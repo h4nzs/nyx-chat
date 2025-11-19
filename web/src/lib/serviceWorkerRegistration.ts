@@ -16,6 +16,6 @@ export function registerServiceWorker() {
     });
 
     // Register the service worker.
-    wb.register();
+    // wb.register();
   }
 }

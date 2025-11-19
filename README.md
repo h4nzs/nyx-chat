@@ -2,7 +2,7 @@
 
 A secure, modern, and customizable real-time messaging application built with a focus on user experience and end-to-end encryption.
 
-![App Screenshot](Neumorphism.jpeg)
+![App Screenshot](./web/public/hero-dark.png)
 
 ## ✨ Core Features
 
@@ -19,6 +19,13 @@ A secure, modern, and customizable real-time messaging application built with a 
   - **Keyboard Navigation**: Navigate your chat list and close modals using only your keyboard.
 - **User Onboarding**: A guided tour for new users explaining key security concepts like Recovery Phrases and Safety Numbers.
 - **And More**: Message replies, emoji reactions, link previews, and robust user profiles.
+
+## 📸 Screenshots
+
+| Desktop | Tablet | Mobile |
+| :---: | :---: | :---: |
+| <img src="./web/public/normal-desktop-dark.png" alt="Desktop View" width="400"/> | <img src="./web/public/tablet-dark.png" alt="Tablet View" width="300"/> | <img src="./web/public/mobile-light.png" alt="Mobile View" width="200"/> |
+
 
 ## 🛠️ Tech Stack
 
@@ -103,3 +110,4 @@ chat-lite/
 ├── server/       # Backend (Node.js, Express, Prisma)
 └── web/          # Frontend (React, Vite)
 ```
+

@@ -32,9 +32,12 @@ const ALLOWED_TYPES: Record<string, string> = {
   'video/x-msvideo': 'videos',
   'audio/mpeg': 'audio',
   'audio/wav': 'audio',
+  'audio/webm': 'audio',
+  'audio/mp4': 'audio',
   // Archives
   'application/zip': 'archives',
   'application/x-rar-compressed': 'archives',
+  'application/octet-stream': 'archives', // For encrypted files
 };
 
 const getFileCategory = (mimetype: string): string => {

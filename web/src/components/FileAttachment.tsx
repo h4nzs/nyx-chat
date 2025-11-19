@@ -1,15 +1,18 @@
-import type { Message } from "@store/message";
+import { useState, useEffect, useRef } from 'react';
+import type { Message } from "@store/conversation";
 import { toAbsoluteUrl } from "@utils/url";
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { Spinner } from "./Spinner";
+import { decryptFile, decryptMessage } from '@utils/crypto';
+import { useKeychainStore } from '@store/keychain';
+import { FiAlertTriangle } from 'react-icons/fi';
 
-// Configure the PDF worker
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
 
 function formatBytes(bytes: number, decimals = 2) {
-  if (bytes === 0) return '0 Bytes';
+  if (!bytes || bytes === 0) return '0 Bytes';
   const k = 1024;
   const dm = decimals < 0 ? 0 : decimals;
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
@@ -21,90 +24,130 @@ interface FileAttachmentProps {
   message: Message;
 }
 
-const PdfPreview = ({ fileUrl, fileName }: { fileUrl: string, fileName?: string }) => (
-  <a 
-    href={fileUrl}
-    target="_blank"
-    rel="noopener noreferrer"
-    download={fileName || 'download'}
-    className="block p-2 rounded-lg bg-black/20 hover:bg-black/30 transition-colors my-2 max-w-sm"
-  >
-    <div className="bg-white rounded-md overflow-hidden pointer-events-none">
-      <Document
-        file={fileUrl}
-        loading={<div className="flex justify-center items-center h-40"><Spinner /></div>}
-        error={<div className="text-center text-sm text-destructive p-4">Failed to load PDF preview.</div>}
-      >
-        <Page pageNumber={1} width={300} />
-      </Document>
-    </div>
-    <div className="mt-2 px-1">
-      <p className="font-semibold text-white truncate">{fileName || 'File'}</p>
-    </div>
-  </a>
-);
-
-const VideoPlayer = ({ fileUrl, fileName }: { fileUrl: string, fileName?: string }) => (
-  <div className="my-2 max-w-sm">
-    <video controls className="w-full rounded-lg">
-      <source src={fileUrl} />
-      Your browser does not support the video tag.
-    </video>
-    <p className="text-xs text-text-secondary mt-1 px-1">{fileName}</p>
-  </div>
-);
-
-const AudioPlayer = ({ fileUrl, fileName }: { fileUrl: string, fileName?: string }) => (
-  <div className="my-2 w-full max-w-sm">
-    <p className="text-sm text-text-primary font-semibold mb-1 px-1">{fileName}</p>
-    <audio controls className="w-full">
-      <source src={fileUrl} />
-      Your browser does not support the audio element.
-    </audio>
-  </div>
-);
-
-const GenericFile = ({ message }: { message: Message }) => (
-  <a 
-    href={toAbsoluteUrl(message.fileUrl!)}
-    target="_blank"
-    rel="noopener noreferrer"
-    download={message.fileName || 'download'}
-    className="flex items-center gap-3 p-3 rounded-lg bg-black/20 hover:bg-black/30 transition-colors my-2 max-w-sm"
-  >
-    <div className="flex-shrink-0 p-2 bg-gray-600 rounded-full">
-      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
-        <polyline points="14 2 14 8 20 8"/>
-      </svg>
-    </div>
-    <div className="min-w-0">
-      <p className="font-semibold text-white truncate">{message.fileName || 'File'}</p>
-      {message.fileSize && <p className="text-xs text-gray-400">{formatBytes(message.fileSize)}</p>}
-    </div>
-    <div className="ml-auto p-2 text-gray-400">
-      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="m8 12 4 4 4-4"/></svg>
-    </div>
-  </a>
-);
-
 export default function FileAttachment({ message }: FileAttachmentProps) {
-  if (!message.fileUrl) return null;
+  const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
+  const [isDecrypting, setIsDecrypting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
 
-  const fileName = message.fileName?.toLowerCase() || '';
-  const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let isMounted = true;
 
-  if (fileName.endsWith('.pdf')) {
-    return <PdfPreview fileUrl={absoluteUrl} fileName={message.fileName} />;
+    const handleDecryption = async () => {
+      if (!message.fileUrl || !message.fileKey || !message.sessionId) {
+        if (isMounted) setError("Incomplete file data.");
+        return;
+      }
+      
+      if (isMounted) {
+        setIsDecrypting(true);
+        setError(null);
+      }
+
+      try {
+        let fileKey = message.fileKey;
+        if (!message.optimistic && fileKey.length > 50) { // Looks encrypted
+          fileKey = await decryptMessage(message.fileKey, message.conversationId, message.sessionId);
+        }
+
+        if (!fileKey || fileKey.startsWith('[')) {
+          throw new Error(fileKey || "Could not retrieve file key.");
+        }
+
+        const response = await fetch(toAbsoluteUrl(message.fileUrl));
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error("File not found on server.");
+          }
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const encryptedBlob = await response.blob();
+
+        const originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
+        const decryptedBlob = await decryptFile(encryptedBlob, fileKey, originalType);
+        
+        if (isMounted) {
+          objectUrl = URL.createObjectURL(decryptedBlob);
+          setDecryptedUrl(objectUrl);
+        }
+      } catch (e: any) {
+        console.error("File decryption failed:", e);
+        if (isMounted) setError(e.message || "Failed to decrypt file.");
+      } finally {
+        if (isMounted) setIsDecrypting(false);
+      }
+    };
+
+    if (message.fileType?.includes(';encrypted=true')) {
+      handleDecryption();
+    } else if (message.fileUrl) {
+      setDecryptedUrl(toAbsoluteUrl(message.fileUrl));
+    }
+
+    return () => {
+      isMounted = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [message, lastKeychainUpdate]);
+
+  if (isDecrypting) {
+    return (
+      <div className="flex items-center gap-3 p-3 rounded-lg bg-black/20 my-2 max-w-sm">
+        <Spinner size="sm" />
+        <span className="text-sm text-gray-300">Decrypting file...</span>
+      </div>
+    );
   }
-  
-  if (fileName.match(/\.(mp4|webm|mov)$/)) {
-    return <VideoPlayer fileUrl={absoluteUrl} fileName={message.fileName} />;
+
+  if (error) {
+    return (
+      <div className="flex items-center gap-3 p-3 rounded-lg bg-destructive/20 my-2 max-w-sm text-destructive">
+        <FiAlertTriangle />
+        <span className="text-sm">{error}</span>
+      </div>
+    );
   }
 
-  if (fileName.match(/\.(mp3|ogg|wav|m4a)$/)) {
-    return <AudioPlayer fileUrl={absoluteUrl} fileName={message.fileName} />;
+  if (!decryptedUrl) return null;
+
+  const fileType = message.fileType?.split(';')[0] || '';
+
+  if (fileType === 'application/pdf') {
+    return (
+      <a href={decryptedUrl} target="_blank" rel="noopener noreferrer" download={message.fileName || 'download.pdf'} className="block p-2 rounded-lg bg-black/20 hover:bg-black/30 transition-colors my-2 max-w-sm">
+        <div className="bg-white rounded-md overflow-hidden pointer-events-none"><Document file={decryptedUrl} loading={<div className="flex justify-center items-center h-40"><Spinner /></div>}><Page pageNumber={1} width={300} /></Document></div>
+        <div className="mt-2 px-1"><p className="font-semibold text-white truncate">{message.fileName || 'File'}</p></div>
+      </a>
+    );
   }
 
-  return <GenericFile message={message} />;
+  if (fileType.startsWith('video/')) {
+    return (
+      <div className="my-2 max-w-sm">
+        <video controls className="w-full rounded-lg"><source src={decryptedUrl} type={fileType} />Your browser does not support the video tag.</video>
+        <p className="text-xs text-text-secondary mt-1 px-1">{message.fileName}</p>
+      </div>
+    );
+  }
+
+  if (fileType.startsWith('audio/') && !message.duration) { // Exclude voice messages
+    return (
+      <div className="my-2 w-full max-w-sm">
+        <p className="text-sm text-text-primary font-semibold mb-1 px-1">{message.fileName}</p>
+        <audio controls className="w-full"><source src={decryptedUrl} type={fileType} />Your browser does not support the audio element.</audio>
+      </div>
+    );
+  }
+
+  // Generic file download link
+  return (
+    <a href={decryptedUrl} download={message.fileName || 'download'} className="flex items-center gap-3 p-3 rounded-lg bg-black/20 hover:bg-black/30 transition-colors my-2 max-w-sm">
+      <div className="flex-shrink-0 p-2 bg-gray-600 rounded-full"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg></div>
+      <div className="min-w-0"><p className="font-semibold text-white truncate">{message.fileName || 'File'}</p>{message.fileSize && <p className="text-xs text-gray-400">{formatBytes(message.fileSize)}</p>}</div>
+      <div className="ml-auto p-2 text-gray-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8"/><path d="m8 12 4 4 4-4"/></svg></div>
+    </a>
+  );
 }

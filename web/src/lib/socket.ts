@@ -2,11 +2,12 @@ import { io, Socket } from "socket.io-client";
 import { toast } from "react-hot-toast";
 import { useAuthStore } from "@store/auth";
 import { useConversationStore } from "@store/conversation";
-import { fulfillKeyRequest } from "@utils/crypto";
+import { fulfillKeyRequest, storeReceivedSessionKey } from "@utils/crypto";
+import { useKeychainStore } from "@store/keychain";
+import { useConnectionStore } from "@store/connection"; // Import the new store
 
 const WS_URL = (import.meta.env.VITE_WS_URL as string) || "http://localhost:4000";
 let socket: Socket | null = null;
-let connectionTimeout: number | null = null;
 
 // --- Emitters for Key Recovery ---
 export function emitSessionKeyRequest(conversationId: string, sessionId: string) {
@@ -22,98 +23,118 @@ export function emitSessionKeyFulfillment(payload: {
   getSocket()?.emit('session:fulfill_response', payload);
 }
 
-
 export function getSocket() {
+  // The singleton pattern is kept to ensure only one socket instance
   if (!socket) {
     socket = io(WS_URL, {
       withCredentials: true,
       transports: ["websocket", "polling"],
-      autoConnect: true,
+      autoConnect: false, // We will connect manually
       path: "/socket.io",
     });
+
+    // Get the status setter from the store
+    const { setStatus } = useConnectionStore.getState();
+
+    // --- Centralized Event Listeners ---
 
     socket.on("connect", () => {
       console.log("✅ Socket connected:", socket?.id);
       toast.success("Connected to chat server");
+      setStatus('connected');
 
-      if (connectionTimeout) {
-        clearTimeout(connectionTimeout);
-        connectionTimeout = null;
+      // Resync state to ensure consistency after connection, but only if initial load hasn't completed
+      // This prevents loops on reconnects, especially for users with no conversations
+      const { initialLoadCompleted } = useConversationStore.getState();
+      if (!initialLoadCompleted) {
+        useConversationStore.getState().resyncState();
       }
 
-      const activeId = useConversationStore.getState().activeId;
-      if (activeId) {
-        socket?.emit("conversation:join", activeId);
-      }
-      
       const userId = useAuthStore.getState().user?.id;
       if (userId) {
         socket?.emit("presence:update", { userId, online: true });
       }
     });
 
-    socket.on("conversation:new", (newConversation) => {
-      console.log("[Socket] Received new conversation:", newConversation);
-      useConversationStore.getState().addOrUpdateConversation(newConversation);
-      // Also join the room for this new conversation
-      socket?.emit("conversation:join", newConversation.id);
-      toast.success(`You've been added to "${newConversation.title || 'a new chat'}"`);
-    });
-
-    // --- Listener for Key Recovery ---
-    socket.on('session:fulfill_request', (data) => {
-      console.log('[Socket] Received request to fulfill a session key:', data);
-      // This is a fire-and-forget call. The fulfillKeyRequest function will
-      // handle getting the key, re-encrypting it, and emitting the fulfillment event.
-      fulfillKeyRequest(data).catch(error => {
-        console.error('Failed to fulfill key request:', error);
-        // Optionally, emit a failure event back to the server
-      });
+    socket.on("disconnect", (reason) => {
+      console.log("⚠️ Socket disconnected:", reason);
+      setStatus('disconnected');
+      if (reason !== "io client disconnect") {
+        toast.error("Disconnected from server. Reconnecting...");
+      }
     });
 
     socket.on("connect_error", (err: any) => {
-      console.error("❌ Socket error:", err?.message ?? err);
-      toast.error("Connection failed");
-    });
-
-    socket.on("disconnect", (reason) => {
-      console.log("⚠️ Socket disconnected:", reason);
-      if (reason !== "io client disconnect") {
-        toast.error("Disconnected from server");
-      }
-      if (connectionTimeout) clearTimeout(connectionTimeout);
-      connectionTimeout = window.setTimeout(() => {
-        if (!socket?.connected) {
-          toast.error("Still trying to reconnect...");
-        }
-      }, 30_000);
+      console.error("❌ Socket connection error:", err?.message ?? err);
+      setStatus('disconnected');
+      // The default backoff mechanism will handle retries, so a toast here might be too noisy.
+      // Only show a persistent error if reconnects fail.
     });
 
     socket.on("reconnect", (attempt) => {
       console.log("🔄 Reconnected after", attempt, "attempts");
-      toast.success("Reconnected");
-      if (connectionTimeout) clearTimeout(connectionTimeout);
-
-      const { activeId, openConversation } = useConversationStore.getState();
-      if (activeId) {
-        socket?.emit("conversation:join", activeId);
-        openConversation(activeId);
-      }
+      // The 'connect' event will fire after this, where we handle the state resync.
+      // No need to do it here to avoid duplication.
+      setStatus('connecting'); // Set to connecting, 'connect' event will set to 'connected'
     });
 
     socket.on("reconnect_failed", () => {
-      console.error("❌ Reconnect failed");
-      toast.error("Reconnect failed. Refresh page.");
-      if (connectionTimeout) clearTimeout(connectionTimeout);
+      console.error("❌ Reconnect failed permanently.");
+      toast.error("Could not reconnect to the server. Please refresh the page.");
+      setStatus('disconnected');
+    });
+
+    // --- Application-specific Listeners ---
+
+    socket.on("conversation:new", (newConversation) => {
+      console.log("[Socket] Received new conversation:", newConversation);
+      useConversationStore.getState().addOrUpdateConversation(newConversation);
+      socket?.emit("conversation:join", newConversation.id);
+      toast.success(`You've been added to "${newConversation.title || 'a new chat'}"`);
+    });
+
+    socket.on('session:fulfill_request', (data) => {
+      console.log('[Socket] Received request to fulfill a session key:', data);
+      fulfillKeyRequest(data).catch(error => {
+        console.error('Failed to fulfill key request:', error);
+      });
+    });
+
+    socket.on('session:new_key', (data) => {
+      console.log('[Socket] Received a new session key from a peer:', data);
+      storeReceivedSessionKey(data)
+        .then(() => {
+          toast.success("New decryption key stored!");
+          useKeychainStore.getState().keysUpdated();
+        })
+        .catch(error => {
+          console.error('Failed to store received session key:', error);
+          toast.error('Failed to process new key.');
+        });
+    });
+
+    socket.on('force_logout', (data) => {
+      console.log(`Received force_logout for session: ${data.jti}. Logging out.`);
+      toast.error("This session has been logged out remotely.");
+      useAuthStore.getState().logout();
+      disconnectSocket();
     });
   }
-
   return socket;
 }
 
-export function disconnectSocket() {
-  if (socket) {
-    socket.disconnect();
-    socket = null;
+// --- New connection management functions ---
+
+export function connectSocket() {
+  if (socket && !socket.connected) {
+    useConnectionStore.getState().setStatus('connecting');
+    socket.connect();
   }
+}
+
+export function disconnectSocket() {
+  if (socket?.connected) {
+    socket.disconnect();
+  }
+  // We don't nullify the socket object to allow for reconnection.
 }

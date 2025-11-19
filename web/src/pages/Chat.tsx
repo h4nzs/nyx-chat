@@ -22,6 +22,8 @@ export default function Chat() {
     isSidebarOpen,
     conversations,
     toggleSidebar,
+    loading,
+    initialLoadCompleted,
   } = useConversationStore(state => ({
     activeId: state.activeId,
     openConversation: state.openConversation,
@@ -29,8 +31,10 @@ export default function Chat() {
     isSidebarOpen: state.isSidebarOpen,
     conversations: state.conversations,
     toggleSidebar: state.toggleSidebar,
+    loading: state.loading,
+    initialLoadCompleted: state.initialLoadCompleted,
   }));
-  const { user } = useAuthStore(state => ({ user: state.user }));
+  const user = useAuthStore(state => state.user);
   const { isLandscape } = useOrientation();
   const [isTourOpen, setIsTourOpen] = useState(false);
 
@@ -41,10 +45,10 @@ export default function Chat() {
 
   // Load initial conversations
   useEffect(() => {
-    if (user) {
+    if (user && !loading && !initialLoadCompleted) { // Only load if user exists, we're not loading, and initial load hasn't completed
       loadConversations();
     }
-  }, [user, loadConversations]);
+  }, [user, loading, initialLoadCompleted, loadConversations]);
 
   // Sync activeId from URL to store, and handle closing conversations
   useEffect(() => {

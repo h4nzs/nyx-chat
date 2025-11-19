@@ -1,18 +1,33 @@
-import React from 'react';
-import { useSocketStore } from '@store/socket';
-import { Spinner } from './Spinner'; // Assuming Spinner component exists
+import { useConnectionStore } from '@store/connection';
+import { Spinner } from './Spinner';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function ConnectionStatusBanner() {
-  const { isConnected } = useSocketStore();
+  const { status } = useConnectionStore();
 
-  if (isConnected) {
-    return null;
+  const isVisible = status === 'connecting' || status === 'disconnected';
+
+  let message = '';
+  if (status === 'connecting') {
+    message = 'Connecting...';
+  } else if (status === 'disconnected') {
+    message = 'Connection lost. Reconnecting...';
   }
 
   return (
-    <div className="fixed top-0 left-0 w-full bg-yellow-500 text-white text-center p-2 text-sm z-50 flex items-center justify-center gap-2">
-      <Spinner size="sm" />
-      <span>Koneksi terputus. Mencoba menyambung kembali...</span>
-    </div>
+    <AnimatePresence>
+      {isVisible && (
+        <motion.div
+          initial={{ y: -40, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: -40, opacity: 0 }}
+          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          className="fixed top-0 left-0 w-full bg-yellow-500/90 backdrop-blur-sm text-black font-semibold text-center p-2 text-sm z-50 flex items-center justify-center gap-2 shadow-lg"
+        >
+          <Spinner size="sm" />
+          <span>{message}</span>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

@@ -1,6 +1,6 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api";
-import { decryptMessage } from "@utils/crypto";
+import { decryptMessageObject } from "./message";
 import { getSocket } from "@lib/socket";
 import { useVerificationStore } from './verification';
 
@@ -80,10 +80,11 @@ type State = {
   isSidebarOpen: boolean;
   error: string | null;
   loading: boolean;
+  initialLoadCompleted: boolean; // Flag to prevent re-loading
 
   // Actions
   loadConversations: () => Promise<void>;
-  openConversation: (id: string) => void;
+  openConversation: (id: string | null) => void;
   deleteConversation: (id: string) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
   toggleSidebar: () => void;
@@ -95,6 +96,7 @@ type State = {
   addParticipants: (conversationId: string, participants: Participant[]) => void;
   removeParticipant: (conversationId: string, userId: string) => void;
   updateParticipantRole: (conversationId: string, userId: string, role: "ADMIN" | "MEMBER") => void;
+  updateConversationLastMessage: (conversationId: string, message: Message) => void;
   resyncState: () => Promise<void>;
   clearError: () => void;
 };
@@ -107,33 +109,48 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
   isSidebarOpen: false,
   error: null,
   loading: false,
+  initialLoadCompleted: false, // Default to false
 
   clearError: () => set({ error: null }),
 
   resyncState: async () => {
-    console.log("Resyncing conversation state...");
-    await get().loadConversations();
+    // Only perform a full resync if the initial load has not completed yet.
+    // This prevents a loop on socket reconnects, especially for users with no conversations.
+    if (!get().initialLoadCompleted) {
+      await get().loadConversations();
+    }
   },
 
   loadConversations: async () => {
+    // Prevent multiple simultaneous loads
+    if (get().loading) return;
+
     try {
       set({ loading: true, error: null });
       const rawConversations = await api<any[]>("/api/conversations");
-      const conversations: Conversation[] = rawConversations.map(c => ({
-        ...c,
-        lastMessage: c.messages?.[0] || null,
-        participants: c.participants.map((p: any) => ({ ...p.user, description: p.user.description, role: p.role })),
-      }));
 
-      // Safely decrypt messages one by one to prevent a single failure from stopping the entire load
-      for (const c of conversations) {
-        if (c.lastMessage?.content) {
-          c.lastMessage.content = await decryptMessage(c.lastMessage.content, c.id, c.lastMessage.sessionId);
-        }
-        if (c.lastMessage) {
-          c.lastMessage = withPreview(c.lastMessage);
-        }
+      if (!Array.isArray(rawConversations)) {
+        throw new Error('Invalid data from server.');
       }
+
+      const conversations = await Promise.all(rawConversations.map(async c => {
+        let lastMessage = c.messages?.[0] || null;
+        if (lastMessage) {
+          try {
+            lastMessage = await decryptMessageObject(lastMessage);
+          } catch (e) {
+            console.error(`Failed to decrypt last message for convo ${c.id}`, e);
+            lastMessage.content = '[Failed to decrypt]';
+          }
+          lastMessage = withPreview(lastMessage);
+        }
+
+        return {
+          ...c,
+          lastMessage,
+          participants: c.participants.map((p: any) => ({ ...p.user, description: p.user.description, role: p.role })),
+        };
+      }));
 
       set({ conversations: sortConversations(conversations) });
 
@@ -149,11 +166,16 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
       console.error("Failed to load conversations", error);
       set({ error: "Failed to load conversations." });
     } finally {
-      set({ loading: false });
+      set({ loading: false, initialLoadCompleted: true }); // Mark as completed regardless of outcome
     }
   },
 
-  openConversation: (id: string) => {
+  openConversation: (id: string | null) => {
+    if (!id) {
+      set({ activeId: null });
+      return;
+    }
+
     // Optimistically update UI
     set(state => ({
       activeId: id,
@@ -193,9 +215,25 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
 
   // --- Actions to be called by socket store ---
   addOrUpdateConversation: (conversation) => {
-    set(state => ({ 
-      conversations: sortConversations([conversation, ...state.conversations.filter(c => c.id !== conversation.id)])
-    }));
+    set(state => {
+      const existingConversation = state.conversations.find(c => c.id === conversation.id);
+      let updatedConversation: Conversation;
+
+      if (existingConversation) {
+        // Merge new data into existing conversation
+        updatedConversation = {
+          ...existingConversation,
+          ...conversation,
+        };
+      } else {
+        // This is a new conversation, add it as is
+        updatedConversation = conversation;
+      }
+
+      return {
+        conversations: sortConversations([updatedConversation, ...state.conversations.filter(c => c.id !== conversation.id)])
+      };
+    });
   },
 
   removeConversation: (conversationId) => {
@@ -275,5 +313,23 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
         return c;
       }),
     }));
+  },
+
+  updateConversationLastMessage: (conversationId, message) => {
+    set(state => {
+      const conversation = state.conversations.find(c => c.id === conversationId);
+      if (!conversation) return state;
+
+      const updatedConversation = {
+        ...conversation,
+        lastMessage: withPreview(message),
+        unreadCount: state.activeId === conversationId ? 0 : (conversation.unreadCount || 0) + 1,
+      };
+
+      const otherConversations = state.conversations.filter(c => c.id !== conversationId);
+      const newConversations = sortConversations([updatedConversation, ...otherConversations]);
+
+      return { conversations: newConversations };
+    });
   },
 }));

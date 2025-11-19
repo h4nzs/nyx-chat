@@ -217,4 +217,105 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
 
   console.log(`Successfully fulfilled and sent re-encrypted key for session ${sessionId} to ${requesterId}`);
 }
-    
+
+// --- Key Recovery (Receiver Side) ---
+
+interface ReceiveKeyPayload {
+  conversationId: string;
+  sessionId: string;
+  encryptedKey: string; // base64
+}
+
+/**
+ * Handles receiving a new session key from a peer, decrypts it with our
+ * private key, and stores it.
+ */
+export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promise<void> {
+  const { conversationId, sessionId, encryptedKey } = payload;
+  console.log(`Received a new key for session ${sessionId}. Storing...`);
+
+  const { publicKey, privateKey } = await getMyKeyPair();
+  const sodium = await getSodium();
+
+  const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey, sodium);
+
+  await addSessionKey(conversationId, sessionId, newSessionKey);
+  console.log(`Successfully stored new key for session ${sessionId}`);
+}
+
+// --- File Encryption/Decryption ---
+
+const ALGO = 'AES-GCM';
+const KEY_LENGTH = 256;
+const IV_LENGTH = 12; // 96 bits, optimal for AES-GCM
+
+/**
+ * Encrypts a file blob using a newly generated symmetric key.
+ * @param blob The file blob to encrypt.
+ * @returns A promise that resolves to an object containing the encrypted blob and the encryption key (as base64).
+ */
+export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; key: string }> {
+  const key = await crypto.subtle.generateKey(
+    { name: ALGO, length: KEY_LENGTH },
+    true, // exportable
+    ['encrypt', 'decrypt']
+  );
+
+  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+  const fileData = await blob.arrayBuffer();
+  const encryptedData = await crypto.subtle.encrypt(
+    { name: ALGO, iv },
+    key,
+    fileData
+  );
+
+  // Prepend IV to the encrypted data
+  const combined = new Uint8Array(iv.length + encryptedData.byteLength);
+  combined.set(iv);
+  combined.set(new Uint8Array(encryptedData), iv.length);
+
+  const encryptedBlob = new Blob([combined], { type: 'application/octet-stream' });
+  
+  // Export the key to be sent to the recipient
+  const exportedKey = await crypto.subtle.exportKey('raw', key);
+  const sodium = await getSodium();
+  const keyB64 = sodium.to_base64(new Uint8Array(exportedKey), sodium.base64_variants.ORIGINAL);
+
+  return { encryptedBlob, key: keyB64 };
+}
+
+/**
+ * Decrypts a file blob using a symmetric key.
+ * @param encryptedBlob The blob containing the IV and encrypted data.
+ * @param keyB64 The base64 encoded symmetric key.
+ * @param originalType The original MIME type of the file.
+ * @returns A promise that resolves to the decrypted file blob.
+ */
+export async function decryptFile(encryptedBlob: Blob, keyB64: string, originalType: string): Promise<Blob> {
+  const sodium = await getSodium();
+  const keyBytes = sodium.from_base64(keyB64, sodium.base64_variants.ORIGINAL);
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: ALGO },
+    false,
+    ['decrypt']
+  );
+
+  const combinedData = await encryptedBlob.arrayBuffer();
+  if (combinedData.byteLength < IV_LENGTH) {
+    throw new Error("Encrypted file is too short to contain an IV.");
+  }
+
+  const iv = combinedData.slice(0, IV_LENGTH);
+  const encryptedData = combinedData.slice(IV_LENGTH);
+
+  const decryptedData = await crypto.subtle.decrypt(
+    { name: ALGO, iv },
+    key,
+    encryptedData
+  );
+
+  return new Blob([decryptedData], { type: originalType });
+}

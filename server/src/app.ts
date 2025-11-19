@@ -28,17 +28,34 @@ import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
 import webpush from "web-push";
 
-// Set VAPID keys for web-push notifications
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT,
-  process.env.VAPID_PUBLIC_KEY,
-  process.env.VAPID_PRIVATE_KEY
-);
+// Set VAPID keys for web-push notifications (only if all required environment variables are set)
+if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT,
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+} else {
+  console.warn("⚠️ VAPID keys not configured. Push notifications will be disabled.");
+  console.warn("To enable push notifications, set VAPID_SUBJECT, VAPID_PUBLIC_KEY, and VAPID_PRIVATE_KEY environment variables.");
+}
 
 const app = express();
 
 // === SECURITY / CORS ===
 const isProd = env.nodeEnv === 'production';
+
+// Ambil origin untuk WebSocket secara dinamis
+let wsOrigin = 'ws://localhost:4000';
+if (env.appUrl) {
+  try {
+    const url = new URL(env.appUrl);
+    // Gunakan wss:// untuk koneksi https://
+    wsOrigin = `${url.protocol === 'https:' ? 'wss' : 'ws'}://${url.host}`;
+  } catch (e) {
+    console.error("Invalid APP_URL provided for CSP:", env.appUrl);
+  }
+}
 
 // Gunakan Helmet untuk header keamanan dasar
 app.use(helmet({
@@ -49,8 +66,7 @@ app.use(helmet({
       scriptSrc: ["'self'", isProd ? '' : "'unsafe-eval'"],
       styleSrc: ["'self'", "'unsafe-inline'"], // Diperlukan untuk styling dinamis
       imgSrc: ["'self'", "data:", "blob:"], // blob: diperlukan untuk avatar preview
-      // TODO: Ganti ws://localhost:4000 dengan URL WebSocket produksi Anda
-      connectSrc: ["'self'", "ws://localhost:4000"],
+      connectSrc: ["'self'", wsOrigin],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"], // Mencegah clickjacking
       ...(isProd && { upgradeInsecureRequests: [] }),

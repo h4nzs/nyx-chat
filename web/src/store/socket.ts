@@ -1,5 +1,5 @@
 import { createWithEqualityFn } from "zustand/traditional";
-import { getSocket } from "@lib/socket";
+import { getSocket, emitSessionKeyRequest } from "@lib/socket";
 import { useAuthStore } from "./auth";
 import { useConversationStore, Message, Conversation } from "./conversation";
 import { useMessageStore, decryptMessageObject } from "./message";
@@ -51,7 +51,11 @@ export const useSocketStore = createWithEqualityFn<State>((set) => ({
     socket.on("reconnect", (attempt) => {
       console.log("🔄 Socket reconnected (store) after", attempt, "attempts");
       set({ isConnected: true });
-      getStores().convo.resyncState(); // Call resync function
+      // Only resync if initial load hasn't completed to prevent loops
+      const { initialLoadCompleted } = getStores().convo;
+      if (!initialLoadCompleted) {
+        getStores().convo.resyncState(); // Call resync function
+      }
     });
 
     // --- Register all other listeners ---
@@ -82,54 +86,64 @@ export const useSocketStore = createWithEqualityFn<State>((set) => ({
     });
 
     socket.on("message:new", async (newMessage: Message) => {
-      const decryptedMessage = await decryptMessageObject(newMessage);
       const { convo, msg, auth } = getStores();
       const { activeId } = convo;
       const meId = auth.user?.id;
 
+      let processedMessage: Message;
+      try {
+        processedMessage = await decryptMessageObject(newMessage);
+      } catch (e) {
+        console.error("Decryption failed for incoming real-time message. Requesting key.", e);
+        processedMessage = { ...newMessage, content: '[Requesting key to decrypt...]' };
+        if (newMessage.sessionId) {
+          emitSessionKeyRequest(newMessage.conversationId, newMessage.sessionId);
+        }
+      }
+
       // Handle message state update
-      if (decryptedMessage.senderId === meId && decryptedMessage.tempId) {
-        msg.replaceOptimisticMessage(decryptedMessage.conversationId, decryptedMessage.tempId, decryptedMessage);
+      if (processedMessage.senderId === meId && processedMessage.tempId) {
+        msg.replaceOptimisticMessage(processedMessage.conversationId, processedMessage.tempId, processedMessage);
       } else {
-        msg.addIncomingMessage(decryptedMessage.conversationId, decryptedMessage);
+        msg.addIncomingMessage(processedMessage.conversationId, processedMessage);
       }
 
       // Handle conversation list update
-      const existingConversation = convo.conversations.find(c => c.id === decryptedMessage.conversationId);
+      const existingConversation = convo.conversations.find(c => c.id === processedMessage.conversationId);
 
       // Trigger in-app notification if the message is not from the current user and the conversation is not active
-      if (decryptedMessage.senderId !== meId && activeId !== decryptedMessage.conversationId) {
-        const senderName = decryptedMessage.sender?.name || 'Someone';
-        const messageContent = decryptedMessage.content || (decryptedMessage.fileUrl ? 'Sent a file' : 'New message');
+      if (processedMessage.senderId !== meId && activeId !== processedMessage.conversationId) {
+        const senderName = processedMessage.sender?.name || 'Someone';
+        const messageContent = processedMessage.content || (processedMessage.fileUrl ? 'Sent a file' : 'New message');
         
         const notificationPayload = {
-          id: decryptedMessage.id,
+          id: processedMessage.id,
           message: `${senderName}: ${messageContent}`,
-          link: decryptedMessage.conversationId,
-          sender: decryptedMessage.sender
+          link: processedMessage.conversationId,
+          sender: processedMessage.sender
         };
 
         useNotificationStore.getState().addNotification(notificationPayload);
       }
 
       if (existingConversation) {
-        const newUnreadCount = activeId !== decryptedMessage.conversationId && decryptedMessage.senderId !== meId
+        const newUnreadCount = activeId !== processedMessage.conversationId && processedMessage.senderId !== meId
           ? (existingConversation.unreadCount || 0) + 1
           : existingConversation.unreadCount;
 
         convo.addOrUpdateConversation({ 
           ...existingConversation,
-          lastMessage: decryptedMessage,
+          lastMessage: processedMessage,
           unreadCount: newUnreadCount
         });
       } else {
         // If conversation is not in the list, fetch it
         try {
-          const newConversation = await api<Conversation>(`/api/conversations/${decryptedMessage.conversationId}`);
+          const newConversation = await api<Conversation>(`/api/conversations/${processedMessage.conversationId}`);
           if (newConversation) {
             convo.addOrUpdateConversation({
               ...newConversation,
-              lastMessage: decryptedMessage,
+              lastMessage: processedMessage,
               unreadCount: 1, // It's a new message, so unread count is at least 1
             });
           }
@@ -247,9 +261,6 @@ export const useSocketStore = createWithEqualityFn<State>((set) => ({
         const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey, sodium);
         await addSessionKey(conversationId, sessionId, newSessionKey);
         console.log(`Successfully stored new session key ${sessionId}`);
-
-        // Trigger re-decryption for the conversation
-        getStores().msg.redecryptMessages(conversationId);
         
       } catch (error) {
         console.error("Failed to process new session key:", error);

@@ -1,118 +1,128 @@
-# Analisis Proyek Chat-Lite
+# Laporan Analisis Komprehensif: Chat-Lite
 
-Dokumen ini merangkum analisis menyeluruh dari aplikasi Chat-Lite, mencakup arsitektur, fungsionalitas, dan potensi masalah.
-
----
-
-### 1. **Struktur dan Arsitektur**
-
-Proyek ini adalah monorepo dengan dua bagian utama: `server/` (backend) dan `web/` (frontend).
-
-**Framework & Library Utama:**
-
-*   **Backend (`server/`):**
-    *   **Framework:** Node.js, Express.js
-    *   **Real-time:** Socket.IO
-    *   **Database ORM:** Prisma
-    *   **Keamanan:** JWT (`jsonwebtoken`), `bcrypt`, `helmet`, `cors`
-    *   **Lainnya:** `multer` (file uploads), `zod` (validasi), `web-push`
-
-*   **Frontend (`web/`):**
-    *   **Framework:** React, Vite
-    *   **Styling:** TailwindCSS
-    *   **State Management:** Zustand
-    *   **Routing:** React Router
-    *   **Real-time:** `socket.io-client`
-    *   **UI Komponen:** `react-icons`, `@radix-ui/react-popover`
-    *   **Kriptografi:** `libsodium-wrappers` (terindikasi untuk E2EE)
-
-**Arsitektur Komunikasi:**
-
-Aplikasi menggunakan **arsitektur hibrida**:
-1.  **API REST:** Digunakan untuk operasi stateful seperti autentikasi (login/register), mengambil data awal (daftar chat, riwayat pesan), dan manajemen pengguna/grup. Dikelola oleh Express di `server/src/app.ts`.
-2.  **WebSocket (Socket.IO):** Digunakan untuk semua komunikasi real-time setelah koneksi terjalin. Ini mencakup pengiriman/penerimaan pesan baru, status online, notifikasi pengetikan, reaksi, dll. Dikelola di `server/src/socket.ts`.
+Dokumen ini merangkum hasil analisis menyeluruh terhadap proyek Chat-Lite, sesuai dengan instruksi pada `@prompt-analis.md` dan `@prompt-analis-2.md`. Tujuannya adalah untuk memetakan arsitektur, alur data, dan kondisi aplikasi saat ini.
 
 ---
 
-### 2. **Fungsi Utama Aplikasi**
+## 1. Ringkasan & Arsitektur Umum
 
-Berdasarkan analisis file, berikut adalah fitur-fitur utama:
+Chat-Lite adalah aplikasi pesan instan modern yang mengutamakan keamanan melalui enkripsi ujung-ke-ujung (E2EE). Aplikasi ini dibangun dengan arsitektur monorepo yang terdiri dari:
 
-*   **Autentikasi:** ✅ Berfungsi. Menggunakan JWT (disimpan di cookie) dengan middleware di REST API dan Socket.IO.
-*   **Real-time Chat Pribadi:** ✅ Berfungsi. Menggunakan event socket `message:new`.
-*   **Real-time Chat Grup:** ✅ Berfungsi. Menggunakan sistem room dari Socket.IO.
-*   **Typing Indicator:** ✅ Berfungsi. Menggunakan event `user:typing` dan `user:stopped-typing`.
-*   **Online Status:** ✅ Berfungsi. Dikelola di server melalui map `onlineUsers` dan disiarkan melalui event `user:online` & `user:offline`.
-*   **Reaksi Pesan:** ✅ Berfungsi. Menggunakan event `message:react` dan `message:updated`.
-*   **Hapus Pesan:** ✅ Berfungsi. Menggunakan event `message:delete` dan `message:deleted`.
-*   **Manajemen Grup:** ✅ Berfungsi. Dibuat melalui API, pembaruan disiarkan melalui socket (`conversation:new`, `conversation:deleted`).
-*   **File Attachment:** ✅ Berfungsi. Upload ditangani melalui REST API (`/api/uploads`), dan pesan dengan lampiran dikirim melalui socket.
-*   **End-to-End Encryption (E2EE):** ⚠️ Perlu cek. Terdapat dependensi `libsodium-wrappers` dan file `e2ee.ts`, `crypto.ts` di frontend, serta `keys.ts` di backend. Ini menandakan adanya infrastruktur untuk E2EE, namun fungsionalitas penuhnya perlu diverifikasi.
+-   **Backend (`server/`):** Node.js, Express, Prisma (PostgreSQL), dan Socket.IO. Bertanggung jawab atas otentikasi, persistensi data terenkripsi, dan komunikasi real-time.
+-   **Frontend (`web/`):** React, Vite, TypeScript, Zustand, dan Tailwind CSS. Menyediakan antarmuka pengguna yang reaktif dan modern.
+
+Komunikasi antara klien dan server menggunakan pendekatan hybrid:
+-   **API REST:** Untuk operasi CRUD stateful seperti otentikasi, pengambilan riwayat chat, dan manajemen sesi.
+-   **WebSockets (Socket.IO):** Untuk semua komunikasi real-time seperti pengiriman pesan, status online, notifikasi pengetikan, dan sinkronisasi kunci enkripsi.
 
 ---
 
-### 3. **Alur Kerja (Workflow)**
+## 2. Peta Alur Data & Fitur Utama
 
-1.  **Inisialisasi:** Pengguna login melalui API REST. Server memvalidasi dan mengembalikan JWT.
-2.  **Koneksi Socket:** Frontend menginisialisasi koneksi Socket.IO, mengirimkan JWT dalam *handshake* untuk autentikasi (`authSocketMiddleware`).
-3.  **Pengiriman Pesan:**
-    *   Input dari UI (`ChatWindow.tsx`) memicu fungsi yang memanggil `socket.emit('message:send', ...)`.
-    *   Server (`socket.ts`) menerima event, memproses pesan (menyimpan ke DB), lalu menyiarkan `message:new` ke anggota percakapan (room).
-4.  **Penerimaan Pesan:**
-    *   Frontend (`Chat.tsx`) memiliki listener `socket.on('message:new', ...)`.
-    *   Listener ini memanggil *action* dari store Zustand (`useMessageStore`).
-    *   Store Zustand diperbarui, yang secara otomatis memicu re-render pada komponen React yang berlangganan (seperti `ChatWindow.tsx`).
+Berikut adalah pemetaan alur data untuk fitur-fitur inti aplikasi:
 
-**Event Socket.IO Utama:**
-*   `connection`, `disconnect`
-*   `message:send`, `message:new`, `message:read`, `message:delete`, `message:deleted`, `message:react`, `message:updated`
-*   `user:typing`, `user:stopped-typing`
-*   `user:online`, `user:offline`
-*   `conversation:new`, `conversation:updated`, `conversation:deleted`
+| Fitur | Alur Proses |
+| :--- | :--- |
+| **👤 Otentikasi (Login)** | `AuthForm` → `useAuthStore.login()` → `POST /api/auth/login` → `jwt.sign()` → `HTTP-only cookie` → `useAuthStore.setUser()` → Navigasi ke `/chat` |
+| **📨 Pengiriman Pesan** | `MessageInput` → `useConversation.sendMessage()` → `encryptMessage()` → `socket.emit('message:send', payload)` → **Server:** `on('message:send')` → Simpan ke DB → `io.to(roomId).emit('message:new', data)` → **Klien:** `on('message:new')` → `decryptMessage()` → Update `useConversation` store → UI re-render |
+| **👥 Pembuatan Grup** | `CreateGroupChat` → `POST /api/conversations` → **Server:** Buat grup & partisipan → `io.to(userIds).emit('conversation:new', data)` → **Klien:** `on('conversation:new')` → `useConversationStore.addOrUpdateConversation()` |
+| **✍️ Indikator Pengetikan** | `MessageInput.onChange` → `socket.emit('typing:start', { convId })` → **Server:** `io.to(roomId).emit('typing:started', { userId })` → **Klien:** `usePresenceStore.addTypingUser()` → `TypingIndicator` re-render |
+| **🟢 Status Online** | `socket.on('connect')` → `socket.emit('presence:update', { online: true })` → **Server:** `redis.sadd('online_users')` → `io.emit('presence:updated', { userId, online: true })` → **Klien:** `usePresenceStore.setPresence()` |
+| **📎 Lampiran File** | `MessageInput.onFileChange` → `useConversation.uploadFile()` → `POST /api/uploads` (multipart/form-data) → Simpan file di `server/uploads` → `sendMessage` dengan `fileUrl` |
+| **🔄 Sinkronisasi Kunci E2EE** | `App.tsx` → `syncSessionKeys()` → `emitSessionKeyRequest()` → **Server:** `on('session:request_key')` → `io.to(otherDeviceId).emit('session:fulfill_request')` → **Perangkat Lain:** `on('session:fulfill_request')` → `fulfillKeyRequest()` → `emitSessionKeyFulfillment()` → **Server:** `on('session:fulfill_response')` → `io.to(requesterId).emit('session:new_key')` → **Perangkat Peminta:** `on('session:new_key')` → `storeReceivedSessionKey()` → `useKeychainStore.keysUpdated()` |
 
 ---
 
-### 4. **Kondisi UI & UX**
+## 3. Peta Event Socket.IO
 
-*   **Komponen:** Struktur komponen cukup modular (`ChatItem`, `ChatList`, `MessageBubble`, dll).
-*   **Styling:** Menggunakan TailwindCSS secara ekstensif. Konfigurasi ada di `tailwind.config.ts`. Tidak ada indikasi *dark mode* aktif.
-*   **Interaktivitas:** Terdapat elemen interaktif seperti `Reactions.tsx`, `OnlineDot.tsx`, dan menu popover dari Radix UI.
-*   **Responsivitas:** Perlu diuji secara manual, namun penggunaan TailwindCSS biasanya memfasilitasi desain responsif.
+Event Socket.IO adalah tulang punggung komunikasi real-time di Chat-Lite.
 
----
+#### Client → Server
+-   `presence:update`: Mengirim status online/offline pengguna saat terhubung/terputus.
+-   `conversation:join`: Bergabung ke "room" sebuah percakapan untuk menerima pesan.
+-   `message:send`: Mengirim pesan baru yang sudah terenkripsi ke sebuah percakapan.
+-   `typing:start` / `typing:stop`: Memberi tahu server bahwa pengguna sedang mengetik atau berhenti.
+-   `session:request_key`: Meminta kunci sesi dari perangkat lain milik pengguna yang sama.
+-   `session:fulfill_response`: Mengirimkan kunci sesi yang diminta (terenkripsi) sebagai respons.
+-   `linking:send_payload`: Mengirim payload untuk menautkan perangkat baru.
 
-### 5. **State Management**
-
-*   **Zustand:** Digunakan sebagai state management global di frontend.
-*   **Struktur Store:** State dibagi menjadi beberapa *slice* yang logis: `auth.ts`, `conversation.ts`, `message.ts`, `presence.ts`.
-*   **Alur Update:** Komponen UI tidak secara langsung menangani logika event socket. Event listener di `Chat.tsx` bertindak sebagai jembatan yang meneruskan data dari socket ke store Zustand. Komponen kemudian bereaksi terhadap perubahan di store. Ini adalah pola yang baik dan terpusat.
-
----
-
-### 6. **Keamanan & Koneksi**
-
-*   **Autentikasi:** Cukup kuat. Token JWT diverifikasi di semua endpoint API yang dilindungi dan pada saat koneksi awal Socket.IO.
-*   **Transport:** Koneksi socket aman karena token dikirim dalam payload `auth` saat *handshake*, bukan sebagai parameter query.
-*   **Middleware:** Penggunaan `helmet` dan `cors` di backend adalah praktik keamanan standar yang baik.
-*   **Otorisasi:** Logika di sisi server (misalnya saat mengirim pesan) tampaknya memastikan bahwa pengguna hanya dapat berinteraksi dalam percakapan di mana mereka menjadi anggota.
-
----
-
-### 7. **Masalah Potensial & Area Risiko**
-
-*   **Duplikasi Event Listener:** Di `web/src/pages/Chat.tsx`, `useEffect` yang mengatur listener socket tidak memiliki fungsi *cleanup* yang benar untuk menghapus semua listener (`socket.off(...)`). Jika komponen ini di-unmount dan di-mount kembali, ini akan menyebabkan listener duplikat, memicu beberapa pembaruan state untuk satu event. **Ini adalah risiko tinggi.**
-*   **Sinkronisasi Fitur:** Fitur seperti pembuatan grup bergantung pada panggilan API awal. Jika siaran socket gagal, UI bisa menjadi tidak sinkron dengan server sampai di-refresh manual.
-*   **Manajemen Koneksi Socket:** Logika koneksi dan diskoneksi socket tersebar. Perlu dipastikan bahwa `socket.disconnect()` dipanggil dengan benar saat pengguna logout untuk membersihkan sumber daya di server.
-*   **Kompleksitas Komponen:** `Chat.tsx` menjadi sangat kompleks karena menangani semua logika listener socket. Ini bisa menjadi kandidat untuk refactor dengan memindahkannya ke *custom hook* (misalnya `useSocketEvents`).
+#### Server → Client
+-   `presence:updated`: Memberi tahu semua klien tentang perubahan status online/offline seorang pengguna.
+-   `conversation:new`: Memberi tahu pengguna bahwa mereka telah ditambahkan ke percakapan baru.
+-   `message:new`: Meneruskan pesan baru yang terenkripsi ke semua anggota percakapan.
+-   `message:updated`: Mengirim pembaruan untuk sebuah pesan (misalnya, reaksi atau penghapusan).
+-   `typing:started` / `typing:stopped`: Meneruskan status pengetikan ke anggota percakapan.
+-   `session:fulfill_request`: Meneruskan permintaan kunci sesi ke perangkat lain milik pengguna.
+-   `session:new_key`: Mengirim kunci sesi yang baru diterima ke perangkat yang memintanya.
+-   `force_logout`: Memaksa klien untuk logout (misalnya, jika sesi dicabut dari perangkat lain).
 
 ---
 
-### 8. **Output Analisis & Rekomendasi**
+## 4. Arsitektur Frontend (React & Zustand)
 
-*   **Ringkasan Logika:** UI (React) → State (Zustand) → Socket Client → Socket Server (Node.js/Socket.IO) → Database (Prisma).
-*   **Dependensi Kunci:** React, Socket.IO, Zustand, Prisma, Express, TailwindCSS.
-*   **Area Risiko Tinggi:** Manajemen *event listener* di `Chat.tsx` adalah prioritas utama untuk diperbaiki guna mencegah kebocoran memori dan bug.
-*   **Rekomendasi Singkat:**
-    1.  **Stabilisasi:** Segera perbaiki masalah *event listener* di `Chat.tsx` dengan menambahkan fungsi *cleanup* yang komprehensif di dalam `useEffect`.
-    2.  **Refactor:** Ekstrak semua logika penanganan event socket dari `Chat.tsx` ke dalam satu atau beberapa *custom hooks* (misalnya `useSocketListeners`) untuk memisahkan *concerns* dan membuat komponen lebih bersih.
-    3.  **Verifikasi E2EE:** Lakukan audit pada alur kerja enkripsi untuk memastikan implementasinya benar dan aman dari ujung ke ujung.
+#### Hierarki Komponen Utama (`pages/Chat.tsx`)
+```
+<Chat>
+ ├── <ConnectionStatusBanner />
+ ├── <ChatList> (Sidebar Kiri)
+ │    ├── <ChatItem />
+ │    └── <StartNewChat />
+ ├── <ChatWindow> (Konten Utama)
+ │    ├── <ChatHeader />
+ │    ├── <Virtuoso> (Message List)
+ │    │    └── <MessageItem />
+ │    └── <MessageInput />
+ └── <GroupInfoPanel> / <UserInfoPanel> (Sidebar Kanan)
+```
+
+#### State Management (Zustand)
+State global dibagi menjadi beberapa *store* yang logis, yang merupakan praktik yang baik untuk dikelola.
+-   `useAuthStore`: Mengelola state otentikasi pengguna, token, dan data pengguna.
+-   `useConversationStore`: Mengelola daftar percakapan, percakapan aktif, dan operasi terkait (memuat, membuka, membuat).
+-   `useMessageStore` (di dalam hook `useConversation`): Mengelola pesan untuk percakapan yang sedang aktif.
+-   `usePresenceStore`: Melacak status online pengguna dan siapa yang sedang mengetik di setiap percakapan.
+-   `useKeychainStore`: Mengelola status kunci enkripsi yang tersedia di perangkat.
+-   `useModalStore`, `useCommandPaletteStore`, dll: Mengelola state UI spesifik.
+
+Interaksi antar komponen sebagian besar terjadi melalui *store* Zustand ini. Komponen mengirim *action*, dan *store* berkomunikasi dengan backend. Ketika data baru diterima (terutama melalui socket), *store* diperbarui, dan semua komponen yang berlangganan akan me-render ulang secara otomatis.
+
+---
+
+## 5. Integrasi API Backend
+
+Backend menyediakan API REST untuk operasi yang tidak memerlukan real-time.
+
+-   `/api/auth/*`: Mengelola registrasi, login, logout, dan manajemen sesi (misalnya, `POST /api/auth/login`).
+-   `/api/conversations`:
+    -   `GET /`: Mengambil semua percakapan pengguna.
+    -   `POST /`: Membuat percakapan baru.
+    -   `POST /:id/read`: Menandai percakapan sebagai telah dibaca.
+-   `/api/messages/:conversationId`: Mengambil riwayat pesan untuk sebuah percakapan (dengan paginasi).
+-   `/api/users/*`: Mencari pengguna.
+-   `/api/uploads`: Mengunggah lampiran file.
+-   `/api/keys/*`: Mengelola kunci publik dan kunci sesi terenkripsi.
+
+Semua rute yang memerlukan otentikasi dilindungi oleh middleware yang memverifikasi token JWT dari *cookie*.
+
+---
+
+## 6. Temuan & Status Fitur
+
+| Fitur | Status | Catatan |
+| :--- | :--- | :--- |
+| **Otentikasi & Sesi** | ✅ **Berfungsi** | Alur login, registrasi, dan manajemen sesi sudah solid. |
+| **Pesan Pribadi & Grup** | ✅ **Berfungsi** | Pengiriman dan penerimaan pesan berfungsi secara real-time. |
+| **Enkripsi E2E** | ✅ **Berfungsi** | Alur enkripsi, dekripsi, dan sinkronisasi kunci antar perangkat sudah terimplementasi. |
+| **Indikator Pengetikan** | ✅ **Berfungsi** | Tampil secara real-time. |
+| **Status Online** | ✅ **Berfungsi** | Status online/offline pengguna ditampilkan dengan benar. |
+| **Manajemen Grup** | ✅ **Berfungsi** | Membuat grup dan menambahkan anggota sudah berfungsi. |
+| **Lampiran File** | ✅ **Berfungsi** | Pengguna dapat mengunggah dan melihat lampiran. |
+| **Pencarian Pesan** | ✅ **Berfungsi** | Fungsionalitas pencarian di dalam percakapan sudah ada. |
+| **UI Responsif** |  **berfungsi** | Tata letak utama sudah responsif, tetapi beberapa modal dan panel mungkin memerlukan penyesuaian lebih lanjut untuk layar yang sangat kecil atau sangat besar. |
+| **Stabilitas Socket** |  **berfungsi** | Logika *reconnect* sudah ada, tetapi perlu diuji dalam kondisi jaringan yang tidak stabil untuk memastikan tidak ada *race condition* atau kehilangan state. |
+
+### Rekomendasi & Area Risiko
+1.  **Kompleksitas E2EE:** Logika sinkronisasi kunci (`session:request_key`, `session:fulfill_request`, dll.) sangat penting dan rumit. Kesalahan implementasi di sisi klien dapat membahayakan keamanan atau menyebabkan pengguna tidak dapat mendekripsi pesan. Area ini harus diuji secara menyeluruh.
+2.  **Manajemen State:** Meskipun Zustand membantu, ada banyak *store* yang saling bergantung. Perubahan pada satu *store* dapat memicu pembaruan berantai. Ini perlu diperhatikan saat menambahkan fitur baru agar tidak menimbulkan *re-render loop*.
+3.  **Optimasi Performa:** Penggunaan `react-virtuoso` untuk daftar pesan adalah pilihan yang sangat baik untuk performa. Namun, pemuatan awal `loadConversations` yang mendekripsi setiap pesan terakhir bisa menjadi lambat jika jumlah percakapan sangat banyak. Ini bisa dioptimalkan di masa depan.
+4.  **Penanganan Error:** Penanganan error di beberapa alur socket bisa ditingkatkan. Saat ini, banyak error hanya dicatat di konsol (`console.error`). Menampilkan umpan balik yang lebih jelas kepada pengguna (misalnya, melalui *toast*) akan meningkatkan UX.

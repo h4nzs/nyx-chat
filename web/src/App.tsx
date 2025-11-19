@@ -21,7 +21,7 @@ import ChatInfoModal from './components/ChatInfoModal';
 import DynamicIsland from './components/DynamicIsland';
 import ConnectionStatusBanner from './components/ConnectionStatusBanner';
 import { useThemeStore } from './store/theme';
-import { getSocket } from './lib/socket';
+import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
 import { useGlobalShortcut } from './hooks/useGlobalShortcut';
 import { useCommandPaletteStore } from './store/commandPalette';
 import CommandPalette from './components/CommandPalette';
@@ -30,6 +30,9 @@ import { syncSessionKeys } from './utils/sessionSync';
 import { useConversationStore } from './store/conversation';
 
 let isSyncing = false;
+
+// Initialize socket listeners once
+getSocket();
 
 // New component to handle root navigation
 const Home = () => {
@@ -66,7 +69,12 @@ const AppContent = () => {
   const navigate = useNavigate();
 
   const settingsAction = useCallback(() => navigate('/settings'), [navigate]);
-  const logoutAction = useCallback(() => logout(), [logout]);
+  
+  // We need to ensure logout also disconnects the socket
+  const logoutAction = useCallback(() => {
+    logout();
+    disconnectSocket();
+  }, [logout]);
 
   useGlobalShortcut(['Control', 'k'], openCommandPalette);
   useGlobalShortcut(['Meta', 'k'], openCommandPalette); // For macOS
@@ -96,7 +104,20 @@ const AppContent = () => {
 
   useEffect(() => {
     bootstrap();
-  }, [bootstrap]);
+  }, []);
+
+  // --- NEW: Centralized connection management ---
+  useEffect(() => {
+    if (user) {
+      console.log("User found, connecting socket...");
+      connectSocket();
+    } else {
+      console.log("No user, disconnecting socket...");
+      disconnectSocket();
+    }
+    // No return cleanup needed as disconnect is handled explicitly
+  }, [user]);
+  // --- END NEW ---
 
   // --- NEW: Trigger key sync after user is loaded and UI is ready ---
   useEffect(() => {
@@ -117,17 +138,6 @@ const AppContent = () => {
     sync();
   }, [user]);
   // --- END NEW ---
-
-  useEffect(() => {
-    if (user) {
-      const socket = getSocket();
-      socket.on('force_logout', (data) => {
-        console.log(`Received force_logout for session: ${data.jti}. Logging out.`);
-        logout();
-      });
-      return () => socket.off('force_logout');
-    }
-  }, [user, logout]);
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -164,6 +174,7 @@ const AppContent = () => {
           },
         }}
       />
+      <ConnectionStatusBanner />
       <CommandPalette />
       <ConfirmModal />
       <UserInfoModal />
@@ -171,18 +182,25 @@ const AppContent = () => {
       <ChatInfoModal />
       <DynamicIsland />
       <Routes>
+        {/* Public routes */}
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/restore" element={<Restore />} />
         <Route path="/link-device" element={<LinkDevicePage />} />
-        <Route path="/chat" element={<ProtectedRoute><Home /></ProtectedRoute>} />
-        <Route path="/chat/:conversationId" element={<ProtectedRoute><Chat /></ProtectedRoute>} />
-        <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-        <Route path="/settings/keys" element={<ProtectedRoute><KeyManagementPage /></ProtectedRoute>} />
-        <Route path="/settings/sessions" element={<ProtectedRoute><SessionManagerPage /></ProtectedRoute>} />
-        <Route path="/settings/link-device" element={<ProtectedRoute><DeviceScannerPage /></ProtectedRoute>} />
-        <Route path="/profile/:userId" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+
+        {/* Protected routes */}
+        <Route element={<ProtectedRoute />}>
+          <Route path="/chat" element={<Home />} />
+          <Route path="/chat/:conversationId" element={<Chat />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings/keys" element={<KeyManagementPage />} />
+          <Route path="/settings/sessions" element={<SessionManagerPage />} />
+          <Route path="/settings/link-device" element={<DeviceScannerPage />} />
+          <Route path="/profile/:userId" element={<ProfilePage />} />
+        </Route>
+
+        {/* Fallback route */}
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
     </>

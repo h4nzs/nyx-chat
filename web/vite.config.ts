@@ -47,5 +47,10 @@ export default defineConfig({
         changeOrigin: true,
       }
     }
+  },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/SetupTests.ts',
   }
 });

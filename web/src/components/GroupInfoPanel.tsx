@@ -100,22 +100,22 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
           <h2 className="text-xl font-bold text-text-primary">Group Info</h2>
         </header>
 
-        <main className="relative flex-1 overflow-y-auto bg-bg-main p-4 md:p-6 space-y-6">
-          <div className="px-4 md:px-0 mb-4">
+        <main className="flex-1 flex flex-col overflow-y-auto bg-bg-main">
+          <div className="p-4 md:px-6 md:pt-6 flex-shrink-0">
             <AnimatedTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
           </div>
 
-          <AnimatePresence mode="wait">
-            {activeTab === 'details' && (
-              <motion.div
-                key="group-details"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.2 }}
-                className="absolute top-24 left-0 w-full px-4 md:px-6" // Adjust top based on header/tab height
-              >
-                <div className="space-y-6">
+          <div className="flex-1 relative px-4 md:px-6 pb-6">
+            <AnimatePresence mode="wait">
+              {activeTab === 'details' && (
+                <motion.div
+                  key="group-details"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.2 }}
+                  className="space-y-6"
+                >
                   {/* Group Identity Card */}
                   <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-6 text-center relative">
                     <div className="relative w-24 h-24 mx-auto mb-4">
@@ -169,23 +169,22 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
                       <span>Leave Group</span>
                     </button>
                   </div>
-                </div>
-              </motion.div>
-            )}
+                </motion.div>
+              )}
 
-            {activeTab === 'media' && (
-              <motion.div
-                key="group-media"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.2 }}
-                className="absolute top-24 left-0 w-full px-4 md:px-6" // Adjust top based on header/tab height
-              >
-                <MediaGallery conversationId={conversation.id} />
-              </motion.div>
-            )}
-          </AnimatePresence>
+              {activeTab === 'media' && (
+                <motion.div
+                  key="group-media"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <MediaGallery conversationId={conversation.id} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </main>
 
         {isEditing && (

@@ -19,11 +19,12 @@ import Lightbox from "./Lightbox";
 import GroupInfoPanel from './GroupInfoPanel';
 import clsx from "clsx";
 import { useVerificationStore } from '@store/verification';
-import { FiShield, FiSmile } from 'react-icons/fi';
+import { FiShield, FiSmile, FiMic, FiSquare } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 
+import { useConnectionStore } from "@store/connection";
 import LinkPreviewCard from './LinkPreviewCard';
 
 // Helper function to prevent spamming the API
@@ -126,7 +127,19 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
     if (!replyingTo) return null;
   
     const authorName = replyingTo.sender?.name || 'User';
-    const contentPreview = replyingTo.content || (replyingTo.fileUrl ? 'File' : '...');
+    
+    let contentPreview: string;
+    if (replyingTo.duration) {
+      contentPreview = 'Voice Message';
+    } else if (replyingTo.fileName) {
+      contentPreview = replyingTo.fileName;
+    } else if (replyingTo.fileUrl) {
+      contentPreview = 'File';
+    } else if (replyingTo.content) {
+      contentPreview = replyingTo.content; // This is ciphertext, but we'll truncate it.
+    } else {
+      contentPreview = '...';
+    }
   
     return (
       <div className="px-4 pt-3">
@@ -145,14 +158,25 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
     );
   };
   
-  const MessageInput = ({ onSend, onTyping, onFileChange }: { onSend: (data: { content: string }) => void; onTyping: () => void; onFileChange: (e: ChangeEvent<HTMLInputElement>) => void; }) => {
+  const MessageInput = ({ onSend, onTyping, onFileChange, onVoiceSend }: { onSend: (data: { content: string }) => void; onTyping: () => void; onFileChange: (e: ChangeEvent<HTMLInputElement>) => void; onVoiceSend: (blob: Blob, duration: number) => void; }) => {
   const [text, setText] = useState('');
   const [isPressed, setIsPressed] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview } = useMessageInputStore();
+  const { status: connectionStatus } = useConnectionStore();
 
+  // --- Voice Recording State ---
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const recordingTimeRef = useRef(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  // --- End Voice Recording State ---
+
+  const isConnected = connectionStatus === 'connected';
   const hasText = text.trim().length > 0;
 
   const debouncedFetchPreview = useCallback(
@@ -174,6 +198,57 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
     };
   }, []);
 
+  // --- Voice Recording Logic ---
+  const handleStartRecording = async () => {
+    if (!isConnected) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorderRef.current.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        // Use the ref's value to avoid stale state in the closure
+        onVoiceSend(audioBlob, recordingTimeRef.current);
+        
+        // Clean up stream and reset timer AFTER sending
+        stream.getTracks().forEach(track => track.stop());
+        setRecordingTime(0);
+        recordingTimeRef.current = 0;
+      };
+
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+      recordingIntervalRef.current = setInterval(() => {
+        setRecordingTime(prev => {
+          const newTime = prev + 1;
+          // Update both state for UI and ref for the final value
+          recordingTimeRef.current = newTime;
+          return newTime;
+        });
+      }, 1000);
+    } catch (error) {
+      console.error("Error starting recording:", error);
+      // You might want to show a toast notification to the user here
+    }
+  };
+
+  const handleStopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (recordingIntervalRef.current) {
+        clearInterval(recordingIntervalRef.current);
+      }
+      // Timer and ref are now reset in the onstop handler
+    }
+  };
+  // --- End Voice Recording Logic ---
+
   const handleEmojiClick = (emojiData: EmojiClickData) => {
     setText(prevText => prevText + emojiData.emoji);
     setShowEmojiPicker(false);
@@ -181,7 +256,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hasText) return;
+    if (!hasText || !isConnected) return;
     onSend({ content: text });
     setText('');
     clearTypingLinkPreview();
@@ -190,8 +265,10 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const handleTextChange = (e: ChangeEvent<HTMLInputElement>) => {
     const newText = e.target.value;
     setText(newText);
-    onTyping();
-    debouncedFetchPreview(newText);
+    if (isConnected) {
+      onTyping();
+      debouncedFetchPreview(newText);
+    }
   }
 
   const sendButtonClasses = clsx(
@@ -200,20 +277,22 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
       'translate-y-px brightness-95': isPressed && hasText,
       'active:shadow-neumorphic-pressed': hasText,
       'scale-100 opacity-100': hasText,
-      'scale-90 opacity-60 cursor-not-allowed': !hasText,
+      'scale-90 opacity-60 cursor-not-allowed': !hasText || !isConnected,
     }
   );
 
   const textInputClasses = clsx(
     'flex-1 bg-bg-surface px-4 py-2.5 rounded-full text-text-primary placeholder-text-secondary focus:outline-none focus:ring-2 focus:ring-accent',
-    'shadow-neumorphic-concave' // Use inner shadow for recessed look
+    'shadow-neumorphic-concave',
+    { 'opacity-50 cursor-not-allowed': !isConnected }
   );
 
   const fileButtonClasses = clsx(
     'p-2 rounded-full text-text-secondary transition-all duration-150',
     'hover:text-accent',
     'shadow-neumorphic-convex', // Use soft shadow for elevated look
-    'active:shadow-neumorphic-pressed' // Use inner shadow for pressed state
+    'active:shadow-neumorphic-pressed', // Use inner shadow for pressed state
+    { 'opacity-50 cursor-not-allowed': !isConnected }
   );
 
   return (
@@ -224,7 +303,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
           <LinkPreviewCard preview={typingLinkPreview} />
         </div>
       )}
-      <div className="p-4 bg-bg-surface shadow-neumorphic-convex rounded-t-xl relative"> {/* Added relative positioning */}
+      <div className="p-4 bg-bg-surface shadow-neumorphic-convex rounded-t-xl relative">
         {showEmojiPicker && (
           <div ref={emojiPickerRef} className="absolute bottom-full mb-2">
             <EmojiPicker 
@@ -235,42 +314,67 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
             />
           </div>
         )}
-        <form onSubmit={handleSubmit} className="flex items-center gap-3">
-          <button type="button" onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className={fileButtonClasses}>
-            <motion.svg 
-              whileHover={{ scale: 1.1, rotate: -15 }}
-              xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></motion.svg>
-          </button>
-          <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} aria-label="Open emoji picker" className={fileButtonClasses}>
-            <motion.div whileHover={{ scale: 1.1 }}>
-              <FiSmile size={22} />
-            </motion.div>
-          </button>
-          <input 
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            onChange={onFileChange}
-          />
-          <input 
-            type="text" 
-            value={text} 
-            onChange={handleTextChange}
-            placeholder="Type a message..."
-            className={textInputClasses}
-          />
-          <button 
-            type="submit" 
-            disabled={!hasText}
-            onMouseDown={() => hasText && setIsPressed(true)}
-            onMouseUp={() => setIsPressed(false)}
-            onMouseLeave={() => setIsPressed(false)}
-            aria-label="Send message"
-            className={sendButtonClasses}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          </button>
-        </form>
+        
+        {isRecording ? (
+          <div className="flex items-center gap-3 w-full">
+            <button type="button" onClick={handleStopRecording} aria-label="Stop recording" className={`${fileButtonClasses} bg-red-500 text-white`} disabled={!isConnected}>
+              <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 1 }}>
+                <FiSquare size={22} />
+              </motion.div>
+            </button>
+            <div className="flex-1 bg-bg-main shadow-neumorphic-concave rounded-full flex items-center px-4">
+              <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse mr-3"></div>
+              <p className="text-text-secondary font-mono">{new Date(recordingTime * 1000).toISOString().substr(14, 5)}</p>
+            </div>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="flex items-center gap-3">
+            <button type="button" onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className={fileButtonClasses} disabled={!isConnected}>
+              <motion.svg 
+                whileHover={{ scale: 1.1, rotate: -15 }}
+                xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></motion.svg>
+            </button>
+            <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} aria-label="Open emoji picker" className={fileButtonClasses} disabled={!isConnected}>
+              <motion.div whileHover={{ scale: 1.1 }}>
+                <FiSmile size={22} />
+              </motion.div>
+            </button>
+            <input 
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={onFileChange}
+              disabled={!isConnected}
+            />
+            <input 
+              type="text" 
+              value={text} 
+              onChange={handleTextChange}
+              placeholder={isConnected ? "Type a message..." : "Disconnected..."}
+              className={textInputClasses}
+              disabled={!isConnected}
+            />
+            {hasText ? (
+              <button 
+                type="submit" 
+                disabled={!hasText || !isConnected}
+                onMouseDown={() => hasText && setIsPressed(true)}
+                onMouseUp={() => setIsPressed(false)}
+                onMouseLeave={() => setIsPressed(false)}
+                aria-label="Send message"
+                className={sendButtonClasses}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </button>
+            ) : (
+              <button type="button" onClick={handleStartRecording} aria-label="Start recording" className={fileButtonClasses} disabled={!isConnected}>
+                <motion.div whileHover={{ scale: 1.1 }}>
+                  <FiMic size={22} />
+                </motion.div>
+              </button>
+            )}
+          </form>
+        )}
       </div>
     </div>
   );
@@ -298,7 +402,8 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     highlightedMessageId: state.highlightedMessageId,
     setHighlightedMessageId: state.setHighlightedMessageId,
   }));
-  const { replyingTo, setReplyingTo } = useMessageInputStore(state => ({
+  const { handleStopRecording, replyingTo, setReplyingTo } = useMessageInputStore(state => ({
+    handleStopRecording: state.handleStopRecording,
     replyingTo: state.replyingTo,
     setReplyingTo: state.setReplyingTo,
   }));
@@ -310,7 +415,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const typing = usePresenceStore(state => state.typing);
   
   const virtuosoRef = useRef<any>(null);
-  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [lightboxMessage, setLightboxMessage] = useState<Message | null>(null);
   const [isGroupInfoOpen, setIsGroupInfoOpen] = useState(false);
   const navigate = useNavigate();
 
@@ -320,7 +425,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     }
   }, [id, actions]);
 
-  const handleImageClick = (src: string) => setLightboxSrc(src);
+  const handleImageClick = (message: Message) => setLightboxMessage(message);
 
   useEffect(() => {
     if (highlightedMessageId && virtuosoRef.current && messages.length > 0) {
@@ -359,6 +464,10 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     if (e.target.files?.[0]) {
       actions.uploadFile(e.target.files[0]);
     }
+  };
+
+  const handleVoiceSend = (blob: Blob, duration: number) => {
+    handleStopRecording(id, blob, duration);
   };
 
   return (
@@ -439,8 +548,8 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                    </div>
                 )}
               </div>
-              <MessageInput onSend={handleSendMessage} onTyping={handleTyping} onFileChange={handleFileChange} />
-              {lightboxSrc && <Lightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
+              <MessageInput onSend={handleSendMessage} onTyping={handleTyping} onFileChange={handleFileChange} onVoiceSend={handleVoiceSend} />
+              {lightboxMessage && <Lightbox message={lightboxMessage} onClose={() => setLightboxMessage(null)} />}
               {isGroupInfoOpen && <GroupInfoPanel conversationId={id} onClose={() => setIsGroupInfoOpen(false)} />}
             </>
           );

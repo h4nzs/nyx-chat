@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { Message, Conversation } from "@store/conversation";
 import { useAuthStore } from "@store/auth";
 import { useMessageInputStore } from "@store/messageInput";
@@ -12,10 +12,13 @@ import FileAttachment from "./FileAttachment";
 import { useModalStore } from '@store/modal';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
-import LinkPreviewCard from './LinkPreviewCard'; // Import the new component
-import { FiRefreshCw } from 'react-icons/fi'; // Import retry icon
+import LinkPreviewCard from './LinkPreviewCard';
+import { FiRefreshCw } from 'react-icons/fi';
 import { getUserColor } from '@utils/color';
 import { FaCheck, FaCheckDouble } from 'react-icons/fa';
+import VoiceMessagePlayer from './VoiceMessagePlayer';
+import { decryptMessage } from "@utils/crypto";
+import { useKeychainStore } from "@store/keychain";
 
 const MessageStatusIcon = ({ message, conversation }: { message: Message; conversation: Conversation | undefined }) => {
   const meId = useAuthStore((s) => s.user?.id);
@@ -60,7 +63,17 @@ const MessageStatusIcon = ({ message, conversation }: { message: Message; conver
 
 const ReplyQuote = ({ message }: { message: Message }) => {
   const authorName = message.sender?.name || 'User';
-  const contentPreview = message.content || (message.fileUrl ? 'File' : '...');
+  
+  let contentPreview: string;
+  if (message.duration) {
+    contentPreview = 'Voice Message';
+  } else if (message.fileName) {
+    contentPreview = message.fileName;
+  } else if (message.fileUrl) {
+    contentPreview = 'File';
+  } else {
+    contentPreview = message.content || '...';
+  }
 
   return (
     <div className="mb-1.5 p-2 rounded-lg bg-black/20 border-l-4 border-accent/50">
@@ -70,19 +83,50 @@ const ReplyQuote = ({ message }: { message: Message }) => {
   );
 };
 
-const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversation }: { message: Message; mine: boolean; isLastInSequence: boolean; onImageClick: (src: string) => void; conversation: Conversation | undefined; }) => {
-  const hasContent = message.content && message.content.trim().length > 0 && message.content !== "[This message was deleted]";
-  const isImage = message.fileType?.startsWith('image/');
+const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversation }: { message: Message; mine: boolean; isLastInSequence: boolean; onImageClick: (message: Message) => void; conversation: Conversation | undefined; }) => {
+  const [decryptedContent, setDecryptedContent] = useState<string | null>(message.content || '');
+  const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
 
-  const hasBubbleStyle = hasContent || (message.fileUrl && !isImage);
+  // This effect is now ONLY for TEXT messages.
+  useEffect(() => {
+    if (!message.fileUrl) { // DO NOT RUN FOR ANY FILE MESSAGES
+      let isMounted = true;
+      const tryDecrypt = async () => {
+        if (message.content && message.sessionId) {
+          if (decryptedContent?.startsWith('[') || !decryptedContent) {
+             try {
+              const decrypted = await decryptMessage(message.content, message.conversationId, message.sessionId);
+              if (isMounted) {
+                setDecryptedContent(decrypted);
+              }
+            } catch (e) {
+              if (isMounted) {
+                setDecryptedContent(message.content);
+              }
+            }
+          }
+        }
+      };
+
+      tryDecrypt();
+      return () => { isMounted = false; };
+    }
+  }, [message.content, message.conversationId, message.sessionId, lastKeychainUpdate, decryptedContent, message.fileUrl]);
+
+
+  const hasTextContent = !!(decryptedContent && !decryptedContent.startsWith('['));
+  const isImage = message.fileType?.startsWith('image/');
+  const isVoiceMessage = message.fileType?.startsWith('audio/webm');
+
+  // A bubble should only have padding if it's a text-only message or a generic file attachment.
+  const hasBubbleStyle = (hasTextContent && !message.fileUrl) || (message.fileUrl && !isImage && !isVoiceMessage);
 
   const bubbleClasses = clsx(
-    'relative max-w-md md:max-w-lg',
-    hasBubbleStyle && `px-4 py-2.5 shadow-neumorphic-bubble`,
+    'relative max-w-md md:max-w-lg shadow-neumorphic-bubble',
     {
+      'px-4 py-2.5': hasBubbleStyle,
       'bg-accent text-accent-foreground': mine,
       'bg-bg-surface text-text-primary': !mine,
-      // Add a "tail" to the last message in a sequence
       'rounded-t-2xl': true,
       'rounded-bl-2xl': mine,
       'rounded-br-2xl': !mine,
@@ -95,27 +139,38 @@ const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversa
     <div className={bubbleClasses}>
       {message.repliedTo && <ReplyQuote message={message.repliedTo} />}
       
+      {isVoiceMessage && message.fileUrl && (
+        <div className="p-2 w-[250px]">
+          <VoiceMessagePlayer message={message} />
+        </div>
+      )}
+
       {message.fileUrl && isImage && (
-        <button onClick={() => onImageClick(toAbsoluteUrl(message.fileUrl!))} className={`block w-full ${hasContent ? 'my-2' : ''}`}>
+        <button onClick={() => onImageClick(message)} className="block w-full">
           <LazyImage 
-            src={toAbsoluteUrl(message.fileUrl!)} 
+            message={message}
             alt={message.fileName || 'Image attachment'}
-            className={`rounded-lg max-h-80 w-full object-cover cursor-pointer ${hasContent ? '' : 'rounded-xl'}`}
+            className="rounded-lg max-h-80 w-full object-cover cursor-pointer"
           />
         </button>
       )}
 
-      {message.fileUrl && !isImage && (
+      {message.fileUrl && !isImage && !isVoiceMessage && (
         <FileAttachment message={message} />
       )}
 
-      {hasContent && (
-        <p className="text-base whitespace-pre-wrap break-words">{message.content}</p>
+      {/* Only render text content if it's NOT a file message */}
+      {!message.fileUrl && (
+        hasTextContent ? (
+          <p className="text-base whitespace-pre-wrap break-words">{decryptedContent}</p>
+        ) : (
+          <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{decryptedContent}</p>
+        )
       )}
 
       {message.linkPreview && <LinkPreviewCard preview={message.linkPreview} />}
 
-      <div className={`text-xs mt-1 flex items-center gap-1.5 ${isImage && !hasContent ? 'absolute bottom-2 right-2 bg-black/50 text-white rounded-full px-2 py-1 pointer-events-none' : `justify-end ${mine ? 'text-accent-foreground/60' : 'text-text-secondary/80'}`}`}>
+      <div className={`text-xs mt-1 flex items-center gap-1.5 ${isImage ? 'absolute bottom-2 right-2 bg-black/50 text-white rounded-full px-2 py-1 pointer-events-none' : `justify-end ${mine ? 'text-accent-foreground/60' : 'text-text-secondary/80'}`}`}>
         <span>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
         <MessageStatusIcon message={message} conversation={conversation} />
       </div>
@@ -145,7 +200,7 @@ interface MessageItemProps {
   message: Message;
   conversation: Conversation | undefined;
   isHighlighted?: boolean;
-  onImageClick: (src: string) => void;
+  onImageClick: (message: Message) => void;
   isFirstInSequence: boolean;
   isLastInSequence: boolean;
 }
@@ -268,4 +323,3 @@ const MessageItem = ({ message, conversation, isHighlighted, onImageClick, isFir
 };
 
 export default memo(MessageItem);
-

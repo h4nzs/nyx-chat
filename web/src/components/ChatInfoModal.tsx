@@ -51,20 +51,20 @@ export default function ChatInfoModal() {
           </ul>
         </InfoSection>
 
-        <InfoSection icon={<FiAlertTriangle size={20} />} title="Mengakses Akun Anda di Perangkat Baru">
+        <InfoSection icon={<FiAlertTriangle size={20} />} title="Accessing Your Account on a New Device">
           <p>
-            Anda memiliki dua cara untuk mengakses akun dan pesan Anda di perangkat baru:
+            You have two ways to access your account and messages on a new device:
           </p>
           <ul className="list-disc list-inside space-y-1">
             <li>
-              <span className="font-semibold text-text-primary">Penautan Perangkat (Device Linking):</span> Ini adalah cara yang paling nyaman. Dari perangkat yang sudah login, Anda dapat memindai QR code yang ditampilkan di perangkat baru. Anda akan diminta untuk membuat <span className="font-semibold text-text-primary">kata sandi baru yang spesifik untuk perangkat ini</span>. Ini akan mentransfer kunci Master Anda dengan aman ke perangkat baru.
+              <span className="font-semibold text-text-primary">Device Linking:</span> This is the most convenient method. From a device that is already logged in, you can scan a QR code displayed on the new device. You will be prompted to create a <span className="font-semibold text-text-primary">new, device-specific password</span>. This will securely transfer your Master Key to the new device.
             </li>
             <li>
-              <span className="font-semibold text-text-primary">Pulihkan (Restore):</span> Jika Anda tidak memiliki perangkat yang sudah login, Anda dapat menggunakan fitur "Pulihkan" dan memasukkan Frasa Pemulihan 24 kata Anda. Ini akan meregenerasi Kunci Master Anda di perangkat baru.
+              <span className="font-semibold text-text-primary">Restore:</span> If you don't have a logged-in device, you can use the "Restore" feature and enter your 24-word Recovery Phrase. This will regenerate your Master Key on the new device.
             </li>
           </ul>
           <p className="p-3 bg-accent/10 text-accent rounded-lg">
-            <span className="font-bold">Penting:</span> Saat menautkan perangkat baru, Anda akan diminta untuk membuat kata sandi baru. Kata sandi ini hanya untuk perangkat tersebut dan akan digunakan untuk membuka kunci Master Anda di perangkat baru tersebut.
+            <span className="font-bold">Important:</span> When linking a new device, you will be asked to create a new password. This password is only for that device and will be used to unlock your Master Key on it.
           </p>
         </InfoSection>
 

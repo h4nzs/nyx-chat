@@ -197,6 +197,21 @@ export default function LandingPage() {
           </div>
         </main>
 
+        {/* Why Chat Lite Section */}
+        <section className="py-16 md:py-24">
+          <AnimatedSection>
+            <div className="max-w-4xl mx-auto px-4 text-center">
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-bold mb-6">Why Chat Lite?</motion.h2>
+              <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary mb-4">
+                Tired of complicated sign-ups and mandatory app downloads? Chat Lite is your solution. Access it instantly from your favorite browser—no installation needed.
+              </motion.p>
+              <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary">
+                Worried about your data? We are too. Chat Lite is built on a foundation of privacy, acting only as a secure bridge between you and your contacts. Your data is yours, and yours alone.
+              </motion.p>
+            </div>
+          </AnimatedSection>
+        </section>
+
         {/* Features Section */}
         <section className="py-16 md:py-24 bg-bg-surface">
           <AnimatedSection>

@@ -42,7 +42,7 @@ router.get("/:conversationId", requireAuth, async (req: Request, res, next) => {
       }),
       include: {
         sender: {
-          select: { id: true, username: true, avatarUrl: true },
+          select: { id: true, username: true, avatarUrl: true, name: true },
         },
         reactions: {
           include: {
@@ -89,11 +89,24 @@ router.delete("/:messageId", requireAuth, async (req, res, next) => {
     const urlToDelete = message.fileUrl || message.imageUrl;
     if (urlToDelete) {
       try {
-        const filePath = path.join(process.cwd(), 'uploads', path.basename(urlToDelete));
-        await fs.unlink(filePath);
+        // urlToDelete is like: http://localhost:4000/uploads/archives/file-123.zip
+        const url = new URL(urlToDelete);
+        const pathname = url.pathname; // /uploads/archives/file-123.zip
+        
+        // Find the part of the path relative to the project root
+        const uploadsDir = '/uploads/';
+        const relativePathIndex = pathname.indexOf(uploadsDir);
+        
+        if (relativePathIndex !== -1) {
+          const filePathInProject = pathname.substring(relativePathIndex + 1); // uploads/archives/file-123.zip
+          const absolutePath = path.join(process.cwd(), filePathInProject);
+          
+          await fs.unlink(absolutePath);
+        }
       } catch (fileError: any) {
+        // Jangan gagalkan seluruh permintaan jika file tidak ada (mungkin sudah dihapus)
         if (fileError.code !== 'ENOENT') {
-          console.error(`Failed to delete file: ${urlToDelete}`, fileError);
+          console.error(`Failed to delete file for URL ${urlToDelete}:`, fileError);
         }
       }
     }

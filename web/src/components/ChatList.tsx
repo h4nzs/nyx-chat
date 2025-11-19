@@ -112,6 +112,8 @@ const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, 
     }
   );
 
+  const previewText = conversation.lastMessage?.content || conversation.lastMessage?.preview || 'No messages yet';
+
   return (
     <motion.div layout key={conversation.id} className={itemClasses}>
       <div className="w-full text-left p-3 pr-10 flex items-center gap-3" onClick={onClick}>
@@ -137,7 +139,7 @@ const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, 
           </div>
           <div className="flex justify-between items-center mt-1">
             <p className={`text-sm truncate ${isUnread ? 'font-bold text-text-primary' : 'text-text-secondary'}`}>
-              {conversation.lastMessage?.preview || sanitizeText(conversation.lastMessage?.content || '') || 'No messages yet'}
+              {previewText}
             </p>
             {isUnread && (
               <span className="bg-accent text-accent-foreground text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center flex-shrink-0 ml-2">

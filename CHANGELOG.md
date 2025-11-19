@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0] - 2025-11-10
+
+This is a quality-of-life and robustness release focused on polishing the user interface of newly implemented features and hardening the application against potential data inconsistencies.
+
+### Changed
+- **Polished Voice Message Player:** The UI for the voice message player has been significantly improved:
+  - The play button now uses the main theme background color for better contrast against the message bubble.
+  - A "thumb" indicator has been added to the progress bar, providing clearer visual feedback of the current playback position.
+  - The overall layout and styling have been tweaked for a more refined and professional appearance.
+- **Improved Error Handling for Missing Files:** All media components (`VoiceMessagePlayer`, `FileAttachment`, `LazyImage`) now provide a clear, user-friendly error message ("File not found on server.") when they fail to load a file due to a 404 error. This improves the user experience if files are cleaned up from the server.
+- **Consistent Modal Language:** All text within the "Security Info" modal (`ChatInfoModal`) has been standardized to English to ensure consistency.
+
+### Fixed
+- **Incomplete Chat History:** Fixed a critical bug where opening a conversation would sometimes only show the most recent messages instead of the full history. The message loading logic now correctly fetches the complete history the first time a chat is opened.
+- **Voice Message Bubble Width:** Fixed a UI bug where voice message bubbles would shrink, by enforcing a fixed, proportional width for all voice messages.
+- **Voice Message Duration Bug:** Fixed a critical bug where the duration of all voice messages was incorrectly recorded as `0`. This was traced to a stale state issue within an event handler, which has been resolved by using a `useRef` hook to guarantee the correct duration is captured. This fix also corrected the progress bar indicator, which was stuck at the start.
+- **File Deletion on Server:** Fixed a critical bug where deleting a message with a file attached would delete the database record but leave the physical file on the server. The backend logic now correctly reconstructs the file path and deletes the file from storage.
+- **Lightbox Image Overflow:** Fixed a bug where very tall or wide images would overflow the screen in the lightbox view. The component now correctly constrains the image to the viewport while maintaining its aspect ratio and ensuring a consistent margin.
+- **Reply Preview:** Fixed a bug where the reply preview UI would show incorrect information or raw encrypted text. The preview now correctly shows the sender's name and a proper summary for all message types (text, file, voice).
+- **Build Failure:** Fixed a build failure caused by a dangling import to a deleted file (`sanitize.ts`) in `ChatList.tsx`.
+
+### Reverted
+- **Typing Indicator:** Reverted a change that attempted to fix the typing indicator. The implementation caused a regression in the user presence (online/offline) status and has been rolled back to restore the correct presence behavior. The typing indicator remains non-functional and is a known issue.
+
+## [1.4.0] - 2025-11-10
+
+This is a major security and feature release that implements a complete, end-to-end encrypted (E2EE) file sharing system, building upon the robust patterns established in previous versions. All user-uploaded content, including voice messages, images, and documents, is now fully encrypted.
+
+### Added
+- **E2EE for All File Uploads:** Extended the end-to-end encryption protocol to cover all file types. The application now follows a consistent and secure pattern for all uploads:
+  1.  A one-time symmetric key is generated for the file on the client.
+  2.  The file is encrypted with this key.
+  3.  The file key is then encrypted with the conversation's session key.
+  4.  The encrypted file is uploaded, and the encrypted file key is sent as part of the message payload.
+- **E2EE Voice Messages:** Implemented a full-featured voice messaging system with E2EE.
+- **Smart Media Components:** Refactored all components that handle file-based media (`VoiceMessagePlayer`, `FileAttachment`, `LazyImage`, `Lightbox`) to be "smart". They now accept the full message object, handle their own decryption logic, and manage loading/error states internally.
+
+### Fixed
+- **Critical E2EE Data Corruption Bug:** Diagnosed and fixed a persistent and elusive bug where encrypted keys were being corrupted before reaching the receiver. The root cause was traced to the database schema, where the `content` field had a default length limit that was silently truncating the long encrypted keys.
+  - **Solution:** The `content` field's data type was changed to `Text` in the Prisma schema to remove the length limit. As a more robust, long-term solution, a dedicated `fileKey` field was added to the `Message` model to completely isolate file keys from the text `content` field, preventing any future conflicts.
+- **UI Race Condition in Voice Recording:** Fixed a bug where the voice message duration was always recorded as `0` seconds. This was caused by a race condition where the recording timer was reset before the `onstop` event could capture its value.
+- **E2EE Key Decryption Failures:**
+  - Fixed a bug where the sender of a voice message or file would see a decryption error on their own optimistic message. This was resolved by making the media components "optimistic-aware" and preventing them from attempting to decrypt a raw, unencrypted key.
+  - Fixed multiple instances where components would attempt to decrypt the wrong message field (e.g., `content` instead of `fileKey`).
+- **Broken Lightbox:** Fixed a bug where the image lightbox failed to display images after the initial E2EE implementation. The `Lightbox` component was refactored to be "smart" and handle its own decryption.
+- **UI Glitches:**
+  - Fixed a bug where the raw file key (a random string) would briefly appear in the message bubble for voice messages.
+  - Corrected placeholder text in reply previews for voice messages.
+
 ## [1.3.0] - 2025-11-10
 
 This release introduces a comprehensive, professional landing page to serve as the application's public-facing "front door". It also includes numerous UI/UX enhancements and critical routing fixes.
@@ -230,7 +279,7 @@ This release focuses on a significant UI/UX overhaul, introducing a unique visua
 ### Added (New Features)
 
 - **"Aurora" Gradient Theme:** Implemented a distinctive Teal-to-Indigo gradient as the application's new accent color, applied to primary buttons and key UI elements.
-- **Three-Column "Command Center" Layout:** Introduced an adaptive three-column layout for ultrawide monitors, displaying ChatList, ChatWindow, and a contextual info panel (GroupInfoPanel or UserInfoPanel) simultaneously.
+- **"Command Center" Layout:** Introduced an adaptive three-column layout for ultrawide monitors, displaying ChatList, ChatWindow, and a contextual info panel (GroupInfoPanel or UserInfoPanel) simultaneously.
 - **Hybrid Tablet Experience:** Implemented dynamic layout switching for tablets based on orientation (mobile-like in portrait, desktop-like in landscape).
 - **`useOrientation` Hook:** Created a custom React hook to detect and respond to screen orientation changes.
 - **`UserInfoPanel` Component:** Developed a dedicated panel to display user information in the three-column layout.

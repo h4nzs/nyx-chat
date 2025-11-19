@@ -85,12 +85,14 @@ model Message {
   conversationId      String
   sender              User            @relation(fields: [senderId], references: [id], onDelete: Cascade)
   senderId            String
-  content             String?
+  content             String?      @db.Text
   imageUrl            String?
   fileUrl             String?
   fileName            String?
   fileType            String?   // Tambahkan ini
   fileSize            Int?      // Tambahkan ini
+  duration            Int?      // Duration of the voice message in seconds
+  fileKey             String?   @db.Text // Dedicated field for the encrypted file key
   sessionId           String?         // References the session key set for encryption
   encryptedSessionKey String?         // Encrypted session key for this specific message (for forward secrecy)
   createdAt           DateTime        @default(now())

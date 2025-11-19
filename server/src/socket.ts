@@ -101,7 +101,8 @@ export function registerSocket(httpServer: HttpServer) {
         });
 
         let linkPreviewData: any = null;
-        if (data.content) {
+        // Only check for link previews on pure text messages
+        if (data.content && !data.fileUrl) {
           const urlRegex = /(https?:\/\/[^\s]+)/g;
           const urls = data.content.match(urlRegex);
           if (urls && urls.length > 0) {
@@ -133,6 +134,8 @@ export function registerSocket(httpServer: HttpServer) {
               fileName: data.fileName,
               fileType: data.fileType,
               fileSize: data.fileSize,
+              duration: data.duration,
+              fileKey: data.fileKey, // Use the new dedicated field
               sessionId: data.sessionId,
               repliedToId: data.repliedToId,
               linkPreview: linkPreviewData,
@@ -169,13 +172,17 @@ export function registerSocket(httpServer: HttpServer) {
           tempId: data.tempId,
         };
 
-        io.to(conversationId).emit("message:new", messageToBroadcast);
+        // Broadcast to all OTHER clients in the room
+        socket.broadcast.to(conversationId).emit("message:new", messageToBroadcast);
+
+        // Send the final message back to the sender via acknowledgement
+        cb?.({ ok: true, msg: messageToBroadcast });
 
         const pushRecipients = participants.filter(p => p.userId !== senderId);
-        const payload = { title: `New message from ${socket.user.username}`, body: data.content || 'File received' };
+        const pushBody = data.fileUrl ? 'You received a file.' : (data.content || '');
+        const payload = { title: `New message from ${socket.user.username}`, body: pushBody.substring(0, 200) };
         pushRecipients.forEach(p => sendPushNotification(p.userId, payload));
 
-        cb?.({ ok: true, msg: newMessage });
       } catch (error) {
         console.error("Message send error:", error);
         cb?.({ ok: false, error: "Failed to save or send message" });

@@ -7,6 +7,7 @@ import { FiUser, FiLock, FiRefreshCw } from 'react-icons/fi';
 import * as bip39 from 'bip39';
 import { getSodium } from "@lib/sodiumInitializer";
 import { storePrivateKey, exportPublicKey } from "@utils/keyManagement";
+import { syncSessionKeys } from "@utils/sessionSync";
 import { api } from "@lib/api";
 import toast from "react-hot-toast";
 
@@ -66,16 +67,18 @@ export default function Restore() {
       const encryptedPrivateKey = await storePrivateKey(privateKeyBytes, newPassword);
       localStorage.setItem('publicKey', publicKeyB64);
       localStorage.setItem('encryptedPrivateKey', encryptedPrivateKey);
+      
+      toast.success("Account restored successfully! Syncing history...");
 
-      // 5. Log the user in
-      toast.success("Account restored successfully! Attempting to log you in...");
-      try {
-        await login(username, newPassword);
-        navigate("/chat");
-      } catch (loginErr: any) {
-        setError(`Your keys have been restored, but auto-login failed. Please go to the login page and log in manually with your new password. Error: ${loginErr.message}`)
-        toast.error("Auto-login failed. Please log in manually.");
-      }
+      // 5. Log the user in to get a valid token for the next step
+      // We do this before sync to ensure authFetch works
+      await login(username, newPassword);
+
+      // 6. Sync historical session keys to decrypt old messages
+      await syncSessionKeys();
+
+      // 7. Navigate to chat
+      navigate("/chat");
 
     } catch (err: any) {
       setError(err.message || "Restore failed. Please check your details and try again.");
