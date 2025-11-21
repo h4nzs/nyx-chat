@@ -13,12 +13,14 @@ import { useModalStore } from '@store/modal';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import LinkPreviewCard from './LinkPreviewCard';
-import { FiRefreshCw } from 'react-icons/fi';
+import { FiRefreshCw, FiShield } from 'react-icons/fi';
 import { getUserColor } from '@utils/color';
 import { FaCheck, FaCheckDouble } from 'react-icons/fa';
 import VoiceMessagePlayer from './VoiceMessagePlayer';
 import { decryptMessage } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
+
+// --- HELPER COMPONENTS (MOVED TO TOP) ---
 
 const MessageStatusIcon = ({ message, conversation }: { message: Message; conversation: Conversation | undefined }) => {
   const meId = useAuthStore((s) => s.user?.id);
@@ -87,9 +89,8 @@ const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversa
   const [decryptedContent, setDecryptedContent] = useState<string | null>(message.content || '');
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
 
-  // This effect is now ONLY for TEXT messages.
   useEffect(() => {
-    if (!message.fileUrl) { // DO NOT RUN FOR ANY FILE MESSAGES
+    if (!message.fileUrl) {
       let isMounted = true;
       const tryDecrypt = async () => {
         if (message.content && message.sessionId) {
@@ -107,18 +108,15 @@ const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversa
           }
         }
       };
-
       tryDecrypt();
       return () => { isMounted = false; };
     }
   }, [message.content, message.conversationId, message.sessionId, lastKeychainUpdate, decryptedContent, message.fileUrl]);
 
-
   const hasTextContent = !!(decryptedContent && !decryptedContent.startsWith('['));
   const isImage = message.fileType?.startsWith('image/');
   const isVoiceMessage = message.fileType?.startsWith('audio/webm');
 
-  // A bubble should only have padding if it's a text-only message or a generic file attachment.
   const hasBubbleStyle = (hasTextContent && !message.fileUrl) || (message.fileUrl && !isImage && !isVoiceMessage);
 
   const bubbleClasses = clsx(
@@ -159,7 +157,6 @@ const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversa
         <FileAttachment message={message} />
       )}
 
-      {/* Only render text content if it's NOT a file message */}
       {!message.fileUrl && (
         hasTextContent ? (
           <p className="text-base whitespace-pre-wrap break-words">{decryptedContent}</p>
@@ -196,6 +193,8 @@ const ReactionsDisplay = ({ reactions }: { reactions: Message['reactions'] }) =>
   );
 };
 
+// --- MAIN COMPONENT ---
+
 interface MessageItemProps {
   message: Message;
   conversation: Conversation | undefined;
@@ -211,6 +210,17 @@ const MessageItem = ({ message, conversation, isHighlighted, onImageClick, isFir
   const showConfirm = useModalStore(state => state.showConfirm);
   const mine = message.senderId === meId;
   const ref = useRef<HTMLDivElement>(null);
+
+  if (message.type === 'SYSTEM') {
+    return (
+      <div className="flex justify-center items-center my-2">
+        <div className="text-xs text-text-secondary bg-bg-surface rounded-full px-3 py-1 flex items-center gap-2 shadow-sm">
+          <FiShield className="text-yellow-500" />
+          <span>{message.content}</span>
+        </div>
+      </div>
+    );
+  }
 
   useEffect(() => {
     if (!ref.current || mine) return;

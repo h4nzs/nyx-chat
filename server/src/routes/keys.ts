@@ -5,6 +5,7 @@ import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
 import sodium from "libsodium-wrappers";
 import bcrypt from "bcrypt";
+import { getIo } from "../socket.js"; // Import getIo
 
 const router = Router();
 
@@ -15,12 +16,50 @@ router.post("/public",
   async (req, res, next) => {
     try {
       const userId = req.user.id;
-      const { publicKey } = req.body; // Correctly extract publicKey from body
+      const { publicKey } = req.body;
 
       await prisma.user.update({
         where: { id: userId },
-        data: { publicKey }, // Use the extracted variable
+        data: { publicKey },
       });
+
+      // --- BEGIN: Notify contacts about the key change ---
+      const io = getIo();
+
+      // 1. Find all conversations the user is in
+      const conversations = await prisma.conversation.findMany({
+        where: {
+          participants: {
+            some: {
+              userId: userId,
+            },
+          },
+        },
+        include: {
+          participants: {
+            select: {
+              userId: true,
+            },
+          },
+        },
+      });
+
+      // 2. Collect all unique participant IDs, excluding the user themselves
+      const contactIds = new Set<string>();
+      conversations.forEach(convo => {
+        convo.participants.forEach(p => {
+          if (p.userId !== userId) {
+            contactIds.add(p.userId);
+          }
+        });
+      });
+
+      // 3. Broadcast the identity change event to each contact
+      const payload = { userId: userId, name: req.user.name || req.user.username };
+      contactIds.forEach(contactId => {
+        io.to(contactId).emit("user:identity_changed", payload);
+      });
+      // --- END: Notify contacts ---
 
       res.json({ ok: true });
     } catch (e) {

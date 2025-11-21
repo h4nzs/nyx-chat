@@ -5,7 +5,6 @@ import { useConversationStore } from "@store/conversation";
 import { fulfillKeyRequest, storeReceivedSessionKey } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
 import { useConnectionStore } from "@store/connection"; // Import the new store
-
 const WS_URL = (import.meta.env.VITE_WS_URL as string) || "http://localhost:4000";
 let socket: Socket | null = null;
 
@@ -118,6 +117,28 @@ export function getSocket() {
       toast.error("This session has been logged out remotely.");
       useAuthStore.getState().logout();
       disconnectSocket();
+    });
+
+    socket.on("user:identity_changed", (data: { userId: string; name: string }) => {
+      console.log(`[Socket] Identity changed for user: ${data.name}`);
+      
+      const message = `The security key for ${data.name} has changed. You may want to verify their identity.`;
+
+      // 1. Show an immediate toast notification
+      toast.success(message, {
+        duration: 10000,
+        icon: '🛡️',
+      });
+      
+      // 2. Find relevant conversations and add a persistent system message
+      const { conversations } = useConversationStore.getState();
+      const { addSystemMessage } = useMessageStore.getState();
+
+      conversations.forEach(convo => {
+        if (convo.participants.some(p => p.id === data.userId)) {
+          addSystemMessage(convo.id, message);
+        }
+      });
     });
   }
   return socket;

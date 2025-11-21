@@ -19,7 +19,7 @@ import UserInfoModal from './components/UserInfoModal';
 import PasswordPromptModal from './components/PasswordPromptModal';
 import ChatInfoModal from './components/ChatInfoModal';
 import DynamicIsland from './components/DynamicIsland';
-import ConnectionStatusBanner from './components/ConnectionStatusBanner';
+
 import { useThemeStore } from './store/theme';
 import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
 import { useGlobalShortcut } from './hooks/useGlobalShortcut';
@@ -174,7 +174,7 @@ const AppContent = () => {
           },
         }}
       />
-      <ConnectionStatusBanner />
+
       <CommandPalette />
       <ConfirmModal />
       <UserInfoModal />

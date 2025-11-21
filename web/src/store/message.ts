@@ -58,6 +58,7 @@ type State = {
   updateMessageStatus: (conversationId: string, messageId: string, userId: string, status: string) => void;
   clearMessagesForConversation: (conversationId: string) => void;
   retrySendMessage: (message: Message) => void;
+  addSystemMessage: (conversationId: string, content: string) => void;
 };
 
 // --- Zustand Store ---
@@ -67,6 +68,23 @@ export const useMessageStore = createWithEqualityFn<State>((set, get) => ({
   isFetchingMore: {},
   hasMore: {},
   hasLoadedHistory: {},
+
+  addSystemMessage: (conversationId, content) => {
+    const systemMessage: Message = {
+      id: `system_${Date.now()}`,
+      type: 'SYSTEM',
+      conversationId,
+      content,
+      createdAt: new Date().toISOString(),
+      senderId: 'system', // Assign a special senderId
+    };
+    set(state => ({
+      messages: {
+        ...state.messages,
+        [conversationId]: [...(state.messages[conversationId] || []), systemMessage],
+      },
+    }));
+  },
 
   loadMessagesForConversation: async (id) => {
     if (get().hasLoadedHistory[id]) return;

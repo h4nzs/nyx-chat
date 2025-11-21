@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { FiGithub, FiLock, FiKey, FiSmartphone, FiSun, FiMoon, FiChevronsLeft, FiChevronsRight, FiUserPlus, FiMessageSquare, FiShield } from 'react-icons/fi';
 import { motion, useMotionValue, useTransform, useInView } from 'framer-motion';
 import { useState, useRef, useEffect, ReactNode } from 'react';
+import { useThemeStore } from '@store/theme'; // Import useThemeStore
 
 // Animation Variants
 const containerVariants = {
@@ -146,17 +147,20 @@ const TestimonialCard = ({ children, author, role }: { children: ReactNode; auth
 );
 
 export default function LandingPage() {
+  const { theme } = useThemeStore(); // Get current theme
+  const backgroundImage = theme === 'dark' ? '/landing-bg-dark.jpg' : '/landing-bg-light.jpg';
+
   return (
-    <div className="bg-bg-main min-h-screen font-sans text-text-primary overflow-y-auto relative">
-      {/* Decorative Gradient */}
-      <div 
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-[150%] h-[800px] bg-radial-gradient from-accent/10 to-transparent pointer-events-none"
-        style={{
-          background: 'radial-gradient(circle, hsl(var(--accent) / 0.05) 0%, transparent 60%)'
-        }}
-      />
-      
-      <div className="relative z-10">
+    <div 
+      className="bg-bg-main min-h-screen font-sans text-text-primary overflow-y-auto relative"
+      style={{
+        backgroundImage: `url(${backgroundImage})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundAttachment: 'fixed',
+      }}
+    >
+      <div className="relative z-10 bg-bg-main/80"> {/* Removed backdrop-blur-sm */}
         {/* Header */}
         <motion.header 
           initial="hidden" 
@@ -315,7 +319,7 @@ export default function LandingPage() {
                   Finally, a chat app that respects my privacy without sacrificing a beautiful user experience. The fact that I control my own keys is a game-changer.
                 </TestimonialCard>
                 <TestimonialCard author="Sarah T." role="Remote Team Lead">
-                  Chat Lite has become essential for our team. It's simple, secure, and the interface is just a pleasure to use every day.
+                  Chat Lite has become essential for our team. It's simple, secure, and a pleasure to use every day.
                 </TestimonialCard>
               </motion.div>
             </div>

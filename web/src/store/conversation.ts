@@ -9,6 +9,7 @@ import { useVerificationStore } from './verification';
 export type Message = {
   id: string;
   tempId?: number;
+  type?: 'USER' | 'SYSTEM'; // Add new type field
   conversationId: string;
   senderId: string;
   sender?: { id: string; name: string; username: string; avatarUrl?: string | null };
