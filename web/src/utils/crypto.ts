@@ -1,7 +1,6 @@
 import { getSodium } from '@lib/sodiumInitializer';
-import { api } from '@lib/api';
-import { retrievePrivateKey, decryptSessionKeyForUser } from '@utils/keyManagement';
-import { useModalStore } from '@store/modal';
+import { api, authFetch } from '@lib/api';
+import { useAuthStore } from '@store/auth';
 import {
   addSessionKey,
   getSessionKey as getKeyFromDb,
@@ -9,92 +8,58 @@ import {
 } from '@lib/keychainDb';
 import { emitSessionKeyFulfillment, emitSessionKeyRequest } from '@lib/socket';
 
-// --- User Private Key Cache (in-memory for one session) ---
-let userPublicKey: Uint8Array | null = null;
-let userPrivateKey: Uint8Array | null = null;
+const B64_VARIANT = 'URLSAFE_NO_PADDING';
 
-// --- Ratchet Tracker (in-memory for one session) ---
-// This ensures we only ratchet once per conversation per app session.
-const ratchetedConversations = new Set<string>();
+// --- Types ---
+export type DecryptResult =
+  | { status: 'success'; value: string }
+  | { status: 'pending'; reason: string }
+  | { status: 'error'; error: Error };
+
+// --- User Key Management ---
 
 export function clearKeyCache(): void {
-  userPublicKey = null;
-  userPrivateKey = null;
-  ratchetedConversations.clear();
-  // clearKeychainDb(); // Clear the IndexedDB keychain on logout - REMOVED
+  // The primary key cache (privateKeysCache) is managed inside auth.ts
 }
 
-// --- Password & Private Key Management ---
-async function getPassword(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    useModalStore.getState().showPasswordPrompt(
-      (password) => {
-        if (password) {
-          resolve(password);
-        } else {
-          reject(new Error("Password not provided."));
-        }
-      }
-    );
-  });
+export async function getMyEncryptionKeyPair(): Promise<{ publicKey: Uint8Array; privateKey: Uint8Array }> {
+  return useAuthStore.getState().getEncryptionKeyPair();
 }
 
-export async function getMyKeyPair(): Promise<{ publicKey: Uint8Array; privateKey: Uint8Array }> {
-  if (userPrivateKey && userPublicKey) {
-    return { publicKey: userPublicKey, privateKey: userPrivateKey };
-  }
-
-  const password = await getPassword();
-  const encryptedKey = localStorage.getItem('encryptedPrivateKey');
-  const publicKeyB64 = localStorage.getItem('publicKey');
-
-  if (!encryptedKey || !publicKeyB64) {
-    throw new Error("Encryption keys not found in storage.");
-  }
-
-  const privateKey = await retrievePrivateKey(encryptedKey, password);
-  if (!privateKey) {
-    throw new Error("Incorrect password. Failed to decrypt private key.");
-  }
-
+export async function decryptSessionKeyForUser(
+  encryptedSessionKeyStr: string,
+  publicKey: Uint8Array,
+  privateKey: Uint8Array
+): Promise<Uint8Array> {
   const sodium = await getSodium();
-  const publicKey = sodium.from_base64(publicKeyB64, sodium.base64_variants.ORIGINAL);
+  if (!privateKey || privateKey.length !== sodium.crypto_box_SECRETKEYBYTES) {
+    throw new TypeError("Invalid privateKey length for session key decryption.");
+  }
+  if (!publicKey || publicKey.length !== sodium.crypto_box_PUBLICKEYBYTES) {
+    throw new TypeError("Invalid publicKey length for session key decryption.");
+  }
 
-  userPrivateKey = privateKey;
-  userPublicKey = publicKey;
-  
-  return { publicKey, privateKey };
+  const encryptedSessionKey = sodium.from_base64(encryptedSessionKeyStr, sodium.base64_variants[B64_VARIANT]);
+  const sessionKey = sodium.crypto_box_seal_open(encryptedSessionKey, publicKey, privateKey);
+
+  if (!sessionKey) {
+    throw new Error("Failed to decrypt session key, likely due to incorrect key pair or corrupted data.");
+  }
+
+  return sessionKey;
 }
 
 // --- Session Ratcheting and Key Retrieval ---
 
-/**
- * Ensures a session is established and up-to-date for a conversation.
- * If it's a new app session for this convo, it ratchets a new key.
- */
 export async function ensureAndRatchetSession(conversationId: string): Promise<void> {
-  if (ratchetedConversations.has(conversationId)) {
-    return; // Already ratcheted in this app session
-  }
-
   try {
-    console.log(`Ratcheting session for conversation ${conversationId}...`);
-    const { sessionId, encryptedKey } = await api<{ sessionId: string; encryptedKey: string }>(
-      `/api/session-keys/${conversationId}/ratchet`,
-      { method: 'POST' }
+    const { sessionId, encryptedKey } = await authFetch<{ sessionId: string; encryptedKey: string }>(
+      `/api/session-keys/${conversationId}/ratchet`, { method: 'POST' }
     );
-
-    if (!sessionId || !encryptedKey) {
-      throw new Error('Invalid response from ratchet endpoint.');
-    }
-
-    const { publicKey, privateKey } = await getMyKeyPair();
-    const sodium = await getSodium();
-    const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey, sodium);
+    const { publicKey, privateKey } = await getMyEncryptionKeyPair();
+    const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
 
     await addSessionKey(conversationId, sessionId, newSessionKey);
-    ratchetedConversations.add(conversationId);
-    console.log(`Successfully ratcheted and stored new session key ${sessionId} for ${conversationId}`);
   } catch (error) {
     console.error(`Failed to ratchet session for ${conversationId}:`, error);
     throw new Error('Could not establish a secure session.');
@@ -107,15 +72,8 @@ export async function encryptMessage(
   text: string,
   conversationId: string
 ): Promise<{ ciphertext: string; sessionId: string }> {
-  if (!text) {
-    throw new Error('Cannot encrypt empty text.');
-  }
-
   const latestKey = await getLatestSessionKey(conversationId);
-  if (!latestKey) {
-    // This should ideally not happen if ensureAndRatchetSession is called first.
-    throw new Error('No session key available for encryption. Please re-open the conversation.');
-  }
+  if (!latestKey) throw new Error('No session key available for encryption.');
 
   const { sessionId, key } = latestKey;
   const sodium = await getSodium();
@@ -126,54 +84,149 @@ export async function encryptMessage(
   combined.set(nonce);
   combined.set(encrypted, nonce.length);
 
-  const ciphertext = sodium.to_base64(combined, sodium.base64_variants.ORIGINAL);
-  return { ciphertext, sessionId };
+  return { ciphertext: sodium.to_base64(combined, sodium.base64_variants[B64_VARIANT]), sessionId };
 }
 
+/**
+ * The core decryption function. It tries to find a key locally. If not found,
+ * it attempts to derive it from a stored initial session, and if that fails,
+ * it falls back to requesting the key from online peers.
+ */
 export async function decryptMessage(
   cipher: string,
   conversationId: string,
   sessionId: string | null | undefined
-): Promise<string> {
-  if (!cipher || typeof cipher !== 'string' || cipher.trim() === '') {
-    return '';
+): Promise<DecryptResult> {
+  if (!cipher) return { status: 'success', value: '' };
+  if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt message: Missing session ID.') };
+
+  // 1. Try to get the key from our local keychain DB
+  let sessionKey = await getKeyFromDb(conversationId, sessionId);
+
+  // 2. If the key is not found, try to derive it from an initial session OR decrypt a ratchet key
+  if (!sessionKey) {
+    try {
+      console.log(`Key for session ${sessionId} not found locally. Attempting to fetch initial/ratchet session...`);
+      const sessionData = await authFetch<any>(`/api/keys/initial-session/${conversationId}/${sessionId}`);
+      const { getSignedPreKeyPair, getEncryptionKeyPair } = useAuthStore.getState();
+      const myIdentityKeyPair = await getEncryptionKeyPair();
+
+      // Check if this is a client-initiated session (X3DH) or a server-ratcheted session
+      if (sessionData.initiatorEphemeralKey === "server-ratchet") {
+        // This is a server-ratcheted key, we just need to decrypt it.
+        console.log("Detected server-ratchet session. Decrypting key...");
+        sessionKey = await decryptSessionKeyForUser(
+          sessionData.encryptedKey,
+          myIdentityKeyPair.publicKey,
+          myIdentityKeyPair.privateKey
+        );
+      } else {
+        // This is a client-initiated session, we need to derive the key.
+        console.log("Detected client-initiated session. Deriving key...");
+        const mySignedPreKeyPair = await getSignedPreKeyPair();
+        sessionKey = await deriveSessionKeyAsRecipient(
+          myIdentityKeyPair,
+          mySignedPreKeyPair,
+          sessionData.initiatorIdentityKey,
+          sessionData.initiatorEphemeralKey
+        );
+      }
+
+      await addSessionKey(conversationId, sessionId, sessionKey);
+      console.log(`Successfully processed and stored key for session ${sessionId}.`);
+
+    } catch (e) {
+      // This will fail if the API call fails or if derivation/decryption fails.
+      // In that case, we fall back to the original peer request method.
+      console.warn("Failed to process session from server, falling back to peer request.", e);
+      emitSessionKeyRequest(conversationId, sessionId);
+      return { status: 'pending', reason: '[Requesting key to decrypt...]' };
+    }
   }
   
-  if (!sessionId) {
-    return '[Message from an old session, cannot be decrypted]';
-  }
-
-  const sodium = await getSodium();
-  const key = await getKeyFromDb(conversationId, sessionId);
-
-  if (!key) {
-    // Key not found. This happens when receiving messages from a session started while offline.
-    // We will request the key from another online user in the conversation.
-    console.warn(`Key for session ${sessionId} not found locally. Emitting request...`);
-    emitSessionKeyRequest(conversationId, sessionId);
-    
-    // Return a temporary message. The UI will need to re-render when the key arrives.
-    return '[Requesting key to decrypt...]';
-  }
-
+  // 3. If we have the key (either from DB or after processing), decrypt the message
   try {
-    const combined = sodium.from_base64(cipher, sodium.base64_variants.ORIGINAL);
-    if (combined.length <= sodium.crypto_secretbox_NONCEBYTES) {
-      return '[Invalid Encrypted Data]';
-    }
-
+    const sodium = await getSodium();
+    const combined = sodium.from_base64(cipher, sodium.base64_variants[B64_VARIANT]);
     const nonce = combined.slice(0, sodium.crypto_secretbox_NONCEBYTES);
     const encrypted = combined.slice(sodium.crypto_secretbox_NONCEBYTES);
-
-    const decrypted = sodium.to_string(sodium.crypto_secretbox_open_easy(encrypted, nonce, key));
-    return decrypted;
-  } catch (error) {
-    console.error(`Decryption failed for convo ${conversationId}, session ${sessionId}:`, error);
-    return '[Failed to decrypt message]';
+    const decrypted = sodium.to_string(sodium.crypto_secretbox_open_easy(encrypted, nonce, sessionKey));
+    return { status: 'success', value: decrypted };
+  } catch (e: any) {
+    console.error(`Decryption failed for convo ${conversationId}, session ${sessionId}:`, e);
+    return { status: 'error', error: new Error('Failed to decrypt message') };
   }
 }
 
-// --- Key Recovery (Fulfiller Side) ---
+// --- Pre-Key Handshake (Simplified X3DH) ---
+
+export type PreKeyBundle = {
+  identityKey: string;
+  signingKey: string;
+  signedPreKey: {
+    key: string;
+    signature: string;
+  };
+};
+
+/**
+ * INITIATOR (Alice) side of the handshake.
+ */
+export async function establishSessionFromPreKeyBundle(
+  myIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
+  preKeyBundle: PreKeyBundle
+): Promise<{ sessionKey: Uint8Array, ephemeralPublicKey: string }> {
+  const sodium = await getSodium();
+  const ephemeralKeyPair = sodium.crypto_box_keypair();
+
+  const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants[B64_VARIANT]);
+  const theirSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.key, sodium.base64_variants[B64_VARIANT]);
+  const theirSigningKey = sodium.from_base64(preKeyBundle.signingKey, sodium.base64_variants[B64_VARIANT]);
+
+  const signature = sodium.from_base64(preKeyBundle.signedPreKey.signature, sodium.base64_variants[B64_VARIANT]);
+  if (!sodium.crypto_sign_verify_detached(signature, theirSignedPreKey, theirSigningKey)) {
+    throw new Error("Invalid signature on signed pre-key.");
+  }
+
+  const dh1 = sodium.crypto_scalarmult(myIdentityKeyPair.privateKey, theirSignedPreKey);
+  const dh2 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirIdentityKey);
+  const dh3 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirSignedPreKey);
+
+  const sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
+  const sessionKey = sodium.crypto_generichash(32, sharedSecret);
+
+  return {
+    sessionKey,
+    ephemeralPublicKey: sodium.to_base64(ephemeralKeyPair.publicKey, sodium.base64_variants[B64_VARIANT]),
+  };
+}
+
+/**
+ * RECIPIENT (Bob) side of the handshake.
+ */
+export async function deriveSessionKeyAsRecipient(
+  myIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
+  mySignedPreKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
+  initiatorIdentityKeyStr: string,
+  initiatorEphemeralKeyStr: string
+): Promise<Uint8Array> {
+  const sodium = await getSodium();
+
+  const theirIdentityKey = sodium.from_base64(initiatorIdentityKeyStr, sodium.base64_variants[B64_VARIANT]);
+  const theirEphemeralKey = sodium.from_base64(initiatorEphemeralKeyStr, sodium.base64_variants[B64_VARIANT]);
+  
+  const dh1 = sodium.crypto_scalarmult(mySignedPreKeyPair.privateKey, theirIdentityKey);
+  const dh2 = sodium.crypto_scalarmult(myIdentityKeyPair.privateKey, theirEphemeralKey);
+  const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPair.privateKey, theirEphemeralKey);
+
+  const sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
+  const sessionKey = sodium.crypto_generichash(32, sharedSecret);
+  
+  return sessionKey;
+}
+
+
+// --- Key Recovery ---
 
 interface FulfillRequestPayload {
   conversationId: string;
@@ -182,140 +235,72 @@ interface FulfillRequestPayload {
   requesterPublicKey: string;
 }
 
-/**
- * Handles a request from another user to re-encrypt a session key.
- * This is triggered by a socket event.
- */
 export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise<void> {
   const { conversationId, sessionId, requesterId, requesterPublicKey: requesterPublicKeyB64 } = payload;
-
-  console.log(`Fulfilling key request for session ${sessionId} from user ${requesterId}`);
-
-  // 1. Get the session key from our local DB
   const key = await getKeyFromDb(conversationId, sessionId);
-  if (!key) {
-    console.error(`Cannot fulfill request: Key for session ${sessionId} not found in our keychain.`);
-    return;
-  }
+  if (!key) return;
 
-  // 2. Re-encrypt it for the requester
   const sodium = await getSodium();
-  const requesterPublicKey = sodium.from_base64(requesterPublicKeyB64, sodium.base64_variants.ORIGINAL);
-  
-  // crypto_box_seal_open requires our full keypair, but we are SEALING for them.
-  // We just need their public key.
+  const requesterPublicKey = sodium.from_base64(requesterPublicKeyB64, sodium.base64_variants[B64_VARIANT]);
   const encryptedKeyForRequester = sodium.crypto_box_seal(key, requesterPublicKey);
-  const encryptedKeyB64 = sodium.to_base64(encryptedKeyForRequester, sodium.base64_variants.ORIGINAL);
 
-  // 3. Emit the fulfillment event back
   emitSessionKeyFulfillment({
     requesterId,
     conversationId,
     sessionId,
-    encryptedKey: encryptedKeyB64,
+    encryptedKey: sodium.to_base64(encryptedKeyForRequester, sodium.base64_variants[B64_VARIANT]),
   });
-
-  console.log(`Successfully fulfilled and sent re-encrypted key for session ${sessionId} to ${requesterId}`);
 }
-
-// --- Key Recovery (Receiver Side) ---
 
 interface ReceiveKeyPayload {
   conversationId: string;
   sessionId: string;
-  encryptedKey: string; // base64
+  encryptedKey: string;
 }
 
-/**
- * Handles receiving a new session key from a peer, decrypts it with our
- * private key, and stores it.
- */
 export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promise<void> {
   const { conversationId, sessionId, encryptedKey } = payload;
-  console.log(`Received a new key for session ${sessionId}. Storing...`);
-
-  const { publicKey, privateKey } = await getMyKeyPair();
-  const sodium = await getSodium();
-
-  const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey, sodium);
+  const { publicKey, privateKey } = await getMyEncryptionKeyPair();
+  const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
 
   await addSessionKey(conversationId, sessionId, newSessionKey);
-  console.log(`Successfully stored new key for session ${sessionId}`);
 }
 
 // --- File Encryption/Decryption ---
 
 const ALGO = 'AES-GCM';
 const KEY_LENGTH = 256;
-const IV_LENGTH = 12; // 96 bits, optimal for AES-GCM
+const IV_LENGTH = 12;
 
-/**
- * Encrypts a file blob using a newly generated symmetric key.
- * @param blob The file blob to encrypt.
- * @returns A promise that resolves to an object containing the encrypted blob and the encryption key (as base64).
- */
 export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; key: string }> {
-  const key = await crypto.subtle.generateKey(
-    { name: ALGO, length: KEY_LENGTH },
-    true, // exportable
-    ['encrypt', 'decrypt']
-  );
-
+  const key = await crypto.subtle.generateKey({ name: ALGO, length: KEY_LENGTH }, true, ['encrypt', 'decrypt']);
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
   const fileData = await blob.arrayBuffer();
-  const encryptedData = await crypto.subtle.encrypt(
-    { name: ALGO, iv },
-    key,
-    fileData
-  );
+  const encryptedData = await crypto.subtle.encrypt({ name: ALGO, iv }, key, fileData);
 
-  // Prepend IV to the encrypted data
   const combined = new Uint8Array(iv.length + encryptedData.byteLength);
   combined.set(iv);
   combined.set(new Uint8Array(encryptedData), iv.length);
-
   const encryptedBlob = new Blob([combined], { type: 'application/octet-stream' });
-  
-  // Export the key to be sent to the recipient
+
   const exportedKey = await crypto.subtle.exportKey('raw', key);
   const sodium = await getSodium();
-  const keyB64 = sodium.to_base64(new Uint8Array(exportedKey), sodium.base64_variants.ORIGINAL);
+  const keyB64 = sodium.to_base64(new Uint8Array(exportedKey), sodium.base64_variants[B64_VARIANT]);
 
   return { encryptedBlob, key: keyB64 };
 }
 
-/**
- * Decrypts a file blob using a symmetric key.
- * @param encryptedBlob The blob containing the IV and encrypted data.
- * @param keyB64 The base64 encoded symmetric key.
- * @param originalType The original MIME type of the file.
- * @returns A promise that resolves to the decrypted file blob.
- */
 export async function decryptFile(encryptedBlob: Blob, keyB64: string, originalType: string): Promise<Blob> {
   const sodium = await getSodium();
-  const keyBytes = sodium.from_base64(keyB64, sodium.base64_variants.ORIGINAL);
-
-  const key = await crypto.subtle.importKey(
-    'raw',
-    keyBytes,
-    { name: ALGO },
-    false,
-    ['decrypt']
-  );
+  const keyBytes = sodium.from_base64(keyB64, sodium.base64_variants[B64_VARIANT]);
+  const key = await crypto.subtle.importKey('raw', keyBytes, { name: ALGO }, false, ['decrypt']);
 
   const combinedData = await encryptedBlob.arrayBuffer();
-  if (combinedData.byteLength < IV_LENGTH) {
-    throw new Error("Encrypted file is too short to contain an IV.");
-  }
+  if (combinedData.byteLength < IV_LENGTH) throw new Error("Encrypted file is too short.");
 
   const iv = combinedData.slice(0, IV_LENGTH);
   const encryptedData = combinedData.slice(IV_LENGTH);
-
-  const decryptedData = await crypto.subtle.decrypt(
-    { name: ALGO, iv },
-    key,
-    encryptedData
-  );
+  const decryptedData = await crypto.subtle.decrypt({ name: ALGO, iv }, key, encryptedData);
 
   return new Blob([decryptedData], { type: originalType });
 }

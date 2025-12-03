@@ -1,6 +1,7 @@
 import * as Popover from '@radix-ui/react-popover';
 import { useAuthStore } from '@store/auth';
-import { Message } from '@store/chat';
+import { useMessageStore } from '@store/message';
+import type { Message } from '@store/conversation';
 import { api } from '@lib/api';
 
 interface ReactionPopoverProps {
@@ -11,25 +12,60 @@ interface ReactionPopoverProps {
 const COMMON_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
 
 export default function ReactionPopover({ message, children }: ReactionPopoverProps) {
-  const meId = useAuthStore((s) => s.user?.id);
+  const me = useAuthStore((s) => s.user);
+  const { addReaction, removeReaction } = useMessageStore(s => ({ addReaction: s.addReaction, removeReaction: s.removeReaction }));
 
   const handleSelectReaction = async (emoji: string) => {
-    const userReaction = message.reactions?.find(r => r.userId === meId);
+    if (!me) return;
+    
+    const userReaction = message.reactions?.find(r => r.userId === me.id);
 
-    // Jika user sudah bereaksi, hapus reaksi lama dulu (jika emojinya beda)
-    if (userReaction && userReaction.emoji !== emoji) {
-      await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' }).catch(console.error);
+    // If user clicks the same emoji, they are toggling it off.
+    if (userReaction?.emoji === emoji) {
+      removeReaction(message.conversationId, message.id, userReaction.id);
+      await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' }).catch(() => {
+        // Revert on failure
+        addReaction(message.conversationId, message.id, userReaction);
+      });
+      return;
     }
 
-    // Jika user mengklik emoji yang sama dengan reaksinya, hapus reaksi itu
-    if (userReaction?.emoji === emoji) {
-      await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' }).catch(console.error);
-    } else {
-      // Tambah reaksi baru
+    // If user clicks a new emoji, handle adding/replacing
+    const tempId = `temp-reaction-${Date.now()}`;
+    const optimisticReaction = {
+      id: tempId,
+      emoji,
+      userId: me.id,
+      user: { id: me.id, name: me.name, username: me.username },
+      tempId: tempId,
+    };
+
+    // Optimistically remove the old reaction if it exists
+    if (userReaction) {
+      removeReaction(message.conversationId, message.id, userReaction.id);
+    }
+    // Optimistically add the new one
+    addReaction(message.conversationId, message.id, optimisticReaction);
+
+    try {
+      // Add the new reaction on the server first
       await api(`/api/messages/${message.id}/reactions`, {
         method: 'POST',
-        body: JSON.stringify({ emoji }),
-      }).catch(console.error);
+        body: JSON.stringify({ emoji, tempId }),
+      });
+      // If user had a previous reaction, now delete it on the server
+      if (userReaction) {
+        await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
+      }
+    } catch (error) {
+      // Revert all optimistic changes on failure
+      console.error("Failed to update reaction:", error);
+      // Remove the optimistic reaction
+      removeReaction(message.conversationId, message.id, tempId);
+      // Re-add the original reaction if there was one
+      if (userReaction) {
+        addReaction(message.conversationId, message.id, userReaction);
+      }
     }
   };
 
@@ -41,7 +77,7 @@ export default function ReactionPopover({ message, children }: ReactionPopoverPr
           side="top" 
           align="center" 
           sideOffset={10}
-          className="flex gap-2 bg-gray-800 border border-gray-700 rounded-full px-3 py-2 shadow-lg z-[99]"
+          className="flex gap-2 bg-bg-surface/80 backdrop-blur-sm rounded-full px-3 py-2 shadow-lg z-[99] border border-border"
         >
           {COMMON_EMOJIS.map(emoji => (
             <button 
@@ -52,7 +88,7 @@ export default function ReactionPopover({ message, children }: ReactionPopoverPr
               {emoji}
             </button>
           ))}
-          <Popover.Arrow className="fill-current text-gray-700" />
+          <Popover.Arrow className="fill-current text-border" />
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

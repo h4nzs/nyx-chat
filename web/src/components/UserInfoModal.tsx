@@ -5,7 +5,8 @@ import { toAbsoluteUrl } from '@utils/url';
 import { authFetch, handleApiError } from '@lib/api';
 import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
-import { generateSafetyNumber, importPublicKey } from '@utils/keyManagement';
+import { generateSafetyNumber } from '@utils/keyManagement';
+import { getSodium } from '@lib/sodiumInitializer';
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
 import { useVerificationStore } from '@store/verification';
@@ -13,12 +14,11 @@ import ModalBase from './ui/ModalBase';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 
-// The user type for the profile modal can have an optional email and public key
 type ProfileUser = User & { email?: string; publicKey?: string };
 
 export default function UserInfoModal() {
   const { isProfileModalOpen, profileUserId, closeProfileModal } = useModalStore();
-  const { activeId } = useConversationStore(); // Get active conversation ID
+  const { activeId } = useConversationStore();
   const { verifiedStatus, setVerified } = useVerificationStore();
   const navigate = useNavigate();
   const [user, setUser] = useState<ProfileUser | null>(null);
@@ -37,7 +37,7 @@ export default function UserInfoModal() {
 
   useEffect(() => {
     if (!profileUserId) {
-      setUser(null); // Clear user data when modal is closed
+      setUser(null);
       return;
     }
 
@@ -76,8 +76,9 @@ export default function UserInfoModal() {
         throw new Error("Your public key is not found. Please set up your keys first.");
       }
 
-      const myPublicKey = await importPublicKey(myPublicKeyB64);
-      const theirPublicKey = await importPublicKey(user.publicKey);
+      const sodium = await getSodium();
+      const myPublicKey = sodium.from_base64(myPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const theirPublicKey = sodium.from_base64(user.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       const sn = await generateSafetyNumber(myPublicKey, theirPublicKey);
       setSafetyNumber(sn);
@@ -121,12 +122,10 @@ export default function UserInfoModal() {
         title={user?.name || 'User Profile'}
       >
         <div className="flex flex-col gap-4">
-          {/* Tab Switcher */}
           <div className="px-4 md:px-0">
             <AnimatedTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
           </div>
 
-          {/* Tab Content */}
           {activeTab === 'about' && (
             <>
               {renderContent()}

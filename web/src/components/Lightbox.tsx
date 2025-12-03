@@ -54,12 +54,18 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
         }
 
         let fileKey = message.fileKey;
-        if (!message.optimistic && fileKey.length > 50) {
-          fileKey = await decryptMessage(message.fileKey, message.conversationId, message.sessionId);
+        if (!message.optimistic && fileKey && typeof fileKey === 'string' && fileKey.length > 50) {
+          const result = await decryptMessage(message.fileKey, message.conversationId, message.sessionId);
+          if (result.status === 'success') {
+            fileKey = result.value;
+          } else {
+            // If pending or error, throw to be caught by the outer catch block
+            throw new Error(result.status === 'pending' ? result.reason : result.error.message);
+          }
         }
 
-        if (!fileKey || fileKey.startsWith('[')) {
-          throw new Error(fileKey || "Could not retrieve file key.");
+        if (!fileKey) {
+          throw new Error("Could not retrieve file key.");
         }
 
         const response = await fetch(toAbsoluteUrl(message.fileUrl));

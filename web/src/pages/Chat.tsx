@@ -34,6 +34,7 @@ export default function Chat() {
     loading: state.loading,
     initialLoadCompleted: state.initialLoadCompleted,
   }));
+
   const user = useAuthStore(state => state.user);
   const { isLandscape } = useOrientation();
   const [isTourOpen, setIsTourOpen] = useState(false);

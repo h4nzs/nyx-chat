@@ -1,9 +1,6 @@
-
 import { authFetch } from "@lib/api";
-import { getMyKeyPair } from "@utils/crypto";
-import { decryptSessionKeyForUser } from "@utils/keyManagement";
+import { getMyEncryptionKeyPair, decryptSessionKeyForUser } from "@utils/crypto";
 import { addSessionKey } from "@lib/keychainDb";
-import { getSodium } from "@lib/sodiumInitializer";
 import toast from "react-hot-toast";
 
 type SyncResponse = Record<string, { sessionId: string; encryptedKey: string }[]>;
@@ -14,20 +11,15 @@ export async function syncSessionKeys() {
       try {
         console.log("Starting session key synchronization...");
 
-        // 1. Fetch all encrypted session keys from the server
         const allEncryptedKeys = await authFetch<SyncResponse>("/api/session-keys/sync");
         if (!allEncryptedKeys || Object.keys(allEncryptedKeys).length === 0) {
           console.log("No session keys to sync.");
-          return; // Nothing to do
+          return;
         }
 
-        // 2. Get user's master key pair (this will prompt for password if not cached)
-        const { publicKey, privateKey } = await getMyKeyPair();
-        const sodium = await getSodium();
-
+        const { publicKey, privateKey } = await getMyEncryptionKeyPair();
         let syncedKeyCount = 0;
 
-        // 3. Decrypt and store each key
         for (const conversationId in allEncryptedKeys) {
           const keysForConvo = allEncryptedKeys[conversationId];
           for (const keyInfo of keysForConvo) {
@@ -35,8 +27,7 @@ export async function syncSessionKeys() {
               const sessionKey = await decryptSessionKeyForUser(
                 keyInfo.encryptedKey,
                 publicKey,
-                privateKey,
-                sodium
+                privateKey
               );
               await addSessionKey(conversationId, keyInfo.sessionId, sessionKey);
               syncedKeyCount++;
@@ -48,10 +39,7 @@ export async function syncSessionKeys() {
 
         console.log(`Synchronization complete. Synced ${syncedKeyCount} session keys.`);
       } catch (error: any) {
-        // Don't re-throw the error to avoid breaking the app load.
-        // The toast will show the failure.
         console.error("Session key synchronization failed:", error);
-        // We check for the specific password error to give a better message
         if (error.message.includes("Incorrect password")) {
           throw new Error("Incorrect password provided for key sync.");
         }

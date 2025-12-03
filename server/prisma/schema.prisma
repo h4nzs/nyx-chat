@@ -9,34 +9,49 @@ datasource db {
 }
 
 model User {
-  id               String           @id @default(cuid())
-  email            String           @unique
-  username         String           @unique
-  passwordHash     String
-  name             String
-  avatarUrl        String?
-  description      String?
-  publicKey        String?
-  recoveryPhraseHash String?
-  showEmailToOthers Boolean          @default(false)
-  hasCompletedOnboarding Boolean    @default(false)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  id                 String    @id @default(cuid())
+  email              String    @unique
+  username           String    @unique
+  passwordHash       String
+  name               String
+  avatarUrl          String?
+  description        String?
+  publicKey          String?   // Encryption/Identity Key
+  signingKey         String?   // Verification Key
+  showEmailToOthers  Boolean   @default(false)
+  hasCompletedOnboarding Boolean @default(false)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  messages         Message[]
-  participants     Participant[]
-  messageStatuses  MessageStatus[]
-  refreshTokens    RefreshToken[]
-  reactions        MessageReaction[]
-  pushSubscriptions PushSubscription[]
-  hiddenConversations UserHiddenConversation[] // Relasi untuk soft delete
-  createdConversations Conversation[] @relation("CreatedConversations")
-  authenticators     Authenticator[]
-  currentChallenge String?
+  messages             Message[]
+  participants         Participant[]
+  messageStatuses      MessageStatus[]
+  refreshTokens        RefreshToken[]
+  reactions            MessageReaction[]
+  pushSubscriptions    PushSubscription[]
+  hiddenConversations  UserHiddenConversation[]
+  createdConversations Conversation[]           @relation("CreatedConversations")
+  authenticators       Authenticator[]
+  currentChallenge     String?
+  
+  // Relation to the simplified pre-key bundle
+  preKeyBundle         PreKeyBundle?
+  sessionKeys          SessionKey[]
 
   @@index([email])
   @@index([username])
   @@index([createdAt])
+}
+
+// Simplified PreKeyBundle model
+model PreKeyBundle {
+  id          Int      @id @default(autoincrement())
+  identityKey String   // User's long-term public identity key
+  key         String   // The public part of the signed pre-key
+  signature   String   // Signature of the 'key'
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId      String   @unique
 }
 
 
@@ -46,20 +61,19 @@ model Conversation {
   title         String?
   description   String?
   avatarUrl     String?
-  creatorId     String?        // ID user yang membuat grup
+  creatorId     String?
   creator       User?          @relation("CreatedConversations", fields: [creatorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   lastMessageAt DateTime?      @db.Timestamptz(6)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   participants  Participant[]
   messages      Message[]
-  hiddenBy      UserHiddenConversation[] // Relasi untuk soft delete
+  hiddenBy      UserHiddenConversation[]
 
   @@index([lastMessageAt])
   @@index([createdAt])
   @@index([isGroup])
 }
-
 
 model Participant {
   id             String       @id @default(cuid())
@@ -69,7 +83,7 @@ model Participant {
   conversationId String
   joinedAt       DateTime     @default(now())
   lastReadMsgId  String?
-  role           String       @default("MEMBER") // "ADMIN" or "MEMBER"
+  role           String       @default("MEMBER")
 
   @@unique([userId, conversationId])
   @@index([conversationId])
@@ -89,18 +103,17 @@ model Message {
   imageUrl            String?
   fileUrl             String?
   fileName            String?
-  fileType            String?   // Tambahkan ini
-  fileSize            Int?      // Tambahkan ini
-  duration            Int?      // Duration of the voice message in seconds
-  fileKey             String?   @db.Text // Dedicated field for the encrypted file key
-  sessionId           String?         // References the session key set for encryption
-  encryptedSessionKey String?         // Encrypted session key for this specific message (for forward secrecy)
+  fileType            String?
+  fileSize            Int?
+  duration            Int?
+  fileKey             String?   @db.Text
+  sessionId           String?
+  encryptedSessionKey String?
   createdAt           DateTime        @default(now())
   statuses            MessageStatus[]
   reactions           MessageReaction[]
-  linkPreview         Json?           // To store link preview data
+  linkPreview         Json?
 
-  // Fields for replies
   repliedToId         String?         @map("replied_to_id")
   repliedTo           Message?        @relation("Replies", fields: [repliedToId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   replies             Message[]       @relation("Replies")
@@ -109,7 +122,7 @@ model Message {
   @@index([senderId])
   @@index([sessionId])
   @@index([createdAt])
-  @@index([repliedToId]) // Index for faster reply lookups
+  @@index([repliedToId])
 }
 
 
@@ -174,13 +187,16 @@ model RefreshToken {
 
 
 model SessionKey {
-  id              String   @id @default(cuid())
-  conversationId  String
-  sessionId       String
-  userId          String
-  encryptedKey    String   // Session key encrypted with user's public key
-  createdAt       DateTime @default(now())
-  expiresAt       DateTime?
+  id                    String   @id @default(cuid())
+  conversationId        String
+  sessionId             String
+  userId                String
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isInitiator           Boolean  @default(false)
+  encryptedKey          String
+  initiatorEphemeralKey String?  // For the recipient to derive the initial shared secret
+  createdAt             DateTime @default(now())
+  expiresAt             DateTime?
 
   @@index([conversationId])
   @@index([userId])

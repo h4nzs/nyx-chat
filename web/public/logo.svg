@@ -1,0 +1,17 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Layer (optional, adjust if needed) -->
+  <rect width="200" height="200" fill="black" />
+
+  <!-- Purple Bubble Shape with Tail -->
+  <path d="M 100, 20
+           A 80,80 0 1,1 100,180
+           A 80,80 0 0,1 100,20
+           L 180, 20 Z" 
+        fill="#9932CC" />
+
+  <!-- CHAT text (White, top part of bubble) -->
+  <text x="100" y="90" font-family="Arial, sans-serif" font-size="40" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="auto">CHAT</text>
+  
+  <!-- LITE text (Black, bottom part of bubble) -->
+  <text x="100" y="140" font-family="monospace" font-size="28" fill="black" text-anchor="middle" dominant-baseline="auto" letter-spacing="3">LITE</text>
+</svg>

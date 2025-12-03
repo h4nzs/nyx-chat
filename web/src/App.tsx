@@ -10,6 +10,8 @@ import LinkDevicePage from './pages/LinkDevicePage';
 import DeviceScannerPage from './pages/DeviceScannerPage';
 import ProfilePage from './pages/ProfilePage';
 import LandingPage from './pages/LandingPage';
+import HelpPage from './pages/HelpPage'; // Import HelpPage
+
 import ProtectedRoute from './components/ProtectedRoute';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from './store/auth';
@@ -188,6 +190,7 @@ const AppContent = () => {
         <Route path="/register" element={<Register />} />
         <Route path="/restore" element={<Restore />} />
         <Route path="/link-device" element={<LinkDevicePage />} />
+        <Route path="/help" element={<HelpPage />} /> {/* New Help Page Route */}
 
         {/* Protected routes */}
         <Route element={<ProtectedRoute />}>

@@ -1,15 +1,19 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api";
 import { decryptMessageObject } from "./message";
-import { getSocket } from "@lib/socket";
+import { getSocket, emitSessionKeyRequest } from "@lib/socket";
 import { useVerificationStore } from './verification';
+import { useAuthStore, User } from './auth';
+import { getSodium } from '@lib/sodiumInitializer';
+import { establishSessionFromPreKeyBundle } from '@utils/crypto';
+import { addSessionKey } from '@lib/keychainDb';
 
 // --- Type Definitions ---
 
 export type Message = {
   id: string;
   tempId?: number;
-  type?: 'USER' | 'SYSTEM'; // Add new type field
+  type?: 'USER' | 'SYSTEM';
   conversationId: string;
   senderId: string;
   sender?: { id: string; name: string; username: string; avatarUrl?: string | null };
@@ -20,7 +24,7 @@ export type Message = {
   fileType?: string;
   fileSize?: number;
   sessionId?: string | null;
-  ciphertext?: string | null; // To store the original encrypted content
+  ciphertext?: string | null;
   createdAt: string;
   error?: boolean;
   preview?: string;
@@ -28,7 +32,7 @@ export type Message = {
   optimistic?: boolean;
   repliedTo?: Message;
   repliedToId?: string;
-  linkPreview?: any; // For link preview data
+  linkPreview?: any;
 };
 
 export type Participant = {
@@ -73,17 +77,16 @@ const withPreview = (msg: Message): Message => {
 
 // --- State Type ---
 
-// --- State Type ---
-
 type State = {
   conversations: Conversation[];
   activeId: string | null;
   isSidebarOpen: boolean;
   error: string | null;
   loading: boolean;
-  initialLoadCompleted: boolean; // Flag to prevent re-loading
+  initialLoadCompleted: boolean;
+};
 
-  // Actions
+type Actions = {
   loadConversations: () => Promise<void>;
   openConversation: (id: string | null) => void;
   deleteConversation: (id: string) => Promise<void>;
@@ -100,39 +103,47 @@ type State = {
   updateConversationLastMessage: (conversationId: string, message: Message) => void;
   resyncState: () => Promise<void>;
   clearError: () => void;
-};
+  reset: () => void;
+}
 
 // --- Zustand Store ---
 
-export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
+const initialState: State = {
   conversations: [],
   activeId: null,
   isSidebarOpen: false,
   error: null,
   loading: false,
-  initialLoadCompleted: false, // Default to false
+  initialLoadCompleted: false,
+};
+
+export const useConversationStore = createWithEqualityFn<State & Actions>((set, get) => ({
+  ...initialState,
 
   clearError: () => set({ error: null }),
 
+  reset: () => {
+    set(initialState);
+  },
+
   resyncState: async () => {
-    // Only perform a full resync if the initial load has not completed yet.
-    // This prevents a loop on socket reconnects, especially for users with no conversations.
     if (!get().initialLoadCompleted) {
       await get().loadConversations();
     }
   },
 
   loadConversations: async () => {
-    // Prevent multiple simultaneous loads
-    if (get().loading) return;
+    let shouldProceed = false;
+    set(state => {
+      if (state.loading) return state;
+      shouldProceed = true;
+      return { ...state, loading: true, error: null };
+    });
+    if (!shouldProceed) return;
 
     try {
-      set({ loading: true, error: null });
       const rawConversations = await api<any[]>("/api/conversations");
-
-      if (!Array.isArray(rawConversations)) {
-        throw new Error('Invalid data from server.');
-      }
+      if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 
       const conversations = await Promise.all(rawConversations.map(async c => {
         let lastMessage = c.messages?.[0] || null;
@@ -140,12 +151,13 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
           try {
             lastMessage = await decryptMessageObject(lastMessage);
           } catch (e) {
-            console.error(`Failed to decrypt last message for convo ${c.id}`, e);
-            lastMessage.content = '[Failed to decrypt]';
+            if (lastMessage.sessionId) {
+              emitSessionKeyRequest(lastMessage.conversationId, lastMessage.sessionId);
+            }
+            lastMessage.content = '[Requesting key to decrypt...]';
           }
           lastMessage = withPreview(lastMessage);
         }
-
         return {
           ...c,
           lastMessage,
@@ -154,20 +166,15 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
       }));
 
       set({ conversations: sortConversations(conversations) });
-
-      // Initialize verification statuses from localStorage
       useVerificationStore.getState().loadInitialStatus(conversations);
 
-      // After loading conversations, join their respective socket rooms
       const socket = getSocket();
-      conversations.forEach(c => {
-        socket.emit("conversation:join", c.id);
-      });
+      conversations.forEach(c => socket.emit("conversation:join", c.id));
     } catch (error) {
       console.error("Failed to load conversations", error);
       set({ error: "Failed to load conversations." });
     } finally {
-      set({ loading: false, initialLoadCompleted: true }); // Mark as completed regardless of outcome
+      set({ loading: false, initialLoadCompleted: true });
     }
   },
 
@@ -176,8 +183,6 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
       set({ activeId: null });
       return;
     }
-
-    // Optimistically update UI
     set(state => ({
       activeId: id,
       isSidebarOpen: false,
@@ -185,8 +190,6 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
         c.id === id ? { ...c, unreadCount: 0 } : c
       ),
     }));
-
-    // Inform the backend that the conversation has been read
     authFetch(`/api/conversations/${id}/read`, { method: 'POST' }).catch(console.error);
   },
 
@@ -200,40 +203,77 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
   },
   toggleSidebar: () => set(s => ({ isSidebarOpen: !s.isSidebarOpen })),
 
-  startConversation: async (peerId) => {
-    const conv = await authFetch<Conversation>("/api/conversations", {
-      method: "POST",
-      body: JSON.stringify({ userIds: [peerId], isGroup: false }),
-    });
-    
-    // Join the socket room for real-time updates
-    getSocket().emit("conversation:join", conv.id);
+  startConversation: async (peerId: string): Promise<string> => {
+    const { user, getEncryptionKeyPair } = useAuthStore.getState();
+    if (!user) {
+      throw new Error("Cannot start a conversation: user is not authenticated.");
+    }
 
-    get().addOrUpdateConversation(conv);
-    set({ activeId: conv.id, isSidebarOpen: false });
-    return conv.id;
+    try {
+      const theirBundle = await authFetch<any>(`/api/keys/prekey-bundle/${peerId}`);
+      if (!theirBundle) throw new Error("User does not have a pre-key bundle available.");
+
+      const myKeyPair = await getEncryptionKeyPair();
+      const { sessionKey, ephemeralPublicKey } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
+
+      const sodium = await getSodium();
+      const myPublicKey = myKeyPair.publicKey;
+      const theirPublicKey = sodium.from_base64(theirBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+      const encryptedKeyForSelf = sodium.crypto_box_seal(sessionKey, myPublicKey);
+      const encryptedKeyForPeer = sodium.crypto_box_seal(sessionKey, theirPublicKey);
+      const sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
+
+      const conv = await authFetch<Conversation>("/api/conversations", {
+        method: "POST",
+        body: JSON.stringify({
+          userIds: [peerId],
+          isGroup: false,
+          initialSession: {
+            sessionId,
+            ephemeralPublicKey,
+            initialKeys: [
+              { userId: user.id, key: sodium.to_base64(encryptedKeyForSelf, sodium.base64_variants.URLSAFE_NO_PADDING) },
+              { userId: peerId, key: sodium.to_base64(encryptedKeyForPeer, sodium.base64_variants.URLSAFE_NO_PADDING) },
+            ],
+          },
+        }),
+      });
+      
+      await addSessionKey(conv.id, sessionId, sessionKey);
+
+      getSocket().emit("conversation:join", conv.id);
+      get().addOrUpdateConversation(conv);
+      set({ activeId: conv.id, isSidebarOpen: false });
+      return conv.id;
+    } catch (error: any) {
+      console.error("Failed to start conversation using pre-keys:", error);
+      throw new Error(`Failed to establish secure conversation. ${error.message || ''} The recipient may not have encryption keys set up.`);
+    }
   },
 
-  // --- Actions to be called by socket store ---
   addOrUpdateConversation: (conversation) => {
     set(state => {
-      const existingConversation = state.conversations.find(c => c.id === conversation.id);
-      let updatedConversation: Conversation;
-
-      if (existingConversation) {
-        // Merge new data into existing conversation
-        updatedConversation = {
-          ...existingConversation,
-          ...conversation,
+      const existing = state.conversations.find(c => c.id === conversation.id);
+      if (existing) {
+        const updated = {
+          ...existing,
+          title: conversation.title,
+          description: conversation.description,
+          avatarUrl: conversation.avatarUrl,
+          participants: conversation.participants,
+          lastMessage: conversation.lastMessage || existing.lastMessage,
+          updatedAt: conversation.updatedAt,
+          unreadCount: conversation.unreadCount ?? existing.unreadCount,
+        };
+        return {
+          conversations: sortConversations(state.conversations.map(c => c.id === conversation.id ? updated : c))
         };
       } else {
-        // This is a new conversation, add it as is
-        updatedConversation = conversation;
+        return {
+          conversations: sortConversations([conversation, ...state.conversations])
+        };
       }
-
-      return {
-        conversations: sortConversations([updatedConversation, ...state.conversations.filter(c => c.id !== conversation.id)])
-      };
     });
   },
 
@@ -274,7 +314,6 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
-          // Map the incoming participants to the correct frontend structure
           const newParticipants = participants.map((p: any) => ({ ...p.user, description: p.user.description, role: p.role }));
           return {
             ...c,
@@ -290,10 +329,7 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
-          return {
-            ...c,
-            participants: c.participants.filter(p => p.id !== userId),
-          };
+          return { ...c, participants: c.participants.filter(p => p.id !== userId) };
         }
         return c;
       }),
@@ -304,12 +340,7 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
-          return {
-            ...c,
-            participants: c.participants.map(p => 
-              p.id === userId ? { ...p, role } : p
-            ),
-          };
+          return { ...c, participants: c.participants.map(p => p.id === userId ? { ...p, role } : p) };
         }
         return c;
       }),
@@ -320,17 +351,13 @@ export const useConversationStore = createWithEqualityFn<State>((set, get) => ({
     set(state => {
       const conversation = state.conversations.find(c => c.id === conversationId);
       if (!conversation) return state;
-
       const updatedConversation = {
         ...conversation,
         lastMessage: withPreview(message),
         unreadCount: state.activeId === conversationId ? 0 : (conversation.unreadCount || 0) + 1,
       };
-
       const otherConversations = state.conversations.filter(c => c.id !== conversationId);
-      const newConversations = sortConversations([updatedConversation, ...otherConversations]);
-
-      return { conversations: newConversations };
+      return { conversations: sortConversations([updatedConversation, ...otherConversations]) };
     });
   },
 }));

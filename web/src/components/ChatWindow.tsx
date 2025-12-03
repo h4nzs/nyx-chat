@@ -6,6 +6,7 @@ import MessageItem from "@components/MessageItem";
 import { useConversation } from "@hooks/useConversation";
 import { Spinner } from "./Spinner";
 import { useConversationStore, type Conversation } from "@store/conversation";
+import { useMessageStore } from '@store/message';
 import { useMessageInputStore as useTypingStore } from '@store/messageInput'; // Alias for clarity
 import { useMessageInputStore } from '@store/messageInput';
 import { useMessageSearchStore } from '@store/messageSearch';
@@ -55,14 +56,14 @@ const TypingIndicator = ({ conversationId }: { conversationId: string }) => {
 
 const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conversation: Conversation; onBack: () => void; onInfoToggle: () => void; onMenuClick: () => void; }) => {
   const meId = useAuthStore((s) => s.user?.id);
-  const presence = usePresenceStore((s) => s.presence);
+  const onlineUsers = usePresenceStore((s) => s.onlineUsers);
   const { openProfileModal, openChatInfoModal } = useModalStore(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal }));
   const { verifiedStatus } = useVerificationStore();
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
   const title = conversation.isGroup ? conversation.title : peerUser?.name;
   const avatarUrl = conversation.isGroup ? conversation.avatarUrl : peerUser?.avatarUrl;
-  const isOnline = peerUser ? presence.includes(peerUser.id) : false;
+  const isOnline = peerUser ? onlineUsers.has(peerUser.id) : false;
   const isConvVerified = verifiedStatus[conversation.id] || false;
 
   const handleHeaderClick = () => {
@@ -397,6 +398,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     actions,
     isFetchingMore, 
   } = useConversation(id);
+  const loadMessagesForConversation = useMessageStore(s => s.loadMessagesForConversation);
   
   const { highlightedMessageId, setHighlightedMessageId } = useMessageSearchStore(state => ({
     highlightedMessageId: state.highlightedMessageId,
@@ -412,7 +414,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     clearTypingLinkPreview: state.clearTypingLinkPreview,
   }));
   const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore();
-  const typing = usePresenceStore(state => state.typing);
+  const typingIndicators = usePresenceStore(state => state.typingIndicators);
   
   const virtuosoRef = useRef<any>(null);
   const [lightboxMessage, setLightboxMessage] = useState<Message | null>(null);
@@ -421,9 +423,9 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
   useEffect(() => {
     if (id) {
-      actions.loadMessages();
+      loadMessagesForConversation(id);
     }
-  }, [id, actions]);
+  }, [id, loadMessagesForConversation]);
 
   const handleImageClick = (message: Message) => setLightboxMessage(message);
 
@@ -441,8 +443,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     }
   }, [highlightedMessageId, messages, setHighlightedMessageId]);
 
-  const typingUsers = typing[id] || [];
-  const filteredTypingUsers = typingUsers.filter(uid => uid !== meId);
+  const typingUsersInThisConvo = typingIndicators.filter(i => i.conversationId === id && i.id !== meId && i.isTyping);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleTyping = useCallback(() => {
@@ -523,7 +524,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                     const isLastInSequence = !nextMessage || nextMessage.senderId !== message.senderId;
 
                     return (
-                      <div className="px-4">
+                      <div className="px-4" key={message.id}>
                         <MessageItem 
                           message={message} 
                           conversation={conversation} 
@@ -537,7 +538,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                   }}
                   followOutput="auto"
                 />
-                {filteredTypingUsers.length > 0 && (
+                {typingUsersInThisConvo.length > 0 && (
                   <div aria-live="polite" className="absolute bottom-2 left-4 flex items-center gap-2 bg-bg-surface/80 backdrop-blur-sm text-text-secondary text-xs rounded-full px-3 py-1.5 shadow-lg animate-fade-in">
                      <div className="flex gap-1 items-end h-4">
                        <span className="w-1.5 h-1.5 bg-current rounded-full animate-bounce [animation-delay:-0.3s]"></span>

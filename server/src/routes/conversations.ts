@@ -8,42 +8,6 @@ import { rotateAndDistributeSessionKeys } from "../utils/sessionKeys.js";
 const router = Router();
 router.use(requireAuth);
 
-// Helper function to create and distribute session keys for a conversation
-async function createAndDistributeSessionKeys(conversationId: string, participantUserIds: string[]) {
-  await sodium.ready;
-
-  // 1. Generate a new random session key
-  const sessionKey = sodium.crypto_secretbox_keygen();
-
-  // 2. Fetch public keys for all participants
-  const participants = await prisma.user.findMany({
-    where: {
-      id: { in: participantUserIds },
-      publicKey: { not: null },
-    },
-    select: { id: true, publicKey: true },
-  });
-
-  if (participants.length === 0) return; // No one has a public key, can't create session
-
-  // 3. Encrypt the session key for each participant
-  const sessionKeyData = participants.map(p => {
-    const encryptedKey = sodium.crypto_box_seal(sessionKey, sodium.from_base64(p.publicKey!, sodium.base64_variants.ORIGINAL));
-    return {
-      conversationId,
-      userId: p.id,
-      encryptedKey: sodium.to_base64(encryptedKey, sodium.base64_variants.ORIGINAL),
-    };
-  });
-
-  // 4. Store the encrypted keys in the database
-  await prisma.sessionKey.createMany({
-    data: sessionKeyData,
-    skipDuplicates: true, // Avoid errors if a key already exists
-  });
-}
-
-
 // GET all conversations for the current user
 router.get("/", async (req, res, next) => {
   try {
@@ -111,10 +75,10 @@ router.get("/", async (req, res, next) => {
 
 // CREATE a new conversation (private or group)
 router.post("/", async (req, res, next) => {
-  try {
-    const { title, userIds, isGroup } = req.body;
-    const creatorId = req.user.id;
+  const { title, userIds, isGroup, initialSession } = req.body;
+  const creatorId = req.user.id;
 
+  try {
     if (!isGroup) {
       const otherUserId = userIds.find((id: string) => id !== creatorId);
       if (!otherUserId) {
@@ -129,6 +93,10 @@ router.post("/", async (req, res, next) => {
             { participants: { some: { userId: otherUserId } } },
           ],
         },
+        include: {
+          participants: { include: { user: true } },
+          creator: true,
+        }
       });
 
       if (existingConversation) {
@@ -138,42 +106,58 @@ router.post("/", async (req, res, next) => {
 
     const allUserIds = Array.from(new Set([...userIds, creatorId]));
 
-    const newConversation = await prisma.conversation.create({
-      data: {
-        title: isGroup ? title : null,
-        isGroup,
-        creatorId: isGroup ? creatorId : null,
-        participants: {
-          create: allUserIds.map((userId: string) => ({
-            user: { connect: { id: userId } },
-            role: userId === creatorId ? "ADMIN" : "MEMBER",
-          })),
+    // --- Start Transaction ---
+    const newConversation = await prisma.$transaction(async (tx) => {
+      const conversation = await tx.conversation.create({
+        data: {
+          title: isGroup ? title : null,
+          isGroup,
+          creatorId: isGroup ? creatorId : null,
+          participants: {
+            create: allUserIds.map((userId: string) => ({
+              user: { connect: { id: userId } },
+              role: userId === creatorId ? "ADMIN" : "MEMBER",
+            })),
+          },
         },
-      },
-      include: {
-        participants: {
-          include: {
-            user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true } }
-          }
+        include: {
+          participants: { include: { user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true } } } },
+          creator: true,
         },
-        creator: true,
-      },
+      });
+
+      if (initialSession) {
+        const { sessionId, initialKeys, ephemeralPublicKey } = initialSession;
+        if (!sessionId || !initialKeys || !ephemeralPublicKey) {
+          throw new Error("Incomplete initial session data provided.");
+        }
+        const keyRecords = initialKeys.map((ik: { userId: string; key: string; }) => ({
+          sessionId,
+          encryptedKey: ik.key,
+          userId: ik.userId,
+          conversationId: conversation.id,
+          initiatorEphemeralKey: ephemeralPublicKey,
+          isInitiator: ik.userId === creatorId,
+        }));
+        await tx.sessionKey.createMany({
+          data: keyRecords,
+        });
+      } else {
+        // Note: rotateAndDistributeSessionKeys performs its own prisma calls and cannot be part of this transaction.
+        // If this call fails, the transaction will still commit. This is a known limitation to be addressed if needed.
+        await rotateAndDistributeSessionKeys(conversation.id, creatorId, tx);
+      }
+
+      return conversation;
     });
+    // --- End Transaction ---
 
-    // Create and distribute session keys for the new conversation
-    await rotateAndDistributeSessionKeys(newConversation.id, creatorId);
-
-    // --- FIX: Transform the conversation object to match client-side expectations ---
     const transformedConversation = {
       ...newConversation,
-      participants: newConversation.participants.map(p => ({
-        ...p.user,
-        role: p.role
-      })),
-      unreadCount: 1, // For the recipient
-      lastMessage: null, // A new conversation has no last message
+      participants: newConversation.participants.map(p => ({ ...p.user, role: p.role })),
+      unreadCount: 1,
+      lastMessage: null,
     };
-    // --- END FIX ---
 
     const io = getIo();
     const otherParticipants = allUserIds.filter(uid => uid !== creatorId);
@@ -181,9 +165,9 @@ router.post("/", async (req, res, next) => {
       io.to(userId).emit("conversation:new", transformedConversation);
     });
 
-    // Also respond to the initiator with the transformed object for consistency
     const initiatorConversation = { ...transformedConversation, unreadCount: 0 };
     res.status(201).json(initiatorConversation);
+
   } catch (error) {
     next(error);
   }
@@ -336,7 +320,6 @@ router.post("/:id/participants", async (req, res, next) => {
       io.to(p.userId).emit("conversation:new", conversation);
     });
 
-    // Rotate session keys to include the new participants
     await rotateAndDistributeSessionKeys(conversationId, currentUserId);
 
     res.status(201).json(newParticipants);
@@ -419,7 +402,6 @@ router.delete("/:id/participants/:userId", async (req, res, next) => {
     io.to(conversationId).emit("conversation:participant_removed", { conversationId, userId: userToRemoveId });
     io.to(userToRemoveId).emit("conversation:deleted", { id: conversationId });
 
-    // Rotate session keys for the remaining members
     await rotateAndDistributeSessionKeys(conversationId, currentUserId);
 
     res.status(204).send();
@@ -441,17 +423,16 @@ router.delete("/:id/leave", async (req, res, next) => {
     const participant = await prisma.participant.findFirst({
       where: { conversationId, userId },
     });
-
     if (!participant) {
       return res.status(404).json({ error: "You are not a member of this group." });
     }
 
-    // Prevent creator from leaving for now, they should delete the group instead
     const conversation = await prisma.conversation.findUnique({ where: { id: conversationId } });
     if (conversation?.creatorId === userId) {
-      return res.status(400).json({ error: "Group creator cannot leave the group; please delete it instead." });
+      return res.status(400).json({ error: "Group creator cannot leave; please delete it instead." });
     }
 
+    // 1. Delete the leaving user from participants
     await prisma.participant.delete({
       where: { userId_conversationId: { userId, conversationId } },
     });
@@ -460,8 +441,26 @@ router.delete("/:id/leave", async (req, res, next) => {
     io.to(conversationId).emit("conversation:participant_removed", { conversationId, userId });
     io.to(userId).emit("conversation:deleted", { id: conversationId });
 
-    // Rotate session keys for the remaining members
-    await rotateAndDistributeSessionKeys(conversationId, userId);
+    // 2. Find another admin to initiate key rotation
+    const remainingAdmin = await prisma.participant.findFirst({
+      where: {
+        conversationId,
+        role: "ADMIN",
+        userId: { not: userId }, // Ensure it's not the user who just left
+      },
+    });
+
+    // 3. Rotate keys using the remaining admin as the initiator
+    if (remainingAdmin) {
+      try {
+        await rotateAndDistributeSessionKeys(conversationId, remainingAdmin.userId);
+      } catch (error) {
+        console.error(`Failed to rotate session keys for conversation ${conversationId} after user ${userId} left:`, error);
+        // Note: User has already been removed; key rotation failure is logged but doesn't block the leave operation
+      }
+    } else {
+      console.warn(`Could not rotate keys for conversation ${conversationId} after user left: no remaining admin found.`);
+    }
 
     res.status(204).send();
   } catch (error) {

@@ -82,40 +82,25 @@ router.post(
       password: z.string().min(8).max(128),
       name: z.string().min(1).max(80),
       publicKey: z.string(),
-      recoveryPhrase: z.string(), // Expect the raw phrase from the client
+      signingKey: z.string(),
     }),
   }),
   async (req, res, next) => {
     try {
-      const { email, username, password, name, publicKey, recoveryPhrase } = req.body;
+      const { email, username, password, name, publicKey, signingKey } = req.body;
 
-      // Hash the password for storage
       const passwordHash = await bcrypt.hash(password, 10);
 
-      // Hash the recovery phrase and encode it to Base64 for storage
-      await sodium.ready;
-      const normalizedPhrase = recoveryPhrase.trim().split(/\s+/).join(' ');
-      const phraseHashBytes = sodium.crypto_generichash(64, normalizedPhrase);
-      const recoveryPhraseHash = sodium.to_base64(phraseHashBytes, sodium.base64_variants.ORIGINAL);
-
-      const user = await prisma.user.create({
-        data: { email, username, passwordHash, name, publicKey, recoveryPhraseHash },
+      await prisma.user.create({
+        data: { email, username, passwordHash, name, publicKey, signingKey },
       });
-      const tokens = await issueTokens(user, req);
-      setAuthCookies(res, tokens);
-      res.json({
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          name: user.name,
-          avatarUrl: user.avatarUrl,
-          hasCompletedOnboarding: user.hasCompletedOnboarding,
-        },
+
+      res.status(201).json({
+        message: "User registered successfully. Please log in.",
       });
     } catch (e: any) {
       if (e.code === "P2002")
-        return next(new ApiError(400, "Email/username already used"));
+        return next(new ApiError(409, "Email or username already in use."));
       next(e);
     }
   }
@@ -137,6 +122,15 @@ router.post(
         where: {
           OR: [{ email: emailOrUsername }, { username: emailOrUsername }],
         },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          passwordHash: true,
+          name: true,
+          avatarUrl: true,
+          hasCompletedOnboarding: true,
+        }
       });
       if (!user) throw new ApiError(401, "Invalid credentials");
 

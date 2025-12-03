@@ -232,6 +232,11 @@ export default function Settings() {
                 <FiChevronRight size={20} className="text-text-secondary" />
               </SettingsRow>
             </Link>
+            <Link to="/help" className="block w-full text-left">
+              <SettingsRow title="Help & Support" description="Find answers to common questions and troubleshooting tips.">
+                <FiChevronRight size={20} className="text-text-secondary" />
+              </SettingsRow>
+            </Link>
           </div>
           <div className="flex justify-end">
               <button onClick={handlePrivacySubmit} className="px-4 py-2 rounded-lg font-semibold text-white bg-accent shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all">

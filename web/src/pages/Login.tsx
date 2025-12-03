@@ -1,14 +1,21 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { useAuthStore } from "../store/auth";
+import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useAuthStore, setupAndUploadPreKeyBundle } from "../store/auth";
 import AuthForm from "../components/AuthForm";
 import { IoFingerPrint } from "react-icons/io5";
+import toast from "react-hot-toast";
 
 export default function Login() {
   const [error, setError] = useState("");
   const [isBiometricsAvailable, setIsBiometricsAvailable] = useState(false);
   const navigate = useNavigate();
-  const { login, loginWithBiometrics } = useAuthStore(s => ({ login: s.login, loginWithBiometrics: s.loginWithBiometrics }));
+  const location = useLocation();
+
+  const { login, loginWithBiometrics, getSigningPrivateKey } = useAuthStore(s => ({ 
+    login: s.login, 
+    loginWithBiometrics: s.loginWithBiometrics,
+    getSigningPrivateKey: s.getSigningPrivateKey,
+  }));
 
   useEffect(() => {
     if (window.PublicKeyCredential && PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable) {
@@ -21,8 +28,13 @@ export default function Login() {
       setError("Both fields are required.");
       return;
     }
-    await login(data.a, data.b);
-    navigate("/chat");
+    try {
+      await login(data.a, data.b);
+      navigate("/chat");
+
+    } catch (err: any) {
+      setError(err.message || "Login failed. Please check your credentials.");
+    }
   };
 
   async function handleBiometricLogin(username: string) {
@@ -42,32 +54,31 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-bg-main p-4">
       <div className="w-full max-w-md bg-bg-surface rounded-xl p-8 shadow-neumorphic-concave">
         <h1 className="text-3xl font-bold text-center text-foreground mb-6">Login</h1>
-          <AuthForm 
-            onSubmit={handleLogin}
-            button="Login"
-          />
-          {isBiometricsAvailable && (
-            <button 
-              type="button"
-              // A bit of a hack to get the username, ideally AuthForm would expose its state
-              onClick={() => handleBiometricLogin((document.querySelector('input[placeholder="Email or Username"]') as HTMLInputElement)?.value)}
-              className="w-full flex items-center justify-center gap-3 mt-4 btn btn-secondary"
-            >
-              <IoFingerPrint />
-              <span>Login with Biometrics</span>
-            </button>
-          )}
-
-          <div className="text-center mt-6">
-            <p className="text-text-secondary">
-              Don't have an account? <Link to="/register" className="font-semibold text-accent hover:underline">Sign up</Link>
-            </p>
-            <div className="flex justify-center gap-4 mt-4">
-              <Link to="/restore" className="text-sm text-accent hover:underline">Restore from phrase</Link>
-              <Link to="/link-device" className="text-sm text-accent hover:underline">Link a new device</Link>
-            </div>
+        {error && <p className="text-red-500 text-center mb-4">{error}</p>}
+        <AuthForm 
+          onSubmit={handleLogin}
+          button="Login"
+        />
+        {isBiometricsAvailable && (
+          <button 
+            type="button"
+            onClick={() => handleBiometricLogin((document.querySelector('input[placeholder="Email or Username"]') as HTMLInputElement)?.value)}
+            className="w-full flex items-center justify-center gap-3 mt-4 btn btn-secondary"
+          >
+            <IoFingerPrint />
+            <span>Login with Biometrics</span>
+          </button>
+        )}
+        <div className="text-center mt-6">
+          <p className="text-text-secondary">
+            Don't have an account? <Link to="/register" className="font-semibold text-accent hover:underline">Sign up</Link>
+          </p>
+          <div className="flex justify-center gap-4 mt-4">
+            <Link to="/restore" className="text-sm text-accent hover:underline">Restore from phrase</Link>
+            <Link to="/link-device" className="text-sm text-accent hover:underline">Link a new device</Link>
           </div>
         </div>
       </div>
+    </div>
   );
 }

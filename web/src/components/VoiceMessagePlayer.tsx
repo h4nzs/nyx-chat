@@ -42,15 +42,17 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
       try {
         let fileKey = message.fileKey;
 
-        // Decrypt the file key ONLY if the message is not optimistic (i.e., from the server)
-        // and the key looks like a long encrypted string. Raw keys are 44 chars.
-        if (!message.optimistic && fileKey && fileKey.length > 50) {
-          fileKey = await decryptMessage(message.fileKey, message.conversationId, message.sessionId);
+        if (!message.optimistic && fileKey && typeof fileKey === 'string' && fileKey.length > 50) {
+          const result = await decryptMessage(message.fileKey, message.conversationId, message.sessionId);
+          if (result.status === 'success') {
+            fileKey = result.value;
+          } else {
+            throw new Error(result.status === 'pending' ? result.reason : result.error.message);
+          }
         }
 
-        if (!fileKey || fileKey.startsWith('[')) {
-          if (isMounted) setError(fileKey || "Could not retrieve file key.");
-          return;
+        if (!fileKey) {
+          throw new Error("Could not retrieve file key.");
         }
 
         // 2. Fetch the encrypted file

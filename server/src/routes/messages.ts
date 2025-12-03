@@ -1,170 +1,257 @@
-import { Router, Request } from "express";
+import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { ApiError } from "../utils/errors.js";
-import { io } from "../socket.js";
-import fs from "fs/promises";
-import path from "path";
+import { getIo } from "../socket.js";
+import { getLinkPreview } from "link-preview-js";
+import { sendPushNotification } from "../utils/sendPushNotification.js";
 
 const router = Router();
+router.use(requireAuth);
 
-
-// ... (GET and DELETE message routes remain the same)
-
-// === GET: semua pesan dalam conversation (user harus anggota) ===
-router.get("/:conversationId", requireAuth, async (req: Request, res, next) => {
+// GET all messages for a conversation
+router.get("/:conversationId", async (req, res, next) => {
   try {
     const { conversationId } = req.params;
     const userId = req.user.id;
-    const { cursor } = req.query;
+    const cursor = req.query.cursor as string | undefined;
 
-    const participant = await prisma.participant.findUnique({
-      where: { userId_conversationId: { userId, conversationId } },
+    // Authorization check: Ensure the user is a participant
+    const participant = await prisma.participant.findFirst({
+      where: {
+        userId,
+        conversationId,
+      },
     });
 
     if (!participant) {
-      throw new ApiError(403, "Forbidden: You are not a participant of this conversation.");
+      return res.status(403).json({ error: "You are not a member of this conversation." });
     }
 
     const messages = await prisma.message.findMany({
-      where: {
-        conversationId,
-        createdAt: { 
-          gte: participant.joinedAt // Only fetch messages since the user joined
-        },
-      },
-      take: 50,
-      ...(cursor && {
-        skip: 1,
-        cursor: {
-          id: cursor,
-        },
+      where: { conversationId },
+      take: -50, // Fetch the last 50 messages
+      ...(cursor && { 
+        skip: 1, // Skip the cursor itself
+        cursor: { id: cursor } 
       }),
-      include: {
-        sender: {
-          select: { id: true, username: true, avatarUrl: true, name: true },
-        },
-        reactions: {
-          include: {
-            user: { select: { id: true, username: true } },
-          },
-        },
+      include: { 
+        sender: true,
+        reactions: true,
         statuses: true,
-        repliedTo: { // Include the message being replied to
+        repliedTo: {
           include: {
-            sender: { // And the sender of that original message
-              select: { id: true, name: true, username: true }
-            }
+            sender: { select: { id: true, name: true, username: true } }
           }
         }
       },
-      orderBy: {
-        createdAt: "desc", // Fetch newest messages first
-      },
+      orderBy: { createdAt: 'asc' },
     });
-
-    // Reverse the array on the server to send them in ascending order (oldest to newest)
-    res.json({ items: messages.reverse() });
-  } catch (e) {
-    next(e);
+    res.json({ items: messages });
+  } catch (error) {
+    next(error);
   }
 });
 
-// === DELETE: hanya sender boleh hapus pesannya ===
-router.delete("/:messageId", requireAuth, async (req, res, next) => {
+// POST a new message
+router.post("/", async (req, res, next) => {
   try {
-    const { messageId } = req.params;
-    const userId = req.user.id;
+    const senderId = req.user.id;
+    const { conversationId, content, fileUrl, fileName, fileType, fileSize, duration, fileKey, sessionId, repliedToId, tempId } = req.body;
 
-    const message = await prisma.message.findFirst({
-      where: { id: messageId, senderId: userId },
-      select: { conversationId: true, fileUrl: true, imageUrl: true },
-    });
-
-    if (!message) {
-      throw new ApiError(404, "Message not found or you do not have permission to delete it");
+    if (!conversationId) {
+      return res.status(400).json({ error: "conversationId is required." });
     }
 
-    // Hapus file fisik jika ada
-    const urlToDelete = message.fileUrl || message.imageUrl;
-    if (urlToDelete) {
-      try {
-        // urlToDelete is like: http://localhost:4000/uploads/archives/file-123.zip
-        const url = new URL(urlToDelete);
-        const pathname = url.pathname; // /uploads/archives/file-123.zip
-        
-        // Find the part of the path relative to the project root
-        const uploadsDir = '/uploads/';
-        const relativePathIndex = pathname.indexOf(uploadsDir);
-        
-        if (relativePathIndex !== -1) {
-          const filePathInProject = pathname.substring(relativePathIndex + 1); // uploads/archives/file-123.zip
-          const absolutePath = path.join(process.cwd(), filePathInProject);
-          
-          await fs.unlink(absolutePath);
-        }
-      } catch (fileError: any) {
-        // Jangan gagalkan seluruh permintaan jika file tidak ada (mungkin sudah dihapus)
-        if (fileError.code !== 'ENOENT') {
-          console.error(`Failed to delete file for URL ${urlToDelete}:`, fileError);
+    const participants = await prisma.participant.findMany({
+      where: { conversationId },
+      select: { userId: true },
+    });
+
+    if (!participants.some(p => p.userId === senderId)) {
+      return res.status(403).json({ error: "You are not a participant of this conversation." });
+    }
+
+    let linkPreviewData: any = null;
+    if (content && !fileUrl) {
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      const urls = content.match(urlRegex);
+      if (urls && urls.length > 0) {
+        try {
+          const preview = await getLinkPreview(urls[0]);
+          if ('title' in preview && 'description' in preview && 'images' in preview) {
+            linkPreviewData = {
+              url: preview.url,
+              title: preview.title,
+              description: preview.description,
+              image: preview.images[0],
+              siteName: preview.siteName,
+            };
+          }
+        } catch (e) {
+          console.error("Failed to get link preview:", e);
         }
       }
     }
 
-    await prisma.message.delete({ where: { id: messageId } });
+    const newMessage = await prisma.$transaction(async (tx) => {
+      const msg = await tx.message.create({
+        data: {
+          conversationId, senderId, content, fileUrl, fileName, fileType, fileSize, duration, fileKey, sessionId, repliedToId,
+          linkPreview: linkPreviewData,
+          statuses: {
+            create: participants.map(p => ({
+              userId: p.userId,
+              status: p.userId === senderId ? 'READ' : 'SENT',
+            })),
+          },
+        },
+        include: { sender: true, reactions: true, statuses: true, repliedTo: { include: { sender: true } } },
+      });
 
-    io.to(message.conversationId).emit("message:deleted", { messageId, conversationId: message.conversationId });
-
-    res.json({ ok: true });
-  } catch (e) {
-    next(e);
-  }
-});
-
-
-// === REACTION ROUTES ===
-
-router.post("/:messageId/reactions", requireAuth, async (req: Request, res, next) => {
-  try {
-    const { emoji } = req.body;
-    const userId = req.user.id;
-    const { messageId } = req.params;
-
-    const message = await prisma.message.findUnique({ where: { id: messageId }, select: { conversationId: true } });
-    if (!message) throw new ApiError(404, "Message not found");
-
-    const reaction = await prisma.messageReaction.create({
-      data: { emoji, messageId, userId },
-      include: { user: { select: { id: true, username: true } } },
+      await tx.conversation.update({
+        where: { id: conversationId },
+        data: { lastMessageAt: msg.createdAt },
+      });
+      return msg;
     });
 
-    io.to(message.conversationId).emit("reaction:new", reaction);
-    res.status(201).json(reaction);
-  } catch (e) {
-    next(e);
+    const messageToBroadcast = { ...newMessage, tempId };
+    const io = getIo();
+    io.to(conversationId).emit("message:new", messageToBroadcast);
+
+    const pushRecipients = participants.filter(p => p.userId !== senderId);
+    const pushBody = fileUrl ? 'You received a file.' : (content || '');
+    const payload = { title: `New message from ${req.user.username}`, body: pushBody.substring(0, 200) };
+    pushRecipients.forEach(p => sendPushNotification(p.userId, payload));
+
+    res.status(201).json(messageToBroadcast);
+  } catch (error) {
+    next(error);
   }
 });
 
-router.delete("/reactions/:reactionId", requireAuth, async (req: Request, res, next) => {
+// DELETE a message
+router.delete("/:id", async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const message = await prisma.message.findUnique({ where: { id } });
+    if (!message) return res.status(404).json({ error: "Message not found" });
+    if (message.senderId !== userId) return res.status(403).json({ error: "You can only delete your own messages" });
+
+    // Hard delete the message
+    await prisma.message.delete({
+      where: { id },
+    });
+    
+    getIo().to(message.conversationId).emit("message:deleted", { 
+      conversationId: message.conversationId,
+      id: message.id 
+    });
+
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST a reaction to a message
+router.post("/:messageId/reactions", async (req, res, next) => {
+  try {
+    const { messageId } = req.params;
+    const { emoji, tempId } = req.body;
+    const userId = req.user.id;
+
+    if (!emoji) {
+      return res.status(400).json({ error: "Emoji is required." });
+    }
+
+    const message = await prisma.message.findUnique({
+      where: { id: messageId },
+      select: { conversationId: true }
+    });
+
+    if (!message) {
+      return res.status(404).json({ error: "Message not found." });
+    }
+
+    // Authorization check: Ensure the user is a participant of the message's conversation
+    const participant = await prisma.participant.findFirst({
+      where: {
+        userId,
+        conversationId: message.conversationId,
+      },
+    });
+
+    if (!participant) {
+      return res.status(403).json({ error: "You are not a participant of this conversation." });
+    }
+
+    const newReaction = await prisma.messageReaction.create({
+      data: {
+        messageId,
+        emoji,
+        userId,
+      },
+      include: {
+        user: {
+          select: { id: true, name: true, username: true }
+        }
+      }
+    });
+
+    getIo().to(message.conversationId).emit("reaction:new", {
+      conversationId: message.conversationId,
+      messageId: messageId,
+      reaction: { ...newReaction, tempId },
+    });
+
+    res.status(201).json(newReaction);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE a reaction from a message
+router.delete("/reactions/:reactionId", async (req, res, next) => {
   try {
     const { reactionId } = req.params;
     const userId = req.user.id;
 
-    const reaction = await prisma.messageReaction.findFirst({
-      where: { id: reactionId, userId },
-      select: { id: true, message: { select: { conversationId: true, id: true } } },
+    const reaction = await prisma.messageReaction.findUnique({
+      where: { id: reactionId },
+      select: { 
+        userId: true, 
+        message: { 
+          select: { 
+            id: true, 
+            conversationId: true 
+          } 
+        } 
+      }
     });
 
     if (!reaction) {
-      throw new ApiError(404, "Reaction not found or you do not have permission to delete it");
+      return res.status(404).json({ error: "Reaction not found." });
     }
 
-    await prisma.messageReaction.delete({ where: { id: reactionId } });
+    if (reaction.userId !== userId) {
+      return res.status(403).json({ error: "You can only delete your own reactions." });
+    }
 
-    io.to(reaction.message.conversationId).emit("reaction:remove", { reactionId, messageId: reaction.message.id });
-    res.sendStatus(204);
-  } catch (e) {
-    next(e);
+    await prisma.messageReaction.delete({
+      where: { id: reactionId }
+    });
+
+    getIo().to(reaction.message.conversationId).emit("reaction:deleted", {
+      conversationId: reaction.message.conversationId,
+      messageId: reaction.message.id,
+      reactionId: reactionId,
+    });
+
+    res.status(204).send();
+  } catch (error) {
+    next(error);
   }
 });
 

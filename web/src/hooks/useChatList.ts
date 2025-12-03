@@ -30,7 +30,7 @@ export function useChatList() {
       deleteConversation: state.deleteConversation,
     }));
   
-    const presence = usePresenceStore(state => state.presence);
+    const onlineUsers = usePresenceStore(state => state.onlineUsers);
     const meId = useAuthStore(state => state.user?.id);
   
     const [searchQuery, setSearchQuery] = useState('');
@@ -92,7 +92,7 @@ export function useChatList() {
       isSearching,
       error,
       activeId,
-      presence,
+      presence: Array.from(onlineUsers),
       meId,
       // Actions
       setSearchQuery,

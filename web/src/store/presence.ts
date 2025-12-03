@@ -1,28 +1,50 @@
-import { createWithEqualityFn } from "zustand/traditional";
+import { create } from 'zustand';
 
-type State = {
-  presence: string[];
-  typing: Record<string, string[]>;
-  setPresence: (userIds: string[]) => void;
-  userJoined: (userId: string) => void;
-  userLeft: (userId: string) => void;
-  setTyping: (conversationId: string, userIds: string[]) => void;
+type TypingIndicator = {
+  id: string; // userId
+  conversationId: string;
+  isTyping: boolean;
 };
 
-export const usePresenceStore = createWithEqualityFn<State>((set) => ({
-  presence: [],
-  typing: {},
+type State = {
+  onlineUsers: Set<string>;
+  typingIndicators: TypingIndicator[];
+  setOnlineUsers: (userIds: string[]) => void;
+  userJoined: (userId: string) => void;
+  userLeft: (userId: string) => void;
+  addOrUpdate: (indicator: TypingIndicator) => void;
+  clear: () => void;
+};
 
-  setPresence: (userIds) => set({ presence: userIds }),
+export const usePresenceStore = create<State>((set) => ({
+  onlineUsers: new Set(),
+  typingIndicators: [],
 
-  userJoined: (userId) =>
-    set((state) => ({ presence: [...state.presence, userId] })),
+  setOnlineUsers: (userIds) => set({ onlineUsers: new Set(userIds) }),
 
-  userLeft: (userId) =>
-    set((state) => ({ presence: state.presence.filter((id) => id !== userId) })),
+  userJoined: (userId) => set(state => ({ onlineUsers: new Set(state.onlineUsers).add(userId) })),
 
-  setTyping: (conversationId, userIds) =>
-    set((state) => ({ 
-      typing: { ...state.typing, [conversationId]: userIds } 
-    })),
+  userLeft: (userId) => set(state => {
+    const newOnlineUsers = new Set(state.onlineUsers);
+    newOnlineUsers.delete(userId);
+    const newTypingIndicators = state.typingIndicators.filter(i => i.id !== userId);
+    return { onlineUsers: newOnlineUsers, typingIndicators: newTypingIndicators };
+  }),
+
+  addOrUpdate: (indicator) => set(state => {
+    const existing = state.typingIndicators.find(
+      i => i.id === indicator.id && i.conversationId === indicator.conversationId
+    );
+    if (existing) {
+      if (!indicator.isTyping) {
+        return { typingIndicators: state.typingIndicators.filter(i => i.id !== indicator.id || i.conversationId !== indicator.conversationId) };
+      }
+      return state;
+    } else if (indicator.isTyping) {
+      return { typingIndicators: [...state.typingIndicators, indicator] };
+    }
+    return state;
+  }),
+  
+  clear: () => set({ onlineUsers: new Set(), typingIndicators: [] }),
 }));

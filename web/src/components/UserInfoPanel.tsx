@@ -4,7 +4,8 @@ import { toAbsoluteUrl } from '@utils/url';
 import { authFetch, handleApiError } from '@lib/api';
 import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
-import { generateSafetyNumber, importPublicKey } from '@utils/keyManagement';
+import { generateSafetyNumber } from '@utils/keyManagement';
+import { getSodium } from '@lib/sodiumInitializer';
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
 import { useVerificationStore } from '@store/verification';
@@ -12,7 +13,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 
-// The user type for the profile panel can have an optional email and public key
 type ProfileUser = User & { email?: string; publicKey?: string };
 
 export default function UserInfoPanel({ userId }: { userId: string }) {
@@ -72,9 +72,10 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
       if (!myPublicKeyB64) {
         throw new Error("Your public key is not found. Please set up your keys first.");
       }
-
-      const myPublicKey = await importPublicKey(myPublicKeyB64);
-      const theirPublicKey = await importPublicKey(user.publicKey);
+      
+      const sodium = await getSodium();
+      const myPublicKey = sodium.from_base64(myPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const theirPublicKey = sodium.from_base64(user.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       const sn = await generateSafetyNumber(myPublicKey, theirPublicKey);
       setSafetyNumber(sn);
@@ -146,7 +147,7 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.2 }}
-                className="absolute top-24 left-0 w-full px-4 md:px-6" // Adjust top based on header/tab height
+                className="absolute top-24 left-0 w-full px-4 md:px-6"
               >
                 {renderDetails()}
               </motion.div>
@@ -158,7 +159,7 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 transition={{ duration: 0.2 }}
-                className="absolute top-24 left-0 w-full px-4 md:px-6" // Adjust top based on header/tab height
+                className="absolute top-24 left-0 w-full px-4 md:px-6"
               >
                 <MediaGallery conversationId={activeId} />
               </motion.div>

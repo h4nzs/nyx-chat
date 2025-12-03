@@ -3,7 +3,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getIo } from "../socket.js";
-import { createAndDistributeSessionKeys } from "../utils/sessionKeys.js";
+import { rotateAndDistributeSessionKeys } from "../utils/sessionKeys.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -88,40 +88,28 @@ router.post("/:conversationId/ratchet", async (req, res, next) => {
         id: conversationId,
         participants: { some: { userId } },
       },
-      include: {
-        participants: { select: { userId: true } },
-      },
     });
 
     if (!conversation) {
       return res.status(404).json({ error: "Conversation not found or you are not a participant." });
     }
 
-    const participantIds = conversation.participants.map(p => p.userId);
-    const newSessionInfo = await createAndDistributeSessionKeys(conversationId, participantIds);
+    // This function now handles distribution to all participants and returns the key
+    // specifically for the initiator.
+    const { sessionId, encryptedKey } = await rotateAndDistributeSessionKeys(conversationId, userId);
 
-    if (!newSessionInfo) {
-      return res.status(500).json({ error: "Failed to create new session key." });
+    if (!sessionId || !encryptedKey) {
+      return res.status(500).json({ error: "Failed to create and retrieve session key for initiator." });
     }
-
-    // Find the specific encrypted key for the requesting user
-    const userEncryptedKey = newSessionInfo.sessionKeyData.find(d => d.userId === userId);
-
-    // Proactively send the new encrypted session key to all other participants
-    const io = getIo();
-    newSessionInfo.sessionKeyData.forEach(keyData => {
-      if (keyData.userId !== userId) { // Don't send to the user who initiated the ratchet
-        io.to(keyData.userId).emit('session:new_key', {
-          conversationId: keyData.conversationId,
-          sessionId: newSessionInfo.sessionId,
-          encryptedKey: keyData.encryptedKey,
-        });
-      }
-    });
+    
+    // The key is already distributed to all members within rotateAndDistributeSessionKeys.
+    // The client requesting the ratchet gets the key back directly in this response.
+    // Other clients will get the new key when they next fetch messages or via a push.
+    // The old proactive push logic is removed for simplicity and robustness.
 
     res.status(201).json({
-      sessionId: newSessionInfo.sessionId,
-      encryptedKey: userEncryptedKey?.encryptedKey,
+      sessionId,
+      encryptedKey,
     });
 
   } catch (error) {
