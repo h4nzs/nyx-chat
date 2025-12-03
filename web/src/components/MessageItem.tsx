@@ -20,6 +20,7 @@ import VoiceMessagePlayer from './VoiceMessagePlayer';
 import { decryptMessage } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
 import { useMessageStore } from '@store/message';
+import toast from 'react-hot-toast';
 
 const MessageStatusIcon = ({ message, conversation }: { message: Message; conversation: Conversation | undefined }) => {
   const meId = useAuthStore((s) => s.user?.id);
@@ -158,6 +159,10 @@ const MessageItem = ({ message, conversation, isHighlighted, onImageClick, isFir
   const meId = useAuthStore((s) => s.user?.id);
   const setReplyingTo = useMessageInputStore(state => state.setReplyingTo);
   const showConfirm = useModalStore(state => state.showConfirm);
+  const { removeMessage, addOptimisticMessage } = useMessageStore(state => ({
+    removeMessage: state.removeMessage,
+    addOptimisticMessage: state.addOptimisticMessage,
+  }));
   const mine = message.senderId === meId;
   const ref = useRef<HTMLDivElement>(null);
 
@@ -176,7 +181,7 @@ const MessageItem = ({ message, conversation, isHighlighted, onImageClick, isFir
     return () => observer.disconnect();
   }, [message.id, message.conversationId, mine, meId, message.statuses]);
 
-    if (message.type === 'SYSTEM') {
+  if (message.type === 'SYSTEM') {
     return (
       <div className="flex justify-center items-center my-2">
         <div className="text-xs text-text-secondary bg-bg-surface rounded-full px-3 py-1 flex items-center gap-2 shadow-sm">
@@ -186,10 +191,7 @@ const MessageItem = ({ message, conversation, isHighlighted, onImageClick, isFir
       </div>
     );
   }
-  const { removeMessage, addOptimisticMessage } = useMessageStore(state => ({
-    removeMessage: state.removeMessage,
-    addOptimisticMessage: state.addOptimisticMessage,
-  }));
+
   const handleDelete = () => {
     showConfirm('Delete Message', 'Are you sure you want to permanently delete this message?', () => {
       // Optimistically remove the message from the UI

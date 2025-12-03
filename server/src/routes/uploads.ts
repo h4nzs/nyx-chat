@@ -23,12 +23,16 @@ router.post(
       const senderId = req.user.id;
       const file = req.file;
       const { fileKey, sessionId, repliedToId, tempId, duration } = req.body;
+      const parsedTempId = Number(tempId);
 
       if (!file) {
         throw new ApiError(400, "No file uploaded or file type is not allowed.");
       }
       if (!fileKey || !sessionId) {
         throw new ApiError(400, "Missing required encrypted key or session for the file.");
+      }
+      if (!tempId || !Number.isFinite(parsedTempId)) {
+        throw new ApiError(400, "A valid temporary ID (tempId) is required.");
       }
 
       const participant = await prisma.participant.findFirst({
@@ -76,7 +80,7 @@ router.post(
         return msg;
       });
 
-      const messageToBroadcast = { ...newMessage, tempId: Number(tempId) };
+      const messageToBroadcast = { ...newMessage, tempId: parsedTempId };
       const io = getIo();
       io.to(conversationId).emit("message:new", messageToBroadcast);
       
@@ -85,16 +89,7 @@ router.post(
       const payload = { title: `New message from ${req.user.username}`, body: pushBody.substring(0, 200) };
       pushRecipients.forEach(p => sendPushNotification(p.userId, payload));
 
-      // Return both the message and the file data to the client for verification
-      res.status(201).json({
-        message: messageToBroadcast,
-        file: {
-          url: fileUrl,
-          name: file.originalname,
-          size: file.size,
-          type: file.mimetype,
-        }
-      });
+      res.status(201).json(messageToBroadcast);
 
     } catch (e) {
       next(e);

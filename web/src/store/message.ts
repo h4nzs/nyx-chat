@@ -277,15 +277,29 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     if (currentMessages.some(m => m.id === message.id)) return state;
     return { messages: { ...state.messages, [conversationId]: [...currentMessages, message] } };
   }),
-  replaceOptimisticMessage: (conversationId, tempId, newMessage) => set(state => ({
-    messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.tempId === tempId ? { ...newMessage, tempId: undefined } : m) }
-  })),
-  removeMessage: (conversationId, messageId) => set(state => ({
-    messages: {
-        ...state.messages,
-        [conversationId]: (state.messages[conversationId] || []).filter(m => m.id !== messageId),
+  replaceOptimisticMessage: (conversationId, tempId, newMessage) => set(state => {
+    // Find the optimistic message to revoke its blob URL if it exists
+    const optimisticMessage = state.messages[conversationId]?.find(m => m.tempId === tempId);
+    if (optimisticMessage?.fileUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(optimisticMessage.fileUrl);
     }
-  })),
+    return {
+      messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.tempId === tempId ? { ...newMessage, tempId: undefined } : m) }
+    };
+  }),
+  removeMessage: (conversationId, messageId) => set(state => {
+    // Find the message to revoke its blob URL if it exists
+    const messageToRemove = state.messages[conversationId]?.find(m => m.id === messageId);
+    if (messageToRemove?.fileUrl?.startsWith('blob:')) {
+      URL.revokeObjectURL(messageToRemove.fileUrl);
+    }
+    return {
+      messages: {
+          ...state.messages,
+          [conversationId]: (state.messages[conversationId] || []).filter(m => m.id !== messageId),
+      }
+    };
+  }),
   updateMessage: (conversationId, messageId, updates) => set(state => ({ messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, ...updates } : m) } })),
   addReaction: (conversationId, messageId, reaction) => set(state => ({
     messages: {

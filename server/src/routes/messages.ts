@@ -141,22 +141,34 @@ router.delete("/:id", async (req, res, next) => {
     if (!message) return res.status(404).json({ error: "Message not found" });
     if (message.senderId !== userId) return res.status(403).json({ error: "You can only delete your own messages" });
 
-    // If the message has a file, delete the physical file
-    if (message.fileUrl) {
+    // If the message has a file, securely delete the physical file
+    if (message.fileUrl && typeof message.fileUrl === 'string' && message.fileUrl.startsWith('/uploads/')) {
       try {
-        // Reconstruct the local file path from the fileUrl
-        // fileUrl typically looks like /uploads/category/filename.ext
-        const relativeFilePath = message.fileUrl.replace('/uploads/', '');
-        const localFilePath = path.join(process.cwd(), 'uploads', relativeFilePath);
-        await fs.unlink(localFilePath);
-        console.log(`[File Delete] Successfully deleted physical file: ${localFilePath}`);
+        const uploadsDir = path.resolve(process.cwd(), 'uploads');
+        // Decode and sanitize the user-provided path segment
+        const relativePath = path.normalize(decodeURIComponent(message.fileUrl.substring('/uploads/'.length)));
+
+        // Prevent directory traversal
+        if (relativePath.includes('..')) {
+          throw new Error("Invalid path detected (directory traversal).");
+        }
+
+        const candidatePath = path.join(uploadsDir, relativePath);
+
+        // Final check: ensure the resolved path is within the uploads directory
+        if (relativePath && relativePath !== '.' && candidatePath.startsWith(uploadsDir + path.sep)) {
+          await fs.unlink(candidatePath);
+          console.log(`[File Delete] Successfully deleted physical file: ${candidatePath}`);
+        } else {
+          throw new Error(`Invalid path: ${candidatePath} is outside of the allowed directory.`);
+        }
       } catch (fileError: any) {
+        // Log the error but don't block the message deletion itself
         console.error(`[File Delete Error] Failed to delete physical file for message ${id}: ${fileError.message}`);
-        // Continue with DB deletion even if physical file deletion fails
       }
     }
 
-    // Hard delete the message
+    // Hard delete the message record from the database
     await prisma.message.delete({
       where: { id },
     });

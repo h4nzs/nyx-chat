@@ -512,7 +512,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                     const isLastInSequence = !nextMessage || nextMessage.senderId !== message.senderId;
 
                     return (
-                      <div className="px-4">
+                      <div className="px-4" key={message.id}>
                         <MessageItem 
                           message={message} 
                           conversation={conversation} 

@@ -13,7 +13,8 @@ const disallowedRanges = [
   "reserved"
 ];
 
-// Custom DNS resolver to prevent SSRF
+// Custom DNS resolver to prevent SSRF. This is called for the initial URL
+// and for each subsequent redirect, providing security at each step.
 async function resolveDns(url: string): Promise<string> {
   const hostname = new URL(url).hostname;
   const { address } = await dns.lookup(hostname);
@@ -26,24 +27,10 @@ async function resolveDns(url: string): Promise<string> {
   return address;
 }
 
-// Custom redirect handler to prevent SSRF on redirects
-function handleRedirects(url: string, newUrl: string, maxRedirects: number): Promise<boolean> {
-  return new Promise(async (resolve, reject) => {
-    if (maxRedirects < 0) {
-      return reject(new Error("Exceeded max redirects."));
-    }
-    try {
-      await resolveDns(newUrl); // Validate the new URL's IP
-      resolve(true); // Allow the redirect
-    } catch (error) {
-      reject(error); // Reject if the redirect target is disallowed
-    }
-  });
-}
-
 /**
  * A secure wrapper around getLinkPreview to prevent SSRF attacks.
- * It includes a timeout, DNS resolution checks, and redirect validation.
+ * It includes a timeout and relies on a custom DNS resolver to validate
+ * the initial URL and any subsequent redirects against disallowed IP ranges.
  * @param url The URL to get a preview for.
  * @returns A promise that resolves to the link preview.
  */
@@ -51,9 +38,8 @@ export async function getSecureLinkPreview(url: string): Promise<LinkPreview> {
   try {
     const preview = await getLinkPreview(url, {
       timeout: 5000,
-      followRedirects: `manual`,
-      handleRedirects: (baseURL, forwardURL, maxRedirects) => handleRedirects(baseURL, forwardURL, maxRedirects),
-      resolveDNS: (url) => resolveDns(url),
+      followRedirects: 'follow', // Let the library handle redirects
+      resolveDNSHost: (url) => resolveDns(url), // Our security check is here
     });
     return preview as LinkPreview;
   } catch (error) {
