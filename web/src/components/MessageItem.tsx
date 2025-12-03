@@ -19,6 +19,7 @@ import { FaCheck, FaCheckDouble } from 'react-icons/fa';
 import VoiceMessagePlayer from './VoiceMessagePlayer';
 import { decryptMessage } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
+import { useMessageStore } from '@store/message';
 
 const MessageStatusIcon = ({ message, conversation }: { message: Message; conversation: Conversation | undefined }) => {
   const meId = useAuthStore((s) => s.user?.id);
@@ -54,18 +55,27 @@ const ReplyQuote = ({ message }: { message: Message }) => {
 const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversation }: { message: Message; mine: boolean; isLastInSequence: boolean; onImageClick: (message: Message) => void; conversation: Conversation | undefined; }) => {
   const [decryptedContent, setDecryptedContent] = useState<string | null>(message.content || '');
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
+  const decryptionAttemptedRef = useRef(false);
+
+  // Effect to reset decryption attempt status when the key set changes or the message itself changes
+  useEffect(() => {
+    decryptionAttemptedRef.current = false;
+  }, [message.id, lastKeychainUpdate]);
 
   useEffect(() => {
     const isPlaceholder = typeof decryptedContent === 'string' && decryptedContent.startsWith('[');
 
     if (message.fileUrl || (!message.ciphertext && !isPlaceholder) || !message.sessionId) {
-      // If it's a file, or if there's no ciphertext and the current content is not a placeholder, do nothing.
+      return;
+    }
+
+    if (!isPlaceholder || decryptionAttemptedRef.current) {
       return;
     }
 
     let isMounted = true;
     const tryDecrypt = async () => {
-      // Always use the original ciphertext for decryption attempts
+      decryptionAttemptedRef.current = true;
       const sourceCipher = message.ciphertext || message.content;
       if (!sourceCipher) return;
 
@@ -81,13 +91,10 @@ const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversa
       }
     };
 
-    // Only try to decrypt if the current state is a placeholder (e.g., "[Requesting key...]")
-    if (isPlaceholder) {
-      tryDecrypt();
-    }
+    tryDecrypt();
     
     return () => { isMounted = false; };
-  }, [decryptedContent, message.ciphertext, message.content, message.conversationId, message.sessionId, lastKeychainUpdate, message.fileUrl]);
+  }, [message.ciphertext, message.content, message.conversationId, message.sessionId, lastKeychainUpdate, message.fileUrl]);
 
   const isPlaceholder = !decryptedContent || (typeof decryptedContent === 'string' && decryptedContent.startsWith('['));
   const isImage = message.fileType?.startsWith('image/');
@@ -159,7 +166,7 @@ const MessageItem = ({ message, conversation, isHighlighted, onImageClick, isFir
     const observer = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting) {
         const alreadyRead = message.statuses?.some(s => s.userId === meId && s.status === 'READ');
-      if (!alreadyRead) {
+        if (!alreadyRead) {
           getSocket().emit('message:mark_as_read', { messageId: message.id, conversationId: message.conversationId });
         }
         observer.disconnect();
@@ -179,9 +186,21 @@ const MessageItem = ({ message, conversation, isHighlighted, onImageClick, isFir
       </div>
     );
   }
+  const { removeMessage, addOptimisticMessage } = useMessageStore(state => ({
+    removeMessage: state.removeMessage,
+    addOptimisticMessage: state.addOptimisticMessage,
+  }));
   const handleDelete = () => {
     showConfirm('Delete Message', 'Are you sure you want to permanently delete this message?', () => {
-      api(`/api/messages/${message.id}`, { method: 'DELETE' }).catch(console.error);
+      // Optimistically remove the message from the UI
+      removeMessage(message.conversationId, message.id);
+      // Call the API to delete the message from the server
+      api(`/api/messages/${message.id}`, { method: 'DELETE' }).catch((error) => {
+        // If the API call fails, revert the change by re-adding the message
+        console.error("Failed to delete message:", error);
+        toast.error("Failed to delete message.");
+        addOptimisticMessage(message.conversationId, message);
+      });
     });
   };
 
@@ -209,7 +228,7 @@ const MessageItem = ({ message, conversation, isHighlighted, onImageClick, isFir
               <DropdownMenu.Content sideOffset={5} align="center" className="min-w-[150px] bg-surface/80 backdrop-blur-sm rounded-md shadow-lg z-50 p-1">
                 <DropdownMenu.Item onSelect={() => setReplyingTo(message)} className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-text-secondary hover:bg-secondary rounded cursor-pointer outline-none"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>Reply</DropdownMenu.Item>
                 <ReactionPopover message={message}><div className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-text-secondary hover:bg-secondary rounded cursor-pointer outline-none"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 100-2 1 1 0 000 2zm7-1a1 1 0 11-2 0 1 1 0 012 0zm-.464 5.535a.75.75 0 01.028.022l.028.027a.75.75 0 01.027.028l.027.028a.75.75 0 01.022.028l.022.028a.75.75 0 01.016.023l.016.023a.75.75 0 01.01.016l.01.016c.004.005.007.01.01.015l.004.005a.75.75 0 01.005.004l.005.004a.75.75 0 01.002.002l.002.002a.75.75 0 010 .004c0 .001 0 .002 0 .002a.75.75 0 01-.004 0l-.002-.002a.75.75 0 01-.005-.004l-.005-.004a.75.75 0 01-.01-.015l-.01-.016a.75.75 0 01-.016-.023l-.016-.023a.75.75 0 01-.022-.028l-.022-.028a.75.75 0 01-.027-.028l-.027-.028a.75.75 0 01-.028-.022l-.028-.027a.75.75 0 01-.022-.028l-.022-.028a.75.75 0 01-.016-.023l-.016-.023a.75.75 0 01-.01-.016l-.01-.016a.75.75 0 01-.005-.004l-.005-.004a.75.75 0 01-.002-.002l-.002-.002a.75.75 0 010-.004c.09.34.26.65.49.93a.75.75 0 01-1.06 1.06 5.25 5.25 0 00-1.5 3.75.75.75 0 01-1.5 0 6.75 6.75 0 011.94-4.71.75.75 0 011.06-1.06z" clipRule="evenodd" /></svg>React</div></ReactionPopover>
-                {mine && <DropdownMenu.Item onSelect={handleDelete} className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-destructive hover:bg-destructive hover:text-destructive-foreground rounded cursor-pointer outline-none"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>Delete Message</DropdownMenu.Item>}
+                {mine && !message.optimistic && <DropdownMenu.Item onSelect={handleDelete} className="flex items-center gap-2 w-full text-left px-3 py-2 text-sm text-destructive hover:bg-destructive hover:text-destructive-foreground rounded cursor-pointer outline-none"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clipRule="evenodd" /></svg>Delete Message</DropdownMenu.Item>}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>

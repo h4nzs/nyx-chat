@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getLinkPreview } from "link-preview-js";
+import { getSecureLinkPreview } from "../utils/secureLinkPreview.js";
 import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
@@ -11,7 +11,7 @@ router.post("/", requireAuth, async (req, res, next) => {
   }
 
   try {
-    const preview = await getLinkPreview(url);
+    const preview = await getSecureLinkPreview(url);
     if ('title' in preview) {
       res.json(preview);
     } else {

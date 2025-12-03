@@ -39,19 +39,22 @@ export default function RestorePage() {
         throw new Error("Failed to derive a valid 32-byte seed from the phrase.");
       }
 
-      // 2. Deterministically re-derive the specific seeds for encryption and signing
+      // 2. Deterministically re-derive the specific seeds
       const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
       const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));
+      const signedPreKeySeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
 
       // 3. Re-generate the exact same key pairs from the derived seeds
       const encryptionKeyPair = sodium.crypto_box_seed_keypair(encryptionSeed);
       const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
+      const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
 
-      // 4. Encrypt and store the retrieved private keys (including the master seed) with the NEW password
+      // 4. Encrypt and store all three retrieved private keys with the NEW password
       const encryptedPrivateKeys = await storePrivateKeys(
         { 
           encryption: encryptionKeyPair.privateKey, 
           signing: signingKeyPair.privateKey,
+          signedPreKey: signedPreKeyPair.privateKey,
           masterSeed: masterSeed 
         },
         password

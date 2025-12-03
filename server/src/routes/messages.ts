@@ -2,8 +2,10 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getIo } from "../socket.js";
-import { getLinkPreview } from "link-preview-js";
+import { getSecureLinkPreview } from "../utils/secureLinkPreview.js";
 import { sendPushNotification } from "../utils/sendPushNotification.js";
+import fs from 'fs/promises';
+import path from 'path';
 
 const router = Router();
 router.use(requireAuth);
@@ -77,7 +79,7 @@ router.post("/", async (req, res, next) => {
       const urls = content.match(urlRegex);
       if (urls && urls.length > 0) {
         try {
-          const preview = await getLinkPreview(urls[0]);
+          const preview = await getSecureLinkPreview(urls[0]);
           if ('title' in preview && 'description' in preview && 'images' in preview) {
             linkPreviewData = {
               url: preview.url,
@@ -138,6 +140,21 @@ router.delete("/:id", async (req, res, next) => {
     const message = await prisma.message.findUnique({ where: { id } });
     if (!message) return res.status(404).json({ error: "Message not found" });
     if (message.senderId !== userId) return res.status(403).json({ error: "You can only delete your own messages" });
+
+    // If the message has a file, delete the physical file
+    if (message.fileUrl) {
+      try {
+        // Reconstruct the local file path from the fileUrl
+        // fileUrl typically looks like /uploads/category/filename.ext
+        const relativeFilePath = message.fileUrl.replace('/uploads/', '');
+        const localFilePath = path.join(process.cwd(), 'uploads', relativeFilePath);
+        await fs.unlink(localFilePath);
+        console.log(`[File Delete] Successfully deleted physical file: ${localFilePath}`);
+      } catch (fileError: any) {
+        console.error(`[File Delete Error] Failed to delete physical file for message ${id}: ${fileError.message}`);
+        // Continue with DB deletion even if physical file deletion fails
+      }
+    }
 
     // Hard delete the message
     await prisma.message.delete({

@@ -1,20 +1,17 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
-import { useAuthStore, setupAndUploadPreKeyBundle } from "../store/auth";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuthStore } from "../store/auth";
 import AuthForm from "../components/AuthForm";
 import { IoFingerPrint } from "react-icons/io5";
-import toast from "react-hot-toast";
 
 export default function Login() {
   const [error, setError] = useState("");
   const [isBiometricsAvailable, setIsBiometricsAvailable] = useState(false);
   const navigate = useNavigate();
-  const location = useLocation();
 
-  const { login, loginWithBiometrics, getSigningPrivateKey } = useAuthStore(s => ({ 
+  const { login, loginWithBiometrics } = useAuthStore(s => ({ 
     login: s.login, 
     loginWithBiometrics: s.loginWithBiometrics,
-    getSigningPrivateKey: s.getSigningPrivateKey,
   }));
 
   useEffect(() => {

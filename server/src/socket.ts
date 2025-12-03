@@ -2,7 +2,6 @@ import { Server } from "socket.io";
 import type { Server as HttpServer } from "http";
 import { socketAuthMiddleware } from "./middleware/auth.js";
 import { prisma } from "./lib/prisma.js";
-import { getLinkPreview } from "link-preview-js";
 import { sendPushNotification } from "./utils/sendPushNotification.js";
 import crypto from "crypto";
 import { redisClient } from "./lib/redis.js";

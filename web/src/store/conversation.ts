@@ -248,7 +248,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       return conv.id;
     } catch (error: any) {
       console.error("Failed to start conversation using pre-keys:", error);
-      throw new Error(`Failed to establish secure conversation. ${error.message || ''} The recipient may not have encryption keys set up.`);
+      // Differentiate between user cancelling password prompt and other errors
+      if (error?.message?.includes("Password not provided")) {
+        throw new Error("Password is required to decrypt your keys and start a secure conversation.");
+      }
+      throw new Error(`Failed to establish secure conversation. ${error.message || ''}`);
     }
   },
 

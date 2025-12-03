@@ -47,6 +47,20 @@ const getFileCategory = (mimetype: string): string => {
 // Konfigurasi storage Multer
 const storage = multer.diskStorage({
   destination: (req: Request, file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
+    // If mimetype is generic, try to infer a better one from the file extension.
+    if (file.mimetype === 'application/octet-stream') {
+      const ext = path.extname(file.originalname).toLowerCase();
+      // A simple map to infer common types.
+      const extToMime: Record<string, string> = {
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
+        '.pdf': 'application/pdf', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav', '.webm': 'audio/webm'
+      };
+      if (extToMime[ext]) {
+        file.mimetype = extToMime[ext]; // Mutate the file object to fix the mimetype
+      }
+    }
+
     const category = getFileCategory(file.mimetype);
     const categoryPath = path.join(UPLOAD_DIR, category);
 

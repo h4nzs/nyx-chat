@@ -42,18 +42,6 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
   return debounced as (...args: Parameters<F>) => void;
 }
 
-
-
-const TypingIndicator = ({ conversationId }: { conversationId: string }) => {
-  const typing = usePresenceStore((s) => s.typing[conversationId] || []);
-  const meId = useAuthStore((s) => s.user?.id);
-  const typingUsers = typing.filter((id) => id !== meId);
-
-  if (typingUsers.length === 0) return null;
-
-  return <div className="text-xs text-text-secondary">typing...</div>;
-};
-
 const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conversation: Conversation; onBack: () => void; onInfoToggle: () => void; onMenuClick: () => void; }) => {
   const meId = useAuthStore((s) => s.user?.id);
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
@@ -524,7 +512,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                     const isLastInSequence = !nextMessage || nextMessage.senderId !== message.senderId;
 
                     return (
-                      <div className="px-4" key={message.id}>
+                      <div className="px-4">
                         <MessageItem 
                           message={message} 
                           conversation={conversation} 

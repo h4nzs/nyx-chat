@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { useAuthStore } from '@store/auth';
 
 const API_URL = (import.meta.env.VITE_API_URL as string) || "http://localhost:4000";
 
@@ -105,8 +106,14 @@ export async function authFetch<T>(
         if (refreshRes.ok) {
           return await api<T>(url, options);
         }
+        // If refresh fails, clear caches and throw original error
+        useAuthStore.getState().clearPrivateKeysCache();
         throw err;
       } catch {
+        // This catch block handles failure of the refresh token endpoint itself
+        useAuthStore.getState().clearPrivateKeysCache();
+        // Force a logout to clear all state
+        useAuthStore.getState().logout();
         throw err;
       }
     }

@@ -287,9 +287,10 @@ router.post("/:id/participants", async (req, res, next) => {
     const currentUserId = req.user.id;
 
     const adminParticipant = await prisma.participant.findFirst({
-      where: { conversationId, userId: currentUserId },
+      where: { conversationId, userId: currentUserId, role: "ADMIN" },
     });
-    if (!adminParticipant || adminParticipant.role !== "ADMIN") {
+
+    if (!adminParticipant) {
       return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
     }
 
@@ -298,16 +299,25 @@ router.post("/:id/participants", async (req, res, next) => {
       userId,
     }));
 
-    await prisma.participant.createMany({
-      data: newParticipantsData,
-      skipDuplicates: true,
-    });
+    // --- Start Transaction ---
+    const newParticipants = await prisma.$transaction(async (tx) => {
+      await tx.participant.createMany({
+        data: newParticipantsData,
+        skipDuplicates: true,
+      });
 
-    const newParticipants = await prisma.participant.findMany({
-      where: { conversationId, userId: { in: userIds } },
-      include: { user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true } } },
+      // Rotate session keys to include the new participants, now within the transaction
+      await rotateAndDistributeSessionKeys(conversationId, currentUserId, tx);
+      
+      // Fetch the newly added participants to return them
+      return await tx.participant.findMany({
+        where: { conversationId, userId: { in: userIds } },
+        include: { user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true } } },
+      });
     });
+    // --- End Transaction ---
 
+    // --- Notifications can now be sent after the transaction is successful ---
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
       include: { participants: { include: { user: true } }, creator: true },
@@ -319,8 +329,6 @@ router.post("/:id/participants", async (req, res, next) => {
     newParticipants.forEach(p => {
       io.to(p.userId).emit("conversation:new", conversation);
     });
-
-    await rotateAndDistributeSessionKeys(conversationId, currentUserId);
 
     res.status(201).json(newParticipants);
   } catch (error) {

@@ -154,27 +154,67 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   uploadFile: async (conversationId, file) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const uploadId = addActivity({ type: 'upload', fileName: file.name, progress: 0 });
+    const tempId = Date.now();
+    const { user } = useAuthStore.getState();
+    if (!user) return;
+    
+    // 1. Create optimistic message
+    const optimisticMessage: Message = {
+      id: `temp_${tempId}`,
+      tempId: tempId,
+      optimistic: true,
+      sender: user,
+      senderId: user.id,
+      createdAt: new Date().toISOString(),
+      conversationId,
+      reactions: [],
+      statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${tempId}`, id: `temp_status_${tempId}` }],
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+      fileUrl: URL.createObjectURL(file) // Use local blob URL for instant preview
+    };
+    get().addOptimisticMessage(conversationId, optimisticMessage);
+    useConversationStore.getState().updateConversationLastMessage(conversationId, optimisticMessage);
+    
     try {
       updateActivity(uploadId, { progress: 10 });
+      // 2. Encrypt file and its key
       const { encryptedBlob, key: fileKey } = await encryptFile(file);
+      const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(fileKey, conversationId);
       updateActivity(uploadId, { progress: 40 });
+
+      // 3. Upload file and send message data
       const formData = new FormData();
       formData.append('file', encryptedBlob, file.name);
-      const uploadRes = await apiUpload<{ file: { url: string } }>(`/api/uploads/${conversationId}/upload`, formData);
-      updateActivity(uploadId, { progress: 90 });
-      await get().sendMessage(conversationId, {
-        fileUrl: uploadRes.file.url,
-        fileName: file.name,
-        fileType: `${file.type};encrypted=true`,
-        fileSize: file.size,
-        fileKey,
+      formData.append('sessionId', sessionId);
+      formData.append('fileKey', encryptedFileKey);
+      formData.append('tempId', tempId.toString());
+      // Append other relevant data
+      formData.append('fileType', file.type);
+      formData.append('fileSize', file.size.toString());
+      
+      await apiUpload<Message>({
+        path: `/api/uploads/${conversationId}/upload`, 
+        formData,
+        onUploadProgress: (p) => updateActivity(uploadId, { progress: 40 + (p * 0.5) }) // Scale progress to 40-90 range
       });
+      
       updateActivity(uploadId, { progress: 100 });
+      // 4. Konfirmasi dan penggantian pesan optimistik sekarang ditangani oleh event listener 'message:new' di socket.ts
+      // untuk menyatukan alur logika dan menghindari race condition.
       setTimeout(() => removeActivity(uploadId), 1000);
     } catch (error) {
       removeActivity(uploadId);
       console.error("File upload failed:", error);
       toast.error(`Failed to upload ${file.name}.`);
+      // Mark optimistic message as failed
+      set(state => ({
+        messages: {
+          ...state.messages,
+          [conversationId]: state.messages[conversationId]?.map(m => m.tempId === tempId ? { ...m, error: true } : m) || [],
+        },
+      }));
     }
   },
 
@@ -228,7 +268,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     }
   },
 
-  addOptimisticMessage: (conversationId, message) => set(state => ({ messages: { ...state.messages, [conversationId]: [...(state.messages[conversationId] || []), message] } })),
+  addOptimisticMessage: (conversationId, message) => {
+    console.log("Adding optimistic message:", message);
+    set(state => ({ messages: { ...state.messages, [conversationId]: [...(state.messages[conversationId] || []), message] } }))
+  },
   addIncomingMessage: (conversationId, message) => set(state => {
     const currentMessages = state.messages[conversationId] || [];
     if (currentMessages.some(m => m.id === message.id)) return state;

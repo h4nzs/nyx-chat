@@ -53,16 +53,22 @@ export default function ReactionPopover({ message, children }: ReactionPopoverPr
         method: 'POST',
         body: JSON.stringify({ emoji, tempId }),
       });
-      // If user had a previous reaction, now delete it on the server
+
+      // If that succeeds, try to delete the old one, but don't revert the new one if this fails.
       if (userReaction) {
-        await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
+        try {
+          await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
+        } catch (deleteError) {
+          console.error("Failed to delete old reaction, but new reaction was successful:", deleteError);
+          // The UI is already showing the new state, which is fine.
+          // The old reaction might reappear on refresh, which is an acceptable inconsistency for now.
+        }
       }
     } catch (error) {
+      // This outer catch only handles the failure of the POST request.
+      console.error("Failed to add new reaction:", error);
       // Revert all optimistic changes on failure
-      console.error("Failed to update reaction:", error);
-      // Remove the optimistic reaction
       removeReaction(message.conversationId, message.id, tempId);
-      // Re-add the original reaction if there was one
       if (userReaction) {
         addReaction(message.conversationId, message.id, userReaction);
       }

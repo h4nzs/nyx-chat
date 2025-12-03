@@ -40,9 +40,10 @@ export default function Chat() {
   const [isTourOpen, setIsTourOpen] = useState(false);
 
   const activeConversation = conversations.find(c => c.id === activeId);
-  const peerUser = activeConversation && !activeConversation.isGroup 
-    ? activeConversation.participants.find(p => p.id !== user?.id) 
-    : null;
+  const peerUser =
+    user && activeConversation && !activeConversation.isGroup
+      ? activeConversation.participants.find(p => p.id !== user.id)
+      : null;
 
   // Load initial conversations
   useEffect(() => {
