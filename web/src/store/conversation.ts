@@ -7,6 +7,7 @@ import { useAuthStore, User } from './auth';
 import { getSodium } from '@lib/sodiumInitializer';
 import { establishSessionFromPreKeyBundle } from '@utils/crypto';
 import { addSessionKey } from '@lib/keychainDb';
+import toast from 'react-hot-toast';
 
 // --- Type Definitions ---
 
@@ -42,6 +43,7 @@ export type Participant = {
   description?: string | null;
   avatarUrl?: string | null;
   role: "ADMIN" | "MEMBER";
+  isPinned?: boolean;
 };
 
 export type Conversation = {
@@ -61,7 +63,17 @@ export type Conversation = {
 // --- Helper Functions ---
 
 const sortConversations = (list: Conversation[]) =>
-  [...list].sort((a, b) => new Date(b.lastMessage?.createdAt || b.updatedAt).getTime() - new Date(a.lastMessage?.createdAt || a.updatedAt).getTime());
+  [...list].sort((a, b) => {
+    // First, sort by pinned status (pinned conversations first)
+    const aIsPinned = a.participants.some(p => p.isPinned);
+    const bIsPinned = b.participants.some(p => p.isPinned);
+
+    if (aIsPinned && !bIsPinned) return -1;
+    if (!aIsPinned && bIsPinned) return 1;
+
+    // If both are pinned or both are not pinned, sort by last message time
+    return new Date(b.lastMessage?.createdAt || b.updatedAt).getTime() - new Date(a.lastMessage?.createdAt || a.updatedAt).getTime();
+  });
 
 const withPreview = (msg: Message): Message => {
   if (msg.content) {
@@ -161,7 +173,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         return {
           ...c,
           lastMessage,
-          participants: c.participants.map((p: any) => ({ ...p.user, description: p.user.description, role: p.role })),
+          participants: c.participants.map((p: any) => ({
+            ...p.user,
+            description: p.user.description,
+            role: p.role,
+            isPinned: p.isPinned  // Include the pinned status
+          })),
         };
       }));
 
@@ -193,13 +210,30 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     authFetch(`/api/conversations/${id}/read`, { method: 'POST' }).catch(console.error);
   },
 
-  deleteConversation: async (id) => { 
-    await authFetch(`/api/conversations/${id}`, { method: 'DELETE' });
-    get().removeConversation(id);
+  deleteConversation: async (id) => {
+    try {
+      await authFetch(`/api/conversations/${id}`, { method: 'DELETE' });
+      get().removeConversation(id);
+    } catch (error: any) {
+      console.error("Failed to delete conversation:", error);
+      const errorMessage = error.message || "Failed to delete conversation.";
+      toast.error(errorMessage);
+    }
   },
-  deleteGroup: async (id) => { 
-    await authFetch(`/api/conversations/${id}`, { method: 'DELETE' });
-    get().removeConversation(id);
+  deleteGroup: async (id) => {
+    try {
+      await authFetch(`/api/conversations/${id}`, { method: 'DELETE' });
+      get().removeConversation(id);
+    } catch (error: any) {
+      console.error("Failed to delete group:", error);
+      // Check if error is an ApiError with status property
+      if (error.status === 403) {
+        toast.error("Only the group creator can delete the group.");
+      } else {
+        const errorMessage = error.message || "Failed to delete group.";
+        toast.error(errorMessage);
+      }
+    }
   },
   toggleSidebar: () => set(s => ({ isSidebarOpen: !s.isSidebarOpen })),
 
@@ -318,7 +352,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
-          const newParticipants = participants.map((p: any) => ({ ...p.user, description: p.user.description, role: p.role }));
+          const newParticipants = participants.map((p: any) => ({
+            ...p.user,
+            description: p.user.description,
+            role: p.role,
+            isPinned: p.isPinned  // Include the pinned status
+          }));
           return {
             ...c,
             participants: [...c.participants, ...newParticipants],
@@ -363,5 +402,69 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const otherConversations = state.conversations.filter(c => c.id !== conversationId);
       return { conversations: sortConversations([updatedConversation, ...otherConversations]) };
     });
+  },
+
+  togglePinConversation: async (conversationId) => {
+    try {
+      // Optimistically update the UI
+      set(state => {
+        const updatedConversations = state.conversations.map(conversation => {
+          if (conversation.id === conversationId) {
+            const updatedParticipants = conversation.participants.map(participant => {
+              if (participant.id === useAuthStore.getState().user?.id) {
+                return { ...participant, isPinned: !participant.isPinned };
+              }
+              return participant;
+            });
+            return { ...conversation, participants: updatedParticipants };
+          }
+          return conversation;
+        });
+        return { conversations: sortConversations(updatedConversations) };
+      });
+
+      // Call the API to update the server
+      const response = await authFetch<{ isPinned: boolean }>(`/api/conversations/${conversationId}/pin`, {
+        method: 'POST',
+      });
+
+      // Update the UI based on the server response
+      set(state => {
+        const updatedConversations = state.conversations.map(conversation => {
+          if (conversation.id === conversationId) {
+            const updatedParticipants = conversation.participants.map(participant => {
+              if (participant.id === useAuthStore.getState().user?.id) {
+                return { ...participant, isPinned: response.isPinned };
+              }
+              return participant;
+            });
+            return { ...conversation, participants: updatedParticipants };
+          }
+          return conversation;
+        });
+        return { conversations: sortConversations(updatedConversations) };
+      });
+    } catch (error: any) {
+      console.error("Failed to toggle pinned conversation", error);
+      // Show error toast
+      const errorMessage = error.message || "Failed to toggle pinned conversation.";
+      toast.error(errorMessage);
+      // If the API call fails, revert the optimistic update
+      set(state => {
+        const updatedConversations = state.conversations.map(conversation => {
+          if (conversation.id === conversationId) {
+            const updatedParticipants = conversation.participants.map(participant => {
+              if (participant.id === useAuthStore.getState().user?.id) {
+                return { ...participant, isPinned: !participant.isPinned }; // Revert to original state
+              }
+              return participant;
+            });
+            return { ...conversation, participants: updatedParticipants };
+          }
+          return conversation;
+        });
+        return { conversations: sortConversations(updatedConversations) };
+      });
+    }
   },
 }));

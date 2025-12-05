@@ -26,10 +26,11 @@ router.get("/", async (req, res, next) => {
       },
       include: {
         participants: {
-          include: {
+          select: {
             user: {
               select: { id: true, username: true, name: true, avatarUrl: true, description: true },
             },
+            isPinned: true,  // Include the isPinned field
           },
         },
         messages: {
@@ -520,6 +521,45 @@ router.delete("/:id", async (req, res, next) => {
     }
 
     res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Toggle pin status of a conversation
+router.post("/:id/pin", async (req, res, next) => {
+  try {
+    const { id: conversationId } = req.params;
+    const userId = req.user.id;
+
+    // Check if the user is a participant of the conversation
+    const participant = await prisma.participant.findUnique({
+      where: {
+        userId_conversationId: {
+          userId: userId,
+          conversationId: conversationId
+        }
+      }
+    });
+
+    if (!participant) {
+      return res.status(404).json({ error: "You are not a participant of this conversation." });
+    }
+
+    // Toggle the isPinned status
+    const updatedParticipant = await prisma.participant.update({
+      where: {
+        userId_conversationId: {
+          userId: userId,
+          conversationId: conversationId
+        }
+      },
+      data: {
+        isPinned: !participant.isPinned
+      }
+    });
+
+    res.json({ isPinned: updatedParticipant.isPinned });
   } catch (error) {
     next(error);
   }

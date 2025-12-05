@@ -84,6 +84,7 @@ model Participant {
   joinedAt       DateTime     @default(now())
   lastReadMsgId  String?
   role           String       @default("MEMBER")
+  isPinned       Boolean      @default(false)
 
   @@unique([userId, conversationId])
   @@index([conversationId])

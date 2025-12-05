@@ -19,6 +19,7 @@ export function useChatList() {
       clearError,
       deleteGroup,
       deleteConversation,
+      togglePinConversation,
     } = useConversationStore(state => ({
       conversations: state.conversations,
       error: state.error,
@@ -28,6 +29,7 @@ export function useChatList() {
       clearError: state.clearError,
       deleteGroup: state.deleteGroup,
       deleteConversation: state.deleteConversation,
+      togglePinConversation: state.togglePinConversation,
     }));
   
     const onlineUsers = usePresenceStore(state => state.onlineUsers);
@@ -101,5 +103,6 @@ export function useChatList() {
       handleRetry,
       deleteGroup,
       deleteConversation,
+      togglePinConversation,
     };
   }
