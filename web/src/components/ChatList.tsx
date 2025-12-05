@@ -90,6 +90,7 @@ const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, 
   const title = conversation.isGroup ? conversation.title : peerUser?.name || 'Conversation';
   const isOnline = peerUser ? presence.includes(peerUser.id) : false;
   const isUnread = conversation.unreadCount > 0;
+  const isPinnedByMe = Boolean(conversation.participants?.some(p => p.id === meId && p.isPinned));
 
   const avatarSrc = conversation.isGroup 
     ? (conversation.avatarUrl ? `${toAbsoluteUrl(conversation.avatarUrl)}?t=${conversation.lastUpdated}` : `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`)
@@ -136,7 +137,7 @@ const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, 
         <div className="flex-1 min-w-0 cursor-pointer">
           <div className="flex justify-between items-start">
             <div className="flex items-center">
-              {conversation.participants.some(p => p.id === meId && p.isPinned) && (
+              {isPinnedByMe && (
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-accent flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
                   <circle cx="12" cy="10" r="3"></circle>
@@ -173,7 +174,7 @@ const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, 
                 onSelect={() => onTogglePin(conversation.id)}
                 className="block w-full text-left px-3 py-2 text-sm rounded cursor-pointer outline-none hover:bg-secondary"
               >
-                {conversation.participants.some(p => p.id === meId && p.isPinned) ? (
+                {isPinnedByMe ? (
                   <>
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <line x1="2" y1="5" x2="22" y2="5"/>

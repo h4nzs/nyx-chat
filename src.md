@@ -1,42 +1,30 @@
-1. Modifikasi Skema Database (`prisma/schema.prisma`):
-       * Saya akan menambahkan satu kolom baru ke model Participant: isPinned Boolean
-         @default(false).
+Plan for Markdown Message Formatting Implementation
 
-   2. Jalankan Migrasi Database:
-       * Setelah skema diperbarui, saya akan menjalankan prisma migrate untuk menerapkan
-         perubahan ke database.
+  1. Frontend Changes:
+   - Message Display: Create a MarkdownMessage component that uses a library like
+     react-markdown to render formatted text
+   - Message Input: Enhance the message input field with formatting indicators (showing
+     text as bold, etc.) or a toolbar for formatting
+   - Security: Implement proper sanitization to prevent XSS attacks when rendering Markdown
 
-   3. Buat Endpoint API Baru (`server/src/routes/conversations.ts`):
-       * Saya akan membuat endpoint POST baru, misalnya /api/conversations/:id/pin.
-       * Endpoint ini akan digunakan untuk mengubah status isPinned (dari true ke false dan
-         sebaliknya) untuk partisipan (pengguna yang sedang login) di percakapan tersebut.
+  2. Backend Changes:
+   - Message Storage: Messages will continue to be stored as plain text in the database
+   - API Updates: No changes needed to API endpoints, as formatting is handled client-side
 
-  Tahap 2: Frontend (UI/UX)
+  3. Technical Approach:
+   - Use a Markdown library like react-markdown or marked for rendering
+   - Ensure basic formatting support: bold, italic, strikethrough, code blocks, and code
+     snippets
+   - Apply sanitization using DOMPurify to prevent XSS attacks
 
-   1. Ambil Status `isPinned`:
-       * Saya akan memastikan data isPinned dikirim dari server ke klien saat memuat daftar
-         percakapan.
+  4. Integration Points:
+   - Update MessageItem component to use the new Markdown renderer
+   - Update the message display logic in ChatWindow
+   - Ensure the formatting works in both sent and received messages
 
-   2. Perbarui Logika Penyortiran (`web/src/store/conversation.ts`):
-       * Fungsi sortConversations akan saya perbarui untuk mengurutkan berdasarkan isPinned
-         terlebih dahulu.
-
-   3. Buat Aksi Baru di Store (`web/src/store/conversation.ts`):
-       * Saya akan membuat action baru, togglePinConversation(conversationId).
-       * Action ini akan secara optimistis memperbarui UI, lalu memanggil endpoint API yang
-         kita buat di Tahap 1.
-
-   4. Perbarui UI (`web/src/components/ChatItem.tsx`):
-       * Saya akan memodifikasi menu dropdown tiga titik yang sudah ada di setiap item
-         chat.
-       * Saya akan menambahkan entri baru seperti "Sematkan Percakapan" atau "Lepas Sematan
-         Percakapan" sesuai dengan status isPinned saat ini.
-
-
-Format Pesan (Markdown): Mengizinkan pengguna untuk memformat teks menggunakan
-      Markdown sederhana, seperti *tebal*, _miring_, ~coret~, atau  ``blok kode`` . Fitur
-      ini sangat disukai oleh pengguna teknis.
-
+  This approach ensures that the Markdown formatting is implemented securely and works
+  consistently across the application without requiring changes to the database schema or
+  API structure.
 
   - Maybe Mute/Unmute or other notification settings
   - Maybe View Info or Settings

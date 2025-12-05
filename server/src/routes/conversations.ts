@@ -189,10 +189,11 @@ router.get("/:id", async (req, res, next) => {
       },
       include: {
         participants: {
-          include: {
+          select: {
             user: {
               select: { id: true, username: true, name: true, avatarUrl: true, description: true },
             },
+            isPinned: true,  // Include the isPinned field
           },
         },
         creator: {

@@ -62,11 +62,11 @@ export type Conversation = {
 
 // --- Helper Functions ---
 
-const sortConversations = (list: Conversation[]) =>
+const sortConversations = (list: Conversation[], currentUserId: string) =>
   [...list].sort((a, b) => {
     // First, sort by pinned status (pinned conversations first)
-    const aIsPinned = a.participants.some(p => p.isPinned);
-    const bIsPinned = b.participants.some(p => p.isPinned);
+    const aIsPinned = a.participants.some(p => p.id === currentUserId && p.isPinned);
+    const bIsPinned = b.participants.some(p => p.id === currentUserId && p.isPinned);
 
     if (aIsPinned && !bIsPinned) return -1;
     if (!aIsPinned && bIsPinned) return 1;
@@ -182,7 +182,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         };
       }));
 
-      set({ conversations: sortConversations(conversations) });
+      set({ conversations: sortConversations(conversations, useAuthStore.getState().user?.id) });
       useVerificationStore.getState().loadInitialStatus(conversations);
 
       const socket = getSocket();
@@ -305,11 +305,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           unreadCount: conversation.unreadCount ?? existing.unreadCount,
         };
         return {
-          conversations: sortConversations(state.conversations.map(c => c.id === conversation.id ? updated : c))
+          conversations: sortConversations(state.conversations.map(c => c.id === conversation.id ? updated : c), useAuthStore.getState().user?.id)
         };
       } else {
         return {
-          conversations: sortConversations([conversation, ...state.conversations])
+          conversations: sortConversations([conversation, ...state.conversations], useAuthStore.getState().user?.id)
         };
       }
     });
@@ -400,7 +400,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         unreadCount: state.activeId === conversationId ? 0 : (conversation.unreadCount || 0) + 1,
       };
       const otherConversations = state.conversations.filter(c => c.id !== conversationId);
-      return { conversations: sortConversations([updatedConversation, ...otherConversations]) };
+      return { conversations: sortConversations([updatedConversation, ...otherConversations], useAuthStore.getState().user?.id) };
     });
   },
 
@@ -420,7 +420,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           }
           return conversation;
         });
-        return { conversations: sortConversations(updatedConversations) };
+        return { conversations: sortConversations(updatedConversations, useAuthStore.getState().user?.id) };
       });
 
       // Call the API to update the server
@@ -442,7 +442,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           }
           return conversation;
         });
-        return { conversations: sortConversations(updatedConversations) };
+        return { conversations: sortConversations(updatedConversations, useAuthStore.getState().user?.id) };
       });
     } catch (error: any) {
       console.error("Failed to toggle pinned conversation", error);
@@ -463,7 +463,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           }
           return conversation;
         });
-        return { conversations: sortConversations(updatedConversations) };
+        return { conversations: sortConversations(updatedConversations, useAuthStore.getState().user?.id) };
       });
     }
   },
