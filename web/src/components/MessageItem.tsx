@@ -21,6 +21,7 @@ import { decryptMessage } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
 import { useMessageStore } from '@store/message';
 import toast from 'react-hot-toast';
+import MarkdownMessage from './MarkdownMessage';
 
 const MessageStatusIcon = ({ message, conversation }: { message: Message; conversation: Conversation | undefined }) => {
   const meId = useAuthStore((s) => s.user?.id);
@@ -48,7 +49,9 @@ const ReplyQuote = ({ message }: { message: Message }) => {
   return (
     <div className="mb-1.5 p-2 rounded-lg bg-black/20 border-l-4 border-accent/50">
       <p className="text-xs font-bold text-accent/80">{authorName}</p>
-      <p className="text-text-primary/70 truncate text-sm">{contentPreview}</p>
+      <div className="text-text-primary/70 truncate text-sm">
+        <MarkdownMessage content={contentPreview} />
+      </div>
     </div>
   );
 };
@@ -119,7 +122,7 @@ const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversa
       {isVoiceMessage && message.fileUrl && <div className="p-2 w-[250px]"><VoiceMessagePlayer message={message} /></div>}
       {message.fileUrl && isImage && <button onClick={() => onImageClick(message)} className="block w-full"><LazyImage message={message} alt={message.fileName || 'Image attachment'} className="rounded-lg max-h-80 w-full object-cover cursor-pointer" /></button>}
       {message.fileUrl && !isImage && !isVoiceMessage && <FileAttachment message={message} />}
-      {!message.fileUrl && (isPlaceholder ? <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{decryptedContent}</p> : <p className="text-base whitespace-pre-wrap break-words">{decryptedContent}</p>)}
+      {!message.fileUrl && (isPlaceholder ? <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{decryptedContent}</p> : <div className="text-base whitespace-pre-wrap break-words"><MarkdownMessage content={decryptedContent || ''} /></div>)}
       {message.linkPreview && <LinkPreviewCard preview={message.linkPreview} />}
       <div className={`text-xs mt-1 flex items-center gap-1.5 ${isImage ? 'absolute bottom-2 right-2 bg-black/50 text-white rounded-full px-2 py-1 pointer-events-none' : `justify-end ${mine ? 'text-accent-foreground/60' : 'text-text-secondary/80'}`}`}>
         <span>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>

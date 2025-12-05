@@ -26,5 +26,6 @@ Plan for Markdown Message Formatting Implementation
   consistently across the application without requiring changes to the database schema or
   API structure.
 
+
   - Maybe Mute/Unmute or other notification settings
   - Maybe View Info or Settings
