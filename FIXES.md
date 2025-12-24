@@ -1,80 +1,76 @@
-# Rencana Pengembangan dan Perbaikan "Chat Lite"
+Saat ini, berdasarkan analisa kode `crypto.ts` dan `socket.ts`, sepertinya aplikasi Chat Lite menggunakan pendekatan **Pairwise Encryption** (atau *Client-Side Fan-out*). Artinya, jika ada grup dengan 50 anggota, ketika User A mengirim pesan, User A harus mengenkripsi pesan itu 49 kali (satu untuk setiap kunci sesi teman). Ini memakan CPU dan baterai.
 
-Dokumen ini menguraikan rencana pengembangan jangka panjang untuk meningkatkan fungsionalitas dan keamanan aplikasi "Chat Lite" agar lebih sesuai dengan draf arsitektur E2EE (`src.md`).
+Berikut adalah saran dan solusi konkrit untuk mengatasi masalah skalabilitas ini, diurutkan dari yang paling mudah diterapkan hingga yang paling *advanced*:
 
----
+### 1. Implementasi "Sender Keys" (Solusi Paling Efektif)
 
-## 1. Implementasi *Forward Secrecy* dengan Sesi Ratchet
+Ini adalah standar industri yang digunakan oleh Signal (untuk grup) dan WhatsApp.
 
-**🎯 Tujuan:**
-Meningkatkan keamanan sesi percakapan dengan mengimplementasikan mekanisme *ratcheting*. Ini akan memastikan bahwa jika sebuah kunci sesi bocor, hanya sebagian kecil pesan yang dapat terdekripsi, bukan seluruh riwayat percakapan. Ini adalah langkah untuk menyamai Poin 3.3 di draf.
+* **Masalah Sekarang (Pairwise):**
+User A ingin kirim "Halo" ke Grup (B, C, D).
+1. Encrypt "Halo" pakai Kunci A-B.
+2. Encrypt "Halo" pakai Kunci A-C.
+3. Encrypt "Halo" pakai Kunci A-D.
+*Beban: 3x enkripsi.*
 
-**📝 Rencana Implementasi:**
-1.  **Modifikasi Kriptografi:** Ubah logika enkripsi/dekripsi dari yang menggunakan satu kunci sesi statis per percakapan menjadi sistem yang menghasilkan kunci baru untuk setiap pesan (atau setiap beberapa pesan).
-2.  **Sisi Klien (Frontend):**
-    *   Saat mengirim pesan, klien akan melakukan langkah "ratchet" untuk menghasilkan kunci pesan baru, lalu mengenkripsi pesan dengan kunci tersebut.
-    *   Saat menerima pesan, klien akan melakukan langkah "ratchet" yang sesuai untuk mendapatkan kunci yang benar untuk dekripsi.
-    *   *State* ratchet untuk setiap percakapan harus disimpan secara persisten di IndexedDB.
-3.  **Sisi Server (Backend):** Tidak ada perubahan besar yang diperlukan, karena server tetap hanya meneruskan pesan terenkripsi. Namun, format pesan mungkin perlu diperbarui untuk menyertakan informasi tentang posisi ratchet (misalnya, nomor urut pesan, kunci publik ephemeral).
 
-**⚖️ Kelayakan & Pertimbangan:**
-*   **Kelayakan:** **Sangat Kompleks.** Mengimplementasikan Double Ratchet Algorithm secara penuh sangatlah sulit dan rawan kesalahan, terutama dengan sinkronisasi multi-perangkat.
-*   **Perbedaan dengan Draf:** Draf menyebutkan "Double Ratchet" sebagai standar emas.
-*   **Saran:** Sebagai langkah awal yang lebih realistis, kita bisa mengimplementasikan **rotasi kunci sesi berbasis waktu atau jumlah pesan**, bukan *per-message ratchet*. Misalnya, secara otomatis membuat kunci sesi baru setiap 100 pesan atau setiap 24 jam. Ini memberikan "Forward Secrecy" yang lebih baik daripada sekarang, dengan kompleksitas yang lebih rendah.
+* **Solusi (Sender Keys):**
+User A membuat satu **"Chain Key"** (kunci simetris acak) khusus untuk dirinya di grup ini.
+1. User A mengenkripsi Chain Key ini *sekali saja* ke B, C, dan D menggunakan *pairwise channel* yang sudah ada. (Ini disebut tahap distribusi kunci).
+2. Untuk pesan "Halo", User A mengenkripsinya **HANYA SEKALI** menggunakan Chain Key tersebut.
+3. Kirim *ciphertext* tunggal itu ke server. Server menyebarkannya ke B, C, D.
+4. B, C, dan D sudah punya Chain Key milik A, jadi mereka bisa mendekripsinya.
 
----
 
-## 2. Notifikasi Perubahan Kunci Keamanan yang Lebih Baik
+* **Dampak:** Kompleksitas enkripsi pesan turun dari  menjadi . Beban CPU klien berkurang drastis. Ratcheting hanya terjadi pada *Chain Key* itu sendiri (Hash Ratchet), yang sangat ringan.
 
-**🎯 Tujuan:**
-Memberikan jaminan keamanan yang lebih eksplisit kepada pengguna saat kunci enkripsi kontak mereka berubah, sesuai dengan praktik terbaik aplikasi seperti Signal/WhatsApp.
+### 2. Offloading ke Web Workers (Optimasi Frontend)
 
-**📝 Rencana Implementasi:**
-1.  **Sisi Klien (Frontend):**
-    *   Saat ini, notifikasi *toast* sudah muncul saat *event* `user:identity_changed` diterima. Ini adalah langkah pertama yang bagus.
-    *   **Peningkatan:** Selain *toast*, sisipkan sebuah pesan sistem permanen di dalam jendela obrolan yang relevan, misalnya: *"Kunci keamanan untuk [Nama Kontak] telah berubah. Verifikasi identitas mereka untuk melanjutkan."*
-    *   **Fitur Verifikasi:** Buat sebuah modal atau halaman di mana pengguna bisa memverifikasi identitas kontak baru, misalnya dengan memindai QR code (jika bertemu langsung) atau membandingkan serangkaian angka ("Safety Numbers"). Setelah diverifikasi, pesan peringatan di obrolan akan hilang.
-2.  **Sisi Server (Backend):** Logika yang ada saat ini sudah cukup untuk mengirim notifikasi awal. Tidak ada perubahan besar yang diperlukan untuk tahap ini.
+Saya melihat di `chat-lite/web/src/utils/crypto.ts`, fungsi enkripsi/dekripsi berjalan di *main thread* JavaScript.
+Pada grup yang ramai, ini akan membuat UI "nge-freeze" atau patah-patah saat mendekripsi banyak pesan masuk sekaligus.
 
-**⚖️ Kelayakan & Pertimbangan:**
-*   **Kelayakan:** **Sangat Mungkin Dilakukan.** Ini sebagian besar adalah pekerjaan di sisi UI/UX dan dapat diimplementasikan secara bertahap.
+* **Solusi:** Pindahkan seluruh logika `libsodium` dan manajemen kunci ke **Web Worker**.
+* **Cara Kerja:**
+1. UI mengirim pesan mentah ke Worker.
+2. Worker melakukan kerja berat (enkripsi matematika).
+3. Worker mengembalikan *ciphertext* ke UI untuk dikirim via Socket.
 
----
 
-## 3. Dukungan Percakapan Asinkron (Pre-Keys)
+* **Keuntungan:** UI tetap 60fps mulus meskipun di latar belakang sedang mendekripsi 100 pesan gambar.
 
-**🎯 Tujuan:**
-Memungkinkan pengguna untuk memulai percakapan dan mengirim pesan pertama kepada kontak yang sedang *offline*, sesuai dengan Poin 3.2 di draf.
+### 3. "Lazy" Ratcheting (Optimasi Protokol)
 
-**📝 Rencana Implementasi:**
-1.  **Sisi Server (Backend):**
-    *   Buat model *database* baru untuk `SignedPreKey` dan `OneTimePreKey`.
-    *   Buat *endpoint* API bagi klien untuk mengunggah kunci-kunci publik ini. Server akan menyimpan dan mendistribusikannya sesuai permintaan.
-2.  **Sisi Klien (Frontend):**
-    *   Saat *login*, klien akan membuat satu `SignedPreKey` dan sekumpulan `OneTimePreKey` (misalnya, 100 kunci), lalu mengunggahnya ke server.
-    *   Saat memulai percakapan baru, klien pengirim akan meminta "paket pre-key" dari server untuk penerima.
-    *   Klien pengirim menggunakan paket ini untuk membangun sesi terenkripsi awal (menggunakan protokol seperti X3DH) dan mengirim pesan pertama.
-    *   Saat penerima *online*, ia akan menggunakan kunci privatnya untuk memproses pesan awal ini, membangun sesi, dan membalas.
+Di file `crypto.ts`, terdapat fungsi `ensureAndRatchetSession`. Jika ini dipanggil terlalu sering (misal setiap pesan), overhead jabat tangan (handshake) akan tinggi.
 
-**⚖️ Kelayakan & Pertimbangan:**
-*   **Kelayakan:** **Kompleks, tapi Mungkin Dilakukan.** Ini adalah fitur standar untuk aplikasi E2EE modern dan akan menjadi peningkatan besar bagi pengalaman pengguna. Ini adalah perubahan arsitektur yang signifikan tetapi sepadan dengan hasilnya.
+* **Solusi:** Jangan lakukan *Diffie-Hellman Ratchet* (pembaruan kunci asimetris) setiap kali kirim pesan.
+* **Strategi:** Gunakan **Hash Ratchet** (sangat cepat) untuk setiap pesan, dan simpan *Diffie-Hellman Ratchet* hanya untuk momen-momen tertentu, misalnya:
+* Setiap 50 pesan.
+* Atau hanya ketika ada anggota baru masuk/keluar grup (untuk menjaga *Post-Compromise Security*).
 
----
 
-## 4. Sinkronisasi Multi-Perangkat yang Lebih Baik
 
-**🎯 Tujuan:**
-Mencapai pengalaman multi-perangkat yang mulus di mana riwayat obrolan dan statusnya (telah dibaca, dll.) tersinkronisasi di semua perangkat milik satu pengguna, sesuai Poin 5 di draf.
+### 4. Enkripsi Media yang Efisien (Hybrid Encryption)
 
-**📝 Rencana Implementasi:**
-1.  **Fan-out Pesan:**
-    *   Saat pengguna mengirim pesan, server harus mengenkripsi dan mengirimkannya tidak hanya ke penerima, tetapi juga ke **semua perangkat lain milik si pengirim**.
-    *   Ini sangat rumit karena setiap perangkat memiliki sesi enkripsinya sendiri.
-2.  **Sinkronisasi Status:**
-    *   Saat pesan dibaca di satu perangkat, *event* harus disiarkan ke perangkat lain milik pengguna yang sama untuk menandainya sebagai telah dibaca di mana-mana.
-    *   Hal yang sama berlaku untuk menghapus atau mengedit pesan.
+Untuk file (gambar/video), pastikan kamu tidak mengenkripsi *blob* file itu berkali-kali.
+Saya melihat di `crypto.ts` fungsi `encryptFile` sudah menghasilkan `encryptedBlob` dan `key`.
 
-**⚖️ Kelayakan & Pertimbangan:**
-*   **Kelayakan:** **Sangat Sulit dan Kompleks.** Ini adalah tantangan terbesar dalam arsitektur E2EE. Sinkronisasi riwayat pesan secara aman tanpa server bisa melihat kontennya adalah masalah yang sangat sulit untuk dipecahkan di lingkungan web.
-*   **Perbedaan dengan Draf:** Draf menguraikan arsitektur ini secara ideal. Namun, dalam praktiknya, ini adalah fitur yang paling sering disederhanakan.
-*   **Saran:** Untuk saat ini, model "satu sesi aktif pada satu waktu" yang ada di aplikasi adalah kompromi yang wajar. Fokus pada tiga poin perbaikan di atas akan memberikan dampak yang jauh lebih besar dengan tingkat kesulitan yang lebih masuk akal. Fitur ini sebaiknya dianggap sebagai **tujuan jangka panjang (aspirasional)**.
+* **Pastikan Alurnya:**
+1. Enkripsi file besar (misal 5MB) **satu kali** dengan kunci acak sementara (`AES-Key`).
+2. Simpan file terenkripsi itu ke server/storage.
+3. Lalu, enkripsi `AES-Key` (yang ukurannya cuma 32 bytes) menggunakan metode *Sender Keys* (Poin 1) atau *Pairwise* ke semua anggota grup.
+
+
+* **Hasil:** Klien hanya perlu mengenkripsi ulang 32 bytes data untuk setiap anggota, bukan 5MB data.
+
+### 5. MLS (Messaging Layer Security) - Masa Depan
+
+Jika kamu ingin solusi yang benar-benar *scalable* untuk grup dengan ribuan anggota (seperti "Supergroup"), kamu bisa melirik standar IETF baru bernama **MLS**.
+
+* **Konsep:** Menggunakan struktur pohon (*TreeKEM*). Jika ada anggota keluar dari grup berisi 1000 orang, operasi *re-keying* hanya butuh logaritma langkah (), bukan linear.
+* **Catatan:** Ini sangat kompleks untuk diimplementasikan dari nol. Mengingat kamu sudah punya basis *Signal Protocol* (X3DH), pindah ke "Sender Keys" (Poin 1) adalah langkah transisi yang paling masuk akal dan *feasible*.
+
+### Rekomendasi Prioritas
+
+Saya sarankan kamu mulai dengan **Poin 2 (Web Workers)** karena itu murni perubahan arsitektur kode frontend tanpa mengubah protokol database/server. Itu akan memberikan dampak performa "terasa" yang instan bagi pengguna.
+
+Setelah itu, baru implementasikan **Poin 1 (Sender Keys)** untuk menyelesaikan masalah skalabilitas kriptografinya secara fundamental.

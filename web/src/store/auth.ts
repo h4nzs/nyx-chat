@@ -4,12 +4,15 @@ import { getSocket, disconnectSocket, connectSocket } from "@lib/socket";
 import { eraseCookie } from "@lib/tokenStorage";
 import { clearKeyCache } from "@utils/crypto";
 import { getSodium } from '@lib/sodiumInitializer';
-import { exportPublicKey, storePrivateKeys, retrievePrivateKeys, type RetrieveKeysResult } from "@utils/keyManagement";
 import { useModalStore } from "./modal";
-import * as bip39 from 'bip39';
 import { useConversationStore } from "./conversation";
 import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
+import { 
+  registerAndGenerateKeys,
+  retrievePrivateKeys,
+  type RetrieveKeysResult
+} from "@lib/crypto-worker-proxy";
 
 /**
  * Retrieves the persisted signed pre-key, signs it with the identity signing key,
@@ -22,13 +25,12 @@ export async function setupAndUploadPreKeyBundle() {
     const sodium = await getSodium();
     const signingPrivateKey = await getSigningPrivateKey();
     const signedPreKeyPair = await getSignedPreKeyPair();
-    const encryptionKeyPair = await getEncryptionKeyPair(); // Get the main identity key pair
+    const encryptionKeyPair = await getEncryptionKeyPair();
 
-    // Validation: Ensure the public key in localStorage matches the one derived from the private key
     const identityKeyFromStorage = localStorage.getItem('publicKey');
     if (!identityKeyFromStorage) throw new Error("Identity key not found in localStorage.");
 
-    const derivedIdentityKey = await exportPublicKey(encryptionKeyPair.publicKey);
+    const derivedIdentityKey = sodium.to_base64(encryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
     if (identityKeyFromStorage !== derivedIdentityKey) {
       throw new Error("CRITICAL: Stored public key does not match derived private key. Aborting pre-key bundle upload.");
@@ -39,7 +41,7 @@ export async function setupAndUploadPreKeyBundle() {
     const bundle = {
       identityKey: identityKeyFromStorage,
       signedPreKey: {
-        key: await exportPublicKey(signedPreKeyPair.publicKey),
+        key: sodium.to_base64(signedPreKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
         signature: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING),
       },
     };
@@ -110,6 +112,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
         if (!encryptedKeys) return reject(new Error("Encrypted private keys not found."));
 
+        // Use the worker proxy to retrieve keys
         const result = await retrievePrivateKeys(encryptedKeys, password);
 
         if (!result.success) {
@@ -181,26 +184,19 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     async registerAndGeneratePhrase(data) {
-      const sodium = await getSodium();
-      const masterSeed = sodium.randombytes_buf(32);
-      const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
-      const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));
-      const signedPreKeySeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
-      const encryptionKeyPair = sodium.crypto_box_seed_keypair(encryptionSeed);
-      const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
-      const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
-      const encryptionPublicKeyB64 = await exportPublicKey(encryptionKeyPair.publicKey);
-      const signingPublicKeyB64 = await exportPublicKey(signingKeyPair.publicKey);
-      const encryptedPrivateKeys = await storePrivateKeys({
-        encryption: encryptionKeyPair.privateKey,
-        signing: signingKeyPair.privateKey,
-        signedPreKey: signedPreKeyPair.privateKey,
-        masterSeed: masterSeed
-      }, data.password);
+      // All heavy crypto work is now in the worker
+      const {
+        encryptionPublicKeyB64,
+        signingPublicKeyB64,
+        encryptedPrivateKeys,
+        phrase
+      } = await registerAndGenerateKeys(data.password);
+
       localStorage.setItem('publicKey', encryptionPublicKeyB64);
       localStorage.setItem('signingPublicKey', signingPublicKeyB64);
       localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
-      const phrase = bip39.entropyToMnemonic(masterSeed);
+      
+      // The non-crypto part remains here
       await api("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({
@@ -266,6 +262,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const keys = await retrieveAndCacheKeys();
       if (!keys.encryption) throw new Error("Encryption key not found in bundle.");
       const sodium = await getSodium();
+      // This is a very lightweight operation, acceptable to keep on main thread
       const publicKey = sodium.crypto_scalarmult_base(keys.encryption);
       return { publicKey, privateKey: keys.encryption };
     },
@@ -274,6 +271,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const keys = await retrieveAndCacheKeys();
       if (!keys.signedPreKey) throw new Error("Signed pre-key not found in bundle.");
       const sodium = await getSodium();
+      // This is a very lightweight operation, acceptable to keep on main thread
       const publicKey = sodium.crypto_scalarmult_base(keys.signedPreKey);
       return { publicKey, privateKey: keys.signedPreKey };
     },

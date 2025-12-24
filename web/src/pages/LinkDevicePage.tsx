@@ -7,8 +7,8 @@ import { io, Socket } from "socket.io-client";
 import { getSodium } from '@lib/sodiumInitializer';
 import { v4 as uuidv4 } from 'uuid';
 import { useAuthStore } from '@store/auth';
-import { useModalStore } from '@store/modal';
-import { getSocket } from '@lib/socket';
+import toast from 'react-hot-toast';
+import { worker_crypto_box_seal_open, reEncryptBundleFromMasterKey } from '@lib/crypto-worker-proxy';
 
 const SERVER_URL = import.meta.env.VITE_WS_URL || "http://localhost:4000";
 
@@ -17,7 +17,6 @@ export default function LinkDevicePage() {
   const [status, setStatus] = useState<'idle' | 'generating' | 'waiting' | 'linked' | 'failed'>('generating');
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const bootstrap = useAuthStore(s => s.bootstrap);
 
   useEffect(() => {
     // Create a dedicated, isolated socket connection for this page only.
@@ -33,6 +32,7 @@ export default function LinkDevicePage() {
         const sodium = await getSodium();
         const roomId = uuidv4();
         
+        // This is a one-time lightweight operation, acceptable on the main thread.
         const linkingKeys = sodium.crypto_box_keypair();
         const linkingPubKey = sodium.to_base64(linkingKeys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
         const linkingPrivKey = sodium.to_base64(linkingKeys.privateKey, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -54,14 +54,14 @@ export default function LinkDevicePage() {
             if (!linkingPrivKeyB64 || !linkingPubKeyB64) throw new Error('Linking session expired.');
 
             const sodium = await getSodium();
-            const { storePrivateKey } = await import('@utils/keyManagement');
-
-            // Decrypt the master private key
+            
+            // Decrypt the master private key using the worker
             const encryptedMasterKeyBytes = sodium.from_base64(payload.encryptedMasterKey, sodium.base64_variants.URLSAFE_NO_PADDING);
             const linkingPubKeyBytes = sodium.from_base64(linkingPubKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
             const linkingPrivKeyBytes = sodium.from_base64(linkingPrivKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
             
-            const masterPrivateKey = sodium.crypto_box_seal_open(encryptedMasterKeyBytes, linkingPubKeyBytes, linkingPrivKeyBytes);
+            const masterPrivateKey = await worker_crypto_box_seal_open(encryptedMasterKeyBytes, linkingPubKeyBytes, linkingPrivKeyBytes);
+            if (!masterPrivateKey) throw new Error("Failed to decrypt master key.");
 
             // Prompt user for a NEW password for this device
             const { showPasswordPrompt } = (await import('@store/modal')).useModalStore.getState();
@@ -73,30 +73,32 @@ export default function LinkDevicePage() {
               }
 
               try {
-                // Re-encrypt the master key with the new password and store it
-                const encryptedKeyForStorage = await storePrivateKey(masterPrivateKey, newDevicePassword);
-                localStorage.setItem('encryptedPrivateKey', encryptedKeyForStorage);
-
+                // Re-encrypt the master key with the new password and store it, using the worker
+                const {
+                  encryptedPrivateKeys,
+                  encryptionPublicKeyB64,
+                } = await reEncryptBundleFromMasterKey(masterPrivateKey, newDevicePassword);
+                
+                localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
+                
                 // Finalize the linking process with the server
                 const { api } = await import('@lib/api');
-                const { user } = await api<{ user: any }>('/api/auth/finalize-linking', {
+                await api('/api/auth/finalize-linking', {
                   method: 'POST',
-                  body: JSON.stringify({ linkingToken: payload.linkingToken }),
+                  body: JSON.stringify({ 
+                    linkingToken: payload.linkingToken,
+                    publicKey: encryptionPublicKeyB64, // Send the derived public key for verification
+                  }),
                 });
 
-                // Store public key and user data
+                // Manually bootstrap the user without needing to hit /api/users/me
+                // We can trust the server's response after a successful finalization
+                const user = { publicKey: encryptionPublicKeyB64 };
                 localStorage.setItem('publicKey', user.publicKey);
-                useAuthStore.getState().setUser(user);
+                
+                toast.success('Device linked successfully! Please log in.');
+                setTimeout(() => navigate('/login'), 2000);
 
-                // Bootstrap the app
-                const { initSocketListeners } = (await import('@store/socket')).useSocketStore.getState();
-                initSocketListeners();
-                const { loadConversations } = (await import('@store/conversation')).useConversationStore.getState();
-                await loadConversations();
-
-                setStatus('linked');
-                toast.success('Device linked successfully!');
-                setTimeout(() => navigate('/'), 2000);
               } catch (err: any) {
                 console.error("Error during linking finalization:", err);
                 setError(err.message || 'Failed to finalize linking.');
@@ -127,7 +129,7 @@ export default function LinkDevicePage() {
       socket.off('linking:receive_payload');
       socket.disconnect();
     };
-  }, [bootstrap, navigate]);
+  }, [navigate]);
 
   const renderStatusMessage = () => {
     const messageClasses = "flex items-center gap-2";

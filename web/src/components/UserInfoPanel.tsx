@@ -4,7 +4,7 @@ import { toAbsoluteUrl } from '@utils/url';
 import { authFetch, handleApiError } from '@lib/api';
 import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
-import { generateSafetyNumber } from '@utils/keyManagement';
+import { generateSafetyNumber } from '@lib/crypto-worker-proxy';
 import { getSodium } from '@lib/sodiumInitializer';
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';

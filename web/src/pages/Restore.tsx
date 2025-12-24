@@ -1,13 +1,9 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FiKey, FiUpload } from 'react-icons/fi';
-import { useAuthStore } from '@store/auth';
 import toast from 'react-hot-toast';
 import { Spinner } from '@components/Spinner';
-import * as bip39 from 'bip39';
-import { getSodium } from '@lib/sodiumInitializer';
-import { storePrivateKeys, exportPublicKey } from "@utils/keyManagement";
-import { syncSessionKeys } from '@utils/sessionSync';
+import { restoreFromPhrase } from '@lib/crypto-worker-proxy';
 
 export default function RestorePage() {
   const [phrase, setPhrase] = useState('');
@@ -24,53 +20,35 @@ export default function RestorePage() {
     }
     setIsRestoring(true);
     try {
-      const trimmedPhrase = phrase.trim();
-      if (!bip39.validateMnemonic(trimmedPhrase)) {
-        throw new Error("Invalid recovery phrase. Please check for typos.");
-      }
+      const trimmedPhrase = phrase.trim().toLowerCase();
       
-      const sodium = await getSodium();
+      // All heavy crypto work is now in the worker
+      const {
+        encryptedPrivateKeys,
+        encryptionPublicKeyB64,
+        signingPublicKeyB64,
+      } = await restoreFromPhrase(trimmedPhrase, password);
 
-      // 1. Convert the mnemonic back to the original 32-byte entropy (master seed).
-      const masterSeedHex = bip39.mnemonicToEntropy(trimmedPhrase);
-      const masterSeed = sodium.from_hex(masterSeedHex);
-
-      if (masterSeed.length !== 32) {
-        throw new Error("Failed to derive a valid 32-byte seed from the phrase.");
+      if (!encryptedPrivateKeys) {
+        throw new Error("Failed to restore keys. The phrase may be invalid.");
       }
 
-      // 2. Deterministically re-derive the specific seeds
-      const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
-      const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));
-      const signedPreKeySeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
-
-      // 3. Re-generate the exact same key pairs from the derived seeds
-      const encryptionKeyPair = sodium.crypto_box_seed_keypair(encryptionSeed);
-      const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
-      const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
-
-      // 4. Encrypt and store all three retrieved private keys with the NEW password
-      const encryptedPrivateKeys = await storePrivateKeys(
-        { 
-          encryption: encryptionKeyPair.privateKey, 
-          signing: signingKeyPair.privateKey,
-          signedPreKey: signedPreKeyPair.privateKey,
-          masterSeed: masterSeed 
-        },
-        password
-      );
-
-      // 5. Store the new encrypted bundle and public keys in localStorage
+      // Store the new encrypted bundle and public keys in localStorage
       localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
-      localStorage.setItem('publicKey', await exportPublicKey(encryptionKeyPair.publicKey));
-      localStorage.setItem('signingPublicKey', await exportPublicKey(signingKeyPair.publicKey));
+      localStorage.setItem('publicKey', encryptionPublicKeyB64);
+      localStorage.setItem('signingPublicKey', signingPublicKeyB64);
       
       toast.success('Account restored! Please log in to sync your new keys with the server.');
       navigate('/login', { state: { from: 'restore' } });
 
     } catch (error: any) {
       console.error("Restore failed:", error);
-      toast.error(error.message || "Restore failed. Please check your phrase and try again.");
+      // Bip39 in the worker will throw an error for invalid mnemonics
+      if (error.message.includes('mnemonic')) {
+        toast.error("Invalid recovery phrase. Please check for typos and ensure all words are correct.");
+      } else {
+        toast.error(error.message || "Restore failed. Please check your phrase and try again.");
+      }
     } finally {
       setIsRestoring(false);
     }
@@ -83,7 +61,7 @@ export default function RestorePage() {
           <FiKey className="mx-auto text-accent text-5xl mb-4" />
           <h1 className="text-3xl font-bold">Restore Account</h1>
           <p className="text-text-secondary mt-2">
-            Enter your 24-word recovery phrase and set a new password for this device.
+            Enter your 12 or 24-word recovery phrase and set a new password for this device.
           </p>
         </div>
         <form onSubmit={handleRestore} className="bg-bg-surface rounded-lg shadow-lg p-8 border border-border">
@@ -96,7 +74,7 @@ export default function RestorePage() {
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
                 className="textarea textarea-bordered w-full h-28"
-                placeholder="Enter your 24-word recovery phrase, separated by spaces..."
+                placeholder="Enter your recovery phrase, separated by spaces..."
                 required
               />
             </div>
