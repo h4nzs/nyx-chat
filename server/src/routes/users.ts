@@ -89,6 +89,40 @@ router.put("/me",
   }
 );
 
+// === PUT: Update user's public keys ===
+router.put("/me/keys",
+  requireAuth,
+  zodValidate({
+    body: z.object({
+      publicKey: z.string().min(10),
+      signingKey: z.string().min(10),
+    })
+  }),
+  async (req, res, next) => {
+    try {
+      const userId = req.user.id;
+      const { publicKey, signingKey } = req.body;
+
+      const user = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          publicKey,
+          signingKey,
+        },
+        select: { id: true, name: true },
+      });
+      
+      // Notify other users that this user's identity has changed
+      io.emit('user:identity_changed', { userId: user.id, name: user.name });
+
+      res.status(200).json({ message: "Keys updated successfully." });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+
 // === POST: Update user avatar ===
 router.post("/me/avatar", requireAuth, uploadAvatar.single('avatar'), async (req, res, next) => {
   try {

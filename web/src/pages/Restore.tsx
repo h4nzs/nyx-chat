@@ -4,6 +4,7 @@ import { FiKey, FiUpload } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { Spinner } from '@components/Spinner';
 import { restoreFromPhrase } from '@lib/crypto-worker-proxy';
+import { useAuthStore } from '@store/auth';
 
 export default function RestorePage() {
   const [phrase, setPhrase] = useState('');
@@ -38,8 +39,11 @@ export default function RestorePage() {
       localStorage.setItem('publicKey', encryptionPublicKeyB64);
       localStorage.setItem('signingPublicKey', signingPublicKeyB64);
       
+      // Manually update the auth store state
+      useAuthStore.getState().setHasRestoredKeys(true);
+
       toast.success('Account restored! Please log in to sync your new keys with the server.');
-      navigate('/login', { state: { from: 'restore' } });
+      navigate('/login', { state: { restoredNotSynced: true } });
 
     } catch (error: any) {
       console.error("Restore failed:", error);

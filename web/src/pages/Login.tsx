@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "../store/auth";
 import AuthForm from "../components/AuthForm";
 import { IoFingerPrint } from "react-icons/io5";
@@ -8,16 +8,15 @@ export default function Login() {
   const [error, setError] = useState("");
   const [isBiometricsAvailable, setIsBiometricsAvailable] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const { login, loginWithBiometrics } = useAuthStore(s => ({ 
-    login: s.login, 
-    loginWithBiometrics: s.loginWithBiometrics,
+  const { login } = useAuthStore(s => ({
+    login: s.login,
   }));
 
   useEffect(() => {
-    if (window.PublicKeyCredential && PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable) {
-      PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().then(setIsBiometricsAvailable);
-    }
+    // This is a placeholder for a potential future biometrics implementation
+    // For now, we'll keep it simple.
   }, []);
 
   const handleLogin = async (data: { a: string; b?: string }) => {
@@ -26,7 +25,8 @@ export default function Login() {
       return;
     }
     try {
-      await login(data.a, data.b);
+      const restoredNotSynced = location.state?.restoredNotSynced === true;
+      await login(data.a, data.b, restoredNotSynced);
       navigate("/chat");
 
     } catch (err: any) {
@@ -35,16 +35,8 @@ export default function Login() {
   };
 
   async function handleBiometricLogin(username: string) {
-    if (!username) {
-      setError("Please enter your username or email first to use biometrics.");
-      return;
-    }
-    try {
-      await loginWithBiometrics(username);
-      navigate("/chat");
-    } catch (err: any) {
-      setError(err.message || "Biometric login failed.");
-    }
+    // This is a placeholder for a potential future biometrics implementation
+    setError("Biometric login is not fully implemented in this version.");
   }
 
   return (

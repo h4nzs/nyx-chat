@@ -78,6 +78,7 @@ type State = {
   user: User | null;
   isBootstrapping: boolean;
   sendReadReceipts: boolean;
+  hasRestoredKeys: boolean;
 };
 
 type Actions = {
@@ -92,6 +93,7 @@ type Actions = {
   updateProfile: (data: Partial<Pick<User, 'name' | 'description' | 'showEmailToOthers'>>) => Promise<void>;
   updateAvatar: (avatar: File) => Promise<void>;
   setReadReceipts: (value: boolean) => void;
+  setHasRestoredKeys: (hasKeys: boolean) => void;
   clearPrivateKeysCache: () => void;
 };
 
@@ -135,6 +137,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     user: savedUser ? JSON.parse(savedUser) : null,
     isBootstrapping: true,
     sendReadReceipts: savedReadReceipts ? JSON.parse(savedReadReceipts) : true,
+    hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys'),
+
+    setHasRestoredKeys: (hasKeys: boolean) => {
+      set({ hasRestoredKeys: hasKeys });
+    },
 
     clearPrivateKeysCache: () => {
       privateKeysCache = null;
@@ -149,28 +156,48 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     async bootstrap() {
       try {
         const me = await authFetch<User>("/api/users/me");
-        set({ user: me });
+        set({ user: me, hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys') });
         localStorage.setItem("user", JSON.stringify(me));
         connectSocket();
       } catch (error) {
         get().clearPrivateKeysCache();
-        set({ user: null });
+        set({ user: null, hasRestoredKeys: false });
         localStorage.removeItem("user");
       } finally {
         set({ isBootstrapping: false });
       }
     },
 
-    async login(emailOrUsername, password) {
+    async login(emailOrUsername, password, restoredNotSynced = false) {
       get().clearPrivateKeysCache();
       const res = await api<{ user: User }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ emailOrUsername, password }),
       });
-      set({ user: res.user });
+      const hasKeys = !!localStorage.getItem('encryptedPrivateKeys');
+      set({ user: res.user, hasRestoredKeys: hasKeys });
       localStorage.setItem("user", JSON.stringify(res.user));
       
-      if (localStorage.getItem('encryptedPrivateKeys')) {
+      // If logging in after a restore, update the public keys on the server
+      if (restoredNotSynced) {
+        try {
+          console.log("Syncing restored keys with the server...");
+          const publicKey = localStorage.getItem('publicKey');
+          const signingKey = localStorage.getItem('signingPublicKey');
+          if (!publicKey || !signingKey) throw new Error("Restored public keys not found in local storage.");
+
+          await authFetch('/api/users/me/keys', {
+            method: 'PUT',
+            body: JSON.stringify({ publicKey, signingKey }),
+          });
+          console.log("Server keys updated successfully.");
+        } catch(e) {
+          console.error("Failed to sync restored keys with server:", e);
+          toast.error("Failed to sync new keys with server. You may need to generate new keys.");
+        }
+      }
+      
+      if (hasKeys) {
         try {
           await setupAndUploadPreKeyBundle();
         } catch (e) {
@@ -195,6 +222,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       localStorage.setItem('publicKey', encryptionPublicKeyB64);
       localStorage.setItem('signingPublicKey', signingPublicKeyB64);
       localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
+      set({ hasRestoredKeys: true });
       
       // The non-crypto part remains here
       await api("/api/auth/register", {
@@ -216,7 +244,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       eraseCookie("rt");
       get().clearPrivateKeysCache();
       localStorage.removeItem('user');
-      set({ user: null });
+      set({ user: null, hasRestoredKeys: false });
       disconnectSocket();
       useConversationStore.getState().reset();
       useMessageStore.getState().reset();

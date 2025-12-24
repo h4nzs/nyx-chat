@@ -94,10 +94,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   clearTypingLinkPreview: () => set({ typingLinkPreview: null }),
 
   sendMessage: async (conversationId, data) => {
-    const tempId = Date.now();
-    const { user } = useAuthStore.getState();
+    const { user, hasRestoredKeys } = useAuthStore.getState();
     if (!user) return;
 
+    if (!hasRestoredKeys) {
+      toast.error("You must restore your keys from your recovery phrase before you can send messages.");
+      return;
+    }
+
+    const tempId = Date.now();
     try {
       const optimisticMessage: Message = {
         ...data,
@@ -152,11 +157,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   uploadFile: async (conversationId, file) => {
+    const { user, hasRestoredKeys } = useAuthStore.getState();
+    if (!user) return;
+
+    if (!hasRestoredKeys) {
+      toast.error("You must restore your keys from your recovery phrase before you can send files.");
+      return;
+    }
+
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const uploadId = addActivity({ type: 'upload', fileName: file.name, progress: 0 });
     const tempId = Date.now();
-    const { user } = useAuthStore.getState();
-    if (!user) return;
     
     // 1. Create optimistic message
     const optimisticMessage: Message = {
@@ -219,12 +230,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   loadMessagesForConversation: async (id) => {
+    const { hasRestoredKeys } = useAuthStore.getState();
     if (get().hasLoadedHistory[id]) return;
-    try {
-      await ensureAndRatchetSession(id);
-    } catch (ratchetError) {
-      console.error("Failed to establish session, decryption may fail:", ratchetError);
+
+    if (hasRestoredKeys) {
+      try {
+        await ensureAndRatchetSession(id);
+      } catch (ratchetError) {
+        console.error("Failed to establish session, decryption may fail:", ratchetError);
+      }
+    } else {
+      console.log("Skipping session ratchet: No keys restored.");
     }
+    
     try {
       set(state => ({ hasMore: { ...state.hasMore, [id]: true }, isFetchingMore: { ...state.isFetchingMore, [id]: false } }));
       const res = await api<{ items: Message[] }>(`/api/messages/${id}`);
