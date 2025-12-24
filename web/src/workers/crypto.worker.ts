@@ -281,7 +281,8 @@ self.onmessage = async (event: MessageEvent) => {
 
       case 'restoreFromPhrase': {
         const { phrase, password } = payload;
-        const masterSeed = bip39.mnemonicToEntropy(phrase);
+        const masterSeedHex = bip39.mnemonicToEntropy(phrase);
+        const masterSeed = sodium.from_hex(masterSeedHex);
 
         const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
         const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));

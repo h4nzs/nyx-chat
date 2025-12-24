@@ -1,13 +1,17 @@
 // web/src/lib/crypto-worker-proxy.ts
 
 // Create a new worker instance.
-// The `?worker` query is a Vite-specific feature that bundles the script as a worker.
+// Vite automatically infers and bundles this as a worker.
 const worker = new Worker(new URL('../workers/crypto.worker.ts', import.meta.url), {
   type: 'module',
 });
 
 // A map to store resolvers for pending requests
-const pendingRequests = new Map<number, { resolve: (value: any) => void; reject: (reason?: any) => void }>();
+const pendingRequests = new Map<number, { 
+  resolve: (value: any) => void;
+  reject: (reason?: any) => void;
+  timerId: number; 
+}>();
 let requestIdCounter = 0;
 
 // Define the type locally since the original file is gone.
@@ -22,21 +26,75 @@ export type RetrieveKeysResult =
   | { success: false; reason: 'incorrect_password' | 'legacy_bundle' | 'keys_not_found' | 'decryption_failed' | 'app_secret_missing' };
 
 
-// Handle messages from the worker
+// --- Worker Event Handlers ---
+
+// Handle successfully processed messages from the worker
 worker.onmessage = (event: MessageEvent) => {
-  const { type, id, result, error } = event.data;
+  try {
+    // 1. Validate incoming data structure
+    if (typeof event.data !== 'object' || event.data === null || typeof event.data.id === 'undefined' || !event.data.type) {
+      console.warn("[Crypto Worker] Received malformed message:", event.data);
+      return;
+    }
+    const { type, id, result, error } = event.data;
 
-  const promise = pendingRequests.get(id);
-  if (!promise) return;
+    // 2. Look up the pending promise
+    const promise = pendingRequests.get(id);
+    if (!promise) {
+      // This can happen if the request timed out before the worker responded.
+      console.warn(`[Crypto Worker] Received response for timed out or unknown request id: ${id}, type: ${type}`);
+      return;
+    }
+    
+    // 3. Clear the timeout now that we have a response.
+    clearTimeout(promise.timerId);
 
-  if (type.endsWith('_result')) {
-    promise.resolve(result);
-  } else if (type === 'error') {
-    promise.reject(new Error(error));
+    // 4. Handle message based on type
+    if (type.endsWith('_result')) {
+      promise.resolve(result);
+    } else if (type === 'error') {
+      promise.reject(new Error(error || 'An unknown error occurred in the crypto worker'));
+    } else {
+      // This case should ideally not be reached if the worker is well-behaved.
+      const unexpectedError = new Error(`[Crypto Worker] Received unexpected message type '${type}' for request id: ${id}`);
+      console.error(unexpectedError);
+      promise.reject(unexpectedError);
+    }
+    
+    // 5. Clean up the pending request
+    pendingRequests.delete(id);
+
+  } catch(e) {
+    // Catch any synchronous errors within the handler itself
+    console.error("[Crypto Worker] Error in onmessage handler:", e);
   }
-  
-  pendingRequests.delete(id);
 };
+
+// Handle unhandled exceptions in the worker
+worker.onerror = (event: ErrorEvent) => {
+  console.error(
+    `[Crypto Worker] Unhandled Error: ${event.message}\n` +
+    `  File: ${event.filename}\n` +
+    `  Line: ${event.lineno}, Col: ${event.colno}\n`,
+    event.error
+  );
+  
+  // Reject all pending promises as the worker is in a broken state
+  pendingRequests.forEach((promise) => {
+    clearTimeout(promise.timerId);
+    promise.reject(new Error("Crypto worker encountered an unrecoverable error."));
+  });
+  pendingRequests.clear();
+  event.preventDefault(); // Prevent the default browser error handling (e.g., logging to console)
+};
+
+// Handle messages that can't be deserialized
+worker.onmessageerror = (event: MessageEvent) => {
+  console.error("[Crypto Worker] Failed to deserialize message:", event);
+};
+
+
+// --- Core Proxy Logic ---
 
 /**
  * A generic function to call a command on the crypto worker.
@@ -47,19 +105,23 @@ worker.onmessage = (event: MessageEvent) => {
 function callWorker<T = any>(type: string, payload: any): Promise<T> {
   const id = requestIdCounter++;
   return new Promise((resolve, reject) => {
-    pendingRequests.set(id, { resolve, reject });
-    
-    // Pass the app secret to the worker for crypto operations
+    // Fail fast if VITE_APP_SECRET is missing for operations that need it.
     const appSecret = import.meta.env.VITE_APP_SECRET;
-    worker.postMessage({ type, payload: { ...payload, appSecret }, id });
+    if (type !== 'init' && type !== 'generateSafetyNumber' && !appSecret) {
+      return reject(new Error("VITE_APP_SECRET is not defined."));
+    }
 
-    // Optional: Add a timeout to prevent promises from hanging indefinitely
-    setTimeout(() => {
-        if(pendingRequests.has(id)){
-            reject(new Error(`Request ${type} with id ${id} timed out.`));
-            pendingRequests.delete(id);
-        }
+    const timerId = window.setTimeout(() => {
+      // The promise will be rejected, and we clean up the map entry.
+      if (pendingRequests.has(id)) {
+        reject(new Error(`Request '${type}' with id ${id} timed out.`));
+        pendingRequests.delete(id);
+      }
     }, 30000); // 30 second timeout
+
+    pendingRequests.set(id, { resolve, reject, timerId });
+    
+    worker.postMessage({ type, payload: { ...payload, appSecret }, id });
   });
 }
 

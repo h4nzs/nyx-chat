@@ -212,8 +212,8 @@ export async function deriveSessionKeyAsRecipient(
   
   // Offload the entire key derivation to the worker
   return worker_x3dh_recipient({
-    myIdentityKey,
-    mySignedPreKey,
+    myIdentityKey: myIdentityKeyPair,
+    mySignedPreKey: mySignedPreKeyPair,
     theirIdentityKey,
     theirEphemeralKey,
   });

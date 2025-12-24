@@ -83,7 +83,7 @@ type State = {
 
 type Actions = {
   bootstrap: () => Promise<void>;
-  login: (emailOrUsername: string, password: string) => Promise<void>;
+  login: (emailOrUsername: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
   registerAndGeneratePhrase: (data: any) => Promise<string>;
   logout: () => Promise<void>;
   getEncryptionKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
