@@ -8,12 +8,20 @@ import App from './App';
 import { registerServiceWorker } from '@lib/serviceWorkerRegistration';
 import { setAuthFailureHandler } from '@lib/api';
 import { useAuthStore } from '@store/auth';
+import { initializeCryptoWorker } from '@lib/crypto-worker-proxy';
 
 // --- Dependency Injection for Auth Failure ---
 // This injects the logout function into the api layer, breaking the circular dependency.
 // Now, if authFetch encounters a final token refresh failure, it can trigger a full logout.
 setAuthFailureHandler(() => useAuthStore.getState().logout());
 // -----------------------------------------
+
+// --- Initialize Crypto Worker ---
+// This starts the worker and allows it to initialize libsodium ahead of time.
+initializeCryptoWorker()
+  .then(() => console.log('Crypto worker initialized successfully.'))
+  .catch(err => console.error('Failed to initialize crypto worker:', err));
+// --------------------------------
 
 // Validate essential environment variables on startup
 if (!import.meta.env.VITE_APP_SECRET) {

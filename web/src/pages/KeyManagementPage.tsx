@@ -3,15 +3,13 @@ import { FiKey, FiShield, FiRefreshCw } from 'react-icons/fi';
 import { IoFingerPrint } from "react-icons/io5";
 import { useState } from 'react';
 import { useAuthStore, setupAndUploadPreKeyBundle } from '@store/auth';
-import { retrievePrivateKeys, generateKeyPairs, storePrivateKeys, exportPublicKey } from '@utils/keyManagement';
-import { getSodium } from '@lib/sodiumInitializer';
 import toast from 'react-hot-toast';
 import { Spinner } from '@components/Spinner';
 import { useModalStore } from '@store/modal';
-import * as bip39 from 'bip39';
 import RecoveryPhraseModal from '@components/RecoveryPhraseModal';
 import { startRegistration } from '@simplewebauthn/browser';
 import { api } from '@lib/api';
+import { getRecoveryPhrase, generateNewKeys } from '@lib/crypto-worker-proxy';
 
 export default function KeyManagementPage() {
   const { logout } = useAuthStore(state => ({ 
@@ -31,13 +29,12 @@ export default function KeyManagementPage() {
         const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
         if (!encryptedKeys) throw new Error("No encrypted key found in storage.");
         
-        const keys = await retrievePrivateKeys(encryptedKeys, password);
-        if (!keys || !keys.masterSeed) {
+        const phrase = await getRecoveryPhrase(encryptedKeys, password);
+        if (!phrase) {
           throw new Error("Failed to decrypt keys or master seed. The password may be incorrect.");
         }
         
-        const mnemonic = bip39.entropyToMnemonic(keys.masterSeed);
-        setRecoveryPhrase(mnemonic);
+        setRecoveryPhrase(phrase);
         setShowRecoveryModal(true);
 
       } catch (error: any) {
@@ -80,29 +77,19 @@ export default function KeyManagementPage() {
           if (!password) return;
           setIsProcessing(true);
           try {
-            // 1. Generate new keys locally (all three key pairs)
-            const sodium = await getSodium();
-            const masterSeed = sodium.randombytes_buf(32);
-            const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
-            const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));
-            const signedPreKeySeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
-
-            const encryptionKeyPair = sodium.crypto_box_seed_keypair(encryptionSeed);
-            const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
-            const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
+            // 1. Generate new keys using the worker
+            const {
+              encryptedPrivateKeys,
+              encryptionPublicKeyB64,
+              signingPublicKeyB64,
+            } = await generateNewKeys(password);
             
             // 2. Store them in localStorage
-            const encryptedPrivateKeys = await storePrivateKeys({
-              encryption: encryptionKeyPair.privateKey,
-              signing: signingKeyPair.privateKey,
-              signedPreKey: signedPreKeyPair.privateKey, // Add signedPreKey
-              masterSeed: masterSeed
-            }, password);
             localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
-            localStorage.setItem('publicKey', await exportPublicKey(encryptionKeyPair.publicKey));
-            localStorage.setItem('signingPublicKey', await exportPublicKey(signingKeyPair.publicKey));
+            localStorage.setItem('publicKey', encryptionPublicKeyB64);
+            localStorage.setItem('signingPublicKey', signingPublicKeyB64);
             
-            // 3. Upload the new pre-key bundle to the server (no argument needed now)
+            // 3. Upload the new pre-key bundle to the server
             await setupAndUploadPreKeyBundle();
 
             toast.success('New keys generated and uploaded! For security, you will be logged out.', { duration: 5000 });

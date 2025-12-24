@@ -89,6 +89,78 @@ router.put("/me",
   }
 );
 
+// === PUT: Update user's public keys ===
+// Regex to validate URL-safe Base64 format (no padding)
+const base64UrlRegex = /^[A-Za-z0-9_-]+$/;
+
+router.put("/me/keys",
+  requireAuth,
+  zodValidate({
+    body: z.object({
+      publicKey: z.string({ required_error: "Public key is required."})
+        .min(43, { message: "Public key must be at least 43 characters." })
+        .max(256, { message: "Public key cannot exceed 256 characters." })
+        .regex(base64UrlRegex, { message: "Public key must be in URL-safe Base64 format." }),
+      signingKey: z.string({ required_error: "Signing key is required."})
+        .min(43, { message: "Signing key must be at least 43 characters." })
+        .max(256, { message: "Signing key cannot exceed 256 characters." })
+        .regex(base64UrlRegex, { message: "Signing key must be in URL-safe Base64 format." }),
+    })
+  }),
+  async (req, res, next) => {
+    try {
+      const userId = req.user.id;
+      const { publicKey, signingKey } = req.body;
+
+      const user = await prisma.user.update({
+        where: { id: userId },
+        data: {
+          publicKey,
+          signingKey,
+        },
+        select: { id: true, name: true },
+      });
+      
+      // Find all users who share a conversation with the current user and notify them.
+      const conversations = await prisma.conversation.findMany({
+        where: {
+          participants: {
+            some: {
+              userId: userId,
+            },
+          },
+        },
+        include: {
+          participants: {
+            select: {
+              userId: true,
+            },
+          },
+        },
+      });
+
+      const recipients = new Set<string>();
+      for (const conversation of conversations) {
+        for (const participant of conversation.participants) {
+          if (participant.userId !== userId) {
+            recipients.add(participant.userId);
+          }
+        }
+      }
+
+      // Emit the event to each recipient's personal room.
+      for (const recipientId of recipients) {
+        io.to(recipientId).emit('user:identity_changed', { userId: user.id, name: user.name });
+      }
+
+      res.status(200).json({ message: "Keys updated successfully." });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+
 // === POST: Update user avatar ===
 router.post("/me/avatar", requireAuth, uploadAvatar.single('avatar'), async (req, res, next) => {
   try {

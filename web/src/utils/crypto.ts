@@ -7,6 +7,7 @@ import {
   getLatestSessionKey,
 } from '@lib/keychainDb';
 import { emitSessionKeyFulfillment, emitSessionKeyRequest } from '@lib/socket';
+import { worker_crypto_secretbox_easy, worker_crypto_secretbox_open_easy, worker_crypto_box_seal_open, worker_x3dh_initiator, worker_x3dh_recipient, worker_crypto_box_seal, worker_file_encrypt, worker_file_decrypt } from '@lib/crypto-worker-proxy';
 
 const B64_VARIANT = 'URLSAFE_NO_PADDING';
 
@@ -40,7 +41,7 @@ export async function decryptSessionKeyForUser(
   }
 
   const encryptedSessionKey = sodium.from_base64(encryptedSessionKeyStr, sodium.base64_variants[B64_VARIANT]);
-  const sessionKey = sodium.crypto_box_seal_open(encryptedSessionKey, publicKey, privateKey);
+  const sessionKey = await worker_crypto_box_seal_open(encryptedSessionKey, publicKey, privateKey);
 
   if (!sessionKey) {
     throw new Error("Failed to decrypt session key, likely due to incorrect key pair or corrupted data.");
@@ -78,7 +79,9 @@ export async function encryptMessage(
   const { sessionId, key } = latestKey;
   const sodium = await getSodium();
   const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
-  const encrypted = sodium.crypto_secretbox_easy(text, nonce, key);
+  
+  // Offload the heavy lifting to the worker
+  const encrypted = await worker_crypto_secretbox_easy(text, nonce, key);
 
   const combined = new Uint8Array(nonce.length + encrypted.length);
   combined.set(nonce);
@@ -150,8 +153,8 @@ export async function decryptMessage(
     const combined = sodium.from_base64(cipher, sodium.base64_variants[B64_VARIANT]);
     const nonce = combined.slice(0, sodium.crypto_secretbox_NONCEBYTES);
     const encrypted = combined.slice(sodium.crypto_secretbox_NONCEBYTES);
-    const decrypted = sodium.to_string(sodium.crypto_secretbox_open_easy(encrypted, nonce, sessionKey));
-    return { status: 'success', value: decrypted };
+    const decrypted = await worker_crypto_secretbox_open_easy(encrypted, nonce, sessionKey);
+    return { status: 'success', value: sodium.to_string(decrypted) };
   } catch (e: any) {
     console.error(`Decryption failed for convo ${conversationId}, session ${sessionId}:`, e);
     return { status: 'error', error: new Error('Failed to decrypt message') };
@@ -177,28 +180,20 @@ export async function establishSessionFromPreKeyBundle(
   preKeyBundle: PreKeyBundle
 ): Promise<{ sessionKey: Uint8Array, ephemeralPublicKey: string }> {
   const sodium = await getSodium();
-  const ephemeralKeyPair = sodium.crypto_box_keypair();
 
   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants[B64_VARIANT]);
   const theirSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.key, sodium.base64_variants[B64_VARIANT]);
   const theirSigningKey = sodium.from_base64(preKeyBundle.signingKey, sodium.base64_variants[B64_VARIANT]);
-
   const signature = sodium.from_base64(preKeyBundle.signedPreKey.signature, sodium.base64_variants[B64_VARIANT]);
-  if (!sodium.crypto_sign_verify_detached(signature, theirSignedPreKey, theirSigningKey)) {
-    throw new Error("Invalid signature on signed pre-key.");
-  }
 
-  const dh1 = sodium.crypto_scalarmult(myIdentityKeyPair.privateKey, theirSignedPreKey);
-  const dh2 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirIdentityKey);
-  const dh3 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirSignedPreKey);
-
-  const sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
-  const sessionKey = sodium.crypto_generichash(32, sharedSecret);
-
-  return {
-    sessionKey,
-    ephemeralPublicKey: sodium.to_base64(ephemeralKeyPair.publicKey, sodium.base64_variants[B64_VARIANT]),
-  };
+  // Offload the entire handshake calculation to the worker
+  return worker_x3dh_initiator({
+    myIdentityKey: myIdentityKeyPair,
+    theirIdentityKey,
+    theirSignedPreKey,
+    theirSigningKey,
+    signature,
+  });
 }
 
 /**
@@ -215,14 +210,13 @@ export async function deriveSessionKeyAsRecipient(
   const theirIdentityKey = sodium.from_base64(initiatorIdentityKeyStr, sodium.base64_variants[B64_VARIANT]);
   const theirEphemeralKey = sodium.from_base64(initiatorEphemeralKeyStr, sodium.base64_variants[B64_VARIANT]);
   
-  const dh1 = sodium.crypto_scalarmult(mySignedPreKeyPair.privateKey, theirIdentityKey);
-  const dh2 = sodium.crypto_scalarmult(myIdentityKeyPair.privateKey, theirEphemeralKey);
-  const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPair.privateKey, theirEphemeralKey);
-
-  const sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
-  const sessionKey = sodium.crypto_generichash(32, sharedSecret);
-  
-  return sessionKey;
+  // Offload the entire key derivation to the worker
+  return worker_x3dh_recipient({
+    myIdentityKey: myIdentityKeyPair,
+    mySignedPreKey: mySignedPreKeyPair,
+    theirIdentityKey,
+    theirEphemeralKey,
+  });
 }
 
 
@@ -242,7 +236,7 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
 
   const sodium = await getSodium();
   const requesterPublicKey = sodium.from_base64(requesterPublicKeyB64, sodium.base64_variants[B64_VARIANT]);
-  const encryptedKeyForRequester = sodium.crypto_box_seal(key, requesterPublicKey);
+  const encryptedKeyForRequester = await worker_crypto_box_seal(key, requesterPublicKey);
 
   emitSessionKeyFulfillment({
     requesterId,
@@ -273,19 +267,18 @@ const KEY_LENGTH = 256;
 const IV_LENGTH = 12;
 
 export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; key: string }> {
-  const key = await crypto.subtle.generateKey({ name: ALGO, length: KEY_LENGTH }, true, ['encrypt', 'decrypt']);
-  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
   const fileData = await blob.arrayBuffer();
-  const encryptedData = await crypto.subtle.encrypt({ name: ALGO, iv }, key, fileData);
+  
+  // Offload the entire file encryption process to the worker
+  const { encryptedData, iv, key } = await worker_file_encrypt(fileData);
 
   const combined = new Uint8Array(iv.length + encryptedData.byteLength);
   combined.set(iv);
   combined.set(new Uint8Array(encryptedData), iv.length);
   const encryptedBlob = new Blob([combined], { type: 'application/octet-stream' });
 
-  const exportedKey = await crypto.subtle.exportKey('raw', key);
   const sodium = await getSodium();
-  const keyB64 = sodium.to_base64(new Uint8Array(exportedKey), sodium.base64_variants[B64_VARIANT]);
+  const keyB64 = sodium.to_base64(key, sodium.base64_variants[B64_VARIANT]);
 
   return { encryptedBlob, key: keyB64 };
 }
@@ -293,14 +286,12 @@ export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; ke
 export async function decryptFile(encryptedBlob: Blob, keyB64: string, originalType: string): Promise<Blob> {
   const sodium = await getSodium();
   const keyBytes = sodium.from_base64(keyB64, sodium.base64_variants[B64_VARIANT]);
-  const key = await crypto.subtle.importKey('raw', keyBytes, { name: ALGO }, false, ['decrypt']);
-
+  
   const combinedData = await encryptedBlob.arrayBuffer();
   if (combinedData.byteLength < IV_LENGTH) throw new Error("Encrypted file is too short.");
 
-  const iv = combinedData.slice(0, IV_LENGTH);
-  const encryptedData = combinedData.slice(IV_LENGTH);
-  const decryptedData = await crypto.subtle.decrypt({ name: ALGO, iv }, key, encryptedData);
+  // Offload the decryption to the worker
+  const decryptedData = await worker_file_decrypt(combinedData, keyBytes);
 
   return new Blob([decryptedData], { type: originalType });
 }
