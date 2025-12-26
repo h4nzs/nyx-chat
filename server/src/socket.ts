@@ -93,6 +93,51 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
+    socket.on('message:send', async (message, callback) => {
+      if (!userId) return callback?.({ ok: false, error: "Not authenticated." });
+
+      const { conversationId, content, sessionId, tempId } = message;
+
+      try {
+        const conversation = await prisma.conversation.findUnique({
+          where: { id: conversationId },
+          include: { participants: { select: { userId: true } } },
+        });
+
+        if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
+          return callback?.({ ok: false, error: "Conversation not found or you are not a participant." });
+        }
+
+        const newMessage = await prisma.message.create({
+          data: {
+            conversationId,
+            senderId: userId,
+            content,
+            sessionId,
+          },
+          include: {
+            sender: {
+              select: { id: true, name: true, avatarUrl: true, username: true }
+            }
+          }
+        });
+        
+        // Add tempId to the message object before fanning out, so clients can match it
+        const finalMessage = { ...newMessage, tempId };
+
+        // Fan-out the message to all participants
+        conversation.participants.forEach(participant => {
+          io.to(participant.userId).emit('message:new', finalMessage);
+        });
+
+        callback?.({ ok: true, msg: finalMessage });
+      } catch (error) {
+        console.error("Failed to process message:send event:", error);
+        callback?.({ ok: false, error: "Failed to save or distribute message." });
+      }
+    });
+
+
     socket.on("push:subscribe", async (data) => {
       try {
         const { endpoint, keys } = data;

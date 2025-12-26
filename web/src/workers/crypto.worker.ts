@@ -127,7 +127,7 @@ self.onmessage = async (event: MessageEvent) => {
     await sodium.ready;
     isReady = true;
     if (type === 'init') {
-      self.postMessage({ type: 'init_success', id });
+      self.postMessage({ type: 'init_result', id, result: true });
       return;
     }
   }
