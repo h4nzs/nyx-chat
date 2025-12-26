@@ -175,6 +175,10 @@ export async function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicK
     return callWorker('generateSafetyNumber', { myPublicKey, theirPublicKey });
 }
 
+export function worker_generate_random_key(): Promise<Uint8Array> {
+    return callWorker('generate_random_key', {});
+}
+
 // --- Internal Crypto Primitives Proxy Functions ---
 
 export function worker_crypto_secretbox_easy(message: string | Uint8Array, nonce: Uint8Array, key: Uint8Array): Promise<Uint8Array> {

@@ -310,6 +310,11 @@ self.onmessage = async (event: MessageEvent) => {
         break;
       }
 
+      case 'generate_random_key': {
+        result = sodium.randombytes_buf(32);
+        break;
+      }
+
       case 'reEncryptBundleFromMasterKey': {
         const { masterKey, newPassword } = payload;
         const encryptionSeed = sodium.crypto_generichash(32, masterKey, new Uint8Array(new TextEncoder().encode("encryption")));

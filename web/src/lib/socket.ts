@@ -175,3 +175,7 @@ export function emitSessionKeyRequest(conversationId: string, sessionId: string)
 export function emitSessionKeyFulfillment(payload: { requesterId: string; conversationId: string; sessionId: string; encryptedKey: string; }) {
   getSocket()?.emit('session:fulfill_response', payload);
 }
+
+export function emitGroupKeyDistribution(conversationId: string, keys: any[]) {
+  getSocket()?.emit('messages:distribute_keys', { conversationId, keys });
+}

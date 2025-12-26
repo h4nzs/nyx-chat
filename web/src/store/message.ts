@@ -1,7 +1,7 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, apiUpload } from "@lib/api";
-import { getSocket, emitSessionKeyRequest } from "@lib/socket";
-import { encryptMessage, decryptMessage, ensureAndRatchetSession, encryptFile } from "@utils/crypto";
+import { getSocket, emitSessionKeyRequest, emitGroupKeyDistribution } from "@lib/socket";
+import { encryptMessage, decryptMessage, ensureAndRatchetSession, encryptFile, ensureGroupSession } from "@utils/crypto";
 import toast from "react-hot-toast";
 import { useAuthStore, type User } from "./auth";
 import type { Message } from "./conversation";
@@ -11,15 +11,20 @@ import { useConversationStore } from "./conversation";
 export async function decryptMessageObject(message: Message): Promise<Message> {
   const decryptedMsg = { ...message };
   try {
-    if (decryptedMsg.content && decryptedMsg.sessionId) {
+    const conversation = useConversationStore.getState().conversations.find(c => c.id === decryptedMsg.conversationId);
+    const isGroup = conversation?.isGroup || false;
+    console.log(`[message.ts] decryptMessageObject: isGroup is ${isGroup} for convo ${decryptedMsg.conversationId}`);
+
+    if (decryptedMsg.content) { // No need to check for sessionId for group messages
       decryptedMsg.ciphertext = decryptedMsg.content;
-      const result = await decryptMessage(decryptedMsg.content, decryptedMsg.conversationId, decryptedMsg.sessionId);
+      const result = await decryptMessage(decryptedMsg.content, decryptedMsg.conversationId, isGroup, decryptedMsg.sessionId);
       if (result.status === 'success') decryptedMsg.content = result.value;
       else if (result.status === 'pending') decryptedMsg.content = result.reason;
       else decryptedMsg.content = `[${result.error.message}]`;
     }
     if (decryptedMsg.repliedTo?.content && decryptedMsg.repliedTo.sessionId) {
-      const replyResult = await decryptMessage(decryptedMsg.repliedTo.content, decryptedMsg.conversationId, decryptedMsg.repliedTo.sessionId);
+      // For replies, we assume they are decrypted with the same context (isGroup)
+      const replyResult = await decryptMessage(decryptedMsg.repliedTo.content, decryptedMsg.conversationId, isGroup, decryptedMsg.repliedTo.sessionId);
       if (replyResult.status === 'success') decryptedMsg.repliedTo.content = replyResult.value;
       else decryptedMsg.repliedTo.content = '[Encrypted Reply]';
     }
@@ -102,6 +107,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       return;
     }
 
+    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+    if (!conversation) {
+      toast.error("Conversation not found.");
+      return;
+    }
+    const isGroup = conversation.isGroup;
+
     const tempId = Date.now();
     try {
       const optimisticMessage: Message = {
@@ -120,12 +132,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       // Store original content for potential retry before encrypting
       if (data.content) {
         optimisticMessage.preview = data.content;
-        const { ciphertext, sessionId } = await encryptMessage(data.content, conversationId);
+        const { ciphertext, sessionId } = await encryptMessage(data.content, conversationId, isGroup);
         optimisticMessage.content = ciphertext;
         optimisticMessage.sessionId = sessionId;
       }
       if (data.fileKey) {
-        const { ciphertext, sessionId } = await encryptMessage(data.fileKey, conversationId);
+        const { ciphertext, sessionId } = await encryptMessage(data.fileKey, conversationId, isGroup);
         optimisticMessage.fileKey = ciphertext;
         optimisticMessage.sessionId = sessionId;
       }
@@ -164,6 +176,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       toast.error("You must restore your keys from your recovery phrase before you can send files.");
       return;
     }
+    
+    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+    if (!conversation) {
+      toast.error("Conversation not found.");
+      return;
+    }
+    const isGroup = conversation.isGroup;
 
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const uploadId = addActivity({ type: 'upload', fileName: file.name, progress: 0 });
@@ -192,13 +211,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       updateActivity(uploadId, { progress: 10 });
       // 2. Encrypt file and its key
       const { encryptedBlob, key: fileKey } = await encryptFile(file);
-      const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(fileKey, conversationId);
+      const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(fileKey, conversationId, isGroup);
       updateActivity(uploadId, { progress: 40 });
 
       // 3. Upload file and send message data
       const formData = new FormData();
       formData.append('file', encryptedBlob, file.name);
-      formData.append('sessionId', sessionId);
+      if (sessionId) formData.append('sessionId', sessionId);
       formData.append('fileKey', encryptedFileKey);
       formData.append('tempId', tempId.toString());
       // Append other relevant data
@@ -235,12 +254,22 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     if (hasRestoredKeys) {
       try {
-        await ensureAndRatchetSession(id);
-      } catch (ratchetError) {
-        console.error("Failed to establish session, decryption may fail:", ratchetError);
+        // Find the conversation first to determine its type
+        const conversation = useConversationStore.getState().conversations.find(c => c.id === id);
+        if (conversation?.isGroup) {
+          console.log(`[message.ts] Loading a group chat ${id}, ensuring group session.`);
+          const distributionKeys = await ensureGroupSession(id, conversation.participants);
+          if (distributionKeys && distributionKeys.length > 0) {
+            emitGroupKeyDistribution(id, distributionKeys);
+          }
+        } else if (conversation) { // It's a 1-on-1 chat
+          await ensureAndRatchetSession(id);
+        }
+      } catch (sessionError) {
+        console.error("Failed to establish session, decryption may fail:", sessionError);
       }
     } else {
-      console.log("Skipping session ratchet: No keys restored.");
+      console.log("Skipping session setup: No keys restored.");
     }
     
     try {

@@ -2,15 +2,22 @@
 import { openDB, IDBPDatabase } from 'idb';
 
 const DB_NAME = 'keychain-db';
-const STORE_NAME = 'session-keys';
+const SESSION_KEYS_STORE_NAME = 'session-keys';
+const GROUP_KEYS_STORE_NAME = 'group-keys';
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
 function getDb(): Promise<IDBPDatabase> {
   if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, 1, {
-      upgrade(db) {
-        db.createObjectStore(STORE_NAME);
+    dbPromise = openDB(DB_NAME, DB_VERSION, {
+      upgrade(db, oldVersion) {
+        if (oldVersion < 1) {
+          db.createObjectStore(SESSION_KEYS_STORE_NAME);
+        }
+        if (oldVersion < 2) {
+          db.createObjectStore(GROUP_KEYS_STORE_NAME);
+        }
       },
     });
   }
@@ -27,8 +34,8 @@ export async function addSessionKey(
   key: Uint8Array
 ): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction(STORE_NAME, 'readwrite');
-  const store = tx.objectStore(STORE_NAME);
+  const tx = db.transaction(SESSION_KEYS_STORE_NAME, 'readwrite');
+  const store = tx.objectStore(SESSION_KEYS_STORE_NAME);
   const currentKeys = (await store.get(conversationId)) || [];
   
   // Avoid adding duplicate keys
@@ -46,7 +53,7 @@ export async function getSessionKey(
   sessionId: string
 ): Promise<Uint8Array | null> {
   const db = await getDb();
-  const keys = (await db.get(STORE_NAME, conversationId)) as any[];
+  const keys = (await db.get(SESSION_KEYS_STORE_NAME, conversationId)) as any[];
   if (!keys) return null;
   
   const keyObj = keys.find(k => k.sessionId === sessionId);
@@ -60,10 +67,39 @@ export async function getLatestSessionKey(
   conversationId: string
 ): Promise<{ sessionId: string; key: Uint8Array } | null> {
   const db = await getDb();
-  const keys = (await db.get(STORE_NAME, conversationId)) as any[];
+  const keys = (await db.get(SESSION_KEYS_STORE_NAME, conversationId)) as any[];
   if (!keys || keys.length === 0) return null;
   
   return keys[keys.length - 1]; // The last key is the latest
+}
+
+/**
+ * Stores a group key for a specific conversation.
+ * This overwrites any existing key for the conversation.
+ */
+export async function storeGroupKey(conversationId: string, key: Uint8Array): Promise<void> {
+  console.log(`[keychainDb] Storing group key for conversation: ${conversationId}`);
+  const db = await getDb();
+  await db.put(GROUP_KEYS_STORE_NAME, key, conversationId);
+}
+
+/**
+ * Retrieves the group key for a specific conversation.
+ */
+export async function getGroupKey(conversationId: string): Promise<Uint8Array | null> {
+  console.log(`[keychainDb] Getting group key for conversation: ${conversationId}`);
+  const db = await getDb();
+  const key = (await db.get(GROUP_KEYS_STORE_NAME, conversationId)) || null;
+  console.log(`[keychainDb] Key for ${conversationId}`, key ? 'found' : 'NOT found');
+  return key;
+}
+
+/**
+ * Stores a group key received from another user.
+ * This is an alias for storeGroupKey for semantic clarity.
+ */
+export async function receiveGroupKey(conversationId: string, key: Uint8Array): Promise<void> {
+  return storeGroupKey(conversationId, key);
 }
 
 /**
@@ -71,7 +107,8 @@ export async function getLatestSessionKey(
  */
 export async function clearAllKeys(): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction(STORE_NAME, 'readwrite');
-  await tx.objectStore(STORE_NAME).clear();
+  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME], 'readwrite');
+  await tx.objectStore(SESSION_KEYS_STORE_NAME).clear();
+  await tx.objectStore(GROUP_KEYS_STORE_NAME).clear();
   await tx.done;
 }
