@@ -30,7 +30,12 @@ router.get("/:conversationId", async (req, res, next) => {
     }
 
     const messages = await prisma.message.findMany({
-      where: { conversationId },
+      where: { 
+        conversationId,
+        createdAt: {
+          gte: participant.joinedAt,
+        }
+      },
       take: -50, // Fetch the last 50 messages
       ...(cursor && { 
         skip: 1, // Skip the cursor itself

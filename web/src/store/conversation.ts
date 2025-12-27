@@ -1,6 +1,6 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api";
-import { decryptMessageObject } from "./message";
+import { useMessageStore, decryptMessageObject } from "./message";
 import { getSocket, emitSessionKeyRequest } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
@@ -318,6 +318,9 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   removeConversation: (conversationId) => {
+    // Also clear messages from the message store
+    useMessageStore.getState().clearMessagesForConversation(conversationId);
+
     set(state => {
       const wasActive = state.activeId === conversationId;
       if (wasActive) {

@@ -30,7 +30,8 @@ router.get("/", async (req, res, next) => {
             user: {
               select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true },
             },
-            isPinned: true,  // Include the isPinned field
+            isPinned: true,
+            role: true,
           },
         },
         messages: {
@@ -122,7 +123,14 @@ router.post("/", async (req, res, next) => {
           },
         },
         include: {
-          participants: { include: { user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } } } },
+          participants: { 
+            select: { 
+              role: true, 
+              user: { 
+                select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } 
+              } 
+            } 
+          },
           creator: true,
         },
       });
@@ -194,7 +202,8 @@ router.get("/:id", async (req, res, next) => {
             user: {
               select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true },
             },
-            isPinned: true,  // Include the isPinned field
+            isPinned: true,
+            role: true,
           },
         },
         creator: {

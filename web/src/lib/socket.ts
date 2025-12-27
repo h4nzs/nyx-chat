@@ -125,6 +125,11 @@ export function getSocket() {
     socket.on("conversation:updated", (updates) => conversationStore.updateConversation(updates.id, updates));
     socket.on("conversation:deleted", ({ id }) => conversationStore.removeConversation(id));
 
+    socket.on("conversation:participants_added", ({ conversationId, newParticipants }) => {
+      console.log(`[socket] ${newParticipants.length} participant(s) added to ${conversationId}. Updating UI.`);
+      useConversationStore.getState().addParticipants(conversationId, newParticipants);
+    });
+
     socket.on("conversation:participant_removed", ({ conversationId, userId }) => {
       console.log(`[socket] Participant ${userId} removed from ${conversationId}. Rotating key and updating UI.`);
       
