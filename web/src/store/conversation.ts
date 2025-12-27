@@ -299,6 +299,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           title: conversation.title,
           description: conversation.description,
           avatarUrl: conversation.avatarUrl,
+          isGroup: conversation.isGroup, // Ensure isGroup is updated
           participants: conversation.participants,
           lastMessage: conversation.lastMessage || existing.lastMessage,
           updatedAt: conversation.updatedAt,

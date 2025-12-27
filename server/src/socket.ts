@@ -93,6 +93,22 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
+    socket.on('messages:distribute_keys', ({ conversationId, keys }) => {
+      if (!userId || !keys || !Array.isArray(keys)) return;
+
+      console.log(`[Key Distribution] User ${userId} is distributing ${keys.length} key(s) for conversation ${conversationId}`);
+
+      keys.forEach(keyPackage => {
+        if (keyPackage.userId && keyPackage.key) {
+          io.to(keyPackage.userId).emit('session:new_key', {
+            conversationId,
+            encryptedKey: keyPackage.key,
+            type: 'GROUP_KEY' // Explicitly mark as group key
+          });
+        }
+      });
+    });
+
     socket.on('message:send', async (message, callback) => {
       if (!userId) return callback?.({ ok: false, error: "Not authenticated." });
 

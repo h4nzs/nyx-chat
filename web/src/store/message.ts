@@ -114,6 +114,21 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     }
     const isGroup = conversation.isGroup;
 
+    // Ensure group session and distribute keys if necessary BEFORE sending the message
+    if (isGroup) {
+      try {
+        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
+        if (distributionKeys && distributionKeys.length > 0) {
+          console.log(`[message.ts] sendMessage: New group key generated, distributing ${distributionKeys.length} keys.`);
+          emitGroupKeyDistribution(conversationId, distributionKeys);
+        }
+      } catch (e) {
+        console.error("Failed to ensure group session, message will likely fail for others.", e);
+        toast.error("Failed to establish group session.");
+        // Optional: We could abort sending here, but for now we'll let it proceed to not block the user.
+      }
+    }
+
     const tempId = Date.now();
     try {
       const optimisticMessage: Message = {
@@ -256,13 +271,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       try {
         // Find the conversation first to determine its type
         const conversation = useConversationStore.getState().conversations.find(c => c.id === id);
-        if (conversation?.isGroup) {
-          console.log(`[message.ts] Loading a group chat ${id}, ensuring group session.`);
-          const distributionKeys = await ensureGroupSession(id, conversation.participants);
-          if (distributionKeys && distributionKeys.length > 0) {
-            emitGroupKeyDistribution(id, distributionKeys);
-          }
-        } else if (conversation) { // It's a 1-on-1 chat
+        // Key distribution logic is now handled by sendMessage, but we still need to handle the 1-on-1 case.
+        if (conversation && !conversation.isGroup) {
           await ensureAndRatchetSession(id);
         }
       } catch (sessionError) {

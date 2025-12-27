@@ -28,7 +28,7 @@ router.get("/", async (req, res, next) => {
         participants: {
           select: {
             user: {
-              select: { id: true, username: true, name: true, avatarUrl: true, description: true },
+              select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true },
             },
             isPinned: true,  // Include the isPinned field
           },
@@ -122,7 +122,7 @@ router.post("/", async (req, res, next) => {
           },
         },
         include: {
-          participants: { include: { user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true } } } },
+          participants: { include: { user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } } } },
           creator: true,
         },
       });
@@ -155,6 +155,7 @@ router.post("/", async (req, res, next) => {
 
     const transformedConversation = {
       ...newConversation,
+      isGroup: newConversation.isGroup, // Explicitly include isGroup
       participants: newConversation.participants.map(p => ({ ...p.user, role: p.role })),
       unreadCount: 1,
       lastMessage: null,
@@ -191,7 +192,7 @@ router.get("/:id", async (req, res, next) => {
         participants: {
           select: {
             user: {
-              select: { id: true, username: true, name: true, avatarUrl: true, description: true },
+              select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true },
             },
             isPinned: true,  // Include the isPinned field
           },
