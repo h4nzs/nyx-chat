@@ -42,6 +42,7 @@ export type Participant = {
   name: string;
   description?: string | null;
   avatarUrl?: string | null;
+  publicKey?: string;
   role: "ADMIN" | "MEMBER";
   isPinned?: boolean;
 };

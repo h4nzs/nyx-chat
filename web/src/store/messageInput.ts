@@ -294,7 +294,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     }
     
     if (repliedTo) {
-      set({ replyingTo });
+      set({ replyingTo: repliedTo });
     }
     get().sendMessage(conversationId, { content: content || '' });
   },

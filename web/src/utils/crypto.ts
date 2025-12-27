@@ -92,7 +92,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
     console.log(`[crypto] No existing key. Generating a new group key for ${conversationId}.`);
     const sodium = await getSodium();
     const groupKey = await worker_generate_random_key();
-    console.log(`[crypto] New group key generated: ${sodium.to_hex(groupKey)}`);
+    console.log(`[crypto] New group key generated.`);
 
     await storeGroupKey(conversationId, groupKey);
     console.log(`[crypto] New group key stored for ${conversationId}.`);
@@ -146,7 +146,7 @@ export async function encryptMessage(
       console.error(`[crypto] FATAL: No group key found during encryption for ${conversationId}.`);
       throw new Error(`No group key available for conversation ${conversationId}.`);
     }
-    console.log(`[crypto] Found group key for encryption: ${sodium.to_hex(groupKey)}`);
+    console.log(`[crypto] Found group key for encryption.`);
     key = groupKey;
     sessionId = undefined; // No session ID for group messages
   } else {
@@ -203,7 +203,7 @@ export async function decryptMessage(
         // from another member or the server. For now, we show a pending state.
         return { status: 'pending', reason: '[Requesting group key...]' };
       }
-      console.log(`[crypto] Found group key for decryption: ${sodium.to_hex(key)}`);
+      console.log(`[crypto] Found group key for decryption.`);
     } else {
       if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt message: Missing session ID.') };
       key = await getKeyFromDb(conversationId, sessionId);
@@ -349,6 +349,8 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
       const { publicKey, privateKey } = await getMyEncryptionKeyPair();
       const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
       await addSessionKey(conversationId, sessionId, newSessionKey);
+    } else {
+      console.warn(`[crypto] storeReceivedSessionKey: Received an invalid or malformed key payload.`, { conversationId, sessionId, type });
     }
 }
 

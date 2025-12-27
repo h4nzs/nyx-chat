@@ -93,26 +93,54 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
-    socket.on('messages:distribute_keys', ({ conversationId, keys }) => {
-      if (!userId || !keys || !Array.isArray(keys)) return;
+    socket.on('messages:distribute_keys', async ({ conversationId, keys }) => {
+      if (!userId || !keys || !Array.isArray(keys) || !conversationId) return;
 
       console.log(`[Key Distribution] User ${userId} is distributing ${keys.length} key(s) for conversation ${conversationId}`);
 
-      keys.forEach(keyPackage => {
-        if (keyPackage.userId && keyPackage.key) {
-          io.to(keyPackage.userId).emit('session:new_key', {
-            conversationId,
-            encryptedKey: keyPackage.key,
-            type: 'GROUP_KEY' // Explicitly mark as group key
-          });
+      try {
+        // Verify user is a participant of the conversation
+        const participant = await prisma.participant.findFirst({
+          where: {
+            conversationId: conversationId,
+            userId: userId,
+          },
+        });
+
+        if (!participant) {
+          console.error(`[Key Distribution] User ${userId} is not a participant of conversation ${conversationId}`);
+          return;
         }
-      });
+
+        keys.forEach(keyPackage => {
+          if (keyPackage.userId && keyPackage.key) {
+            io.to(keyPackage.userId).emit('session:new_key', {
+              conversationId,
+              encryptedKey: keyPackage.key,
+              type: 'GROUP_KEY' // Explicitly mark as group key
+            });
+          } else {
+            console.warn(`[Key Distribution] Invalid key package for conversation ${conversationId}`);
+          }
+        });
+      } catch (error) {
+        console.error(`[Key Distribution] Error distributing keys for conversation ${conversationId}:`, error);
+      }
     });
 
     socket.on('message:send', async (message, callback) => {
       if (!userId) return callback?.({ ok: false, error: "Not authenticated." });
 
       const { conversationId, content, sessionId, tempId } = message;
+
+      // Validate content
+      if (!content || typeof content !== 'string') {
+        return callback?.({ ok: false, error: "Invalid message content." });
+      }
+
+      if (content.length > 10000) { // Adjust limit as needed
+        return callback?.({ ok: false, error: "Message content too large." });
+      }
 
       try {
         const conversation = await prisma.conversation.findUnique({

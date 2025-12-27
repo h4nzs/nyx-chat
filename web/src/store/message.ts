@@ -23,8 +23,13 @@ export async function decryptMessageObject(message: Message): Promise<Message> {
       else decryptedMsg.content = `[${result.error.message}]`;
     }
     if (decryptedMsg.repliedTo?.content && decryptedMsg.repliedTo.sessionId) {
-      // For replies, we assume they are decrypted with the same context (isGroup)
-      const replyResult = await decryptMessage(decryptedMsg.repliedTo.content, decryptedMsg.conversationId, isGroup, decryptedMsg.repliedTo.sessionId);
+      let replyIsGroup = isGroup; // Default to parent context
+      // Defensively check if the replied-to message is from a different conversation
+      if (decryptedMsg.repliedTo.conversationId !== decryptedMsg.conversationId) {
+        const replyConversation = useConversationStore.getState().conversations.find(c => c.id === decryptedMsg.repliedTo.conversationId);
+        replyIsGroup = replyConversation?.isGroup ?? false;
+      }
+      const replyResult = await decryptMessage(decryptedMsg.repliedTo.content, decryptedMsg.repliedTo.conversationId, replyIsGroup, decryptedMsg.repliedTo.sessionId);
       if (replyResult.status === 'success') decryptedMsg.repliedTo.content = replyResult.value;
       else decryptedMsg.repliedTo.content = '[Encrypted Reply]';
     }
