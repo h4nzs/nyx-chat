@@ -71,6 +71,7 @@ type Actions = {
   clearMessagesForConversation: (conversationId: string) => void;
   retrySendMessage: (message: Message) => void;
   addSystemMessage: (conversationId: string, content: string) => void;
+  reDecryptPendingMessages: (conversationId: string) => Promise<void>;
   reset: () => void;
 };
 
@@ -436,5 +437,40 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const systemMessage: Message = {
       id: `system_${Date.now()}`, type: 'SYSTEM', conversationId, content, createdAt: new Date().toISOString(), senderId: 'system' };
     set(state => ({ messages: { ...state.messages, [conversationId]: [...(state.messages[conversationId] || []), systemMessage] } }));
+  },
+
+  reDecryptPendingMessages: async (conversationId: string) => {
+    console.log(`[re-decrypt] Triggered for conversation ${conversationId}`);
+    const state = get();
+    const conversationMessages = state.messages[conversationId];
+    if (!conversationMessages) return;
+
+    const pendingMessages = conversationMessages.filter(
+      m => m.content === 'waiting_for_key' || m.content === '[Requesting group key...]' || m.content === '[Requesting key to decrypt...]'
+    );
+
+    if (pendingMessages.length === 0) {
+      console.log(`[re-decrypt] No pending messages found for ${conversationId}.`);
+      return;
+    }
+
+    console.log(`[re-decrypt] Found ${pendingMessages.length} pending messages to re-decrypt.`);
+
+    const reDecryptedMessages = await Promise.all(
+      pendingMessages.map(msg => decryptMessageObject({ ...msg, content: msg.ciphertext }))
+    );
+
+    const messageMap = new Map(conversationMessages.map(m => [m.id, m]));
+    reDecryptedMessages.forEach(m => messageMap.set(m.id, m));
+    
+    const newMessagesForConvo = Array.from(messageMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    set({
+      messages: {
+        ...state.messages,
+        [conversationId]: newMessagesForConvo,
+      },
+    });
+    console.log(`[re-decrypt] Re-decryption complete for ${conversationId}.`);
   },
 }));

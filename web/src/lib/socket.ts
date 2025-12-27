@@ -164,7 +164,15 @@ export function getSocket() {
     
     socket.on('session:fulfill_request', (data) => fulfillKeyRequest(data).catch(error => console.error('Failed to fulfill key request:', error)));
     socket.on('group:fulfill_key_request', (data) => fulfillGroupKeyRequest(data).catch(error => console.error('Failed to fulfill group key request:', error)));
-    socket.on('session:new_key', (data) => storeReceivedSessionKey(data).then(() => useKeychainStore.getState().keysUpdated()).catch(error => console.error('Failed to store received session key:', error)));
+    socket.on('session:new_key', (data) => {
+      storeReceivedSessionKey(data)
+        .then(() => {
+          useKeychainStore.getState().keysUpdated();
+          // After a new key is stored, try to re-decrypt any pending messages for that conversation
+          useMessageStore.getState().reDecryptPendingMessages(data.conversationId);
+        })
+        .catch(error => console.error('Failed to store or process received session key:', error));
+    });
     socket.on('force_logout', () => {
       toast.error("This session has been logged out remotely.");
       useAuthStore.getState().logout();
