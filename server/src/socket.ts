@@ -226,6 +226,60 @@ export function registerSocket(httpServer: HttpServer) {
 
     // --- Handlers for E2EE Key Recovery ---
 
+    socket.on('group:request_key', async ({ conversationId }) => {
+      if (!userId || !conversationId) return;
+
+      console.log(`[Group Key Request] User ${userId} is requesting key for conversation ${conversationId}`);
+      try {
+        const participants = await prisma.participant.findMany({
+          where: {
+            conversationId,
+            userId: { not: userId },
+          },
+          select: { userId: true },
+        });
+
+        const allOnlineUsers = await redisClient.sMembers('online_users');
+        const onlineParticipants = participants.filter(p => allOnlineUsers.includes(p.userId));
+
+        if (onlineParticipants.length === 0) {
+          console.log(`[Group Key Request] No online users found in ${conversationId} to fulfill key request.`);
+          return;
+        }
+
+        const fulfillerId = onlineParticipants[0].userId;
+        const requester = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { publicKey: true },
+        });
+
+        if (!requester?.publicKey) {
+          console.error(`[Group Key Request] Requester ${userId} has no public key.`);
+          return;
+        }
+        
+        console.log(`[Group Key Request] Asking ${fulfillerId} to fulfill key request for ${userId}.`);
+        io.to(fulfillerId).emit('group:fulfill_key_request', {
+          conversationId,
+          requesterId: userId,
+          requesterPublicKey: requester.publicKey,
+        });
+      } catch (error) {
+        console.error(`[Group Key Request] Error processing group:request_key for ${conversationId}:`, error);
+      }
+    });
+
+    socket.on('group:fulfilled_key', ({ requesterId, conversationId, encryptedKey }) => {
+      if (!userId || !requesterId || !conversationId || !encryptedKey) return;
+      
+      console.log(`[Group Key Fulfill] Relaying group key for ${conversationId} from ${userId} to ${requesterId}`);
+      io.to(requesterId).emit('session:new_key', {
+        conversationId,
+        encryptedKey,
+        type: 'GROUP_KEY',
+      });
+    });
+
     socket.on('session:request_key', async ({ conversationId, sessionId }) => {
       if (!userId || !conversationId || !sessionId) return;
 

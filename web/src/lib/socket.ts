@@ -6,7 +6,7 @@ import { useMessageStore, decryptMessageObject } from "@store/message";
 import { useConnectionStore } from "@store/connection";
 import { usePresenceStore } from "@store/presence";
 import useNotificationStore from '@store/notification';
-import { fulfillKeyRequest, storeReceivedSessionKey } from "@utils/crypto";
+import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
 import type { Message } from "@store/conversation";
 
@@ -117,6 +117,13 @@ export function getSocket() {
     socket.on("conversation:updated", (updates) => conversationStore.updateConversation(updates.id, updates));
     socket.on("conversation:deleted", ({ id }) => conversationStore.removeConversation(id));
 
+    socket.on("conversation:participant_removed", ({ conversationId, userId }) => {
+      console.log(`[socket] Participant ${userId} removed from ${conversationId}. Rotating key.`);
+      rotateGroupKey(conversationId).catch(err => {
+        console.error(`[socket] Failed to rotate group key for ${conversationId}`, err);
+      });
+    });
+
     socket.on('user:updated', (updatedUser) => {
       // Update the user's own info if it's them
       const { user, setUser } = useAuthStore.getState();
@@ -138,6 +145,7 @@ export function getSocket() {
     });
     
     socket.on('session:fulfill_request', (data) => fulfillKeyRequest(data).catch(error => console.error('Failed to fulfill key request:', error)));
+    socket.on('group:fulfill_key_request', (data) => fulfillGroupKeyRequest(data).catch(error => console.error('Failed to fulfill group key request:', error)));
     socket.on('session:new_key', (data) => storeReceivedSessionKey(data).then(() => useKeychainStore.getState().keysUpdated()).catch(error => console.error('Failed to store received session key:', error)));
     socket.on('force_logout', () => {
       toast.error("This session has been logged out remotely.");
@@ -178,4 +186,12 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
 
 export function emitGroupKeyDistribution(conversationId: string, keys: any[]) {
   getSocket()?.emit('messages:distribute_keys', { conversationId, keys });
+}
+
+export function emitGroupKeyRequest(conversationId: string) {
+  getSocket()?.emit('group:request_key', { conversationId });
+}
+
+export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; }) {
+  getSocket()?.emit('group:fulfilled_key', payload);
 }

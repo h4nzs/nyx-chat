@@ -103,6 +103,15 @@ export async function receiveGroupKey(conversationId: string, key: Uint8Array): 
 }
 
 /**
+ * Deletes the group key for a specific conversation.
+ */
+export async function deleteGroupKey(conversationId: string): Promise<void> {
+  console.log(`[keychainDb] Deleting group key for conversation: ${conversationId}`);
+  const db = await getDb();
+  await db.delete(GROUP_KEYS_STORE_NAME, conversationId);
+}
+
+/**
  * Clears all keys from the database. Used on logout.
  */
 export async function clearAllKeys(): Promise<void> {
