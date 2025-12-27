@@ -50,6 +50,14 @@ export function getSocket() {
 
     // --- Application-specific Listeners ---
     socket.on("message:new", async (newMessage: Message) => {
+      // Defensive check: If the client receives a message for a conversation it's not in, ignore it.
+      // This can happen briefly after being removed from a group.
+      const convExists = useConversationStore.getState().conversations.some(c => c.id === newMessage.conversationId);
+      if (!convExists) {
+        console.warn(`[socket] Ignored message for unknown or removed conversation ${newMessage.conversationId}`);
+        return;
+      }
+
       try {
         const { user: me } = useAuthStore.getState();
         const { replaceOptimisticMessage, addIncomingMessage } = useMessageStore.getState();
@@ -118,7 +126,12 @@ export function getSocket() {
     socket.on("conversation:deleted", ({ id }) => conversationStore.removeConversation(id));
 
     socket.on("conversation:participant_removed", ({ conversationId, userId }) => {
-      console.log(`[socket] Participant ${userId} removed from ${conversationId}. Rotating key.`);
+      console.log(`[socket] Participant ${userId} removed from ${conversationId}. Rotating key and updating UI.`);
+      
+      // Remove participant from the UI state
+      useConversationStore.getState().removeParticipant(conversationId, userId);
+      
+      // Rotate the group key for security
       rotateGroupKey(conversationId).catch(err => {
         console.error(`[socket] Failed to rotate group key for ${conversationId}`, err);
       });
