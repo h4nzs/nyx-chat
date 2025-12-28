@@ -1,76 +1,182 @@
-Saat ini, berdasarkan analisa kode `crypto.ts` dan `socket.ts`, sepertinya aplikasi Chat Lite menggunakan pendekatan **Pairwise Encryption** (atau *Client-Side Fan-out*). Artinya, jika ada grup dengan 50 anggota, ketika User A mengirim pesan, User A harus mengenkripsi pesan itu 49 kali (satu untuk setiap kunci sesi teman). Ini memakan CPU dan baterai.
 
-Berikut adalah saran dan solusi konkrit untuk mengatasi masalah skalabilitas ini, diurutkan dari yang paling mudah diterapkan hingga yang paling *advanced*:
+Berdasarkan peninjauan kode terbaru Anda, saya telah menemukan akar penyebab untuk ketiga masalah tersebut. Bug kritis pada pengiriman file 1-on-1 sangat mungkin disebabkan oleh kombinasi **"Diagnostic Patch"** yang ada di `crypto.ts` dan penanganan `sessionId` yang hilang pada saat pengiriman file.
 
-### 1. Implementasi "Sender Keys" (Solusi Paling Efektif)
+Berikut adalah solusi dan perbaikan kode untuk ketiga masalah tersebut:
 
-Ini adalah standar industri yang digunakan oleh Signal (untuk grup) dan WhatsApp.
+---
 
-* **Masalah Sekarang (Pairwise):**
-User A ingin kirim "Halo" ke Grup (B, C, D).
-1. Encrypt "Halo" pakai Kunci A-B.
-2. Encrypt "Halo" pakai Kunci A-C.
-3. Encrypt "Halo" pakai Kunci A-D.
-*Beban: 3x enkripsi.*
+### 1. PERBAIKAN BUG KRITIS: Kegagalan Dekripsi File 1-on-1
 
+**Diagnosa:**
+Ada dua masalah yang berkontribusi di sini:
 
-* **Solusi (Sender Keys):**
-User A membuat satu **"Chain Key"** (kunci simetris acak) khusus untuk dirinya di grup ini.
-1. User A mengenkripsi Chain Key ini *sekali saja* ke B, C, dan D menggunakan *pairwise channel* yang sudah ada. (Ini disebut tahap distribusi kunci).
-2. Untuk pesan "Halo", User A mengenkripsinya **HANYA SEKALI** menggunakan Chain Key tersebut.
-3. Kirim *ciphertext* tunggal itu ke server. Server menyebarkannya ke B, C, D.
-4. B, C, dan D sudah punya Chain Key milik A, jadi mereka bisa mendekripsinya.
+1. **"Contradiction" Patch:** Di file `crypto.ts` Anda, terdapat logika "Diagnostic Patch" yang memaksa penggunaan kunci grup jika kunci tersebut ditemukan, *bahkan untuk chat 1-on-1*. Jika ada sisa data (sampah) kunci grup di `keychainDb` untuk ID percakapan tersebut (mungkin dari testing sebelumnya), logika ini akan membajak proses dekripsi dan membuatnya seolah-olah pesan grup.
+2. **Missing `sessionId`:** Saat mengirim file di 1-on-1, kunci enkripsi file (AES Key) dikirim sebagai pesan teks. Namun, kode pengiriman file di frontend seringkali lupa menyertakan `sessionId` dari hasil enkripsi kunci tersebut ke payload socket. Akibatnya, penerima menerima `sessionId: null`, dan karena logika 1-on-1 gagal (karena butuh session ID), ia mungkin "jatuh" ke logika grup atau error.
 
+**Langkah Perbaikan:**
 
-* **Dampak:** Kompleksitas enkripsi pesan turun dari  menjadi . Beban CPU klien berkurang drastis. Ratcheting hanya terjadi pada *Chain Key* itu sendiri (Hash Ratchet), yang sangat ringan.
+**A. Hapus Logic Berbahaya di `chat-lite/web/src/utils/crypto.ts**`
+Hapus blok kode yang memaksa penggunaan grup key pada blok `else`.
 
-### 2. Offloading ke Web Workers (Optimasi Frontend)
+```typescript
+// chat-lite/web/src/utils/crypto.ts
 
-Saya melihat di `chat-lite/web/src/utils/crypto.ts`, fungsi enkripsi/dekripsi berjalan di *main thread* JavaScript.
-Pada grup yang ramai, ini akan membuat UI "nge-freeze" atau patah-patah saat mendekripsi banyak pesan masuk sekaligus.
+export async function decryptMessage(...) {
+  // ... (kode awal)
 
-* **Solusi:** Pindahkan seluruh logika `libsodium` dan manajemen kunci ke **Web Worker**.
-* **Cara Kerja:**
-1. UI mengirim pesan mentah ke Worker.
-2. Worker melakukan kerja berat (enkripsi matematika).
-3. Worker mengembalikan *ciphertext* ke UI untuk dikirim via Socket.
+  if (isGroup) {
+    // ... (logika grup)
+  } else {
+    if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt message: Missing session ID.') };
+    key = await getKeyFromDb(conversationId, sessionId);
 
+    // --- HAPUS BLOK INI (DARI SINI) ---
+    /*
+    if (!key) {
+        const potentialGroupKey = await getGroupKey(conversationId);
+        if (potentialGroupKey) {
+             console.error("CONTRADICTION: encryptMessage called with isGroup=false...");
+             key = potentialGroupKey; // INI PENYEBABNYA
+             sessionId = undefined;
+        }
+    }
+    */
+    // --- SAMPAI SINI ---
 
-* **Keuntungan:** UI tetap 60fps mulus meskipun di latar belakang sedang mendekripsi 100 pesan gambar.
+    if (!key) {
+        // ... (logika fetch session dari server)
+    }
+  }
+  // ...
+}
 
-### 3. "Lazy" Ratcheting (Optimasi Protokol)
+```
 
-Di file `crypto.ts`, terdapat fungsi `ensureAndRatchetSession`. Jika ini dipanggil terlalu sering (misal setiap pesan), overhead jabat tangan (handshake) akan tinggi.
+**B. Pastikan `sessionId` Terkirim saat Upload File (`ChatWindow.tsx`)**
+Anda perlu memastikan saat mengirim file 1-on-1, `sessionId` dari enkripsi kunci file disertakan.
 
-* **Solusi:** Jangan lakukan *Diffie-Hellman Ratchet* (pembaruan kunci asimetris) setiap kali kirim pesan.
-* **Strategi:** Gunakan **Hash Ratchet** (sangat cepat) untuk setiap pesan, dan simpan *Diffie-Hellman Ratchet* hanya untuk momen-momen tertentu, misalnya:
-* Setiap 50 pesan.
-* Atau hanya ketika ada anggota baru masuk/keluar grup (untuk menjaga *Post-Compromise Security*).
+```typescript
+// Cari fungsi handleFileUpload atau sejenisnya di ChatWindow.tsx atau hook terkait
 
+// CONTOH LOGIKA PERBAIKAN:
+const handleFileSelect = async (e) => {
+    // ...
+    const { encryptedBlob, key } = await encryptFile(file);
+    
+    let content = key; // Kunci file dalam base64
+    let sessionId = undefined;
 
+    if (!isGroup) {
+        // Enkripsi kunci file agar aman dikirim lewat socket
+        const encryptionResult = await encryptMessage(key, conversation.id); 
+        content = encryptionResult.ciphertext;
+        sessionId = encryptionResult.sessionId; // <--- PENTING: Ambil Session ID ini
+    } else {
+        // Logic grup
+        const encryptionResult = await encryptGroupMessage(key, conversation.id);
+        content = encryptionResult.ciphertext;
+    }
 
-### 4. Enkripsi Media yang Efisien (Hybrid Encryption)
+    // Upload file blob ke server (biasanya via REST API)
+    const fileUrl = await uploadFile(encryptedBlob);
 
-Untuk file (gambar/video), pastikan kamu tidak mengenkripsi *blob* file itu berkali-kali.
-Saya melihat di `crypto.ts` fungsi `encryptFile` sudah menghasilkan `encryptedBlob` dan `key`.
+    // Kirim metadata via Socket
+    socket.emit('message:send', {
+        conversationId: conversation.id,
+        content: content, 
+        fileUrl: fileUrl,
+        sessionId: sessionId, // <--- PASTIKAN INI DIKIRIM KE SOCKET
+        // ... field lainnya
+    });
+}
 
-* **Pastikan Alurnya:**
-1. Enkripsi file besar (misal 5MB) **satu kali** dengan kunci acak sementara (`AES-Key`).
-2. Simpan file terenkripsi itu ke server/storage.
-3. Lalu, enkripsi `AES-Key` (yang ukurannya cuma 32 bytes) menggunakan metode *Sender Keys* (Poin 1) atau *Pairwise* ke semua anggota grup.
+```
 
+---
 
-* **Hasil:** Klien hanya perlu mengenkripsi ulang 32 bytes data untuk setiap anggota, bukan 5MB data.
+### 2. PERBAIKAN ARSITEKTUR: Kebocoran Riwayat (History Leak)
 
-### 5. MLS (Messaging Layer Security) - Masa Depan
+**Diagnosa:**
+Server menggunakan `skipDuplicates: true` saat menambahkan user. Ini mempertahankan `joinedAt` lama. Kita harus memaksa update `joinedAt`.
 
-Jika kamu ingin solusi yang benar-benar *scalable* untuk grup dengan ribuan anggota (seperti "Supergroup"), kamu bisa melirik standar IETF baru bernama **MLS**.
+**Langkah Perbaikan:**
+Ubah logika di backend (`chat-lite/server/src/routes/conversations.ts`) pada endpoint `POST /:id/participants`.
 
-* **Konsep:** Menggunakan struktur pohon (*TreeKEM*). Jika ada anggota keluar dari grup berisi 1000 orang, operasi *re-keying* hanya butuh logaritma langkah (), bukan linear.
-* **Catatan:** Ini sangat kompleks untuk diimplementasikan dari nol. Mengingat kamu sudah punya basis *Signal Protocol* (X3DH), pindah ke "Sender Keys" (Poin 1) adalah langkah transisi yang paling masuk akal dan *feasible*.
+```typescript
+// chat-lite/server/src/routes/conversations.ts
 
-### Rekomendasi Prioritas
+// Ganti logika prisma.participant.createMany atau create dengan upsert/transaction
+// Contoh perbaikan untuk loop penambahan peserta:
 
-Saya sarankan kamu mulai dengan **Poin 2 (Web Workers)** karena itu murni perubahan arsitektur kode frontend tanpa mengubah protokol database/server. Itu akan memberikan dampak performa "terasa" yang instan bagi pengguna.
+await prisma.$transaction(
+  participantIds.map((userId) =>
+    prisma.participant.upsert({
+      where: {
+        userId_conversationId: {
+          userId,
+          conversationId: id,
+        },
+      },
+      create: {
+        userId,
+        conversationId: id,
+        joinedAt: new Date(), // Set waktu sekarang untuk member baru
+      },
+      update: {
+        joinedAt: new Date(), // <--- UPDATE waktu join untuk member lama yang re-join
+        // Reset field lain jika perlu, misal: isPinned: false
+      },
+    })
+  )
+);
 
-Setelah itu, baru implementasikan **Poin 1 (Sender Keys)** untuk menyelesaikan masalah skalabilitas kriptografinya secara fundamental.
+```
+
+---
+
+### 3. PERBAIKAN ARSITEKTUR: Silent Failure Distribusi Kunci
+
+**Diagnosa:**
+`ensureGroupSession` mengabaikan user yang tidak punya public key (`filter(Boolean)`).
+
+**Langkah Perbaikan:**
+Tambahkan validasi jumlah kunci yang berhasil dienkripsi di `chat-lite/web/src/utils/crypto.ts`.
+
+```typescript
+// chat-lite/web/src/utils/crypto.ts
+
+export async function ensureGroupSession(conversationId: string, participants: Participant[]): Promise<any[] | null> {
+    // ... (kode generate key)
+
+    const myId = useAuthStore.getState().user?.id;
+    const otherParticipants = participants.filter(p => p.id !== myId);
+  
+    // Array untuk menampung error
+    const missingKeys: string[] = [];
+
+    const distributionKeys = await Promise.all(
+      otherParticipants.map(async (p) => {
+        if (!p.publicKey) {
+          console.warn(`Participant ${p.username} has no public key.`);
+          missingKeys.push(p.username); // Catat user yang bermasalah
+          return null;
+        }
+        // ... (kode enkripsi normal)
+      })
+    );
+  
+    // JIKA ADA YANG GAGAL, LEMPAR ERROR AGAR UI TAHU
+    if (missingKeys.length > 0) {
+        // Anda bisa memilih untuk melempar error keras, atau mengembalikan struktur error
+        throw new Error(`Gagal mengenkripsi untuk user: ${missingKeys.join(', ')}. Mereka mungkin belum setup kunci.`);
+    }
+  
+    return distributionKeys.filter(Boolean);
+}
+
+```
+
+**Catatan Tambahan untuk UI:**
+Anda perlu menangkap error ini di komponen `ChatWindow.tsx` (di bagian `sendMessage`) dan menampilkan `toast.error` atau `Alert` kepada pengguna, sehingga mereka tahu pesan tidak terkirim karena masalah kunci anggota lain.
+
+Silakan terapkan perubahan ini, terutama poin nomor 1 dan 2, lalu lakukan tes ulang. Seharusnya masalah "Decrypting for GROUP" pada chat 1-on-1 akan hilang setelah patch kontradiksi dihapus dan session ID dipastikan terkirim.

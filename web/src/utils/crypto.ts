@@ -100,11 +100,14 @@ export async function ensureGroupSession(conversationId: string, participants: P
   
     const myId = useAuthStore.getState().user?.id;
     const otherParticipants = participants.filter(p => p.id !== myId);
+    
+    const missingKeys: string[] = [];
   
     const distributionKeys = await Promise.all(
       otherParticipants.map(async (p) => {
         if (!p.publicKey) {
           console.warn(`Participant ${p.username} has no public key. Cannot send group key.`);
+          missingKeys.push(p.username);
           return null;
         }
         const theirPublicKey = sodium.from_base64(p.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -116,6 +119,10 @@ export async function ensureGroupSession(conversationId: string, participants: P
         };
       })
     );
+
+    if (missingKeys.length > 0) {
+      throw new Error(`Failed to encrypt for users: ${missingKeys.join(', ')}. They may need to set up their keys.`);
+    }
   
     return distributionKeys.filter(Boolean);
 }
@@ -156,22 +163,10 @@ export async function encryptMessage(
     key = groupKey;
     sessionId = undefined; // No session ID for group messages
   } else {
-    // This is the 1-on-1 chat logic path.
-    // DIAGNOSTIC PATCH: Check if a group key exists anyway.
-    const potentialGroupKey = await getGroupKey(conversationId);
-    if (potentialGroupKey) {
-      console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-      console.error(`[crypto] CONTRADICTION: encryptMessage called with isGroup=false, but a group key exists for this conversation (${conversationId}).`);
-      console.error("[crypto] Forcing use of group key to prevent crash.");
-      console.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-      key = potentialGroupKey;
-      sessionId = undefined;
-    } else {
-      const latestKey = await getLatestSessionKey(conversationId);
-      if (!latestKey) throw new Error('No session key available for encryption.');
-      key = latestKey.key;
-      sessionId = latestKey.sessionId;
-    }
+    const latestKey = await getLatestSessionKey(conversationId);
+    if (!latestKey) throw new Error('No session key available for encryption.');
+    key = latestKey.key;
+    sessionId = latestKey.sessionId;
   }
   
   const messageBytes = sodium.from_string(text);

@@ -306,25 +306,35 @@ router.post("/:id/participants", async (req, res, next) => {
       return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
     }
 
-    const newParticipantsData = userIds.map((userId: string) => ({
-      conversationId,
-      userId,
-    }));
-
     // --- Start Transaction ---
     const newParticipants = await prisma.$transaction(async (tx) => {
-      await tx.participant.createMany({
-        data: newParticipantsData,
-        skipDuplicates: true,
-      });
+      // Upsert participants to handle re-joining users and update their joinedAt timestamp
+      await Promise.all(userIds.map((userId: string) => 
+        tx.participant.upsert({
+          where: {
+            userId_conversationId: {
+              userId,
+              conversationId,
+            },
+          },
+          create: {
+            userId,
+            conversationId,
+            joinedAt: new Date(),
+          },
+          update: {
+            joinedAt: new Date(),
+          },
+        })
+      ));
 
-      // Rotate session keys to include the new participants, now within the transaction
+      // Rotate session keys to include the new participants
       await rotateAndDistributeSessionKeys(conversationId, currentUserId, tx);
       
-      // Fetch the newly added participants to return them
+      // Fetch the newly added/updated participants to return them
       return await tx.participant.findMany({
         where: { conversationId, userId: { in: userIds } },
-        include: { user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true } } },
+        include: { user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } } },
       });
     });
     // --- End Transaction ---
