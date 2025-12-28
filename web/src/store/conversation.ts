@@ -21,6 +21,7 @@ export type Message = {
   content?: string | null;
   imageUrl?: string | null;
   fileUrl?: string | null;
+  fileKey?: string | null;
   fileName?: string | null;
   fileType?: string;
   fileSize?: number;

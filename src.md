@@ -1,61 +1,51 @@
-Meskipun performa sudah optimal, model Sender Key membawa tantangan manajemen state yang harus kamu perhatikan untuk fase selanjutnya:
+# Laporan Masalah Saat Ini & Analisis Bug (27 Desember 2025)
 
-    Skenario "Member Left/Removed": Saat ini, jika User A dikeluarkan dari grup, dia mungkin masih memegang Salinan GroupKey di IndexedDB lokalnya. Jika kunci tidak diputar (rotated), User A secara teknis masih bisa mendekripsi pesan baru jika dia berhasil menyadap lalu lintas data (walaupun server menolaknya, ini celah keamanan teoritis).
+Dokumen ini merangkum masalah-masalah kritis yang masih ada di dalam aplikasi, berdasarkan serangkaian pengujian dan analisis mendalam. Meskipun beberapa perbaikan keamanan dan logika telah diterapkan, ada satu bug inti yang persisten dan beberapa kelemahan arsitektur yang perlu ditangani.
 
-        Saran: Implementasikan logika: "Jika anggota grup berubah (ada yang keluar/kick), semua anggota tersisa harus memutar (rotate) kunci grup mereka dan mendistribusikan kunci baru."
+---
 
-    Race Conditions (Kunci Belum Sampai): Ada kemungkinan User A mengirim pesan ke grup bersamaan dengan User B baru bergabung. User B mungkin menerima pesan terenkripsi sebelum menerima kunci grupnya.
+### 1. Bug Inti (Belum Terselesaikan): Kegagalan Dekripsi untuk Pesan File di Percakapan 1-on-1
 
-        Solusi: Pastikan logika catch di decryptMessage yang menangani "Missing Key" sudah cukup robust untuk meminta kunci ulang (session:request_key) secara otomatis.
+Ini adalah bug paling kritis yang saat ini ada.
 
-ni adalah tantangan klasik dalam sistem Group Encryption. Karena kamu menggunakan pendekatan Shared Group Key (satu kunci dipakai bersama untuk efisiensi) dan bukan Individual Sender Keys (setiap user punya kunci sendiri), strateginya harus sedikit disesuaikan.
+**Gejala:**
+- Saat mengirim sebuah file (gambar, dokumen, dll.) dalam percakapan 1-on-1, pesan tampil dengan benar sesaat (sebagai pesan optimistik).
+- Namun, setelah pesan tersebut dikonfirmasi oleh server dan diterima kembali melalui event `message:new`, bubble pesan di sisi pengirim dan penerima berubah menjadi "waiting_for_key".
+- Log konsol secara konsisten menunjukkan bahwa aplikasi mencoba mendekripsi pesan ini menggunakan alur **grup** (`[crypto] Decrypting for GROUP...`), yang mana salah untuk konteks 1-on-1.
 
-Berikut adalah langkah implementasi taktis untuk mengatasi kedua masalah tersebut:
-1. Skenario Member Left/Kicked (Key Rotation)
+**Analisis Akar Masalah:**
+Penyebab pastinya masih belum dapat dipastikan, yang menandakan adanya masalah fundamental dan sulit dipahami dalam state management aplikasi. Hipotesisnya adalah:
+- **Korupsi State:** Di suatu tempat dalam alur pengiriman file, `state` dari `useConversationStore` untuk percakapan 1-on-1 tersebut menjadi tidak sinkron, menyebabkan properti `isGroup` terbaca sebagai `true` saat `decryptMessageObject` dieksekusi.
+- **Perbedaan Alur Data:** Ada perbedaan mendasar antara bagaimana pesan teks dan pesan file diproses setelah diterima dari server. Meskipun beberapa upaya telah dilakukan untuk menyamakan logika dekripsi (seperti di `decryptMessageObject`), tampaknya ada jalur kode lain atau transformasi data yang terlewat yang khusus menangani pesan file dan salah mengidentifikasi konteksnya.
+- **Upaya Perbaikan & Kegagalan:** Upaya untuk memperbaiki sumber data (`GET /api/conversations`), memperbaiki fungsi pembaruan state (`addOrUpdateConversation`), dan bahkan memaksa logika dekripsi untuk menggunakan `!message.sessionId` sebagai sumber kebenaran, semuanya gagal. Ini menunjukkan masalahnya lebih dalam dari sekadar salah satu fungsi tersebut.
 
-Masalah: User A dikeluarkan. Dia masih punya salinan kunci grup di penyimpanan lokalnya. Jika User B mengirim pesan baru dengan kunci lama itu, User A (secara teori) masih bisa mendekripsinya jika ia menyadap jaringan.
+**Status:** Belum teratasi. Memerlukan *instrumentasi* dan *debugging* yang lebih mendalam pada alur `message:new` di `socket.ts` hingga ke pemanggilan `decryptMessageObject` untuk melihat secara pasti mengapa state bisa salah.
 
-Solusi: "Rotation on Departure" (Rotasi saat Kepergian)
+---
 
-Kamu tidak perlu memutar kunci setiap saat. Kamu hanya perlu memutar kunci saat daftar anggota berubah.
+### 2. Kelemahan Arsitektur: Kebocoran Sebagian Riwayat saat Pengguna Ditambahkan Kembali
 
-    Langkah 1: Hapus Kunci Lokal saat Event user_left Di sisi Frontend, saat socket menerima event bahwa ada anggota yang keluar (atau diri sendiri dikeluarkan), aplikasi harus menghapus Group Key yang tersimpan untuk percakapan tersebut.
+**Gejala:**
+- User A dikeluarkan dari grup, lalu ditambahkan kembali.
+- Setelah User A me-reload halaman, ia dapat melihat kembali riwayat pesan dari periode keanggotaan **pertamanya**. Pesan yang dikirim saat ia di luar grup tetap tidak bisa diakses, namun riwayat lama muncul kembali.
 
-    Langkah 2: "Lazy" Generation oleh Pengirim Berikutnya Karena kunci lokal sudah dihapus (di Langkah 1), saat user berikutnya (siapa pun itu) ingin mengirim pesan, fungsi ensureGroupSession di crypto.ts akan mendeteksi bahwa kuncinya hilang (null).
+**Analisis Akar Masalah:**
+- Saat menambahkan kembali anggota, server menggunakan logika `skipDuplicates: true` yang tidak membuat record `Participant` baru. Ini menyebabkan timestamp `joinedAt` pengguna tersebut tidak diperbarui.
+- Endpoint `GET /api/messages/:id` telah diperbaiki untuk hanya mengambil pesan yang dibuat setelah `joinedAt`. Namun, karena `joinedAt` tidak diperbarui, pengguna tersebut secara teknis masih dianggap berhak melihat riwayat lama tersebut.
+- **Implikasi Privasi:** Ini melanggar ekspektasi privasi di mana anggota grup yang tersisa berasumsi bahwa pengguna yang dikeluarkan telah kehilangan akses ke semua riwayat.
 
-        Otomatis, fungsi itu akan memicu worker_generate_random_key.
+**Status:** Teridentifikasi. Membutuhkan perubahan arsitektur yang lebih signifikan, seperti mengubah cara server menangani penambahan ulang anggota (misalnya, dengan menghapus dan membuat ulang record `Participant` untuk memperbarui `joinedAt`) atau mengimplementasikan tabel untuk melacak periode keanggotaan.
 
-        Kunci BARU ini kemudian dienkripsi dan didistribusikan hanya kepada anggota yang tersisa (member yang dikick tidak akan dikirimi kunci baru ini).
+---
 
-Implementasi Code (Konsep):
+### 3. Kelemahan Arsitektur: Kegagalan Distribusi Kunci yang Tidak Terdengar (Silent Failure)
 
-Di file yang menangani socket events (misal di useConversation.ts atau socket.ts store):
-TypeScript
+**Gejala:**
+- Saat kita menemukan bug di mana seorang peserta tidak memiliki `publicKey` di database, pengirim tetap dapat mengirim pesan.
+- Pesan tersebut dienkripsi dengan kunci grup yang hanya dimiliki oleh pengirim. Pesan ini dijamin gagal didekripsi di sisi penerima, namun pengirim tidak menerima notifikasi error apa pun.
 
-socket.on('conversation:user_left', async ({ conversationId }) => {
-  // Hapus kunci lama karena sudah "kotor" (diketahui oleh user yang keluar)
-  await keyChainDb.deleteGroupKey(conversationId);
-  console.log(`[Security] Group Key rotated for ${conversationId} due to member departure.`);
-});
+**Analisis Akar Masalah:**
+- Fungsi `ensureGroupSession` di `crypto.ts` saat ini, jika gagal membuat kunci terenkripsi untuk satu peserta (karena `publicKey` tidak ada), ia hanya akan mencatat peringatan di konsol dan melanjutkan proses.
+- Seharusnya, aplikasi memberikan umpan balik yang jelas kepada pengirim bahwa pesan tidak dapat dienkripsi untuk semua anggota, dan mungkin memberikan pilihan untuk membatalkan pengiriman.
 
-2. Skenario Race Condition (Member Baru & Pesan Cepat)
-
-Masalah: User C baru bergabung. Di detik yang sama, User A mengirim pesan. Pesan User A sampai ke User C, tapi kunci grup (yang dikirim User A via jalur terpisah) belum sampai atau sedang diproses. Akibatnya: User C melihat pesan kosong atau error dekripsi.
-
-Solusi: "Message Self-Healing" (Penyembuhan Mandiri)
-
-Jangan biarkan pesan gagal diam-diam. Jika dekripsi gagal karena kunci hilang, minta kuncinya.
-
-    Langkah 1: Deteksi Kegagalan Dekripsi Di decryptMessage, jika getGroupKey mengembalikan null, jangan langsung menyerah. Kembalikan status khusus, misal MISSING_KEY.
-
-    Langkah 2: Mekanisme Request (Client-Side) Di komponen UI (MessageItem.tsx atau MessageBubble.tsx), jika status pesan adalah MISSING_KEY (atau dekripsi gagal):
-
-        Tampilkan placeholder "Mendekripsi pesan..." atau "Menunggu kunci...".
-
-        Emit event socket session:request_group_key ke server.
-
-    Langkah 3: Pemenuhan Request (Provider) Anggota lain yang online (misal Admin atau siapa saja yang punya kunci) mendengarkan event tersebut.
-
-        Cek apakah User C (peminta) benar-benar anggota grup yang valid (validasi via Server/State).
-
-        Jika valid, ambil kunci grup saat ini, enkripsi secara pairwise (1-on-1) untuk User C, dan kirimkan.
+**Status:** Teridentifikasi. Membutuhkan perubahan logika di `ensureGroupSession` dan fungsi pemanggilnya (`sendMessage`, `uploadFile`, dll.) untuk menangani kasus kegagalan ini dengan lebih baik dan memberikan feedback ke UI.

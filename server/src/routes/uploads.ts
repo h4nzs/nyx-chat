@@ -28,12 +28,27 @@ router.post(
       if (!file) {
         throw new ApiError(400, "No file uploaded or file type is not allowed.");
       }
-      if (!fileKey || !sessionId) {
-        throw new ApiError(400, "Missing required encrypted key or session for the file.");
+      if (!fileKey) {
+        throw new ApiError(400, "Missing required encrypted key for the file.");
       }
       if (!tempId || !Number.isFinite(parsedTempId)) {
         throw new ApiError(400, "A valid temporary ID (tempId) is required.");
       }
+
+      // --- Start Validation ---
+      const conversation = await prisma.conversation.findUnique({
+        where: { id: conversationId },
+      });
+
+      if (!conversation) {
+        throw new ApiError(404, "Conversation not found.");
+      }
+
+      // Session ID is required only for non-group messages
+      if (!conversation.isGroup && !sessionId) {
+        throw new ApiError(400, "Missing required session for a 1-on-1 file message.");
+      }
+      // --- End Validation ---
 
       const participant = await prisma.participant.findFirst({
         where: { userId: senderId, conversationId },

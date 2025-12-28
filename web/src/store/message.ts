@@ -11,27 +11,37 @@ import { useConversationStore } from "./conversation";
 export async function decryptMessageObject(message: Message): Promise<Message> {
   const decryptedMsg = { ...message };
   try {
-    const conversation = useConversationStore.getState().conversations.find(c => c.id === decryptedMsg.conversationId);
-    const isGroup = conversation?.isGroup || false;
-    console.log(`[message.ts] decryptMessageObject: isGroup is ${isGroup} for convo ${decryptedMsg.conversationId}`);
+    // Robustly determine if the message is from a group chat.
+    // A message is considered a group message if it does NOT have a sessionId.
+    const isGroup = !decryptedMsg.sessionId;
+    
+    // The content to decrypt is either the main text content or the encrypted file key.
+    const contentToDecrypt = decryptedMsg.content || decryptedMsg.fileKey;
 
-    if (decryptedMsg.content) { // No need to check for sessionId for group messages
-      decryptedMsg.ciphertext = decryptedMsg.content;
-      const result = await decryptMessage(decryptedMsg.content, decryptedMsg.conversationId, isGroup, decryptedMsg.sessionId);
-      if (result.status === 'success') decryptedMsg.content = result.value;
-      else if (result.status === 'pending') decryptedMsg.content = result.reason;
-      else decryptedMsg.content = `[${result.error.message}]`;
-    }
-    if (decryptedMsg.repliedTo?.content && decryptedMsg.repliedTo.sessionId) {
-      let replyIsGroup = isGroup; // Default to parent context
-      // Defensively check if the replied-to message is from a different conversation
-      if (decryptedMsg.repliedTo.conversationId !== decryptedMsg.conversationId) {
-        const replyConversation = useConversationStore.getState().conversations.find(c => c.id === decryptedMsg.repliedTo.conversationId);
-        replyIsGroup = replyConversation?.isGroup ?? false;
+    if (contentToDecrypt) {
+      decryptedMsg.ciphertext = contentToDecrypt;
+      const result = await decryptMessage(contentToDecrypt, decryptedMsg.conversationId, isGroup, decryptedMsg.sessionId);
+      
+      if (result.status === 'success') {
+        // If the original message had a fileKey, the decrypted content is the raw file key.
+        // We put it back in the `content` field for the UI components to use.
+        decryptedMsg.content = result.value;
+      } else if (result.status === 'pending') {
+        decryptedMsg.content = result.reason;
+      } else {
+        decryptedMsg.content = `[${result.error.message}]`;
       }
+    }
+
+    // Handle decryption of replied-to messages
+    if (decryptedMsg.repliedTo?.content && decryptedMsg.repliedTo.sessionId) {
+      const replyIsGroup = !decryptedMsg.repliedTo.sessionId;
       const replyResult = await decryptMessage(decryptedMsg.repliedTo.content, decryptedMsg.repliedTo.conversationId, replyIsGroup, decryptedMsg.repliedTo.sessionId);
-      if (replyResult.status === 'success') decryptedMsg.repliedTo.content = replyResult.value;
-      else decryptedMsg.repliedTo.content = '[Encrypted Reply]';
+      if (replyResult.status === 'success') {
+        decryptedMsg.repliedTo.content = replyResult.value;
+      } else {
+        decryptedMsg.repliedTo.content = '[Encrypted Reply]';
+      }
     }
     return decryptedMsg;
   } catch (e) {
