@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getIo } from "../socket.js";
+import { ApiError } from "../utils/errors.js";
 import { getSecureLinkPreview } from "../utils/secureLinkPreview.js";
 import { sendPushNotification } from "../utils/sendPushNotification.js";
 import fs from 'fs/promises';
@@ -30,7 +31,12 @@ router.get("/:conversationId", async (req, res, next) => {
     }
 
     const messages = await prisma.message.findMany({
-      where: { conversationId },
+      where: { 
+        conversationId,
+        createdAt: {
+          gte: participant.joinedAt,
+        }
+      },
       take: -50, // Fetch the last 50 messages
       ...(cursor && { 
         skip: 1, // Skip the cursor itself
@@ -72,6 +78,28 @@ router.post("/", async (req, res, next) => {
     if (!participants.some(p => p.userId === senderId)) {
       return res.status(403).json({ error: "You are not a participant of this conversation." });
     }
+
+    // --- Reply Chain Depth Validation ---
+    if (repliedToId) {
+      let currentId = repliedToId;
+      let depth = 0;
+      const MAX_DEPTH = 10;
+
+      while (currentId && depth < MAX_DEPTH) {
+        const parentMessage = await prisma.message.findUnique({
+          where: { id: currentId },
+          select: { repliedToId: true },
+        });
+        if (!parentMessage) break;
+        currentId = parentMessage.repliedToId;
+        depth++;
+      }
+
+      if (depth >= MAX_DEPTH) {
+        throw new ApiError(400, "Reply chain is too deep.");
+      }
+    }
+    // --- End Validation ---
 
     let linkPreviewData: any = null;
     if (content && !fileUrl) {

@@ -127,7 +127,7 @@ self.onmessage = async (event: MessageEvent) => {
     await sodium.ready;
     isReady = true;
     if (type === 'init') {
-      self.postMessage({ type: 'init_success', id });
+      self.postMessage({ type: 'init_result', id, result: true });
       return;
     }
   }
@@ -307,6 +307,11 @@ self.onmessage = async (event: MessageEvent) => {
           signingPublicKeyB64,
           encryptedPrivateKeys,
         };
+        break;
+      }
+
+      case 'generate_random_key': {
+        result = sodium.randombytes_buf(32);
         break;
       }
 

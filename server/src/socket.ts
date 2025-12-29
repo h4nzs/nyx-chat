@@ -93,6 +93,95 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
+    socket.on('messages:distribute_keys', async ({ conversationId, keys }) => {
+      if (!userId || !keys || !Array.isArray(keys) || !conversationId) return;
+
+      console.log(`[Key Distribution] User ${userId} is distributing ${keys.length} key(s) for conversation ${conversationId}`);
+
+      try {
+        // Verify user is a participant of the conversation
+        const participant = await prisma.participant.findFirst({
+          where: {
+            conversationId: conversationId,
+            userId: userId,
+          },
+        });
+
+        if (!participant) {
+          console.error(`[Key Distribution] User ${userId} is not a participant of conversation ${conversationId}`);
+          return;
+        }
+
+        keys.forEach(keyPackage => {
+          if (keyPackage.userId && keyPackage.key) {
+            io.to(keyPackage.userId).emit('session:new_key', {
+              conversationId,
+              encryptedKey: keyPackage.key,
+              type: 'GROUP_KEY' // Explicitly mark as group key
+            });
+          } else {
+            console.warn(`[Key Distribution] Invalid key package for conversation ${conversationId}`);
+          }
+        });
+      } catch (error) {
+        console.error(`[Key Distribution] Error distributing keys for conversation ${conversationId}:`, error);
+      }
+    });
+
+    socket.on('message:send', async (message, callback) => {
+      if (!userId) return callback?.({ ok: false, error: "Not authenticated." });
+
+      const { conversationId, content, sessionId, tempId } = message;
+
+      // Validate content
+      if (!content || typeof content !== 'string') {
+        return callback?.({ ok: false, error: "Invalid message content." });
+      }
+
+      if (content.length > 10000) { // Adjust limit as needed
+        return callback?.({ ok: false, error: "Message content too large." });
+      }
+
+      try {
+        const conversation = await prisma.conversation.findUnique({
+          where: { id: conversationId },
+          include: { participants: { select: { userId: true } } },
+        });
+
+        if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
+          return callback?.({ ok: false, error: "Conversation not found or you are not a participant." });
+        }
+
+        const newMessage = await prisma.message.create({
+          data: {
+            conversationId,
+            senderId: userId,
+            content,
+            sessionId,
+          },
+          include: {
+            sender: {
+              select: { id: true, name: true, avatarUrl: true, username: true }
+            }
+          }
+        });
+        
+        // Add tempId to the message object before fanning out, so clients can match it
+        const finalMessage = { ...newMessage, tempId };
+
+        // Fan-out the message to all participants
+        conversation.participants.forEach(participant => {
+          io.to(participant.userId).emit('message:new', finalMessage);
+        });
+
+        callback?.({ ok: true, msg: finalMessage });
+      } catch (error) {
+        console.error("Failed to process message:send event:", error);
+        callback?.({ ok: false, error: "Failed to save or distribute message." });
+      }
+    });
+
+
     socket.on("push:subscribe", async (data) => {
       try {
         const { endpoint, keys } = data;
@@ -136,6 +225,60 @@ export function registerSocket(httpServer: HttpServer) {
     });
 
     // --- Handlers for E2EE Key Recovery ---
+
+    socket.on('group:request_key', async ({ conversationId }) => {
+      if (!userId || !conversationId) return;
+
+      console.log(`[Group Key Request] User ${userId} is requesting key for conversation ${conversationId}`);
+      try {
+        const participants = await prisma.participant.findMany({
+          where: {
+            conversationId,
+            userId: { not: userId },
+          },
+          select: { userId: true },
+        });
+
+        const allOnlineUsers = await redisClient.sMembers('online_users');
+        const onlineParticipants = participants.filter(p => allOnlineUsers.includes(p.userId));
+
+        if (onlineParticipants.length === 0) {
+          console.log(`[Group Key Request] No online users found in ${conversationId} to fulfill key request.`);
+          return;
+        }
+
+        const fulfillerId = onlineParticipants[0].userId;
+        const requester = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { publicKey: true },
+        });
+
+        if (!requester?.publicKey) {
+          console.error(`[Group Key Request] Requester ${userId} has no public key.`);
+          return;
+        }
+        
+        console.log(`[Group Key Request] Asking ${fulfillerId} to fulfill key request for ${userId}.`);
+        io.to(fulfillerId).emit('group:fulfill_key_request', {
+          conversationId,
+          requesterId: userId,
+          requesterPublicKey: requester.publicKey,
+        });
+      } catch (error) {
+        console.error(`[Group Key Request] Error processing group:request_key for ${conversationId}:`, error);
+      }
+    });
+
+    socket.on('group:fulfilled_key', ({ requesterId, conversationId, encryptedKey }) => {
+      if (!userId || !requesterId || !conversationId || !encryptedKey) return;
+      
+      console.log(`[Group Key Fulfill] Relaying group key for ${conversationId} from ${userId} to ${requesterId}`);
+      io.to(requesterId).emit('session:new_key', {
+        conversationId,
+        encryptedKey,
+        type: 'GROUP_KEY',
+      });
+    });
 
     socket.on('session:request_key', async ({ conversationId, sessionId }) => {
       if (!userId || !conversationId || !sessionId) return;

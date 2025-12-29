@@ -11,13 +11,12 @@ import { sendPushNotification } from "../utils/sendPushNotification.js";
 
 const router = Router();
 
-// Correctly structured endpoint with proper middleware usage and error handling
 router.post(
   "/:conversationId/upload",
   requireAuth,
   zodValidate({ params: z.object({ conversationId: z.string().cuid() }) }),
-  upload.single("file"), // Use multer as middleware before the handler
-  async (req: Request, res: Response, next: NextFunction) => { // Ensure 'next' is defined
+  upload.single("file"),
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { conversationId } = req.params;
       const senderId = req.user.id;
@@ -25,14 +24,35 @@ router.post(
       const { fileKey, sessionId, repliedToId, tempId, duration } = req.body;
       const parsedTempId = Number(tempId);
 
+      // --- DEBUG LOG 1: Incoming Data ---
+      console.log(`[UPLOAD-DEBUG] Incoming Request Body for ${conversationId}:`, {
+        fileKey: !!fileKey,
+        sessionId,
+        sessionIdType: typeof sessionId,
+        tempId,
+        isFilePresent: !!file
+      });
+
       if (!file) {
         throw new ApiError(400, "No file uploaded or file type is not allowed.");
       }
-      if (!fileKey || !sessionId) {
-        throw new ApiError(400, "Missing required encrypted key or session for the file.");
+      if (!fileKey) {
+        throw new ApiError(400, "Missing required encrypted key for the file.");
       }
       if (!tempId || !Number.isFinite(parsedTempId)) {
         throw new ApiError(400, "A valid temporary ID (tempId) is required.");
+      }
+
+      const conversation = await prisma.conversation.findUnique({
+        where: { id: conversationId },
+      });
+
+      if (!conversation) {
+        throw new ApiError(404, "Conversation not found.");
+      }
+
+      if (!conversation.isGroup && !sessionId) {
+        throw new ApiError(400, "Missing required session for a 1-on-1 file message.");
       }
 
       const participant = await prisma.participant.findFirst({
@@ -57,7 +77,7 @@ router.post(
             senderId,
             fileUrl,
             fileKey,
-            sessionId,
+            sessionId, // Pastikan ini masuk ke DB
             repliedToId,
             fileName: file.originalname,
             fileType: `${file.mimetype};encrypted=true`,
@@ -73,6 +93,12 @@ router.post(
           include: { sender: true, reactions: true, statuses: true, repliedTo: { include: { sender: true } } },
         });
 
+        // --- DEBUG LOG 2: Prisma Result ---
+        // Memastikan prisma mengembalikan sessionId setelah create
+        if (!conversation.isGroup && !msg.sessionId) {
+            console.error("[UPLOAD-CRITICAL] Prisma created message BUT sessionId is missing in return object!", msg);
+        }
+
         await tx.conversation.update({
           where: { id: conversationId },
           data: { lastMessageAt: msg.createdAt },
@@ -81,6 +107,16 @@ router.post(
       });
 
       const messageToBroadcast = { ...newMessage, tempId: parsedTempId };
+      
+      // --- DEBUG LOG 3: Pre-Broadcast ---
+      // Ini adalah bukti terakhir sebelum data meninggalkan server
+      console.log("[UPLOAD-DEBUG] Broadcasting Message Payload:", JSON.stringify({
+        id: messageToBroadcast.id,
+        sessionId: messageToBroadcast.sessionId, // Cek nilai ini di log!
+        isGroup: conversation.isGroup,
+        conversationId: messageToBroadcast.conversationId
+      }, null, 2));
+
       const io = getIo();
       io.to(conversationId).emit("message:new", messageToBroadcast);
       
@@ -92,6 +128,7 @@ router.post(
       res.status(201).json(messageToBroadcast);
 
     } catch (e) {
+      console.error("[UPLOAD-ERROR]", e);
       next(e);
     }
   }

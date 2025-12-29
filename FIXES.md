@@ -1,76 +1,155 @@
-Saat ini, berdasarkan analisa kode `crypto.ts` dan `socket.ts`, sepertinya aplikasi Chat Lite menggunakan pendekatan **Pairwise Encryption** (atau *Client-Side Fan-out*). Artinya, jika ada grup dengan 50 anggota, ketika User A mengirim pesan, User A harus mengenkripsi pesan itu 49 kali (satu untuk setiap kunci sesi teman). Ini memakan CPU dan baterai.
+Analisis Anda brilian. Penemuan bahwa `sessionId` **ada** saat diterima (`socket:on`) tetapi "menghilang" atau "salah konteks" saat dekripsi (`[crypto] Decrypting for GROUP...`) adalah *smoking gun* yang membuktikan adanya **Race Condition** atau **State Desynchronization**.
 
-Berikut adalah saran dan solusi konkrit untuk mengatasi masalah skalabilitas ini, diurutkan dari yang paling mudah diterapkan hingga yang paling *advanced*:
+Diagnosis Anda benar: Ada dua mekanisme yang berebut mendekripsi pesan yang sama.
 
-### 1. Implementasi "Sender Keys" (Solusi Paling Efektif)
+1. **Mekanisme Benar:** `decryptMessageObject` di `socket.ts` (menerima data mentah lengkap dengan `sessionId`).
+2. **Mekanisme Salah:** Komponen UI (React Component) yang me-render ulang, melihat pesan "belum terbaca/terdekripsi", lalu mencoba mendekripsi sendiri **tanpa** konteks `sessionId` yang lengkap (karena mungkin mengambil dari state global yang belum *settled* atau berasumsi default `isGroup: true`).
 
-Ini adalah standar industri yang digunakan oleh Signal (untuk grup) dan WhatsApp.
+Berikut adalah langkah perbaikan konkret untuk menerapkan solusi **"Single Source of Truth"** yang Anda usulkan.
 
-* **Masalah Sekarang (Pairwise):**
-User A ingin kirim "Halo" ke Grup (B, C, D).
-1. Encrypt "Halo" pakai Kunci A-B.
-2. Encrypt "Halo" pakai Kunci A-C.
-3. Encrypt "Halo" pakai Kunci A-D.
-*Beban: 3x enkripsi.*
+### Langkah 1: Perbarui `web/src/store/message.ts`
 
+Kita akan menulis ulang `decryptMessageObject` agar menjadi **satu-satunya** tempat logika dekripsi terjadi. Fungsi ini akan cerdas: ia mendeteksi sendiri apakah ini Grup atau Personal berdasarkan ada/tidaknya `sessionId` di dalam pesan itu sendiri, bukan bergantung pada state eksternal.
 
-* **Solusi (Sender Keys):**
-User A membuat satu **"Chain Key"** (kunci simetris acak) khusus untuk dirinya di grup ini.
-1. User A mengenkripsi Chain Key ini *sekali saja* ke B, C, dan D menggunakan *pairwise channel* yang sudah ada. (Ini disebut tahap distribusi kunci).
-2. Untuk pesan "Halo", User A mengenkripsinya **HANYA SEKALI** menggunakan Chain Key tersebut.
-3. Kirim *ciphertext* tunggal itu ke server. Server menyebarkannya ke B, C, D.
-4. B, C, dan D sudah punya Chain Key milik A, jadi mereka bisa mendekripsinya.
+Ubah file `web/src/store/message.ts`:
 
+```typescript
+import { create } from "zustand";
+import { Message } from "./conversation"; // Pastikan path import benar
+import { decryptMessage } from "../utils/crypto";
 
-* **Dampak:** Kompleksitas enkripsi pesan turun dari  menjadi . Beban CPU klien berkurang drastis. Ratcheting hanya terjadi pada *Chain Key* itu sendiri (Hash Ratchet), yang sangat ringan.
+// ... (kode store lainnya tetap sama) ...
 
-### 2. Offloading ke Web Workers (Optimasi Frontend)
+/**
+ * Logika Dekripsi Terpusat (Single Source of Truth)
+ * Menangani dekripsi teks biasa DAN kunci file.
+ */
+export async function decryptMessageObject(message: Message): Promise<Message> {
+  // 1. Clone pesan agar tidak memutasi state secara tidak sengaja
+  const decryptedMsg = { ...message };
 
-Saya melihat di `chat-lite/web/src/utils/crypto.ts`, fungsi enkripsi/dekripsi berjalan di *main thread* JavaScript.
-Pada grup yang ramai, ini akan membuat UI "nge-freeze" atau patah-patah saat mendekripsi banyak pesan masuk sekaligus.
+  try {
+    // -------------------------------------------------------------------------
+    // LOGIKA PENENTUAN KONTEKS (CRITICAL FIX)
+    // Jangan mengandalkan state conversationStore untuk menentukan isGroup,
+    // karena state tersebut mungkin belum sinkron saat pesan baru masuk (race condition).
+    // Gunakan properti pesan itu sendiri sebagai kebenaran mutlak.
+    // -------------------------------------------------------------------------
+    
+    // Jika sessionId ADA, ini PASTI 1-on-1 (Private).
+    // Jika sessionId KOSONG, ini diasumsikan Group.
+    const isGroup = !decryptedMsg.sessionId;
 
-* **Solusi:** Pindahkan seluruh logika `libsodium` dan manajemen kunci ke **Web Worker**.
-* **Cara Kerja:**
-1. UI mengirim pesan mentah ke Worker.
-2. Worker melakukan kerja berat (enkripsi matematika).
-3. Worker mengembalikan *ciphertext* ke UI untuk dikirim via Socket.
+    // 2. Tentukan Payload yang Akan Didekripsi
+    // Prioritas: Jika ada fileKey, itu yang harus didekripsi (untuk pesan File).
+    // Jika tidak, baru cek content (untuk pesan Teks).
+    const contentToDecrypt = decryptedMsg.fileKey || decryptedMsg.content;
 
+    // Jika tidak ada yang perlu didekripsi, kembalikan apa adanya (misal pesan sistem)
+    if (!contentToDecrypt) {
+      return decryptedMsg;
+    }
 
-* **Keuntungan:** UI tetap 60fps mulus meskipun di latar belakang sedang mendekripsi 100 pesan gambar.
+    // 3. Eksekusi Dekripsi
+    // Kita simpan ciphertext asli untuk keperluan debugging jika perlu
+    decryptedMsg.ciphertext = contentToDecrypt;
 
-### 3. "Lazy" Ratcheting (Optimasi Protokol)
+    const result = await decryptMessage(
+      contentToDecrypt,
+      decryptedMsg.conversationId,
+      isGroup,
+      decryptedMsg.sessionId
+    );
 
-Di file `crypto.ts`, terdapat fungsi `ensureAndRatchetSession`. Jika ini dipanggil terlalu sering (misal setiap pesan), overhead jabat tangan (handshake) akan tinggi.
+    // 4. Proses Hasil
+    if (result.status === 'success') {
+      // PENTING: Untuk pesan file, 'value' ini adalah KUNCI FILE TERDEKRIPSI.
+      // UI (FileAttachment) harus tahu bahwa jika pesan punya fileUrl,
+      // maka message.content berisi kunci enkripsi file, bukan teks chat.
+      decryptedMsg.content = result.value;
+      
+      // Opsional: Anda bisa menghapus field fileKey yang terenkripsi agar tidak membingungkan
+      // decryptedMsg.fileKey = undefined; 
+    } else if (result.status === 'pending') {
+      // Kasus "waiting_for_key"
+      decryptedMsg.content = result.reason || 'waiting_for_key';
+    } else {
+      // Kasus Error
+      console.warn(`[Decrypt] Failed for msg ${message.id}:`, result.error);
+      decryptedMsg.content = 'Decryption failed';
+    }
 
-* **Solusi:** Jangan lakukan *Diffie-Hellman Ratchet* (pembaruan kunci asimetris) setiap kali kirim pesan.
-* **Strategi:** Gunakan **Hash Ratchet** (sangat cepat) untuk setiap pesan, dan simpan *Diffie-Hellman Ratchet* hanya untuk momen-momen tertentu, misalnya:
-* Setiap 50 pesan.
-* Atau hanya ketika ada anggota baru masuk/keluar grup (untuk menjaga *Post-Compromise Security*).
+    // 5. Dekripsi Replied Message (Nested)
+    // Logika yang sama harus diterapkan secara rekursif jika ada reply
+    if (decryptedMsg.repliedTo) {
+        // Kita panggil fungsi ini lagi secara rekursif untuk pesan yang dibalas
+        // (Pastikan tidak infinite loop, tapi struktur data message tree biasanya aman)
+        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo);
+    }
 
+    return decryptedMsg;
 
+  } catch (e) {
+    console.error("Critical error in decryptMessageObject:", e);
+    return { ...message, content: "Error processing message" };
+  }
+}
 
-### 4. Enkripsi Media yang Efisien (Hybrid Encryption)
+// ... (sisa file message.ts) ...
 
-Untuk file (gambar/video), pastikan kamu tidak mengenkripsi *blob* file itu berkali-kali.
-Saya melihat di `crypto.ts` fungsi `encryptFile` sudah menghasilkan `encryptedBlob` dan `key`.
+```
 
-* **Pastikan Alurnya:**
-1. Enkripsi file besar (misal 5MB) **satu kali** dengan kunci acak sementara (`AES-Key`).
-2. Simpan file terenkripsi itu ke server/storage.
-3. Lalu, enkripsi `AES-Key` (yang ukurannya cuma 32 bytes) menggunakan metode *Sender Keys* (Poin 1) atau *Pairwise* ke semua anggota grup.
+### Langkah 2: Audit & Bersihkan Komponen UI (MENGHENTIKAN RACE CONDITION)
 
+Ini langkah yang **paling krusial**. Kode di atas tidak akan berguna jika komponen UI (seperti `MessageItem.tsx`, `FileAttachment.tsx`, atau `ChatWindow.tsx`) masih bandel mencoba mendekripsi sendiri.
 
-* **Hasil:** Klien hanya perlu mengenkripsi ulang 32 bytes data untuk setiap anggota, bukan 5MB data.
+Anda harus mencari (Ctrl+F) string `decryptMessage` di dalam folder `web/src/components`.
 
-### 5. MLS (Messaging Layer Security) - Masa Depan
+**Jika Anda menemukan pola seperti ini di komponen UI:**
 
-Jika kamu ingin solusi yang benar-benar *scalable* untuk grup dengan ribuan anggota (seperti "Supergroup"), kamu bisa melirik standar IETF baru bernama **MLS**.
+```typescript
+// CONTOH KODE SALAH (HARUS DIHAPUS)
+useEffect(() => {
+  if (message.fileKey && !decryptedKey) {
+     // Komponen mencoba mendekripsi sendiri -> INI PENYEBAB BUG!
+     // Komponen ini tidak tahu context sessionId dengan benar
+     decryptMessage(message.fileKey, conversationId, isGroup, ...).then(...)
+  }
+}, [message]);
 
-* **Konsep:** Menggunakan struktur pohon (*TreeKEM*). Jika ada anggota keluar dari grup berisi 1000 orang, operasi *re-keying* hanya butuh logaritma langkah (), bukan linear.
-* **Catatan:** Ini sangat kompleks untuk diimplementasikan dari nol. Mengingat kamu sudah punya basis *Signal Protocol* (X3DH), pindah ke "Sender Keys" (Poin 1) adalah langkah transisi yang paling masuk akal dan *feasible*.
+```
 
-### Rekomendasi Prioritas
+**Tindakan:** **Hapus total** `useEffect` atau logika tersebut.
+Komponen UI harus menjadi "dumb component" yang hanya menerima data matang:
 
-Saya sarankan kamu mulai dengan **Poin 2 (Web Workers)** karena itu murni perubahan arsitektur kode frontend tanpa mengubah protokol database/server. Itu akan memberikan dampak performa "terasa" yang instan bagi pengguna.
+* Jika `message.content` berisi string acak/base64 -> Tampilkan "Waiting for key..." (atau spinner).
+* Jika `message.content` berisi kunci valid -> Lakukan dekripsi *file* (bukan dekripsi kunci file).
 
-Setelah itu, baru implementasikan **Poin 1 (Sender Keys)** untuk menyelesaikan masalah skalabilitas kriptografinya secara fundamental.
+### Langkah 3: Penyesuaian Kecil di `FileAttachment.tsx`
+
+Karena kita sekarang menyimpan **Kunci File yang Sudah Didekripsi** ke dalam `message.content` (untuk menyederhanakan struktur), pastikan komponen `FileAttachment` mengambil kuncinya dari sana.
+
+Periksa `web/src/components/FileAttachment.tsx`. Pastikan ia menggunakan `message.content` sebagai kunci untuk mendownload/mendekripsi blob file, **bukan** menggunakan `message.fileKey` lagi (karena `fileKey` masih mentah/terenkripsi).
+
+```typescript
+// Contoh logika di FileAttachment.tsx
+const handleDownload = async () => {
+  // SEBELUMNYA MUNGKIN: const key = message.fileKey; (SALAH)
+  
+  // SEKARANG:
+  // Kunci file yang sudah didekripsi oleh store ada di message.content
+  const decryptedFileKey = message.content; 
+  
+  if (!decryptedFileKey || decryptedFileKey === 'waiting_for_key') {
+      alert("Kunci belum tersedia");
+      return;
+  }
+  
+  // Lanjut ke logika decryptFile(blob, decryptedFileKey, ...)
+};
+
+```
+
+### Ringkasan
+
+Dengan 3 langkah ini, Anda mematikan "noise" dari UI yang mencoba mendekripsi sembarangan (yang menyebabkan log `Decrypting for GROUP...`), dan Anda memberdayakan `store/message.ts` untuk menangani logika dengan benar menggunakan data `sessionId` yang terbukti sudah diterima dari server.

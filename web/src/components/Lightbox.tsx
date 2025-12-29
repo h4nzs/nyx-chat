@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Message } from '@store/conversation';
-import { decryptFile, decryptMessage } from '@utils/crypto';
+import { decryptFile } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
@@ -42,30 +42,17 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
         setIsLoading(true);
         setError(null);
       }
-
+      
       try {
         if (!message.fileType?.includes(';encrypted=true')) {
           if (isMounted) setDecryptedUrl(toAbsoluteUrl(message.fileUrl));
           return;
         }
 
-        if (!message.fileKey || !message.sessionId) {
-          throw new Error("Incomplete image data for decryption.");
-        }
+        const fileKey = message.content;
 
-        let fileKey = message.fileKey;
-        if (!message.optimistic && fileKey && typeof fileKey === 'string' && fileKey.length > 50) {
-          const result = await decryptMessage(message.fileKey, message.conversationId, message.sessionId);
-          if (result.status === 'success') {
-            fileKey = result.value;
-          } else {
-            // If pending or error, throw to be caught by the outer catch block
-            throw new Error(result.status === 'pending' ? result.reason : result.error.message);
-          }
-        }
-
-        if (!fileKey) {
-          throw new Error("Could not retrieve file key.");
+        if (!fileKey || fileKey === 'waiting_for_key' || fileKey.startsWith('[')) {
+          throw new Error(fileKey || "File key not available yet.");
         }
 
         const response = await fetch(toAbsoluteUrl(message.fileUrl));

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { FiPlay, FiPause, FiDownload, FiAlertTriangle } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { Message } from '@store/conversation';
-import { decryptMessage, decryptFile } from '@utils/crypto';
+import { decryptFile } from '@utils/crypto';
 import { toAbsoluteUrl } from '@utils/url';
 import { useKeychainStore } from '@store/keychain';
 import { Spinner } from './Spinner';
@@ -29,33 +29,27 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
     let isMounted = true;
 
     const handleDecryption = async () => {
-      if (!message.fileUrl || !message.fileKey || !message.sessionId) {
+      // The decrypted file key is now expected to be in message.content
+      const fileKey = message.content;
+
+      if (!message.fileUrl || !fileKey) {
         if (isMounted) setError("Incomplete message data for decryption.");
         return;
       }
       
+      // Handle pending/error states passed from the store
+      if (fileKey === 'waiting_for_key' || fileKey.startsWith('[')) {
+        if (isMounted) setError(fileKey);
+        return;
+      }
+
       if (isMounted) {
         setIsLoading(true);
         setError(null);
       }
 
       try {
-        let fileKey = message.fileKey;
-
-        if (!message.optimistic && fileKey && typeof fileKey === 'string' && fileKey.length > 50) {
-          const result = await decryptMessage(message.fileKey, message.conversationId, message.sessionId);
-          if (result.status === 'success') {
-            fileKey = result.value;
-          } else {
-            throw new Error(result.status === 'pending' ? result.reason : result.error.message);
-          }
-        }
-
-        if (!fileKey) {
-          throw new Error("Could not retrieve file key.");
-        }
-
-        // 2. Fetch the encrypted file
+        // 1. Fetch the encrypted file
         const response = await fetch(toAbsoluteUrl(message.fileUrl));
         if (!response.ok) {
           if (response.status === 404) {
@@ -65,11 +59,11 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
         }
         const encryptedBlob = await response.blob();
 
-        // 3. Decrypt the file blob
+        // 2. Decrypt the file blob
         const decryptedBlob = await decryptFile(encryptedBlob, fileKey, 'audio/webm');
         
         if (isMounted) {
-          // 4. Create a playable URL
+          // 3. Create a playable URL
           objectUrl = URL.createObjectURL(decryptedBlob);
           setAudioSrc(objectUrl);
         }
@@ -81,10 +75,10 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
       }
     };
 
-    if (message.fileType === 'audio/webm;encrypted=true') {
+    if (message.fileType?.includes('encrypted=true')) {
       handleDecryption();
     } else if (message.fileUrl) {
-      // For backward compatibility or unencrypted files
+      // For optimistic messages with blob URLs
       setAudioSrc(toAbsoluteUrl(message.fileUrl));
     }
 

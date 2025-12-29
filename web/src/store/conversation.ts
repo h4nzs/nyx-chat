@@ -1,6 +1,6 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api";
-import { decryptMessageObject } from "./message";
+import { useMessageStore, decryptMessageObject } from "./message";
 import { getSocket, emitSessionKeyRequest } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
@@ -21,6 +21,7 @@ export type Message = {
   content?: string | null;
   imageUrl?: string | null;
   fileUrl?: string | null;
+  fileKey?: string | null;
   fileName?: string | null;
   fileType?: string;
   fileSize?: number;
@@ -42,6 +43,7 @@ export type Participant = {
   name: string;
   description?: string | null;
   avatarUrl?: string | null;
+  publicKey?: string;
   role: "ADMIN" | "MEMBER";
   isPinned?: boolean;
 };
@@ -58,6 +60,7 @@ export type Conversation = {
   updatedAt: string;
   unreadCount: number;
   lastUpdated?: number;
+  keyRotationPending?: boolean;
 };
 
 // --- Helper Functions ---
@@ -299,6 +302,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           title: conversation.title,
           description: conversation.description,
           avatarUrl: conversation.avatarUrl,
+          isGroup: conversation.isGroup, // Ensure isGroup is updated
           participants: conversation.participants,
           lastMessage: conversation.lastMessage || existing.lastMessage,
           updatedAt: conversation.updatedAt,
@@ -316,6 +320,9 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   removeConversation: (conversationId) => {
+    // Also clear messages from the message store
+    useMessageStore.getState().clearMessagesForConversation(conversationId);
+
     set(state => {
       const wasActive = state.activeId === conversationId;
       if (wasActive) {

@@ -1,33 +1,69 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, apiUpload } from "@lib/api";
-import { getSocket, emitSessionKeyRequest } from "@lib/socket";
-import { encryptMessage, decryptMessage, ensureAndRatchetSession, encryptFile } from "@utils/crypto";
+import { getSocket, emitSessionKeyRequest, emitGroupKeyDistribution } from "@lib/socket";
+import { encryptMessage, decryptMessage, ensureAndRatchetSession, encryptFile, ensureGroupSession } from "@utils/crypto";
 import toast from "react-hot-toast";
 import { useAuthStore, type User } from "./auth";
 import type { Message } from "./conversation";
 import useDynamicIslandStore from './dynamicIsland';
 import { useConversationStore } from "./conversation";
 
-export async function decryptMessageObject(message: Message): Promise<Message> {
+/**
+ * Logika Dekripsi Terpusat (Single Source of Truth)
+ * Menangani dekripsi teks biasa DAN kunci file.
+ */
+export async function decryptMessageObject(message: Message, seenIds = new Set<string>(), depth = 0): Promise<Message> {
+  // 1. Clone pesan dan tambahkan recursion guard
   const decryptedMsg = { ...message };
+  
+  if (seenIds.has(decryptedMsg.id) || depth > 10) {
+    decryptedMsg.repliedTo = undefined; // Putus rantai rekursif
+    return decryptedMsg;
+  }
+  seenIds.add(decryptedMsg.id);
+
   try {
-    if (decryptedMsg.content && decryptedMsg.sessionId) {
-      decryptedMsg.ciphertext = decryptedMsg.content;
-      const result = await decryptMessage(decryptedMsg.content, decryptedMsg.conversationId, decryptedMsg.sessionId);
-      if (result.status === 'success') decryptedMsg.content = result.value;
-      else if (result.status === 'pending') decryptedMsg.content = result.reason;
-      else decryptedMsg.content = `[${result.error.message}]`;
+    // -------------------------------------------------------------------------
+    // LOGIKA PENENTUAN KONTEKS (CRITICAL FIX)
+    // -------------------------------------------------------------------------
+    const isGroup = !decryptedMsg.sessionId;
+
+    // 2. Tentukan Payload yang Akan Didekripsi
+    const contentToDecrypt = decryptedMsg.fileKey || decryptedMsg.content;
+
+    if (!contentToDecrypt) {
+      return decryptedMsg;
     }
-    if (decryptedMsg.repliedTo?.content && decryptedMsg.repliedTo.sessionId) {
-      const replyResult = await decryptMessage(decryptedMsg.repliedTo.content, decryptedMsg.conversationId, decryptedMsg.repliedTo.sessionId);
-      if (replyResult.status === 'success') decryptedMsg.repliedTo.content = replyResult.value;
-      else decryptedMsg.repliedTo.content = '[Encrypted Reply]';
+
+    // 3. Eksekusi Dekripsi
+    decryptedMsg.ciphertext = contentToDecrypt;
+    const result = await decryptMessage(
+      contentToDecrypt,
+      decryptedMsg.conversationId,
+      isGroup,
+      decryptedMsg.sessionId
+    );
+
+    // 4. Proses Hasil
+    if (result.status === 'success') {
+      decryptedMsg.content = result.value;
+    } else if (result.status === 'pending') {
+      decryptedMsg.content = result.reason || 'waiting_for_key';
+    } else {
+      console.warn(`[Decrypt] Failed for msg ${message.id}:`, result.error);
+      decryptedMsg.content = 'Decryption failed';
     }
+
+    // 5. Dekripsi Replied Message (Nested & Guarded)
+    if (decryptedMsg.repliedTo) {
+        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1);
+    }
+
     return decryptedMsg;
+
   } catch (e) {
-    console.error("Decryption failed in decryptMessageObject", e);
-    decryptedMsg.content = '[Failed to decrypt message]';
-    return decryptedMsg;
+    console.error("Critical error in decryptMessageObject:", e);
+    return { ...message, content: "Error processing message" };
   }
 }
 
@@ -61,6 +97,8 @@ type Actions = {
   clearMessagesForConversation: (conversationId: string) => void;
   retrySendMessage: (message: Message) => void;
   addSystemMessage: (conversationId: string, content: string) => void;
+  reDecryptPendingMessages: (conversationId: string) => Promise<void>;
+  failPendingMessages: (conversationId: string, reason: string) => void;
   reset: () => void;
 };
 
@@ -102,6 +140,28 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       return;
     }
 
+    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+    if (!conversation) {
+      toast.error("Conversation not found.");
+      return;
+    }
+    const isGroup = conversation.isGroup;
+
+    // Ensure group session and distribute keys if necessary BEFORE sending the message
+    if (isGroup) {
+      try {
+        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
+        if (distributionKeys && distributionKeys.length > 0) {
+          console.log(`[message.ts] sendMessage: New group key generated, distributing ${distributionKeys.length} keys.`);
+          emitGroupKeyDistribution(conversationId, distributionKeys);
+        }
+      } catch (e) {
+        console.error("Failed to ensure group session, message will likely fail for others.", e);
+        toast.error("Failed to establish group session.");
+        // Optional: We could abort sending here, but for now we'll let it proceed to not block the user.
+      }
+    }
+
     const tempId = Date.now();
     try {
       const optimisticMessage: Message = {
@@ -120,12 +180,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       // Store original content for potential retry before encrypting
       if (data.content) {
         optimisticMessage.preview = data.content;
-        const { ciphertext, sessionId } = await encryptMessage(data.content, conversationId);
+        const { ciphertext, sessionId } = await encryptMessage(data.content, conversationId, isGroup);
         optimisticMessage.content = ciphertext;
         optimisticMessage.sessionId = sessionId;
       }
       if (data.fileKey) {
-        const { ciphertext, sessionId } = await encryptMessage(data.fileKey, conversationId);
+        const { ciphertext, sessionId } = await encryptMessage(data.fileKey, conversationId, isGroup);
         optimisticMessage.fileKey = ciphertext;
         optimisticMessage.sessionId = sessionId;
       }
@@ -164,6 +224,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       toast.error("You must restore your keys from your recovery phrase before you can send files.");
       return;
     }
+    
+    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+    if (!conversation) {
+      toast.error("Conversation not found.");
+      return;
+    }
+    const isGroup = conversation.isGroup;
 
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const uploadId = addActivity({ type: 'upload', fileName: file.name, progress: 0 });
@@ -192,13 +259,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       updateActivity(uploadId, { progress: 10 });
       // 2. Encrypt file and its key
       const { encryptedBlob, key: fileKey } = await encryptFile(file);
-      const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(fileKey, conversationId);
+      const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(fileKey, conversationId, isGroup);
       updateActivity(uploadId, { progress: 40 });
 
       // 3. Upload file and send message data
       const formData = new FormData();
       formData.append('file', encryptedBlob, file.name);
-      formData.append('sessionId', sessionId);
+      if (sessionId) formData.append('sessionId', sessionId);
       formData.append('fileKey', encryptedFileKey);
       formData.append('tempId', tempId.toString());
       // Append other relevant data
@@ -235,12 +302,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     if (hasRestoredKeys) {
       try {
-        await ensureAndRatchetSession(id);
-      } catch (ratchetError) {
-        console.error("Failed to establish session, decryption may fail:", ratchetError);
+        // Find the conversation first to determine its type
+        const conversation = useConversationStore.getState().conversations.find(c => c.id === id);
+        // Key distribution logic is now handled by sendMessage, but we still need to handle the 1-on-1 case.
+        if (conversation && !conversation.isGroup) {
+          await ensureAndRatchetSession(id);
+        }
+      } catch (sessionError) {
+        console.error("Failed to establish session, decryption may fail:", sessionError);
       }
     } else {
-      console.log("Skipping session ratchet: No keys restored.");
+      console.log("Skipping session setup: No keys restored.");
     }
     
     try {
@@ -392,5 +464,61 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const systemMessage: Message = {
       id: `system_${Date.now()}`, type: 'SYSTEM', conversationId, content, createdAt: new Date().toISOString(), senderId: 'system' };
     set(state => ({ messages: { ...state.messages, [conversationId]: [...(state.messages[conversationId] || []), systemMessage] } }));
+  },
+
+  reDecryptPendingMessages: async (conversationId: string) => {
+    console.log(`[re-decrypt] Triggered for conversation ${conversationId}`);
+    const state = get();
+    const conversationMessages = state.messages[conversationId];
+    if (!conversationMessages) return;
+
+    const pendingMessages = conversationMessages.filter(
+      m => m.content === 'waiting_for_key' || m.content === '[Requesting group key...]' || m.content === '[Requesting key to decrypt...]'
+    );
+
+    if (pendingMessages.length === 0) {
+      console.log(`[re-decrypt] No pending messages found for ${conversationId}.`);
+      return;
+    }
+
+    console.log(`[re-decrypt] Found ${pendingMessages.length} pending messages to re-decrypt.`);
+
+    const reDecryptedMessages = await Promise.all(
+      pendingMessages.map(msg => decryptMessageObject({ ...msg, content: msg.ciphertext }))
+    );
+
+    const messageMap = new Map(conversationMessages.map(m => [m.id, m]));
+    reDecryptedMessages.forEach(m => messageMap.set(m.id, m));
+    
+    const newMessagesForConvo = Array.from(messageMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    set({
+      messages: {
+        ...state.messages,
+        [conversationId]: newMessagesForConvo,
+      },
+    });
+    console.log(`[re-decrypt] Re-decryption complete for ${conversationId}.`);
+  },
+
+  failPendingMessages: (conversationId: string, reason: string) => {
+    set(state => {
+      const conversationMessages = state.messages[conversationId];
+      if (!conversationMessages) return state;
+
+      const newMessages = conversationMessages.map(m => {
+        if (m.content === 'waiting_for_key' || m.content === '[Requesting group key...]' || m.content === '[Requesting key to decrypt...]') {
+          return { ...m, content: reason };
+        }
+        return m;
+      });
+
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: newMessages,
+        },
+      };
+    });
   },
 }));
