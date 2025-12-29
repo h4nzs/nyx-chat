@@ -78,6 +78,23 @@ export async function decryptSessionKeyForUser(
   return sessionKey;
 }
 
+// --- Session Ratcheting and Key Retrieval ---
+
+export async function ensureAndRatchetSession(conversationId: string): Promise<void> {
+  try {
+    const { sessionId, encryptedKey } = await authFetch<{ sessionId: string; encryptedKey: string }>(
+      `/api/session-keys/${conversationId}/ratchet`, { method: 'POST' }
+    );
+    const { publicKey, privateKey } = await getMyEncryptionKeyPair();
+    const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+
+    await addSessionKey(conversationId, sessionId, newSessionKey);
+  } catch (error) {
+    console.error(`Failed to ratchet session for ${conversationId}:`, error);
+    throw new Error('Could not establish a secure session.');
+  }
+}
+
 // --- Group Key Management & Recovery ---
 
 export async function ensureGroupSession(conversationId: string, participants: Participant[]): Promise<any[] | null> {
@@ -237,6 +254,64 @@ export async function decryptMessage(
   }
 }
 
+// --- Pre-Key Handshake (Simplified X3DH) ---
+
+export type PreKeyBundle = {
+  identityKey: string;
+  signingKey: string;
+  signedPreKey: {
+    key: string;
+    signature: string;
+  };
+};
+
+/**
+ * INITIATOR (Alice) side of the handshake.
+ */
+export async function establishSessionFromPreKeyBundle(
+  myIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
+  preKeyBundle: PreKeyBundle
+): Promise<{ sessionKey: Uint8Array, ephemeralPublicKey: string }> {
+  const sodium = await getSodium();
+
+  const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const theirSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const theirSigningKey = sodium.from_base64(preKeyBundle.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const signature = sodium.from_base64(preKeyBundle.signedPreKey.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+  // Offload the entire handshake calculation to the worker
+  return worker_x3dh_initiator({
+    myIdentityKey: myIdentityKeyPair,
+    theirIdentityKey,
+    theirSignedPreKey,
+    theirSigningKey,
+    signature,
+  });
+}
+
+/**
+ * RECIPIENT (Bob) side of the handshake.
+ */
+export async function deriveSessionKeyAsRecipient(
+  myIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
+  mySignedPreKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
+  initiatorIdentityKeyStr: string,
+  initiatorEphemeralKeyStr: string
+): Promise<Uint8Array> {
+  const sodium = await getSodium();
+
+  const theirIdentityKey = sodium.from_base64(initiatorIdentityKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const theirEphemeralKey = sodium.from_base64(initiatorEphemeralKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
+  
+  // Offload the entire key derivation to the worker
+  return worker_x3dh_recipient({
+    myIdentityKey: myIdentityKeyPair,
+    mySignedPreKey: mySignedPreKeyPair,
+    theirIdentityKey,
+    theirEphemeralKey,
+  });
+}
+
 // --- Key Recovery & Fulfillment ---
 
 interface GroupFulfillRequestPayload {
@@ -363,8 +438,3 @@ export async function decryptFile(encryptedBlob: Blob, keyB64: string, originalT
 
   return new Blob([decryptedData], { type: originalType });
 }
-
-// Dummy export to make replace happy for older versions
-export type PreKeyBundle = {};
-export async function establishSessionFromPreKeyBundle() {}
-export async function deriveSessionKeyAsRecipient() {}
