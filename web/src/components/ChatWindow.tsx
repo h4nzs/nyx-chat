@@ -28,6 +28,18 @@ import { useNavigate } from 'react-router-dom';
 import { useConnectionStore } from "@store/connection";
 import LinkPreviewCard from './LinkPreviewCard';
 
+const KeyRotationBanner = () => (
+  <div className="bg-yellow-500/20 border-t-2 border-b-2 border-yellow-600 px-4 py-3 text-yellow-800 dark:text-yellow-200">
+    <div className="flex items-center">
+      <FiShield className="mr-3 flex-shrink-0" size={20} />
+      <div>
+        <p className="font-bold">Chat Insecure: Key Rotation Needed</p>
+        <p className="text-sm">A member has left this group. Send a message to generate a new key and re-secure the chat.</p>
+      </div>
+    </div>
+  </div>
+);
+
 // Helper function to prevent spamming the API
 function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
   let timeout: ReturnType<typeof setTimeout> | null = null;
@@ -537,6 +549,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                    </div>
                 )}
               </div>
+              {conversation.keyRotationPending && <KeyRotationBanner />}
               <MessageInput onSend={handleSendMessage} onTyping={handleTyping} onFileChange={handleFileChange} onVoiceSend={handleVoiceSend} />
               {lightboxMessage && <Lightbox message={lightboxMessage} onClose={() => setLightboxMessage(null)} />}
               {isGroupInfoOpen && <GroupInfoPanel conversationId={id} onClose={() => setIsGroupInfoOpen(false)} />}

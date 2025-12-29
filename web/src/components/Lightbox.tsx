@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Message } from '@store/conversation';
-import { decryptFile, decryptMessage } from '@utils/crypto';
+import { decryptFile } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';

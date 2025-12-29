@@ -23,6 +23,28 @@ type State = {
   retrySendMessage: (message: Message) => void;
 };
 
+const ensureGroupSessionIfNeeded = async (conversationId: string): Promise<boolean> => {
+  const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  if (!conversation) {
+    toast.error("Internal error: Active conversation not found.");
+    return false;
+  }
+  
+  if (conversation.isGroup) {
+    try {
+      const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
+      if (distributionKeys && distributionKeys.length > 0) {
+        emitGroupKeyDistribution(conversationId, distributionKeys);
+      }
+    } catch (e: any) {
+      console.error("Failed to ensure group session.", e);
+      toast.error(`Failed to establish group session: ${e.message}`);
+      return false;
+    }
+  }
+  return true;
+};
+
 export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   replyingTo: null,
   typingLinkPreview: null,
@@ -53,26 +75,11 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     const { replyingTo } = get();
-    
-    // --- START BUG FIX ---
-    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-    if (!conversation) {
-      return toast.error("Internal error: Active conversation not found.");
-    }
-    const isGroup = conversation.isGroup;
 
-    if (isGroup) {
-      try {
-        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
-        if (distributionKeys && distributionKeys.length > 0) {
-          emitGroupKeyDistribution(conversationId, distributionKeys);
-        }
-      } catch (e) {
-        console.error("Failed to ensure group session, message will likely fail for others.", e);
-        toast.error("Failed to establish group session.");
-      }
-    }
-    // --- END BUG FIX ---
+    if (!await ensureGroupSessionIfNeeded(conversationId)) return;
+    
+    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
+    const isGroup = conversation.isGroup;
 
     let payload: Partial<Message> = { ...data };
 
@@ -132,26 +139,13 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       return toast.error("User not authenticated.");
     }
 
-    // --- START BUG FIX ---
-    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-    if (!conversation) {
+    if (!await ensureGroupSessionIfNeeded(conversationId)) {
       removeActivity(activityId);
-      return toast.error("Internal error: Active conversation not found.");
+      return;
     }
-    const isGroup = conversation.isGroup;
 
-    if (isGroup) {
-      try {
-        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
-        if (distributionKeys && distributionKeys.length > 0) {
-          emitGroupKeyDistribution(conversationId, distributionKeys);
-        }
-      } catch (e) {
-        console.error("Failed to ensure group session, file upload will likely fail for others.", e);
-        toast.error("Failed to establish group session.");
-      }
-    }
-    // --- END BUG FIX ---
+    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
+    const isGroup = conversation.isGroup;
 
     const tempId = Date.now();
     const optimisticMessage: Message = {
@@ -213,26 +207,13 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       return toast.error("User not authenticated.");
     }
     
-    // --- START BUG FIX ---
-    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-    if (!conversation) {
+    if (!await ensureGroupSessionIfNeeded(conversationId)) {
       removeActivity(activityId);
-      return toast.error("Internal error: Active conversation not found.");
+      return;
     }
-    const isGroup = conversation.isGroup;
 
-    if (isGroup) {
-      try {
-        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
-        if (distributionKeys && distributionKeys.length > 0) {
-          emitGroupKeyDistribution(conversationId, distributionKeys);
-        }
-      } catch (e) {
-        console.error("Failed to ensure group session, voice message will likely fail for others.", e);
-        toast.error("Failed to establish group session.");
-      }
-    }
-    // --- END BUG FIX ---
+    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
+    const isGroup = conversation.isGroup;
     
     const tempId = Date.now();
     const optimisticMessage: Message = {
@@ -266,7 +247,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       form.append("tempId", String(tempId));
       form.append("duration", String(duration));
       if (replyingTo) form.append("repliedToId", replyingTo.id);
-      form.append("file", new File([encryptedBlob], "voice-message.webm", { type: "application/octet-stream" })); // Corrected line
+      form.append("file", new File([encryptedBlob], "voice-message.webm", { type: "application/octet-stream" }));
 
       await apiUpload<{ file: any }> ({
         path: `/api/uploads/${conversationId}/upload`,

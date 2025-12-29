@@ -12,36 +12,31 @@ import { useConversationStore } from "./conversation";
  * Logika Dekripsi Terpusat (Single Source of Truth)
  * Menangani dekripsi teks biasa DAN kunci file.
  */
-export async function decryptMessageObject(message: Message): Promise<Message> {
-  // 1. Clone pesan agar tidak memutasi state secara tidak sengaja
+export async function decryptMessageObject(message: Message, seenIds = new Set<string>(), depth = 0): Promise<Message> {
+  // 1. Clone pesan dan tambahkan recursion guard
   const decryptedMsg = { ...message };
+  
+  if (seenIds.has(decryptedMsg.id) || depth > 10) {
+    decryptedMsg.repliedTo = undefined; // Putus rantai rekursif
+    return decryptedMsg;
+  }
+  seenIds.add(decryptedMsg.id);
 
   try {
     // -------------------------------------------------------------------------
     // LOGIKA PENENTUAN KONTEKS (CRITICAL FIX)
-    // Jangan mengandalkan state conversationStore untuk menentukan isGroup,
-    // karena state tersebut mungkin belum sinkron saat pesan baru masuk (race condition).
-    // Gunakan properti pesan itu sendiri sebagai kebenaran mutlak.
     // -------------------------------------------------------------------------
-    
-    // Jika sessionId ADA, ini PASTI 1-on-1 (Private).
-    // Jika sessionId KOSONG, ini diasumsikan Group.
     const isGroup = !decryptedMsg.sessionId;
 
     // 2. Tentukan Payload yang Akan Didekripsi
-    // Prioritas: Jika ada fileKey, itu yang harus didekripsi (untuk pesan File).
-    // Jika tidak, baru cek content (untuk pesan Teks).
     const contentToDecrypt = decryptedMsg.fileKey || decryptedMsg.content;
 
-    // Jika tidak ada yang perlu didekripsi, kembalikan apa adanya (misal pesan sistem)
     if (!contentToDecrypt) {
       return decryptedMsg;
     }
 
     // 3. Eksekusi Dekripsi
-    // Kita simpan ciphertext asli untuk keperluan debugging jika perlu
     decryptedMsg.ciphertext = contentToDecrypt;
-
     const result = await decryptMessage(
       contentToDecrypt,
       decryptedMsg.conversationId,
@@ -51,28 +46,17 @@ export async function decryptMessageObject(message: Message): Promise<Message> {
 
     // 4. Proses Hasil
     if (result.status === 'success') {
-      // PENTING: Untuk pesan file, 'value' ini adalah KUNCI FILE TERDEKRIPSI.
-      // UI (FileAttachment) harus tahu bahwa jika pesan punya fileUrl,
-      // maka message.content berisi kunci enkripsi file, bukan teks chat.
       decryptedMsg.content = result.value;
-      
-      // Opsional: Anda bisa menghapus field fileKey yang terenkripsi agar tidak membingungkan
-      // decryptedMsg.fileKey = undefined; 
     } else if (result.status === 'pending') {
-      // Kasus "waiting_for_key"
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
-      // Kasus Error
       console.warn(`[Decrypt] Failed for msg ${message.id}:`, result.error);
       decryptedMsg.content = 'Decryption failed';
     }
 
-    // 5. Dekripsi Replied Message (Nested)
-    // Logika yang sama harus diterapkan secara rekursif jika ada reply
+    // 5. Dekripsi Replied Message (Nested & Guarded)
     if (decryptedMsg.repliedTo) {
-        // Kita panggil fungsi ini lagi secara rekursif untuk pesan yang dibalas
-        // (Pastikan tidak infinite loop, tapi struktur data message tree biasanya aman)
-        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo);
+        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1);
     }
 
     return decryptedMsg;
@@ -114,6 +98,7 @@ type Actions = {
   retrySendMessage: (message: Message) => void;
   addSystemMessage: (conversationId: string, content: string) => void;
   reDecryptPendingMessages: (conversationId: string) => Promise<void>;
+  failPendingMessages: (conversationId: string, reason: string) => void;
   reset: () => void;
 };
 
@@ -514,5 +499,26 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       },
     });
     console.log(`[re-decrypt] Re-decryption complete for ${conversationId}.`);
+  },
+
+  failPendingMessages: (conversationId: string, reason: string) => {
+    set(state => {
+      const conversationMessages = state.messages[conversationId];
+      if (!conversationMessages) return state;
+
+      const newMessages = conversationMessages.map(m => {
+        if (m.content === 'waiting_for_key' || m.content === '[Requesting group key...]' || m.content === '[Requesting key to decrypt...]') {
+          return { ...m, content: reason };
+        }
+        return m;
+      });
+
+      return {
+        messages: {
+          ...state.messages,
+          [conversationId]: newMessages,
+        },
+      };
+    });
   },
 }));

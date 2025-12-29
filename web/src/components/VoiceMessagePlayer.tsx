@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { FiPlay, FiPause, FiDownload, FiAlertTriangle } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { Message } from '@store/conversation';
-import { decryptMessage, decryptFile } from '@utils/crypto';
+import { decryptFile } from '@utils/crypto';
 import { toAbsoluteUrl } from '@utils/url';
 import { useKeychainStore } from '@store/keychain';
 import { Spinner } from './Spinner';

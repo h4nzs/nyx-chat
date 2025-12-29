@@ -5,7 +5,7 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { Spinner } from "./Spinner";
-import { decryptFile, decryptMessage } from '@utils/crypto';
+import { decryptFile } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
 import { FiAlertTriangle } from 'react-icons/fi';
 

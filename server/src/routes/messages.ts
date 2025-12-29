@@ -78,6 +78,28 @@ router.post("/", async (req, res, next) => {
       return res.status(403).json({ error: "You are not a participant of this conversation." });
     }
 
+    // --- Reply Chain Depth Validation ---
+    if (repliedToId) {
+      let currentId = repliedToId;
+      let depth = 0;
+      const MAX_DEPTH = 10;
+
+      while (currentId && depth < MAX_DEPTH) {
+        const parentMessage = await prisma.message.findUnique({
+          where: { id: currentId },
+          select: { repliedToId: true },
+        });
+        if (!parentMessage) break;
+        currentId = parentMessage.repliedToId;
+        depth++;
+      }
+
+      if (depth >= MAX_DEPTH) {
+        throw new ApiError(400, "Reply chain is too deep.");
+      }
+    }
+    // --- End Validation ---
+
     let linkPreviewData: any = null;
     if (content && !fileUrl) {
       const urlRegex = /(https?:\/\/[^\s]+)/g;

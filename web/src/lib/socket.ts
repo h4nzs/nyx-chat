@@ -13,6 +13,35 @@ import type { Message } from "@store/conversation";
 const WS_URL = (import.meta.env.VITE_WS_URL as string) || "http://localhost:4000";
 let socket: Socket | null = null;
 
+
+const handleKeyRotation = async (conversationId: string) => {
+  const MAX_RETRIES = 3;
+  let attempt = 0;
+
+  while (attempt < MAX_RETRIES) {
+    try {
+      await rotateGroupKey(conversationId);
+      // On success, clear any pending rotation flag
+      useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: false });
+      console.log(`[socket] Key rotation for ${conversationId} successful.`);
+      return; // Success, exit the function
+    } catch (err) {
+      attempt++;
+      console.error(`[socket] Key rotation attempt ${attempt} failed for ${conversationId}:`, err);
+      if (attempt >= MAX_RETRIES) {
+        // All retries have failed
+        console.error(`[socket] All key rotation retries failed for ${conversationId}. Marking as pending.`);
+        useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: true });
+        toast.error(`CRITICAL: Failed to rotate keys for group. The chat is insecure.`, { duration: 10000 });
+      } else {
+        // Wait before retrying
+        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff (2s, 4s, ...)
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+};
+
 export function getSocket() {
   if (!socket) {
     socket = io(WS_URL, {
@@ -147,9 +176,7 @@ export function getSocket() {
       useConversationStore.getState().removeParticipant(conversationId, userId);
       
       // Rotate the group key for security
-      rotateGroupKey(conversationId).catch(err => {
-        console.error(`[socket] Failed to rotate group key for ${conversationId}`, err);
-      });
+      handleKeyRotation(conversationId);
     });
 
     socket.on('user:updated', (updatedUser) => {

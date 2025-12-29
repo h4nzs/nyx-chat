@@ -60,6 +60,7 @@ export type Conversation = {
   updatedAt: string;
   unreadCount: number;
   lastUpdated?: number;
+  keyRotationPending?: boolean;
 };
 
 // --- Helper Functions ---
