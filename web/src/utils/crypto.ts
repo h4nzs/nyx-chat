@@ -37,6 +37,14 @@ const pendingGroupKeyRequests = new Map<string, { timerId: number }>();
 const MAX_KEY_REQUEST_RETRIES = 2; // Total 3 attempts
 const KEY_REQUEST_TIMEOUT_MS = 15000; // 15 seconds
 
+type RetrievedKeys = {
+  encryption: Uint8Array;
+  signing: Uint8Array;
+  signedPreKey: Uint8Array;
+  masterSeed?: Uint8Array;
+};
+let privateKeysCache: RetrievedKeys | null = null;
+
 // --- User Key Management ---
 
 export function clearKeyCache(): void {

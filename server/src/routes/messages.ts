@@ -2,6 +2,7 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getIo } from "../socket.js";
+import { ApiError } from "../utils/errors.js";
 import { getSecureLinkPreview } from "../utils/secureLinkPreview.js";
 import { sendPushNotification } from "../utils/sendPushNotification.js";
 import fs from 'fs/promises';
