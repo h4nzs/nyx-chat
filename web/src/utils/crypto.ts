@@ -37,6 +37,8 @@ const pendingGroupKeyRequests = new Map<string, { timerId: number }>();
 const MAX_KEY_REQUEST_RETRIES = 2; // Total 3 attempts
 const KEY_REQUEST_TIMEOUT_MS = 15000; // 15 seconds
 
+const pendingGroupSessionPromises = new Map<string, Promise<any[] | null>>();
+
 type RetrievedKeys = {
   encryption: Uint8Array;
   signing: Uint8Array;
@@ -98,45 +100,59 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
 // --- Group Key Management & Recovery ---
 
 export async function ensureGroupSession(conversationId: string, participants: Participant[]): Promise<any[] | null> {
-  console.log(`[crypto] ensureGroupSession called for ${conversationId}`);
-  const existingKey = await getGroupKey(conversationId);
-  if (existingKey) {
-    return null;
-  }
-  
-  console.log(`[crypto] No existing key. Generating a new group key for ${conversationId}.`);
-  const sodium = await getSodium();
-  const groupKey = await worker_generate_random_key();
-  await storeGroupKey(conversationId, groupKey);
-  console.log(`[crypto] New group key stored for ${conversationId}.`);
-
-  const myId = useAuthStore.getState().user?.id;
-  const otherParticipants = participants.filter(p => p.id !== myId);
-  
-  const missingKeys: string[] = [];
-
-  const distributionKeys = await Promise.all(
-    otherParticipants.map(async (p) => {
-      if (!p.publicKey) {
-        console.warn(`Participant ${p.username} has no public key. Cannot send group key.`);
-        missingKeys.push(p.username);
-        return null;
-      }
-      const theirPublicKey = sodium.from_base64(p.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-      const encryptedKey = await worker_crypto_box_seal(groupKey, theirPublicKey);
-      return {
-        userId: p.id,
-        key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-        type: 'GROUP_KEY'
-      };
-    })
-  );
-
-  if (missingKeys.length > 0) {
-    throw new Error(`Failed to encrypt for users: ${missingKeys.join(', ')}. They may need to set up their keys.`);
+  const pending = pendingGroupSessionPromises.get(conversationId);
+  if (pending) {
+    return pending;
   }
 
-  return distributionKeys.filter(Boolean);
+  const promise = (async () => {
+    console.log(`[crypto] ensureGroupSession called for ${conversationId}`);
+    const existingKey = await getGroupKey(conversationId);
+    if (existingKey) {
+      return null;
+    }
+    
+    console.log(`[crypto] No existing key. Generating a new group key for ${conversationId}.`);
+    const sodium = await getSodium();
+    const groupKey = await worker_generate_random_key();
+    await storeGroupKey(conversationId, groupKey);
+    console.log(`[crypto] New group key stored for ${conversationId}.`);
+
+    const myId = useAuthStore.getState().user?.id;
+    const otherParticipants = participants.filter(p => p.id !== myId);
+    
+    const missingKeys: string[] = [];
+
+    const distributionKeys = await Promise.all(
+      otherParticipants.map(async (p) => {
+        if (!p.publicKey) {
+          console.warn(`Participant ${p.username} has no public key. Cannot send group key.`);
+          missingKeys.push(p.username);
+          return null;
+        }
+        const theirPublicKey = sodium.from_base64(p.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const encryptedKey = await worker_crypto_box_seal(groupKey, theirPublicKey);
+        return {
+          userId: p.id,
+          key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+          type: 'GROUP_KEY'
+        };
+      })
+    );
+
+    if (missingKeys.length > 0) {
+      throw new Error(`Failed to encrypt for users: ${missingKeys.join(', ')}. They may need to set up their keys.`);
+    }
+
+    return distributionKeys.filter(Boolean);
+  })();
+
+  pendingGroupSessionPromises.set(conversationId, promise);
+  try {
+    return await promise;
+  } finally {
+    pendingGroupSessionPromises.delete(conversationId);
+  }
 }
 
 export async function handleGroupKeyDistribution(conversationId: string, encryptedKey: string): Promise<void> {

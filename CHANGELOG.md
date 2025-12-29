@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.1] - 2025-12-29
+
+This is a massive stability, security, and architectural hardening release that resolves numerous critical bugs, race conditions, and security vulnerabilities, particularly within the End-to-End Encryption (E2EE) and real-time state synchronization systems.
+
+### Changed
+
+-   **Major E2EE Decryption Refactor:** Rearchitected the entire message decryption flow to eliminate critical race conditions. All decryption logic is now centralized in a single function (`decryptMessageObject`) which acts as the "single source of truth". It now robustly determines the message context (1-on-1 vs. Group) based on the message's `sessionId` rather than relying on potentially stale component state.
+-   **Robust Key Rotation & Request Handling:**
+    -   The key rotation process for groups is no longer "fire-and-forget". It now features an automatic retry mechanism with exponential backoff.
+    -   Key requests for missing group keys now have a timeout and retry limit. If all retries fail (e.g., no other users are online), messages will now display a final "Key request timed out" error instead of being stuck in a "waiting" state indefinitely.
+
+### Fixed
+
+-   **CRITICAL SECURITY: Invalid Key Distribution Vulnerability:** Patched a critical vulnerability where any authenticated user could distribute encryption keys to any conversation, even those they were not a part of. The server now strictly validates that the key distributor is a member of the target conversation.
+-   **CRITICAL SECURITY: Reply Chain DoS Vulnerability:**
+    -   Hardened the client-side decryption logic to prevent infinite recursion or stack overflow crashes when processing messages with circular or excessively deep reply chains.
+    -   Added server-side validation to reject new messages that would create a reply chain deeper than a set limit.
+-   **CRITICAL SECURITY: History Leak on Re-join:** Fixed a major privacy leak where a user who was kicked from and then re-added to a group could see the message history from their original membership period after a page reload. The server now correctly resets the user's "joined at" timestamp upon re-joining.
+-   **CRITICAL SECURITY: Key Material Leaked in Logs:** Removed multiple `console.log` statements that were insecurely printing sensitive cryptographic key material in the browser console.
+-   **Real-time & State Synchronization Bugs:**
+    -   Fixed a bug where the group member list in the UI would not update in real-time when a user was added or removed.
+    -   Fixed an issue where a user kicked from a group would still receive notifications for new messages in that group. The client now correctly ignores events for conversations it has left.
+    -   Fixed a bug where an Admin's special controls (e.g., "add member") would disappear after reloading the page. The server now consistently provides the user's role data.
+-   **General Stability:**
+    -   Fixed multiple `ReferenceError` crashes caused by missing imports or undeclared variables in the crypto and state management modules.
+    -   Fixed a bug where the "retry send" feature would not work correctly for messages that were replies.
+
 ## [1.7.0] - 2025-12-27
 
 This is a major architectural and stability release that introduces significant performance improvements for end-to-end encryption (E2EE) and fixes critical bugs in the group chat implementation.
