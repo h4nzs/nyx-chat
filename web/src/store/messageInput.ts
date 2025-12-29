@@ -178,11 +178,12 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
       updateActivity(activityId, { progress: 50, fileName: `Uploading ${file.name}...` });
       const form = new FormData();
-      form.append("file", new File([encryptedBlob], file.name, { type: "application/octet-stream" }));
+      // Defensive programming: Append metadata fields BEFORE the file blob.
       form.append("fileKey", encryptedFileKey);
       if (sessionId) form.append("sessionId", sessionId);
       form.append("tempId", String(tempId));
       if (replyingTo) form.append("repliedToId", replyingTo.id);
+      form.append("file", new File([encryptedBlob], file.name, { type: "application/octet-stream" }));
 
       await apiUpload<{ file: any }> ({
         path: `/api/uploads/${conversationId}/upload`,
@@ -259,12 +260,13 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
       updateActivity(activityId, { progress: 50, fileName: 'Uploading voice message...' });
       const form = new FormData();
-      form.append("file", new File([encryptedBlob], "voice-message.webm", { type: "application/octet-stream" }));
+      // Defensive programming: Append metadata fields BEFORE the file blob.
       form.append("fileKey", encryptedFileKey);
       if (sessionId) form.append("sessionId", sessionId);
       form.append("tempId", String(tempId));
       form.append("duration", String(duration));
       if (replyingTo) form.append("repliedToId", replyingTo.id);
+      form.append("file", new File([encryptedBlob], "voice-message.webm", { type: "application/octet-stream" })); // Corrected line
 
       await apiUpload<{ file: any }> ({
         path: `/api/uploads/${conversationId}/upload`,

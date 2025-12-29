@@ -57,50 +57,8 @@ const ReplyQuote = ({ message }: { message: Message }) => {
 };
 
 const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversation }: { message: Message; mine: boolean; isLastInSequence: boolean; onImageClick: (message: Message) => void; conversation: Conversation | undefined; }) => {
-  const [decryptedContent, setDecryptedContent] = useState<string | null>(message.content || '');
-  const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
-  const decryptionAttemptedRef = useRef(false);
-
-  // Effect to reset decryption attempt status when the key set changes or the message itself changes
-  useEffect(() => {
-    decryptionAttemptedRef.current = false;
-  }, [message.id, lastKeychainUpdate]);
-
-  useEffect(() => {
-    const isPlaceholder = typeof decryptedContent === 'string' && decryptedContent.startsWith('[');
-
-    if (message.fileUrl || (!message.ciphertext && !isPlaceholder) || !message.sessionId) {
-      return;
-    }
-
-    if (!isPlaceholder || decryptionAttemptedRef.current) {
-      return;
-    }
-
-    let isMounted = true;
-    const tryDecrypt = async () => {
-      decryptionAttemptedRef.current = true;
-      const sourceCipher = message.ciphertext || message.content;
-      if (!sourceCipher) return;
-
-      const result = await decryptMessage(sourceCipher, message.conversationId, message.sessionId);
-      if (isMounted) {
-        if (result.status === 'success') {
-          setDecryptedContent(result.value);
-        } else if (result.status === 'pending') {
-          setDecryptedContent(result.reason);
-        } else {
-          setDecryptedContent(`[${result.error.message}]`);
-        }
-      }
-    };
-
-    tryDecrypt();
-    
-    return () => { isMounted = false; };
-  }, [message.ciphertext, message.content, message.conversationId, message.sessionId, lastKeychainUpdate, message.fileUrl]);
-
-  const isPlaceholder = !decryptedContent || (typeof decryptedContent === 'string' && decryptedContent.startsWith('['));
+  const content = message.content || '';
+  const isPlaceholder = content === 'waiting_for_key' || content.startsWith('[') || content === 'Decryption failed';
   const isImage = message.fileType?.startsWith('image/');
   const isVoiceMessage = message.fileType?.startsWith('audio/webm');
   
@@ -122,7 +80,7 @@ const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversa
       {isVoiceMessage && message.fileUrl && <div className="p-2 w-[250px]"><VoiceMessagePlayer message={message} /></div>}
       {message.fileUrl && isImage && <button onClick={() => onImageClick(message)} className="block w-full"><LazyImage message={message} alt={message.fileName || 'Image attachment'} className="rounded-lg max-h-80 w-full object-cover cursor-pointer" /></button>}
       {message.fileUrl && !isImage && !isVoiceMessage && <FileAttachment message={message} />}
-      {!message.fileUrl && (isPlaceholder ? <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{decryptedContent}</p> : <div className="text-base whitespace-pre-wrap break-words"><MarkdownMessage content={decryptedContent || ''} /></div>)}
+      {!message.fileUrl && (isPlaceholder ? <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p> : <div className="text-base whitespace-pre-wrap break-words"><MarkdownMessage content={content} /></div>)}
       {message.linkPreview && <LinkPreviewCard preview={message.linkPreview} />}
       <div className={`text-xs mt-1 flex items-center gap-1.5 ${isImage ? 'absolute bottom-2 right-2 bg-black/50 text-white rounded-full px-2 py-1 pointer-events-none' : `justify-end ${mine ? 'text-accent-foreground/60' : 'text-text-secondary/80'}`}`}>
         <span>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>

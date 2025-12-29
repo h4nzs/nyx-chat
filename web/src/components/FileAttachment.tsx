@@ -35,31 +35,26 @@ export default function FileAttachment({ message }: FileAttachmentProps) {
     let isMounted = true;
 
     const handleDecryption = async () => {
-      if (!message.fileUrl || !message.fileKey || !message.sessionId) {
+      // The decrypted file key is now expected to be in message.content
+      const fileKey = message.content;
+
+      if (!message.fileUrl || !fileKey) {
         if (isMounted) setError("Incomplete file data.");
         return;
       }
       
+      // Handle pending/error states passed from the store
+      if (fileKey === 'waiting_for_key' || fileKey.startsWith('[')) {
+        if (isMounted) setError(fileKey);
+        return;
+      }
+
       if (isMounted) {
         setIsDecrypting(true);
         setError(null);
       }
 
       try {
-        let fileKey = message.fileKey;
-        if (!message.optimistic && fileKey && typeof fileKey === 'string' && fileKey.length > 50) { // Looks encrypted
-          const result = await decryptMessage(message.fileKey, message.conversationId, message.sessionId);
-          if (result.status === 'success') {
-            fileKey = result.value;
-          } else {
-            throw new Error(result.status === 'pending' ? result.reason : result.error.message);
-          }
-        }
-
-        if (!fileKey) {
-          throw new Error("Could not retrieve file key.");
-        }
-
         const response = await fetch(toAbsoluteUrl(message.fileUrl));
         if (!response.ok) {
           if (response.status === 404) {
@@ -87,6 +82,7 @@ export default function FileAttachment({ message }: FileAttachmentProps) {
     if (message.fileType?.includes(';encrypted=true')) {
       handleDecryption();
     } else if (message.fileUrl) {
+      // For non-encrypted files (e.g. optimistic blob URLs)
       setDecryptedUrl(toAbsoluteUrl(message.fileUrl));
     }
 

@@ -50,6 +50,16 @@ export function getSocket() {
 
     // --- Application-specific Listeners ---
     socket.on("message:new", async (newMessage: Message) => {
+      // --- DEBUG LOG 4: Client Reception ---
+      console.log("🔥 [SOCKET-DEBUG] Received message:new event", {
+        id: newMessage.id,
+        sessionId: newMessage.sessionId, // Is this undefined/null?
+        fileKey: !!newMessage.fileKey,
+        content: newMessage.content,
+        conversationId: newMessage.conversationId
+      });
+      console.log("🔥 [SOCKET-DEBUG] Raw Object:", JSON.stringify(newMessage));
+
       // Defensive check: If the client receives a message for a conversation it's not in, ignore it.
       // This can happen briefly after being removed from a group.
       const convExists = useConversationStore.getState().conversations.some(c => c.id === newMessage.conversationId);

@@ -33,6 +33,32 @@ export default function LazyImage({
         if (isMounted) setError("No file URL provided.");
         return;
       }
+      
+      if (!message.fileType?.includes(';encrypted=true')) {
+        if (isMounted) {
+          setImageUrl(toAbsoluteUrl(message.fileUrl));
+          setDecryptionStatus('succeeded');
+        }
+        return;
+      }
+
+      const fileKey = message.content;
+
+      if (!fileKey) {
+        if (isMounted) {
+          setDecryptionStatus('waiting_for_key');
+          setError("File key not available yet.");
+        }
+        return;
+      }
+      
+      if (fileKey === 'waiting_for_key' || fileKey.startsWith('[')) {
+        if (isMounted) {
+          setDecryptionStatus('waiting_for_key');
+          setError(fileKey);
+        }
+        return;
+      }
 
       if (isMounted) {
         setDecryptionStatus('decrypting');
@@ -40,36 +66,6 @@ export default function LazyImage({
       }
 
       try {
-        if (!message.fileType?.includes(';encrypted=true')) {
-          if (isMounted) {
-            setImageUrl(toAbsoluteUrl(message.fileUrl));
-            setDecryptionStatus('succeeded');
-          }
-          return;
-        }
-
-        if (!message.fileKey || !message.sessionId) {
-          throw new Error("Incomplete image data for decryption.");
-        }
-
-        let fileKey = message.fileKey;
-        if (!message.optimistic && fileKey.length > 50) {
-          const result = await decryptMessage(message.fileKey, message.conversationId, message.sessionId);
-          if (result.status === 'success') {
-            fileKey = result.value;
-          } else if (result.status === 'pending') {
-            if (isMounted) {
-              setDecryptionStatus('waiting_for_key');
-              setError(result.reason);
-            }
-            return;
-          } else {
-            throw result.error;
-          }
-        }
-        
-        if (!fileKey) throw new Error("Could not retrieve file key.");
-
         const response = await fetch(toAbsoluteUrl(message.fileUrl));
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const encryptedBlob = await response.blob();

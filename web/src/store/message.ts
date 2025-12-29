@@ -8,46 +8,78 @@ import type { Message } from "./conversation";
 import useDynamicIslandStore from './dynamicIsland';
 import { useConversationStore } from "./conversation";
 
+/**
+ * Logika Dekripsi Terpusat (Single Source of Truth)
+ * Menangani dekripsi teks biasa DAN kunci file.
+ */
 export async function decryptMessageObject(message: Message): Promise<Message> {
+  // 1. Clone pesan agar tidak memutasi state secara tidak sengaja
   const decryptedMsg = { ...message };
+
   try {
-    // Robustly determine if the message is from a group chat.
-    // A message is considered a group message if it does NOT have a sessionId.
-    const isGroup = !decryptedMsg.sessionId;
+    // -------------------------------------------------------------------------
+    // LOGIKA PENENTUAN KONTEKS (CRITICAL FIX)
+    // Jangan mengandalkan state conversationStore untuk menentukan isGroup,
+    // karena state tersebut mungkin belum sinkron saat pesan baru masuk (race condition).
+    // Gunakan properti pesan itu sendiri sebagai kebenaran mutlak.
+    // -------------------------------------------------------------------------
     
-    // The content to decrypt is either the main text content or the encrypted file key.
-    const contentToDecrypt = decryptedMsg.content || decryptedMsg.fileKey;
+    // Jika sessionId ADA, ini PASTI 1-on-1 (Private).
+    // Jika sessionId KOSONG, ini diasumsikan Group.
+    const isGroup = !decryptedMsg.sessionId;
 
-    if (contentToDecrypt) {
-      decryptedMsg.ciphertext = contentToDecrypt;
-      const result = await decryptMessage(contentToDecrypt, decryptedMsg.conversationId, isGroup, decryptedMsg.sessionId);
+    // 2. Tentukan Payload yang Akan Didekripsi
+    // Prioritas: Jika ada fileKey, itu yang harus didekripsi (untuk pesan File).
+    // Jika tidak, baru cek content (untuk pesan Teks).
+    const contentToDecrypt = decryptedMsg.fileKey || decryptedMsg.content;
+
+    // Jika tidak ada yang perlu didekripsi, kembalikan apa adanya (misal pesan sistem)
+    if (!contentToDecrypt) {
+      return decryptedMsg;
+    }
+
+    // 3. Eksekusi Dekripsi
+    // Kita simpan ciphertext asli untuk keperluan debugging jika perlu
+    decryptedMsg.ciphertext = contentToDecrypt;
+
+    const result = await decryptMessage(
+      contentToDecrypt,
+      decryptedMsg.conversationId,
+      isGroup,
+      decryptedMsg.sessionId
+    );
+
+    // 4. Proses Hasil
+    if (result.status === 'success') {
+      // PENTING: Untuk pesan file, 'value' ini adalah KUNCI FILE TERDEKRIPSI.
+      // UI (FileAttachment) harus tahu bahwa jika pesan punya fileUrl,
+      // maka message.content berisi kunci enkripsi file, bukan teks chat.
+      decryptedMsg.content = result.value;
       
-      if (result.status === 'success') {
-        // If the original message had a fileKey, the decrypted content is the raw file key.
-        // We put it back in the `content` field for the UI components to use.
-        decryptedMsg.content = result.value;
-      } else if (result.status === 'pending') {
-        decryptedMsg.content = result.reason;
-      } else {
-        decryptedMsg.content = `[${result.error.message}]`;
-      }
+      // Opsional: Anda bisa menghapus field fileKey yang terenkripsi agar tidak membingungkan
+      // decryptedMsg.fileKey = undefined; 
+    } else if (result.status === 'pending') {
+      // Kasus "waiting_for_key"
+      decryptedMsg.content = result.reason || 'waiting_for_key';
+    } else {
+      // Kasus Error
+      console.warn(`[Decrypt] Failed for msg ${message.id}:`, result.error);
+      decryptedMsg.content = 'Decryption failed';
     }
 
-    // Handle decryption of replied-to messages
-    if (decryptedMsg.repliedTo?.content && decryptedMsg.repliedTo.sessionId) {
-      const replyIsGroup = !decryptedMsg.repliedTo.sessionId;
-      const replyResult = await decryptMessage(decryptedMsg.repliedTo.content, decryptedMsg.repliedTo.conversationId, replyIsGroup, decryptedMsg.repliedTo.sessionId);
-      if (replyResult.status === 'success') {
-        decryptedMsg.repliedTo.content = replyResult.value;
-      } else {
-        decryptedMsg.repliedTo.content = '[Encrypted Reply]';
-      }
+    // 5. Dekripsi Replied Message (Nested)
+    // Logika yang sama harus diterapkan secara rekursif jika ada reply
+    if (decryptedMsg.repliedTo) {
+        // Kita panggil fungsi ini lagi secara rekursif untuk pesan yang dibalas
+        // (Pastikan tidak infinite loop, tapi struktur data message tree biasanya aman)
+        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo);
     }
+
     return decryptedMsg;
+
   } catch (e) {
-    console.error("Decryption failed in decryptMessageObject", e);
-    decryptedMsg.content = '[Failed to decrypt message]';
-    return decryptedMsg;
+    console.error("Critical error in decryptMessageObject:", e);
+    return { ...message, content: "Error processing message" };
   }
 }
 
