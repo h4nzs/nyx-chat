@@ -102,9 +102,6 @@ importers:
       '@types/express':
         specifier: ^4.17.21
         version: 4.17.25
-      '@types/express-rate-limit':
-        specifier: ^6.0.0
-        version: 6.0.2(express@4.21.2)
       '@types/helmet':
         specifier: ^4.0.0
         version: 4.0.0
@@ -776,10 +773,6 @@ packages:
 
   '@types/crypto-js@4.2.2':
     resolution: {integrity: sha512-sDOLlVbHhXpAUAL0YHDUUwDZf3iN4Bwi4W6a0W0b+QcAezUbRtH4FVb+9J4h+XFPW7l/gQ9F8qC7P+Ec4k8QVQ==}
-
-  '@types/express-rate-limit@6.0.2':
-    resolution: {integrity: sha512-e1xZLOOlxCDvplAGq7rDcXtbdBu2CWRsMjaIu1LVqGxWtKvwr884YE5mPs3IvHeG/OMDhf24oTaqG5T1bV3rBQ==}
-    deprecated: This is a stub types definition. express-rate-limit provides its own type definitions, so you do not need this installed.
 
   '@types/express-serve-static-core@4.19.7':
     resolution: {integrity: sha512-FvPtiIf1LfhzsaIXhv/PHan/2FeQBbtBDtfX2QfvPxdUelMDEckK08SM6nqo1MIZY3RUlfA+HV8+hFUSio78qg==}
@@ -3549,12 +3542,6 @@ snapshots:
       '@types/node': 20.19.25
 
   '@types/crypto-js@4.2.2': {}
-
-  '@types/express-rate-limit@6.0.2(express@4.21.2)':
-    dependencies:
-      express-rate-limit: 7.5.1(express@4.21.2)
-    transitivePeerDependencies:
-      - express
 
   '@types/express-serve-static-core@4.19.7':
     dependencies:

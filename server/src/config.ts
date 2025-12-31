@@ -16,6 +16,11 @@ if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process
 export const env = {
   port: parseInt(process.env.PORT || '4000', 10),
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  
+  // --- DITAMBAHKAN AGAR BUILD BERHASIL ---
+  appUrl: process.env.APP_URL || 'http://localhost:4000',
+  // ---------------------------------------
+
   jwtSecret: process.env.JWT_SECRET || (() => {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('JWT_SECRET is required in production environment')
