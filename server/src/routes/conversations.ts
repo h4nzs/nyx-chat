@@ -1,9 +1,11 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
+import { Prisma } from "@prisma/client";
 import { requireAuth } from "../middleware/auth.js";
 import { getIo } from "../socket.js";
 import { upload } from "../utils/upload.js";
 import { rotateAndDistributeSessionKeys } from "../utils/sessionKeys.js";
+import { ApiError } from "../utils/errors.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -11,18 +13,13 @@ router.use(requireAuth);
 // GET all conversations for the current user
 router.get("/", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
+    const userId = req.user.id;
+
     const conversationsData = await prisma.conversation.findMany({
       where: {
-        participants: {
-          some: {
-            userId: req.user.id,
-          },
-        },
-        hiddenBy: {
-          none: {
-            userId: req.user.id,
-          },
-        },
+        participants: { some: { userId: userId } },
+        hiddenBy: { none: { userId: userId } },
       },
       include: {
         participants: {
@@ -56,14 +53,13 @@ router.get("/", async (req, res, next) => {
       LEFT JOIN "Message" last_read_message ON p."lastReadMsgId" = last_read_message.id
       JOIN "Message" m ON m."conversationId" = p."conversationId"
       WHERE
-        p."userId" = ${req.user.id}
-        AND m."senderId" != ${req.user.id}
+        p."userId" = ${userId}
+        AND m."senderId" != ${userId}
         AND m."createdAt" > COALESCE(last_read_message."createdAt", p."joinedAt")
       GROUP BY p."conversationId";
     `;
 
     const unreadMap = new Map(unreadCounts.map(item => [item.conversationId, item.unreadCount]));
-
     const conversations = conversationsData.map(convo => ({
       ...convo,
       unreadCount: unreadMap.get(convo.id) || 0,
@@ -75,17 +71,16 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// CREATE a new conversation (private or group)
+// CREATE a new conversation
 router.post("/", async (req, res, next) => {
-  const { title, userIds, isGroup, initialSession } = req.body;
-  const creatorId = req.user.id;
-
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
+    const { title, userIds, isGroup, initialSession } = req.body;
+    const creatorId = req.user.id;
+
     if (!isGroup) {
       const otherUserId = userIds.find((id: string) => id !== creatorId);
-      if (!otherUserId) {
-        return res.status(400).json({ error: "Another user ID is required for a private chat." });
-      }
+      if (!otherUserId) return res.status(400).json({ error: "Another user ID is required for a private chat." });
 
       const existingConversation = await prisma.conversation.findFirst({
         where: {
@@ -95,20 +90,14 @@ router.post("/", async (req, res, next) => {
             { participants: { some: { userId: otherUserId } } },
           ],
         },
-        include: {
-          participants: { include: { user: true } },
-          creator: true,
-        }
+        include: { participants: { include: { user: true } }, creator: true }
       });
 
-      if (existingConversation) {
-        return res.status(200).json(existingConversation);
-      }
+      if (existingConversation) return res.status(200).json(existingConversation);
     }
 
     const allUserIds = Array.from(new Set([...userIds, creatorId]));
 
-    // --- Start Transaction ---
     const newConversation = await prisma.$transaction(async (tx) => {
       const conversation = await tx.conversation.create({
         data: {
@@ -126,9 +115,7 @@ router.post("/", async (req, res, next) => {
           participants: { 
             select: { 
               role: true, 
-              user: { 
-                select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } 
-              } 
+              user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } }
             } 
           },
           creator: true,
@@ -137,9 +124,7 @@ router.post("/", async (req, res, next) => {
 
       if (initialSession) {
         const { sessionId, initialKeys, ephemeralPublicKey } = initialSession;
-        if (!sessionId || !initialKeys || !ephemeralPublicKey) {
-          throw new Error("Incomplete initial session data provided.");
-        }
+        if (!sessionId || !initialKeys || !ephemeralPublicKey) throw new Error("Incomplete initial session data provided.");
         const keyRecords = initialKeys.map((ik: { userId: string; key: string; }) => ({
           sessionId,
           encryptedKey: ik.key,
@@ -148,35 +133,24 @@ router.post("/", async (req, res, next) => {
           initiatorEphemeralKey: ephemeralPublicKey,
           isInitiator: ik.userId === creatorId,
         }));
-        await tx.sessionKey.createMany({
-          data: keyRecords,
-        });
+        await tx.sessionKey.createMany({ data: keyRecords });
       } else {
-        // Note: rotateAndDistributeSessionKeys performs its own prisma calls and cannot be part of this transaction.
-        // If this call fails, the transaction will still commit. This is a known limitation to be addressed if needed.
         await rotateAndDistributeSessionKeys(conversation.id, creatorId, tx);
       }
 
       return conversation;
     });
-    // --- End Transaction ---
 
     const transformedConversation = {
       ...newConversation,
-      isGroup: newConversation.isGroup, // Explicitly include isGroup
+      isGroup: newConversation.isGroup,
       participants: newConversation.participants.map(p => ({ ...p.user, role: p.role })),
       unreadCount: 1,
       lastMessage: null,
     };
 
-    const io = getIo();
-    const otherParticipants = allUserIds.filter(uid => uid !== creatorId);
-    otherParticipants.forEach(userId => {
-      io.to(userId).emit("conversation:new", transformedConversation);
-    });
-
-    const initiatorConversation = { ...transformedConversation, unreadCount: 0 };
-    res.status(201).json(initiatorConversation);
+    getIo().to(allUserIds.filter(uid => uid !== creatorId)).emit("conversation:new", transformedConversation);
+    res.status(201).json({ ...transformedConversation, unreadCount: 0 });
 
   } catch (error) {
     next(error);
@@ -186,35 +160,26 @@ router.post("/", async (req, res, next) => {
 // GET a single conversation by ID
 router.get("/:id", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { id } = req.params;
     const conversation = await prisma.conversation.findFirst({
       where: {
         id,
-        participants: {
-          some: {
-            userId: req.user.id,
-          },
-        },
+        participants: { some: { userId: req.user.id } },
       },
       include: {
         participants: {
           select: {
-            user: {
-              select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true },
-            },
+            user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } },
             isPinned: true,
             role: true,
           },
         },
-        creator: {
-          select: { id: true, username: true },
-        },
+        creator: { select: { id: true, username: true } },
       },
     });
 
-    if (!conversation) {
-      return res.status(404).json({ error: "Conversation not found" });
-    }
+    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
     res.json(conversation);
   } catch (error) {
     next(error);
@@ -224,30 +189,23 @@ router.get("/:id", async (req, res, next) => {
 // UPDATE group conversation details
 router.put("/:id/details", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { id } = req.params;
     const { title, description } = req.body;
-    const userId = req.user.id;
-
     const participant = await prisma.participant.findFirst({
-      where: { conversationId: id, userId: userId },
+      where: { conversationId: id, userId: req.user.id },
     });
-
-    if (!participant || participant.role !== "ADMIN") {
-      return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
-    }
+    if (!participant || participant.role !== "ADMIN") return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
 
     const updatedConversation = await prisma.conversation.update({
       where: { id },
       data: { title, description },
     });
-
-    const io = getIo();
-    io.to(id).emit("conversation:updated", {
+    getIo().to(id).emit("conversation:updated", {
       id,
       title: updatedConversation.title,
       description: updatedConversation.description,
     });
-
     res.json(updatedConversation);
   } catch (error) {
     next(error);
@@ -257,35 +215,21 @@ router.put("/:id/details", async (req, res, next) => {
 // UPLOAD group avatar
 router.post("/:id/avatar", upload.single('avatar'), async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { id } = req.params;
-    const userId = req.user.id;
-
     const participant = await prisma.participant.findFirst({
-      where: { conversationId: id, userId: userId },
+      where: { conversationId: id, userId: req.user.id },
     });
-
-    if (!participant || participant.role !== "ADMIN") {
-      return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({ error: "No avatar file provided." });
-    }
+    if (!participant || participant.role !== "ADMIN") return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
+    if (!req.file) return res.status(400).json({ error: "No avatar file provided." });
 
     const avatarUrl = `/uploads/images/${req.file.filename}`;
-
     const updatedConversation = await prisma.conversation.update({
       where: { id },
       data: { avatarUrl },
     });
-
-    const io = getIo();
-    io.to(id).emit("conversation:updated", {
-      id,
-      avatarUrl: updatedConversation.avatarUrl,
-    });
-
-    res.json({ avatarUrl: updatedConversation.avatarUrl });
+    getIo().to(id).emit("conversation:updated", { id, avatarUrl });
+    res.json({ avatarUrl });
   } catch (error) {
     next(error);
   }
@@ -294,108 +238,63 @@ router.post("/:id/avatar", upload.single('avatar'), async (req, res, next) => {
 // ADD new members to a group
 router.post("/:id/participants", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { id: conversationId } = req.params;
     const { userIds } = req.body;
-    const currentUserId = req.user.id;
-
     const adminParticipant = await prisma.participant.findFirst({
-      where: { conversationId, userId: currentUserId, role: "ADMIN" },
+      where: { conversationId, userId: req.user.id, role: "ADMIN" },
     });
+    if (!adminParticipant) return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
 
-    if (!adminParticipant) {
-      return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
-    }
-
-    // --- Start Transaction ---
     const newParticipants = await prisma.$transaction(async (tx) => {
-      // Upsert participants to handle re-joining users and update their joinedAt timestamp
       await Promise.all(userIds.map((userId: string) => 
         tx.participant.upsert({
-          where: {
-            userId_conversationId: {
-              userId,
-              conversationId,
-            },
-          },
-          create: {
-            userId,
-            conversationId,
-            joinedAt: new Date(),
-          },
-          update: {
-            joinedAt: new Date(),
-          },
+          where: { userId_conversationId: { userId, conversationId } },
+          create: { userId, conversationId, joinedAt: new Date() },
+          update: { joinedAt: new Date() },
         })
       ));
-
-      // Rotate session keys to include the new participants
-      await rotateAndDistributeSessionKeys(conversationId, currentUserId, tx);
-      
-      // Fetch the newly added/updated participants to return them
+      await rotateAndDistributeSessionKeys(conversationId, req.user!.id, tx);
       return await tx.participant.findMany({
         where: { conversationId, userId: { in: userIds } },
         include: { user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } } },
       });
     });
-    // --- End Transaction ---
 
-    // --- Notifications can now be sent after the transaction is successful ---
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
       include: { participants: { include: { user: true } }, creator: true },
     });
 
-    const io = getIo();
-    io.to(conversationId).emit("conversation:participants_added", { conversationId, newParticipants });
-
+    getIo().to(conversationId).emit("conversation:participants_added", { conversationId, newParticipants });
     newParticipants.forEach(p => {
-      io.to(p.userId).emit("conversation:new", conversation);
+      if (conversation) getIo().to(p.userId).emit("conversation:new", conversation);
     });
-
     res.status(201).json(newParticipants);
   } catch (error) {
     next(error);
   }
 });
 
-// UPDATE a member's role in a group
+// UPDATE a member's role
 router.put("/:id/participants/:userId/role", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { id: conversationId, userId: userToModifyId } = req.params;
     const { role } = req.body;
-    const currentUserId = req.user.id;
+    if (role !== "ADMIN" && role !== "MEMBER") return res.status(400).json({ error: "Invalid role specified." });
 
-    if (role !== "ADMIN" && role !== "MEMBER") {
-      return res.status(400).json({ error: "Invalid role specified." });
-    }
-
-    const adminParticipant = await prisma.participant.findFirst({
-      where: { conversationId, userId: currentUserId },
-    });
-    if (!adminParticipant || adminParticipant.role !== "ADMIN") {
-      return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
-    }
-
-    if (currentUserId === userToModifyId) {
-      return res.status(400).json({ error: "You cannot change your own role." });
-    }
+    const adminParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: req.user.id } });
+    if (!adminParticipant || adminParticipant.role !== "ADMIN") return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
+    if (req.user.id === userToModifyId) return res.status(400).json({ error: "You cannot change your own role." });
 
     const updatedParticipant = await prisma.participant.updateMany({
       where: { conversationId, userId: userToModifyId },
       data: { role },
     });
+    if (updatedParticipant.count === 0) return res.status(404).json({ error: "Participant not found." });
 
-    if (updatedParticipant.count === 0) {
-      return res.status(404).json({ error: "Participant not found." });
-    }
-
-    const io = getIo();
-    io.to(conversationId).emit("conversation:participant_updated", {
-      conversationId,
-      userId: userToModifyId,
-      role,
-    });
-
+    getIo().to(conversationId).emit("conversation:participant_updated", { conversationId, userId: userToModifyId, role });
     res.json({ userId: userToModifyId, role });
   } catch (error) {
     next(error);
@@ -405,39 +304,19 @@ router.put("/:id/participants/:userId/role", async (req, res, next) => {
 // REMOVE a member from a group
 router.delete("/:id/participants/:userId", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { id: conversationId, userId: userToRemoveId } = req.params;
-    const currentUserId = req.user.id;
+    const adminParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: req.user.id } });
+    if (!adminParticipant || adminParticipant.role !== "ADMIN") return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
+    if (req.user.id === userToRemoveId) return res.status(400).json({ error: "You cannot remove yourself from the group." });
 
-    const adminParticipant = await prisma.participant.findFirst({
-      where: { conversationId, userId: currentUserId },
-    });
-    if (!adminParticipant || adminParticipant.role !== "ADMIN") {
-      return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
-    }
-
-    if (currentUserId === userToRemoveId) {
-      return res.status(400).json({ error: "You cannot remove yourself from the group." });
-    }
-
-    const deleteResult = await prisma.participant.delete({
-      where: {
-        userId_conversationId: {
-          userId: userToRemoveId,
-          conversationId: conversationId
-        }
-      },
-    });
-
-    const io = getIo();
-    io.to(conversationId).emit("conversation:participant_removed", { conversationId, userId: userToRemoveId });
-    io.to(userToRemoveId).emit("conversation:deleted", { id: conversationId });
-
-    await rotateAndDistributeSessionKeys(conversationId, currentUserId);
-
+    await prisma.participant.delete({ where: { userId_conversationId: { userId: userToRemoveId, conversationId } } });
+    getIo().to(conversationId).emit("conversation:participant_removed", { conversationId, userId: userToRemoveId });
+    getIo().to(userToRemoveId).emit("conversation:deleted", { id: conversationId });
+    await rotateAndDistributeSessionKeys(conversationId, req.user.id);
     res.status(204).send();
   } catch (error) {
-    // Catch error if participant not found and send a 404
-    if (error.code === 'P2025') {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
       return res.status(404).json({ error: "Participant not found in this group." });
     }
     next(error);
@@ -447,223 +326,122 @@ router.delete("/:id/participants/:userId", async (req, res, next) => {
 // LEAVE a group
 router.delete("/:id/leave", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { id: conversationId } = req.params;
     const userId = req.user.id;
-
-    const participant = await prisma.participant.findFirst({
-      where: { conversationId, userId },
-    });
-    if (!participant) {
-      return res.status(404).json({ error: "You are not a member of this group." });
-    }
+    const participant = await prisma.participant.findFirst({ where: { conversationId, userId } });
+    if (!participant) return res.status(404).json({ error: "You are not a member of this group." });
 
     const conversation = await prisma.conversation.findUnique({ where: { id: conversationId } });
-    if (conversation?.creatorId === userId) {
-      return res.status(400).json({ error: "Group creator cannot leave; please delete it instead." });
-    }
+    if (conversation?.creatorId === userId) return res.status(400).json({ error: "Group creator cannot leave; please delete it instead." });
 
-    // 1. Delete the leaving user from participants
-    await prisma.participant.delete({
-      where: { userId_conversationId: { userId, conversationId } },
-    });
+    await prisma.participant.delete({ where: { userId_conversationId: { userId, conversationId } } });
+    getIo().to(conversationId).emit("conversation:participant_removed", { conversationId, userId });
+    getIo().to(userId).emit("conversation:deleted", { id: conversationId });
 
-    const io = getIo();
-    io.to(conversationId).emit("conversation:participant_removed", { conversationId, userId });
-    io.to(userId).emit("conversation:deleted", { id: conversationId });
-
-    // 2. Find another admin to initiate key rotation
     const remainingAdmin = await prisma.participant.findFirst({
-      where: {
-        conversationId,
-        role: "ADMIN",
-        userId: { not: userId }, // Ensure it's not the user who just left
-      },
+      where: { conversationId, role: "ADMIN", userId: { not: userId } },
     });
-
-    // 3. Rotate keys using the remaining admin as the initiator
     if (remainingAdmin) {
       try {
         await rotateAndDistributeSessionKeys(conversationId, remainingAdmin.userId);
       } catch (error) {
-        console.error(`Failed to rotate session keys for conversation ${conversationId} after user ${userId} left:`, error);
-        // Note: User has already been removed; key rotation failure is logged but doesn't block the leave operation
+        console.error(`Failed to rotate keys for ${conversationId} after user ${userId} left:`, error);
       }
     } else {
-      console.warn(`Could not rotate keys for conversation ${conversationId} after user left: no remaining admin found.`);
+      console.warn(`Could not rotate keys for ${conversationId} after user left: no remaining admin found.`);
     }
-
     res.status(204).send();
   } catch (error) {
     next(error);
   }
 });
 
-// DELETE a conversation (soft delete for 1-on-1, hard delete for group by creator)
+// DELETE a conversation
 router.delete("/:id", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { id } = req.params;
     const userId = req.user.id;
-
     const conversation = await prisma.conversation.findUnique({
       where: { id },
       include: { participants: { select: { userId: true } } },
     });
-
-    if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
-      return res.status(404).json({ error: "Conversation not found or you are not a participant." });
-    }
-
-    const io = getIo();
+    if (!conversation || !conversation.participants.some(p => p.userId === userId)) return res.status(404).json({ error: "Conversation not found or you are not a participant." });
 
     if (conversation.isGroup) {
-      const deleteResult = await prisma.conversation.deleteMany({
-        where: {
-          id: id,
-          creatorId: userId,
-        },
-      });
-
-      if (deleteResult.count === 0) {
-        return res.status(403).json({ error: "Only the group creator can delete the group." });
-      }
-
-      conversation.participants.forEach(p => {
-        io.to(p.userId).emit("conversation:deleted", { id });
-      });
-
+      if (conversation.creatorId !== userId) return res.status(403).json({ error: "Only the group creator can delete the group." });
+      await prisma.conversation.delete({ where: { id } });
+      getIo().to(conversation.participants.map(p => p.userId)).emit("conversation:deleted", { id });
     } else {
-      await prisma.userHiddenConversation.create({
-        data: {
-          userId,
-          conversationId: id,
-        },
-      });
-      io.to(userId).emit("conversation:deleted", { id });
+      await prisma.userHiddenConversation.create({ data: { userId, conversationId: id } });
+      getIo().to(userId).emit("conversation:deleted", { id });
     }
-
     res.status(204).send();
   } catch (error) {
     next(error);
   }
 });
 
-// Toggle pin status of a conversation
+// Toggle pin status
 router.post("/:id/pin", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { id: conversationId } = req.params;
     const userId = req.user.id;
+    const participant = await prisma.participant.findUnique({ where: { userId_conversationId: { userId, conversationId } } });
+    if (!participant) return res.status(404).json({ error: "You are not a participant of this conversation." });
 
-    // Check if the user is a participant of the conversation
-    const participant = await prisma.participant.findUnique({
-      where: {
-        userId_conversationId: {
-          userId: userId,
-          conversationId: conversationId
-        }
-      }
-    });
-
-    if (!participant) {
-      return res.status(404).json({ error: "You are not a participant of this conversation." });
-    }
-
-    // Toggle the isPinned status
     const updatedParticipant = await prisma.participant.update({
-      where: {
-        userId_conversationId: {
-          userId: userId,
-          conversationId: conversationId
-        }
-      },
-      data: {
-        isPinned: !participant.isPinned
-      }
+      where: { userId_conversationId: { userId, conversationId } },
+      data: { isPinned: !participant.isPinned },
     });
-
     res.json({ isPinned: updatedParticipant.isPinned });
   } catch (error) {
     next(error);
   }
 });
 
-// Mark a conversation as read
+// Mark as read
 router.post("/:id/read", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { id } = req.params;
-    const userId = req.user.id;
-
-    const lastMessage = await prisma.message.findFirst({
-      where: { conversationId: id },
-      orderBy: { createdAt: 'desc' },
-    });
-
+    const lastMessage = await prisma.message.findFirst({ where: { conversationId: id }, orderBy: { createdAt: 'desc' } });
     if (lastMessage) {
       await prisma.participant.updateMany({
-        where: {
-          conversationId: id,
-          userId: userId,
-        },
-        data: {
-          lastReadMsgId: lastMessage.id,
-        },
+        where: { conversationId: id, userId: req.user.id },
+        data: { lastReadMsgId: lastMessage.id },
       });
     }
-
     res.status(204).send();
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/conversations/:id/media
-// Fetches all media messages for a conversation
-router.get('/:id/media', requireAuth, async (req, res) => {
+// GET media for a conversation
+router.get('/:id/media', requireAuth, async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { id } = req.params;
-
     const conversation = await prisma.conversation.findFirst({
-      where: {
-        id,
-        participants: {
-          some: {
-            userId: req.user.id,
-          },
-        },
-      },
+      where: { id, participants: { some: { userId: req.user.id } } },
     });
-
-    if (!conversation) {
-      return res.status(404).json({ message: 'Conversation not found or you are not a member.' });
-    }
+    if (!conversation) return res.status(404).json({ message: 'Conversation not found or you are not a member.' });
 
     const mediaResults = await prisma.message.findMany({
-      where: {
-        conversationId: id,
-        OR: [
-          { imageUrl: { not: null } },
-          { fileUrl: { not: null } },
-        ]
-      },
+      where: { conversationId: id, OR: [{ imageUrl: { not: null } }, { fileUrl: { not: null } }] },
       orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        imageUrl: true,
-        fileUrl: true,
-        fileName: true,
-        fileType: true,
-      }
+      select: { id: true, imageUrl: true, fileUrl: true, fileName: true, fileType: true }
     });
 
     const formattedMedia = mediaResults.map(msg => {
       const isImage = !!msg.imageUrl;
       let type = 'DOCUMENT';
-      if (isImage) {
-        type = 'IMAGE';
-      } else if (msg.fileType) {
-        if (msg.fileType.startsWith('video')) type = 'VIDEO';
-        else if (msg.fileType.startsWith('audio')) type = 'AUDIO';
-        // The frontend FileAttachment component will handle PDF detection by fileName
-      }
+      if (isImage) type = 'IMAGE';
+      else if (msg.fileType?.startsWith('video')) type = 'VIDEO';
+      else if (msg.fileType?.startsWith('audio')) type = 'AUDIO';
       
       return {
         id: msg.id,
@@ -672,12 +450,10 @@ router.get('/:id/media', requireAuth, async (req, res) => {
         fileName: msg.fileName,
       };
     });
-
     res.json(formattedMedia);
-
   } catch (error) {
     console.error('Failed to fetch media:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    next(error)
   }
 });
 

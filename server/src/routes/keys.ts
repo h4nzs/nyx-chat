@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
+import { ApiError } from "../utils/errors.js";
 
 const router = Router();
 
@@ -21,6 +22,7 @@ router.post(
   }),
   async (req, res, next) => {
     try {
+      if (!req.user) throw new ApiError(401, "Authentication required.");
       const userId = req.user.id;
       const { identityKey, signedPreKey } = req.body;
 
@@ -108,6 +110,7 @@ router.get(
   }),
   async (req, res, next) => {
     try {
+      if (!req.user) throw new ApiError(401, "Authentication required.");
       const { conversationId, sessionId } = req.params;
       const userId = req.user.id;
 

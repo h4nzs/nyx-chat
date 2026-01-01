@@ -4,6 +4,7 @@ import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getIo } from "../socket.js";
 import { rotateAndDistributeSessionKeys } from "../utils/sessionKeys.js";
+import { ApiError } from "../utils/errors.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -11,6 +12,7 @@ router.use(requireAuth);
 // GET all encrypted session keys for a user across ALL conversations
 router.get("/sync", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const userId = req.user.id;
 
     // 1. Find all conversations the user is a participant in
@@ -59,6 +61,7 @@ router.get("/sync", async (req, res, next) => {
 // GET all encrypted session keys for a user in a conversation
 router.get("/:conversationId", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { conversationId } = req.params;
     const userId = req.user.id;
 
@@ -80,6 +83,7 @@ router.get("/:conversationId", async (req, res, next) => {
 // POST: Force create a new session key for a conversation (ratcheting)
 router.post("/:conversationId/ratchet", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { conversationId } = req.params;
     const userId = req.user.id;
 

@@ -1,4 +1,4 @@
-import { getLinkPreview, LinkPreview } from "link-preview-js";
+import { getLinkPreview } from "link-preview-js";
 import dns from 'dns/promises';
 import ipaddr from 'ipaddr.js';
 
@@ -34,14 +34,14 @@ async function resolveDns(url: string): Promise<string> {
  * @param url The URL to get a preview for.
  * @returns A promise that resolves to the link preview.
  */
-export async function getSecureLinkPreview(url: string): Promise<LinkPreview> {
+export async function getSecureLinkPreview(url: string): Promise<any> {
   try {
     const preview = await getLinkPreview(url, {
       timeout: 5000,
       followRedirects: 'follow', // Let the library handle redirects
       resolveDNSHost: (url) => resolveDns(url), // Our security check is here
     });
-    return preview as LinkPreview;
+    return preview;
   } catch (error) {
     console.error(`Secure link preview failed for URL "${url}":`, error);
     throw error; // Re-throw the error to be handled by the caller

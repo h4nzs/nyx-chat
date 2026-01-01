@@ -4,13 +4,16 @@ import { requireAuth } from "../middleware/auth.js";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
-import { io } from "../socket.js";
+import { getIo } from "../socket.js";
 import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
+import { ApiError } from "../utils/errors.js";
 
 const router = Router();
 
-// Konfigurasi Multer untuk upload avatar
+// This middleware will apply to all routes in this file
+router.use(requireAuth);
+
 const avatarStorage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadPath = path.join(process.cwd(), "uploads", "avatars");
@@ -18,7 +21,8 @@ const avatarStorage = multer.diskStorage({
     cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
-    const userId = req.user.id;
+    // req.user is guaranteed to be present by requireAuth middleware
+    const userId = req.user!.id;
     const extension = path.extname(file.originalname);
     cb(null, `${userId}${extension}`);
   },
@@ -38,11 +42,11 @@ const uploadAvatar = multer({
   }
 });
 
-// === GET: User data diri ===
-router.get("/me", requireAuth, async (req, res, next) => {
+router.get("/me", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const user = await prisma.user.findUnique({
-      where: { id: (req as any).user.id },
+      where: { id: req.user.id },
       select: { id: true, email: true, username: true, name: true, avatarUrl: true, description: true, showEmailToOthers: true, hasCompletedOnboarding: true },
     });
     res.json(user);
@@ -51,9 +55,7 @@ router.get("/me", requireAuth, async (req, res, next) => {
   }
 });
 
-// === PUT: Update user profile (e.g., name) ===
 router.put("/me", 
-  requireAuth, 
   zodValidate({ 
     body: z.object({ 
       name: z.string().min(1).trim().optional(),
@@ -63,9 +65,8 @@ router.put("/me",
   }),
   async (req, res, next) => {
     try {
-      const userId = (req as any).user.id;
+      if (!req.user) throw new ApiError(401, "Authentication required.");
       const { name, description, showEmailToOthers } = req.body;
-
       const dataToUpdate: { name?: string; description?: string, showEmailToOthers?: boolean } = {};
       if (name) dataToUpdate.name = name;
       if (description !== undefined) dataToUpdate.description = description;
@@ -76,12 +77,12 @@ router.put("/me",
       }
 
       const updatedUser = await prisma.user.update({
-        where: { id: userId },
+        where: { id: req.user.id },
         data: dataToUpdate,
         select: { id: true, email: true, username: true, name: true, avatarUrl: true, description: true, showEmailToOthers: true },
       });
 
-      io.emit('user:updated', updatedUser);
+      getIo().emit('user:updated', updatedUser);
       res.json(updatedUser);
     } catch (error) {
       next(error);
@@ -89,69 +90,39 @@ router.put("/me",
   }
 );
 
-// === PUT: Update user's public keys ===
-// Regex to validate URL-safe Base64 format (no padding)
 const base64UrlRegex = /^[A-Za-z0-9_-]+$/;
-
 router.put("/me/keys",
-  requireAuth,
   zodValidate({
     body: z.object({
-      publicKey: z.string({ required_error: "Public key is required."})
-        .min(43, { message: "Public key must be at least 43 characters." })
-        .max(256, { message: "Public key cannot exceed 256 characters." })
-        .regex(base64UrlRegex, { message: "Public key must be in URL-safe Base64 format." }),
-      signingKey: z.string({ required_error: "Signing key is required."})
-        .min(43, { message: "Signing key must be at least 43 characters." })
-        .max(256, { message: "Signing key cannot exceed 256 characters." })
-        .regex(base64UrlRegex, { message: "Signing key must be in URL-safe Base64 format." }),
+      publicKey: z.string().min(43).max(256).regex(base64UrlRegex, { message: "Invalid public key format." }),
+      signingKey: z.string().min(43).max(256).regex(base64UrlRegex, { message: "Invalid signing key format." }),
     })
   }),
   async (req, res, next) => {
     try {
+      if (!req.user) throw new ApiError(401, "Authentication required.");
       const userId = req.user.id;
       const { publicKey, signingKey } = req.body;
 
       const user = await prisma.user.update({
         where: { id: userId },
-        data: {
-          publicKey,
-          signingKey,
-        },
+        data: { publicKey, signingKey },
         select: { id: true, name: true },
       });
       
-      // Find all users who share a conversation with the current user and notify them.
       const conversations = await prisma.conversation.findMany({
-        where: {
-          participants: {
-            some: {
-              userId: userId,
-            },
-          },
-        },
-        include: {
-          participants: {
-            select: {
-              userId: true,
-            },
-          },
-        },
+        where: { participants: { some: { userId: userId } } },
+        include: { participants: { select: { userId: true } } },
       });
 
       const recipients = new Set<string>();
-      for (const conversation of conversations) {
-        for (const participant of conversation.participants) {
-          if (participant.userId !== userId) {
-            recipients.add(participant.userId);
-          }
-        }
-      }
+      conversations.forEach(c => c.participants.forEach(p => {
+        if (p.userId !== userId) recipients.add(p.userId);
+      }));
 
-      // Emit the event to each recipient's personal room.
-      for (const recipientId of recipients) {
-        io.to(recipientId).emit('user:identity_changed', { userId: user.id, name: user.name });
-      }
+      recipients.forEach(recipientId => {
+        getIo().to(recipientId).emit('user:identity_changed', { userId: user.id, name: user.name });
+      });
 
       res.status(200).json({ message: "Keys updated successfully." });
     } catch (error) {
@@ -160,36 +131,30 @@ router.put("/me/keys",
   }
 );
 
-
-// === POST: Update user avatar ===
-router.post("/me/avatar", requireAuth, uploadAvatar.single('avatar'), async (req, res, next) => {
+router.post("/me/avatar", uploadAvatar.single('avatar'), async (req, res, next) => {
   try {
-    const userId = (req as any).user.id;
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+    if (!req.user) throw new ApiError(401, "Authentication required.");
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const avatarUrl = `/uploads/avatars/${req.file.filename}`;
-
     const updatedUser = await prisma.user.update({
-      where: { id: userId },
+      where: { id: req.user.id },
       data: { avatarUrl },
       select: { id: true, email: true, username: true, name: true, avatarUrl: true },
     });
 
-    io.emit('user:updated', updatedUser);
+    getIo().emit('user:updated', updatedUser);
     res.json(updatedUser);
   } catch (error) {
     next(error);
   }
 });
 
-// === GET: Cari user berdasarkan query ===
 router.get("/search", 
-  requireAuth, 
   zodValidate({ query: z.object({ q: z.string().min(1) }) }),
   async (req, res, next) => {
     try {
+      if (!req.user) throw new ApiError(401, "Authentication required.");
       const query = req.query.q as string;
       const meId = req.user.id;
 
@@ -197,8 +162,7 @@ router.get("/search",
         where: {
           AND: [
             { id: { not: meId } },
-            {
-              OR: [
+            { OR: [
                 { username: { contains: query, mode: "insensitive" } },
                 { name: { contains: query, mode: "insensitive" } },
               ],
@@ -206,14 +170,8 @@ router.get("/search",
           ],
         },
         take: 10,
-        select: {
-          id: true,
-          username: true,
-          name: true,
-          avatarUrl: true,
-        },
+        select: { id: true, username: true, name: true, avatarUrl: true },
       });
-
       res.json(users);
     } catch (e) {
       next(e);
@@ -221,42 +179,23 @@ router.get("/search",
   }
 );
 
-// === GET: User data by ID ===
-router.get(
-  '/:userId',
-  requireAuth,
-  async (req, res, next) => {
+router.get('/:userId', async (req, res, next) => {
     try {
       const { userId } = req.params;
-
       const user = await prisma.user.findUnique({
         where: { id: userId },
         select: {
-          id: true,
-          username: true,
-          name: true,
-          avatarUrl: true,
-          description: true,
-          createdAt: true,
-          publicKey: true, // Include public key
-          email: true, // Select email to check it
-          showEmailToOthers: true, // Select the flag
+          id: true, username: true, name: true, avatarUrl: true, description: true,
+          createdAt: true, publicKey: true, email: true, showEmailToOthers: true,
         },
       });
 
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-      }
+      if (!user) return res.status(404).json({ error: 'User not found' });
 
-      // Conditionally build the response
-      const publicProfile: any = {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        avatarUrl: user.avatarUrl,
-        description: user.description,
-        createdAt: user.createdAt,
-        publicKey: user.publicKey, // Add public key to the response
+      const publicProfile: Partial<typeof user> & { id: string } = {
+        id: user.id, username: user.username, name: user.name,
+        avatarUrl: user.avatarUrl, description: user.description,
+        createdAt: user.createdAt, publicKey: user.publicKey,
       };
 
       if (user.showEmailToOthers) {
@@ -270,9 +209,9 @@ router.get(
   }
 );
 
-// === POST: Mark onboarding as complete ===
-router.post("/me/complete-onboarding", requireAuth, async (req, res, next) => {
+router.post("/me/complete-onboarding", async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     await prisma.user.update({
       where: { id: req.user.id },
       data: { hasCompletedOnboarding: true },

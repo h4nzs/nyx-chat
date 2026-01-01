@@ -18,6 +18,7 @@ router.post(
   upload.single("file"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
+      if (!req.user) throw new ApiError(401, "Authentication required.");
       const { conversationId } = req.params;
       const senderId = req.user.id;
       const file = req.file;

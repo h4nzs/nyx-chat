@@ -1,17 +1,11 @@
-import { Request } from 'express';
-
-// Definisikan payload user yang akan kita tambahkan ke request
-interface UserPayload {
-  id: string;
-  email: string;
-  username: string;
-}
+import { AuthPayload } from './auth';
+import { JwtPayload } from 'jsonwebtoken';
 
 declare global {
   namespace Express {
-    // Tambahkan properti 'user' ke interface Request dari Express
-    export interface Request {
-      user?: UserPayload;
+    interface Request {
+      user?: AuthPayload;
+      jwtPayload?: JwtPayload;
     }
   }
 }

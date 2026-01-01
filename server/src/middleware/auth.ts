@@ -2,11 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import type { Socket } from "socket.io";
 import { env } from "../config.js";
-
-export interface AuthPayload {
-  id: string;
-  username: string;
-}
+import { AuthPayload } from "../types/auth.js";
 
 // === Middleware untuk REST API ===
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -24,7 +20,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const payload = jwt.verify(token, env.jwtSecret) as AuthPayload;
     console.log('[Auth Middleware] Pengguna terotentikasi:', payload); 
-    (req as any).user = payload;
+    req.user = payload;
     next();
   } catch (err) {
     console.error("Authentication error:", err);
