@@ -34,11 +34,12 @@ function setAuthCookies(
   { access, refresh }: { access: string; refresh: string }
 ) {
   const isProd = env.nodeEnv === "production";
+  const isTunnelTesting = true;
 
   res.cookie("at", access, {
     httpOnly: true,
-    secure: isProd,
-    sameSite: "strict",  // Changed from conditional to strict
+    secure: isProd || isTunnelTesting,
+    sameSite: isTunnelTesting ? "none" : "strict", // Changed from conditional to strict
     path: "/",
     maxAge: 1000 * 60 * 15, // 15 menit
   });
