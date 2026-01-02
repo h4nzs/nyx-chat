@@ -34,14 +34,14 @@ function setAuthCookies(res: Response, { access, refresh }: { access: string; re
   res.cookie("at", access, {
     httpOnly: true,
     secure: isProd,
-    sameSite: "strict",
+    sameSite: "lax",
     path: "/",
     maxAge: 1000 * 60 * 15,
   });
   res.cookie("rt", refresh, {
     httpOnly: true,
     secure: isProd,
-    sameSite: "strict",
+    sameSite: "lax",
     path: "/",
     maxAge: 1000 * 60 * 60 * 24 * 30,
   });
