@@ -1,4 +1,5 @@
-import type { Conversation, Message, User } from '@store/conversation';
+import type { Conversation, Message } from '@store/conversation';
+import type { User } from '@store/auth';
 
 export interface ServerToClientEvents {
     connect: () => void;

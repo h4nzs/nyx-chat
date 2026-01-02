@@ -68,14 +68,6 @@ export default function Chat() {
     }
   }, [user]);
 
-  const handleSelectConversation = (id: string) => {
-    navigate(`/chat/${id}`);
-    // On mobile, hide the sidebar after selecting a conversation
-    if (window.innerWidth < 768 && isSidebarOpen) {
-      toggleSidebar();
-    }
-  };
-
   const handleCloseTour = useCallback(() => {
     setIsTourOpen(false);
   }, []);

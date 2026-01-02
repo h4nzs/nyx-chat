@@ -37,7 +37,9 @@ export default defineConfig({
     'global.Buffer': ['buffer', 'Buffer'],
   },
   server: {
-    allowedHosts: true,
+    // Whitelist specific hosts to prevent DNS rebinding attacks.
+    // '.ngrok.io' is for ngrok tunneling, 'localhost' for local development.
+    allowedHosts: ['.ngrok.io', 'localhost'],
     fs: {
       allow: ['..']
     },

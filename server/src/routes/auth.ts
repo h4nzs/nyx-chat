@@ -267,13 +267,13 @@ router.post("/webauthn/auth-verify", async (req, res, next) => {
         expectedOrigin,
         expectedRPID: rpID,
         authenticator: {
-          credentialID: Buffer.from(authenticator.credentialID, 'base64url'),
-          credentialPublicKey: Buffer.from(authenticator.credentialPublicKey, 'base64url'),
+          id: Buffer.from(authenticator.credentialID, 'base64url'),
+          publicKey: Buffer.from(authenticator.credentialPublicKey, 'base64url'),
           counter: authenticator.counter,
           transports: authenticator.transports?.split(',') as AuthenticatorTransportFuture[],
         },
         requireUserVerification: false,
-      } as any);
+      });
     } catch (error: any) {
       return res.status(400).json({ error: error.message });
     }

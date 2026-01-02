@@ -155,7 +155,8 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
   searchUsers: async (query) => {
     try {
-      const users = await api<{ id: string; username: string; name: string; avatarUrl?: string | null }[]>(`/api/users/search?q=${query}`);
+      const safeQuery = encodeURIComponent(query || '');
+      const users = await api<{ id: string; username: string; name: string; avatarUrl?: string | null }[]>(`/api/users/search?q=${safeQuery}`);
       return users;
     } catch (error) {
       console.error("Failed to search users", error);

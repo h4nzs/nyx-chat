@@ -42,6 +42,8 @@ if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAP
 
 const app = express();
 
+app.set('trust proxy', 1); // Trust the first proxy
+
 // === SECURITY / CORS ===
 const isProd = env.nodeEnv === 'production';
 
@@ -107,7 +109,7 @@ app.use("/api/sessions", sessionsRouter);
 
 // === CSRF Protection ===
 const csrfProtection = csrf({
-  cookie: { httpOnly: true, sameSite: "lax", secure: true}
+  cookie: { httpOnly: true, sameSite: "lax", secure: isProd}
 });
 app.use(csrfProtection);
 

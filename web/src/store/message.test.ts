@@ -54,6 +54,6 @@ describe('useMessageStore', () => {
     expect(messages).toHaveLength(1);
     expect(messages[0].id).toBe('real-id-456');
     expect(messages[0].optimistic).toBe(false);
-    expect(messages[0].tempId).toBe(tempId); // tempId should be preserved
+    expect(messages[0].tempId).toBeUndefined(); // tempId is cleared when replacing with real message
   });
 });

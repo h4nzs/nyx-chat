@@ -35,8 +35,8 @@ services:
       DATABASE_URL: ${DATABASE_URL} 
       JWT_SECRET: ${JWT_SECRET}
       REDIS_URL: redis://redis:6379
-      CLIENT_URL: http://localhost
-      CORS_ORIGIN: http://localhost
+      CLIENT_URL: ${CLIENT_URL:-http://localhost}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
     networks:
       - chat-net
 
