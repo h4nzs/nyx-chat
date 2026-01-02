@@ -10,7 +10,7 @@ import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGrou
 import { useKeychainStore } from "@store/keychain";
 import type { Message } from "@store/conversation";
 
-const WS_URL = (import.meta.env.VITE_WS_URL as string) || "http://localhost:4000";
+const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:4000";
 let socket: Socket | null = null;
 
 
