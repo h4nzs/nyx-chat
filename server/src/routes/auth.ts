@@ -196,7 +196,6 @@ router.post("/webauthn/register-verify", requireAuth, async (req, res, next) => 
 
     const { verified, registrationInfo } = verification;
     if (verified && registrationInfo) {
-      // PERBAIKAN: Akses credentialID, credentialPublicKey, dan counter dari properti 'credential'
       const { credential, credentialDeviceType, credentialBackedUp } = registrationInfo;
       
       const newAuthData = {
@@ -266,10 +265,13 @@ router.post("/webauthn/auth-verify", async (req, res, next) => {
         expectedChallenge: user.currentChallenge,
         expectedOrigin,
         expectedRPID: rpID,
-        authenticator: {
-          id: Buffer.from(authenticator.credentialID, 'base64url'),
+        credential: {
+          // FIX 1: Gunakan langsung string credentialID, tidak perlu Buffer.from(...) karena tipe yang diminta adalah string
+          id: authenticator.credentialID,
+          // publicKey masih perlu Buffer karena tipenya Uint8Array
           publicKey: Buffer.from(authenticator.credentialPublicKey, 'base64url'),
-          counter: authenticator.counter,
+          // FIX 2: Konversi BigInt ke Number
+          counter: Number(authenticator.counter),
           transports: authenticator.transports?.split(',') as AuthenticatorTransportFuture[],
         },
         requireUserVerification: false,

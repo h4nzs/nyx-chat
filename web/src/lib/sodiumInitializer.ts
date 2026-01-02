@@ -24,7 +24,7 @@ export async function initializeSodium(): Promise<void> {
       isSodiumInitialized = true;
       console.log('Libsodium initialized successfully');
     })
-    .catch((error) => {
+    .catch((error: any) => {
       console.error('Failed to initialize libsodium:', error);
       // Reset promise to allow retry on next call
       sodiumInitPromise = null;

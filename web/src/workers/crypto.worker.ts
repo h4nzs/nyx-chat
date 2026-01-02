@@ -163,7 +163,8 @@ self.onmessage = async (event: MessageEvent) => {
           masterSeed: masterSeed
         }, password, appSecret);
 
-        const phrase = await bip39.entropyToMnemonic(masterSeed);
+        // FIX: Konversi masterSeed ke Buffer sebelum pass ke bip39
+        const phrase = await bip39.entropyToMnemonic(Buffer.from(masterSeed));
         
         result = {
             encryptionPublicKeyB64,
@@ -272,7 +273,8 @@ self.onmessage = async (event: MessageEvent) => {
         const { encryptedDataStr, password } = payload;
         const resultData = retrievePrivateKeys(encryptedDataStr, password, appSecret);
         if (resultData.success && resultData.keys.masterSeed) {
-          result = await bip39.entropyToMnemonic(resultData.keys.masterSeed);
+          // FIX: Gunakan Buffer.from agar sesuai dengan tipe yang diminta bip39
+          result = await bip39.entropyToMnemonic(Buffer.from(resultData.keys.masterSeed));
         } else {
           throw new Error("Failed to retrieve master seed from bundle.");
         }
