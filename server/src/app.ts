@@ -28,7 +28,7 @@ import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
 import webpush from "web-push";
 
-// Set VAPID keys for web-push notifications (only if all required environment variables are set)
+// Set VAPID keys for web-push notifications
 if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails(
     process.env.VAPID_SUBJECT,
@@ -37,12 +37,12 @@ if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAP
   );
 } else {
   console.warn("⚠️ VAPID keys not configured. Push notifications will be disabled.");
-  console.warn("To enable push notifications, set VAPID_SUBJECT, VAPID_PUBLIC_KEY, and VAPID_PRIVATE_KEY environment variables.");
 }
 
 const app = express();
 
-app.set('trust proxy', 1); // Trust the first proxy
+// PENTING: Trust proxy agar cookies 'secure' bekerja di balik Ngrok/Nginx
+app.set('trust proxy', 1);
 
 // === SECURITY / CORS ===
 const isProd = env.nodeEnv === 'production';
@@ -64,26 +64,45 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      // 'unsafe-eval' diperlukan untuk hot-reloading di mode development
-      scriptSrc: ["'self'", isProd ? '' : "'unsafe-eval'"],
+      // Izinkan akses dari domain ngrok dan localhost
+      scriptSrc: ["'self'", isProd ? '' : "'unsafe-eval'", "https://*.ngrok-free.app"],
       styleSrc: ["'self'", "'unsafe-inline'"], // Diperlukan untuk styling dinamis
-      imgSrc: ["'self'", "data:", "blob:"], // blob: diperlukan untuk avatar preview
-      connectSrc: ["'self'", wsOrigin],
+      imgSrc: ["'self'", "data:", "blob:", "https://*.ngrok-free.app"],
+      connectSrc: ["'self'", wsOrigin, "https://*.ngrok-free.app", "wss://*.ngrok-free.app"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"], // Mencegah clickjacking
       ...(isProd && { upgradeInsecureRequests: [] }),
     },
   },
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // Izinkan resource (gambar) di-load lintas origin
 }));
+
 // Hapus header X-Powered-By untuk menyembunyikan detail teknologi server
 app.disable('x-powered-by');
 
+// PERBAIKAN UTAMA: Dynamic CORS Origin
+// Mengizinkan Localhost dan domain Ngrok secara otomatis tanpa perlu hardcode satu per satu
 const corsMiddleware = cors({
-  origin: env.corsOrigin || "http://localhost:5173",
-  credentials: true,
+  origin: (origin, callback) => {
+    // Izinkan request tanpa origin (seperti dari aplikasi mobile, curl, atau postman)
+    if (!origin) return callback(null, true);
+    
+    // Daftar whitelist statis
+    const allowedOrigins = [env.corsOrigin, "http://localhost:5173", "http://localhost:4173"];
+    
+    // Logika: Izinkan jika ada di whitelist ATAU jika domainnya adalah ngrok-free.app
+    if (allowedOrigins.includes(origin) || origin.endsWith('.ngrok-free.app')) {
+      callback(null, true);
+    } else {
+      console.warn(`Blocked by CORS: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true, // Wajib true agar cookies dikirim/diterima
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "CSRF-Token"],
 });
+
 app.use(corsMiddleware);
 
 if (isProd) {
@@ -103,13 +122,19 @@ app.use(cookieParser());
 app.use(express.json({ limit: "10mb" })); // Naikkan limit untuk payload JSON jika perlu
 app.use(express.urlencoded({ extended: true }));
 
-// Public routes that don't need CSRF protection
+// Public routes that don't need CSRF protection (e.g., initial handshake)
 app.use("/api/keys", keysRouter);
 app.use("/api/sessions", sessionsRouter);
 
 // === CSRF Protection ===
 const csrfProtection = csrf({
-  cookie: { httpOnly: true, sameSite: "lax", secure: isProd}
+  cookie: { 
+    httpOnly: true, 
+    sameSite: "lax", 
+    // Secure harus true jika running di HTTPS (Ngrok/Production), false jika HTTP (Localhost tanpa SSL)
+    // Jika via Ngrok, protocol 'https' akan diteruskan via header X-Forwarded-Proto (dihandle oleh trust proxy)
+    secure: isProd 
+  }
 });
 app.use(csrfProtection);
 
@@ -121,7 +146,7 @@ app.get("/api/csrf-token", (req: Request, res: Response) => {
 // === STATIC FILES (UPLOAD) - SECURE IMPLEMENTATION ===
 const uploadsPath = path.resolve(process.cwd(), env.uploadDir);
 app.use("/uploads", 
-  corsMiddleware, // Apply the CORS middleware here as well
+  corsMiddleware, // Terapkan CORS di sini juga agar fetch gambar dari frontend berhasil
   // Middleware untuk menambahkan header CORP & keamanan lainnya
   (req, res, next) => {
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
