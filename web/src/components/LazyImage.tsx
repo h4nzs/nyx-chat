@@ -36,8 +36,14 @@ export default function LazyImage({
       
       if (!message.fileType?.includes(';encrypted=true')) {
         if (isMounted) {
-          setImageUrl(toAbsoluteUrl(message.fileUrl));
-          setDecryptionStatus('succeeded');
+          const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+          if (absoluteUrl) {
+            setImageUrl(absoluteUrl);
+            setDecryptionStatus('succeeded');
+          } else {
+            setError("Invalid image URL.");
+            setDecryptionStatus('failed');
+          }
         }
         return;
       }
@@ -66,7 +72,11 @@ export default function LazyImage({
       }
 
       try {
-        const response = await fetch(toAbsoluteUrl(message.fileUrl));
+        const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+        if (!absoluteUrl) {
+          throw new Error("File URL is invalid.");
+        }
+        const response = await fetch(absoluteUrl);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const encryptedBlob = await response.blob();
 

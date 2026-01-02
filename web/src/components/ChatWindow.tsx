@@ -5,7 +5,7 @@ import { Virtuoso } from "react-virtuoso";
 import MessageItem from "@components/MessageItem";
 import { useConversation } from "@hooks/useConversation";
 import { Spinner } from "./Spinner";
-import { useConversationStore, type Conversation } from "@store/conversation";
+import { useConversationStore, type Conversation, type Message } from "@store/conversation";
 import { useMessageStore } from '@store/message';
 import { useMessageInputStore as useTypingStore } from '@store/messageInput'; // Alias for clarity
 import { useMessageInputStore } from '@store/messageInput';

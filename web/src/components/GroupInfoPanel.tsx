@@ -191,7 +191,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
           <EditGroupInfoModal
             conversationId={conversation.id}
             currentTitle={conversation.title || ''}
-            currentDescription={conversation.description}
+            currentDescription={conversation.description || null}
             onClose={() => setIsEditing(false)}
           />
         )}

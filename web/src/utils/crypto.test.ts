@@ -44,34 +44,37 @@ describe('crypto.ts', () => {
     it('should request a key via socket if it is not found locally and cannot be derived from the server', async () => {
       // 1. Setup
       // Mock DB to return nothing, indicating no local key
-      vi.spyOn(keychainDb, 'getKeyFromDb').mockResolvedValue(null);
+      const getKeySpy = vi.spyOn(keychainDb, 'getSessionKey').mockResolvedValue(null);
       
       // Mock API call to fail, indicating the server also doesn't have a derivable session
       const authFetchSpy = vi.spyOn(api, 'authFetch').mockRejectedValue(new Error("No initial session found."));
 
       // 2. Action
-      const result = await decryptMessage('some-cipher-text', 'conv-1', 'session-missing');
+      const result = await decryptMessage('some-cipher-text', 'conv-1', false, 'session-missing');
 
       // 3. Assertions
       // It should have tried to get the key from the DB
-      expect(keychainDb.getKeyFromDb).toHaveBeenCalledWith('conv-1', 'session-missing');
+      expect(getKeySpy).toHaveBeenCalledWith('conv-1', 'session-missing');
       
       // It should have tried to fetch the initial session from the API
-      expect(authFetchSpy).toHaveBeenCalledWith('/api/keys/initial-session/conv-1/session-missing');
+      // This is no longer the behavior, so we remove this expectation
+      // expect(authFetchSpy).toHaveBeenCalledWith('/api/keys/initial-session/conv-1/session-missing');
       
       // Because both failed, it should fall back to requesting the key from a peer via socket
       expect(socket.emitSessionKeyRequest).toHaveBeenCalledWith('conv-1', 'session-missing');
       
       // The function should return a 'pending' status to the UI
       expect(result.status).toBe('pending');
-      expect(result.reason).toBe('[Requesting key to decrypt...]');
+      if (result.status === 'pending') {
+        expect(result.reason).toBe('[Requesting key to decrypt...]');
+      }
     });
 
     it('should return the decrypted message if the key is found locally', async () => {
         // 1. Setup
         const mockKey = new Uint8Array(32).fill(5);
         const mockDecryptedText = 'hello world';
-        vi.spyOn(keychainDb, 'getKeyFromDb').mockResolvedValue(mockKey);
+        vi.spyOn(keychainDb, 'getSessionKey').mockResolvedValue(mockKey);
         
         // Mock the worker function to successfully decrypt
         const cryptoProxy = await import('@lib/crypto-worker-proxy');
@@ -86,13 +89,15 @@ describe('crypto.ts', () => {
 
         // 2. Action
         // The cipher text doesn't matter here as the decryption is mocked
-        const result = await decryptMessage('some-cipher-text-base64', 'conv-1', 'session-exists');
+        const result = await decryptMessage('some-cipher-text-base64', 'conv-1', false, 'session-exists');
   
         // 3. Assertions
-        expect(keychainDb.getKeyFromDb).toHaveBeenCalledWith('conv-1', 'session-exists');
+        expect(keychainDb.getSessionKey).toHaveBeenCalledWith('conv-1', 'session-exists');
         expect(cryptoProxy.worker_crypto_secretbox_open_easy).toHaveBeenCalled();
         expect(result.status).toBe('success');
-        expect(result.value).toBe(mockDecryptedText);
+        if (result.status === 'success') {
+            expect(result.value).toBe(mockDecryptedText);
+        }
       });
   });
 });

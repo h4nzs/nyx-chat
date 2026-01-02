@@ -1,7 +1,8 @@
-import { io, Socket } from "socket.io-client";
+import io from "socket.io-client";
+import type { Socket } from "socket.io-client";
 import toast from "react-hot-toast";
-import { useAuthStore } from "@store/auth";
-import { useConversationStore } from "@store/conversation";
+import { useAuthStore, User } from "@store/auth";
+import { useConversationStore, Conversation } from "@store/conversation";
 import { useMessageStore, decryptMessageObject } from "@store/message";
 import { useConnectionStore } from "@store/connection";
 import { usePresenceStore } from "@store/presence";
@@ -12,6 +13,23 @@ import type { Message } from "@store/conversation";
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:4000";
 let socket: Socket | null = null;
+
+// Payload types
+interface DisconnectReason extends Socket.DisconnectReason {}
+interface MessageDeletedPayload { conversationId: string; id: string; }
+interface TypingUpdatePayload { userId: string; conversationId: string; isTyping: boolean; }
+interface ReactionNewPayload { conversationId: string; messageId: string; reaction: any; } // 'any' for now, can be improved
+interface ReactionDeletedPayload { conversationId: string; messageId: string; reactionId: string; }
+interface ConversationNewPayload extends Conversation {}
+interface ConversationUpdatedPayload extends Partial<Conversation> { id: string }
+interface ConversationDeletedPayload { id: string }
+interface ParticipantsAddedPayload { conversationId: string; newParticipants: any[] } // 'any' for now
+interface ParticipantRemovedPayload { conversationId: string; userId: string }
+interface UserUpdatedPayload extends Partial<User> { id: string }
+interface MessageStatusUpdatedPayload { conversationId: string; messageId: string; deliveredTo?: string, readBy?: string; status: string }
+interface FulfillRequestPayload { conversationId: string; sessionId: string; requesterId: string; requesterPublicKey: string; }
+interface GroupFulfillRequestPayload { conversationId: string; requesterId: string; requesterPublicKey: string; }
+interface SessionNewKeyPayload { conversationId: string; sessionId?: string; encryptedKey: string; type?: 'GROUP_KEY' | 'SESSION_KEY'; }
 
 
 const handleKeyRotation = async (conversationId: string) => {
@@ -25,7 +43,7 @@ const handleKeyRotation = async (conversationId: string) => {
       useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: false });
       console.log(`[socket] Key rotation for ${conversationId} successful.`);
       return; // Success, exit the function
-    } catch (err) {
+    } catch (err: any) {
       attempt++;
       console.error(`[socket] Key rotation attempt ${attempt} failed for ${conversationId}:`, err);
       if (attempt >= MAX_RETRIES) {
@@ -66,7 +84,7 @@ export function getSocket() {
       console.log("✅ Socket connected:", socket?.id);
     });
 
-    socket.on("disconnect", (reason) => {
+    socket.on("disconnect", (reason: DisconnectReason) => {
       setStatus('disconnected');
       if (reason !== "io client disconnect") toast.error("Disconnected. Reconnecting...");
       console.log("⚠️ Socket disconnected:", reason);
@@ -123,7 +141,7 @@ export function getSocket() {
 
         conversationStore.updateConversationLastMessage(decryptedMessage.conversationId, decryptedMessage);
         socket?.emit('message:ack_delivered', { messageId: decryptedMessage.id, conversationId: decryptedMessage.conversationId });
-      } catch (e) {
+      } catch (e: any) {
         console.error("Failed to process incoming message", e);
       }
     });
@@ -132,7 +150,7 @@ export function getSocket() {
       updateMessage(updatedMessage.conversationId, updatedMessage.id, updatedMessage);
     });
 
-    socket.on("message:deleted", ({ conversationId, id }) => {
+    socket.on("message:deleted", ({ conversationId, id }: MessageDeletedPayload) => {
       const { removeMessage } = useMessageStore.getState();
       removeMessage(conversationId, id);
     });
@@ -140,8 +158,8 @@ export function getSocket() {
     socket.on("presence:init", (onlineUserIds: string[]) => setOnlineUsers(onlineUserIds));
     socket.on("presence:user_joined", (userId: string) => userJoined(userId));
     socket.on("presence:user_left", (userId: string) => userLeft(userId));
-    socket.on("typing:update", ({ userId, conversationId, isTyping }) => addOrUpdate({ id: userId, conversationId, isTyping }));
-    socket.on("reaction:new", ({ conversationId, messageId, reaction }) => {
+    socket.on("typing:update", ({ userId, conversationId, isTyping }: TypingUpdatePayload) => addOrUpdate({ id: userId, conversationId, isTyping }));
+    socket.on("reaction:new", ({ conversationId, messageId, reaction }: ReactionNewPayload) => {
       const { user: me } = useAuthStore.getState();
       const { replaceOptimisticReaction, addReaction } = useMessageStore.getState();
 
@@ -153,23 +171,23 @@ export function getSocket() {
         addReaction(conversationId, messageId, reaction);
       }
     });
-    socket.on("reaction:deleted", ({ conversationId, messageId, reactionId }) => removeReaction(conversationId, messageId, reactionId));
+    socket.on("reaction:deleted", ({ conversationId, messageId, reactionId }: ReactionDeletedPayload) => removeReaction(conversationId, messageId, reactionId));
     
-    socket.on("conversation:new", (newConversation) => {
+    socket.on("conversation:new", (newConversation: ConversationNewPayload) => {
       conversationStore.addOrUpdateConversation(newConversation);
       socket?.emit("conversation:join", newConversation.id);
       toast.success(`You've been added to "${newConversation.title || 'a new chat'}"`);
     });
 
-    socket.on("conversation:updated", (updates) => conversationStore.updateConversation(updates.id, updates));
-    socket.on("conversation:deleted", ({ id }) => conversationStore.removeConversation(id));
+    socket.on("conversation:updated", (updates: ConversationUpdatedPayload) => conversationStore.updateConversation(updates.id, updates));
+    socket.on("conversation:deleted", ({ id }: ConversationDeletedPayload) => conversationStore.removeConversation(id));
 
-    socket.on("conversation:participants_added", ({ conversationId, newParticipants }) => {
+    socket.on("conversation:participants_added", ({ conversationId, newParticipants }: ParticipantsAddedPayload) => {
       console.log(`[socket] ${newParticipants.length} participant(s) added to ${conversationId}. Updating UI.`);
       useConversationStore.getState().addParticipants(conversationId, newParticipants);
     });
 
-    socket.on("conversation:participant_removed", ({ conversationId, userId }) => {
+    socket.on("conversation:participant_removed", ({ conversationId, userId }: ParticipantRemovedPayload) => {
       console.log(`[socket] Participant ${userId} removed from ${conversationId}. Rotating key and updating UI.`);
       
       // Remove participant from the UI state
@@ -179,18 +197,18 @@ export function getSocket() {
       handleKeyRotation(conversationId);
     });
 
-    socket.on('user:updated', (updatedUser) => {
+    socket.on('user:updated', (updatedUser: UserUpdatedPayload) => {
       // Update the user's own info if it's them
       const { user, setUser } = useAuthStore.getState();
       if (user?.id === updatedUser.id) {
-        setUser({ ...user, ...updatedUser });
+        setUser({ ...user, ...updatedUser } as User);
       }
       // Update user details in conversation participants and message senders
       useConversationStore.getState().updateParticipantDetails(updatedUser);
       useMessageStore.getState().updateSenderDetails(updatedUser);
     });
 
-    socket.on('message:status_updated', (payload) => {
+    socket.on('message:status_updated', (payload: MessageStatusUpdatedPayload) => {
       console.log('[STATUS] Received message:status_updated:', payload); // Diagnostic Log
       const { conversationId, messageId, deliveredTo, readBy, status } = payload;
       const userId = deliveredTo || readBy;
@@ -199,9 +217,9 @@ export function getSocket() {
       }
     });
     
-    socket.on('session:fulfill_request', (data) => fulfillKeyRequest(data).catch(error => console.error('Failed to fulfill key request:', error)));
-    socket.on('group:fulfill_key_request', (data) => fulfillGroupKeyRequest(data).catch(error => console.error('Failed to fulfill group key request:', error)));
-    socket.on('session:new_key', (data) => {
+    socket.on('session:fulfill_request', (data: FulfillRequestPayload) => fulfillKeyRequest(data).catch(error => console.error('Failed to fulfill key request:', error)));
+    socket.on('group:fulfill_key_request', (data: GroupFulfillRequestPayload) => fulfillGroupKeyRequest(data).catch(error => console.error('Failed to fulfill group key request:', error)));
+    socket.on('session:new_key', (data: SessionNewKeyPayload) => {
       storeReceivedSessionKey(data)
         .then(() => {
           useKeychainStore.getState().keysUpdated();

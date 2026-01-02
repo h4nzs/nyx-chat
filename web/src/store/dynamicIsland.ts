@@ -7,7 +7,7 @@ import type { User } from './auth';
 export interface NotificationActivity {
   type: 'notification';
   id: string;
-  sender: User;
+  sender: Partial<User>;
   message: string;
   link: string;
 }
@@ -51,7 +51,7 @@ const useDynamicIslandStore = create<DynamicIslandState>((set, get) => ({
   updateActivity: (id, updates) => {
     set(state => ({
       activities: state.activities.map(activity =>
-        activity.id === id ? { ...activity, ...updates } : activity
+        activity.id === id ? { ...activity, ...updates } as Activity : activity
       ),
     }));
   },

@@ -7,7 +7,7 @@ import { useAuthStore } from "./auth";
 import { useMessageStore } from "./message";
 import { useConversationStore } from "./conversation";
 import type { Message } from "./conversation";
-import useDynamicIslandStore from "./dynamicIsland";
+import useDynamicIslandStore, { UploadActivity } from "./dynamicIsland";
 
 type State = {
   replyingTo: Message | null;
@@ -130,13 +130,15 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   
   uploadFile: async (conversationId, file) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
-    const activityId = addActivity({ type: 'upload', fileName: `Encrypting ${file.name}...`, progress: 0 });
+    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Encrypting ${file.name}...`, progress: 0 };
+    const activityId = addActivity(activity);
     const { replyingTo } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     if (!me) {
       removeActivity(activityId);
-      return toast.error("User not authenticated.");
+      toast.error("User not authenticated.");
+      return;
     }
 
     if (!await ensureGroupSessionIfNeeded(conversationId)) {
@@ -198,13 +200,15 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
   handleStopRecording: async (conversationId, blob, duration) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
-    const activityId = addActivity({ type: 'upload', fileName: 'Encrypting & Uploading Voice...', progress: 0 });
+    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: 'Encrypting & Uploading Voice...', progress: 0 };
+    const activityId = addActivity(activity);
     const { replyingTo } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     if (!me) {
       removeActivity(activityId);
-      return toast.error("User not authenticated.");
+      toast.error("User not authenticated.");
+      return;
     }
     
     if (!await ensureGroupSessionIfNeeded(conversationId)) {

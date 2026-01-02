@@ -10,6 +10,13 @@ import { addSessionKey } from '@lib/keychainDb';
 import toast from 'react-hot-toast';
 
 // --- Type Definitions ---
+export type MessageStatus = {
+  id: string;
+  messageId: string;
+  userId: string;
+  status: 'SENT' | 'DELIVERED' | 'READ';
+  updatedAt: string;
+};
 
 export type Message = {
   id: string;
@@ -35,6 +42,9 @@ export type Message = {
   repliedTo?: Message;
   repliedToId?: string;
   linkPreview?: any;
+  duration?: number;
+  statuses?: MessageStatus[];
+  deletedAt?: string | Date | null;
 };
 
 export type Participant = {
@@ -65,7 +75,7 @@ export type Conversation = {
 
 // --- Helper Functions ---
 
-const sortConversations = (list: Conversation[], currentUserId: string) =>
+const sortConversations = (list: Conversation[], currentUserId: string | undefined) =>
   [...list].sort((a, b) => {
     // First, sort by pinned status (pinned conversations first)
     const aIsPinned = a.participants.some(p => p.id === currentUserId && p.isPinned);
@@ -108,6 +118,7 @@ type Actions = {
   deleteGroup: (id: string) => Promise<void>;
   toggleSidebar: () => void;
   startConversation: (peerId: string) => Promise<string>;
+  searchUsers: (query: string) => Promise<{ id: string; username: string; name: string; avatarUrl?: string | null }[]>;
   addOrUpdateConversation: (conversation: Conversation) => void;
   removeConversation: (conversationId: string) => void;
   updateConversation: (conversationId: string, updates: Partial<Conversation>) => void;
@@ -116,6 +127,7 @@ type Actions = {
   removeParticipant: (conversationId: string, userId: string) => void;
   updateParticipantRole: (conversationId: string, userId: string, role: "ADMIN" | "MEMBER") => void;
   updateConversationLastMessage: (conversationId: string, message: Message) => void;
+  togglePinConversation: (conversationId: string) => Promise<void>;
   resyncState: () => Promise<void>;
   clearError: () => void;
   reset: () => void;
@@ -139,6 +151,16 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
   reset: () => {
     set(initialState);
+  },
+
+  searchUsers: async (query) => {
+    try {
+      const users = await api<{ id: string; username: string; name: string; avatarUrl?: string | null }[]>(`/api/users/search?q=${query}`);
+      return users;
+    } catch (error) {
+      console.error("Failed to search users", error);
+      throw error;
+    }
   },
 
   resyncState: async () => {

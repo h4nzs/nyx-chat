@@ -1,12 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useAuthStore } from './auth';
-import { api } from '@lib/api';
+import { api, authFetch } from '@lib/api';
 
 // Mock the api module
-vi.mock('@lib/api', () => ({
-  api: vi.fn(),
-  authFetch: vi.fn(),
-}));
+vi.mock('@lib/api');
 
 // Mock the crypto worker proxy module
 vi.mock('@lib/crypto-worker-proxy', () => ({
@@ -53,7 +50,7 @@ describe('useAuthStore', () => {
   it('should set user on successful login', async () => {
     const mockUser = { id: '1', name: 'Test User', email: 'test@test.com', username: 'testuser' };
     vi.mocked(api).mockResolvedValue({ user: mockUser });
-    vi.mocked(api.authFetch).mockResolvedValue({}); // Mock the bundle upload
+    vi.mocked(authFetch).mockResolvedValue({}); // Mock the bundle upload
 
     // Check initial state
     expect(useAuthStore.getState().user).toBeNull();

@@ -1,4 +1,4 @@
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { FiX } from 'react-icons/fi';
 import React from 'react';
 import { useGlobalEscape } from '../../hooks/useGlobalEscape';
@@ -11,7 +11,7 @@ interface ModalBaseProps {
   footer?: React.ReactNode;
 }
 
-const dropIn = {
+const dropIn: Variants = {
   hidden: {
     y: "-50px",
     opacity: 0,

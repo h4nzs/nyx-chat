@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import useDynamicIslandStore from './dynamicIsland';
+import useDynamicIslandStore, { NotificationActivity } from './dynamicIsland';
+import { User } from './auth';
 
 export type AppNotification = {
   id: string;
@@ -7,7 +8,7 @@ export type AppNotification = {
   timestamp: number;
   read: boolean;
   link?: string; // Optional link to navigate to
-  sender?: { id: string; name: string; username: string; avatarUrl?: string | null };
+  sender?: Partial<User>;
 };
 
 type NotificationState = {
@@ -16,6 +17,7 @@ type NotificationState = {
   addNotification: (notification: Omit<AppNotification, 'id' | 'read' | 'timestamp'>) => void;
   markAllAsRead: () => void;
   clearNotifications: () => void;
+  removeNotificationsForConversation: (conversationId: string) => void;
 };
 
 const useNotificationStore = create<NotificationState>((set) => ({
@@ -36,12 +38,13 @@ const useNotificationStore = create<NotificationState>((set) => ({
 
     // Integrate with Dynamic Island
     if (newNotification.sender && newNotification.link) {
-      useDynamicIslandStore.getState().addActivity({
+      const activity: Omit<NotificationActivity, 'id'> = {
         type: 'notification',
         sender: newNotification.sender,
         message: newNotification.message,
         link: newNotification.link,
-      }, 5000); // Auto-hide after 5 seconds
+      };
+      useDynamicIslandStore.getState().addActivity(activity, 5000); // Auto-hide after 5 seconds
     }
   },
 
@@ -54,6 +57,12 @@ const useNotificationStore = create<NotificationState>((set) => ({
 
   clearNotifications: () => {
     set({ notifications: [], unreadCount: 0 });
+  },
+
+  removeNotificationsForConversation: (conversationId) => {
+    set(state => ({
+      notifications: state.notifications.filter(n => n.link !== conversationId),
+    }));
   },
 }));
 

@@ -5,7 +5,7 @@ import { encryptMessage, decryptMessage, ensureAndRatchetSession, encryptFile, e
 import toast from "react-hot-toast";
 import { useAuthStore, type User } from "./auth";
 import type { Message } from "./conversation";
-import useDynamicIslandStore from './dynamicIsland';
+import useDynamicIslandStore, { UploadActivity } from './dynamicIsland';
 import { useConversationStore } from "./conversation";
 
 /**
@@ -174,7 +174,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         createdAt: new Date().toISOString(),
         conversationId,
         reactions: [],
-        statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${tempId}`, id: `temp_status_${tempId}` }],
+        statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${tempId}`, id: `temp_status_${tempId}`, updatedAt: new Date().toISOString() }],
       };
 
       // Store original content for potential retry before encrypting
@@ -233,7 +233,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const isGroup = conversation.isGroup;
 
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
-    const uploadId = addActivity({ type: 'upload', fileName: file.name, progress: 0 });
+    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: file.name, progress: 0 };
+    const uploadId = addActivity(activity);
     const tempId = Date.now();
     
     // 1. Create optimistic message
@@ -246,7 +247,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       createdAt: new Date().toISOString(),
       conversationId,
       reactions: [],
-      statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${tempId}`, id: `temp_status_${tempId}` }],
+      statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${tempId}`, id: `temp_status_${tempId}`, updatedAt: new Date().toISOString() }],
       fileName: file.name,
       fileSize: file.size,
       fileType: file.type,
@@ -347,7 +348,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: true } }));
     try {
       const res = await api<{ items: Message[] }>(`/api/messages/${conversationId}?cursor=${oldestMessage.id}`);
-      const decryptedItems = await Promise.all((res.items || []).map(decryptMessageObject));
+      const decryptedItems = await Promise.all((res.items || []).map(m => decryptMessageObject(m)));
       decryptedItems.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
       if (decryptedItems.length < 50) set(state => ({ hasMore: { ...state.hasMore, [conversationId]: false } }));
       set(state => ({ messages: { ...state.messages, [conversationId]: [...decryptedItems, ...(state.messages[conversationId] || [])] } }));
@@ -425,7 +426,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   updateSenderDetails: (user) => set(state => {
     const newMessages = { ...state.messages };
     for (const convoId in newMessages) {
-      newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...m.sender, ...user } } : m);
+      newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id, name: user.name || '', username: user.username || '' }), ...user } } : m) as Message[];
     }
     return { messages: newMessages };
   }),
@@ -437,11 +438,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     newMessages[conversationId] = convoMessages.map(m => {
       if (m.id === messageId) {
         const existingStatus = m.statuses?.find(s => s.userId === userId);
-        if (existingStatus) return { ...m, statuses: m.statuses!.map(s => s.userId === userId ? { ...s, status } : s) };
-        else return { ...m, statuses: [...(m.statuses || []), { userId, status, messageId, id: `temp-status-${Date.now()}` }] };
+        if (existingStatus) return { ...m, statuses: m.statuses!.map(s => s.userId === userId ? { ...s, status, updatedAt: new Date().toISOString() } : s) };
+        else return { ...m, statuses: [...(m.statuses || []), { userId, status, messageId, id: `temp-status-${Date.now()}`, updatedAt: new Date().toISOString() }] };
       }
       return m;
-    });
+    }) as Message[];
     return { messages: newMessages };
   }),
 

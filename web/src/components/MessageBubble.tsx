@@ -1,14 +1,13 @@
-import { Message } from "@store/conversation";
+import { Message, MessageStatus } from "@store/conversation";
 import { useAuthStore } from "@store/auth";
 import classNames from "classnames";
 import { FaCheck, FaCheckDouble } from "react-icons/fa";
-import Reactions from "./Reactions";
 import FileAttachment from "./FileAttachment";
 import LinkPreviewCard from "./LinkPreviewCard";
 import { useModalStore } from "@store/modal";
 import { toAbsoluteUrl } from "@utils/url";
 import { formatTime } from "@utils/date";
-import MarkdownMessage from "./MarkdownMessage"; // Pastikan ini ada, atau ganti dengan div biasa
+import MarkdownMessage from "./MarkdownMessage";
 
 interface Props {
   message: Message;
@@ -16,7 +15,6 @@ interface Props {
   isGroup: boolean;
   showAvatar: boolean;
   showName: boolean;
-  // Opsional: tambahkan ini jika Anda menggunakan fitur Lightbox
   onImageClick?: (message: Message) => void;
 }
 
@@ -33,8 +31,8 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
   const getStatusIcon = () => {
     if (!isOwn) return null;
     const statuses = message.statuses || [];
-    const readCount = statuses.filter(s => s.status === 'READ' && s.userId !== user?.id).length;
-    const deliveredCount = statuses.filter(s => s.status === 'DELIVERED').length;
+    const readCount = statuses.filter((s: MessageStatus) => s.status === 'READ' && s.userId !== user?.id).length;
+    const deliveredCount = statuses.filter((s: MessageStatus) => s.status === 'DELIVERED').length;
 
     if (readCount > 0) return <FaCheckDouble className="text-blue-500 text-[10px]" />;
     if (deliveredCount > 0) return <FaCheckDouble className="text-text-secondary text-[10px]" />;
@@ -42,7 +40,7 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
   };
 
   const isFile = !!message.fileUrl || !!message.fileKey;
-  const isDeleted = !message.content && !isFile && !message.deletedAt;
+  const isDeleted = !!message.deletedAt;
 
   return (
     <div 
@@ -87,7 +85,7 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
             {
               "bg-accent text-white rounded-tr-sm": isOwn,
               "bg-bg-surface text-text-primary rounded-tl-sm": !isOwn,
-              "italic text-text-secondary border border-border bg-transparent shadow-none": message.deletedAt,
+              "italic text-text-secondary border border-border bg-transparent shadow-none": isDeleted,
             }
           )}
         >
@@ -103,7 +101,7 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
           )}
 
           {/* Content: File or Text */}
-          {message.deletedAt ? (
+          {isDeleted ? (
             <span>🚫 Message deleted</span>
           ) : (
             <>
@@ -117,12 +115,7 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
               
               {message.content && (
                 <div className={classNames("markdown-content", { "text-white": isOwn, "text-text-primary": !isOwn })}>
-                  {/* Gunakan MarkdownMessage jika ada, atau render langsung */}
-                  {typeof MarkdownMessage !== 'undefined' ? (
-                    <MarkdownMessage content={message.content} />
-                  ) : (
-                    message.content
-                  )}
+                  <MarkdownMessage content={message.content} />
                 </div>
               )}
 
@@ -140,16 +133,9 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
             "text-text-secondary": !isOwn
           })}>
             <span>{formatTime(message.createdAt)}</span>
-            {isOwn && !message.deletedAt && getStatusIcon()}
+            {isOwn && !isDeleted && getStatusIcon()}
           </div>
         </div>
-
-        {/* Reactions Display */}
-        {message.reactions && message.reactions.length > 0 && (
-          <div className={classNames("absolute -bottom-3 z-10", { "right-0": isOwn, "left-0": !isOwn })}>
-            <Reactions reactions={message.reactions} currentUserId={user?.id} />
-          </div>
-        )}
       </div>
     </div>
   );

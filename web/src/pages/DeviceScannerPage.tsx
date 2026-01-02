@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { FiChevronLeft, FiCheckCircle, FiXCircle } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
@@ -13,98 +13,72 @@ export default function DeviceScannerPage() {
   const [status, setStatus] = useState<'scanning' | 'processing' | 'success' | 'failed'>('scanning');
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  const getPrivateKey = useAuthStore(s => s.getPrivateKey);
-      const scannerRef = useRef<Html5Qrcode | null>(null);
-    
-      // Expose a self-contained function to the window for manual testing
-      (window as any).testScan = async (data: string) => {
-        // 1. Manually stop the scanner if it's running
-        if (scannerRef.current && scannerRef.current.isScanning) {
-          try {
-            await scannerRef.current.stop();
-          } catch (err) {
-            console.log("Scanner already stopped or failed to stop, proceeding anyway.");
-          }
-        }
-        scannerRef.current = null;
-        setStatus('processing');
-        toast.loading('QR Code scanned, processing...', { id: 'linking-toast' });
-    
-        // 2. Execute the full linking logic directly
-        try {
-          const { roomId, linkingPubKey } = JSON.parse(data);
-          if (!roomId || !linkingPubKey) throw new Error('Invalid QR code format.');
-    
-          const masterPrivateKey = await getPrivateKey();
-          if (!masterPrivateKey) throw new Error("Could not retrieve master key. Password prompt might have been cancelled.");
-    
-          const sodium = await getSodium();
-          const linkingPubKeyBytes = sodium.from_base64(linkingPubKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-          const encryptedPayload = sodium.crypto_box_seal(masterPrivateKey, linkingPubKeyBytes);
-          const encryptedPayloadB64 = sodium.to_base64(encryptedPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
-    
-          const socket = getSocket();
-          console.log(`[Scanner] Emitting payload to roomId: ${roomId}`);
-          socket.emit('linking:send_payload', { 
-            roomId, 
-            encryptedMasterKey: encryptedPayloadB64 
-          });
-    
-          setStatus('success');
-          toast.success('Device link initiated! Check your new device.', { id: 'linking-toast' });
-          setTimeout(() => navigate('/settings/sessions'), 2000);
-    
-        } catch (err: any) {
-          console.error("Linking error during manual test:", err);
-          setError(err.message || 'Failed to process QR code.');
-          setStatus('failed');
-          toast.error(err.message || 'Failed to link device.', { id: 'linking-toast' });
-        }
-      };
-    
-      useEffect(() => {  
-    if (status !== 'scanning' || scannerRef.current) return;
+  const getMasterSeed = useAuthStore(s => s.getMasterSeed);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+
+  const processQrCode = useCallback(async (decodedText: string) => {
+    setStatus('processing');
+    toast.loading('QR Code scanned, processing...', { id: 'linking-toast' });
+
+    try {
+      const { roomId, linkingPubKey } = JSON.parse(decodedText);
+      if (!roomId || !linkingPubKey) throw new Error('Invalid QR code format.');
+
+      const masterSeed = await getMasterSeed();
+      if (!masterSeed) throw new Error("Could not retrieve master key. Password prompt might have been cancelled or key is missing.");
+
+      const sodium = await getSodium();
+      const linkingPubKeyBytes = sodium.from_base64(linkingPubKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const encryptedPayload = sodium.crypto_box_seal(masterSeed, linkingPubKeyBytes);
+      const encryptedPayloadB64 = sodium.to_base64(encryptedPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+      const socket = getSocket();
+      console.log(`[Scanner] Emitting payload to roomId: ${roomId}`);
+      socket.emit('linking:send_payload', { 
+        roomId, 
+        encryptedMasterKey: encryptedPayloadB64 
+      });
+
+      setStatus('success');
+      toast.success('Device link initiated! Check your new device.', { id: 'linking-toast' });
+      setTimeout(() => navigate('/settings/sessions'), 2000);
+
+    } catch (err: any) {
+      console.error("Linking error:", err);
+      setError(err.message || 'Failed to process QR code.');
+      setStatus('failed');
+      toast.error(err.message || 'Failed to link device.', { id: 'linking-toast' });
+    }
+  }, [getMasterSeed, navigate]);
+
+  // Expose a self-contained function to the window for manual testing
+  useEffect(() => {
+    (window as any).testScan = async (data: string) => {
+      if (scannerRef.current?.isScanning) {
+        await scannerRef.current.stop();
+      }
+      processQrCode(data);
+    };
+  }, [processQrCode]);
+
+  useEffect(() => {  
+    if (status !== 'scanning') return;
+
+    // Prevent multiple initializations
+    if (scannerRef.current) return;
 
     const html5QrCode = new Html5Qrcode(qrcodeRegionId);
     scannerRef.current = html5QrCode;
 
-    const qrCodeSuccessCallback = async (decodedText: string) => {
-      if (html5QrCode.isScanning) {
-        try {
-          await html5QrCode.stop();
-        } catch (err) {
-          console.error("Error stopping scanner after success:", err);
-        }
-      }
-      scannerRef.current = null;
-      setStatus('processing');
-      toast.loading('QR Code scanned, processing...', { id: 'linking-toast' });
-
-      try {
-        const { roomId, linkingPubKey } = JSON.parse(decodedText);
-        if (!roomId || !linkingPubKey) throw new Error('Invalid QR code format.');
-
-        const masterPrivateKey = await getPrivateKey();
-        const sodium = await getSodium();
-        const linkingPubKeyBytes = sodium.from_base64(linkingPubKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const encryptedPayload = sodium.crypto_box_seal(masterPrivateKey, linkingPubKeyBytes);
-        const encryptedPayloadB64 = sodium.to_base64(encryptedPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
-
-        const socket = getSocket();
-        socket.emit('linking:send_payload', { 
-          roomId, 
-          encryptedMasterKey: encryptedPayloadB64 
+    const qrCodeSuccessCallback = (decodedText: string) => {
+      // Stop scanning first
+      if (scannerRef.current?.isScanning) {
+        scannerRef.current.stop().then(() => {
+          processQrCode(decodedText);
+        }).catch(err => {
+          console.error("Failed to stop scanner after success, but proceeding anyway.", err);
+          processQrCode(decodedText);
         });
-
-        setStatus('success');
-        toast.success('Device link initiated! Check your new device.', { id: 'linking-toast' });
-        setTimeout(() => navigate('/settings/sessions'), 2000);
-
-      } catch (err: any) {
-        console.error("Linking error:", err);
-        setError(err.message || 'Failed to process QR code.');
-        setStatus('failed');
-        toast.error(err.message || 'Failed to link device.', { id: 'linking-toast' });
       }
     };
 
@@ -120,14 +94,13 @@ export default function DeviceScannerPage() {
     });
 
     return () => {
-      if (scannerRef.current && scannerRef.current.isScanning) {
+      if (scannerRef.current?.isScanning) {
         scannerRef.current.stop().catch(err => {
           console.error("Failed to stop QR scanner on cleanup.", err);
         });
-        scannerRef.current = null;
       }
     };
-  }, [status, getPrivateKey, navigate]);
+  }, [status, processQrCode]);
 
   return (
     <div className="flex flex-col h-screen bg-background text-text-primary">

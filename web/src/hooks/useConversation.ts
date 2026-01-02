@@ -26,7 +26,7 @@ export function useConversation(conversationId: string) {
   const actions = useMemo(() => ({
     loadPrevious: () => loadPreviousMessages(conversationId),
     loadMessages: () => loadMessagesForConversation(conversationId),
-    sendMessage: (data: Partial<Message>) => sendMessage(conversationId, data),
+    sendMessage: (data: { content: string }) => sendMessage(conversationId, data),
     uploadFile: (file: File) => uploadFile(conversationId, file),
     retrySendMessage: (message: Message) => retrySendMessage(message),
   }), [conversationId, loadPreviousMessages, loadMessagesForConversation, sendMessage, uploadFile, retrySendMessage]);
