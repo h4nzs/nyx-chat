@@ -64,7 +64,9 @@ router.post(
         throw new ApiError(403, "Forbidden: You are not a participant of this conversation");
       }
       
-      const fileUrl = `/uploads/${path.basename(file.destination)}/${file.filename}`;
+    const categoryFolder = path.basename(file.destination);
+
+    const fileUrl = `/uploads/${categoryFolder}/${file.filename}`;
 
       const participants = await prisma.participant.findMany({
         where: { conversationId },

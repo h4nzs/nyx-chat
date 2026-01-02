@@ -24,6 +24,7 @@ const avatarStorage = multer.diskStorage({
     // req.user is guaranteed to be present by requireAuth middleware
     const userId = req.user!.id;
     const extension = path.extname(file.originalname);
+    const uniqueSuffix = Date.now();
     cb(null, `${userId}${extension}`);
   },
 });

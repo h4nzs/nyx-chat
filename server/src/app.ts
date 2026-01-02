@@ -107,7 +107,7 @@ app.use("/api/sessions", sessionsRouter);
 
 // === CSRF Protection ===
 const csrfProtection = csrf({
-  cookie: { httpOnly: true, sameSite: "strict", secure: env.nodeEnv === "production" }
+  cookie: { httpOnly: true, sameSite: "lax", secure: true}
 });
 app.use(csrfProtection);
 
