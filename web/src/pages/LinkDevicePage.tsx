@@ -17,7 +17,7 @@ const qrcodeRegionId = "qr-code-scanner-region";
 
 export default function LinkDevicePage() {
   const [qrData, setQrData] = useState<string | null>(null);
-  const [status, setStatus] = useState<'idle' | 'generating' | 'waiting' | 'processing' | 'success' | 'failed' | 'scanning'>('generating');
+  const [status, setStatus] = useState<'idle' | 'generating' | 'waiting' | 'processing' | 'success' | 'failed' | 'scanning' | 'linked'>('generating');
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const getMasterSeed = useAuthStore(s => s.getMasterSeed);
@@ -121,6 +121,8 @@ export default function LinkDevicePage() {
         return <div className={`${messageClasses} text-green-500`}><FiCheckCircle /> Device Linked! Redirecting...</div>;
       case 'failed':
         return <div className={`${messageClasses} text-red-500`}><FiXCircle /> Linking Failed: {error}</div>;
+      case 'processing':
+          return <div className={`${messageClasses} text-text-secondary`}><Spinner size="sm" /> Processing...</div>;
       default:
         return null;
     }

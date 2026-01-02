@@ -82,7 +82,7 @@ export function getSocket() {
     });
 
     // --- Application-specific Listeners ---
-    socket.on("message:new", async (newMessage: Message) => {
+    socket.on("message:new", async (newMessage) => {
       // --- DEBUG LOG 4: Client Reception ---
       console.log("🔥 [SOCKET-DEBUG] Received message:new event", {
         id: newMessage.id,
@@ -132,7 +132,7 @@ export function getSocket() {
       }
     });
 
-    socket.on("message:updated", (updatedMessage: Message) => {
+    socket.on("message:updated", (updatedMessage) => {
       updateMessage(updatedMessage.conversationId, updatedMessage.id, updatedMessage);
     });
 
@@ -220,7 +220,7 @@ export function getSocket() {
       disconnectSocket();
     });
 
-    socket.on("user:identity_changed", (data: { userId: string; name: string }) => {
+    socket.on("user:identity_changed", (data) => {
       const message = `The security key for ${data.name} has changed. You may want to verify their identity.`;
       toast.success(message, { duration: 10000, icon: '🛡️' });
       const { conversations } = useConversationStore.getState();
