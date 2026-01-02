@@ -120,9 +120,6 @@ importers:
       '@types/react-dom':
         specifier: ^18.3.7
         version: 18.3.7(@types/react@18.3.26)
-      '@types/socket.io-client':
-        specifier: ^1.4.36
-        version: 1.4.36
       '@types/uuid':
         specifier: ^10.0.0
         version: 10.0.0
@@ -1527,9 +1524,6 @@ packages:
 
   '@types/resolve@1.20.2':
     resolution: {integrity: sha512-60BCwRFOZCQhDncwQdxxeOEEkbc5dIMccYLwbxsS4TUNeVECQ/pBJ0j09mrHOl/JJvpRPGwO9SvE4nR2Nb/a4Q==}
-
-  '@types/socket.io-client@1.4.36':
-    resolution: {integrity: sha512-ZJWjtFBeBy1kRSYpVbeGYTElf6BqPQUkXDlHHD4k/42byCN5Rh027f4yARHCink9sKAkbtGZXEAmR0ZCnc2/Ag==}
 
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
@@ -5234,8 +5228,6 @@ snapshots:
       csstype: 3.2.2
 
   '@types/resolve@1.20.2': {}
-
-  '@types/socket.io-client@1.4.36': {}
 
   '@types/trusted-types@2.0.7': {}
 

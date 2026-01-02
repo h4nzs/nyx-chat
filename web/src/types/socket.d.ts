@@ -75,6 +75,7 @@ export interface ClientToServerEvents {
         endpoint: string;
         keys: { p256dh: string; auth: string };
     }) => void;
+    "push:unsubscribe": () => void;
     "linking:join_room": (roomId: string) => void;
     "linking:send_payload": (payload: {
         roomId: string;

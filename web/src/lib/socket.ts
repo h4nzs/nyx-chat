@@ -10,7 +10,7 @@ import useNotificationStore from '@store/notification';
 import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
 import type { Message } from "@store/conversation";
-import type { ServerToClientEvents, ClientToServerEvents } from "src/types/socket";
+import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
 
 const WS_URL = import.meta.env.VITE_WS_URL ?? "http://localhost:4000";
 let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
@@ -47,12 +47,10 @@ const handleKeyRotation = async (conversationId: string) => {
 export function getSocket() {
   if (!socket) {
     socket = io(WS_URL, {
-        auth: {
-            withCredentials: true
-        },
-        transports: ["websocket", "polling"],
-        autoConnect: false,
-        path: "/socket.io",
+      withCredentials: true,
+      transports: ["websocket", "polling"],
+      autoConnect: false,
+      path: "/socket.io",
     });
 
     const { setStatus } = useConnectionStore.getState();
@@ -76,7 +74,7 @@ export function getSocket() {
       console.log("⚠️ Socket disconnected:", reason);
     });
 
-    socket.on("connect_error", (err: any) => {
+    socket.on("connect_error", (err) => {
       setStatus('disconnected');
       console.error("❌ Socket connection error:", err?.message ?? err);
     });

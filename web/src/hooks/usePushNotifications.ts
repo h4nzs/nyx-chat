@@ -17,7 +17,16 @@ export function usePushNotifications() {
               if (subscription) {
                 // Send subscription to server
                 const socket = getSocket();
-                socket.emit('push:subscribe', { subscription });
+                const subJSON = subscription.toJSON();
+                if (subJSON.endpoint && subJSON.keys?.p256dh && subJSON.keys?.auth) {
+                  socket.emit('push:subscribe', {
+                    endpoint: subJSON.endpoint,
+                    keys: {
+                      p256dh: subJSON.keys.p256dh,
+                      auth: subJSON.keys.auth,
+                    },
+                  });
+                }
               }
             });
         })
@@ -51,7 +60,16 @@ export async function requestPushPermission() {
 
   // Send subscription to server
   const socket = getSocket();
-  socket.emit('push:subscribe', { subscription });
+  const subJSON = subscription.toJSON();
+    if (subJSON.endpoint && subJSON.keys?.p256dh && subJSON.keys?.auth) {
+        socket.emit('push:subscribe', {
+        endpoint: subJSON.endpoint,
+        keys: {
+            p256dh: subJSON.keys.p256dh,
+            auth: subJSON.keys.auth,
+        },
+        });
+    }
 
   return subscription;
 }

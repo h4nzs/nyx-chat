@@ -12,6 +12,9 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: '.', // sw.js is in the root of the web directory
       filename: 'sw.js',
+      injectManifest: {
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+      },
       devOptions: {
         enabled: true
       }
