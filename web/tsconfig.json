@@ -27,6 +27,6 @@
       "@tests/*": ["src/tests/*"]
     }
   },
-  "include": ["src"],
+  "include": ["src", "src/react-window.d.ts"],
   "references": []
 }
