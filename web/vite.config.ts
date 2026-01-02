@@ -39,7 +39,7 @@ export default defineConfig({
   server: {
     // Whitelist specific hosts to prevent DNS rebinding attacks.
     // '.ngrok.io' is for ngrok tunneling, 'localhost' for local development.
-    allowedHosts: ['.ngrok.io', 'localhost'],
+    allowedHosts: true,
     fs: {
       allow: ['..']
     },
@@ -61,6 +61,10 @@ export default defineConfig({
         secure: false,
       }
     }
+  },
+  preview: {
+    allowedHosts: true, // Mengizinkan akses dari ngrok-free.app dll
+    port: 4173,
   },
   test: {
     globals: true,
