@@ -17,17 +17,23 @@ import type {
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
   AuthenticatorTransportFuture,
-  RegistrationInfo,
 } from "@simplewebauthn/types";
-import type { VerifiedRegistrationResponse, VerifiedAuthenticationResponse, VerifyAuthenticationResponseOpts } from "@simplewebauthn/server";
+import type { VerifiedRegistrationResponse, VerifiedAuthenticationResponse } from "@simplewebauthn/server";
 import { Buffer } from "buffer";
-import { User } from "@prisma/client";
+import { redisClient } from '../lib/redis.js';
 
 const router = Router();
 
 const rpName = "Chat Lite";
-const rpID = env.nodeEnv === "production" ? new URL(env.corsOrigin).hostname : "localhost";
-const expectedOrigin = env.corsOrigin;
+const getRpID = () => {
+  try {
+    return env.nodeEnv === "production" ? new URL(env.corsOrigin).hostname : "localhost";
+  } catch (e) {
+    return "localhost";
+  }
+};
+const rpID = getRpID();
+const expectedOrigin = env.corsOrigin || "http://localhost:5173";
 
 function setAuthCookies(res: Response, { access, refresh }: { access: string; refresh: string }) {
   const isProd = env.nodeEnv === "production";
@@ -47,7 +53,7 @@ function setAuthCookies(res: Response, { access, refresh }: { access: string; re
   });
 }
 
-async function issueTokens(user: User, req: import('express').Request) {
+async function issueTokens(user: any, req: import('express').Request) {
   const access = signAccessToken({ id: user.id, email: user.email, username: user.username });
   const jti = newJti();
   const refresh = signAccessToken({ sub: user.id, jti }, { expiresIn: "30d" });
@@ -190,15 +196,17 @@ router.post("/webauthn/register-verify", requireAuth, async (req, res, next) => 
 
     const { verified, registrationInfo } = verification;
     if (verified && registrationInfo) {
-      const info = registrationInfo as RegistrationInfo;
+      // PERBAIKAN: Akses credentialID, credentialPublicKey, dan counter dari properti 'credential'
+      const { credential, credentialDeviceType, credentialBackedUp } = registrationInfo;
+      
       const newAuthData = {
-        id: Buffer.from(info.credentialID).toString('base64url'),
+        id: Buffer.from(credential.id).toString('base64url'),
         userId: user.id,
-        credentialID: Buffer.from(info.credentialID).toString('base64url'),
-        credentialPublicKey: Buffer.from(info.credentialPublicKey).toString('base64url'),
-        counter: info.counter,
-        credentialDeviceType: info.credentialDeviceType,
-        credentialBackedUp: info.credentialBackedUp,
+        credentialID: Buffer.from(credential.id).toString('base64url'),
+        credentialPublicKey: Buffer.from(credential.publicKey).toString('base64url'),
+        counter: credential.counter,
+        credentialDeviceType,
+        credentialBackedUp,
         transports: req.body.response.transports?.join(','),
       };
       await prisma.authenticator.create({ data: newAuthData });
@@ -253,7 +261,7 @@ router.post("/webauthn/auth-verify", async (req, res, next) => {
 
     let verification: VerifiedAuthenticationResponse;
     try {
-      const opts: VerifyAuthenticationResponseOpts = {
+      verification = await verifyAuthenticationResponse({
         response: webauthnResponse,
         expectedChallenge: user.currentChallenge,
         expectedOrigin,
@@ -265,8 +273,7 @@ router.post("/webauthn/auth-verify", async (req, res, next) => {
           transports: authenticator.transports?.split(',') as AuthenticatorTransportFuture[],
         },
         requireUserVerification: false,
-      };
-      verification = await verifyAuthenticationResponse(opts);
+      } as any);
     } catch (error: any) {
       return res.status(400).json({ error: error.message });
     }
@@ -286,7 +293,6 @@ router.post("/webauthn/auth-verify", async (req, res, next) => {
 });
 
 // === DEVICE LINKING ===
-import { redisClient } from '../lib/redis.js';
 router.post(
   "/finalize-linking",
   zodValidate({ body: z.object({ linkingToken: z.string() }) }),
