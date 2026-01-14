@@ -1,7 +1,6 @@
 import axios from 'axios';
 
-const API_URL = (import.meta.env.VITE_API_URL as string) || "http://localhost:4000";
-
+const API_URL = "";
 // Cache untuk token CSRF
 let csrfTokenCache: string | null = null;
 // Handler for auth failure, to be injected from the UI layer

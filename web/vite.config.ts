@@ -12,6 +12,9 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: '.', // sw.js is in the root of the web directory
       filename: 'sw.js',
+      injectManifest: {
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+      },
       devOptions: {
         enabled: true
       }
@@ -34,6 +37,9 @@ export default defineConfig({
     'global.Buffer': ['buffer', 'Buffer'],
   },
   server: {
+    // Whitelist specific hosts to prevent DNS rebinding attacks.
+    // '.ngrok.io' is for ngrok tunneling, 'localhost' for local development.
+    allowedHosts: true,
     fs: {
       allow: ['..']
     },
@@ -41,12 +47,24 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:4000',
         changeOrigin: true,
+        secure: false,
       },
       '/uploads': {
         target: 'http://localhost:4000',
         changeOrigin: true,
+        secure: false,
+      },
+      '/socket.io': {
+        target: 'http://localhost:4000',
+        ws: true,
+        changeOrigin: true,
+        secure: false,
       }
     }
+  },
+  preview: {
+    allowedHosts: true, // Mengizinkan akses dari ngrok-free.app dll
+    port: 4173,
   },
   test: {
     globals: true,

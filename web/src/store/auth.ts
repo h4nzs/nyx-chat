@@ -89,6 +89,7 @@ type Actions = {
   getEncryptionKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getSigningPrivateKey: () => Promise<Uint8Array>;
   getSignedPreKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
+  getMasterSeed: () => Promise<Uint8Array | undefined>;
   setUser: (user: User) => void;
   updateProfile: (data: Partial<Pick<User, 'name' | 'description' | 'showEmailToOthers'>>) => Promise<void>;
   updateAvatar: (avatar: File) => Promise<void>;
@@ -278,6 +279,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         toast.error(`Upload failed: ${e.message}`);
         throw e;
       }
+    },
+
+    async getMasterSeed(): Promise<Uint8Array | undefined> {
+        const keys = await retrieveAndCacheKeys();
+        return keys.masterSeed;
     },
 
     async getSigningPrivateKey(): Promise<Uint8Array> {

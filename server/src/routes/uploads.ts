@@ -9,7 +9,7 @@ import { zodValidate } from "../utils/validate.js";
 import { getIo } from "../socket.js";
 import { sendPushNotification } from "../utils/sendPushNotification.js";
 
-const router = Router();
+const router: Router = Router();
 
 router.post(
   "/:conversationId/upload",
@@ -18,6 +18,7 @@ router.post(
   upload.single("file"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
+      if (!req.user) throw new ApiError(401, "Authentication required.");
       const { conversationId } = req.params;
       const senderId = req.user.id;
       const file = req.file;
@@ -63,7 +64,9 @@ router.post(
         throw new ApiError(403, "Forbidden: You are not a participant of this conversation");
       }
       
-      const fileUrl = `/uploads/${path.basename(file.destination)}/${file.filename}`;
+    const categoryFolder = path.basename(file.destination);
+
+    const fileUrl = `/uploads/${categoryFolder}/${file.filename}`;
 
       const participants = await prisma.participant.findMany({
         where: { conversationId },

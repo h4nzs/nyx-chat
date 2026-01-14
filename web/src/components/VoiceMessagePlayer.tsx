@@ -49,8 +49,12 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
       }
 
       try {
+        const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+        if (!absoluteUrl) {
+          throw new Error("File URL is invalid.");
+        }
         // 1. Fetch the encrypted file
-        const response = await fetch(toAbsoluteUrl(message.fileUrl));
+        const response = await fetch(absoluteUrl);
         if (!response.ok) {
           if (response.status === 404) {
             throw new Error("File not found on server.");
@@ -78,8 +82,13 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
     if (message.fileType?.includes('encrypted=true')) {
       handleDecryption();
     } else if (message.fileUrl) {
-      // For optimistic messages with blob URLs
-      setAudioSrc(toAbsoluteUrl(message.fileUrl));
+      const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+      if (absoluteUrl) {
+        // For optimistic messages with blob URLs
+        setAudioSrc(absoluteUrl);
+      } else {
+        setError("Invalid audio file URL.");
+      }
     }
 
     return () => {

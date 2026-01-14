@@ -49,7 +49,7 @@ export default function Settings() {
   const [name, setName] = useState(user?.name || '');
   const [description, setDescription] = useState(user?.description || '');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(user?.avatarUrl ? toAbsoluteUrl(user.avatarUrl) : null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(user?.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
   const [showEmail, setShowEmail] = useState(user?.showEmailToOthers || false);
   const [readReceipts, setReadReceiptsState] = useState(sendReadReceipts);
   const [isLoading, setIsLoading] = useState(false);
@@ -66,7 +66,7 @@ export default function Settings() {
     if (user) {
       setName(user.name || '');
       setDescription(user.description || '');
-      setPreviewUrl(user.avatarUrl ? toAbsoluteUrl(user.avatarUrl) : null);
+      setPreviewUrl(user.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
       setShowEmail(user.showEmailToOthers || false);
       setReadReceiptsState(sendReadReceipts);
     }

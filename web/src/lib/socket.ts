@@ -1,7 +1,8 @@
-import { io, Socket } from "socket.io-client";
+import io from "socket.io-client";
+import type { Socket } from "socket.io-client";
 import toast from "react-hot-toast";
-import { useAuthStore } from "@store/auth";
-import { useConversationStore } from "@store/conversation";
+import { useAuthStore, User } from "@store/auth";
+import { useConversationStore, Conversation } from "@store/conversation";
 import { useMessageStore, decryptMessageObject } from "@store/message";
 import { useConnectionStore } from "@store/connection";
 import { usePresenceStore } from "@store/presence";
@@ -9,9 +10,10 @@ import useNotificationStore from '@store/notification';
 import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
 import type { Message } from "@store/conversation";
+import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
 
-const WS_URL = (import.meta.env.VITE_WS_URL as string) || "http://localhost:4000";
-let socket: Socket | null = null;
+const WS_URL = import.meta.env.VITE_WS_URL || "https://chat-lite-api.onrender.com";
+let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
 
 
 const handleKeyRotation = async (conversationId: string) => {
@@ -25,7 +27,7 @@ const handleKeyRotation = async (conversationId: string) => {
       useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: false });
       console.log(`[socket] Key rotation for ${conversationId} successful.`);
       return; // Success, exit the function
-    } catch (err) {
+    } catch (err: any) {
       attempt++;
       console.error(`[socket] Key rotation attempt ${attempt} failed for ${conversationId}:`, err);
       if (attempt >= MAX_RETRIES) {
@@ -72,13 +74,13 @@ export function getSocket() {
       console.log("⚠️ Socket disconnected:", reason);
     });
 
-    socket.on("connect_error", (err: any) => {
+    socket.on("connect_error", (err) => {
       setStatus('disconnected');
       console.error("❌ Socket connection error:", err?.message ?? err);
     });
 
     // --- Application-specific Listeners ---
-    socket.on("message:new", async (newMessage: Message) => {
+    socket.on("message:new", async (newMessage) => {
       // --- DEBUG LOG 4: Client Reception ---
       console.log("🔥 [SOCKET-DEBUG] Received message:new event", {
         id: newMessage.id,
@@ -123,12 +125,12 @@ export function getSocket() {
 
         conversationStore.updateConversationLastMessage(decryptedMessage.conversationId, decryptedMessage);
         socket?.emit('message:ack_delivered', { messageId: decryptedMessage.id, conversationId: decryptedMessage.conversationId });
-      } catch (e) {
+      } catch (e: any) {
         console.error("Failed to process incoming message", e);
       }
     });
 
-    socket.on("message:updated", (updatedMessage: Message) => {
+    socket.on("message:updated", (updatedMessage) => {
       updateMessage(updatedMessage.conversationId, updatedMessage.id, updatedMessage);
     });
 
@@ -137,9 +139,9 @@ export function getSocket() {
       removeMessage(conversationId, id);
     });
 
-    socket.on("presence:init", (onlineUserIds: string[]) => setOnlineUsers(onlineUserIds));
-    socket.on("presence:user_joined", (userId: string) => userJoined(userId));
-    socket.on("presence:user_left", (userId: string) => userLeft(userId));
+    socket.on("presence:init", (onlineUserIds) => setOnlineUsers(onlineUserIds));
+    socket.on("presence:user_joined", (userId) => userJoined(userId));
+    socket.on("presence:user_left", (userId) => userLeft(userId));
     socket.on("typing:update", ({ userId, conversationId, isTyping }) => addOrUpdate({ id: userId, conversationId, isTyping }));
     socket.on("reaction:new", ({ conversationId, messageId, reaction }) => {
       const { user: me } = useAuthStore.getState();
@@ -183,7 +185,7 @@ export function getSocket() {
       // Update the user's own info if it's them
       const { user, setUser } = useAuthStore.getState();
       if (user?.id === updatedUser.id) {
-        setUser({ ...user, ...updatedUser });
+        setUser({ ...user, ...updatedUser } as User);
       }
       // Update user details in conversation participants and message senders
       useConversationStore.getState().updateParticipantDetails(updatedUser);
@@ -216,7 +218,7 @@ export function getSocket() {
       disconnectSocket();
     });
 
-    socket.on("user:identity_changed", (data: { userId: string; name: string }) => {
+    socket.on("user:identity_changed", (data) => {
       const message = `The security key for ${data.name} has changed. You may want to verify their identity.`;
       toast.success(message, { duration: 10000, icon: '🛡️' });
       const { conversations } = useConversationStore.getState();

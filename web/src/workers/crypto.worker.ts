@@ -108,7 +108,7 @@ function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicKey: Uint8Arra
   
     const fingerprint = sodium.to_hex(hash.slice(0, 30));
     const chunks = fingerprint.match(/.{1,10}/g) || [];
-    const digitGroups = chunks.map(chunk => parseInt(chunk, 16).toString().padStart(5, '0').slice(-5));
+    const digitGroups = chunks.map((chunk: string) => parseInt(chunk, 16).toString().padStart(5, '0').slice(-5));
     
     return digitGroups.join(' ');
 }
@@ -163,7 +163,8 @@ self.onmessage = async (event: MessageEvent) => {
           masterSeed: masterSeed
         }, password, appSecret);
 
-        const phrase = bip39.entropyToMnemonic(masterSeed);
+        // FIX: Tambahkan 'as any' karena tipe Buffer polyfill tidak identik dengan Buffer Node.js
+        const phrase = await bip39.entropyToMnemonic(Buffer.from(masterSeed) as any);
         
         result = {
             encryptionPublicKeyB64,
@@ -272,7 +273,8 @@ self.onmessage = async (event: MessageEvent) => {
         const { encryptedDataStr, password } = payload;
         const resultData = retrievePrivateKeys(encryptedDataStr, password, appSecret);
         if (resultData.success && resultData.keys.masterSeed) {
-          result = bip39.entropyToMnemonic(resultData.keys.masterSeed);
+          // FIX: Tambahkan 'as any'
+          result = await bip39.entropyToMnemonic(Buffer.from(resultData.keys.masterSeed) as any);
         } else {
           throw new Error("Failed to retrieve master seed from bundle.");
         }

@@ -15,15 +15,23 @@ export async function initializeSodium(): Promise<void> {
 
   if (sodiumInitPromise) {
     // If initialization is already in progress, wait for it
-    return sodiumInitPromise;
+    await sodiumInitPromise;
+    return;
   }
 
-  sodiumInitPromise = sodium.ready.then(() => {
-    isSodiumInitialized = true;
-    console.log('Libsodium initialized successfully');
-  });
+  sodiumInitPromise = sodium.ready
+    .then(() => {
+      isSodiumInitialized = true;
+      console.log('Libsodium initialized successfully');
+    })
+    .catch((error: any) => {
+      console.error('Failed to initialize libsodium:', error);
+      // Reset promise to allow retry on next call
+      sodiumInitPromise = null;
+      throw error;
+    });
 
-  return sodiumInitPromise;
+  await sodiumInitPromise;
 }
 
 /**

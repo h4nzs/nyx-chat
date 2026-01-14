@@ -45,7 +45,14 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
       
       try {
         if (!message.fileType?.includes(';encrypted=true')) {
-          if (isMounted) setDecryptedUrl(toAbsoluteUrl(message.fileUrl));
+          const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+          if (isMounted) {
+            if (absoluteUrl) {
+              setDecryptedUrl(absoluteUrl);
+            } else {
+              throw new Error("Invalid image URL.");
+            }
+          }
           return;
         }
 
@@ -55,7 +62,11 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
           throw new Error(fileKey || "File key not available yet.");
         }
 
-        const response = await fetch(toAbsoluteUrl(message.fileUrl));
+        const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+        if (!absoluteUrl) {
+          throw new Error("File URL is invalid.");
+        }
+        const response = await fetch(absoluteUrl);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const encryptedBlob = await response.blob();
 

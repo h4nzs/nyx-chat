@@ -2,12 +2,14 @@ import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
 import { getIo } from "../socket.js";
+import { ApiError } from "../utils/errors.js";
 
-const router = Router();
+const router: Router = Router();
 
 // Get all active sessions for the current user
 router.get("/", requireAuth, async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const currentJti = req.cookies.rt ? req.jwtPayload?.jti : null;
     const sessions = await prisma.refreshToken.findMany({
       where: {
@@ -33,6 +35,7 @@ router.get("/", requireAuth, async (req, res, next) => {
 // Revoke a specific session (remote logout)
 router.delete("/:jti", requireAuth, async (req, res, next) => {
   try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
     const { jti } = req.params;
     const userId = req.user.id;
 

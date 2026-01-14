@@ -9,9 +9,10 @@ describe('useMessageStore', () => {
   });
 
   const conversationId = 'conv1';
+  const tempId = 123;
   const optimisticMessage: Message = {
-    id: 'temp-123',
-    tempId: 'temp-123',
+    id: `temp-${tempId}`,
+    tempId: tempId,
     conversationId,
     senderId: 'user1',
     content: 'Hello',
@@ -46,13 +47,13 @@ describe('useMessageStore', () => {
     };
 
     // Replace message
-    useMessageStore.getState().replaceOptimisticMessage(conversationId, 'temp-123', finalMessage);
+    useMessageStore.getState().replaceOptimisticMessage(conversationId, tempId, finalMessage);
 
     // Check final state
     const messages = useMessageStore.getState().messages[conversationId];
     expect(messages).toHaveLength(1);
     expect(messages[0].id).toBe('real-id-456');
     expect(messages[0].optimistic).toBe(false);
-    expect(messages[0].tempId).toBe('temp-123'); // tempId should be preserved
+    expect(messages[0].tempId).toBeUndefined(); // tempId is cleared when replacing with real message
   });
 });

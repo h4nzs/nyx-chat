@@ -22,7 +22,7 @@ export async function rotateAndDistributeSessionKeys(conversationId: string, ini
     throw new Error(`No participants found for conversation ${conversationId}`);
   }
 
-  const keyRecords = participants.map(p => {
+  const keyRecords = participants.map((p: { user: { id: string; publicKey: string | null; } }) => {
     if (!p.user.publicKey) {
       console.warn(`User ${p.user.id} in conversation ${conversationId} has no public key.`);
       return null;
@@ -48,7 +48,7 @@ export async function rotateAndDistributeSessionKeys(conversationId: string, ini
 
   if (keyRecords.length !== participants.length) {
     const participantsWithKeys = new Set(keyRecords.map(r => r.userId));
-    const missingUserIds = participants.filter(p => !participantsWithKeys.has(p.user.id)).map(p => p.user.id);
+    const missingUserIds = participants.filter((p: { user: { id: string }}) => !participantsWithKeys.has(p.user.id)).map((p: { user: { id: string }}) => p.user.id);
     throw new Error(`Failed to create session keys for all participants in conversation ${conversationId}. Missing keys for users: ${missingUserIds.join(', ')}`);
   }
 

@@ -1,0 +1,61 @@
+services:
+  # 1. Database PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: chat-lite-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}      # <--- Mengambil dari .env
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # <--- Mengambil dari .env
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - chat-net
+
+  # 2. Redis Cache
+  redis:
+    image: redis:alpine
+    container_name: chat-lite-redis
+    restart: always
+    networks:
+      - chat-net
+
+  # 3. Backend (API)
+  server:
+    build: ./server
+    container_name: chat-lite-api
+    restart: always
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      PORT: 4000
+      # Gunakan nama service docker ('postgres') sebagai hostname
+      DATABASE_URL: ${DATABASE_URL} 
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_URL: redis://redis:6379
+      CLIENT_URL: ${CLIENT_URL:-http://localhost}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+    networks:
+      - chat-net
+
+  # 4. Frontend (Web + Nginx Reverse Proxy)
+  web:
+    build: ./web
+    container_name: chat-lite-web
+    restart: always
+    depends_on:
+      - server
+    ports:
+      - "80:80" # Akses aplikasi di http://localhost
+    networks:
+      - chat-net
+    # Konfigurasi reverse proxy sederhana via docker labels atau nginx config tambahan
+    # Agar lebih simpel, kita akan update nginx.conf di Langkah 2 sedikit lagi di bawah
+
+volumes:
+  postgres_data:
+
+networks:
+  chat-net:

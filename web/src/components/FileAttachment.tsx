@@ -22,6 +22,8 @@ function formatBytes(bytes: number, decimals = 2) {
 
 interface FileAttachmentProps {
   message: Message;
+  isOwn?: boolean;
+  onImageClick?: () => void;
 }
 
 export default function FileAttachment({ message }: FileAttachmentProps) {
@@ -55,7 +57,11 @@ export default function FileAttachment({ message }: FileAttachmentProps) {
       }
 
       try {
-        const response = await fetch(toAbsoluteUrl(message.fileUrl));
+        const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+        if (!absoluteUrl) {
+          throw new Error("File URL is invalid.");
+        }
+        const response = await fetch(absoluteUrl);
         if (!response.ok) {
           if (response.status === 404) {
             throw new Error("File not found on server.");
@@ -82,8 +88,13 @@ export default function FileAttachment({ message }: FileAttachmentProps) {
     if (message.fileType?.includes(';encrypted=true')) {
       handleDecryption();
     } else if (message.fileUrl) {
-      // For non-encrypted files (e.g. optimistic blob URLs)
-      setDecryptedUrl(toAbsoluteUrl(message.fileUrl));
+      const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+      if (absoluteUrl) {
+        // For non-encrypted files (e.g. optimistic blob URLs)
+        setDecryptedUrl(absoluteUrl);
+      } else {
+        setError("Invalid file URL.");
+      }
     }
 
     return () => {

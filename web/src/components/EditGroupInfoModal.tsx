@@ -54,10 +54,10 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
         <div>
           <label htmlFor="group-title" className="block text-sm font-medium text-text-secondary mb-1">Group Name</label>
             <input
-              id="group-name"
+              id="group-title"
               type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
               className="w-full p-2 rounded-md bg-bg-surface focus:outline-none focus:ring-2 focus:ring-accent shadow-neumorphic-concave"
             />
         </div>

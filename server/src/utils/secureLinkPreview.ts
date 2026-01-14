@@ -1,6 +1,9 @@
-import { getLinkPreview, LinkPreview } from "link-preview-js";
+import { getLinkPreview } from "link-preview-js";
 import dns from 'dns/promises';
 import ipaddr from 'ipaddr.js';
+
+// PERBAIKAN: Gunakan inferensi tipe dari return value fungsi, karena export typenya bermasalah/tidak konsisten
+type LinkPreview = Awaited<ReturnType<typeof getLinkPreview>>;
 
 // List of disallowed IP ranges
 const disallowedRanges = [
