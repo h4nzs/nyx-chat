@@ -5,7 +5,7 @@ import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
 import { ApiError } from "../utils/errors.js";
 
-const router = Router();
+const router: Router = Router();
 
 // === POST: Upload/update a user's pre-key bundle ===
 router.post(

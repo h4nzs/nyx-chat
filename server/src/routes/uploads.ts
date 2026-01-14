@@ -9,7 +9,7 @@ import { zodValidate } from "../utils/validate.js";
 import { getIo } from "../socket.js";
 import { sendPushNotification } from "../utils/sendPushNotification.js";
 
-const router = Router();
+const router: Router = Router();
 
 router.post(
   "/:conversationId/upload",

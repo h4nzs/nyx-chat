@@ -8,7 +8,7 @@ import { sendPushNotification } from "../utils/sendPushNotification.js";
 import fs from 'fs/promises';
 import path from 'path';
 
-const router = Router();
+const router: Router = Router();
 router.use(requireAuth);
 
 router.get("/:conversationId", async (req, res, next) => {

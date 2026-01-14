@@ -22,7 +22,7 @@ import type { VerifiedRegistrationResponse, VerifiedAuthenticationResponse } fro
 import { Buffer } from "buffer";
 import { redisClient } from '../lib/redis.js';
 
-const router = Router();
+const router: Router = Router();
 
 const rpName = "Chat Lite";
 const getRpID = () => {

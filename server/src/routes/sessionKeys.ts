@@ -6,7 +6,7 @@ import { getIo } from "../socket.js";
 import { rotateAndDistributeSessionKeys } from "../utils/sessionKeys.js";
 import { ApiError } from "../utils/errors.js";
 
-const router = Router();
+const router: Router = Router();
 router.use(requireAuth);
 
 // GET all encrypted session keys for a user across ALL conversations

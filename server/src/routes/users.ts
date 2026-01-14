@@ -9,7 +9,7 @@ import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
 import { ApiError } from "../utils/errors.js";
 
-const router = Router();
+const router: Router = Router();
 
 // This middleware will apply to all routes in this file
 router.use(requireAuth);

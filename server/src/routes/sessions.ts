@@ -4,7 +4,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { getIo } from "../socket.js";
 import { ApiError } from "../utils/errors.js";
 
-const router = Router();
+const router: Router = Router();
 
 // Get all active sessions for the current user
 router.get("/", requireAuth, async (req, res, next) => {

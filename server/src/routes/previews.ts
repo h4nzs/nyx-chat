@@ -2,7 +2,7 @@ import { Router } from "express";
 import { getSecureLinkPreview } from "../utils/secureLinkPreview.js";
 import { requireAuth } from "../middleware/auth.js";
 
-const router = Router();
+const router: Router = Router();
 
 router.post("/", requireAuth, async (req, res, next) => {
   const { url } = req.body;

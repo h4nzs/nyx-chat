@@ -7,7 +7,7 @@ import { upload } from "../utils/upload.js";
 import { rotateAndDistributeSessionKeys } from "../utils/sessionKeys.js";
 import { ApiError } from "../utils/errors.js";
 
-const router = Router();
+const router: Router = Router();
 router.use(requireAuth);
 
 // GET all conversations for the current user

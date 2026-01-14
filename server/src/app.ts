@@ -1,4 +1,4 @@
-import express, { Request, Response, NextFunction } from "express";
+import express, { Express, Request, Response, NextFunction } from "express";
 
 declare global {
   namespace Express {
@@ -39,7 +39,7 @@ if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAP
   console.warn("⚠️ VAPID keys not configured. Push notifications will be disabled.");
 }
 
-const app = express();
+const app: Express = express();
 
 // PENTING: Trust proxy agar cookies 'secure' bekerja di balik Ngrok/Nginx
 app.set('trust proxy', 1);
