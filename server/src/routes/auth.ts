@@ -1,4 +1,4 @@
-import { Router, Response } from "express";
+import { Router, Response, CookieOptions } from "express";
 import { prisma } from "../lib/prisma.js";
 import bcrypt from "bcrypt";
 import { ApiError } from "../utils/errors.js";
@@ -35,14 +35,14 @@ const getRpID = () => {
 const rpID = getRpID();
 const expectedOrigin = env.corsOrigin || "http://localhost:5173";
 
-// FIX: Ubah konfigurasi cookie agar support Cross-Domain (Vercel <-> Render)
+// FIX: Tambahkan tipe CookieOptions eksplisit untuk mencegah error TS2769
 function setAuthCookies(res: Response, { access, refresh }: { access: string; refresh: string }) {
   const isProd = env.nodeEnv === "production";
   
-  const cookieOptions = {
+  const cookieOptions: CookieOptions = {
     httpOnly: true,
-    secure: isProd, // Wajib true jika sameSite='none'
-    sameSite: isProd ? "none" : "lax" as const, // 'none' untuk cross-site di production
+    secure: isProd, 
+    sameSite: isProd ? "none" : "lax",
     path: "/",
   };
 
@@ -148,13 +148,13 @@ router.post("/logout", async (req, res) => {
     }
   }
   
-  // FIX: Clear cookies dengan opsi yang SAMA agar berhasil terhapus
+  // FIX: Gunakan tipe CookieOptions eksplisit
   const isProd = env.nodeEnv === "production";
-  const cookieOpts = { 
+  const cookieOpts: CookieOptions = { 
     path: "/", 
     httpOnly: true,
     secure: isProd,
-    sameSite: isProd ? "none" : "lax" as const 
+    sameSite: isProd ? "none" : "lax"
   };
   
   res.clearCookie("at", cookieOpts);
