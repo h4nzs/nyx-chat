@@ -60,7 +60,7 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
               className="w-8 h-8 rounded-full object-cover cursor-pointer shadow-sm hover:opacity-80 transition-opacity"
             />
           ) : (
-            <div className="w-8" /> 
+            <div className="w-8"></div> 
           )}
         </div>
       )}
