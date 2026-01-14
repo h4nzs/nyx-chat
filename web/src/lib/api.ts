@@ -1,6 +1,12 @@
 import axios from 'axios';
 
-const API_URL = "";
+// PERBAIKAN: Baca dari Environment Variable
+const envUrl = import.meta.env.VITE_API_URL || "";
+
+// Hapus '/api' di akhir URL jika user tidak sengaja memasukkannya di .env
+// karena di kode bawah kita sudah menulis '/api/...' secara eksplisit.
+const API_URL = envUrl.replace(/\/api\/?$/, "").replace(/\/$/, "");
+
 // Cache untuk token CSRF
 let csrfTokenCache: string | null = null;
 // Handler for auth failure, to be injected from the UI layer
@@ -68,6 +74,7 @@ export async function api<T = any>(
     }
   }
 
+  // API_URL sekarang sudah berisi domain Render yang benar
   const res = await fetch(API_URL + path, {
     ...options,
     credentials: "include",
