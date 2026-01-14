@@ -41,7 +41,7 @@ if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAP
 
 const app: Express = express();
 
-// PENTING: Trust proxy agar cookies 'secure' bekerja di balik Ngrok/Nginx
+// PENTING: Trust proxy agar cookies 'secure' bekerja di balik Render/Nginx
 app.set('trust proxy', 1);
 
 // === SECURITY / CORS ===
@@ -67,8 +67,10 @@ app.use(helmet({
       // Izinkan akses dari domain ngrok dan localhost
       scriptSrc: ["'self'", isProd ? '' : "'unsafe-eval'", "https://*.ngrok-free.app"],
       styleSrc: ["'self'", "'unsafe-inline'"], // Diperlukan untuk styling dinamis
-      imgSrc: ["'self'", "data:", "blob:", "https://*.ngrok-free.app"],
-      connectSrc: ["'self'", wsOrigin, "https://*.ngrok-free.app", "wss://*.ngrok-free.app"],
+      // Tambahkan vercel.app agar gambar user profile bisa diload
+      imgSrc: ["'self'", "data:", "blob:", "https://*.ngrok-free.app", "https://*.vercel.app"],
+      // Tambahkan vercel.app agar websocket/api bisa connect
+      connectSrc: ["'self'", wsOrigin, "https://*.ngrok-free.app", "wss://*.ngrok-free.app", "https://*.vercel.app"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"], // Mencegah clickjacking
       ...(isProd && { upgradeInsecureRequests: [] }),
@@ -77,21 +79,20 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }, // Izinkan resource (gambar) di-load lintas origin
 }));
 
-// Hapus header X-Powered-By untuk menyembunyikan detail teknologi server
+// Hapus header X-Powered-By
 app.disable('x-powered-by');
 
 // PERBAIKAN UTAMA: Dynamic CORS Origin
-// Mengizinkan Localhost dan domain Ngrok secara otomatis tanpa perlu hardcode satu per satu
 const corsMiddleware = cors({
   origin: (origin, callback) => {
     // Izinkan request tanpa origin (seperti dari aplikasi mobile, curl, atau postman)
     if (!origin) return callback(null, true);
     
-    // Daftar whitelist statis
+    // Daftar whitelist statis (Localhost)
     const allowedOrigins = [env.corsOrigin, "http://localhost:5173", "http://localhost:4173"];
     
-    // Logika: Izinkan jika ada di whitelist ATAU jika domainnya adalah ngrok-free.app
-    if (allowedOrigins.includes(origin) || origin.endsWith('.ngrok-free.app')) {
+    // Logika: Izinkan jika ada di whitelist, domain ngrok, ATAU domain vercel
+    if (allowedOrigins.includes(origin) || origin.endsWith('.ngrok-free.app') || origin.endsWith('.vercel.app')) {
       callback(null, true);
     } else {
       console.warn(`Blocked by CORS: ${origin}`);
@@ -127,12 +128,12 @@ app.use("/api/keys", keysRouter);
 app.use("/api/sessions", sessionsRouter);
 
 // === CSRF Protection ===
+// FIX: Gunakan sameSite: 'none' agar cookie bisa dikirim lintas domain (Vercel -> Render)
+// Cookie secure wajib true jika sameSite='none'
 const csrfProtection = csrf({
   cookie: { 
     httpOnly: true, 
-    sameSite: "lax", 
-    // Secure harus true jika running di HTTPS (Ngrok/Production), false jika HTTP (Localhost tanpa SSL)
-    // Jika via Ngrok, protocol 'https' akan diteruskan via header X-Forwarded-Proto (dihandle oleh trust proxy)
+    sameSite: isProd ? "none" : "lax", 
     secure: isProd 
   }
 });
@@ -143,30 +144,25 @@ app.get("/api/csrf-token", (req: Request, res: Response) => {
   res.json({ csrfToken: req.csrfToken() });
 });
 
-// === STATIC FILES (UPLOAD) - SECURE IMPLEMENTATION ===
+// === STATIC FILES (UPLOAD) ===
 const uploadsPath = path.resolve(process.cwd(), env.uploadDir);
 app.use("/uploads", 
-  corsMiddleware, // Terapkan CORS di sini juga agar fetch gambar dari frontend berhasil
-  // Middleware untuk menambahkan header CORP & keamanan lainnya
+  corsMiddleware, 
   (req, res, next) => {
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     next();
   },
   express.static(uploadsPath, {
-    // Nonaktifkan directory listing
     index: false, 
-    // Jangan jalankan file secara otomatis, paksa download untuk tipe tertentu jika perlu
     setHeaders: (res, filePath) => {
       const mimeType = express.static.mime.lookup(filePath);
       if (mimeType && !mimeType.startsWith('image/') && !mimeType.startsWith('video/') && !mimeType.startsWith('audio/')) {
-        // Paksa download untuk dokumen dan file lainnya
         res.setHeader('Content-Disposition', 'attachment');
       }
     }
   })
 );
-
 
 // === ROUTES ===
 app.use("/api/auth", authRouter);

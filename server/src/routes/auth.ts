@@ -35,21 +35,25 @@ const getRpID = () => {
 const rpID = getRpID();
 const expectedOrigin = env.corsOrigin || "http://localhost:5173";
 
+// FIX: Ubah konfigurasi cookie agar support Cross-Domain (Vercel <-> Render)
 function setAuthCookies(res: Response, { access, refresh }: { access: string; refresh: string }) {
   const isProd = env.nodeEnv === "production";
+  
+  const cookieOptions = {
+    httpOnly: true,
+    secure: isProd, // Wajib true jika sameSite='none'
+    sameSite: isProd ? "none" : "lax" as const, // 'none' untuk cross-site di production
+    path: "/",
+  };
+
   res.cookie("at", access, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 1000 * 60 * 15,
+    ...cookieOptions,
+    maxAge: 1000 * 60 * 15, // 15 mins
   });
+  
   res.cookie("rt", refresh, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 1000 * 60 * 60 * 24 * 30,
+    ...cookieOptions,
+    maxAge: 1000 * 60 * 60 * 24 * 30, // 30 days
   });
 }
 
@@ -143,8 +147,18 @@ router.post("/logout", async (req, res) => {
       // Ignore errors on logout
     }
   }
-  res.clearCookie("at", { path: "/" });
-  res.clearCookie("rt", { path: "/" });
+  
+  // FIX: Clear cookies dengan opsi yang SAMA agar berhasil terhapus
+  const isProd = env.nodeEnv === "production";
+  const cookieOpts = { 
+    path: "/", 
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax" as const 
+  };
+  
+  res.clearCookie("at", cookieOpts);
+  res.clearCookie("rt", cookieOpts);
   res.json({ ok: true });
 });
 
@@ -266,7 +280,7 @@ router.post("/webauthn/auth-verify", async (req, res, next) => {
         expectedOrigin,
         expectedRPID: rpID,
         credential: {
-          // FIX 1: Gunakan langsung string credentialID, tidak perlu Buffer.from(...) karena tipe yang diminta adalah string
+          // FIX 1: Gunakan langsung string credentialID
           id: authenticator.credentialID,
           // publicKey masih perlu Buffer karena tipenya Uint8Array
           publicKey: Buffer.from(authenticator.credentialPublicKey, 'base64url'),
