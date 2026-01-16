@@ -70,7 +70,7 @@ app.use(helmet({
       // Tambahkan vercel.app agar gambar user profile bisa diload
       imgSrc: ["'self'", "data:", "blob:", "https://*.ngrok-free.app", "https://*.vercel.app"],
       // Tambahkan vercel.app agar websocket/api bisa connect
-      connectSrc: ["'self'", wsOrigin, "https://*.ngrok-free.app", "wss://*.ngrok-free.app", "https://*.vercel.app"],
+      connectSrc: ["'self'", wsOrigin, "https://*.ngrok-free.app", "wss://*.ngrok-free.app", "https://*.vercel.app", "wss://*.vercel.app"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"], // Mencegah clickjacking
       ...(isProd && { upgradeInsecureRequests: [] }),
@@ -85,21 +85,15 @@ app.disable('x-powered-by');
 // PERBAIKAN UTAMA: Dynamic CORS Origin
 const corsMiddleware = cors({
   origin: (origin, callback) => {
-    // Izinkan request tanpa origin (seperti dari aplikasi mobile, curl, atau postman)
     if (!origin) return callback(null, true);
-    
-    // Daftar whitelist statis (Localhost)
-    const allowedOrigins = [env.corsOrigin, "http://localhost:5173", "http://localhost:4173"];
-    
-    // Logika: Izinkan jika ada di whitelist, domain ngrok, ATAU domain vercel
-    if (allowedOrigins.includes(origin) || origin.endsWith('.ngrok-free.app') || origin.endsWith('.vercel.app')) {
+    // Kita percayakan semua request dari Vercel
+    if (origin.endsWith('.vercel.app') || origin.endsWith('.onrender.com') || origin.includes('localhost')) {
       callback(null, true);
     } else {
-      console.warn(`Blocked by CORS: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true, // Wajib true agar cookies dikirim/diterima
+  credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "CSRF-Token"],
 });
@@ -133,7 +127,7 @@ app.use("/api/sessions", sessionsRouter);
 const csrfProtection = csrf({
   cookie: { 
     httpOnly: true, 
-    sameSite: isProd ? "none" : "lax", 
+    sameSite: "lax", 
     secure: isProd 
   }
 });

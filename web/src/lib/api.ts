@@ -5,7 +5,7 @@ const envUrl = import.meta.env.VITE_API_URL || "";
 
 // Hapus '/api' di akhir URL jika user tidak sengaja memasukkannya di .env
 // karena di kode bawah kita sudah menulis '/api/...' secara eksplisit.
-const API_URL = envUrl.replace(/\/api\/?$/, "").replace(/\/$/, "");
+const API_URL = "";
 
 // Cache untuk token CSRF
 let csrfTokenCache: string | null = null;

@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://chat-lite-api.onrender.com/api/:path*"
+    },
+    {
+      "source": "/uploads/:path*",
+      "destination": "https://chat-lite-api.onrender.com/uploads/:path*"
+    },
+    {
+      "source": "/socket.io/:path*",
+      "destination": "https://chat-lite-api.onrender.com/socket.io/:path*"
+    }
+  ]
+}
