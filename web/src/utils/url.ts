@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL ?? '';
+const API_URL = "";
 /**
  * Converts a relative server path to an absolute URL.
  * If the path is already absolute (starts with http) or a blob, it returns it as is.
@@ -10,8 +10,18 @@ export function toAbsoluteUrl(relativePath: string | null | undefined): string |
     return undefined;
   }
   // Don't modify absolute URLs or blob URLs (for local previews)
-  if (relativePath.startsWith('http') || relativePath.startsWith('blob:')) {
+if (relativePath.startsWith('http') || relativePath.startsWith('blob:')) {
     return relativePath;
   }
-  return `${API_URL}${relativePath}`;
+
+  let cleanPath = relativePath;
+  if (cleanPath.startsWith('/api/uploads')) {
+      cleanPath = cleanPath.replace('/api/uploads', '/uploads');
+  } else if (!cleanPath.startsWith('/')) {
+      // Pastikan ada slash di awal jika belum ada
+      cleanPath = `/${cleanPath}`;
+  }
+
+  // Hasilnya akan menjadi "/uploads/..." yang akan diproxy oleh Vercel ke Render
+  return `${API_URL}${cleanPath}`;
 }
