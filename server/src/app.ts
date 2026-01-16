@@ -41,8 +41,10 @@ if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAP
 
 const app: Express = express();
 
-// PENTING: Trust proxy agar cookies 'secure' bekerja di balik Render/Nginx
-app.set('trust proxy', 1);
+// PERBAIKAN: Set trust proxy ke true/angka tinggi.
+// Karena via Vercel Rewrites, request melewati banyak hop (Vercel -> Render LB -> Nginx -> App).
+// Jika diset 1, Express mungkin mengira request dari Vercel adalah client asli (HTTP), padahal aslinya HTTPS.
+app.set('trust proxy', true);
 
 // === SECURITY / CORS ===
 const isProd = env.nodeEnv === 'production';
@@ -52,7 +54,6 @@ let wsOrigin = 'ws://localhost:4000';
 if (env.appUrl) {
   try {
     const url = new URL(env.appUrl);
-    // Gunakan wss:// untuk koneksi https://
     wsOrigin = `${url.protocol === 'https:' ? 'wss' : 'ws'}://${url.host}`;
   } catch (e) {
     console.error("Invalid APP_URL provided for CSP:", env.appUrl);
@@ -64,32 +65,35 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      // Izinkan akses dari domain ngrok dan localhost
       scriptSrc: ["'self'", isProd ? '' : "'unsafe-eval'", "https://*.ngrok-free.app"],
-      styleSrc: ["'self'", "'unsafe-inline'"], // Diperlukan untuk styling dinamis
-      // Tambahkan vercel.app agar gambar user profile bisa diload
+      styleSrc: ["'self'", "'unsafe-inline'"], 
       imgSrc: ["'self'", "data:", "blob:", "https://*.ngrok-free.app", "https://*.vercel.app"],
-      // Tambahkan vercel.app agar websocket/api bisa connect
       connectSrc: ["'self'", wsOrigin, "https://*.ngrok-free.app", "wss://*.ngrok-free.app", "https://*.vercel.app", "wss://*.vercel.app"],
       objectSrc: ["'none'"],
-      frameAncestors: ["'none'"], // Mencegah clickjacking
+      frameAncestors: ["'none'"], 
       ...(isProd && { upgradeInsecureRequests: [] }),
     },
   },
-  crossOriginResourcePolicy: { policy: "cross-origin" }, // Izinkan resource (gambar) di-load lintas origin
+  crossOriginResourcePolicy: { policy: "cross-origin" }, 
 }));
 
-// Hapus header X-Powered-By
 app.disable('x-powered-by');
 
-// PERBAIKAN UTAMA: Dynamic CORS Origin
 const corsMiddleware = cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    // Kita percayakan semua request dari Vercel
-    if (origin.endsWith('.vercel.app') || origin.endsWith('.onrender.com') || origin.includes('localhost')) {
+    const allowedOrigins = [env.corsOrigin, "http://localhost:5173", "http://localhost:4173"];
+    
+    // Izinkan Vercel, Render, dan Ngrok
+    if (
+      allowedOrigins.includes(origin) || 
+      origin.endsWith('.ngrok-free.app') || 
+      origin.endsWith('.vercel.app') || 
+      origin.endsWith('.onrender.com')
+    ) {
       callback(null, true);
     } else {
+      console.warn(`Blocked by CORS: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -103,8 +107,8 @@ app.use(corsMiddleware);
 if (isProd) {
   app.use(
     rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 menit
-      max: 100, // max 100 request / 15 menit
+      windowMs: 15 * 60 * 1000, 
+      max: 100, 
       standardHeaders: true,
       legacyHeaders: false,
     })
@@ -114,16 +118,15 @@ if (isProd) {
 // === MIDDLEWARE ===
 app.use(logger("dev"));
 app.use(cookieParser());
-app.use(express.json({ limit: "10mb" })); // Naikkan limit untuk payload JSON jika perlu
+app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Public routes that don't need CSRF protection (e.g., initial handshake)
+// Public routes that don't need CSRF protection
 app.use("/api/keys", keysRouter);
 app.use("/api/sessions", sessionsRouter);
 
 // === CSRF Protection ===
-// FIX: Gunakan sameSite: 'none' agar cookie bisa dikirim lintas domain (Vercel -> Render)
-// Cookie secure wajib true jika sameSite='none'
+// 'lax' cocok untuk arsitektur Proxy/Rewrite (First-Party simulation)
 const csrfProtection = csrf({
   cookie: { 
     httpOnly: true, 
@@ -133,7 +136,6 @@ const csrfProtection = csrf({
 });
 app.use(csrfProtection);
 
-// === ROUTE FOR CSRF TOKEN ===
 app.get("/api/csrf-token", (req: Request, res: Response) => {
   res.json({ csrfToken: req.csrfToken() });
 });

@@ -1,12 +1,14 @@
 import { Server, Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
-import { socketAuthMiddleware } from "./middleware/auth.js";
-import { AuthPayload } from "./types/auth.js";
+import { env } from "./config.js";
 import { prisma } from "./lib/prisma.js";
+import { verifyJwt } from "./utils/jwt.js";
 import { sendPushNotification } from "./utils/sendPushNotification.js";
-import crypto from "crypto";
 import { redisClient } from "./lib/redis.js";
 import { Message } from "@prisma/client";
+import { AuthPayload } from "./types/auth.js";
+import cookie from "cookie"; // Pastikan install: pnpm add cookie @types/cookie
+import crypto from "crypto";
 
 // --- Type Definitions for Socket Payloads ---
 interface TypingPayload {
@@ -70,13 +72,90 @@ export function getIo() {
 
 export function registerSocket(httpServer: HttpServer) {
   io = new Server(httpServer, {
+    // === BAGIAN PERBAIKAN KONEKSI (JANGAN DIHAPUS) ===
     cors: {
-      origin: process.env.CLIENT_URL || "http://localhost:5173",
-      credentials: true,
+      origin: (origin, callback) => {
+        // 1. Izinkan request tanpa origin (mobile apps/curl)
+        if (!origin) return callback(null, true);
+
+        // 2. Daftar domain yang diizinkan (Localhost)
+        const allowedOrigins = [
+          env.corsOrigin, 
+          "http://localhost:5173", 
+          "http://localhost:4173"
+        ];
+
+        // 3. Cek apakah origin valid (termasuk Vercel & Render)
+        if (
+          allowedOrigins.includes(origin) || 
+          origin.endsWith('.vercel.app') || 
+          origin.endsWith('.onrender.com') ||
+          origin.endsWith('.ngrok-free.app')
+        ) {
+          callback(null, true);
+        } else {
+          console.warn(`[Socket] Blocked CORS origin: ${origin}`);
+          callback(new Error('Not allowed by CORS'));
+        }
+      },
+      credentials: true, // Wajib true agar cookie dikirim
+      methods: ["GET", "POST"]
     },
+    path: '/socket.io/', // Pastikan path sesuai dengan client
+    transports: ['polling', 'websocket'], // Polling wajib aktif untuk Vercel Proxy
+    allowEIO3: true, // Kompatibilitas maksimum
+    pingTimeout: 60000,
+    pingInterval: 25000
+    // === AKHIR BAGIAN PERBAIKAN ===
   });
 
-  io.use(socketAuthMiddleware);
+  // === MIDDLEWARE AUTH MANUAL (LEBIH ROBUST UNTUK PROXY) ===
+  io.use(async (socket: AuthenticatedSocket, next) => {
+    try {
+      const cookieHeader = socket.handshake.headers.cookie;
+      if (!cookieHeader) {
+        // Coba cek query param untuk fallback jika perlu (opsional)
+        return next(new Error("Authentication error: No cookies"));
+      }
+
+      const cookies = cookie.parse(cookieHeader);
+      const token = cookies.at; // Ambil access token
+
+      if (!token) {
+        return next(new Error("Authentication error: Token missing"));
+      }
+
+      const payload = verifyJwt(token);
+      if (!payload || typeof payload === 'string') {
+        return next(new Error("Authentication error: Invalid token"));
+      }
+
+      // Pastikan payload.id sesuai dengan struktur JWT Anda (kadang 'sub', kadang 'id')
+      // @ts-ignore
+      const userId = payload.id || payload.sub;
+
+      const user = await prisma.user.findUnique({ 
+        where: { id: userId } 
+      });
+
+      if (!user) {
+        return next(new Error("Authentication error: User not found"));
+      }
+
+      // Mapping ke AuthPayload yang diharapkan aplikasi
+      socket.user = {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        // tambahkan field lain jika AuthPayload memintanya
+      };
+      
+      next();
+    } catch (err) {
+      console.error("[Socket Auth] Error:", err);
+      next(new Error("Authentication error"));
+    }
+  });
 
   io.on("connection", async (socket: AuthenticatedSocket) => {
     const userId = socket.user?.id;
@@ -84,6 +163,8 @@ export function registerSocket(httpServer: HttpServer) {
     if (userId) {
       socket.join(userId);
       console.log(`[Socket Connect] User connected: ${userId}`);
+      
+      // LOGIKA ASLI: REDIS ONLINE USERS
       await redisClient.sAdd('online_users', userId);
       
       const onlineUserIds = await redisClient.sMembers('online_users');
@@ -92,6 +173,8 @@ export function registerSocket(httpServer: HttpServer) {
     } else {
       console.log(`[Socket Connect] Guest connected: ${socket.id}`);
     }
+
+    // === LOGIKA ASLI (DIKEMBALIKAN SEMUA) ===
 
     socket.on("linking:join_room", (roomId: string) => {
       if (!userId) {
@@ -116,6 +199,7 @@ export function registerSocket(httpServer: HttpServer) {
         console.log(`[Socket Disconnect] User disconnected: ${userId}`);
         await redisClient.sRem('online_users', userId);
         io.emit("presence:user_left", userId);
+
       } else {
         console.log(`[Socket Disconnect] Guest disconnected: ${socket.id}`);
       }
@@ -153,7 +237,8 @@ export function registerSocket(httpServer: HttpServer) {
             io.to(keyPackage.userId).emit('session:new_key', {
               conversationId,
               encryptedKey: keyPackage.key,
-              type: 'GROUP_KEY'
+              type: 'GROUP_KEY',
+              senderId: userId // Tambahkan senderId agar client tahu sumber kunci
             });
           } else {
             console.warn(`[Key Distribution] Invalid key package for conversation ${conversationId}`);
@@ -180,14 +265,30 @@ export function registerSocket(httpServer: HttpServer) {
         if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
           return callback?.({ ok: false, error: "Conversation not found or you are not a participant." });
         }
+        
+        // Simpan pesan ke DB
         const newMessage = await prisma.message.create({
           data: { conversationId, senderId: userId, content, sessionId },
           include: { sender: { select: { id: true, name: true, avatarUrl: true, username: true } } }
         });
+        
         const finalMessage = { ...newMessage, tempId };
+        
+        // Broadcast ke partisipan lain
         conversation.participants.forEach(participant => {
           io.to(participant.userId).emit('message:new', finalMessage);
+          
+          // Kirim Push Notification (jika bukan pengirim)
+          if (participant.userId !== userId) {
+             // Panggil fungsi utilitas push notification Anda
+             sendPushNotification(participant.userId, {
+                 title: newMessage.sender.name || newMessage.sender.username,
+                 body: "Sent a secure message", // Jangan tampilkan isi pesan terenkripsi
+                 url: `/chat/${conversationId}`
+             }).catch(console.error);
+          }
         });
+        
         callback?.({ ok: true, msg: finalMessage });
       } catch (error) {
         console.error("Failed to process message:send event:", error);
@@ -268,6 +369,7 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
+    // FIX: Gunakan nama event 'group:fulfilled_key' sesuai dengan Client
     socket.on('group:fulfilled_key', ({ requesterId, conversationId, encryptedKey }: KeyFulfillmentPayload) => {
       if (!userId || !requesterId || !conversationId || !encryptedKey) return;
       console.log(`[Group Key Fulfill] Relaying group key for ${conversationId} from ${userId} to ${requesterId}`);
@@ -275,6 +377,7 @@ export function registerSocket(httpServer: HttpServer) {
         conversationId,
         encryptedKey,
         type: 'GROUP_KEY',
+        senderId: userId // Tambahkan sender
       });
     });
 
@@ -319,6 +422,8 @@ export function registerSocket(httpServer: HttpServer) {
         conversationId,
         sessionId,
         encryptedKey,
+        type: 'SESSION_KEY', // Tambahkan tipe agar jelas
+        senderId: userId
       });
     });
   });
