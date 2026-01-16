@@ -35,5 +35,7 @@ export const env = {
   s3SecretKey: process.env.S3_SECRET_KEY || '',
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
-  chatSecret: process.env.CHAT_SECRET || ''
+  chatSecret: process.env.CHAT_SECRET || '',
+  supabaseUrl: process.env.SUPABASE_URL || "",
+  supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY || "",
 }

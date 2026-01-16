@@ -1,15 +1,25 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import { upload } from "../utils/upload.js";
 import { ApiError } from "../utils/errors.js";
-import path from 'path';
 import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
 import { getIo } from "../socket.js";
 import { sendPushNotification } from "../utils/sendPushNotification.js";
+import multer from "multer"; // Import Multer langsung
+import { nanoid } from "nanoid"; // Install jika belum: pnpm add nanoid
+import path from "path";
+import { uploadToSupabase } from "../utils/supabase.js"; // Import utility Supabase
 
 const router: Router = Router();
+
+// KONFIGURASI MULTER (MEMORY STORAGE)
+// Kita simpan file di RAM sebentar untuk diteruskan ke Supabase
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // Limit 50MB (sesuaikan kebutuhan)
+});
 
 router.post(
   "/:conversationId/upload",
@@ -22,6 +32,8 @@ router.post(
       const { conversationId } = req.params;
       const senderId = req.user.id;
       const file = req.file;
+      
+      // Ambil body data
       const { fileKey, sessionId, repliedToId, tempId, duration } = req.body;
       const parsedTempId = Number(tempId);
 
@@ -64,9 +76,19 @@ router.post(
         throw new ApiError(403, "Forbidden: You are not a participant of this conversation");
       }
       
-    const categoryFolder = path.basename(file.destination);
+      // --- PERUBAHAN UTAMA DI SINI (SUPABASE) ---
+      // Generate nama file unik
+      const uniqueFilename = `${nanoid()}${path.extname(file.originalname)}`;
+      const supabasePath = `attachments/${conversationId}/${uniqueFilename}`;
 
-    const fileUrl = `/uploads/${categoryFolder}/${file.filename}`;
+      // Upload ke Supabase
+      console.log(`[UPLOAD-DEBUG] Uploading to Supabase: ${supabasePath}`);
+      const fileUrl = await uploadToSupabase(
+        file.buffer, // Gunakan buffer dari memory storage
+        supabasePath,
+        file.mimetype
+      );
+      // -------------------------------------------
 
       const participants = await prisma.participant.findMany({
         where: { conversationId },
@@ -78,9 +100,9 @@ router.post(
           data: {
             conversationId,
             senderId,
-            fileUrl,
+            fileUrl, // URL Publik dari Supabase
             fileKey,
-            sessionId, // Pastikan ini masuk ke DB
+            sessionId, 
             repliedToId,
             fileName: file.originalname,
             fileType: `${file.mimetype};encrypted=true`,
@@ -97,9 +119,8 @@ router.post(
         });
 
         // --- DEBUG LOG 2: Prisma Result ---
-        // Memastikan prisma mengembalikan sessionId setelah create
         if (!conversation.isGroup && !msg.sessionId) {
-            console.error("[UPLOAD-CRITICAL] Prisma created message BUT sessionId is missing in return object!", msg);
+            console.error("[UPLOAD-CRITICAL] Prisma created message BUT sessionId is missing!", msg);
         }
 
         await tx.conversation.update({
@@ -112,12 +133,12 @@ router.post(
       const messageToBroadcast = { ...newMessage, tempId: parsedTempId };
       
       // --- DEBUG LOG 3: Pre-Broadcast ---
-      // Ini adalah bukti terakhir sebelum data meninggalkan server
       console.log("[UPLOAD-DEBUG] Broadcasting Message Payload:", JSON.stringify({
         id: messageToBroadcast.id,
-        sessionId: messageToBroadcast.sessionId, // Cek nilai ini di log!
+        sessionId: messageToBroadcast.sessionId,
         isGroup: conversation.isGroup,
-        conversationId: messageToBroadcast.conversationId
+        conversationId: messageToBroadcast.conversationId,
+        fileUrl: messageToBroadcast.fileUrl // Cek URL di sini
       }, null, 2));
 
       const io = getIo();
