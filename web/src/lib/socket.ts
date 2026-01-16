@@ -48,7 +48,7 @@ export function getSocket() {
   if (!socket) {
     socket = io(WS_URL, {
       withCredentials: true,
-      transports: ["polling"],
+      transports: ['polling'],
       autoConnect: false,
       reconnection: true,
       reconnectionAttempts: 20,

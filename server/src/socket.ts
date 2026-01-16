@@ -101,7 +101,7 @@ export function registerSocket(httpServer: HttpServer) {
       credentials: true, // Wajib true agar cookie dikirim
       methods: ["GET", "POST"]
     },
-    path: '/socket.io/', // Pastikan path sesuai dengan client
+    path: '/socket.io', // Pastikan path sesuai dengan client
     transports: ['polling', 'websocket'], // Polling wajib aktif untuk Vercel Proxy
     allowEIO3: true, // Kompatibilitas maksimum
     pingTimeout: 60000,

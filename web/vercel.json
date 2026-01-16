@@ -9,6 +9,10 @@
       "destination": "https://chat-lite-api.onrender.com/uploads/:path*"
     },
     {
+      "source": "/socket.io/",
+      "destination": "https://chat-lite-api.onrender.com/socket.io/"
+    },
+    {
       "source": "/socket.io/:path*",
       "destination": "https://chat-lite-api.onrender.com/socket.io/:path*"
     }
