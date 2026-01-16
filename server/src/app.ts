@@ -111,6 +111,7 @@ if (isProd) {
       max: 100, 
       standardHeaders: true,
       legacyHeaders: false,
+      validate: { trustProxy: false }
     })
   );
 }
