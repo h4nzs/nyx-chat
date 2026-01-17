@@ -269,11 +269,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const formData = new FormData();
       formData.append('avatar', avatar);
       try {
-        const updatedUser = await authFetch<User>('/api/users/me/avatar', {
+        const updatedUser = await authFetch<User>('/api/uploads/avatars/upload', {
           method: 'POST',
           body: formData,
         });
         set({ user: updatedUser });
+        localStorage.setItem("user", JSON.stringify(updatedUser));
         toast.success('Avatar updated!');
       } catch (e: any) {
         toast.error(`Upload failed: ${e.message}`);
