@@ -158,4 +158,96 @@ router.post(
   }
 );
 
+// === 2. UPLOAD AVATAR USER (FIX: Menggunakan Supabase) ===
+// Endpoint ini menangani upload avatar profil
+router.post(
+  "/avatars/upload", 
+  requireAuth, 
+  upload.single("avatar"), // Pastikan frontend mengirim field bernama 'avatar'
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        if (!req.user) throw new ApiError(401, "Unauthorized");
+        if (!req.file) throw new ApiError(400, "No file uploaded.");
+
+        const userId = req.user.id;
+        
+        // 1. Upload ke Supabase (Folder: avatars)
+        // Kita gunakan timestamp agar nama file unik dan menghindari caching browser yang agresif
+        const uniqueFilename = `${nanoid()}-${Date.now()}${path.extname(req.file.originalname)}`;
+        const supabasePath = `avatars/${userId}/${uniqueFilename}`;
+
+        console.log(`[Avatar Upload] Uploading to Supabase: ${supabasePath}`);
+
+        const publicUrl = await uploadToSupabase(
+            req.file.buffer,
+            supabasePath,
+            req.file.mimetype
+        );
+
+        // 2. Update URL Avatar di Database User
+        // Ini langkah yang sebelumnya hilang!
+        await prisma.user.update({
+            where: { id: userId },
+            data: { avatarUrl: publicUrl }
+        });
+        
+        console.log(`[Avatar Upload] Success. URL: ${publicUrl}`);
+
+        res.json({ 
+            url: publicUrl,
+            filename: req.file.originalname
+        });
+
+    } catch (e) {
+        console.error("[AVATAR-UPLOAD-ERROR]", e);
+        next(e);
+    }
+});
+
+// === 3. UPLOAD AVATAR GROUP ===
+router.post(
+    "/groups/:id/avatar", 
+    requireAuth, 
+    upload.single("avatar"), 
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+          if (!req.user) throw new ApiError(401, "Unauthorized");
+          if (!req.file) throw new ApiError(400, "No file uploaded.");
+          
+          const groupId = req.params.id;
+          
+          // Cek apakah user adalah admin/member grup
+          const participant = await prisma.participant.findFirst({
+              where: { userId: req.user.id, conversationId: groupId }
+          });
+          if (!participant) throw new ApiError(403, "You are not a member of this group");
+
+          // 1. Upload ke Supabase (Folder: groups)
+          const uniqueFilename = `${nanoid()}-${Date.now()}${path.extname(req.file.originalname)}`;
+          const supabasePath = `groups/${groupId}/${uniqueFilename}`;
+  
+          const publicUrl = await uploadToSupabase(
+              req.file.buffer,
+              supabasePath,
+              req.file.mimetype
+          );
+  
+          // 2. Update URL Avatar di Database Conversation
+          await prisma.conversation.update({
+              where: { id: groupId },
+              data: { avatarUrl: publicUrl }
+          });
+          
+          // 3. Emit socket event agar semua member melihat perubahan avatar realtime
+          const io = getIo();
+          io.to(groupId).emit("conversation:updated", { id: groupId, avatarUrl: publicUrl });
+  
+          res.json({ url: publicUrl });
+  
+      } catch (e) {
+          console.error("[GROUP-AVATAR-ERROR]", e);
+          next(e);
+      }
+  });
+
 export default router;
