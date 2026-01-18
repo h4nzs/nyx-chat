@@ -15,10 +15,10 @@ RUN pnpm install --frozen-lockfile
 # Copy source code
 COPY . .
 
-# Generate Prisma Client
+# Generate Prisma Client (Membuat folder node_modules/.prisma)
 RUN npx prisma generate
 
-# Build TypeScript code (hasilnya masuk ke folder dist/)
+# Build TypeScript code
 RUN pnpm build
 
 # --- Stage 2: Production Runner ---
@@ -29,18 +29,24 @@ WORKDIR /app
 # Install pnpm & dependencies sistem
 RUN corepack enable && apk add --no-cache openssl
 
-# Copy hanya file package yang dibutuhkan
+# Copy package files
 COPY package.json pnpm-lock.yaml ./
 
-# Install hanya dependencies production (hemat size)
+# Install hanya dependencies production
 RUN pnpm install --prod --frozen-lockfile
 
-# Copy hasil build dari Stage 1
+# --- FIX 1: Copy Generated Prisma Client ---
+# Kita wajib mengambil hasil generate dari stage builder
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+
+# Copy hasil build kode & schema
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 
-# Expose port
-EXPOSE 4000
+# --- FIX 2: Set Port ke 8000 ---
+# Memaksa aplikasi berjalan di port 8000 agar cocok dengan default Koyeb
+ENV PORT=8000
+EXPOSE 8000
 
-# Command untuk menjalankan server
+# Command start
 CMD ["node", "dist/index.js"]
