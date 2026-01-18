@@ -269,6 +269,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           accessToken: res.accessToken 
         });
         localStorage.setItem("user", JSON.stringify(res.user));
+        try {
+          await setupAndUploadPreKeyBundle(); // <--- INI YANG KURANG
+        } catch (e) {
+          console.error("Failed to upload initial pre-key bundle:", e);
+        }
         connectSocket();
       }
 
