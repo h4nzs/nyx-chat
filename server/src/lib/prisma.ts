@@ -1,17 +1,22 @@
-import { PrismaClient } from '@prisma/client'
+import { createRequire } from 'module';
 
-// Re-export all types from the Prisma client
-export * from '@prisma/client';
+// Import type saja agar TypeScript tidak error, tapi tidak dieksekusi saat runtime
+import type { PrismaClient as PrismaClientType } from '@prisma/client';
 
-// Add prisma to the NodeJS Global type
+const require = createRequire(import.meta.url);
+
+// Gunakan require untuk mengambil PrismaClient (Bypass ESM restriction)
+const { PrismaClient } = require('@prisma/client');
+
+// Deklarasi Global Type
 declare global {
-  var prisma: PrismaClient | undefined
+  var prisma: PrismaClientType | undefined;
 }
 
-const prisma = global.prisma || new PrismaClient()
+const prisma = global.prisma || new PrismaClient();
 
 if (process.env.NODE_ENV !== 'production') {
-  global.prisma = prisma
+  global.prisma = prisma;
 }
 
-export { prisma }
+export { prisma };
