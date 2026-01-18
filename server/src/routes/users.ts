@@ -1,9 +1,6 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth } from "../middleware/auth.js";
-import multer from "multer";
-import path from "path";
-import fs from "fs";
 import { getIo } from "../socket.js";
 import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
@@ -11,44 +8,25 @@ import { ApiError } from "../utils/errors.js";
 
 const router: Router = Router();
 
-// This middleware will apply to all routes in this file
+// Middleware auth untuk semua route di file ini
 router.use(requireAuth);
 
-const avatarStorage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadPath = path.join(process.cwd(), "uploads", "avatars");
-    fs.mkdirSync(uploadPath, { recursive: true });
-    cb(null, uploadPath);
-  },
-  filename: (req, file, cb) => {
-    // req.user is guaranteed to be present by requireAuth middleware
-    const userId = req.user!.id;
-    const extension = path.extname(file.originalname);
-    const uniqueSuffix = Date.now();
-    cb(null, `${userId}${extension}`);
-  },
-});
-
-const uploadAvatar = multer({ 
-  storage: avatarStorage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = /jpeg|jpg|png|gif/;
-    const mimeType = allowedTypes.test(file.mimetype);
-    const extName = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    if (mimeType && extName) {
-      return cb(null, true);
-    }
-    cb(new Error('Only image files (jpeg, jpg, png, gif) are allowed!'));
-  }
-});
-
+// GET User Profile (Me)
 router.get("/me", async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, "Authentication required.");
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { id: true, email: true, username: true, name: true, avatarUrl: true, description: true, showEmailToOthers: true, hasCompletedOnboarding: true },
+      select: { 
+        id: true, 
+        email: true, 
+        username: true, 
+        name: true, 
+        avatarUrl: true, 
+        description: true, 
+        showEmailToOthers: true, 
+        hasCompletedOnboarding: true 
+      },
     });
     res.json(user);
   } catch (error) {
@@ -56,22 +34,34 @@ router.get("/me", async (req, res, next) => {
   }
 });
 
+// UPDATE User Profile (Text & Avatar URL only)
 router.put("/me", 
   zodValidate({ 
     body: z.object({ 
       name: z.string().min(1).trim().optional(),
-      description: z.string().max(200).trim().optional(),
+      description: z.string().max(200).trim().optional().nullable(),
       showEmailToOthers: z.boolean().optional(),
+      avatarUrl: z.string().optional(), // Menerima URL string (dari Supabase)
     }) 
   }),
   async (req, res, next) => {
     try {
       if (!req.user) throw new ApiError(401, "Authentication required.");
-      const { name, description, showEmailToOthers } = req.body;
-      const dataToUpdate: { name?: string; description?: string, showEmailToOthers?: boolean } = {};
+      
+      const { name, description, showEmailToOthers, avatarUrl } = req.body;
+      
+      // Siapkan object update
+      const dataToUpdate: { 
+        name?: string; 
+        description?: string | null; 
+        showEmailToOthers?: boolean;
+        avatarUrl?: string;
+      } = {};
+
       if (name) dataToUpdate.name = name;
       if (description !== undefined) dataToUpdate.description = description;
       if (showEmailToOthers !== undefined) dataToUpdate.showEmailToOthers = showEmailToOthers;
+      if (avatarUrl !== undefined) dataToUpdate.avatarUrl = avatarUrl;
 
       if (Object.keys(dataToUpdate).length === 0) {
         return res.status(400).json({ error: "No update data provided." });
@@ -80,7 +70,15 @@ router.put("/me",
       const updatedUser = await prisma.user.update({
         where: { id: req.user.id },
         data: dataToUpdate,
-        select: { id: true, email: true, username: true, name: true, avatarUrl: true, description: true, showEmailToOthers: true },
+        select: { 
+          id: true, 
+          email: true, 
+          username: true, 
+          name: true, 
+          avatarUrl: true, 
+          description: true, 
+          showEmailToOthers: true 
+        },
       });
 
       getIo().emit('user:updated', updatedUser);
@@ -91,6 +89,7 @@ router.put("/me",
   }
 );
 
+// UPDATE Public Keys (E2EE)
 const base64UrlRegex = /^[A-Za-z0-9_-]+$/;
 router.put("/me/keys",
   zodValidate({
@@ -111,6 +110,7 @@ router.put("/me/keys",
         select: { id: true, name: true },
       });
       
+      // Notify contacts about identity change
       const conversations = await prisma.conversation.findMany({
         where: { participants: { some: { userId: userId } } },
         include: { participants: { select: { userId: true } } },
@@ -132,25 +132,7 @@ router.put("/me/keys",
   }
 );
 
-router.post("/me/avatar", uploadAvatar.single('avatar'), async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, "Authentication required.");
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
-    const avatarUrl = `/uploads/avatars/${req.file.filename}`;
-    const updatedUser = await prisma.user.update({
-      where: { id: req.user.id },
-      data: { avatarUrl },
-      select: { id: true, email: true, username: true, name: true, avatarUrl: true },
-    });
-
-    getIo().emit('user:updated', updatedUser);
-    res.json(updatedUser);
-  } catch (error) {
-    next(error);
-  }
-});
-
+// SEARCH Users
 router.get("/search", 
   zodValidate({ query: z.object({ q: z.string().min(1) }) }),
   async (req, res, next) => {
@@ -180,6 +162,7 @@ router.get("/search",
   }
 );
 
+// GET Other User Profile by ID
 router.get('/:userId', async (req, res, next) => {
     try {
       const { userId } = req.params;
@@ -210,6 +193,7 @@ router.get('/:userId', async (req, res, next) => {
   }
 );
 
+// COMPLETE Onboarding
 router.post("/me/complete-onboarding", async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, "Authentication required.");
