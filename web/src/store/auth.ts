@@ -1,6 +1,6 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { authFetch, api } from "@lib/api";
-import { getSocket, disconnectSocket, connectSocket } from "@lib/socket";
+import { disconnectSocket, connectSocket } from "@lib/socket";
 import { eraseCookie } from "@lib/tokenStorage";
 import { clearKeyCache } from "@utils/crypto";
 import { getSodium } from '@lib/sodiumInitializer';
@@ -76,6 +76,7 @@ type RetrievedKeys = {
 
 type State = {
   user: User | null;
+  accessToken: string | null; // <-- TAMBAHAN: Untuk menyimpan token socket
   isBootstrapping: boolean;
   sendReadReceipts: boolean;
   hasRestoredKeys: boolean;
@@ -91,6 +92,7 @@ type Actions = {
   getSignedPreKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getMasterSeed: () => Promise<Uint8Array | undefined>;
   setUser: (user: User) => void;
+  setAccessToken: (token: string | null) => void; // <-- TAMBAHAN
   updateProfile: (data: Partial<Pick<User, 'name' | 'description' | 'showEmailToOthers'>>) => Promise<void>;
   updateAvatar: (avatar: File) => Promise<void>;
   setReadReceipts: (value: boolean) => void;
@@ -136,12 +138,17 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
   return {
     user: savedUser ? JSON.parse(savedUser) : null,
+    accessToken: null, // Init token kosong
     isBootstrapping: true,
     sendReadReceipts: savedReadReceipts ? JSON.parse(savedReadReceipts) : true,
     hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys'),
 
     setHasRestoredKeys: (hasKeys: boolean) => {
       set({ hasRestoredKeys: hasKeys });
+    },
+
+    setAccessToken: (token: string | null) => {
+      set({ accessToken: token });
     },
 
     clearPrivateKeysCache: () => {
@@ -156,13 +163,25 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
     async bootstrap() {
       try {
+        // FIX: Coba refresh token dulu untuk dapatkan accessToken baru (penting untuk Socket)
+        // Jika cookie masih valid, ini akan mengembalikan { ok: true, accessToken: '...' }
+        const refreshRes = await api<{ ok: boolean; accessToken?: string }>("/api/auth/refresh", { method: "POST" });
+        
+        if (refreshRes.accessToken) {
+          set({ accessToken: refreshRes.accessToken });
+        }
+
         const me = await authFetch<User>("/api/users/me");
         set({ user: me, hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys') });
         localStorage.setItem("user", JSON.stringify(me));
+        
+        // Connect socket setelah token tersedia
         connectSocket();
       } catch (error) {
+        // Jangan clear user jika hanya error network sementara, tapi untuk 401 clear session
+        // Di sini kita asumsikan error fatal auth
         get().clearPrivateKeysCache();
-        set({ user: null, hasRestoredKeys: false });
+        set({ user: null, accessToken: null, hasRestoredKeys: false });
         localStorage.removeItem("user");
       } finally {
         set({ isBootstrapping: false });
@@ -171,15 +190,23 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
     async login(emailOrUsername, password, restoredNotSynced = false) {
       get().clearPrivateKeysCache();
-      const res = await api<{ user: User }>("/api/auth/login", {
+      
+      // FIX: Ambil accessToken dari response login
+      const res = await api<{ user: User; accessToken: string }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ emailOrUsername, password }),
       });
+
       const hasKeys = !!localStorage.getItem('encryptedPrivateKeys');
-      set({ user: res.user, hasRestoredKeys: hasKeys });
+      
+      set({ 
+        user: res.user, 
+        accessToken: res.accessToken, // Simpan token ke state
+        hasRestoredKeys: hasKeys 
+      });
+      
       localStorage.setItem("user", JSON.stringify(res.user));
       
-      // If logging in after a restore, update the public keys on the server
       if (restoredNotSynced) {
         try {
           console.log("Syncing restored keys with the server...");
@@ -208,11 +235,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         toast("To enable secure messaging, please restore your account from your recovery phrase in Settings.", { duration: 7000 });
       }
       
+      // Socket sekarang akan menggunakan token dari state ini
       connectSocket();
     },
 
     async registerAndGeneratePhrase(data) {
-      // All heavy crypto work is now in the worker
       const {
         encryptionPublicKeyB64,
         signingPublicKeyB64,
@@ -225,8 +252,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
       set({ hasRestoredKeys: true });
       
-      // The non-crypto part remains here
-      await api("/api/auth/register", {
+      // FIX: Ambil accessToken dari response register
+      const res = await api<{ user: User; accessToken: string }>("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({
           ...data,
@@ -234,6 +261,17 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           signingKey: signingPublicKeyB64
         }),
       });
+
+      // Update state user & token agar langsung login
+      if (res.user && res.accessToken) {
+        set({ 
+          user: res.user, 
+          accessToken: res.accessToken 
+        });
+        localStorage.setItem("user", JSON.stringify(res.user));
+        connectSocket();
+      }
+
       return phrase;
     },
 
@@ -245,7 +283,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       eraseCookie("rt");
       get().clearPrivateKeysCache();
       localStorage.removeItem('user');
-      set({ user: null, hasRestoredKeys: false });
+      
+      set({ user: null, accessToken: null, hasRestoredKeys: false }); // Clear token
+      
       disconnectSocket();
       useConversationStore.getState().reset();
       useMessageStore.getState().reset();
@@ -297,7 +337,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const keys = await retrieveAndCacheKeys();
       if (!keys.encryption) throw new Error("Encryption key not found in bundle.");
       const sodium = await getSodium();
-      // This is a very lightweight operation, acceptable to keep on main thread
       const publicKey = sodium.crypto_scalarmult_base(keys.encryption);
       return { publicKey, privateKey: keys.encryption };
     },
@@ -306,7 +345,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const keys = await retrieveAndCacheKeys();
       if (!keys.signedPreKey) throw new Error("Signed pre-key not found in bundle.");
       const sodium = await getSodium();
-      // This is a very lightweight operation, acceptable to keep on main thread
       const publicKey = sodium.crypto_scalarmult_base(keys.signedPreKey);
       return { publicKey, privateKey: keys.signedPreKey };
     },

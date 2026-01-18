@@ -46,6 +46,7 @@ const handleKeyRotation = async (conversationId: string) => {
 
 export function getSocket() {
   if (!socket) {
+    const token = useAuthStore.getState().accessToken;
     socket = io(WS_URL, {
       withCredentials: true,
       transports: ['polling'],
@@ -54,6 +55,9 @@ export function getSocket() {
       reconnectionAttempts: 20,
       reconnectionDelay: 2000,
       path: "/socket.io",
+      auth: {
+        token: token 
+      }
     });
 
     const { setStatus } = useConnectionStore.getState();

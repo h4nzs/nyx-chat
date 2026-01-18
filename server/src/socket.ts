@@ -117,14 +117,15 @@ export function registerSocket(httpServer: HttpServer) {
   // === MIDDLEWARE AUTH MANUAL (LEBIH ROBUST UNTUK PROXY) ===
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
-      const cookieHeader = socket.handshake.headers.cookie;
-      if (!cookieHeader) {
-        // Coba cek query param untuk fallback jika perlu (opsional)
-        return next(new Error("Authentication error: No cookies"));
-      }
+      let token = socket.handshake.auth?.token;
 
-      const cookies = cookie.parse(cookieHeader);
-      const token = cookies.at; // Ambil access token
+      if (!token) {
+        const cookieHeader = socket.handshake.headers.cookie;
+        if (cookieHeader) {
+          const cookies = cookie.parse(cookieHeader);
+          token = cookies.at;
+        }
+      }
 
       if (!token) {
         return next(new Error("Authentication error: Token missing"));
