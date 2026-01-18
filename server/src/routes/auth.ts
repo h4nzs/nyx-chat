@@ -42,7 +42,7 @@ function setAuthCookies(res: Response, { access, refresh }: { access: string; re
   const cookieOptions: CookieOptions = {
     httpOnly: true,
     secure: isProd, 
-    sameSite: isProd ? "none" : "lax",
+    sameSite: "lax",
     path: "/",
   };
 

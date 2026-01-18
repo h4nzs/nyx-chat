@@ -131,7 +131,7 @@ app.use("/api/sessions", sessionsRouter);
 const csrfProtection = csrf({
   cookie: { 
     httpOnly: true, 
-    sameSite: isProd ? "none" : "lax", 
+    sameSite: "lax", 
     secure: isProd 
   }
 });

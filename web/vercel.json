@@ -1,6 +1,18 @@
 {
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://vast-aigneis-h4nzs-9319f44e.koyeb.app/api/:path*"
+    },
+    {
+      "source": "/uploads/:path*",
+      "destination": "https://vast-aigneis-h4nzs-9319f44e.koyeb.app/uploads/:path*"
+    },
+    {
+      "source": "/socket.io/:path*",
+      "destination": "https://vast-aigneis-h4nzs-9319f44e.koyeb.app/socket.io/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
