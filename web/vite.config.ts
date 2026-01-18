@@ -37,8 +37,6 @@ export default defineConfig({
     'global.Buffer': ['buffer', 'Buffer'],
   },
   server: {
-    // Whitelist specific hosts to prevent DNS rebinding attacks.
-    // '.ngrok.io' is for ngrok tunneling, 'localhost' for local development.
     allowedHosts: true,
     fs: {
       allow: ['..']
@@ -62,9 +60,29 @@ export default defineConfig({
       }
     }
   },
+  // FIX: Konfigurasi untuk npm run build && npm run preview (Port 4173)
   preview: {
-    allowedHosts: true, // Mengizinkan akses dari ngrok-free.app dll
+    allowedHosts: true, 
     port: 4173,
+    // Tambahkan Proxy di sini agar preview bisa bicara ke backend lokal
+    proxy: {
+      '/api': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/uploads': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/socket.io': {
+        target: 'http://localhost:4000',
+        ws: true,
+        changeOrigin: true,
+        secure: false,
+      }
+    }
   },
   test: {
     globals: true,

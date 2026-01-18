@@ -6,21 +6,124 @@ import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
 import { getIo } from "../socket.js";
 import { sendPushNotification } from "../utils/sendPushNotification.js";
-import multer from "multer"; // Import Multer langsung
-import { nanoid } from "nanoid"; // Install jika belum: pnpm add nanoid
+import multer from "multer";
+import { nanoid } from "nanoid";
 import path from "path";
-import { uploadToSupabase } from "../utils/supabase.js"; // Import utility Supabase
+import { uploadToSupabase } from "../utils/supabase.js";
 
 const router: Router = Router();
 
 // KONFIGURASI MULTER (MEMORY STORAGE)
-// Kita simpan file di RAM sebentar untuk diteruskan ke Supabase
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // Limit 50MB (sesuaikan kebutuhan)
+  limits: { fileSize: 50 * 1024 * 1024 }, // Limit 50MB
 });
 
+// ============================================================================
+// FIX: Route Statis & Spesifik WAJIB ditaruh DI ATAS route dinamis (/:id...)
+// agar tidak tertangkap/intersep oleh parameter dinamis.
+// ============================================================================
+
+// === 1. UPLOAD AVATAR USER ===
+router.post(
+  "/avatars/upload",
+  requireAuth,
+  upload.single("avatar"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.user) throw new ApiError(401, "Unauthorized");
+      if (!req.file) throw new ApiError(400, "No file uploaded.");
+
+      const userId = req.user.id;
+      
+      // Upload ke Supabase (Folder: avatars)
+      const uniqueFilename = `${nanoid()}-${Date.now()}${path.extname(req.file.originalname)}`;
+      const supabasePath = `avatars/${userId}/${uniqueFilename}`;
+
+      console.log(`[Avatar Upload] Uploading to Supabase: ${supabasePath}`);
+
+      const publicUrl = await uploadToSupabase(
+        req.file.buffer,
+        supabasePath,
+        req.file.mimetype
+      );
+
+      // Update User di Database
+      // Kita kembalikan object user yang sudah diupdate agar frontend bisa langsung update state
+      const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: { avatarUrl: publicUrl },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          description: true,
+          showEmailToOthers: true,
+          hasCompletedOnboarding: true
+        }
+      });
+      
+      console.log(`[Avatar Upload] Success. URL: ${publicUrl}`);
+      res.json(updatedUser);
+
+    } catch (e) {
+      console.error("[AVATAR-UPLOAD-ERROR]", e);
+      next(e);
+    }
+  }
+);
+
+// === 2. UPLOAD AVATAR GROUP ===
+router.post(
+  "/groups/:id/avatar", 
+  requireAuth, 
+  upload.single("avatar"), 
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        if (!req.user) throw new ApiError(401, "Unauthorized");
+        if (!req.file) throw new ApiError(400, "No file uploaded.");
+        
+        const groupId = req.params.id;
+        
+        // Cek akses user ke grup
+        const participant = await prisma.participant.findFirst({
+            where: { userId: req.user.id, conversationId: groupId }
+        });
+        if (!participant) throw new ApiError(403, "You are not a member of this group");
+
+        // Upload ke Supabase (Folder: groups)
+        const uniqueFilename = `${nanoid()}-${Date.now()}${path.extname(req.file.originalname)}`;
+        const supabasePath = `groups/${groupId}/${uniqueFilename}`;
+
+        const publicUrl = await uploadToSupabase(
+            req.file.buffer,
+            supabasePath,
+            req.file.mimetype
+        );
+
+        // Update Database
+        await prisma.conversation.update({
+            where: { id: groupId },
+            data: { avatarUrl: publicUrl }
+        });
+        
+        // Notifikasi realtime ke semua member grup
+        const io = getIo();
+        io.to(groupId).emit("conversation:updated", { id: groupId, avatarUrl: publicUrl });
+
+        res.json({ url: publicUrl });
+
+    } catch (e) {
+        console.error("[GROUP-AVATAR-ERROR]", e);
+        next(e);
+    }
+});
+
+// === 3. UPLOAD ATTACHMENT CHAT (Dynamic Route) ===
+// Ditaruh PALING BAWAH agar "avatars" atau "groups" tidak dianggap sebagai "conversationId"
 router.post(
   "/:conversationId/upload",
   requireAuth,
@@ -33,74 +136,50 @@ router.post(
       const senderId = req.user.id;
       const file = req.file;
       
-      // Ambil body data
       const { fileKey, sessionId, repliedToId, tempId, duration } = req.body;
       const parsedTempId = Number(tempId);
 
-      // --- DEBUG LOG 1: Incoming Data ---
+      // --- DEBUG LOG ---
       console.log(`[UPLOAD-DEBUG] Incoming Request Body for ${conversationId}:`, {
         fileKey: !!fileKey,
         sessionId,
-        sessionIdType: typeof sessionId,
         tempId,
         isFilePresent: !!file
       });
 
-      if (!file) {
-        throw new ApiError(400, "No file uploaded or file type is not allowed.");
-      }
-      if (!fileKey) {
-        throw new ApiError(400, "Missing required encrypted key for the file.");
-      }
-      if (!tempId || !Number.isFinite(parsedTempId)) {
-        throw new ApiError(400, "A valid temporary ID (tempId) is required.");
-      }
+      if (!file) throw new ApiError(400, "No file uploaded.");
+      if (!fileKey) throw new ApiError(400, "Missing required encrypted key.");
+      if (!tempId || !Number.isFinite(parsedTempId)) throw new ApiError(400, "Invalid tempId.");
 
       const conversation = await prisma.conversation.findUnique({
         where: { id: conversationId },
+        include: { participants: true } // Include participants untuk validasi & push notif
       });
 
-      if (!conversation) {
-        throw new ApiError(404, "Conversation not found.");
-      }
+      if (!conversation) throw new ApiError(404, "Conversation not found.");
 
-      if (!conversation.isGroup && !sessionId) {
-        throw new ApiError(400, "Missing required session for a 1-on-1 file message.");
-      }
-
-      const participant = await prisma.participant.findFirst({
-        where: { userId: senderId, conversationId },
-      });
-
-      if (!participant) {
-        throw new ApiError(403, "Forbidden: You are not a participant of this conversation");
-      }
+      // Validasi member
+      const isParticipant = conversation.participants.some(p => p.userId === senderId);
+      if (!isParticipant) throw new ApiError(403, "Forbidden.");
       
-      // --- PERUBAHAN UTAMA DI SINI (SUPABASE) ---
-      // Generate nama file unik
+      // Upload ke Supabase (Folder: attachments)
       const uniqueFilename = `${nanoid()}${path.extname(file.originalname)}`;
       const supabasePath = `attachments/${conversationId}/${uniqueFilename}`;
 
-      // Upload ke Supabase
       console.log(`[UPLOAD-DEBUG] Uploading to Supabase: ${supabasePath}`);
       const fileUrl = await uploadToSupabase(
-        file.buffer, // Gunakan buffer dari memory storage
+        file.buffer,
         supabasePath,
         file.mimetype
       );
-      // -------------------------------------------
 
-      const participants = await prisma.participant.findMany({
-        where: { conversationId },
-        select: { userId: true },
-      });
-
+      // Simpan Message ke DB
       const newMessage = await prisma.$transaction(async (tx) => {
         const msg = await tx.message.create({
           data: {
             conversationId,
             senderId,
-            fileUrl, // URL Publik dari Supabase
+            fileUrl,
             fileKey,
             sessionId, 
             repliedToId,
@@ -109,19 +188,14 @@ router.post(
             fileSize: file.size,
             duration: duration ? parseInt(duration, 10) : undefined,
             statuses: {
-              create: participants.map(p => ({
+              create: conversation.participants.map(p => ({
                 userId: p.userId,
                 status: p.userId === senderId ? 'READ' : 'SENT',
               })),
             },
           },
-          include: { sender: true, reactions: true, statuses: true, repliedTo: { include: { sender: true } } },
+          include: { sender: { select: { id: true, name: true, username: true, avatarUrl: true } } },
         });
-
-        // --- DEBUG LOG 2: Prisma Result ---
-        if (!conversation.isGroup && !msg.sessionId) {
-            console.error("[UPLOAD-CRITICAL] Prisma created message BUT sessionId is missing!", msg);
-        }
 
         await tx.conversation.update({
           where: { id: conversationId },
@@ -132,22 +206,18 @@ router.post(
 
       const messageToBroadcast = { ...newMessage, tempId: parsedTempId };
       
-      // --- DEBUG LOG 3: Pre-Broadcast ---
-      console.log("[UPLOAD-DEBUG] Broadcasting Message Payload:", JSON.stringify({
-        id: messageToBroadcast.id,
-        sessionId: messageToBroadcast.sessionId,
-        isGroup: conversation.isGroup,
-        conversationId: messageToBroadcast.conversationId,
-        fileUrl: messageToBroadcast.fileUrl // Cek URL di sini
-      }, null, 2));
-
+      // Broadcast Socket
       const io = getIo();
       io.to(conversationId).emit("message:new", messageToBroadcast);
       
-      const pushRecipients = participants.filter(p => p.userId !== senderId);
+      // Push Notification
+      const pushRecipients = conversation.participants.filter(p => p.userId !== senderId);
       const pushBody = `Sent a file: ${file.originalname}`;
-      const payload = { title: `New message from ${req.user.username}`, body: pushBody.substring(0, 200) };
-      pushRecipients.forEach(p => sendPushNotification(p.userId, payload));
+      pushRecipients.forEach(p => sendPushNotification(p.userId, { 
+          title: newMessage.sender.name || newMessage.sender.username, 
+          body: pushBody.substring(0, 200),
+          url: `/chat/${conversationId}`
+      }));
 
       res.status(201).json(messageToBroadcast);
 
@@ -157,97 +227,5 @@ router.post(
     }
   }
 );
-
-// === 2. UPLOAD AVATAR USER (FIX: Menggunakan Supabase) ===
-// Endpoint ini menangani upload avatar profil
-router.post(
-  "/avatars/upload", 
-  requireAuth, 
-  upload.single("avatar"), // Pastikan frontend mengirim field bernama 'avatar'
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        if (!req.user) throw new ApiError(401, "Unauthorized");
-        if (!req.file) throw new ApiError(400, "No file uploaded.");
-
-        const userId = req.user.id;
-        
-        // 1. Upload ke Supabase (Folder: avatars)
-        // Kita gunakan timestamp agar nama file unik dan menghindari caching browser yang agresif
-        const uniqueFilename = `${nanoid()}-${Date.now()}${path.extname(req.file.originalname)}`;
-        const supabasePath = `avatars/${userId}/${uniqueFilename}`;
-
-        console.log(`[Avatar Upload] Uploading to Supabase: ${supabasePath}`);
-
-        const publicUrl = await uploadToSupabase(
-            req.file.buffer,
-            supabasePath,
-            req.file.mimetype
-        );
-
-        // 2. Update URL Avatar di Database User
-        // Ini langkah yang sebelumnya hilang!
-        await prisma.user.update({
-            where: { id: userId },
-            data: { avatarUrl: publicUrl }
-        });
-        
-        console.log(`[Avatar Upload] Success. URL: ${publicUrl}`);
-
-        res.json({ 
-            url: publicUrl,
-            filename: req.file.originalname
-        });
-
-    } catch (e) {
-        console.error("[AVATAR-UPLOAD-ERROR]", e);
-        next(e);
-    }
-});
-
-// === 3. UPLOAD AVATAR GROUP ===
-router.post(
-    "/groups/:id/avatar", 
-    requireAuth, 
-    upload.single("avatar"), 
-    async (req: Request, res: Response, next: NextFunction) => {
-      try {
-          if (!req.user) throw new ApiError(401, "Unauthorized");
-          if (!req.file) throw new ApiError(400, "No file uploaded.");
-          
-          const groupId = req.params.id;
-          
-          // Cek apakah user adalah admin/member grup
-          const participant = await prisma.participant.findFirst({
-              where: { userId: req.user.id, conversationId: groupId }
-          });
-          if (!participant) throw new ApiError(403, "You are not a member of this group");
-
-          // 1. Upload ke Supabase (Folder: groups)
-          const uniqueFilename = `${nanoid()}-${Date.now()}${path.extname(req.file.originalname)}`;
-          const supabasePath = `groups/${groupId}/${uniqueFilename}`;
-  
-          const publicUrl = await uploadToSupabase(
-              req.file.buffer,
-              supabasePath,
-              req.file.mimetype
-          );
-  
-          // 2. Update URL Avatar di Database Conversation
-          await prisma.conversation.update({
-              where: { id: groupId },
-              data: { avatarUrl: publicUrl }
-          });
-          
-          // 3. Emit socket event agar semua member melihat perubahan avatar realtime
-          const io = getIo();
-          io.to(groupId).emit("conversation:updated", { id: groupId, avatarUrl: publicUrl });
-  
-          res.json({ url: publicUrl });
-  
-      } catch (e) {
-          console.error("[GROUP-AVATAR-ERROR]", e);
-          next(e);
-      }
-  });
 
 export default router;
