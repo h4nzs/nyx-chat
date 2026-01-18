@@ -89,6 +89,7 @@ export function registerSocket(httpServer: HttpServer) {
         if (
           allowedOrigins.includes(origin) || 
           origin.endsWith('.vercel.app') || 
+          origin.endsWith('.koyeb.app') ||
           origin.endsWith('.onrender.com') ||
           origin.endsWith('.ngrok-free.app')
         ) {
@@ -103,8 +104,12 @@ export function registerSocket(httpServer: HttpServer) {
     },
     path: '/socket.io', // Pastikan path sesuai dengan client
     transports: ['polling', 'websocket'], // Polling wajib aktif untuk Vercel Proxy
+    connectionStateRecovery: {
+      maxDisconnectionDuration: 2 * 60 * 1000, // Buffer 2 menit
+      skipMiddlewares: true,
+    },
     allowEIO3: true, // Kompatibilitas maksimum
-    pingTimeout: 60000,
+    pingTimeout: 20000,
     pingInterval: 25000
     // === AKHIR BAGIAN PERBAIKAN ===
   });
@@ -162,16 +167,16 @@ export function registerSocket(httpServer: HttpServer) {
 
     if (userId) {
       socket.join(userId);
-      console.log(`[Socket Connect] User connected: ${userId}`);
-      
-      // LOGIKA ASLI: REDIS ONLINE USERS
-      await redisClient.sAdd('online_users', userId);
-      
-      const onlineUserIds = await redisClient.sMembers('online_users');
-      socket.emit("presence:init", onlineUserIds);
-      socket.broadcast.emit("presence:user_joined", userId);
-    } else {
-      console.log(`[Socket Connect] Guest connected: ${socket.id}`);
+      // Jika connectionStateRecovery aktif, socket.recovered akan true saat reconnect
+      if (!socket.recovered) {
+          console.log(`[Socket Connect] User connected: ${userId}`);
+          await redisClient.sAdd('online_users', userId);
+          const onlineUserIds = await redisClient.sMembers('online_users');
+          socket.emit("presence:init", onlineUserIds);
+          socket.broadcast.emit("presence:user_joined", userId);
+      } else {
+          console.log(`[Socket Recovered] User recovered session: ${userId}`);
+      }
     }
 
     // === LOGIKA ASLI (DIKEMBALIKAN SEMUA) ===
@@ -196,12 +201,15 @@ export function registerSocket(httpServer: HttpServer) {
 
     socket.on("disconnect", async () => {
       if (userId) {
-        console.log(`[Socket Disconnect] User disconnected: ${userId}`);
-        await redisClient.sRem('online_users', userId);
-        io.emit("presence:user_left", userId);
-
-      } else {
-        console.log(`[Socket Disconnect] Guest disconnected: ${socket.id}`);
+        // Delay sedikit update presence untuk handle refresh page/reconnect cepat
+        setTimeout(async () => {
+            const sockets = await io.in(userId).fetchSockets();
+            if (sockets.length === 0) {
+                console.log(`[Socket Disconnect] User disconnected: ${userId}`);
+                await redisClient.sRem('online_users', userId);
+                io.emit("presence:user_left", userId);
+            }
+        }, 5000);
       }
     });
 
