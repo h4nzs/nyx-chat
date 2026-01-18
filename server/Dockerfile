@@ -43,4 +43,4 @@ COPY --from=builder /app/prisma ./prisma
 EXPOSE 4000
 
 # Command untuk menjalankan server
-CMD ["node", "dist/src/index.js"]
+CMD ["node", "dist/index.js"]
