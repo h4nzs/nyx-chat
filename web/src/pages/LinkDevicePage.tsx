@@ -14,9 +14,7 @@ export default function LinkDevicePage() {
   
   const navigate = useNavigate();
   
-  // Kita HAPUS useAuthStore karena kita tidak akan melakukan auto-login di sini.
-  // Biarkan user login manual di halaman login setelah kunci tersimpan.
-  
+  // Simpan key sementara untuk dekripsi nanti
   const ephemeralKeyPair = useRef<{ publicKey: Uint8Array; privateKey: Uint8Array } | null>(null);
 
   useEffect(() => {
@@ -26,25 +24,35 @@ export default function LinkDevicePage() {
     const initializeSession = async () => {
       try {
         setStatus('initializing');
+        
+        // 1. Pastikan Sodium Siap
         const sodium = await getSodium();
         
-        // 1. Generate Ephemeral Keys (Sekali pakai buat handshake)
+        // 2. Generate Ephemeral Keys
+        // Key ini hanya dipakai sekali untuk menerima Master Key dari device lama
         const keyPair = sodium.crypto_box_keypair();
         ephemeralKeyPair.current = keyPair;
+        
         const pubKeyB64 = sodium.to_base64(keyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+        console.log("🔑 Ephemeral Public Key generated:", pubKeyB64);
 
-        // 2. Connect Socket (Guest Mode)
-        if (!socket.connected) connectSocket();
+        // 3. Connect Socket (Guest Mode)
+        if (!socket.connected) {
+          connectSocket();
+        }
 
-        // 3. Request Room ID
+        // 4. Request Linking Room ID
         socket.emit('auth:request_linking_qr', { publicKey: pubKeyB64 }, (response: any) => {
           if (!isMounted) return;
+
           if (response?.error) {
             setError(response.error);
             setStatus('failed');
             return;
           }
+
           if (response?.token) {
+            // Format QR: { roomId, linkingPubKey }
             setQrData(JSON.stringify({
               roomId: response.token,
               linkingPubKey: pubKeyB64
@@ -54,7 +62,7 @@ export default function LinkDevicePage() {
         });
 
       } catch (err: any) {
-        console.error("Init error:", err);
+        console.error("Linking init error:", err);
         if (isMounted) {
           setError("Failed to initialize security engine.");
           setStatus('failed');
@@ -67,6 +75,7 @@ export default function LinkDevicePage() {
     // --- HANDLE SUKSES SCAN ---
     const handleLinkingSuccess = async (data: any) => {
       if (!isMounted) return;
+      
       console.log("📦 Payload received!", data);
       setStatus('processing');
       toast.loading("Securing connection...", { id: 'link-process' });
@@ -74,29 +83,40 @@ export default function LinkDevicePage() {
       try {
         const sodium = await getSodium();
         
-        // 1. Decrypt Master Key (Pakai Ephemeral Key)
-        if (!ephemeralKeyPair.current) throw new Error("Ephemeral key lost.");
-        const cipherText = sodium.from_base64(data.encryptedMasterKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+        // 1. Validasi Input Kriptografi
+        if (!data.encryptedMasterKey) throw new Error("Missing encrypted master key.");
+        if (!ephemeralKeyPair.current) throw new Error("Ephemeral key pair lost. Please refresh.");
+
+        // 2. Dekripsi Master Key
+        // Gunakan try-catch spesifik untuk dekripsi agar error lebih jelas
+        let masterSeed: Uint8Array;
+        try {
+            const cipherText = sodium.from_base64(data.encryptedMasterKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+            
+            // crypto_box_seal_open(ciphertext, recipient_pk, recipient_sk)
+            masterSeed = sodium.crypto_box_seal_open(
+              cipherText, 
+              ephemeralKeyPair.current.publicKey, 
+              ephemeralKeyPair.current.privateKey
+            );
+        } catch (cryptoErr) {
+            console.error("Crypto operation failed:", cryptoErr);
+            throw new Error("Failed to decrypt secure payload. Keys do not match.");
+        }
+
+        if (!masterSeed) throw new Error("Decryption produced empty result.");
+
+        console.log("🔓 Master Key decrypted successfully. Saving secure storage...");
+
+        // 3. ENKRIPSI & SIMPAN KE LOCALSTORAGE
+        // Kita tidak login otomatis, tapi menyimpan kunci agar saat user login manual nanti, 
+        // kunci ini bisa langsung dipakai (Auto-Unlock).
         
-        const masterSeed = sodium.crypto_box_seal_open(
-          cipherText, 
-          ephemeralKeyPair.current.publicKey, 
-          ephemeralKeyPair.current.privateKey
-        );
-
-        if (!masterSeed) throw new Error("Failed to decrypt Master Key.");
-
-        // --- PERUBAHAN UTAMA DI SINI ---
-        // Kita TIDAK memanggil setUser/setAccessToken (Login Otomatis)
-        // Kita hanya fokus menyimpan kunci, lalu lempar user ke halaman Login.
-
-        // 2. ENKRIPSI & SIMPAN KEYS
-        
-        // A. Generate Password Acak untuk Device Ini (Auto-Unlock)
+        // A. Generate Password Acak untuk Device Ini
         const devicePasswordBytes = sodium.randombytes_buf(16);
         const devicePassword = sodium.to_base64(devicePasswordBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
         
-        // B. Siapkan Salt & Hash Password
+        // B. Hash Password
         const salt = sodium.randombytes_buf(sodium.crypto_pwhash_SALTBYTES);
         const keyHash = sodium.crypto_pwhash(
           sodium.crypto_secretbox_KEYBYTES,
@@ -107,24 +127,20 @@ export default function LinkDevicePage() {
           sodium.crypto_pwhash_ALG_DEFAULT
         );
 
-        // C. Enkripsi MasterSeed
+        // C. Enkripsi MasterSeed dengan Password Baru
         const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
         const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, keyHash);
 
-        // D. Simpan Bundle ke LocalStorage (Gunakan nama standard: 'encryptedPrivateKeys')
+        // D. Simpan Bundle
         const storageBundle = {
           cipherText: sodium.to_base64(encryptedSeed, sodium.base64_variants.URLSAFE_NO_PADDING),
           salt: sodium.to_base64(salt, sodium.base64_variants.URLSAFE_NO_PADDING),
           nonce: sodium.to_base64(nonce, sodium.base64_variants.URLSAFE_NO_PADDING)
         };
         
-        // Bersihkan storage lama biar bersih
+        // Bersihkan storage lama & simpan baru
         localStorage.removeItem('encryptedPrivateKeys');
-        localStorage.removeItem('encrypted_private_keys');
-        
-        // Simpan yang baru
         localStorage.setItem('encryptedPrivateKeys', JSON.stringify(storageBundle));
-        // Simpan kunci pembuka otomatis
         localStorage.setItem('device_auto_unlock_key', devicePassword);
 
         // --------------------------------------------------
@@ -132,15 +148,14 @@ export default function LinkDevicePage() {
         toast.success("Device paired! Please login to finish.", { id: 'link-process' });
         setStatus('success');
 
-        // Redirect ke Login (Bukan Chat)
-        // Delay sedikit untuk memastikan LocalStorage tertulis sempurna
+        // 4. Redirect ke Login (Manual Flow)
         setTimeout(() => {
-          navigate('/login');
-        }, 1500);
+          navigate('/login', { state: { fromLinking: true } });
+        }, 2000);
 
       } catch (err: any) {
-        console.error("Linking failed:", err);
-        toast.error("Handshake failed: " + err.message, { id: 'link-process' });
+        console.error("Linking handshake failed:", err);
+        toast.error("Linking failed: " + err.message, { id: 'link-process' });
         setStatus('failed');
         setError(err.message);
       }
@@ -163,7 +178,7 @@ export default function LinkDevicePage() {
       case 'processing':
         return <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> Securing keys...</div>;
       case 'success':
-        return <div className="flex items-center gap-2 text-green-500 font-bold"><FiCheckCircle /> Linked! Redirecting to Login...</div>;
+        return <div className="flex items-center gap-2 text-green-500 font-bold"><FiCheckCircle /> Paired! Redirecting to Login...</div>;
       case 'failed':
         return <div className="flex items-center gap-2 text-red-500"><FiXCircle /> Error: {error}</div>;
     }
