@@ -29,12 +29,11 @@ export default function LinkDevicePage() {
         const sodium = await getSodium();
         
         // 2. Generate Ephemeral Keys
-        // Key ini hanya dipakai sekali untuk menerima Master Key dari device lama
         const keyPair = sodium.crypto_box_keypair();
         ephemeralKeyPair.current = keyPair;
         
         const pubKeyB64 = sodium.to_base64(keyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-        console.log("🔑 Ephemeral Public Key generated:", pubKeyB64);
+        console.log("🔑 Ephemeral Public Key generated");
 
         // 3. Connect Socket (Guest Mode)
         if (!socket.connected) {
@@ -52,7 +51,6 @@ export default function LinkDevicePage() {
           }
 
           if (response?.token) {
-            // Format QR: { roomId, linkingPubKey }
             setQrData(JSON.stringify({
               roomId: response.token,
               linkingPubKey: pubKeyB64
@@ -83,17 +81,15 @@ export default function LinkDevicePage() {
       try {
         const sodium = await getSodium();
         
-        // 1. Validasi Input Kriptografi
+        // Validasi Payload
         if (!data.encryptedMasterKey) throw new Error("Missing encrypted master key.");
         if (!ephemeralKeyPair.current) throw new Error("Ephemeral key pair lost. Please refresh.");
 
-        // 2. Dekripsi Master Key
-        // Gunakan try-catch spesifik untuk dekripsi agar error lebih jelas
+        // 1. Dekripsi Master Key
         let masterSeed: Uint8Array;
         try {
             const cipherText = sodium.from_base64(data.encryptedMasterKey, sodium.base64_variants.URLSAFE_NO_PADDING);
             
-            // crypto_box_seal_open(ciphertext, recipient_pk, recipient_sk)
             masterSeed = sodium.crypto_box_seal_open(
               cipherText, 
               ephemeralKeyPair.current.publicKey, 
@@ -105,53 +101,64 @@ export default function LinkDevicePage() {
         }
 
         if (!masterSeed) throw new Error("Decryption produced empty result.");
+        console.log("🔓 Master Key decrypted successfully. Preparing storage...");
 
-        console.log("🔓 Master Key decrypted successfully. Saving secure storage...");
-
-        // 3. ENKRIPSI & SIMPAN KE LOCALSTORAGE
-        // Kita tidak login otomatis, tapi menyimpan kunci agar saat user login manual nanti, 
-        // kunci ini bisa langsung dipakai (Auto-Unlock).
+        // 2. ENKRIPSI & SIMPAN (Dengan Fallback Konstanta)
         
-        // A. Generate Password Acak untuk Device Ini
+        // KONSTANTA FALLBACK (Standard Libsodium Defaults)
+        // Kita pakai ini jika properti di object sodium undefined (sering terjadi di wrapper tertentu)
+        const SALT_BYTES = sodium.crypto_pwhash_SALTBYTES || 16;
+        const KEY_BYTES = sodium.crypto_secretbox_KEYBYTES || 32;
+        const NONCE_BYTES = sodium.crypto_secretbox_NONCEBYTES || 24;
+        const OPS_LIMIT = sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE || 2;
+        const MEM_LIMIT = sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE || 67108864;
+        const ALG = sodium.crypto_pwhash_ALG_DEFAULT || 2;
+        const BASE64_VARIANT = sodium.base64_variants.URLSAFE_NO_PADDING;
+
+        // A. Generate Password Device (Auto-Unlock)
         const devicePasswordBytes = sodium.randombytes_buf(16);
-        const devicePassword = sodium.to_base64(devicePasswordBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const devicePassword = sodium.to_base64(devicePasswordBytes, BASE64_VARIANT);
         
-        // B. Hash Password
-        const salt = sodium.randombytes_buf(sodium.crypto_pwhash_SALTBYTES);
+        // B. Generate Salt
+        const salt = sodium.randombytes_buf(SALT_BYTES);
+        
+        // C. Hash Password (Argon2) -> Key
+        // PENTING: Pastikan semua parameter terisi nilai valid (bukan undefined)
         const keyHash = sodium.crypto_pwhash(
-          sodium.crypto_secretbox_KEYBYTES,
-          devicePasswordBytes,
-          salt,
-          sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
-          sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE,
-          sodium.crypto_pwhash_ALG_DEFAULT
+          KEY_BYTES,        // output length
+          devicePasswordBytes, // password (buffer)
+          salt,             // salt
+          OPS_LIMIT,        // opslimit
+          MEM_LIMIT,        // memlimit
+          ALG               // algorithm
         );
 
-        // C. Enkripsi MasterSeed dengan Password Baru
-        const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
+        // D. Enkripsi MasterSeed
+        const nonce = sodium.randombytes_buf(NONCE_BYTES);
         const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, keyHash);
 
-        // D. Simpan Bundle
+        // E. Simpan ke LocalStorage
         const storageBundle = {
-          cipherText: sodium.to_base64(encryptedSeed, sodium.base64_variants.URLSAFE_NO_PADDING),
-          salt: sodium.to_base64(salt, sodium.base64_variants.URLSAFE_NO_PADDING),
-          nonce: sodium.to_base64(nonce, sodium.base64_variants.URLSAFE_NO_PADDING)
+          cipherText: sodium.to_base64(encryptedSeed, BASE64_VARIANT),
+          salt: sodium.to_base64(salt, BASE64_VARIANT),
+          nonce: sodium.to_base64(nonce, BASE64_VARIANT)
         };
         
-        // Bersihkan storage lama & simpan baru
+        // Bersihkan & Simpan
         localStorage.removeItem('encryptedPrivateKeys');
         localStorage.setItem('encryptedPrivateKeys', JSON.stringify(storageBundle));
         localStorage.setItem('device_auto_unlock_key', devicePassword);
 
+        console.log("✅ Secure storage ready. Redirecting...");
         // --------------------------------------------------
 
         toast.success("Device paired! Please login to finish.", { id: 'link-process' });
         setStatus('success');
 
-        // 4. Redirect ke Login (Manual Flow)
+        // 3. Redirect ke Login Manual
         setTimeout(() => {
           navigate('/login', { state: { fromLinking: true } });
-        }, 2000);
+        }, 1500);
 
       } catch (err: any) {
         console.error("Linking handshake failed:", err);
