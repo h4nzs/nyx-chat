@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useCallback } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { FiLogOut, FiSettings } from 'react-icons/fi';
@@ -77,6 +77,7 @@ const AppContent = () => {
     removeCommands: s.removeCommands,
   }));
   const navigate = useNavigate();
+  const location = useLocation(); // <--- Tambahkan ini
 
   // --- Shortcuts & Commands ---
   
@@ -122,6 +123,10 @@ const AppContent = () => {
 
   // 2. Manage Socket Connection (Centralized)
   useEffect(() => {
+    if (location.pathname === '/link-device') {
+      console.log("🔗 On Linking Page: Keeping socket alive managed by page.");
+      return;
+    }
     if (user) {
       console.log("👤 User authenticated, connecting socket...");
       connectSocket();
@@ -129,7 +134,7 @@ const AppContent = () => {
       console.log("👤 User not authenticated, disconnecting socket...");
       disconnectSocket();
     }
-  }, [user]);
+  }, [user, location.pathname]);
 
   // 3. Sync Encryption Keys (Once per session)
   useEffect(() => {

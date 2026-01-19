@@ -21,6 +21,17 @@ export default function DeviceScannerPage() {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const isProcessingRef = useRef(false);
 
+  const stopScanner = async () => {
+    if (scannerRef.current && scannerRef.current.isScanning) {
+      try {
+        await scannerRef.current.stop();
+        scannerRef.current.clear();
+      } catch (e) {
+        console.error("Failed to stop scanner", e);
+      }
+    }
+  };
+
   const processQrCode = useCallback(async (decodedText: string) => {
     // Mencegah double process
     if (isProcessingRef.current) return;
@@ -74,6 +85,7 @@ export default function DeviceScannerPage() {
         await scannerRef.current.stop();
       }
       
+      await stopScanner();
       setTimeout(() => navigate('/settings/sessions'), 2000);
 
     } catch (err: any) {
@@ -87,34 +99,34 @@ export default function DeviceScannerPage() {
 
   useEffect(() => {
     // Inisialisasi Scanner
-    if (status !== 'scanning') return;
-    if (scannerRef.current) return; // Prevent double init
+    if (status === 'scanning') {
+       const initScanner = async () => {
+         // Pastikan elemen DOM ada sebelum init
+         const element = document.getElementById(qrcodeRegionId);
+         if (!element) return;
 
-    const html5QrCode = new Html5Qrcode(qrcodeRegionId);
-    scannerRef.current = html5QrCode;
+         // Cleanup previous instance if any
+         if (scannerRef.current) {
+            await stopScanner();
+         }
+         
+         const html5QrCode = new Html5Qrcode(qrcodeRegionId);
+         scannerRef.current = html5QrCode;
 
-    const qrCodeSuccessCallback = (decodedText: string) => {
-      // Pause scanner saat sukses baca
-      html5QrCode.pause(true);
-      processQrCode(decodedText);
-    };
-
-    html5QrCode.start(
-      { facingMode: "environment" },
-      { 
-        fps: 10, 
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1.0 
-      },
-      qrCodeSuccessCallback,
-      (errorMessage) => { 
-        // Ignore parse errors on every frame
-      }
-    ).catch((err) => {
-      console.error("Camera start error:", err);
-      setError('Could not access camera. Please allow permission.');
-      setStatus('failed');
-    });
+         html5QrCode.start(
+          { facingMode: "environment" },
+          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
+          (decodedText) => processQrCode(decodedText),
+          (errorMessage) => { /* ignore frame errors */ }
+        ).catch((err) => {
+          console.error("Camera start error:", err);
+          setError('Could not access camera. Please check permissions.');
+          setStatus('failed');
+        });
+       }
+       
+       initScanner();
+    }
 
     // Cleanup saat unmount
     return () => {
@@ -124,6 +136,12 @@ export default function DeviceScannerPage() {
       }
     };
   }, [status, processQrCode]);
+
+  const handleRetry = () => {
+      setStatus('scanning');
+      setError(null);
+      isProcessingRef.current = false;
+  };
 
   return (
     <div className="flex flex-col h-screen bg-bg-main text-text-primary">
