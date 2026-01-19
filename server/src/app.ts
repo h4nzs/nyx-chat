@@ -27,6 +27,7 @@ import previewsRouter from "./routes/previews.js";
 import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
 import webpush from "web-push";
+import { cleanupOrphanedFiles } from "./utils/cleanup.js";
 
 // Set VAPID keys for web-push notifications
 if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
@@ -174,6 +175,18 @@ app.use("/api/sessions", sessionsRouter);
 // === HEALTH CHECK ===
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
+});
+
+app.post("/api/admin/cleanup", async (req, res) => {
+  // Tambahkan proteksi password sederhana pakai env variable
+  if (req.headers["x-admin-key"] !== process.env.CHAT_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  
+  // Jalankan di background (jangan tunggu selesai)
+  cleanupOrphanedFiles().catch(console.error);
+  
+  res.json({ message: "Cleanup started" });
 });
 
 // === ERROR HANDLING ===

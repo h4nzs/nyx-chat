@@ -1,4 +1,9 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { useEffect, useCallback } from 'react';
+import { Toaster } from 'react-hot-toast';
+import { FiLogOut, FiSettings } from 'react-icons/fi';
+
+// Pages
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Restore from './pages/Restore';
@@ -10,33 +15,36 @@ import LinkDevicePage from './pages/LinkDevicePage';
 import DeviceScannerPage from './pages/DeviceScannerPage';
 import ProfilePage from './pages/ProfilePage';
 import LandingPage from './pages/LandingPage';
-import HelpPage from './pages/HelpPage'; // Import HelpPage
+import HelpPage from './pages/HelpPage'; 
 
+// Components
 import ProtectedRoute from './components/ProtectedRoute';
-import { Toaster } from 'react-hot-toast';
-import { useAuthStore } from './store/auth';
-import { useEffect, useCallback } from 'react';
 import ConfirmModal from './components/ConfirmModal';
 import UserInfoModal from './components/UserInfoModal';
 import PasswordPromptModal from './components/PasswordPromptModal';
 import ChatInfoModal from './components/ChatInfoModal';
 import DynamicIsland from './components/DynamicIsland';
-
-import { useThemeStore } from './store/theme';
-import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
-import { useGlobalShortcut } from './hooks/useGlobalShortcut';
-import { useCommandPaletteStore } from './store/commandPalette';
 import CommandPalette from './components/CommandPalette';
-import { FiLogOut, FiSettings } from 'react-icons/fi';
-import { syncSessionKeys } from './utils/sessionSync';
-import { useConversationStore } from './store/conversation';
 
+// Stores & Hooks
+import { useAuthStore } from './store/auth';
+import { useThemeStore } from './store/theme';
+import { useCommandPaletteStore } from './store/commandPalette';
+import { useConversationStore } from './store/conversation';
+import { useGlobalShortcut } from './hooks/useGlobalShortcut';
+
+// Libs & Utils
+import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
+import { syncSessionKeys } from './utils/sessionSync';
+
+// Variabel global untuk mencegah double-sync saat render cepat
 let isSyncing = false;
 
-// Initialize socket listeners once
+// Initialize socket instance once
 getSocket();
 
-// New component to handle root navigation
+// --- Components ---
+
 const Home = () => {
   const { conversations, loading } = useConversationStore(state => ({
     conversations: state.conversations,
@@ -45,18 +53,18 @@ const Home = () => {
 
   if (loading) {
     return (
-      <div className="w-screen h-screen flex items-center justify-center">
-        {/* You can replace this with a proper Spinner component */}
+      <div className="w-screen h-screen flex items-center justify-center bg-bg-base text-text-primary">
         <p>Loading conversations...</p>
       </div>
     );
   }
 
+  // Jika user punya percakapan, redirect ke yang paling terakhir/pertama
   if (conversations.length > 0) {
     return <Navigate to={`/chat/${conversations[0].id}`} replace />;
   }
 
-  // If there are no conversations, render the Chat page in a welcome/empty state
+  // Jika tidak ada percakapan, tampilkan halaman Chat kosong (Welcome state)
   return <Chat />;
 };
 
@@ -70,16 +78,17 @@ const AppContent = () => {
   }));
   const navigate = useNavigate();
 
+  // --- Shortcuts & Commands ---
+  
   const settingsAction = useCallback(() => navigate('/settings'), [navigate]);
   
-  // We need to ensure logout also disconnects the socket
   const logoutAction = useCallback(() => {
     logout();
-    disconnectSocket();
+    disconnectSocket(); // Pastikan socket putus saat logout
   }, [logout]);
 
   useGlobalShortcut(['Control', 'k'], openCommandPalette);
-  useGlobalShortcut(['Meta', 'k'], openCommandPalette); // For macOS
+  useGlobalShortcut(['Meta', 'k'], openCommandPalette); // Support macOS Cmd+K
 
   useEffect(() => {
     const commands = [
@@ -104,34 +113,37 @@ const AppContent = () => {
     return () => removeCommands(commands.map(c => c.id));
   }, [addCommands, removeCommands, settingsAction, logoutAction]);
 
+  // --- Lifecycle & Effects ---
+
+  // 1. Bootstrap Auth (Cek session saat load)
   useEffect(() => {
     bootstrap();
-  }, []);
+  }, [bootstrap]);
 
-  // --- NEW: Centralized connection management ---
+  // 2. Manage Socket Connection (Centralized)
   useEffect(() => {
     if (user) {
-      console.log("User found, connecting socket...");
+      console.log("👤 User authenticated, connecting socket...");
       connectSocket();
     } else {
-      console.log("No user, disconnecting socket...");
+      console.log("👤 User not authenticated, disconnecting socket...");
       disconnectSocket();
     }
-    // No return cleanup needed as disconnect is handled explicitly
   }, [user]);
-  // --- END NEW ---
 
-  // --- NEW: Trigger key sync after user is loaded and UI is ready ---
+  // 3. Sync Encryption Keys (Once per session)
   useEffect(() => {
     const sync = async () => {
+      // Cek apakah user ada, belum disync di session ini, dan tidak sedang proses sync
       if (user && sessionStorage.getItem('keys_synced') !== 'true' && !isSyncing) {
         try {
           isSyncing = true;
+          console.log("🔑 Starting session key synchronization...");
           await syncSessionKeys();
           sessionStorage.setItem('keys_synced', 'true');
+          console.log("✅ Keys synced successfully.");
         } catch (error) {
-          console.error("An error occurred during key synchronization:", error);
-          // The toast in syncSessionKeys should handle user feedback
+          console.error("❌ Key synchronization failed:", error);
         } finally {
           isSyncing = false;
         }
@@ -139,12 +151,14 @@ const AppContent = () => {
     };
     sync();
   }, [user]);
-  // --- END NEW ---
 
+  // 4. Apply Theme
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(theme);
+    // Set CSS variable untuk accent color jika diperlukan oleh Tailwind/CSS
+    root.style.setProperty('--color-accent', `var(--accent-${accent})`);
     root.dataset.accent = accent;
   }, [theme, accent]);
 
@@ -157,54 +171,59 @@ const AppContent = () => {
           duration: 5000,
           className: 'glass-toast',
           style: {
-            background: 'hsl(var(--bg-surface) / 0.8)',
-            color: 'hsl(var(--text-primary))',
-            border: '1px solid hsl(var(--border))',
+            background: 'var(--bg-surface)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-convex)',
           },
           success: {
             duration: 3000,
             iconTheme: {
-              primary: 'hsl(var(--accent))',
-              secondary: 'hsl(var(--accent-foreground))',
+              primary: 'var(--color-accent, #3b82f6)',
+              secondary: '#fff',
             },
           },
           error: {
             iconTheme: {
-              primary: 'hsl(var(--destructive))',
-              secondary: 'hsl(var(--destructive-foreground))',
+              primary: '#ef4444',
+              secondary: '#fff',
             },
           },
         }}
       />
 
+      {/* Global Modals & UI Elements */}
       <CommandPalette />
       <ConfirmModal />
       <UserInfoModal />
       <PasswordPromptModal />
       <ChatInfoModal />
       <DynamicIsland />
+
       <Routes>
-        {/* Public routes */}
+        {/* Public Routes */}
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
         <Route path="/restore" element={<Restore />} />
         <Route path="/link-device" element={<LinkDevicePage />} />
-        <Route path="/help" element={<HelpPage />} /> {/* New Help Page Route */}
+        <Route path="/help" element={<HelpPage />} />
 
-        {/* Protected routes */}
+        {/* Protected Routes (Butuh Login) */}
         <Route element={<ProtectedRoute />}>
           <Route path="/chat" element={<Home />} />
           <Route path="/chat/:conversationId" element={<Chat />} />
+          
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/settings/keys" element={<KeyManagementPage />} />
           <Route path="/settings/sessions" element={<SessionManagerPage />} />
           <Route path="/settings/link-device" element={<DeviceScannerPage />} />
+          
           <Route path="/profile/:userId" element={<ProfilePage />} />
         </Route>
 
-        {/* Fallback route */}
-        <Route path="*" element={<Navigate to="/" />} />
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   );
