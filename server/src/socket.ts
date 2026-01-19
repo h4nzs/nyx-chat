@@ -128,12 +128,18 @@ export function registerSocket(httpServer: HttpServer) {
       }
 
       if (!token) {
-        return next(new Error("Authentication error: Token missing"));
+        // Jangan error, tapi tandai sebagai Guest (Unauthenticated)
+        // Ini penting untuk fitur "Link New Device" sebelum login
+        console.log(`[Socket] Guest connection allowed: ${socket.id}`);
+        socket.user = undefined; // Pastikan user undefined
+        return next(); 
       }
 
       const payload = verifyJwt(token);
       if (!payload || typeof payload === 'string') {
-        return next(new Error("Authentication error: Invalid token"));
+        console.warn(`[Socket] Invalid token, treating as guest: ${socket.id}`);
+        socket.user = undefined;
+        return next();
       }
 
       // Pastikan payload.id sesuai dengan struktur JWT Anda (kadang 'sub', kadang 'id')
@@ -145,21 +151,18 @@ export function registerSocket(httpServer: HttpServer) {
       });
 
       if (!user) {
-        return next(new Error("Authentication error: User not found"));
+        socket.user = undefined;
+        return next();
       }
 
       // Mapping ke AuthPayload yang diharapkan aplikasi
-      socket.user = {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        // tambahkan field lain jika AuthPayload memintanya
-      };
-      
+      socket.user = { id: user.id, email: user.email, username: user.username };
       next();
     } catch (err) {
-      console.error("[Socket Auth] Error:", err);
-      next(new Error("Authentication error"));
+      console.error("[Socket] Auth Middleware Error:", err);
+      // Fail safe: Izinkan connect sebagai guest daripada mati total
+      socket.user = undefined;
+      next();
     }
   });
 
@@ -197,6 +200,18 @@ export function registerSocket(httpServer: HttpServer) {
       io.to(data.roomId).emit("linking:receive_payload", { 
         encryptedMasterKey: data.encryptedMasterKey,
         linkingToken: linkingToken,
+      });
+
+    socket.on("auth:request_linking_qr", async (callback) => {
+         // Generate token unik buat sesi linking ini
+         const linkingToken = crypto.randomBytes(32).toString('hex');
+         // Simpan temporary mapping socketId -> linkingToken di Redis (opsional) atau memory
+         // Agar nanti pas user scan, kita tau socket mana yang harus di-update
+         
+         // Join room khusus token ini
+         socket.join(`linking:${linkingToken}`);
+         
+         callback({ token: linkingToken });
       });
     });
 
