@@ -5,7 +5,6 @@ import { FiCheckCircle, FiXCircle, FiChevronLeft, FiSmartphone } from 'react-ico
 import { Spinner } from '@components/Spinner';
 import { getSocket, connectSocket } from '@lib/socket';
 import { getSodium } from '@lib/sodiumInitializer';
-import { useAuthStore } from '@store/auth';
 import toast from 'react-hot-toast';
 
 export default function LinkDevicePage() {
@@ -14,8 +13,9 @@ export default function LinkDevicePage() {
   const [error, setError] = useState<string | null>(null);
   
   const navigate = useNavigate();
-  // Tambahkan setMasterSeed agar state memory langsung terupdate
-  const { setAccessToken, setUser, setHasRestoredKeys, setMasterSeed } = useAuthStore();
+  
+  // Kita HAPUS useAuthStore karena kita tidak akan melakukan auto-login di sini.
+  // Biarkan user login manual di halaman login setelah kunci tersimpan.
   
   const ephemeralKeyPair = useRef<{ publicKey: Uint8Array; privateKey: Uint8Array } | null>(null);
 
@@ -69,7 +69,7 @@ export default function LinkDevicePage() {
       if (!isMounted) return;
       console.log("📦 Payload received!", data);
       setStatus('processing');
-      toast.loading("Synchronizing keys...", { id: 'link-process' });
+      toast.loading("Securing connection...", { id: 'link-process' });
 
       try {
         const sodium = await getSodium();
@@ -86,15 +86,13 @@ export default function LinkDevicePage() {
 
         if (!masterSeed) throw new Error("Failed to decrypt Master Key.");
 
-        // 2. Simpan Login State (Token & User)
-        setAccessToken(data.accessToken);
-        setUser(data.user);
+        // --- PERUBAHAN UTAMA DI SINI ---
+        // Kita TIDAK memanggil setUser/setAccessToken (Login Otomatis)
+        // Kita hanya fokus menyimpan kunci, lalu lempar user ke halaman Login.
 
-        // --- BAGIAN PENTING (FIX ERROR KEYS NOT FOUND) ---
+        // 2. ENKRIPSI & SIMPAN KEYS
         
-        // A. Generate Password Acak untuk Device Ini
-        // Karena login via QR tidak pakai password user, kita buat password lokal
-        // agar kunci tetap tersimpan terenkripsi di disk.
+        // A. Generate Password Acak untuk Device Ini (Auto-Unlock)
         const devicePasswordBytes = sodium.randombytes_buf(16);
         const devicePassword = sodium.to_base64(devicePasswordBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
         
@@ -113,36 +111,35 @@ export default function LinkDevicePage() {
         const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
         const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, keyHash);
 
-        // D. Simpan Bundle ke LocalStorage
+        // D. Simpan Bundle ke LocalStorage (Gunakan nama standard: 'encryptedPrivateKeys')
         const storageBundle = {
           cipherText: sodium.to_base64(encryptedSeed, sodium.base64_variants.URLSAFE_NO_PADDING),
           salt: sodium.to_base64(salt, sodium.base64_variants.URLSAFE_NO_PADDING),
           nonce: sodium.to_base64(nonce, sodium.base64_variants.URLSAFE_NO_PADDING)
         };
-        localStorage.setItem('encryptedPrivateKeys', JSON.stringify(storageBundle));
         
-        // E. Simpan Password Device untuk Auto-Unlock
-        // Nanti app akan cek key ini saat startup untuk membuka 'encrypted_private_keys'
+        // Bersihkan storage lama biar bersih
+        localStorage.removeItem('encryptedPrivateKeys');
+        localStorage.removeItem('encrypted_private_keys');
+        
+        // Simpan yang baru
+        localStorage.setItem('encryptedPrivateKeys', JSON.stringify(storageBundle));
+        // Simpan kunci pembuka otomatis
         localStorage.setItem('device_auto_unlock_key', devicePassword);
-
-        // F. Update State Memory (Agar sesi ini langsung jalan)
-        // Kita ubah Uint8Array ke string Base64 agar seragam dengan store
-        const masterSeedStr = sodium.to_base64(masterSeed, sodium.base64_variants.URLSAFE_NO_PADDING);
-        if (setMasterSeed) setMasterSeed(masterSeedStr); 
-        setHasRestoredKeys(true);
 
         // --------------------------------------------------
 
-        toast.success("Device linked & Keys synced!", { id: 'link-process' });
+        toast.success("Device paired! Please login to finish.", { id: 'link-process' });
         setStatus('success');
 
-        // Redirect ke Chat
+        // Redirect ke Login (Bukan Chat)
+        // Delay sedikit untuk memastikan LocalStorage tertulis sempurna
         setTimeout(() => {
-          navigate('/chat');
-        }, 1000);
+          navigate('/login');
+        }, 1500);
 
       } catch (err: any) {
-        console.error("Decryption failed:", err);
+        console.error("Linking failed:", err);
         toast.error("Handshake failed: " + err.message, { id: 'link-process' });
         setStatus('failed');
         setError(err.message);
@@ -155,7 +152,7 @@ export default function LinkDevicePage() {
       isMounted = false;
       socket.off('auth:linking_success', handleLinkingSuccess);
     };
-  }, [navigate, setAccessToken, setUser, setMasterSeed, setHasRestoredKeys]);
+  }, [navigate]);
 
   const renderStatus = () => {
     switch (status) {
@@ -164,9 +161,9 @@ export default function LinkDevicePage() {
       case 'waiting':
         return <div className="flex items-center gap-2 text-accent animate-pulse"><FiSmartphone /> Scan with mobile app</div>;
       case 'processing':
-        return <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> Decrypting keys...</div>;
+        return <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> Securing keys...</div>;
       case 'success':
-        return <div className="flex items-center gap-2 text-green-500 font-bold"><FiCheckCircle /> Success! Redirecting...</div>;
+        return <div className="flex items-center gap-2 text-green-500 font-bold"><FiCheckCircle /> Linked! Redirecting to Login...</div>;
       case 'failed':
         return <div className="flex items-center gap-2 text-red-500"><FiXCircle /> Error: {error}</div>;
     }
