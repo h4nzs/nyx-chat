@@ -16,6 +16,11 @@ export default defineConfig({
           enabled: true, // Aktifkan PWA di mode dev juga
           type: 'module',
         },
+        injectManifest: {
+          // Naikkan limit ke 5 MB (5 * 1024 * 1024)
+          // Defaultnya cuma 2 MB, sedangkan libsodium bikin bundle jadi besar
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, 
+        },
         manifest: {
           name: 'Chat Lite',
           short_name: 'ChatLite',
