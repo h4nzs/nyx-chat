@@ -57,7 +57,7 @@ export function usePushNotifications() {
     setLoading(true);
     try {
       // Register SW jika belum
-      const registration = await navigator.serviceWorker.register('/sw.js');
+      const registration = await navigator.serviceWorker.ready;
       await navigator.serviceWorker.ready;
 
       // Request Permission Browser

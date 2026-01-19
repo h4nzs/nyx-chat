@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
@@ -7,19 +7,46 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
-      injectRegister: false, // We will handle registration manually
-      strategies: 'injectManifest',
-      srcDir: '.', // sw.js is in the root of the web directory
-      filename: 'sw.js',
-      injectManifest: {
-        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-      },
-      devOptions: {
-        enabled: true
-      }
-    })
-  ],
+      strategies: 'injectManifest', // Kita pakai custom SW
+        srcDir: 'src',
+        filename: 'sw.ts',
+        registerType: 'autoUpdate',
+        injectRegister: 'auto',
+        devOptions: {
+          enabled: true, // Aktifkan PWA di mode dev juga
+          type: 'module',
+        },
+        manifest: {
+          name: 'Chat Lite',
+          short_name: 'ChatLite',
+          description: 'Secure, lightweight messaging app.',
+          theme_color: '#ffffff', // Sesuaikan tema terang/gelap
+          background_color: '#ffffff',
+          display: 'standalone', // Hapus browser UI (Address bar)
+          orientation: 'portrait',
+          start_url: '/',
+          icons: [
+            {
+              src: 'pwa-192x192.png',
+              sizes: '192x192',
+              type: 'image/png'
+            },
+            {
+              src: 'pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png'
+            },
+            {
+              src: 'pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any maskable' // Icon bulat/kotak adaptif (Android 12+)
+            }
+          ]
+        }
+      })
+    ],
+
   resolve: {
     alias: {
       '@': path.resolve(__dirname, "src"),
