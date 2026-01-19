@@ -4,14 +4,15 @@ import { useAuthStore } from '@store/auth';
 import { toast } from 'react-hot-toast';
 import { Spinner } from './Spinner';
 import { toAbsoluteUrl } from '@utils/url';
-import { requestPushPermission } from '@hooks/usePushNotifications';
+// FIX 1: Import hook usePushNotifications (bukan requestPushPermission manual)
+import { usePushNotifications } from '@hooks/usePushNotifications';
 import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { FiChevronRight, FiEdit2 } from 'react-icons/fi';
 
 // Reusable component for a single setting row
 const SettingsRow = ({ title, description, children }: { title: string; description: string; children: React.ReactNode }) => (
   <div className="flex items-center justify-between py-4">
-    <div>
+    <div className="pr-4">
       <p className="font-medium text-text-primary">{title}</p>
       <p className="text-sm text-text-secondary">{description}</p>
     </div>
@@ -24,12 +25,15 @@ const SettingsCard = ({ children }: { children: React.ReactNode }) => (
   <div className="bg-bg-surface rounded-xl shadow-neumorphic-concave">{children}</div>
 );
 
-// Toggle Switch Component
-const ToggleSwitch = ({ checked, onChange }: { checked: boolean; onChange: () => void }) => (
+// FIX 2: Update ToggleSwitch biar bisa disabled (saat loading notif)
+const ToggleSwitch = ({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled?: boolean }) => (
   <button
     type="button"
-    onClick={onChange}
-    className={`relative inline-flex items-center h-7 w-12 flex-shrink-0 cursor-pointer rounded-full bg-bg-surface shadow-neumorphic-concave transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-accent`}
+    onClick={disabled ? undefined : onChange}
+    disabled={disabled}
+    className={`relative inline-flex items-center h-7 w-12 flex-shrink-0 rounded-full shadow-neumorphic-concave transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-accent ${
+      disabled ? 'cursor-not-allowed opacity-50 bg-gray-200 dark:bg-gray-700' : 'cursor-pointer bg-bg-surface'
+    }`}
     role="switch"
     aria-checked={checked}
   >
@@ -45,6 +49,14 @@ const ToggleSwitch = ({ checked, onChange }: { checked: boolean; onChange: () =>
 export default function Settings() {
   const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts } = useAuthStore();
   const { theme, toggleTheme, accent, setAccent } = useThemeStore();
+
+  // FIX 3: Panggil hook push notification
+  const { 
+    isSubscribed, 
+    loading: pushLoading, 
+    subscribeToPush, 
+    unsubscribeFromPush 
+  } = usePushNotifications();
 
   const [name, setName] = useState(user?.name || '');
   const [description, setDescription] = useState(user?.description || '');
@@ -80,15 +92,7 @@ export default function Settings() {
     }
   };
 
-  const handleSubscribePush = async () => {
-    try {
-      await requestPushPermission();
-      toast.success('Push notifications enabled!');
-    } catch (error: any) {
-      console.error('Error subscribing to push notifications:', error);
-      toast.error(error.message || 'Failed to enable push notifications.');
-    }
-  };
+  // Logic Push sudah di-handle oleh hook, kita tinggal panggil di UI
 
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,7 +133,7 @@ export default function Settings() {
   if (!user) return <div className="flex justify-center items-center h-full"><Spinner /></div>;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
+    <div className="max-w-4xl mx-auto space-y-8 pb-20">
       {/* Profile Card */}
       <form onSubmit={handleProfileSubmit}>
         <SettingsCard>
@@ -250,10 +254,16 @@ export default function Settings() {
       <SettingsCard>
         <div className="p-6">
           <h3 className="text-lg font-semibold text-text-primary mb-2">Notifications</h3>
-          <SettingsRow title="Push Notifications" description="Receive notifications for new messages on this device.">
-            <button onClick={handleSubscribePush} className="px-4 py-2 rounded-lg font-semibold text-white bg-accent shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all text-sm">
-              Enable
-            </button>
+          <SettingsRow 
+            title="Push Notifications" 
+            description={pushLoading ? "Processing..." : isSubscribed ? "Enabled on this device." : "Receive notifications for new messages."}
+          >
+            {/* FIX 4: Gunakan ToggleSwitch yang terhubung dengan state hook */}
+            <ToggleSwitch 
+              checked={isSubscribed} 
+              onChange={isSubscribed ? unsubscribeFromPush : subscribeToPush} 
+              disabled={pushLoading}
+            />
           </SettingsRow>
         </div>
       </SettingsCard>
