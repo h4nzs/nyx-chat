@@ -9,6 +9,7 @@ import { sendPushNotification } from "../utils/sendPushNotification.js";
 import multer from "multer";
 import { nanoid } from "nanoid";
 import path from "path";
+import { uploadLimiter } from "../middleware/rateLimiter.js"; // Import
 import { uploadToSupabase } from "../utils/supabase.js";
 
 const router: Router = Router();
@@ -29,6 +30,7 @@ const upload = multer({
 router.post(
   "/avatars/upload",
   requireAuth,
+  uploadLimiter, // <--- Pasang disini
   upload.single("avatar"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -79,6 +81,7 @@ router.post(
 // === 2. UPLOAD AVATAR GROUP ===
 router.post(
   "/groups/:id/avatar", 
+  uploadLimiter, // <--- Pasang disini
   requireAuth, 
   upload.single("avatar"), 
   async (req: Request, res: Response, next: NextFunction) => {
@@ -126,6 +129,7 @@ router.post(
 // Ditaruh PALING BAWAH agar "avatars" atau "groups" tidak dianggap sebagai "conversationId"
 router.post(
   "/:conversationId/upload",
+  uploadLimiter, // <--- Pasang disini
   requireAuth,
   zodValidate({ params: z.object({ conversationId: z.string().cuid() }) }),
   upload.single("file"),

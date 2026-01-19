@@ -28,6 +28,7 @@ import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
 import webpush from "web-push";
 import { cleanupOrphanedFiles } from "./utils/cleanup.js";
+import { generalLimiter } from "./middleware/rateLimiter.js"; // Import ini
 
 // Set VAPID keys for web-push notifications
 if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
@@ -124,6 +125,26 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // Public routes that don't need CSRF protection
+// === SECURITY & STABILITY ===
+
+// 1. Rate Limiter Global (Pasang SEBELUM routes)
+// Ini melindungi server dari DDoS sederhana / spam bot
+app.use("/api", generalLimiter);
+
+// 2. Request Timeout (Manual Implementation)
+// Koyeb punya timeout sendiri, tapi Node.js sebaiknya memutus lebih cepat
+// untuk membebaskan Event Loop.
+app.use((req, res, next) => {
+  res.setTimeout(20000, () => { // 20 Detik timeout
+    res.status(408).send({ error: "Request Timeout" });
+  });
+  next();
+});
+
+// 3. Body Parser Limits (Sudah ada, tapi kita review)
+// Batasi JSON body max 10MB (cukup buat base64 keys, tapi cegah payload bom)
+app.use(express.json({ limit: "10mb" })); 
+app.use(express.urlencoded({ extended: true, limit: "10mb" })); // Tambahkan limit juga disini
 app.use("/api/keys", keysRouter);
 app.use("/api/sessions", sessionsRouter);
 app.post("/api/admin/cleanup", async (req, res) => {

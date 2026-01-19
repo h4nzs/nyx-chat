@@ -7,6 +7,7 @@ import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
 import { env } from "../config.js";
 import { requireAuth } from "../middleware/auth.js";
+import { authLimiter } from "../middleware/rateLimiter.js"; // Import
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -67,7 +68,7 @@ async function issueTokens(user: any, req: import('express').Request) {
   return { access, refresh };
 }
 
-router.post("/register", zodValidate({
+router.post("/register", authLimiter, zodValidate({
     body: z.object({
       email: z.string().email().max(200),
       username: z.string().min(3).max(32),
@@ -96,7 +97,7 @@ router.post("/register", zodValidate({
   }
 );
 
-router.post("/login", zodValidate({
+router.post("/login", authLimiter, zodValidate({
     body: z.object({ emailOrUsername: z.string().min(1), password: z.string().min(8) }),
   }),
   async (req, res, next) => {
