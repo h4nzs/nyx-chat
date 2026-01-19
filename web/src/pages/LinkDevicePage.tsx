@@ -14,7 +14,6 @@ export default function LinkDevicePage() {
   
   const navigate = useNavigate();
   
-  // Simpan key sementara untuk dekripsi nanti
   const ephemeralKeyPair = useRef<{ publicKey: Uint8Array; privateKey: Uint8Array } | null>(null);
 
   useEffect(() => {
@@ -24,32 +23,28 @@ export default function LinkDevicePage() {
     const initializeSession = async () => {
       try {
         setStatus('initializing');
-        
-        // 1. Pastikan Sodium Siap
         const sodium = await getSodium();
         
-        // 2. Generate Ephemeral Keys
+        // 1. Generate Ephemeral Keys
         const keyPair = sodium.crypto_box_keypair();
         ephemeralKeyPair.current = keyPair;
         
         const pubKeyB64 = sodium.to_base64(keyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
         console.log("🔑 Ephemeral Public Key generated");
 
-        // 3. Connect Socket (Guest Mode)
+        // 2. Connect Socket (Guest Mode)
         if (!socket.connected) {
           connectSocket();
         }
 
-        // 4. Request Linking Room ID
+        // 3. Request Room ID
         socket.emit('auth:request_linking_qr', { publicKey: pubKeyB64 }, (response: any) => {
           if (!isMounted) return;
-
           if (response?.error) {
             setError(response.error);
             setStatus('failed');
             return;
           }
-
           if (response?.token) {
             setQrData(JSON.stringify({
               roomId: response.token,
@@ -85,11 +80,10 @@ export default function LinkDevicePage() {
         if (!data.encryptedMasterKey) throw new Error("Missing encrypted master key.");
         if (!ephemeralKeyPair.current) throw new Error("Ephemeral key pair lost. Please refresh.");
 
-        // 1. Dekripsi Master Key
+        // 1. Dekripsi Master Key (Private Key User)
         let masterSeed: Uint8Array;
         try {
             const cipherText = sodium.from_base64(data.encryptedMasterKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-            
             masterSeed = sodium.crypto_box_seal_open(
               cipherText, 
               ephemeralKeyPair.current.publicKey, 
@@ -103,50 +97,46 @@ export default function LinkDevicePage() {
         if (!masterSeed) throw new Error("Decryption produced empty result.");
         console.log("🔓 Master Key decrypted successfully. Preparing storage...");
 
-        // 2. ENKRIPSI & SIMPAN (Dengan Fallback Konstanta)
+        // 2. ENKRIPSI & SIMPAN KE DISK (Local Storage)
         
-        // KONSTANTA FALLBACK (Standard Libsodium Defaults)
-        // Kita pakai ini jika properti di object sodium undefined (sering terjadi di wrapper tertentu)
-        const SALT_BYTES = sodium.crypto_pwhash_SALTBYTES || 16;
+        // Konstanta Default Aman
+        const BASE64_VARIANT = sodium.base64_variants.URLSAFE_NO_PADDING;
         const KEY_BYTES = sodium.crypto_secretbox_KEYBYTES || 32;
         const NONCE_BYTES = sodium.crypto_secretbox_NONCEBYTES || 24;
-        const OPS_LIMIT = sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE || 2;
-        const MEM_LIMIT = sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE || 67108864;
-        const ALG = sodium.crypto_pwhash_ALG_DEFAULT || 2;
-        const BASE64_VARIANT = sodium.base64_variants.URLSAFE_NO_PADDING;
+        const SALT_BYTES = 16; // Standard salt length
 
-        // A. Generate Password Device (Auto-Unlock)
+        // A. Generate Password Device (Auto-Unlock Key) - 16 bytes random
         const devicePasswordBytes = sodium.randombytes_buf(16);
         const devicePassword = sodium.to_base64(devicePasswordBytes, BASE64_VARIANT);
         
         // B. Generate Salt
         const salt = sodium.randombytes_buf(SALT_BYTES);
         
-        // C. Hash Password (Argon2) -> Key
-        // PENTING: Pastikan semua parameter terisi nilai valid (bukan undefined)
-        const keyHash = sodium.crypto_pwhash(
-          KEY_BYTES,        // output length
-          devicePasswordBytes, // password (buffer)
-          salt,             // salt
-          OPS_LIMIT,        // opslimit
-          MEM_LIMIT,        // memlimit
-          ALG               // algorithm
+        // C. Derive Encryption Key (GANTI: Pakai Generic Hash / BLAKE2b)
+        // Kita tidak pakai crypto_pwhash (Argon2) karena berat & error di beberapa environment.
+        // Karena input kita sudah random (High Entropy), simple hash expansion sudah sangat aman.
+        // crypto_generichash(outLen, message, key)
+        const keyHash = sodium.crypto_generichash(
+            KEY_BYTES, 
+            devicePasswordBytes, 
+            salt // Salt dijadikan key/context
         );
 
         // D. Enkripsi MasterSeed
         const nonce = sodium.randombytes_buf(NONCE_BYTES);
         const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, keyHash);
 
-        // E. Simpan ke LocalStorage
+        // E. Simpan Bundle
         const storageBundle = {
           cipherText: sodium.to_base64(encryptedSeed, BASE64_VARIANT),
           salt: sodium.to_base64(salt, BASE64_VARIANT),
           nonce: sodium.to_base64(nonce, BASE64_VARIANT)
         };
         
-        // Bersihkan & Simpan
+        // Simpan
         localStorage.removeItem('encryptedPrivateKeys');
         localStorage.setItem('encryptedPrivateKeys', JSON.stringify(storageBundle));
+        // Simpan kunci pembuka otomatis
         localStorage.setItem('device_auto_unlock_key', devicePassword);
 
         console.log("✅ Secure storage ready. Redirecting...");
