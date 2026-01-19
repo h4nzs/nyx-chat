@@ -52,7 +52,7 @@ export async function setupAndUploadPreKeyBundle() {
     console.log("Pre-key bundle uploaded successfully.");
   } catch (e) {
     console.error("Failed to set up and upload pre-key bundle:", e);
-    toast.error("Could not prepare for secure asynchronous messages.");
+    // toast.error("Could not prepare for secure asynchronous messages.");
   }
 }
 
@@ -76,7 +76,7 @@ type RetrievedKeys = {
 
 type State = {
   user: User | null;
-  accessToken: string | null; // <-- TAMBAHAN: Untuk menyimpan token socket
+  accessToken: string | null;
   isBootstrapping: boolean;
   sendReadReceipts: boolean;
   hasRestoredKeys: boolean;
@@ -92,11 +92,13 @@ type Actions = {
   getSignedPreKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getMasterSeed: () => Promise<Uint8Array | undefined>;
   setUser: (user: User) => void;
-  setAccessToken: (token: string | null) => void; // <-- TAMBAHAN
+  setAccessToken: (token: string | null) => void;
   updateProfile: (data: Partial<Pick<User, 'name' | 'description' | 'showEmailToOthers'>>) => Promise<void>;
   updateAvatar: (avatar: File) => Promise<void>;
   setReadReceipts: (value: boolean) => void;
   setHasRestoredKeys: (hasKeys: boolean) => void;
+  // --- FIX: Tambahkan definisi setMasterSeed ---
+  setMasterSeed: (seed: string) => Promise<void>; 
   clearPrivateKeysCache: () => void;
 };
 
@@ -111,37 +113,58 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     if (privateKeysCache) return Promise.resolve(privateKeysCache);
 
     return new Promise((resolve, reject) => {
-      useModalStore.getState().showPasswordPrompt(async (password) => {
-        if (!password) return reject(new Error("Password not provided."));
-        
-        const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
-        if (!encryptedKeys) return reject(new Error("Encrypted private keys not found."));
+      // 1. Cek Auto-Unlock Key (Untuk device hasil linking / login QR)
+      const autoKey = localStorage.getItem('device_auto_unlock_key');
+      // Cek kedua kemungkinan format key (untuk backward compatibility)
+      const encryptedKeys = localStorage.getItem('encryptedPrivateKeys') || localStorage.getItem('encrypted_private_keys');
 
-        // Use the worker proxy to retrieve keys
-        const result = await retrievePrivateKeys(encryptedKeys, password);
+      if (autoKey && encryptedKeys) {
+        // Coba unlock otomatis tanpa prompt
+        retrievePrivateKeys(encryptedKeys, autoKey).then((result) => {
+          if (result.success) {
+            privateKeysCache = result.keys;
+            resolve(result.keys);
+          } else {
+            // Fallback ke prompt password jika auto-unlock gagal
+            promptForPassword();
+          }
+        }).catch(() => promptForPassword());
+      } else {
+        promptForPassword();
+      }
 
-        if (!result.success) {
-          if (result.reason === 'incorrect_password') {
-            return reject(new Error("Incorrect password."));
+      function promptForPassword() {
+         useModalStore.getState().showPasswordPrompt(async (password) => {
+          if (!password) return reject(new Error("Password not provided."));
+          
+          const encryptedKeysInner = localStorage.getItem('encryptedPrivateKeys') || localStorage.getItem('encrypted_private_keys');
+          if (!encryptedKeysInner) return reject(new Error("Encrypted private keys not found."));
+
+          const result = await retrievePrivateKeys(encryptedKeysInner, password);
+
+          if (!result.success) {
+            if (result.reason === 'incorrect_password') {
+              return reject(new Error("Incorrect password."));
+            }
+            if (result.reason === 'legacy_bundle') {
+              return reject(new Error("Legacy key bundle found. Please restore your account from your recovery phrase to upgrade."));
+            }
+            return reject(new Error(`Failed to retrieve keys: ${result.reason}`));
           }
-          if (result.reason === 'legacy_bundle') {
-            return reject(new Error("Legacy key bundle found. Please restore your account from your recovery phrase to upgrade."));
-          }
-          return reject(new Error(`Failed to retrieve keys: ${result.reason}`));
-        }
-        
-        privateKeysCache = result.keys;
-        resolve(result.keys);
-      });
+          
+          privateKeysCache = result.keys;
+          resolve(result.keys);
+        });
+      }
     });
   };
 
   return {
     user: savedUser ? JSON.parse(savedUser) : null,
-    accessToken: null, // Init token kosong
+    accessToken: null,
     isBootstrapping: true,
     sendReadReceipts: savedReadReceipts ? JSON.parse(savedReadReceipts) : true,
-    hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys'),
+    hasRestoredKeys: !!(localStorage.getItem('encryptedPrivateKeys') || localStorage.getItem('encrypted_private_keys')),
 
     setHasRestoredKeys: (hasKeys: boolean) => {
       set({ hasRestoredKeys: hasKeys });
@@ -149,6 +172,26 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
     setAccessToken: (token: string | null) => {
       set({ accessToken: token });
+    },
+
+    // --- FIX: Implementasi setMasterSeed ---
+    // Fungsi ini dipanggil setelah linking device berhasil untuk menghidupkan cache key
+    setMasterSeed: async (seedStr: string) => {
+      try {
+        const autoKey = localStorage.getItem('device_auto_unlock_key');
+        const encryptedKeys = localStorage.getItem('encryptedPrivateKeys') || localStorage.getItem('encrypted_private_keys');
+        
+        if (autoKey && encryptedKeys) {
+          const result = await retrievePrivateKeys(encryptedKeys, autoKey);
+          if (result.success) {
+            privateKeysCache = result.keys;
+            set({ hasRestoredKeys: true });
+            console.log("Keys hydrated successfully via setMasterSeed");
+          }
+        }
+      } catch (e) {
+        console.error("Failed to hydrate keys in setMasterSeed", e);
+      }
     },
 
     clearPrivateKeysCache: () => {
@@ -163,8 +206,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
     async bootstrap() {
       try {
-        // FIX: Coba refresh token dulu untuk dapatkan accessToken baru (penting untuk Socket)
-        // Jika cookie masih valid, ini akan mengembalikan { ok: true, accessToken: '...' }
         const refreshRes = await api<{ ok: boolean; accessToken?: string }>("/api/auth/refresh", { method: "POST" });
         
         if (refreshRes.accessToken) {
@@ -172,14 +213,20 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         }
 
         const me = await authFetch<User>("/api/users/me");
-        set({ user: me, hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys') });
+        set({ 
+          user: me, 
+          hasRestoredKeys: !!(localStorage.getItem('encryptedPrivateKeys') || localStorage.getItem('encrypted_private_keys')) 
+        });
         localStorage.setItem("user", JSON.stringify(me));
         
-        // Connect socket setelah token tersedia
         connectSocket();
+        
+        // Coba pre-warm keys jika ada auto-unlock key
+        if (localStorage.getItem('device_auto_unlock_key')) {
+           retrieveAndCacheKeys().catch(() => {});
+        }
+
       } catch (error) {
-        // Jangan clear user jika hanya error network sementara, tapi untuk 401 clear session
-        // Di sini kita asumsikan error fatal auth
         get().clearPrivateKeysCache();
         set({ user: null, accessToken: null, hasRestoredKeys: false });
         localStorage.removeItem("user");
@@ -191,17 +238,16 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     async login(emailOrUsername, password, restoredNotSynced = false) {
       get().clearPrivateKeysCache();
       
-      // FIX: Ambil accessToken dari response login
       const res = await api<{ user: User; accessToken: string }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ emailOrUsername, password }),
       });
 
-      const hasKeys = !!localStorage.getItem('encryptedPrivateKeys');
+      const hasKeys = !!(localStorage.getItem('encryptedPrivateKeys') || localStorage.getItem('encrypted_private_keys'));
       
       set({ 
         user: res.user, 
-        accessToken: res.accessToken, // Simpan token ke state
+        accessToken: res.accessToken,
         hasRestoredKeys: hasKeys 
       });
       
@@ -229,13 +275,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         try {
           await setupAndUploadPreKeyBundle();
         } catch (e) {
-          toast.error("Could not prepare secure sessions.");
+          // toast.error("Could not prepare secure sessions.");
         }
       } else {
         toast("To enable secure messaging, please restore your account from your recovery phrase in Settings.", { duration: 7000 });
       }
       
-      // Socket sekarang akan menggunakan token dari state ini
       connectSocket();
     },
 
@@ -252,7 +297,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
       set({ hasRestoredKeys: true });
       
-      // FIX: Ambil accessToken dari response register
       const res = await api<{ user: User; accessToken: string }>("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({
@@ -262,7 +306,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         }),
       });
 
-      // Update state user & token agar langsung login
       if (res.user && res.accessToken) {
         set({ 
           user: res.user, 
@@ -270,7 +313,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         });
         localStorage.setItem("user", JSON.stringify(res.user));
         try {
-          await setupAndUploadPreKeyBundle(); // <--- INI YANG KURANG
+          await setupAndUploadPreKeyBundle();
         } catch (e) {
           console.error("Failed to upload initial pre-key bundle:", e);
         }
@@ -288,7 +331,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
            const subscription = await registration.pushManager.getSubscription();
            if (subscription) {
              endpoint = subscription.endpoint;
-             // Opsional: Unsubscribe dari browser juga biar bersih
              await subscription.unsubscribe(); 
            }
         }
@@ -303,8 +345,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       eraseCookie("rt");
       get().clearPrivateKeysCache();
       localStorage.removeItem('user');
+      // Jangan hapus keys jika user logout, tapi hapus auto-unlock key agar aman
+      localStorage.removeItem('device_auto_unlock_key'); 
       
-      set({ user: null, accessToken: null, hasRestoredKeys: false }); // Clear token
+      set({ user: null, accessToken: null, hasRestoredKeys: false });
       
       disconnectSocket();
       useConversationStore.getState().reset();
