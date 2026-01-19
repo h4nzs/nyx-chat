@@ -126,6 +126,17 @@ app.use(express.urlencoded({ extended: true }));
 // Public routes that don't need CSRF protection
 app.use("/api/keys", keysRouter);
 app.use("/api/sessions", sessionsRouter);
+app.post("/api/admin/cleanup", async (req, res) => {
+  // Tambahkan proteksi password sederhana pakai env variable
+  if (req.headers["x-admin-key"] !== process.env.CHAT_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  
+  // Jalankan di background (jangan tunggu selesai)
+  cleanupOrphanedFiles().catch(console.error);
+  
+  res.json({ message: "Cleanup started" });
+});
 
 // === CSRF Protection ===
 // 'lax' cocok untuk arsitektur Proxy/Rewrite (First-Party simulation)
@@ -175,18 +186,6 @@ app.use("/api/sessions", sessionsRouter);
 // === HEALTH CHECK ===
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
-});
-
-app.post("/api/admin/cleanup", async (req, res) => {
-  // Tambahkan proteksi password sederhana pakai env variable
-  if (req.headers["x-admin-key"] !== process.env.CHAT_SECRET) {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-  
-  // Jalankan di background (jangan tunggu selesai)
-  cleanupOrphanedFiles().catch(console.error);
-  
-  res.json({ message: "Cleanup started" });
 });
 
 // === ERROR HANDLING ===
