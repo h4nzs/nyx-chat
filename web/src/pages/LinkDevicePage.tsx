@@ -13,7 +13,6 @@ export default function LinkDevicePage() {
   const [error, setError] = useState<string | null>(null);
   
   const navigate = useNavigate();
-  
   const ephemeralKeyPair = useRef<{ publicKey: Uint8Array; privateKey: Uint8Array } | null>(null);
 
   useEffect(() => {
@@ -30,12 +29,9 @@ export default function LinkDevicePage() {
         ephemeralKeyPair.current = keyPair;
         
         const pubKeyB64 = sodium.to_base64(keyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-        console.log("🔑 Ephemeral Public Key generated");
 
         // 2. Connect Socket (Guest Mode)
-        if (!socket.connected) {
-          connectSocket();
-        }
+        if (!socket.connected) connectSocket();
 
         // 3. Request Room ID
         socket.emit('auth:request_linking_qr', { publicKey: pubKeyB64 }, (response: any) => {
@@ -55,9 +51,9 @@ export default function LinkDevicePage() {
         });
 
       } catch (err: any) {
-        console.error("Linking init error:", err);
+        console.error("Init error:", err);
         if (isMounted) {
-          setError("Failed to initialize security engine.");
+          setError("Failed to initialize.");
           setStatus('failed');
         }
       }
@@ -68,91 +64,69 @@ export default function LinkDevicePage() {
     // --- HANDLE SUKSES SCAN ---
     const handleLinkingSuccess = async (data: any) => {
       if (!isMounted) return;
-      
-      console.log("📦 Payload received!", data);
+      console.log("📦 Payload received!");
       setStatus('processing');
-      toast.loading("Securing connection...", { id: 'link-process' });
+      toast.loading("Securing keys...", { id: 'link-process' });
 
       try {
         const sodium = await getSodium();
         
-        // Validasi Payload
-        if (!data.encryptedMasterKey) throw new Error("Missing encrypted master key.");
-        if (!ephemeralKeyPair.current) throw new Error("Ephemeral key pair lost. Please refresh.");
-
-        // 1. Dekripsi Master Key (Private Key User)
-        let masterSeed: Uint8Array;
-        try {
-            const cipherText = sodium.from_base64(data.encryptedMasterKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-            masterSeed = sodium.crypto_box_seal_open(
-              cipherText, 
-              ephemeralKeyPair.current.publicKey, 
-              ephemeralKeyPair.current.privateKey
-            );
-        } catch (cryptoErr) {
-            console.error("Crypto operation failed:", cryptoErr);
-            throw new Error("Failed to decrypt secure payload. Keys do not match.");
-        }
-
-        if (!masterSeed) throw new Error("Decryption produced empty result.");
-        console.log("🔓 Master Key decrypted successfully. Preparing storage...");
-
-        // 2. ENKRIPSI & SIMPAN KE DISK (Local Storage)
+        // 1. Dekripsi Master Key
+        if (!ephemeralKeyPair.current) throw new Error("Keypair lost.");
+        const cipherText = sodium.from_base64(data.encryptedMasterKey, sodium.base64_variants.URLSAFE_NO_PADDING);
         
-        // Konstanta Default Aman
-        const BASE64_VARIANT = sodium.base64_variants.URLSAFE_NO_PADDING;
-        const KEY_BYTES = sodium.crypto_secretbox_KEYBYTES || 32;
-        const NONCE_BYTES = sodium.crypto_secretbox_NONCEBYTES || 24;
-        const SALT_BYTES = 16; // Standard salt length
-
-        // A. Generate Password Device (Auto-Unlock Key) - 16 bytes random
-        const devicePasswordBytes = sodium.randombytes_buf(16);
-        const devicePassword = sodium.to_base64(devicePasswordBytes, BASE64_VARIANT);
-        
-        // B. Generate Salt
-        const salt = sodium.randombytes_buf(SALT_BYTES);
-        
-        // C. Derive Encryption Key (GANTI: Pakai Generic Hash / BLAKE2b)
-        // Kita tidak pakai crypto_pwhash (Argon2) karena berat & error di beberapa environment.
-        // Karena input kita sudah random (High Entropy), simple hash expansion sudah sangat aman.
-        // crypto_generichash(outLen, message, key)
-        const keyHash = sodium.crypto_generichash(
-            KEY_BYTES, 
-            devicePasswordBytes, 
-            salt // Salt dijadikan key/context
+        const masterSeed = sodium.crypto_box_seal_open(
+          cipherText, 
+          ephemeralKeyPair.current.publicKey, 
+          ephemeralKeyPair.current.privateKey
         );
 
-        // D. Enkripsi MasterSeed
-        const nonce = sodium.randombytes_buf(NONCE_BYTES);
-        const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, keyHash);
+        // 2. SIMPAN KUNCI (Metode Sederhana & Stabil)
+        // Kita generate Random Key 32-byte langsung sebagai "Password Device"
+        // Tidak perlu hashing (Argon2) karena ini bukan password manusia.
+        const KEY_BYTES = sodium.crypto_secretbox_KEYBYTES || 32;
+        const NONCE_BYTES = sodium.crypto_secretbox_NONCEBYTES || 24;
+        const BASE64_VARIANT = sodium.base64_variants.URLSAFE_NO_PADDING;
 
-        // E. Simpan Bundle
+        // A. Buat Key Unlock Otomatis (Langsung 32 bytes valid)
+        const deviceAutoUnlockKey = sodium.randombytes_buf(KEY_BYTES);
+        
+        // B. Enkripsi MasterSeed
+        const nonce = sodium.randombytes_buf(NONCE_BYTES);
+        const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, deviceAutoUnlockKey);
+
+        // C. Simpan ke LocalStorage
+        // Kita simpan 'salt' dummy biar formatnya tetap kompatibel dengan fungsi retrievePrivateKeys lama
+        const dummySalt = sodium.randombytes_buf(16); 
+
         const storageBundle = {
           cipherText: sodium.to_base64(encryptedSeed, BASE64_VARIANT),
-          salt: sodium.to_base64(salt, BASE64_VARIANT),
+          salt: sodium.to_base64(dummySalt, BASE64_VARIANT), // Dummy, tidak dipakai jika auto-unlock
           nonce: sodium.to_base64(nonce, BASE64_VARIANT)
         };
         
-        // Simpan
+        // Hapus yang lama & Simpan baru
         localStorage.removeItem('encryptedPrivateKeys');
         localStorage.setItem('encryptedPrivateKeys', JSON.stringify(storageBundle));
-        // Simpan kunci pembuka otomatis
-        localStorage.setItem('device_auto_unlock_key', devicePassword);
+        
+        // Simpan kunci pembuka (Base64)
+        localStorage.setItem('device_auto_unlock_key', sodium.to_base64(deviceAutoUnlockKey, BASE64_VARIANT));
 
-        console.log("✅ Secure storage ready. Redirecting...");
+        console.log("✅ Keys saved successfully.");
+        
         // --------------------------------------------------
 
-        toast.success("Device paired! Please login to finish.", { id: 'link-process' });
         setStatus('success');
+        toast.success("Success! Redirecting to Login...", { id: 'link-process' });
 
-        // 3. Redirect ke Login Manual
+        // Redirect ke Login setelah jeda singkat
         setTimeout(() => {
-          navigate('/login', { state: { fromLinking: true } });
-        }, 1500);
+          navigate('/login', { replace: true });
+        }, 2000);
 
       } catch (err: any) {
-        console.error("Linking handshake failed:", err);
-        toast.error("Linking failed: " + err.message, { id: 'link-process' });
+        console.error("Linking failed:", err);
+        toast.error("Error: " + err.message, { id: 'link-process' });
         setStatus('failed');
         setError(err.message);
       }
@@ -166,21 +140,6 @@ export default function LinkDevicePage() {
     };
   }, [navigate]);
 
-  const renderStatus = () => {
-    switch (status) {
-      case 'initializing':
-        return <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> Preparing...</div>;
-      case 'waiting':
-        return <div className="flex items-center gap-2 text-accent animate-pulse"><FiSmartphone /> Scan with mobile app</div>;
-      case 'processing':
-        return <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> Securing keys...</div>;
-      case 'success':
-        return <div className="flex items-center gap-2 text-green-500 font-bold"><FiCheckCircle /> Paired! Redirecting to Login...</div>;
-      case 'failed':
-        return <div className="flex items-center gap-2 text-red-500"><FiXCircle /> Error: {error}</div>;
-    }
-  };
-
   return (
     <div className="relative flex flex-col items-center justify-center h-screen bg-bg-main text-text-primary p-4 overflow-hidden">
       <Link to="/auth/login" className="absolute top-6 left-6 p-3 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary">
@@ -193,18 +152,34 @@ export default function LinkDevicePage() {
           Go to Settings &gt; Link Device on your phone
         </p>
 
-        <div className="bg-white p-4 rounded-xl inline-block mb-8 shadow-inner">
-          {qrData ? (
+        {/* CONTAINER UI (Berubah sesuai status) */}
+        <div className="bg-white p-4 rounded-xl inline-block mb-8 shadow-inner min-w-[250px] min-h-[250px] flex items-center justify-center">
+          
+          {status === 'success' ? (
+            // TAMPILAN SUKSES (Ceklis Besar)
+            <div className="flex flex-col items-center animate-bounce-in">
+              <FiCheckCircle size={100} className="text-green-500 mb-4" />
+              <p className="text-green-600 font-bold text-lg">Paired!</p>
+            </div>
+          ) : qrData ? (
+            // TAMPILAN QR
             <QRCode value={qrData} size={220} level="M" />
           ) : (
-            <div className="w-[220px] h-[220px] flex items-center justify-center">
-              {status === 'failed' ? <FiXCircle size={40} className="text-red-300" /> : <Spinner size="lg" />}
+            // TAMPILAN LOADING / ERROR
+            <div className="flex items-center justify-center">
+              {status === 'failed' ? <FiXCircle size={60} className="text-red-400" /> : <Spinner size="lg" />}
             </div>
           )}
+
         </div>
 
+        {/* STATUS TEXT */}
         <div className="h-8 flex justify-center">
-          {renderStatus()}
+          {status === 'initializing' && <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> Preparing...</div>}
+          {status === 'waiting' && <div className="flex items-center gap-2 text-accent animate-pulse"><FiSmartphone /> Scan with mobile app</div>}
+          {status === 'processing' && <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> Securing keys...</div>}
+          {status === 'success' && <div className="text-green-500 font-medium">Redirecting to login...</div>}
+          {status === 'failed' && <div className="text-red-500 text-sm">{error}</div>}
         </div>
       </div>
     </div>
