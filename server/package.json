@@ -2,17 +2,19 @@
   "name": "chat-lite-server",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "dist/index.js",
   "type": "module",
   "scripts": {
-    "dev": "node --import tsx ./src/index.ts",
-    "start": "node --import tsx ./src/index.ts",
     "build": "tsc",
-    "test": "node --import tsx --test ./tests/api.test.ts",
-    "seed": "node --import tsx ./prisma/seed.ts"
+    "start": "node --max-old-space-size=192 dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "tsx --test tests/api.test.ts",
+    "seed": "tsx prisma/seed.ts",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write src/**/*.ts"
   },
   "keywords": [],
-  "author": "",
+  "author": "h4nzs",
   "license": "ISC",
   "dependencies": {
     "@prisma/client": "^5.14.0",
