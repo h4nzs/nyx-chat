@@ -2,6 +2,13 @@ import webpush from "web-push";
 import { prisma } from "../lib/prisma.js";
 import { env } from "../config.js";
 
+interface PushPayload {
+  title: string;
+  body: string;
+  conversationId?: string; // Tambahkan ini
+  [key: string]: any;
+}
+
 export async function sendPushNotification(userId: string, payload: object) {
   if (!env.vapidPublicKey || !env.vapidPrivateKey) {
     return; // Jangan lakukan apa-apa jika VAPID keys tidak ada

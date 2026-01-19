@@ -282,8 +282,23 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
     async logout() {
       try {
-        await api("/api/auth/logout", { method: "POST" });
-      } catch {}
+        let endpoint = null;
+        if ('serviceWorker' in navigator && 'PushManager' in window) {
+           const registration = await navigator.serviceWorker.ready;
+           const subscription = await registration.pushManager.getSubscription();
+           if (subscription) {
+             endpoint = subscription.endpoint;
+             // Opsional: Unsubscribe dari browser juga biar bersih
+             await subscription.unsubscribe(); 
+           }
+        }
+        await api("/api/auth/logout", {
+          method: "POST",
+          body: JSON.stringify({ endpoint })
+         });
+      } catch (e) {
+        console.error("Logout error", e);
+      }
       eraseCookie("at");
       eraseCookie("rt");
       get().clearPrivateKeysCache();

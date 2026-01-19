@@ -136,6 +136,22 @@ router.post("/refresh", async (req, res, next) => {
 });
 
 router.post("/logout", async (req, res) => {
+  // 1. Ambil 'endpoint' dari body request (dikirim oleh frontend saat logout)
+  const { endpoint } = req.body;
+
+  // 2. Hapus push subscription spesifik dari database jika ada endpoint
+  if (endpoint) {
+    try {
+      await prisma.pushSubscription.deleteMany({
+        where: { endpoint: endpoint }
+      });
+      console.log("Push subscription removed on logout");
+    } catch (e) {
+      console.error("Failed to remove push subscription:", e);
+    }
+  }
+
+  // 3. Logika hapus Refresh Token (Kode Lama)
   const r = req.cookies?.rt;
   if (r) {
     try {
@@ -144,11 +160,11 @@ router.post("/logout", async (req, res) => {
         await prisma.refreshToken.updateMany({ where: { jti: payload.jti }, data: { revokedAt: new Date() } });
       }
     } catch (e) {
-      // Ignore errors on logout
+      // Ignore errors
     }
   }
   
-  // FIX: Gunakan tipe CookieOptions eksplisit
+  // 4. Clear Cookies (Kode Lama)
   const isProd = env.nodeEnv === "production";
   const cookieOpts: CookieOptions = { 
     path: "/", 

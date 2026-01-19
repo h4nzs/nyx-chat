@@ -292,8 +292,8 @@ export function registerSocket(httpServer: HttpServer) {
              // Panggil fungsi utilitas push notification Anda
              sendPushNotification(participant.userId, {
                  title: newMessage.sender.name || newMessage.sender.username,
-                 body: "Sent a secure message", // Jangan tampilkan isi pesan terenkripsi
-                 url: `/chat/${conversationId}`
+                 body: "🔒 Sent a secure message", // Jangan tampilkan isi pesan terenkripsi
+                 conversationId: conversationId
              }).catch(console.error);
           }
         });
