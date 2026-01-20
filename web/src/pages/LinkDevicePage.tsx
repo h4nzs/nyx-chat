@@ -6,7 +6,7 @@ import { Spinner } from '@components/Spinner';
 import { getSocket, connectSocket } from '@lib/socket';
 import { getSodium } from '@lib/sodiumInitializer';
 import toast from 'react-hot-toast';
-import { useAuthStore } from '@store/auth';
+import { useAuthStore, type User } from '@store/auth';
 
 export default function LinkDevicePage() {
   const [qrData, setQrData] = useState<string | null>(null);
@@ -18,16 +18,21 @@ export default function LinkDevicePage() {
   const ephemeralKeyPair = useRef<{ publicKey: Uint8Array; privateKey: Uint8Array } | null>(null);
   const handlerRef = useRef<(data: any) => void>();
 
-  const handleLinkingSuccess = useCallback(async (data: any) => {
+  const handleLinkingSuccess = useCallback(async (data: {user: User, accessToken: string, encryptedMasterKey: string}) => {
     setStatus('processing');
-    toast.loading("Secure payload received. Decrypting...", { id: 'link-process' });
+    toast.loading("Secure payload received. Preparing device...", { id: 'link-process' });
 
     try {
       const sodium = await getSodium();
       
-      if (!data.encryptedMasterKey) throw new Error("Payload is missing the master key.");
-      if (!ephemeralKeyPair.current) throw new Error("Ephemeral keys lost. Please refresh the page.");
+      if (!data.encryptedMasterKey || !data.user || !data.accessToken) {
+        throw new Error("Incomplete payload received from server.");
+      }
+      if (!ephemeralKeyPair.current) {
+        throw new Error("Ephemeral keys lost. Please refresh the page and try again.");
+      }
 
+      // 1. Decrypt the master seed using the ephemeral private key
       const cipherText = sodium.from_base64(data.encryptedMasterKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       const masterSeed = sodium.crypto_box_seal_open(
         cipherText, 
@@ -39,6 +44,7 @@ export default function LinkDevicePage() {
         throw new Error("Failed to decrypt the payload. QR code may be invalid or expired.");
       }
       
+      // 2. Re-encrypt the master seed for local storage with a new one-time auto-unlock key
       const autoUnlockKey = sodium.randombytes_buf(sodium.crypto_secretbox_KEYBYTES);
       const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
       const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, autoUnlockKey);
@@ -48,21 +54,16 @@ export default function LinkDevicePage() {
         nonce: sodium.to_base64(nonce, sodium.base64_variants.URLSAFE_NO_PADDING)
       };
       
+      // 3. Persist everything to localStorage for the bootstrap process on the next page
       localStorage.setItem('encryptedPrivateKeys', JSON.stringify(storageBundle));
       localStorage.setItem('device_auto_unlock_key', sodium.to_base64(autoUnlockKey, sodium.base64_variants.URLSAFE_NO_PADDING));
+      localStorage.setItem('linking_user', JSON.stringify(data.user));
+      localStorage.setItem('linking_accessToken', data.accessToken);
       
-      // Also store the received access token
-      if (data.accessToken) {
-         useAuthStore.getState().setAccessToken(data.accessToken);
-      }
-      if (data.user) {
-         localStorage.setItem('user', JSON.stringify(data.user));
-         useAuthStore.getState().setUser(data.user);
-      }
-
-      toast.success("Device successfully paired!", { id: 'link-process' });
+      toast.success("Device successfully paired! Please wait.", { id: 'link-process' });
       setStatus('success');
 
+      // 4. Navigate to the login page where the bootstrap process will take over
       setTimeout(() => {
         navigate('/login', { state: { fromLinking: true }, replace: true });
       }, 1500);

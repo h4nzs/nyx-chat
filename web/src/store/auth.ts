@@ -156,27 +156,68 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     bootstrap: async () => {
-      // Must run before any auth-related API calls
-      await get().tryAutoUnlock();
+      // This is the main entry point for starting a session.
+      // It now orchestrates the session start, prioritizing the device linking flow.
+      set({ isBootstrapping: true });
+      let sessionStarted = false;
 
-      try {
-        const refreshRes = await api<{ ok: boolean; accessToken?: string }>("/api/auth/refresh", { method: "POST" });
-        if (refreshRes.accessToken) {
-          set({ accessToken: refreshRes.accessToken });
+      // --- 1. Prioritize Device Linking Flow ---
+      const linkingToken = localStorage.getItem('linking_accessToken');
+      const linkingUser = localStorage.getItem('linking_user');
+
+      if (linkingToken && linkingUser) {
+        console.log("🚀 Device linking data found. Attempting to bootstrap session...");
+        try {
+          const user = JSON.parse(linkingUser) as User;
+          set({ accessToken: linkingToken, user });
+          
+          // Now that user/token is set, try to unlock the keys automatically.
+          const unlocked = await get().tryAutoUnlock();
+          if (unlocked) {
+            sessionStarted = true;
+            console.log("✅ Device linking bootstrap successful.");
+            // Connect the socket now that keys are unlocked and session is ready.
+            connectSocket();
+          } else {
+            // This would be an unexpected error, as auto-unlock should work after linking.
+            throw new Error("Failed to auto-unlock keys after device linking.");
+          }
+        } catch (error) {
+          console.error("Critical error during device linking bootstrap:", error);
+          // Fall through to the standard logout/cleanup.
+        } finally {
+          // Always clean up the temporary linking data.
+          localStorage.removeItem('linking_accessToken');
+          localStorage.removeItem('linking_user');
         }
-
-        const me = await authFetch<User>("/api/users/me");
-        set({ user: me, hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys') });
-        localStorage.setItem("user", JSON.stringify(me));
-        
-        connectSocket();
-        
-      } catch (error) {
-        privateKeysCache = null;
-        set({ user: null, accessToken: null });
-      } finally {
-        set({ isBootstrapping: false });
       }
+
+      // --- 2. Standard Refresh Token Flow ---
+      if (!sessionStarted) {
+        try {
+          const refreshRes = await api<{ ok: boolean; accessToken?: string }>("/api/auth/refresh", { method: "POST" });
+          if (refreshRes.accessToken) {
+            set({ accessToken: refreshRes.accessToken });
+
+            // After getting a token, fetch user data.
+            const me = await authFetch<User>("/api/users/me");
+            set({ user: me, hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys') });
+            localStorage.setItem("user", JSON.stringify(me));
+            
+            // Connect socket after a successful refresh.
+            connectSocket();
+          } else {
+            // No linking data and no refresh token, so the user is logged out.
+            throw new Error("No valid session.");
+          }
+        } catch (error) {
+          // This is the normal path for a user who is not logged in.
+          privateKeysCache = null;
+          set({ user: null, accessToken: null });
+        }
+      }
+
+      set({ isBootstrapping: false });
     },
 
     login: async (emailOrUsername, password, restoredNotSynced = false) => {
