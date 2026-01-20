@@ -49,9 +49,14 @@ export default function LinkDevicePage() {
       const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
       const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, autoUnlockKey);
       
+      // FIX: The worker's `retrievePrivateKeys` function expects a `salt` property, even if unused in auto-unlock.
+      // We'll add a dummy salt to match the expected data shape and prevent a parsing error.
+      const dummySalt = sodium.randombytes_buf(16);
+
       const storageBundle = {
         cipherText: sodium.to_base64(encryptedSeed, sodium.base64_variants.URLSAFE_NO_PADDING),
-        nonce: sodium.to_base64(nonce, sodium.base64_variants.URLSAFE_NO_PADDING)
+        nonce: sodium.to_base64(nonce, sodium.base64_variants.URLSAFE_NO_PADDING),
+        salt: sodium.to_base64(dummySalt, sodium.base64_variants.URLSAFE_NO_PADDING),
       };
       
       // 3. Persist everything to localStorage for the bootstrap process on the next page
