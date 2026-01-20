@@ -142,7 +142,8 @@ const AppContent = () => {
   useEffect(() => {
     const sync = async () => {
       // Cek apakah user ada, belum disync di session ini, dan tidak sedang proses sync
-      if (user && sessionStorage.getItem('keys_synced') !== 'true' && !isSyncing) {
+      // FIX: Jangan jalankan sync di halaman linking device
+      if (user && !location.pathname.startsWith('/link-device') && sessionStorage.getItem('keys_synced') !== 'true' && !isSyncing) {
         try {
           isSyncing = true;
           console.log("🔑 Starting session key synchronization...");
@@ -157,7 +158,7 @@ const AppContent = () => {
       }
     };
     sync();
-  }, [user]);
+  }, [user, location.pathname]);
 
   // 4. Apply Theme
   useEffect(() => {
