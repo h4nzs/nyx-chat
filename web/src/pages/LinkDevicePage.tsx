@@ -46,14 +46,27 @@ export default function LinkDevicePage() {
       
       // 2. Re-encrypt the master seed for local storage with a new one-time auto-unlock key
       const autoUnlockKey = sodium.randombytes_buf(sodium.crypto_secretbox_KEYBYTES);
-      const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
-      const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, autoUnlockKey);
+      const autoUnlockKeyB64 = sodium.to_base64(autoUnlockKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       
-      // DEFINITIVE FIX: The worker expects a single Base64 string that is a concatenation of
-      // raw binary data: [salt][nonce][ciphertext]. We will construct this structure now.
-      // The salt here is used by the password-derivation function, not the auto-unlock key, but is required for the format.
-      const salt = sodium.randombytes_buf(32); 
+      // DEFINITIVE FIX: Replicate the exact key derivation logic from the crypto worker.
+      // The worker NEVER uses the password/key directly. It always derives a key from (salt + appSecret + password).
+      const appSecret = import.meta.env.VITE_APP_SECRET;
+      if (!appSecret) {
+        throw new Error("VITE_APP_SECRET is not defined. Cannot derive key.");
+      }
 
+      const salt = sodium.randombytes_buf(32);
+      const combinedPass = `${appSecret}-${autoUnlockKeyB64}`;
+      const keyInput = new Uint8Array(salt.length + sodium.from_string(combinedPass).length);
+      keyInput.set(salt);
+      keyInput.set(sodium.from_string(combinedPass), salt.length);
+      const derivedKey = sodium.crypto_generichash(sodium.crypto_secretbox_KEYBYTES, keyInput);
+
+      // Now, encrypt the seed with the DERIVED key.
+      const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
+      const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, derivedKey);
+      
+      // Concatenate the raw binary data: [salt][nonce][ciphertext]
       const combined = new Uint8Array(salt.length + nonce.length + encryptedSeed.length);
       combined.set(salt, 0);
       combined.set(nonce, salt.length);
@@ -63,7 +76,7 @@ export default function LinkDevicePage() {
       
       // 3. Persist everything to localStorage for the bootstrap process on the next page
       localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeysB64);
-      localStorage.setItem('device_auto_unlock_key', sodium.to_base64(autoUnlockKey, sodium.base64_variants.URLSAFE_NO_PADDING));
+      localStorage.setItem('device_auto_unlock_key', autoUnlockKeyB64); // Store the original key, not the derived one
       localStorage.setItem('linking_user', JSON.stringify(data.user));
       localStorage.setItem('linking_accessToken', data.accessToken);
       
