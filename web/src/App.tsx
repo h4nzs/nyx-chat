@@ -123,8 +123,10 @@ const AppContent = () => {
 
   // 2. Manage Socket Connection (Centralized)
   useEffect(() => {
-    if (location.pathname === '/link-device') {
-      console.log("🔗 On Linking Page: Keeping socket alive managed by page.");
+    // Prevent global socket logic from interfering with the device linking page,
+    // which manages its own guest socket connection.
+    if (location.pathname.startsWith('/link-device')) {
+      console.log("🔗 On Linking Page: Global socket management is paused.");
       return;
     }
     if (user) {

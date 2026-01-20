@@ -1,77 +1,58 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { FiChevronLeft, FiCheckCircle, FiXCircle, FiCamera } from 'react-icons/fi';
+import { FiChevronLeft, FiCheckCircle, FiXCircle } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { useAuthStore } from '@store/auth';
 import { getSocket } from '@lib/socket';
 import { getSodium } from '@lib/sodiumInitializer';
-import { Html5Qrcode } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeScannerState } from 'html5-qrcode';
 import { Spinner } from '@components/Spinner';
-
-const qrcodeRegionId = "qr-code-scanner-region";
 
 export default function DeviceScannerPage() {
   const [status, setStatus] = useState<'scanning' | 'processing' | 'success' | 'failed'>('scanning');
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
-  
-  // Ambil fungsi untuk mendapatkan Master Key yang sedang aktif (unlocked)
+
   const getMasterSeed = useAuthStore(s => s.getMasterSeed);
   
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const qrcodeRegionRef = useRef<HTMLDivElement>(null);
   const isProcessingRef = useRef(false);
 
-  const stopScanner = async () => {
-    if (scannerRef.current && scannerRef.current.isScanning) {
-      try {
-        await scannerRef.current.stop();
-        scannerRef.current.clear();
-      } catch (e) {
-        console.error("Failed to stop scanner", e);
-      }
-    }
-  };
-
   const processQrCode = useCallback(async (decodedText: string) => {
-    // Mencegah double process
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
 
     setStatus('processing');
     toast.loading('QR Code detected. Synchronizing...', { id: 'linking-toast' });
+    
+    if (scannerRef.current?.isScanning) {
+      scannerRef.current.pause(true);
+    }
 
     try {
-      // 1. Parse QR Data
       let data;
       try {
         data = JSON.parse(decodedText);
       } catch (e) {
-        throw new Error("Invalid QR Code format. Not a Chat Lite code.");
+        throw new Error("Invalid QR Code. Not a recognized Chat Lite code.");
       }
 
       const { roomId, linkingPubKey } = data;
       if (!roomId || !linkingPubKey) throw new Error('Invalid QR code data.');
 
-      // 2. Ambil Master Key User (Harus sudah unlock/login)
       const masterSeed = await getMasterSeed();
       if (!masterSeed) {
-        throw new Error("Cannot retrieve your encryption keys. Please login again to unlock them.");
+        throw new Error("Your keys are locked. Please log in again to unlock them.");
       }
 
       const sodium = await getSodium();
       
-      // 3. Enkripsi Master Key menggunakan Public Key Device Baru
-      // Kita pakai Sealed Box (Anonymous Encryption) karena device baru belum tau siapa kita
       const linkingPubKeyBytes = sodium.from_base64(linkingPubKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       const encryptedPayload = sodium.crypto_box_seal(masterSeed, linkingPubKeyBytes);
       const encryptedPayloadB64 = sodium.to_base64(encryptedPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-      // 4. Kirim ke Server via Socket
       const socket = getSocket();
-      
-      // Emit event 'linking:send_payload'
-      // Server akan menerima ini, membuat AccessToken baru untuk device baru,
-      // lalu mem-forward (encryptedMasterKey + AccessToken + UserData) ke RoomID
       socket.emit('linking:send_payload', { 
         roomId, 
         encryptedMasterKey: encryptedPayloadB64 
@@ -80,12 +61,10 @@ export default function DeviceScannerPage() {
       setStatus('success');
       toast.success('Device successfully linked!', { id: 'linking-toast' });
       
-      // Hentikan scanner dan redirect
       if (scannerRef.current?.isScanning) {
         await scannerRef.current.stop();
       }
       
-      await stopScanner();
       setTimeout(() => navigate('/settings/sessions'), 2000);
 
     } catch (err: any) {
@@ -93,60 +72,70 @@ export default function DeviceScannerPage() {
       setError(err.message || 'Failed to process linking.');
       setStatus('failed');
       toast.error(err.message || 'Linking failed.', { id: 'linking-toast' });
-      isProcessingRef.current = false; // Allow retry
     }
   }, [getMasterSeed, navigate]);
 
   useEffect(() => {
-    // Inisialisasi Scanner
-    if (status === 'scanning') {
-       const initScanner = async () => {
-         // Pastikan elemen DOM ada sebelum init
-         const element = document.getElementById(qrcodeRegionId);
-         if (!element) return;
+    if (!qrcodeRegionRef.current) {
+      console.error("QR Code region ref is not available.");
+      return;
+    }
+    
+    const html5QrCode = new Html5Qrcode(qrcodeRegionRef.current.id);
+    scannerRef.current = html5QrCode;
 
-         // Cleanup previous instance if any
-         if (scannerRef.current) {
-            await stopScanner();
-         }
-         
-         const html5QrCode = new Html5Qrcode(qrcodeRegionId);
-         scannerRef.current = html5QrCode;
-
-         html5QrCode.start(
+    const startScanner = async () => {
+      try {
+        await html5QrCode.start(
           { facingMode: "environment" },
           { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
-          (decodedText) => processQrCode(decodedText),
-          (errorMessage) => { /* ignore frame errors */ }
-        ).catch((err) => {
-          console.error("Camera start error:", err);
-          setError('Could not access camera. Please check permissions.');
-          setStatus('failed');
-        });
-       }
-       
-       initScanner();
-    }
-
-    // Cleanup saat unmount
-    return () => {
-      if (scannerRef.current?.isScanning) {
-        scannerRef.current.stop().catch(console.error);
-        scannerRef.current.clear();
+          (decodedText) => {
+            if (!isProcessingRef.current) {
+              processQrCode(decodedText);
+            }
+          },
+          (errorMessage) => { /* ignore frame parse errors */ }
+        );
+      } catch (err: any) {
+        console.error("Camera start error:", err);
+        setError('Could not access camera. Please check permissions and refresh the page.');
+        setStatus('failed');
       }
     };
-  }, [status, processQrCode]);
+
+    startScanner();
+
+    return () => {
+      const stopAndClear = async () => {
+        if (scannerRef.current) {
+          try {
+            const state = scannerRef.current.getState();
+            if (state === Html5QrcodeScannerState.SCANNING || state === Html5QrcodeScannerState.PAUSED) {
+              await scannerRef.current.stop();
+            }
+            scannerRef.current.clear();
+          } catch (e) {
+            console.error("Failed to cleanly stop scanner", e);
+          }
+        }
+      };
+      stopAndClear();
+    };
+  }, [processQrCode]);
 
   const handleRetry = () => {
-      setStatus('scanning');
-      setError(null);
-      isProcessingRef.current = false;
+    if (scannerRef.current) {
+      scannerRef.current.resume();
+    }
+    setStatus('scanning');
+    setError(null);
+    isProcessingRef.current = false;
   };
 
   return (
     <div className="flex flex-col h-screen bg-bg-main text-text-primary">
       <header className="p-4 flex items-center border-b border-border bg-bg-surface">
-        <Link to="/settings/link-device" className="p-2 -ml-2 rounded-full hover:bg-bg-main transition-colors">
+        <Link to="/settings" className="p-2 -ml-2 rounded-full hover:bg-bg-main transition-colors">
           <FiChevronLeft size={24} />
         </Link>
         <h1 className="ml-2 text-xl font-bold">Scan QR Code</h1>
@@ -155,11 +144,9 @@ export default function DeviceScannerPage() {
       <main className="flex-1 flex flex-col items-center justify-center p-4">
         <div className="bg-bg-surface p-6 rounded-2xl shadow-neumorphic-concave text-center max-w-md w-full">
           
-          {/* Area Kamera */}
           <div className="relative w-full aspect-square bg-black rounded-xl overflow-hidden shadow-inner mb-4">
-            <div id={qrcodeRegionId} className="w-full h-full" />
+            <div id="qr-code-scanner-region" ref={qrcodeRegionRef} className="w-full h-full" />
             
-            {/* Overlay Garis Scan */}
             {status === 'scanning' && (
               <div className="absolute inset-0 border-2 border-accent/50 rounded-xl pointer-events-none">
                 <div className="absolute top-1/2 left-4 right-4 h-0.5 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-scan-line"></div>
@@ -167,8 +154,7 @@ export default function DeviceScannerPage() {
             )}
           </div>
 
-          {/* Status Messages */}
-          <div className="min-h-[60px]">
+          <div className="min-h-[80px]">
             {status === 'scanning' && (
               <p className="text-text-secondary text-sm">
                 Point your camera at the QR code shown on the new device.
@@ -192,14 +178,10 @@ export default function DeviceScannerPage() {
             {status === 'failed' && (
               <div className="flex flex-col items-center text-red-500">
                 <FiXCircle size={40} className="mb-2" />
-                <span className="font-bold">Failed</span>
-                <span className="text-xs mt-1">{error}</span>
+                <span className="font-bold">{error ? 'Error' : 'Failed'}</span>
+                <span className="text-xs mt-1 text-text-secondary">{error || 'An unknown error occurred.'}</span>
                 <button 
-                  onClick={() => {
-                    setStatus('scanning');
-                    isProcessingRef.current = false;
-                    scannerRef.current?.resume();
-                  }}
+                  onClick={handleRetry}
                   className="mt-4 px-4 py-2 bg-bg-main rounded-lg shadow-neumorphic-convex active:shadow-neumorphic-pressed text-sm font-medium text-text-primary"
                 >
                   Try Again
