@@ -236,8 +236,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     async login(emailOrUsername, password, restoredNotSynced = false) {
-      get().clearPrivateKeysCache();
+      // Step 1: Clear any keys from a previous session.
+      privateKeysCache = null; 
       
+      // Step 2: Authenticate with the server.
       const res = await api<{ user: User; accessToken: string }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ emailOrUsername, password }),
@@ -245,46 +247,57 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
       const hasKeys = !!(localStorage.getItem('encryptedPrivateKeys') || localStorage.getItem('encrypted_private_keys'));
       
+      // Step 3: Set user and token state.
       set({ 
         user: res.user, 
         accessToken: res.accessToken,
         hasRestoredKeys: hasKeys 
       });
-      
       localStorage.setItem("user", JSON.stringify(res.user));
       
+      // Step 4 (FIX): If keys exist locally, decrypt them now with the provided password.
+      if (hasKeys) {
+        try {
+          const encryptedKeys = localStorage.getItem('encryptedPrivateKeys') || localStorage.getItem('encrypted_private_keys');
+          const result = await retrievePrivateKeys(encryptedKeys!, password);
+          if (result.success) {
+            privateKeysCache = result.keys;
+            console.log("✅ Key cache successfully populated during login.");
+          } else {
+            // This happens if the password is correct for login but not for keys (e.g., after a password reset not yet implemented)
+            throw new Error(`Login successful, but failed to decrypt keys: ${result.reason}`);
+          }
+        } catch (e) {
+          console.error("Failed to decrypt keys on login:", e);
+          toast.error("Could not decrypt your stored keys. You may need to restore from your recovery phrase if the password has changed.");
+        }
+      }
+
+      // Step 5: Handle post-login tasks like syncing keys.
       if (restoredNotSynced) {
+        // This case is for when a user restores from phrase and then logs in.
         try {
           console.log("Syncing restored keys with the server...");
-          const publicKey = localStorage.getItem('publicKey');
-          const signingKey = localStorage.getItem('signingPublicKey');
-          if (!publicKey || !signingKey) throw new Error("Restored public keys not found in local storage.");
-
-          await authFetch('/api/users/me/keys', {
-            method: 'PUT',
-            body: JSON.stringify({ publicKey, signingKey }),
-          });
+          await setupAndUploadPreKeyBundle();
           console.log("Server keys updated successfully.");
         } catch(e) {
           console.error("Failed to sync restored keys with server:", e);
           toast.error("Failed to sync new keys with server. You may need to generate new keys.");
         }
-      }
-      
-      if (hasKeys) {
-        try {
-          await setupAndUploadPreKeyBundle();
-        } catch (e) {
-          // toast.error("Could not prepare secure sessions.");
-        }
+      } else if (get().hasRestoredKeys) {
+        // For a normal login, also ensure the pre-key bundle is uploaded if needed.
+        // The cache should be populated now, so this will succeed.
+        setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload pre-key bundle on login:", e));
       } else {
-        toast("To enable secure messaging, please restore your account from your recovery phrase in Settings.", { duration: 7000 });
+        // This user has no keys on this device.
+        toast("To enable secure messaging, restore your account from your recovery phrase in Settings.", { duration: 7000 });
       }
       
       connectSocket();
     },
 
     async registerAndGeneratePhrase(data) {
+      // Step 1: Generate keys and the encrypted bundle.
       const {
         encryptionPublicKeyB64,
         signingPublicKeyB64,
@@ -292,11 +305,31 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         phrase
       } = await registerAndGenerateKeys(data.password);
 
+      // Step 2: Store the encrypted bundle and public keys in localStorage.
       localStorage.setItem('publicKey', encryptionPublicKeyB64);
       localStorage.setItem('signingPublicKey', signingPublicKeyB64);
       localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
       set({ hasRestoredKeys: true });
       
+      // Step 3 (FIX): Immediately decrypt the bundle we just created to populate the cache.
+      // This prevents the subsequent `setupAndUploadPreKeyBundle` call from failing.
+      try {
+        const result = await retrievePrivateKeys(encryptedPrivateKeys, data.password);
+        if (result.success) {
+          privateKeysCache = result.keys;
+          console.log("✅ Key cache successfully populated during registration.");
+        } else {
+          // This should not happen if the password is correct.
+          throw new Error(`Failed to prime key cache: ${result.reason}`);
+        }
+      } catch (e) {
+        console.error("Critical error: Failed to cache keys during registration.", e);
+        toast.error("A critical error occurred while securing your account. Please try again.");
+        // Throwing here to stop the registration process if keys can't be cached.
+        throw e;
+      }
+
+      // Step 4: Register the user on the server with their public keys.
       const res = await api<{ user: User; accessToken: string }>("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({
@@ -306,12 +339,14 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         }),
       });
 
+      // Step 5: If server registration is successful, set the session and upload the pre-key bundle.
       if (res.user && res.accessToken) {
         set({ 
           user: res.user, 
           accessToken: res.accessToken 
         });
         localStorage.setItem("user", JSON.stringify(res.user));
+        // This will now succeed because the key cache is populated.
         try {
           await setupAndUploadPreKeyBundle();
         } catch (e) {
