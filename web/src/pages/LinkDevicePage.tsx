@@ -49,18 +49,20 @@ export default function LinkDevicePage() {
       const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
       const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, autoUnlockKey);
       
-      // FIX: The worker's `retrievePrivateKeys` function expects a `salt` property, even if unused in auto-unlock.
-      // We'll add a dummy salt to match the expected data shape and prevent a parsing error.
-      const dummySalt = sodium.randombytes_buf(16);
+      // DEFINITIVE FIX: The worker expects a single Base64 string that is a concatenation of
+      // raw binary data: [salt][nonce][ciphertext]. We will construct this structure now.
+      // The salt here is used by the password-derivation function, not the auto-unlock key, but is required for the format.
+      const salt = sodium.randombytes_buf(32); 
 
-      const storageBundle = {
-        cipherText: sodium.to_base64(encryptedSeed, sodium.base64_variants.URLSAFE_NO_PADDING),
-        nonce: sodium.to_base64(nonce, sodium.base64_variants.URLSAFE_NO_PADDING),
-        salt: sodium.to_base64(dummySalt, sodium.base64_variants.URLSAFE_NO_PADDING),
-      };
+      const combined = new Uint8Array(salt.length + nonce.length + encryptedSeed.length);
+      combined.set(salt, 0);
+      combined.set(nonce, salt.length);
+      combined.set(encryptedSeed, salt.length + nonce.length);
+
+      const encryptedPrivateKeysB64 = sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
       
       // 3. Persist everything to localStorage for the bootstrap process on the next page
-      localStorage.setItem('encryptedPrivateKeys', JSON.stringify(storageBundle));
+      localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeysB64);
       localStorage.setItem('device_auto_unlock_key', sodium.to_base64(autoUnlockKey, sodium.base64_variants.URLSAFE_NO_PADDING));
       localStorage.setItem('linking_user', JSON.stringify(data.user));
       localStorage.setItem('linking_accessToken', data.accessToken);
