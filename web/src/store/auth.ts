@@ -1,7 +1,7 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { authFetch, api } from "@lib/api";
 import { disconnectSocket, connectSocket } from "@lib/socket";
-import { eraseCookie } from "@lib/tokenStorage";
+import { eraseCookie, clearAuthCookies } from "@lib/tokenStorage";
 import { getSodium } from '@lib/sodiumInitializer';
 import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";
@@ -187,7 +187,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     bootstrap: async () => {
       set({ isBootstrapping: true });
       let sessionStarted = false;
-      
+
       // --- Standard Refresh Token Flow ---
       if (!sessionStarted) {
         try {
@@ -198,17 +198,26 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             const me = await authFetch<User>("/api/users/me");
             set({ user: me, hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys') });
             localStorage.setItem("user", JSON.stringify(me));
-            
+
             // Coba auto-unlock saat bootstrap
             await get().tryAutoUnlock();
-            
+
             connectSocket();
           } else {
             throw new Error("No valid session.");
           }
-        } catch (error) {
+        } catch (error: any) {
+          console.error("Bootstrap error:", error);
+
+          // Jika refresh token gagal karena token tidak valid/expired, bersihkan state lokal
           privateKeysCache = null;
           set({ user: null, accessToken: null });
+
+          // Hapus cookie secara lokal jika server tidak membersihkannya
+          clearAuthCookies();
+
+          // Hapus data pengguna dari localStorage
+          localStorage.removeItem("user");
         }
       }
 
@@ -217,60 +226,67 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
     login: async (emailOrUsername, password, restoredNotSynced = false) => {
       privateKeysCache = null;
-      
-      const res = await api<{ user: User; accessToken: string }>("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify({ emailOrUsername, password }),
-      });
 
-      const hasKeys = !!localStorage.getItem('encryptedPrivateKeys');
-      
-      set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeys });
-      localStorage.setItem("user", JSON.stringify(res.user));
-      
-      if (hasKeys) {
-        try {
-          const encryptedKeys = localStorage.getItem('encryptedPrivateKeys')!;
-          const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
-          let result;
+      try {
+        const res = await api<{ user: User; accessToken: string }>("/api/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ emailOrUsername, password }),
+        });
 
-          if (autoUnlockKey) {
-             console.log("🔐 Login: Detected linked device key. Using auto-unlock...");
-             result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
-             
-             if (!result.success) {
-                 console.warn("⚠️ Auto-unlock key invalid. Falling back to user password...");
-                 result = await retrievePrivateKeys(encryptedKeys, password);
-             }
-          } else {
-             result = await retrievePrivateKeys(encryptedKeys, password);
+        const hasKeys = !!localStorage.getItem('encryptedPrivateKeys');
+
+        set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeys });
+        localStorage.setItem("user", JSON.stringify(res.user));
+
+        if (hasKeys) {
+          try {
+            const encryptedKeys = localStorage.getItem('encryptedPrivateKeys')!;
+            const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
+            let result;
+
+            if (autoUnlockKey) {
+               console.log("🔐 Login: Detected linked device key. Using auto-unlock...");
+               result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
+
+               if (!result.success) {
+                   console.warn("⚠️ Auto-unlock key invalid. Falling back to user password...");
+                   result = await retrievePrivateKeys(encryptedKeys, password);
+               }
+            } else {
+               result = await retrievePrivateKeys(encryptedKeys, password);
+            }
+
+            if (result.success) {
+              privateKeysCache = result.keys;
+              console.log("✅ Key cache successfully populated during login.");
+            } else {
+              throw new Error(`Login successful, but failed to decrypt keys: ${result.reason}`);
+            }
+          } catch (e) {
+            console.error("Failed to decrypt keys on login:", e);
+            toast.error("Could not decrypt your stored keys. Please restore your account if the password has changed.");
           }
+        }
 
-          if (result.success) {
-            privateKeysCache = result.keys;
-            console.log("✅ Key cache successfully populated during login.");
-          } else {
-            throw new Error(`Login successful, but failed to decrypt keys: ${result.reason}`);
+        if (restoredNotSynced) {
+          try {
+            await setupAndUploadPreKeyBundle();
+          } catch(e) {
+            console.error("Failed to sync restored keys with server:", e);
           }
-        } catch (e) {
-          console.error("Failed to decrypt keys on login:", e);
-          toast.error("Could not decrypt your stored keys. Please restore your account if the password has changed.");
+        } else if (get().hasRestoredKeys) {
+          setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload pre-key bundle on login:", e));
+        } else {
+          toast("To enable secure messaging, restore your account from your recovery phrase in Settings.", { duration: 7000 });
         }
-      }
 
-      if (restoredNotSynced) {
-        try {
-          await setupAndUploadPreKeyBundle();
-        } catch(e) {
-          console.error("Failed to sync restored keys with server:", e);
-        }
-      } else if (get().hasRestoredKeys) {
-        setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload pre-key bundle on login:", e));
-      } else {
-        toast("To enable secure messaging, restore your account from your recovery phrase in Settings.", { duration: 7000 });
+        connectSocket();
+      } catch (error: any) {
+        console.error("Login error:", error);
+        // Jika login gagal, bersihkan state
+        set({ user: null, accessToken: null });
+        throw error;
       }
-      
-      connectSocket();
     },
 
     registerAndGeneratePhrase: async (data) => {
@@ -370,7 +386,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
            if (subscription) {
              const endpoint = subscription.endpoint;
              await api("/api/auth/logout", { method: "POST", body: JSON.stringify({ endpoint }) }).catch(() => {});
-             await subscription.unsubscribe(); 
+             await subscription.unsubscribe();
            } else {
              await api("/api/auth/logout", { method: "POST" }).catch(() => {});
            }
@@ -380,14 +396,13 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       } catch (e) {
         console.error("Logout error", e);
       } finally {
-        eraseCookie("at");
-        eraseCookie("rt");
+        clearAuthCookies();
         privateKeysCache = null;
         localStorage.removeItem('user');
         localStorage.removeItem('device_auto_unlock_key');
-        
+
         set({ user: null, accessToken: null });
-        
+
         disconnectSocket();
         useConversationStore.getState().reset();
         useMessageStore.getState().reset();

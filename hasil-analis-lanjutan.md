@@ -27,7 +27,7 @@
   yang bisa menyebabkan error jika payload tidak sesuai format yang
   diharapkan.
 
-  3. Potensi Bug dalam Proses Registrasi dan Verifikasi Email
+  3. ## done ## Potensi Bug dalam Proses Registrasi dan Verifikasi Email
 
   a. Kekurangan dalam Penanganan Kesalahan OTP
   Dalam endpoint /api/auth/verify-email di server/src/routes/auth.ts,

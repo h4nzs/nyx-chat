@@ -245,10 +245,36 @@ router.post("/refresh", async (req, res, next) => {
     const token = req.cookies?.rt;
     if (!token) throw new ApiError(401, "No refresh token");
     const payload = verifyJwt(token);
-    if (typeof payload === 'string' || !payload?.jti || !payload?.sub) throw new ApiError(401, "Invalid refresh token");
+    if (typeof payload === 'string' || !payload?.jti || !payload?.sub) {
+      // Jika token tidak valid, hapus cookie untuk mencegah kondisi tidak konsisten
+      const isProd = env.nodeEnv === "production";
+      const cookieOpts: CookieOptions = {
+        path: "/",
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? "none" : "lax"
+      };
+
+      res.clearCookie("at", cookieOpts);
+      res.clearCookie("rt", cookieOpts);
+      throw new ApiError(401, "Invalid refresh token");
+    }
 
     const stored = await prisma.refreshToken.findUnique({ where: { jti: payload.jti } });
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) throw new ApiError(401, "Refresh token expired/revoked");
+    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
+      // Jika token tidak ditemukan, dicabut, atau kadaluarsa, hapus cookie
+      const isProd = env.nodeEnv === "production";
+      const cookieOpts: CookieOptions = {
+        path: "/",
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? "none" : "lax"
+      };
+
+      res.clearCookie("at", cookieOpts);
+      res.clearCookie("rt", cookieOpts);
+      throw new ApiError(401, "Refresh token expired/revoked");
+    }
 
     const user = await prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user) throw new ApiError(401, "User not found");
@@ -256,6 +282,7 @@ router.post("/refresh", async (req, res, next) => {
     setAuthCookies(res, tokens);
     res.json({ ok: true, accessToken: tokens.access });
   } catch (e) {
+    console.error("Refresh token error:", e);
     next(e);
   }
 });

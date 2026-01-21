@@ -41,7 +41,7 @@ export default function Login() {
   async function handleBiometricLogin() {
     try {
       setError("");
-      
+
       // A. Minta Challenge Login
       const options = await api<any>("/api/auth/webauthn/login/options");
 
@@ -58,16 +58,32 @@ export default function Login() {
         // D. Login Sukses -> Set Store -> Redirect
         useAuthStore.getState().setAccessToken(result.accessToken);
         useAuthStore.getState().setUser(result.user);
-        
+
         // Auto-unlock keys jika ada di localStorage (dari sesi sebelumnya/link device)
         useAuthStore.getState().tryAutoUnlock();
-        
+
         navigate("/chat");
       }
     } catch (err: any) {
-      console.error(err);
-      if (err.name === 'NotAllowedError') return; // User cancel
-      setError("Biometric login failed. Please use password.");
+      console.error("Biometric login error:", err);
+
+      // Tangani berbagai jenis error WebAuthn
+      if (err.name === 'NotAllowedError') {
+        setError("Biometric authentication was cancelled or timed out.");
+        return;
+      } else if (err.name === 'SecurityError') {
+        setError("Biometric authentication is not available due to security settings.");
+        return;
+      } else if (err.name === 'AbortError') {
+        setError("Biometric authentication was aborted.");
+        return;
+      } else if (err.name === 'InvalidStateError') {
+        setError("Device is locked or already authenticated. Please try again later.");
+        return;
+      }
+
+      // Error umum
+      setError("Biometric login failed. Please use password or try again.");
     }
   }
 
