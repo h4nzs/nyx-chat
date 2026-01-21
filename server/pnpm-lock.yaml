@@ -74,6 +74,9 @@ importers:
       nanoid:
         specifier: ^5.1.6
         version: 5.1.6
+      nodemailer:
+        specifier: ^7.0.12
+        version: 7.0.12
       redis:
         specifier: ^5.9.0
         version: 5.9.0
@@ -153,9 +156,6 @@ importers:
       jest:
         specifier: ^29.7.0
         version: 29.7.0(@types/node@20.19.25)
-      nodemailer:
-        specifier: ^7.0.12
-        version: 7.0.12
       prisma:
         specifier: ^5.14.0
         version: 5.22.0
