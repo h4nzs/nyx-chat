@@ -86,12 +86,12 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   };
 
   return (
-    <div className="flex items-center justify-between p-3 border-b border-border">
+    <div className="flex items-center justify-between p-4 border-b border-border">
       <div className="flex items-center gap-3">
-        <button onClick={onMenuClick} aria-label="Open menu" className="md:hidden p-2 rounded-full text-text-secondary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all">
+        <button onClick={onMenuClick} aria-label="Open menu" className="md:hidden touch-target p-2.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
         </button>
-        <button onClick={onBack} aria-label="Back to conversation list" className="hidden md:block p-2 rounded-full text-text-secondary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all">
+        <button onClick={onBack} aria-label="Back to conversation list" className="hidden md:block touch-target p-2.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
         </button>
         <button onClick={handleHeaderClick} className="flex items-center gap-3 text-left p-2 -ml-2 rounded-lg transition-colors">
@@ -102,16 +102,16 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
           />
           <div>
             <div className="flex items-center gap-2">
-              <p className="text-lg font-semibold text-text-primary">{title}</p>
-              {isConvVerified && <FiShield className="text-[hsl(var(--grad-start))]" title="Verified Contact" />} 
+              <p className="text-lg font-bold text-text-primary">{title}</p>
+              {isConvVerified && <FiShield className="text-[hsl(var(--grad-start))]" title="Verified Contact" />}
             </div>
-            <p className="text-xs text-text-secondary">{getStatus()}</p>
+            <p className="text-sm text-text-secondary">{getStatus()}</p>
           </div>
         </button>
       </div>
       <div className="flex items-center gap-2">
         <SearchMessages conversationId={conversation.id} />
-        <button onClick={openChatInfoModal} aria-label="View conversation information" className="p-2 rounded-full text-text-secondary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all">
+        <button onClick={openChatInfoModal} aria-label="View conversation information" className="touch-target p-2.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
         </button>
       </div>
@@ -124,11 +124,11 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
       replyingTo: state.replyingTo,
       setReplyingTo: state.setReplyingTo,
     }));
-  
+
     if (!replyingTo) return null;
-  
+
     const authorName = replyingTo.sender?.name || 'User';
-    
+
     let contentPreview: string;
     if (replyingTo.duration) {
       contentPreview = 'Voice Message';
@@ -141,16 +141,16 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
     } else {
       contentPreview = '...';
     }
-  
+
     return (
       <div className="px-4 pt-3">
-        <div className="relative bg-bg-surface p-2 rounded-lg shadow-neumorphic-concave">
+        <div className="relative bg-bg-surface p-3 rounded-xl shadow-neumorphic-concave">
           <p className="text-xs font-bold text-accent border-l-4 border-accent pl-2">Replying to {authorName}</p>
           <p className="text-sm text-text-secondary truncate">{contentPreview}</p>
-          <button 
-            onClick={() => setReplyingTo(null)} 
+          <button
+            onClick={() => setReplyingTo(null)}
             aria-label="Cancel reply"
-            className="absolute top-1 right-1 p-1 rounded-full text-text-secondary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+            className="absolute top-1 right-1 p-1.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
           </button>
@@ -183,7 +183,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const debouncedFetchPreview = useCallback(
     debounce((inputText: string) => {
       fetchTypingLinkPreview(inputText);
-    }, 500), 
+    }, 500),
     [fetchTypingLinkPreview]
   );
 
@@ -215,7 +215,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         // Use the ref's value to avoid stale state in the closure
         onVoiceSend(audioBlob, recordingTimeRef.current);
-        
+
         // Clean up stream and reset timer AFTER sending
         stream.getTracks().forEach(track => track.stop());
         setRecordingTime(0);
@@ -283,16 +283,15 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   );
 
   const textInputClasses = clsx(
-    'flex-1 bg-bg-surface px-4 py-2.5 rounded-full text-text-primary placeholder-text-secondary focus:outline-none focus:ring-2 focus:ring-accent',
-    'shadow-neumorphic-concave',
+    'flex-1 input-neumorphic rounded-full px-4 py-2.5',
     { 'opacity-50 cursor-not-allowed': !isConnected }
   );
 
   const fileButtonClasses = clsx(
-    'p-2 rounded-full text-text-secondary transition-all duration-150',
+    'p-2.5 rounded-full text-text-secondary transition-all duration-150',
     'hover:text-accent',
-    'shadow-neumorphic-convex', // Use soft shadow for elevated look
-    'active:shadow-neumorphic-pressed', // Use inner shadow for pressed state
+    'shadow-neumorphic-convex-sm', // Use soft shadow for elevated look
+    'active:shadow-neumorphic-pressed-sm', // Use inner shadow for pressed state
     { 'opacity-50 cursor-not-allowed': !isConnected }
   );
 
@@ -307,15 +306,15 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
       <div className="p-4 bg-bg-surface shadow-neumorphic-convex rounded-t-xl relative">
         {showEmojiPicker && (
           <div ref={emojiPickerRef} className="absolute bottom-full mb-2">
-            <EmojiPicker 
-              onEmojiClick={handleEmojiClick} 
+            <EmojiPicker
+              onEmojiClick={handleEmojiClick}
               autoFocusSearch={false}
               lazyLoadEmojis={true}
               theme={useThemeStore.getState().theme as any}
             />
           </div>
         )}
-        
+
         {isRecording ? (
           <div className="flex items-center gap-3 w-full">
             <button type="button" onClick={handleStopRecording} aria-label="Stop recording" className={`${fileButtonClasses} bg-red-500 text-white`} disabled={!isConnected}>
@@ -330,45 +329,45 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex items-center gap-3">
-            <button type="button" onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className={fileButtonClasses} disabled={!isConnected}>
-              <motion.svg 
+            <button type="button" onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className={`${fileButtonClasses} touch-target`} disabled={!isConnected}>
+              <motion.svg
                 whileHover={{ scale: 1.1, rotate: -15 }}
                 xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></motion.svg>
             </button>
-            <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} aria-label="Open emoji picker" className={fileButtonClasses} disabled={!isConnected}>
+            <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} aria-label="Open emoji picker" className={`${fileButtonClasses} touch-target`} disabled={!isConnected}>
               <motion.div whileHover={{ scale: 1.1 }}>
                 <FiSmile size={22} />
               </motion.div>
             </button>
-            <input 
+            <input
               ref={fileInputRef}
               type="file"
               className="hidden"
               onChange={onFileChange}
               disabled={!isConnected}
             />
-            <input 
-              type="text" 
-              value={text} 
+            <input
+              type="text"
+              value={text}
               onChange={handleTextChange}
               placeholder={isConnected ? "Type a message..." : "Disconnected..."}
               className={textInputClasses}
               disabled={!isConnected}
             />
             {hasText ? (
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={!hasText || !isConnected}
                 onMouseDown={() => hasText && setIsPressed(true)}
                 onMouseUp={() => setIsPressed(false)}
                 onMouseLeave={() => setIsPressed(false)}
                 aria-label="Send message"
-                className={sendButtonClasses}
+                className={`${sendButtonClasses} touch-target`}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               </button>
             ) : (
-              <button type="button" onClick={handleStartRecording} aria-label="Start recording" className={fileButtonClasses} disabled={!isConnected}>
+              <button type="button" onClick={handleStartRecording} aria-label="Start recording" className={`${fileButtonClasses} touch-target`} disabled={!isConnected}>
                 <motion.div whileHover={{ scale: 1.1 }}>
                   <FiMic size={22} />
                 </motion.div>
@@ -475,10 +474,10 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     <AnimatePresence mode="wait">
       <motion.div
         key={id}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.2 }}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        transition={{ duration: 0.3, ease: "easeOut" }}
         className="flex flex-col h-full bg-gradient-to-b from-bg-main to-bg-surface relative"
         style={{
           backgroundImage: `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%239C92AC' fill-opacity='0.04'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")`,

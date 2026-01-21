@@ -61,15 +61,15 @@ const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversa
   const isPlaceholder = content === 'waiting_for_key' || content.startsWith('[') || content === 'Decryption failed';
   const isImage = message.fileType?.startsWith('image/');
   const isVoiceMessage = message.fileType?.startsWith('audio/webm');
-  
+
   const hasBubbleStyle = !isPlaceholder && !message.fileUrl || message.fileUrl && !isImage && !isVoiceMessage;
 
   const bubbleClasses = clsx(
-    'relative max-w-md md:max-w-lg shadow-neumorphic-bubble',
+    'relative max-w-md md:max-w-lg shadow-neumorphic-bubble rounded-2xl',
     {
-      'px-4 py-2.5': hasBubbleStyle,
+      'px-4 py-3': hasBubbleStyle,
       'bg-accent text-accent-foreground': mine, 'bg-bg-surface text-text-primary': !mine,
-      'rounded-t-2xl': true, 'rounded-bl-2xl': mine, 'rounded-br-2xl': !mine,
+      'rounded-bl-2xl': mine, 'rounded-br-2xl': !mine,
       'rounded-br-sm': mine && isLastInSequence, 'rounded-bl-sm': !mine && isLastInSequence,
     }
   );
@@ -82,7 +82,7 @@ const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversa
       {message.fileUrl && !isImage && !isVoiceMessage && <FileAttachment message={message} />}
       {!message.fileUrl && (isPlaceholder ? <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p> : <div className="text-base whitespace-pre-wrap break-words"><MarkdownMessage content={content} /></div>)}
       {message.linkPreview && <LinkPreviewCard preview={message.linkPreview} />}
-      <div className={`text-xs mt-1 flex items-center gap-1.5 ${isImage ? 'absolute bottom-2 right-2 bg-black/50 text-white rounded-full px-2 py-1 pointer-events-none' : `justify-end ${mine ? 'text-accent-foreground/60' : 'text-text-secondary/80'}`}`}>
+      <div className={`text-xs mt-1.5 flex items-center gap-1.5 ${isImage ? 'absolute bottom-2 right-2 bg-black/50 text-white rounded-full px-2 py-1 pointer-events-none' : `justify-end ${mine ? 'text-accent-foreground/60' : 'text-text-secondary/80'}`}`}>
         <span>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
         <MessageStatusIcon message={message} conversation={conversation} />
       </div>
@@ -176,7 +176,7 @@ const MessageItem = ({ message, conversation, isHighlighted, onImageClick, isFir
   }
 
   return (
-    <motion.div ref={ref} id={message.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }} className={clsx('group flex items-end gap-2', isFirstInSequence ? 'mt-2' : 'mt-0.5', mine ? 'justify-end' : 'justify-start', isHighlighted && 'bg-accent/10 rounded-lg')}>
+    <motion.div ref={ref} id={message.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }} className={clsx('group flex items-end gap-2', isFirstInSequence ? 'mt-3' : 'mt-1', mine ? 'justify-end' : 'justify-start', isHighlighted && 'bg-accent/10 rounded-lg p-1 -mx-1')}>
       {!mine && <div className="w-8 flex-shrink-0 mb-1 self-end">{isLastInSequence && <img src={toAbsoluteUrl(message.sender?.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${message.sender?.name || 'U'}`} alt="Avatar" className="w-8 h-8 rounded-full bg-secondary object-cover" />}</div>}
       <div className={`flex items-center gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
         <div className="flex flex-col">

@@ -13,8 +13,11 @@ export default {
     extend: {
       boxShadow: {
         'neumorphic-convex': '5px 5px 10px hsl(var(--shadow-dark)), -5px -5px 10px hsl(var(--shadow-light))',
+        'neumorphic-convex-sm': '2px 2px 5px hsl(var(--shadow-dark)), -2px -2px 5px hsl(var(--shadow-light))',
         'neumorphic-concave': 'inset 5px 5px 10px hsl(var(--shadow-dark)), inset -5px -5px 10px hsl(var(--shadow-light))',
+        'neumorphic-concave-sm': 'inset 2px 2px 5px hsl(var(--shadow-dark)), inset -2px -2px 5px hsl(var(--shadow-light))',
         'neumorphic-pressed': 'inset 2px 2px 5px hsl(var(--shadow-dark)), inset -2px -2px 5px hsl(var(--shadow-light))',
+        'neumorphic-pressed-sm': 'inset 1px 1px 3px hsl(var(--shadow-dark)), inset -1px -1px 3px hsl(var(--shadow-light))',
         'soft': '0 1px 3px 0 hsl(var(--shadow-color) / 0.1), 0 1px 2px 0 hsl(var(--shadow-color) / 0.06)',
         'card': '0 4px 12px hsl(var(--shadow-color) / 0.15)',
       },

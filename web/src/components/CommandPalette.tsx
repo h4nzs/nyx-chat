@@ -90,7 +90,7 @@ export default function CommandPalette() {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
             transition={{ duration: 0.2 }}
-            className="fixed top-[20vh] left-1/2 -translate-x-1/2 z-50 w-full max-w-lg"
+            className="fixed top-[10vh] left-1/2 -translate-x-1/2 z-50 w-full max-w-md sm:max-w-lg md:max-w-xl"
           >
             <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex flex flex-col">
               <div className="p-3 flex items-center gap-3 border-b border-border">
@@ -104,7 +104,7 @@ export default function CommandPalette() {
                   className="w-full bg-transparent text-text-primary placeholder-text-secondary focus:outline-none"
                 />
               </div>
-              <div className="max-h-[40vh] overflow-y-auto p-2">
+              <div className="max-h-[60vh] sm:max-h-[50vh] overflow-y-auto p-2">
                 {filteredCommands.length > 0 ? (
                   filteredCommands.map((cmd, index) => (
                     <button
@@ -112,7 +112,7 @@ export default function CommandPalette() {
                       key={cmd.id}
                       onClick={() => executeCommand(cmd)}
                       onMouseMove={() => setSelectedIndex(index)}
-                      className={`w-full text-left p-3 flex items-center gap-4 rounded-md transition-colors ${
+                      className={`w-full text-left p-3 flex items-center gap-4 rounded-lg transition-colors ${
                         index === selectedIndex ? 'bg-accent text-white' : 'hover:bg-secondary'
                       }`}
                     >

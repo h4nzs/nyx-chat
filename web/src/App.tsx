@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from
 import { useEffect, useCallback } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { FiLogOut, FiSettings } from 'react-icons/fi';
+import { motion } from 'framer-motion';
 
 // Pages
 import Login from './pages/Login';
@@ -210,24 +211,141 @@ const AppContent = () => {
 
       <Routes>
         {/* Public Routes */}
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/restore" element={<Restore />} />
-        <Route path="/link-device" element={<LinkDevicePage />} />
-        <Route path="/help" element={<HelpPage />} />
+        <Route path="/" element={
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <LandingPage />
+          </motion.div>
+        } />
+        <Route path="/login" element={
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Login />
+          </motion.div>
+        } />
+        <Route path="/register" element={
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Register />
+          </motion.div>
+        } />
+        <Route path="/restore" element={
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Restore />
+          </motion.div>
+        } />
+        <Route path="/link-device" element={
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <LinkDevicePage />
+          </motion.div>
+        } />
+        <Route path="/help" element={
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <HelpPage />
+          </motion.div>
+        } />
 
         {/* Protected Routes (Butuh Login) */}
         <Route element={<ProtectedRoute />}>
-          <Route path="/chat" element={<Home />} />
-          <Route path="/chat/:conversationId" element={<Chat />} />
-          
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/settings/keys" element={<KeyManagementPage />} />
-          <Route path="/settings/sessions" element={<SessionManagerPage />} />
-          <Route path="/settings/link-device" element={<DeviceScannerPage />} />
-          
-          <Route path="/profile/:userId" element={<ProfilePage />} />
+          <Route path="/chat" element={
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <Home />
+            </motion.div>
+          } />
+          <Route path="/chat/:conversationId" element={
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <Chat />
+            </motion.div>
+          } />
+
+          <Route path="/settings" element={
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <SettingsPage />
+            </motion.div>
+          } />
+          <Route path="/settings/keys" element={
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <KeyManagementPage />
+            </motion.div>
+          } />
+          <Route path="/settings/sessions" element={
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <SessionManagerPage />
+            </motion.div>
+          } />
+          <Route path="/settings/link-device" element={
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <DeviceScannerPage />
+            </motion.div>
+          } />
+
+          <Route path="/profile/:userId" element={
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <ProfilePage />
+            </motion.div>
+          } />
         </Route>
 
         {/* Fallback */}

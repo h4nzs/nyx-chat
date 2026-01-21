@@ -53,7 +53,7 @@
   kasus di mana authenticator rusak atau tidak dapat digunakan, yang
   bisa membuat pengguna terkunci dari akunnya.
 
-  5. Potensi Bug dalam Proses Linking Device
+  5. ## don ##Potensi Bug dalam Proses Linking Device
 
   a. Potensi Masalah dengan Kunci Auto-Unlock
   Dalam proses linking device, kunci auto-unlock disimpan di
@@ -65,7 +65,7 @@
   perangkat yang memindai, yang bisa menyebabkan error jika payload
   dirusak atau tidak valid.
 
-  6. Potensi Bug dalam Perpesanan Grup
+  6. #### Potensi Bug dalam Perpesanan Grup
 
   a. Potensi Masalah dengan Rotasi Kunci Grup
   Dalam fungsi rotateGroupKey di web/src/utils/crypto.ts, hanya kunci
