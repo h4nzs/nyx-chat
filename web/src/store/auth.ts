@@ -7,6 +7,7 @@ import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";
 import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
+import { compressImage } from "@lib/fileUtils"; // 1. Import fungsi compress
 import { 
   registerAndGenerateKeys,
   retrievePrivateKeys,
@@ -363,16 +364,39 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       toast.success('Profile updated!');
     },
 
-    updateAvatar: async (avatar) => {
+    updateAvatar: async (avatar: File) => {
+      const toastId = toast.loading('Processing avatar...');
+      let fileToProcess = avatar;
+
+      // 2. Logika Kompresi Avatar
+      if (avatar.type.startsWith('image/')) {
+        try {
+          fileToProcess = await compressImage(avatar);
+          console.log(`🖼️ Avatar compressed: ${(avatar.size / 1024).toFixed(2)}KB -> ${(fileToProcess.size / 1024).toFixed(2)}KB`);
+        } catch (e) {
+          console.warn("Avatar compression failed, using original file:", e);
+        }
+      }
+
       const formData = new FormData();
-      formData.append('avatar', avatar);
-      const updatedUser = await authFetch<User>('/api/uploads/avatars/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      set({ user: updatedUser });
-      localStorage.setItem("user", JSON.stringify(updatedUser));
-      toast.success('Avatar updated!');
+      // Gunakan file hasil kompresi (atau original jika gagal/bukan gambar)
+      formData.append('avatar', fileToProcess);
+
+      try {
+        toast.loading('Uploading avatar...', { id: toastId });
+        const updatedUser = await authFetch<User>('/api/uploads/avatars/upload', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        set({ user: updatedUser });
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+        toast.success('Avatar updated!', { id: toastId });
+      } catch (e: any) {
+        console.error(e);
+        toast.error(`Upload failed: ${e.message}`, { id: toastId });
+        throw e; // Lempar error agar komponen pemanggil tahu
+      }
     },
 
     async getMasterSeed() {
