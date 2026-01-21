@@ -38,11 +38,6 @@ export default function DeviceScannerPage() {
         throw new Error("Invalid QR Code. Not a recognized Chat Lite code.");
       }
 
-      // Validasi struktur payload QR code
-      if (typeof data !== 'object' || data === null) {
-        throw new Error("Invalid QR Code format. Expected JSON object.");
-      }
-
       const { roomId, linkingPubKey } = data;
 
       // Validasi bahwa semua field yang diperlukan ada
@@ -54,24 +49,21 @@ export default function DeviceScannerPage() {
         throw new Error('Missing or invalid linkingPubKey in QR code data.');
       }
 
-      // Validasi format Base64 untuk linkingPubKey
-      const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
-      if (!base64Regex.test(linkingPubKey)) {
-        throw new Error('Invalid linkingPubKey format in QR code data.');
-      }
-
-      const masterSeed = await getMasterSeed();
-      if (!masterSeed) {
-        throw new Error("Your keys are locked. Please log in again to unlock them.");
-      }
-
       const sodium = await getSodium();
 
       let linkingPubKeyBytes;
       try {
         linkingPubKeyBytes = sodium.from_base64(linkingPubKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+        if (!linkingPubKeyBytes || linkingPubKeyBytes.length === 0) {
+          throw new Error('Invalid linkingPubKey format in QR code data.');
+        }
       } catch (e) {
         throw new Error("Invalid linkingPubKey format. Failed to decode Base64.");
+      }
+
+      const masterSeed = await getMasterSeed();
+      if (!masterSeed) {
+        throw new Error("Your keys are locked. Please log in again to unlock them.");
       }
 
       const encryptedPayload = sodium.crypto_box_seal(masterSeed, linkingPubKeyBytes);
