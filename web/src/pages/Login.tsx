@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { useAuthStore } from "../store/auth";
+import { useAuthStore, type User } from "../store/auth";
 import AuthForm from "../components/AuthForm";
 import { IoFingerPrint } from "react-icons/io5";
+import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
+import { api } from "@lib/api";
 
 export default function Login() {
   const [error, setError] = useState("");
@@ -15,8 +17,10 @@ export default function Login() {
   }));
 
   useEffect(() => {
-    // This is a placeholder for a potential future biometrics implementation
-    // For now, we'll keep it simple.
+    // Cek ketersediaan hardware biometric
+    platformAuthenticatorIsAvailable().then((available: boolean) => {
+      setIsBiometricsAvailable(available);
+    });
   }, []);
 
   const handleLogin = async (data: { a: string; b?: string }) => {
@@ -34,9 +38,37 @@ export default function Login() {
     }
   };
 
-  async function handleBiometricLogin(username: string) {
-    // This is a placeholder for a potential future biometrics implementation
-    setError("Biometric login is not fully implemented in this version.");
+  async function handleBiometricLogin() {
+    try {
+      setError("");
+      
+      // A. Minta Challenge Login
+      const options = await api<any>("/api/auth/webauthn/login/options");
+
+      // B. Browser minta fingerprint user
+      const authResp = await startAuthentication(options);
+
+      // C. Verifikasi ke Server
+      const result = await api<{ verified: boolean; user: User; accessToken: string }>("/api/auth/webauthn/login/verify", {
+        method: "POST",
+        body: JSON.stringify(authResp)
+      });
+
+      if (result.verified && result.accessToken) {
+        // D. Login Sukses -> Set Store -> Redirect
+        useAuthStore.getState().setAccessToken(result.accessToken);
+        useAuthStore.getState().setUser(result.user);
+        
+        // Auto-unlock keys jika ada di localStorage (dari sesi sebelumnya/link device)
+        useAuthStore.getState().tryAutoUnlock();
+        
+        navigate("/chat");
+      }
+    } catch (err: any) {
+      console.error(err);
+      if (err.name === 'NotAllowedError') return; // User cancel
+      setError("Biometric login failed. Please use password.");
+    }
   }
 
   return (
@@ -51,11 +83,11 @@ export default function Login() {
         {isBiometricsAvailable && (
           <button 
             type="button"
-            onClick={() => handleBiometricLogin((document.querySelector('input[placeholder="Email or Username"]') as HTMLInputElement)?.value)}
+            onClick={handleBiometricLogin}
             className="w-full flex items-center justify-center gap-3 mt-4 btn btn-secondary"
           >
-            <IoFingerPrint />
-            <span>Login with Biometrics</span>
+            <IoFingerPrint size={20} />
+            <span>Login with Passkey</span>
           </button>
         )}
         <div className="text-center mt-6">

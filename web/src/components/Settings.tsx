@@ -2,12 +2,14 @@ import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '@store/auth';
 import { toast } from 'react-hot-toast';
-import { Spinner } from './Spinner';
+import { Spinner } from '../components/Spinner'; // Sesuaikan path import jika perlu
 import { toAbsoluteUrl } from '@utils/url';
-// FIX 1: Import hook usePushNotifications (bukan requestPushPermission manual)
 import { usePushNotifications } from '@hooks/usePushNotifications';
 import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { FiChevronRight, FiEdit2 } from 'react-icons/fi';
+import { startRegistration } from '@simplewebauthn/browser';
+import { IoFingerPrint } from 'react-icons/io5';
+import { api } from '@lib/api'; // Pastikan import api helper ada
 
 // Reusable component for a single setting row
 const SettingsRow = ({ title, description, children }: { title: string; description: string; children: React.ReactNode }) => (
@@ -25,7 +27,6 @@ const SettingsCard = ({ children }: { children: React.ReactNode }) => (
   <div className="bg-bg-surface rounded-xl shadow-neumorphic-concave">{children}</div>
 );
 
-// FIX 2: Update ToggleSwitch biar bisa disabled (saat loading notif)
 const ToggleSwitch = ({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled?: boolean }) => (
   <button
     type="button"
@@ -50,7 +51,6 @@ export default function Settings() {
   const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts } = useAuthStore();
   const { theme, toggleTheme, accent, setAccent } = useThemeStore();
 
-  // FIX 3: Panggil hook push notification
   const { 
     isSubscribed, 
     loading: pushLoading, 
@@ -92,8 +92,6 @@ export default function Settings() {
     }
   };
 
-  // Logic Push sudah di-handle oleh hook, kita tinggal panggil di UI
-
   const handleProfileSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -129,6 +127,42 @@ export default function Settings() {
       toast.error('Failed to save privacy settings.', { id: toastId });
     }
   };
+
+  // --- WEBAUTHN LOGIC START ---
+  const handleRegisterPasskey = async () => {
+    try {
+      toast.loading("Preparing biometric setup...", { id: 'passkey' });
+      
+      // 1. Minta options dari server
+      const options = await api<any>("/api/auth/webauthn/register/options");
+      
+      toast.loading("Scan your fingerprint/face...", { id: 'passkey' });
+
+      // 2. Browser menangani biometric dialog
+      const attResp = await startRegistration(options);
+
+      // 3. Kirim hasil ke server
+      const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {
+        method: "POST",
+        body: JSON.stringify(attResp),
+      });
+
+      if (verificationResp.verified) {
+        toast.success("Passkey registered successfully!", { id: 'passkey' });
+      } else {
+        throw new Error("Verification failed");
+      }
+    } catch (error: any) {
+      console.error(error);
+      // Handle error 'The user cancelled' agar tidak muncul error merah menakutkan
+      if (error.name === 'NotAllowedError') {
+        toast.error("Registration cancelled.", { id: 'passkey' });
+      } else {
+        toast.error(`Failed: ${error.message || "Unknown error"}`, { id: 'passkey' });
+      }
+    }
+  };
+  // --- WEBAUTHN LOGIC END ---
 
   if (!user) return <div className="flex justify-center items-center h-full"><Spinner /></div>;
 
@@ -215,6 +249,22 @@ export default function Settings() {
         <div className="p-6 space-y-4">
           <div>
             <h3 className="text-lg font-semibold text-text-primary mb-2">Privacy & Security</h3>
+            
+            {/* --- WEBAUTHN UI START --- */}
+            <SettingsRow 
+              title="Biometric Login" 
+              description="Use Fingerprint or Face ID to login securely."
+            >
+              <button 
+                onClick={handleRegisterPasskey}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-main text-text-primary border border-border hover:bg-bg-hover transition-colors shadow-neumorphic-flat active:shadow-neumorphic-pressed"
+              >
+                <IoFingerPrint size={18} />
+                <span>Register This Device</span>
+              </button>
+            </SettingsRow>
+            {/* --- WEBAUTHN UI END --- */}
+
             <SettingsRow title="Send Read Receipts" description="Let others know you have read their messages.">
               <ToggleSwitch checked={readReceipts} onChange={() => setReadReceiptsState(!readReceipts)} />
             </SettingsRow>
@@ -258,7 +308,6 @@ export default function Settings() {
             title="Push Notifications" 
             description={pushLoading ? "Processing..." : isSubscribed ? "Enabled on this device." : "Receive notifications for new messages."}
           >
-            {/* FIX 4: Gunakan ToggleSwitch yang terhubung dengan state hook */}
             <ToggleSwitch 
               checked={isSubscribed} 
               onChange={isSubscribed ? unsubscribeFromPush : subscribeToPush} 

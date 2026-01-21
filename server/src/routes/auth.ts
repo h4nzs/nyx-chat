@@ -7,19 +7,15 @@ import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
 import { env } from "../config.js";
 import { requireAuth } from "../middleware/auth.js";
-import { authLimiter } from "../middleware/rateLimiter.js"; // Import
+import { authLimiter } from "../middleware/rateLimiter.js";
+import { nanoid } from "nanoid"; // FIX: Import nanoid
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from "@simplewebauthn/server";
-import type {
-  RegistrationResponseJSON,
-  AuthenticationResponseJSON,
-  AuthenticatorTransportFuture,
-} from "@simplewebauthn/types";
-import type { VerifiedRegistrationResponse, VerifiedAuthenticationResponse } from "@simplewebauthn/server";
+import { isoBase64URL } from '@simplewebauthn/server/helpers';
 import { Buffer } from "buffer";
 import { redisClient } from '../lib/redis.js';
 
@@ -36,14 +32,13 @@ const getRpID = () => {
 const rpID = getRpID();
 const expectedOrigin = env.corsOrigin || "http://localhost:5173";
 
-// FIX: Tambahkan tipe CookieOptions eksplisit untuk mencegah error TS2769
 function setAuthCookies(res: Response, { access, refresh }: { access: string; refresh: string }) {
   const isProd = env.nodeEnv === "production";
   
   const cookieOptions: CookieOptions = {
     httpOnly: true,
     secure: isProd, 
-    sameSite: "lax",
+    sameSite: isProd ? "none" : "lax",
     path: "/",
   };
 
@@ -58,15 +53,21 @@ function setAuthCookies(res: Response, { access, refresh }: { access: string; re
   });
 }
 
-async function issueTokens(user: any, req: import('express').Request) {
+async function issueTokens(user: any, req: any) {
   const access = signAccessToken({ id: user.id, email: user.email, username: user.username });
   const jti = newJti();
   const refresh = signAccessToken({ sub: user.id, jti }, { expiresIn: "30d" });
+  
+  const ipAddress = req.ip;
+  const userAgent = req.headers['user-agent'];
+
   await prisma.refreshToken.create({
-    data: { jti, userId: user.id, expiresAt: refreshExpiryDate(), ipAddress: req.ip, userAgent: req.headers['user-agent'] },
+    data: { jti, userId: user.id, expiresAt: refreshExpiryDate(), ipAddress, userAgent },
   });
   return { access, refresh };
 }
+
+// === STANDARD AUTH ROUTES ===
 
 router.post("/register", authLimiter, zodValidate({
     body: z.object({
@@ -74,8 +75,8 @@ router.post("/register", authLimiter, zodValidate({
       username: z.string().min(3).max(32),
       password: z.string().min(8).max(128),
       name: z.string().min(1).max(80),
-      publicKey: z.string(),
-      signingKey: z.string(),
+      publicKey: z.string().optional(),
+      signingKey: z.string().optional(),
     }),
   }),
   async (req, res, next) => {
@@ -137,22 +138,18 @@ router.post("/refresh", async (req, res, next) => {
 });
 
 router.post("/logout", async (req, res) => {
-  // 1. Ambil 'endpoint' dari body request (dikirim oleh frontend saat logout)
   const { endpoint } = req.body;
 
-  // 2. Hapus push subscription spesifik dari database jika ada endpoint
   if (endpoint) {
     try {
       await prisma.pushSubscription.deleteMany({
         where: { endpoint: endpoint }
       });
-      console.log("Push subscription removed on logout");
     } catch (e) {
       console.error("Failed to remove push subscription:", e);
     }
   }
 
-  // 3. Logika hapus Refresh Token (Kode Lama)
   const r = req.cookies?.rt;
   if (r) {
     try {
@@ -160,12 +157,9 @@ router.post("/logout", async (req, res) => {
       if (typeof payload === 'object' && payload?.jti) {
         await prisma.refreshToken.updateMany({ where: { jti: payload.jti }, data: { revokedAt: new Date() } });
       }
-    } catch (e) {
-      // Ignore errors
-    }
+    } catch (e) {}
   }
   
-  // 4. Clear Cookies (Kode Lama)
   const isProd = env.nodeEnv === "production";
   const cookieOpts: CookieOptions = { 
     path: "/", 
@@ -179,150 +173,145 @@ router.post("/logout", async (req, res) => {
   res.json({ ok: true });
 });
 
-// === WEBAUTHN ===
-router.get("/webauthn/register-options", requireAuth, async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, "Auth required");
-    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-    if (!user) throw new ApiError(404, "User not found");
+// === WEBAUTHN ROUTES ===
 
-    const userAuthenticators = await prisma.authenticator.findMany({ where: { userId: user.id } });
+router.get("/webauthn/register/options", requireAuth, async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Unauthorized");
+    
+    const userAuthenticators = await prisma.authenticator.findMany({
+      where: { userId: req.user.id }
+    });
+
     const options = await generateRegistrationOptions({
       rpName,
       rpID,
-      userName: user.username,
-      userID: Buffer.from(user.id, 'utf-8'),
-      excludeCredentials: userAuthenticators.map(auth => ({
-        id: auth.credentialID,
-        type: 'public-key',
-        transports: auth.transports?.split(',') as AuthenticatorTransportFuture[],
-      })),
+      userID: new Uint8Array(Buffer.from(req.user.id)),
+      userName: req.user.username,
       attestationType: 'none',
+      excludeCredentials: userAuthenticators.map(auth => ({
+        id: isoBase64URL.toBuffer(auth.credentialID),
+        type: 'public-key',
+        transports: auth.transports ? (auth.transports.split(',') as any) : undefined,
+      })),
+      authenticatorSelection: {
+        residentKey: 'preferred',
+        userVerification: 'preferred',
+        authenticatorAttachment: 'platform',
+      },
     });
-    await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: options.challenge } });
+
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { currentChallenge: options.challenge }
+    });
+
     res.json(options);
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 });
 
-router.post("/webauthn/register-verify", requireAuth, async (req, res, next) => {
+router.post("/webauthn/register/verify", requireAuth, async (req, res, next) => {
   try {
-    if (!req.user) throw new ApiError(401, "Auth required");
+    if (!req.user) throw new ApiError(401, "Unauthorized");
+    const { body } = req;
+
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-    if (!user || !user.currentChallenge) throw new ApiError(400, "No challenge for this user.");
-    
-    let verification: VerifiedRegistrationResponse;
-    try {
-      verification = await verifyRegistrationResponse({
-        response: req.body as RegistrationResponseJSON,
-        expectedChallenge: user.currentChallenge,
-        expectedOrigin,
-        expectedRPID: rpID,
-        requireUserVerification: false
-      });
-    } catch (error) {
-      return res.status(400).json({ error: (error as Error).message });
-    }
+    if (!user || !user.currentChallenge) throw new ApiError(400, "No challenge found.");
 
-    const { verified, registrationInfo } = verification;
-    if (verified && registrationInfo) {
-      const { credential, credentialDeviceType, credentialBackedUp } = registrationInfo;
-      
-      const newAuthData = {
-        id: Buffer.from(credential.id).toString('base64url'),
-        userId: user.id,
-        credentialID: Buffer.from(credential.id).toString('base64url'),
-        credentialPublicKey: Buffer.from(credential.publicKey).toString('base64url'),
-        counter: credential.counter,
-        credentialDeviceType,
-        credentialBackedUp,
-        transports: req.body.response.transports?.join(','),
-      };
-      await prisma.authenticator.create({ data: newAuthData });
+    const verification = await verifyRegistrationResponse({
+      response: body,
+      expectedChallenge: user.currentChallenge,
+      expectedOrigin,
+      expectedRPID: rpID,
+    });
+
+    if (verification.verified && verification.registrationInfo) {
+      const { credential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
+      const { id: credentialID, publicKey: credentialPublicKey, counter } = credential;
+
+      await prisma.authenticator.create({
+        data: {
+          id: nanoid(),
+          credentialID: credentialID, 
+          userId: user.id,
+          credentialPublicKey: isoBase64URL.fromBuffer(credentialPublicKey),
+          counter: BigInt(counter),
+          credentialDeviceType,
+          credentialBackedUp,
+          transports: body.response.transports ? body.response.transports.join(',') : null,
+        }
+      });
+
       await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: null } });
-      return res.json({ verified });
+
+      res.json({ verified: true });
+    } else {
+      res.status(400).json({ verified: false, error: "Verification failed" });
     }
-    res.status(400).json({ error: "Could not verify registration." });
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 });
 
-router.post("/webauthn/auth-options", async (req, res, next) => {
+router.get("/webauthn/login/options", async (req, res, next) => {
   try {
-    const { username } = req.body;
-    if (!username) return res.status(400).json({ error: "Username is required." });
-    const user = await prisma.user.findFirst({
-      where: { OR: [{ email: username }, { username }] },
-      include: { authenticators: true },
-    });
-    if (!user || user.authenticators.length === 0) return res.status(404).json({ error: "User or authenticators not found." });
-
     const options = await generateAuthenticationOptions({
       rpID,
-      allowCredentials: user.authenticators.map((auth) => ({
-        id: auth.credentialID,
-        type: 'public-key',
-        transports: auth.transports?.split(',') as AuthenticatorTransportFuture[],
-      })),
       userVerification: 'preferred',
     });
-    await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: options.challenge } });
+
+    res.cookie('webauthn_challenge', options.challenge, { httpOnly: true, maxAge: 60000, secure: env.nodeEnv === 'production' });
+    
     res.json(options);
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 });
 
-router.post("/webauthn/auth-verify", async (req, res, next) => {
+router.post("/webauthn/login/verify", async (req, res, next) => {
   try {
-    const { username, webauthnResponse } = req.body as { username: string, webauthnResponse: AuthenticationResponseJSON };
-    if (!username || !webauthnResponse) return res.status(400).json({ error: "Missing fields." });
+    const { body } = req;
+    const challenge = req.cookies.webauthn_challenge;
 
-    const user = await prisma.user.findFirst({
-      where: { OR: [{ email: username }, { username }] },
-      include: { authenticators: true },
+    if (!challenge) throw new ApiError(400, "Challenge expired or missing.");
+
+    const credentialID = body.id;
+    const authenticator = await prisma.authenticator.findUnique({
+      where: { credentialID: credentialID },
+      include: { user: true }
     });
-    if (!user || !user.currentChallenge) return res.status(400).json({ error: "User or challenge not found." });
 
-    const authenticator = user.authenticators.find((auth) => auth.credentialID === webauthnResponse.id);
-    if (!authenticator) return res.status(404).json({ error: "Authenticator not found." });
+    if (!authenticator) throw new ApiError(400, "Unknown device.");
 
-    let verification: VerifiedAuthenticationResponse;
-    try {
-      verification = await verifyAuthenticationResponse({
-        response: webauthnResponse,
-        expectedChallenge: user.currentChallenge,
-        expectedOrigin,
-        expectedRPID: rpID,
-        credential: {
-          // FIX 1: Gunakan langsung string credentialID
-          id: authenticator.credentialID,
-          // publicKey masih perlu Buffer karena tipenya Uint8Array
-          publicKey: Buffer.from(authenticator.credentialPublicKey, 'base64url'),
-          // FIX 2: Konversi BigInt ke Number
-          counter: Number(authenticator.counter),
-          transports: authenticator.transports?.split(',') as AuthenticatorTransportFuture[],
-        },
-        requireUserVerification: false,
+    // FIX: Gunakan 'as any' untuk menghindari error strict type TS yang tidak mengenali struktur authenticator
+    const verification = await verifyAuthenticationResponse({
+      response: body,
+      expectedChallenge: challenge,
+      expectedOrigin,
+      expectedRPID: rpID,
+      authenticator: {
+        counter: Number(authenticator.counter),
+        credentialID: isoBase64URL.toBuffer(authenticator.credentialID),
+        credentialPublicKey: isoBase64URL.toBuffer(authenticator.credentialPublicKey),
+        transports: authenticator.transports ? (authenticator.transports.split(',') as any) : undefined,
+      }, 
+      requireUserVerification: false,
+    } as any);
+
+    if (verification.verified) {
+      const { authenticationInfo } = verification;
+      
+      await prisma.authenticator.update({
+        where: { id: authenticator.id },
+        data: { counter: BigInt(authenticationInfo.newCounter) }
       });
-    } catch (error: any) {
-      return res.status(400).json({ error: error.message });
+
+      const tokens = await issueTokens(authenticator.user, req);
+      setAuthCookies(res, tokens);
+      
+      res.clearCookie('webauthn_challenge');
+      
+      res.json({ verified: true, user: authenticator.user, accessToken: tokens.access });
+    } else {
+      res.status(400).json({ verified: false });
     }
-
-
-    if (!verification.verified) return res.status(400).json({ error: "Verification failed." });
-    
-    await prisma.authenticator.update({ where: { id: authenticator.id }, data: { counter: verification.authenticationInfo.newCounter } });
-    await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: null } });
-
-    const tokens = await issueTokens(user, req);
-    setAuthCookies(res, tokens);
-    res.json({ verified: true, user: { id: user.id, username: user.username, name: user.name, avatarUrl: user.avatarUrl, description: user.description } });
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 });
 
 // === DEVICE LINKING ===
@@ -341,7 +330,7 @@ router.post(
       
       const tokens = await issueTokens(user, req);
       setAuthCookies(res, tokens);
-      res.json({ user });
+      res.json({ user, accessToken: tokens.access });
     } catch (e) {
       next(e);
     }
