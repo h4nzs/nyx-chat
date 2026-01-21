@@ -5,8 +5,9 @@ import { FiCheckCircle, FiXCircle, FiChevronLeft, FiSmartphone } from 'react-ico
 import { Spinner } from '@components/Spinner';
 import { getSocket, connectSocket } from '@lib/socket';
 import { getSodium } from '@lib/sodiumInitializer';
+import { reEncryptBundleFromMasterKey } from '@lib/crypto-worker-proxy'; // Import fungsi ini!
 import toast from 'react-hot-toast';
-import { useAuthStore, type User } from '@store/auth';
+import { useAuthStore } from '@store/auth';
 
 export default function LinkDevicePage() {
   const [qrData, setQrData] = useState<string | null>(null);
@@ -14,114 +15,36 @@ export default function LinkDevicePage() {
   const [error, setError] = useState<string | null>(null);
   
   const navigate = useNavigate();
+  // Kita tidak butuh login otomatis dari store, user akan login manual
   
   const ephemeralKeyPair = useRef<{ publicKey: Uint8Array; privateKey: Uint8Array } | null>(null);
-  const handlerRef = useRef<(data: any) => void>();
 
-  const handleLinkingSuccess = useCallback(async (data: {user: User, accessToken: string, encryptedMasterKey: string}) => {
-    setStatus('processing');
-    toast.loading("Secure payload received. Preparing device...", { id: 'link-process' });
-
-    try {
-      const sodium = await getSodium();
-      
-      if (!data.encryptedMasterKey || !data.user || !data.accessToken) {
-        throw new Error("Incomplete payload received from server.");
-      }
-      if (!ephemeralKeyPair.current) {
-        throw new Error("Ephemeral keys lost. Please refresh the page and try again.");
-      }
-
-      // 1. Decrypt the master seed using the ephemeral private key
-      const cipherText = sodium.from_base64(data.encryptedMasterKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-      const masterSeed = sodium.crypto_box_seal_open(
-        cipherText, 
-        ephemeralKeyPair.current.publicKey, 
-        ephemeralKeyPair.current.privateKey
-      );
-
-      if (!masterSeed || masterSeed.length === 0) {
-        throw new Error("Failed to decrypt the payload. QR code may be invalid or expired.");
-      }
-      
-      // 2. Re-encrypt the master seed for local storage with a new one-time auto-unlock key
-      const autoUnlockKey = sodium.randombytes_buf(sodium.crypto_secretbox_KEYBYTES);
-      const autoUnlockKeyB64 = sodium.to_base64(autoUnlockKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-      
-      // DEFINITIVE FIX: Replicate the exact key derivation logic from the crypto worker.
-      // The worker NEVER uses the password/key directly. It always derives a key from (salt + appSecret + password).
-      const appSecret = import.meta.env.VITE_APP_SECRET;
-      if (!appSecret) {
-        throw new Error("VITE_APP_SECRET is not defined. Cannot derive key.");
-      }
-
-      const salt = sodium.randombytes_buf(32);
-      const combinedPass = `${appSecret}-${autoUnlockKeyB64}`;
-      const keyInput = new Uint8Array(salt.length + sodium.from_string(combinedPass).length);
-      keyInput.set(salt);
-      keyInput.set(sodium.from_string(combinedPass), salt.length);
-      const derivedKey = sodium.crypto_generichash(sodium.crypto_secretbox_KEYBYTES, keyInput);
-
-      // Now, encrypt the seed with the DERIVED key.
-      const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
-      const encryptedSeed = sodium.crypto_secretbox_easy(masterSeed, nonce, derivedKey);
-      
-      // Concatenate the raw binary data: [salt][nonce][ciphertext]
-      const combined = new Uint8Array(salt.length + nonce.length + encryptedSeed.length);
-      combined.set(salt, 0);
-      combined.set(nonce, salt.length);
-      combined.set(encryptedSeed, salt.length + nonce.length);
-
-      const encryptedPrivateKeysB64 = sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
-      
-      // 3. Persist everything to localStorage for the bootstrap process on the next page
-      localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeysB64);
-      localStorage.setItem('device_auto_unlock_key', autoUnlockKeyB64); // Store the original key, not the derived one
-      localStorage.setItem('linking_user', JSON.stringify(data.user));
-      localStorage.setItem('linking_accessToken', data.accessToken);
-      
-      toast.success("Device successfully paired! Please wait.", { id: 'link-process' });
-      setStatus('success');
-
-      // 4. Navigate to the login page where the bootstrap process will take over
-      setTimeout(() => {
-        navigate('/login', { state: { fromLinking: true }, replace: true });
-      }, 1500);
-
-    } catch (err: any) {
-      console.error("Linking handshake failed:", err);
-      const errorMessage = err.message || "An unknown error occurred during decryption.";
-      toast.error(`Linking failed: ${errorMessage}`, { id: 'link-process', duration: 4000 });
-      setStatus('failed');
-      setError(errorMessage);
-    }
-  }, [navigate]);
-  
+  // Inisialisasi Sesi (Socket & QR)
   useEffect(() => {
-    handlerRef.current = handleLinkingSuccess;
-  }, [handleLinkingSuccess]);
-
-  useEffect(() => {
+    let isMounted = true;
     const socket = getSocket();
-    let isSubscribed = true;
 
-    const initialize = async () => {
+    const initializeSession = async () => {
       try {
+        setStatus('initializing');
         const sodium = await getSodium();
         
+        // 1. Generate Ephemeral Keys (Untuk handshake aman)
         const keyPair = sodium.crypto_box_keypair();
         ephemeralKeyPair.current = keyPair;
         
         const pubKeyB64 = sodium.to_base64(keyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-        if (!socket.connected) {
-          connectSocket();
-        }
+        // 2. Connect Socket (Guest Mode)
+        if (!socket.connected) connectSocket();
 
-        socket.emit('auth:request_linking_qr', { publicKey: pubKeyB64 }, (response: {token?: string, error?: string}) => {
-          if (!isSubscribed) return;
+        // 3. Minta Room ID ke Server
+        socket.emit('auth:request_linking_qr', { publicKey: pubKeyB64 }, (response: any) => {
+          if (!isMounted) return;
           if (response?.error) {
-            throw new Error(response.error);
+            setError(response.error);
+            setStatus('failed');
+            return;
           }
           if (response?.token) {
             setQrData(JSON.stringify({
@@ -129,48 +52,106 @@ export default function LinkDevicePage() {
               linkingPubKey: pubKeyB64
             }));
             setStatus('waiting');
-          } else {
-            throw new Error("Did not receive a valid token from server.");
           }
         });
 
       } catch (err: any) {
-        console.error("Linking init error:", err);
-        if (isSubscribed) {
-          setError(err.message || "Failed to initialize security session.");
+        console.error("Init error:", err);
+        if (isMounted) {
+          setError("Failed to initialize.");
           setStatus('failed');
         }
       }
     };
 
-    initialize();
-
-    const onLinkingSuccess = (data: any) => {
-      if (handlerRef.current) {
-        handlerRef.current(data);
-      }
-    };
-    
-    socket.on('auth:linking_success', onLinkingSuccess);
-
-    return () => {
-      isSubscribed = false;
-      socket.off('auth:linking_success', onLinkingSuccess);
-    };
+    initializeSession();
   }, []);
+
+  // Handler saat Scan Berhasil
+  const handleLinkingSuccess = useCallback(async (data: any) => {
+    console.log("📦 Payload received!");
+    setStatus('processing');
+    toast.loading("Processing keys...", { id: 'link-process' });
+
+    try {
+      const sodium = await getSodium();
+      
+      // 1. Dekripsi Master Key (Layer Transport)
+      if (!ephemeralKeyPair.current) throw new Error("Keypair lost.");
+      if (!data.encryptedMasterKey) throw new Error("Invalid payload.");
+
+      const cipherText = sodium.from_base64(data.encryptedMasterKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      
+      const masterSeed = sodium.crypto_box_seal_open(
+        cipherText, 
+        ephemeralKeyPair.current.publicKey, 
+        ephemeralKeyPair.current.privateKey
+      );
+
+      // 2. RE-ENKRIPSI MENGGUNAKAN WORKER (PENTING!)
+      // Generate password acak mesin (32 bytes)
+      const devicePasswordBytes = sodium.randombytes_buf(32);
+      const devicePassword = sodium.to_base64(devicePasswordBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+      // Panggil Worker untuk mengenkripsi ulang dengan format yang benar
+      // Ini akan menghasilkan format Base64 yang valid, bukan JSON
+      const result = await reEncryptBundleFromMasterKey(masterSeed, devicePassword);
+
+      // 3. Simpan ke LocalStorage
+      // Bersihkan data lama
+      localStorage.removeItem('encryptedPrivateKeys');
+      
+      // Simpan data baru (String Base64 dari worker)
+      localStorage.setItem('encryptedPrivateKeys', result.encryptedPrivateKeys);
+      
+      // Simpan Public Keys untuk identitas
+      if (result.encryptionPublicKeyB64) localStorage.setItem('publicKey', result.encryptionPublicKeyB64);
+      if (result.signingPublicKeyB64) localStorage.setItem('signingPublicKey', result.signingPublicKeyB64);
+
+      // Simpan kunci pembuka otomatis
+      localStorage.setItem('device_auto_unlock_key', devicePassword);
+
+      console.log("✅ Keys re-encrypted by worker and saved.");
+      
+      // 4. Sukses & Redirect
+      setStatus('success');
+      toast.success("Paired! Redirecting to Login...", { id: 'link-process' });
+
+      // Redirect ke Login Manual (User tinggal klik login, kunci otomatis terbuka)
+      setTimeout(() => {
+        navigate('/login', { replace: true });
+      }, 2000);
+
+    } catch (err: any) {
+      console.error("Linking failed:", err);
+      toast.error("Error: " + err.message, { id: 'link-process' });
+      setStatus('failed');
+      setError(err.message);
+    }
+  }, [navigate]);
+
+  // Pasang Listener Socket
+  useEffect(() => {
+    const socket = getSocket();
+    socket.on('auth:linking_success', handleLinkingSuccess);
+    return () => {
+      socket.off('auth:linking_success', handleLinkingSuccess);
+    };
+  }, [handleLinkingSuccess]);
 
   return (
     <div className="relative flex flex-col items-center justify-center h-screen bg-bg-main text-text-primary p-4 overflow-hidden">
-      <Link to="/login" className="absolute top-6 left-6 p-3 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary">
+      <Link to="/auth/login" className="absolute top-6 left-6 p-3 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary">
         <FiChevronLeft size={24} />
       </Link>
 
       <div className="bg-bg-surface p-10 rounded-2xl shadow-neumorphic-flat text-center max-w-md w-full border border-white/5">
-        <h1 className="text-3xl font-bold mb-2 bg-gradient-to-r from-text-primary to-text-secondary bg-clip-text text-transparent">Link Another Device</h1>
+        <h1 className="text-3xl font-bold mb-2 bg-gradient-to-r from-text-primary to-text-secondary bg-clip-text text-transparent">Link Device</h1>
         <p className="text-text-secondary text-sm mb-8">
-          On an existing logged-in device, go to <br/> Settings &gt; Link Device and scan this code.
+          Go to Settings &gt; Link Device on your phone
         </p>
 
+        {/* CONTAINER UI */}
         <div className="bg-white p-4 rounded-xl inline-block mb-8 shadow-inner min-w-[250px] min-h-[250px] flex items-center justify-center">
           
           {status === 'success' ? (
@@ -185,14 +166,16 @@ export default function LinkDevicePage() {
               {status === 'failed' ? <FiXCircle size={60} className="text-red-400" /> : <Spinner size="lg" />}
             </div>
           )}
+
         </div>
 
-        <div className="h-10 flex justify-center items-center">
-          {status === 'initializing' && <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> Preparing secure session...</div>}
-          {status === 'waiting' && <div className="flex items-center gap-2 text-accent animate-pulse"><FiSmartphone /> Waiting for scan...</div>}
-          {status === 'processing' && <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> Finalizing connection...</div>}
+        {/* STATUS TEXT */}
+        <div className="h-8 flex justify-center">
+          {status === 'initializing' && <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> Preparing...</div>}
+          {status === 'waiting' && <div className="flex items-center gap-2 text-accent animate-pulse"><FiSmartphone /> Scan with mobile app</div>}
+          {status === 'processing' && <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> Securing keys...</div>}
           {status === 'success' && <div className="text-green-500 font-medium">Redirecting to login...</div>}
-          {status === 'failed' && <div className="flex flex-col items-center gap-2 text-red-500"><FiXCircle /> <span>Error: {error}</span></div>}
+          {status === 'failed' && <div className="text-red-500 text-sm">{error}</div>}
         </div>
       </div>
     </div>
