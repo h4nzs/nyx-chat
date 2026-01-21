@@ -7,6 +7,7 @@ import { useAuthStore } from "./auth";
 import { useMessageStore } from "./message";
 import { useConversationStore } from "./conversation";
 import type { Message } from "./conversation";
+import { compressImage } from "@lib/fileUtils"; // Import fungsi kompresi
 import useDynamicIslandStore, { UploadActivity } from "./dynamicIsland";
 
 type State = {
@@ -130,7 +131,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   
   uploadFile: async (conversationId, file) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
-    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Encrypting ${file.name}...`, progress: 0 };
+    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Processing ${file.name}...`, progress: 0 };
     const activityId = addActivity(activity);
     const { replyingTo } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
@@ -168,8 +169,24 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     set({ replyingTo: null });
 
     try {
+      // --- LOGIKA KOMPRESI ---
+      let fileToProcess = file;
+      
+      // Jika file adalah gambar, lakukan kompresi
+      if (file.type.startsWith('image/')) {
+        updateActivity(activityId, { progress: 10, fileName: `Compressing ${file.name}...` });
+        try {
+          fileToProcess = await compressImage(file);
+          console.log(`📉 Image compressed: ${(file.size / 1024).toFixed(2)}KB -> ${(fileToProcess.size / 1024).toFixed(2)}KB`);
+        } catch (e) {
+          console.warn("Image compression failed, using original file.", e);
+        }
+      }
+
       updateActivity(activityId, { progress: 25, fileName: `Encrypting ${file.name}...` });
-      const { encryptedBlob, key: rawFileKey } = await encryptFile(file);
+      
+      // Enkripsi file hasil kompresi (atau original jika bukan gambar/gagal kompres)
+      const { encryptedBlob, key: rawFileKey } = await encryptFile(fileToProcess);
       const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(rawFileKey, conversationId, isGroup);
 
       updateActivity(activityId, { progress: 50, fileName: `Uploading ${file.name}...` });
@@ -179,6 +196,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       if (sessionId) form.append("sessionId", sessionId);
       form.append("tempId", String(tempId));
       if (replyingTo) form.append("repliedToId", replyingTo.id);
+      
+      // Gunakan blob terenkripsi dan nama file asli (agar ekstensi tetap dikenali)
       form.append("file", new File([encryptedBlob], file.name, { type: "application/octet-stream" }));
 
       await apiUpload<{ file: any }> ({
