@@ -20,6 +20,7 @@ model User {
   signingKey         String?   // Verification Key
   showEmailToOthers  Boolean   @default(false)
   hasCompletedOnboarding Boolean @default(false)
+  isEmailVerified Boolean  @default(false) // Tambahkan ini
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 

@@ -1,13 +1,11 @@
 import { Link } from 'react-router-dom';
 import { FiKey, FiShield, FiRefreshCw } from 'react-icons/fi';
-import { IoFingerPrint } from "react-icons/io5";
 import { useState } from 'react';
 import { useAuthStore, setupAndUploadPreKeyBundle } from '@store/auth';
 import toast from 'react-hot-toast';
 import { Spinner } from '@components/Spinner';
 import { useModalStore } from '@store/modal';
 import RecoveryPhraseModal from '@components/RecoveryPhraseModal';
-import { startRegistration } from '@simplewebauthn/browser';
 import { api } from '@lib/api';
 import { getRecoveryPhrase, generateNewKeys } from '@lib/crypto-worker-proxy';
 
@@ -43,29 +41,6 @@ export default function KeyManagementPage() {
         setIsProcessing(false);
       }
     });
-  };
-
-  const handleRegisterDevice = async () => {
-    setIsProcessing(true);
-    try {
-      const regOptions = await api("/api/auth/webauthn/register-options");
-      const attResp = await startRegistration(regOptions);
-      const verificationJSON = await api("/api/auth/webauthn/register-verify", {
-        method: "POST",
-        body: JSON.stringify(attResp),
-      });
-
-      if (verificationJSON?.verified) {
-        toast.success("Device registered successfully!");
-      } else {
-        throw new Error("Failed to verify device registration.");
-      }
-
-    } catch (error: any) {
-      toast.error(error.message || "Device registration failed.");
-    } finally {
-      setIsProcessing(false);
-    }
   };
 
   const handleGenerateNew = () => {
@@ -123,10 +98,6 @@ export default function KeyManagementPage() {
           <button onClick={handleShowRecovery} disabled={isProcessing} className="btn btn-secondary w-full justify-center gap-3">
             {isProcessing ? <Spinner size="sm" /> : <FiShield />}
             <span>{isProcessing ? 'Processing...' : 'Show Recovery Phrase'}</span>
-          </button>
-          <button onClick={handleRegisterDevice} disabled={isProcessing} className="btn btn-secondary w-full justify-center gap-3">
-            {isProcessing ? <Spinner size="sm" /> : <IoFingerPrint />}
-            <span>{isProcessing ? 'Processing...' : 'Register This Device for Biometric Login'}</span>
           </button>
           <button onClick={handleGenerateNew} disabled={isProcessing} className="btn-destructive-neumorphic w-full justify-center gap-3">
             {isProcessing ? <Spinner size="sm" /> : <FiRefreshCw />}

@@ -47,7 +47,6 @@ export async function setupAndUploadPreKeyBundle() {
     console.log("Pre-key bundle uploaded successfully.");
   } catch (e) {
     console.error("Failed to set up and upload pre-key bundle:", e);
-    // toast.error("Failed to sync secure keys with server.");
   }
 }
 
@@ -70,11 +69,21 @@ type State = {
   hasRestoredKeys: boolean;
 };
 
+// Tipe return baru untuk register
+type RegisterResponse = {
+  phrase: string;
+  needVerification: boolean;
+  userId?: string;
+  email?: string;
+};
+
 type Actions = {
   bootstrap: () => Promise<void>;
   tryAutoUnlock: () => Promise<boolean>;
   login: (emailOrUsername: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
-  registerAndGeneratePhrase: (data: any) => Promise<string>;
+  registerAndGeneratePhrase: (data: any) => Promise<RegisterResponse>; // Update return type
+  verifyEmail: (userId: string, code: string) => Promise<void>; // New action
+  resendVerification: (email: string) => Promise<void>; // New action
   logout: () => Promise<void>;
   getEncryptionKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getSigningPrivateKey: () => Promise<Uint8Array>;
@@ -99,7 +108,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     if (privateKeysCache) return Promise.resolve(privateKeysCache);
 
     return new Promise((resolve, reject) => {
-      // FIX 1: Cek Auto Unlock dulu di sini juga (untuk case refresh halaman)
+      // Cek Auto Unlock dulu di sini juga (untuk case refresh halaman)
       const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
       const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
 
@@ -110,7 +119,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
               privateKeysCache = result.keys;
               resolve(result.keys);
             } else {
-              // Jika auto unlock gagal, baru prompt password
               promptForPassword();
             }
           })
@@ -165,14 +173,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           if (result.success) {
             privateKeysCache = result.keys;
             set({ hasRestoredKeys: true });
-            // FIX 2: JANGAN hapus key ini jika sukses! 
-            // Kita butuh key ini selamanya di device ini karena kunci di-enkripsi pake ini.
             console.log("✅ Auto-unlock successful. Keys are cached.");
             return true;
           }
           console.warn("Auto-unlock failed.");
-          // Jika gagal decrypt (misal key salah), baru boleh dihapus/direset
-          // localStorage.removeItem('device_auto_unlock_key');
         } catch (e) {
            console.error("Error during auto-unlock:", e);
         }
@@ -183,11 +187,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     bootstrap: async () => {
       set({ isBootstrapping: true });
       let sessionStarted = false;
-
-      // --- 1. Prioritize Device Linking Flow ---
-      // (Kode lama linking_accessToken dihapus karena kita pakai flow login manual)
       
-      // --- 2. Standard Refresh Token Flow ---
+      // --- Standard Refresh Token Flow ---
       if (!sessionStarted) {
         try {
           const refreshRes = await api<{ ok: boolean; accessToken?: string }>("/api/auth/refresh", { method: "POST" });
@@ -217,7 +218,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     login: async (emailOrUsername, password, restoredNotSynced = false) => {
       privateKeysCache = null;
       
-      // 1. Lakukan Login API (Dapatkan Token)
       const res = await api<{ user: User; accessToken: string }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ emailOrUsername, password }),
@@ -228,25 +228,21 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeys });
       localStorage.setItem("user", JSON.stringify(res.user));
       
-      // 2. Dekripsi Kunci Lokal
       if (hasKeys) {
         try {
           const encryptedKeys = localStorage.getItem('encryptedPrivateKeys')!;
           const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
           let result;
 
-          // FIX 3: Prioritas Cek Auto-Unlock Key (Hasil Link Device)
           if (autoUnlockKey) {
              console.log("🔐 Login: Detected linked device key. Using auto-unlock...");
              result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
              
              if (!result.success) {
                  console.warn("⚠️ Auto-unlock key invalid. Falling back to user password...");
-                 // Jika gagal, baru coba pakai password user (Fallback standard)
                  result = await retrievePrivateKeys(encryptedKeys, password);
              }
           } else {
-             // Normal Login: Gunakan Password User
              result = await retrievePrivateKeys(encryptedKeys, password);
           }
 
@@ -278,6 +274,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     registerAndGeneratePhrase: async (data) => {
+      // 1. Generate Kunci Lokal Dulu
       const {
         encryptionPublicKeyB64,
         signingPublicKeyB64,
@@ -285,24 +282,27 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         phrase
       } = await registerAndGenerateKeys(data.password);
 
+      // Simpan kunci (akan berguna setelah verifikasi email)
       localStorage.setItem('publicKey', encryptionPublicKeyB64);
       localStorage.setItem('signingPublicKey', signingPublicKeyB64);
       localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
       set({ hasRestoredKeys: true });
       
+      // Cache kunci di memori
       try {
         const result = await retrievePrivateKeys(encryptedPrivateKeys, data.password);
-        if (result.success) {
-          privateKeysCache = result.keys;
-        } else {
-          throw new Error("Failed to prime key cache during registration.");
-        }
-      } catch (e) {
-        toast.error("A critical error occurred while securing your account. Please try again.");
-        throw e;
-      }
+        if (result.success) privateKeysCache = result.keys;
+      } catch (e) { throw e; }
 
-      const res = await api<{ user: User; accessToken: string }>("/api/auth/register", {
+      // 2. Register ke Server
+      // Note: Data sekarang bisa berisi turnstileToken
+      const res = await api<{ 
+        user?: User; 
+        accessToken?: string; 
+        message?: string; 
+        needVerification?: boolean;
+        userId?: string; 
+      }>("/api/auth/register", {
         method: "POST",
         body: JSON.stringify({
           ...data,
@@ -311,14 +311,50 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         }),
       });
 
+      // 3. Cek apakah butuh verifikasi email
+      if (res.needVerification && res.userId) {
+        return { 
+          phrase, 
+          needVerification: true, 
+          userId: res.userId, 
+          email: data.email 
+        };
+      }
+
+      // Legacy flow (jika verifikasi dimatikan atau tidak perlu)
       if (res.user && res.accessToken) {
         set({ user: res.user, accessToken: res.accessToken });
         localStorage.setItem("user", JSON.stringify(res.user));
         setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
         connectSocket();
+        return { phrase, needVerification: false };
       }
 
-      return phrase;
+      throw new Error("Unexpected response from registration.");
+    },
+
+    verifyEmail: async (userId, code) => {
+      const res = await api<{ user: User; accessToken: string }>("/api/auth/verify-email", {
+        method: "POST",
+        body: JSON.stringify({ userId, code }),
+      });
+
+      if (res.user && res.accessToken) {
+        set({ user: res.user, accessToken: res.accessToken });
+        localStorage.setItem("user", JSON.stringify(res.user));
+        
+        // Setelah verifikasi sukses, upload pre-key bundle (kunci enkripsi)
+        setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
+        connectSocket();
+      }
+    },
+
+    resendVerification: async (email) => {
+      await api("/api/auth/resend-verification", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+      toast.success("Verification code resent!");
     },
 
     logout: async () => {
@@ -343,8 +379,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         eraseCookie("rt");
         privateKeysCache = null;
         localStorage.removeItem('user');
-        
-        // FIX 4: Hapus kunci otomatis hanya saat logout eksplisit
         localStorage.removeItem('device_auto_unlock_key');
         
         set({ user: null, accessToken: null });
@@ -379,7 +413,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       }
 
       const formData = new FormData();
-      // Gunakan file hasil kompresi (atau original jika gagal/bukan gambar)
       formData.append('avatar', fileToProcess);
 
       try {
@@ -395,7 +428,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       } catch (e: any) {
         console.error(e);
         toast.error(`Upload failed: ${e.message}`, { id: toastId });
-        throw e; // Lempar error agar komponen pemanggil tahu
+        throw e;
       }
     },
 

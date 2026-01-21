@@ -9,6 +9,8 @@ import { env } from "../config.js";
 import { requireAuth } from "../middleware/auth.js";
 import { authLimiter } from "../middleware/rateLimiter.js";
 import { nanoid } from "nanoid";
+import { sendVerificationEmail } from "../utils/mailer.js"; // Pastikan file utils/mailer.ts sudah ada
+import crypto from "crypto";
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -67,6 +69,30 @@ async function issueTokens(user: any, req: any) {
   return { access, refresh };
 }
 
+// Helper Turnstile
+async function verifyTurnstileToken(token: string): Promise<boolean> {
+  // Jika di development dan tidak ada key, kita bisa bypass atau return true untuk testing
+  if (env.nodeEnv !== 'production' && !process.env.TURNSTILE_SECRET_KEY) return true;
+  
+  if (!token) return false;
+  
+  const formData = new FormData();
+  formData.append('secret', process.env.TURNSTILE_SECRET_KEY || '');
+  formData.append('response', token);
+
+  try {
+    const result = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      body: formData,
+    });
+    const outcome = await result.json();
+    return outcome.success;
+  } catch (e) {
+    console.error("Turnstile error:", e);
+    return false;
+  }
+}
+
 // === STANDARD AUTH ROUTES ===
 
 router.post("/register", authLimiter, zodValidate({
@@ -77,18 +103,52 @@ router.post("/register", authLimiter, zodValidate({
       name: z.string().min(1).max(80),
       publicKey: z.string().optional(),
       signingKey: z.string().optional(),
+      turnstileToken: z.string().optional(), // Token dari frontend
     }),
   }),
   async (req, res, next) => {
     try {
-      const { email, username, password, name, publicKey, signingKey } = req.body;
+      const { email, username, password, name, publicKey, signingKey, turnstileToken } = req.body;
+
+      // 1. Verifikasi Captcha
+      const isHuman = await verifyTurnstileToken(turnstileToken || '');
+      if (!isHuman) throw new ApiError(400, "Bot detected. Please try again.");
+
+      // 2. Cek Duplikat
+      const existingUser = await prisma.user.findFirst({
+        where: { OR: [{ email }, { username }] },
+      });
+      if (existingUser) throw new ApiError(409, "Email or username already exists.");
+
+      // 3. Buat User (Unverified)
       const passwordHash = await bcrypt.hash(password, 10);
       const user = await prisma.user.create({
-        data: { email, username, passwordHash, name, publicKey, signingKey },
+        data: { 
+          email, 
+          username, 
+          passwordHash, 
+          name, 
+          publicKey, 
+          signingKey, 
+          isEmailVerified: false // Default false
+        },
       });
-      const tokens = await issueTokens(user, req);
-      setAuthCookies(res, tokens);
-      res.status(201).json({ user, accessToken: tokens.access });
+
+      // 4. Generate & Kirim OTP
+      const otp = crypto.randomInt(100000, 999999).toString();
+      await redisClient.setEx(`verify:${user.id}`, 300, otp); // Expire 5 menit
+      
+      // Kirim email background (jangan await agar response cepat)
+      sendVerificationEmail(email, otp).catch(err => console.error("Email fail:", err));
+
+      // 5. Response (TIDAK login dulu)
+      res.status(201).json({ 
+        message: "Registration successful. Please verify your email.",
+        userId: user.id,
+        email: user.email,
+        needVerification: true // Flag untuk frontend pindah ke halaman OTP
+      });
+
     } catch (e: any) {
       if (e?.code === "P2002") {
         return next(new ApiError(409, "Email or username already in use."));
@@ -98,6 +158,62 @@ router.post("/register", authLimiter, zodValidate({
   }
 );
 
+// Route Baru: Verifikasi Email
+router.post("/verify-email", authLimiter, zodValidate({
+    body: z.object({
+      userId: z.string(),
+      code: z.string().length(6)
+    })
+  }), 
+  async (req, res, next) => {
+    try {
+      const { userId, code } = req.body;
+
+      // Cek OTP di Redis
+      const storedOtp = await redisClient.get(`verify:${userId}`);
+      if (!storedOtp) throw new ApiError(400, "Verification code expired or invalid.");
+      if (storedOtp !== code) throw new ApiError(400, "Invalid verification code.");
+
+      // Update User jadi Verified
+      const user = await prisma.user.update({
+        where: { id: userId },
+        data: { isEmailVerified: true }
+      });
+
+      // Hapus OTP dari Redis
+      await redisClient.del(`verify:${userId}`);
+
+      // Login otomatis setelah verifikasi
+      const tokens = await issueTokens(user, req);
+      setAuthCookies(res, tokens);
+
+      res.json({ message: "Email verified successfully.", user, accessToken: tokens.access });
+    } catch(e) {
+      next(e);
+    }
+  }
+);
+
+// Route Baru: Kirim Ulang OTP
+router.post("/resend-verification", authLimiter, zodValidate({
+  body: z.object({ email: z.string().email() })
+}), async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    const user = await prisma.user.findUnique({ where: { email } });
+    
+    if (!user) throw new ApiError(404, "User not found.");
+    if (user.isEmailVerified) throw new ApiError(400, "Email already verified.");
+
+    const otp = crypto.randomInt(100000, 999999).toString();
+    await redisClient.setEx(`verify:${user.id}`, 300, otp);
+    
+    sendVerificationEmail(email, otp).catch(console.error);
+    
+    res.json({ message: "Verification code sent." });
+  } catch (e) { next(e); }
+});
+
 router.post("/login", authLimiter, zodValidate({
     body: z.object({ emailOrUsername: z.string().min(1), password: z.string().min(8) }),
   }),
@@ -105,9 +221,16 @@ router.post("/login", authLimiter, zodValidate({
     try {
       const { emailOrUsername, password } = req.body;
       const user = await prisma.user.findFirst({ where: { OR: [{ email: emailOrUsername }, { username: emailOrUsername }] } });
+      
       if (!user) throw new ApiError(401, "Invalid credentials");
       const ok = await bcrypt.compare(password, user.passwordHash);
       if (!ok) throw new ApiError(401, "Invalid credentials");
+
+      // Cek Status Verifikasi
+      if (!user.isEmailVerified) {
+        throw new ApiError(403, "Email not verified. Please verify your email first.");
+      }
+
       const tokens = await issueTokens(user, req);
       setAuthCookies(res, tokens);
       res.json({ user, accessToken: tokens.access });
@@ -272,7 +395,6 @@ router.post("/webauthn/login/verify", async (req, res, next) => {
     if (!challenge) throw new ApiError(400, "Challenge expired or missing.");
 
     const credentialID = body.id;
-    // FIX: Ubah nama variabel jadi userAuthenticator biar gak bentrok sama nama properti di bawah
     const userAuthenticator = await prisma.authenticator.findUnique({
       where: { credentialID: credentialID },
       include: { user: true }
@@ -280,8 +402,6 @@ router.post("/webauthn/login/verify", async (req, res, next) => {
 
     if (!userAuthenticator) throw new ApiError(400, "Unknown device.");
 
-    // FIX: Gunakan properti 'credential' (BUKAN authenticator)
-    // Library mengharapkan { credential: { id, publicKey, counter, ... } }
     const verification = await verifyAuthenticationResponse({
       response: body,
       expectedChallenge: challenge,
