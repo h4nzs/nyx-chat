@@ -10,8 +10,7 @@ import multer from "multer";
 import { nanoid } from "nanoid";
 import path from "path";
 import { uploadLimiter } from "../middleware/rateLimiter.js"; // Import
-import { uploadToSupabase } from "../utils/supabase.js";
-
+import { uploadToSupabase, deleteFromSupabase } from "../utils/supabase.js"; // Import fungsi delete
 const router: Router = Router();
 
 // KONFIGURASI MULTER (MEMORY STORAGE)
@@ -30,7 +29,7 @@ const upload = multer({
 router.post(
   "/avatars/upload",
   requireAuth,
-  uploadLimiter, // <--- Pasang disini
+  uploadLimiter,
   upload.single("avatar"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -39,7 +38,22 @@ router.post(
 
       const userId = req.user.id;
       
-      // Upload ke Supabase (Folder: avatars)
+      // 1. Ambil data user lama untuk cek avatar sebelumnya
+      const oldUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { avatarUrl: true }
+      });
+
+      // 2. Jika ada avatar lama, HAPUS DARI SUPABASE
+      if (oldUser?.avatarUrl) {
+        console.log(`[Avatar Upload] Deleting old avatar: ${oldUser.avatarUrl}`);
+        // Kita fire-and-forget (tidak await) agar response tidak lambat
+        deleteFromSupabase(oldUser.avatarUrl).catch(err => 
+           console.error("[Avatar Upload] Background delete failed:", err)
+        );
+      }
+      
+      // 3. Upload File Baru ke Supabase (Folder: avatars)
       const uniqueFilename = `${nanoid()}-${Date.now()}${path.extname(req.file.originalname)}`;
       const supabasePath = `avatars/${userId}/${uniqueFilename}`;
 
@@ -81,7 +95,7 @@ router.post(
 // === 2. UPLOAD AVATAR GROUP ===
 router.post(
   "/groups/:id/avatar", 
-  uploadLimiter, // <--- Pasang disini
+  uploadLimiter,
   requireAuth, 
   upload.single("avatar"), 
   async (req: Request, res: Response, next: NextFunction) => {
@@ -97,7 +111,18 @@ router.post(
         });
         if (!participant) throw new ApiError(403, "You are not a member of this group");
 
-        // Upload ke Supabase (Folder: groups)
+        // 1. Ambil data grup lama
+        const oldGroup = await prisma.conversation.findUnique({
+            where: { id: groupId },
+            select: { avatarUrl: true }
+        });
+
+        // 2. Hapus avatar lama jika ada
+        if (oldGroup?.avatarUrl) {
+            deleteFromSupabase(oldGroup.avatarUrl).catch(console.error);
+        }
+
+        // 3. Upload File Baru
         const uniqueFilename = `${nanoid()}-${Date.now()}${path.extname(req.file.originalname)}`;
         const supabasePath = `groups/${groupId}/${uniqueFilename}`;
 
