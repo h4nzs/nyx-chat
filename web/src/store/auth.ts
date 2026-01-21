@@ -46,7 +46,7 @@ export async function setupAndUploadPreKeyBundle() {
     console.log("Pre-key bundle uploaded successfully.");
   } catch (e) {
     console.error("Failed to set up and upload pre-key bundle:", e);
-    toast.error("Failed to sync secure keys with server.");
+    // toast.error("Failed to sync secure keys with server.");
   }
 }
 
@@ -93,26 +93,49 @@ const savedReadReceipts = localStorage.getItem('sendReadReceipts');
 let privateKeysCache: RetrievedKeys | null = null;
 
 export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => {
+  // Helper function to retrieve and cache keys
   const retrieveAndCacheKeys = (): Promise<RetrievedKeys> => {
     if (privateKeysCache) return Promise.resolve(privateKeysCache);
 
     return new Promise((resolve, reject) => {
-      useModalStore.getState().showPasswordPrompt(async (password) => {
-        if (!password) return reject(new Error("Password not provided."));
-        
-        const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
-        if (!encryptedKeys) return reject(new Error("Encrypted private keys not found."));
+      // FIX 1: Cek Auto Unlock dulu di sini juga (untuk case refresh halaman)
+      const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
+      const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
 
-        const result = await retrievePrivateKeys(encryptedKeys, password);
+      if (autoUnlockKey && encryptedKeys) {
+        retrievePrivateKeys(encryptedKeys, autoUnlockKey)
+          .then((result) => {
+            if (result.success) {
+              privateKeysCache = result.keys;
+              resolve(result.keys);
+            } else {
+              // Jika auto unlock gagal, baru prompt password
+              promptForPassword();
+            }
+          })
+          .catch(() => promptForPassword());
+      } else {
+        promptForPassword();
+      }
 
-        if (!result.success) {
-          const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
-          return reject(new Error(reason));
-        }
-        
-        privateKeysCache = result.keys;
-        resolve(result.keys);
-      });
+      function promptForPassword() {
+        useModalStore.getState().showPasswordPrompt(async (password) => {
+          if (!password) return reject(new Error("Password not provided."));
+          
+          const encryptedKeysInner = localStorage.getItem('encryptedPrivateKeys');
+          if (!encryptedKeysInner) return reject(new Error("Encrypted private keys not found."));
+
+          const result = await retrievePrivateKeys(encryptedKeysInner, password);
+
+          if (!result.success) {
+            const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
+            return reject(new Error(reason));
+          }
+          
+          privateKeysCache = result.keys;
+          resolve(result.keys);
+        });
+      }
     });
   };
 
@@ -141,57 +164,28 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           if (result.success) {
             privateKeysCache = result.keys;
             set({ hasRestoredKeys: true });
-            localStorage.removeItem('device_auto_unlock_key');
+            // FIX 2: JANGAN hapus key ini jika sukses! 
+            // Kita butuh key ini selamanya di device ini karena kunci di-enkripsi pake ini.
             console.log("✅ Auto-unlock successful. Keys are cached.");
             return true;
           }
-          console.warn("Auto-unlock failed. The key may be incorrect or expired.");
-          localStorage.removeItem('device_auto_unlock_key');
+          console.warn("Auto-unlock failed.");
+          // Jika gagal decrypt (misal key salah), baru boleh dihapus/direset
+          // localStorage.removeItem('device_auto_unlock_key');
         } catch (e) {
            console.error("Error during auto-unlock:", e);
-           localStorage.removeItem('device_auto_unlock_key');
         }
       }
       return false;
     },
 
     bootstrap: async () => {
-      // This is the main entry point for starting a session.
-      // It now orchestrates the session start, prioritizing the device linking flow.
       set({ isBootstrapping: true });
       let sessionStarted = false;
 
       // --- 1. Prioritize Device Linking Flow ---
-      const linkingToken = localStorage.getItem('linking_accessToken');
-      const linkingUser = localStorage.getItem('linking_user');
-
-      if (linkingToken && linkingUser) {
-        console.log("🚀 Device linking data found. Attempting to bootstrap session...");
-        try {
-          const user = JSON.parse(linkingUser) as User;
-          set({ accessToken: linkingToken, user });
-          
-          // Now that user/token is set, try to unlock the keys automatically.
-          const unlocked = await get().tryAutoUnlock();
-          if (unlocked) {
-            sessionStarted = true;
-            console.log("✅ Device linking bootstrap successful.");
-            // Connect the socket now that keys are unlocked and session is ready.
-            connectSocket();
-          } else {
-            // This would be an unexpected error, as auto-unlock should work after linking.
-            throw new Error("Failed to auto-unlock keys after device linking.");
-          }
-        } catch (error) {
-          console.error("Critical error during device linking bootstrap:", error);
-          // Fall through to the standard logout/cleanup.
-        } finally {
-          // Always clean up the temporary linking data.
-          localStorage.removeItem('linking_accessToken');
-          localStorage.removeItem('linking_user');
-        }
-      }
-
+      // (Kode lama linking_accessToken dihapus karena kita pakai flow login manual)
+      
       // --- 2. Standard Refresh Token Flow ---
       if (!sessionStarted) {
         try {
@@ -199,19 +193,18 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           if (refreshRes.accessToken) {
             set({ accessToken: refreshRes.accessToken });
 
-            // After getting a token, fetch user data.
             const me = await authFetch<User>("/api/users/me");
             set({ user: me, hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys') });
             localStorage.setItem("user", JSON.stringify(me));
             
-            // Connect socket after a successful refresh.
+            // Coba auto-unlock saat bootstrap
+            await get().tryAutoUnlock();
+            
             connectSocket();
           } else {
-            // No linking data and no refresh token, so the user is logged out.
             throw new Error("No valid session.");
           }
         } catch (error) {
-          // This is the normal path for a user who is not logged in.
           privateKeysCache = null;
           set({ user: null, accessToken: null });
         }
@@ -223,6 +216,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     login: async (emailOrUsername, password, restoredNotSynced = false) => {
       privateKeysCache = null;
       
+      // 1. Lakukan Login API (Dapatkan Token)
       const res = await api<{ user: User; accessToken: string }>("/api/auth/login", {
         method: "POST",
         body: JSON.stringify({ emailOrUsername, password }),
@@ -233,10 +227,28 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeys });
       localStorage.setItem("user", JSON.stringify(res.user));
       
+      // 2. Dekripsi Kunci Lokal
       if (hasKeys) {
         try {
           const encryptedKeys = localStorage.getItem('encryptedPrivateKeys')!;
-          const result = await retrievePrivateKeys(encryptedKeys, password);
+          const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
+          let result;
+
+          // FIX 3: Prioritas Cek Auto-Unlock Key (Hasil Link Device)
+          if (autoUnlockKey) {
+             console.log("🔐 Login: Detected linked device key. Using auto-unlock...");
+             result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
+             
+             if (!result.success) {
+                 console.warn("⚠️ Auto-unlock key invalid. Falling back to user password...");
+                 // Jika gagal, baru coba pakai password user (Fallback standard)
+                 result = await retrievePrivateKeys(encryptedKeys, password);
+             }
+          } else {
+             // Normal Login: Gunakan Password User
+             result = await retrievePrivateKeys(encryptedKeys, password);
+          }
+
           if (result.success) {
             privateKeysCache = result.keys;
             console.log("✅ Key cache successfully populated during login.");
@@ -330,6 +342,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         eraseCookie("rt");
         privateKeysCache = null;
         localStorage.removeItem('user');
+        
+        // FIX 4: Hapus kunci otomatis hanya saat logout eksplisit
         localStorage.removeItem('device_auto_unlock_key');
         
         set({ user: null, accessToken: null });
