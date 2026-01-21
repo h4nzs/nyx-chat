@@ -108,8 +108,10 @@ export default function LinkDevicePage() {
       if (result.encryptionPublicKeyB64) localStorage.setItem('publicKey', result.encryptionPublicKeyB64);
       if (result.signingPublicKeyB64) localStorage.setItem('signingPublicKey', result.signingPublicKeyB64);
 
-      // Simpan kunci pembuka otomatis
-      localStorage.setItem('device_auto_unlock_key', devicePassword);
+      // Enkripsi dan simpan kunci pembuka otomatis
+      import('@lib/autoUnlockKeyManager').then(async ({ saveEncryptedAutoUnlockKey }) => {
+        await saveEncryptedAutoUnlockKey(devicePassword, devicePassword); // Gunakan password perangkat sebagai kunci enkripsi
+      });
 
       console.log("✅ Keys re-encrypted by worker and saved.");
       

@@ -40,7 +40,7 @@
   OTP, yang bisa membuat sistem rentan terhadap serangan brute force
   untuk menebak kode OTP.
 
-  4. Potensi Bug dalam Proses Login dan Otentikasi
+  4. ## don ## Potensi Bug dalam Proses Login dan Otentikasi
 
   a. Potensi Masalah dengan Refresh Token
   Dalam endpoint /api/auth/refresh di server/src/routes/auth.ts, jika

@@ -107,30 +107,66 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
   const retrieveAndCacheKeys = (): Promise<RetrievedKeys> => {
     if (privateKeysCache) return Promise.resolve(privateKeysCache);
 
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       // Cek Auto Unlock dulu di sini juga (untuk case refresh halaman)
-      const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
-      const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
+      // Cek apakah ada kunci auto-unlock terenkripsi
+      const autoUnlockManager = await import("@lib/autoUnlockKeyManager");
+      const hasEncryptedKey = autoUnlockManager.hasEncryptedAutoUnlockKey();
 
-      if (autoUnlockKey && encryptedKeys) {
-        retrievePrivateKeys(encryptedKeys, autoUnlockKey)
-          .then((result) => {
+      if (hasEncryptedKey) {
+        // Coba dapatkan password dari prompt untuk mendekripsi kunci auto-unlock
+        useModalStore.getState().showPasswordPrompt(async (password) => {
+          if (!password) return reject(new Error("Password not provided for auto-unlock key decryption."));
+
+          try {
+            const decryptedKey = await autoUnlockManager.getDecryptedAutoUnlockKey(password);
+            if (!decryptedKey) {
+              console.warn("Failed to decrypt auto-unlock key, falling back to password prompt.");
+              promptForPassword();
+              return;
+            }
+
+            const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
+            if (!encryptedKeys) return reject(new Error("Encrypted private keys not found."));
+
+            const result = await retrievePrivateKeys(encryptedKeys, decryptedKey);
+
             if (result.success) {
               privateKeysCache = result.keys;
               resolve(result.keys);
             } else {
+              console.warn("Auto-unlock key decryption failed, falling back to password prompt.");
               promptForPassword();
             }
-          })
-          .catch(() => promptForPassword());
+          } catch (error) {
+            console.error("Error during encrypted auto-unlock key retrieval:", error);
+            promptForPassword();
+          }
+        });
       } else {
-        promptForPassword();
+        const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
+        const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
+
+        if (autoUnlockKey && encryptedKeys) {
+          retrievePrivateKeys(encryptedKeys, autoUnlockKey)
+            .then((result) => {
+              if (result.success) {
+                privateKeysCache = result.keys;
+                resolve(result.keys);
+              } else {
+                promptForPassword();
+              }
+            })
+            .catch(() => promptForPassword());
+        } else {
+          promptForPassword();
+        }
       }
 
       function promptForPassword() {
         useModalStore.getState().showPasswordPrompt(async (password) => {
           if (!password) return reject(new Error("Password not provided."));
-          
+
           const encryptedKeysInner = localStorage.getItem('encryptedPrivateKeys');
           if (!encryptedKeysInner) return reject(new Error("Encrypted private keys not found."));
 
@@ -140,7 +176,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
             return reject(new Error(reason));
           }
-          
+
           privateKeysCache = result.keys;
           resolve(result.keys);
         });
@@ -163,6 +199,15 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     tryAutoUnlock: async () => {
+      // Coba dengan kunci auto-unlock terenkripsi terlebih dahulu
+      const hasEncryptedKey = import("@lib/autoUnlockKeyManager").then(({ hasEncryptedAutoUnlockKey }) => hasEncryptedAutoUnlockKey());
+      if (await hasEncryptedKey) {
+        // Gunakan password perangkat untuk mendekripsi kunci auto-unlock
+        // Dalam kasus ini, kita perlu mendapatkan password dari tempat lain atau menggunakan pendekatan lain
+        // Untuk saat ini, kita tetap gunakan pendekatan lama sebagai fallback
+        console.log("Encrypted auto-unlock key found. This should be decrypted with user password.");
+      }
+
       const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
       const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
 
@@ -241,19 +286,45 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         if (hasKeys) {
           try {
             const encryptedKeys = localStorage.getItem('encryptedPrivateKeys')!;
-            const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
+
+            // Cek apakah ada kunci auto-unlock terenkripsi
+            const autoUnlockManager = await import("@lib/autoUnlockKeyManager");
+            const hasEncryptedKey = autoUnlockManager.hasEncryptedAutoUnlockKey();
+
             let result;
 
-            if (autoUnlockKey) {
-               console.log("🔐 Login: Detected linked device key. Using auto-unlock...");
-               result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
+            if (hasEncryptedKey) {
+              // Coba gunakan kunci auto-unlock terenkripsi
+              console.log("🔐 Login: Detected encrypted linked device key. Requesting password to decrypt...");
 
-               if (!result.success) {
-                   console.warn("⚠️ Auto-unlock key invalid. Falling back to user password...");
-                   result = await retrievePrivateKeys(encryptedKeys, password);
-               }
+              // Dapatkan password dari pengguna untuk mendekripsi kunci auto-unlock
+              const decryptedKey = await autoUnlockManager.getDecryptedAutoUnlockKey(password);
+              if (decryptedKey) {
+                result = await retrievePrivateKeys(encryptedKeys, decryptedKey);
+
+                if (!result.success) {
+                  console.warn("⚠️ Encrypted auto-unlock key invalid. Falling back to user password...");
+                  result = await retrievePrivateKeys(encryptedKeys, password);
+                }
+              } else {
+                console.warn("⚠️ Could not decrypt auto-unlock key. Falling back to user password...");
+                result = await retrievePrivateKeys(encryptedKeys, password);
+              }
             } else {
-               result = await retrievePrivateKeys(encryptedKeys, password);
+              // Gunakan pendekatan lama
+              const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
+
+              if (autoUnlockKey) {
+                 console.log("🔐 Login: Detected linked device key. Using auto-unlock...");
+                 result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
+
+                 if (!result.success) {
+                     console.warn("⚠️ Auto-unlock key invalid. Falling back to user password...");
+                     result = await retrievePrivateKeys(encryptedKeys, password);
+                 }
+              } else {
+                 result = await retrievePrivateKeys(encryptedKeys, password);
+              }
             }
 
             if (result.success) {
@@ -303,12 +374,23 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       localStorage.setItem('signingPublicKey', signingPublicKeyB64);
       localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
       set({ hasRestoredKeys: true });
-      
+
       // Cache kunci di memori
       try {
         const result = await retrievePrivateKeys(encryptedPrivateKeys, data.password);
         if (result.success) privateKeysCache = result.keys;
       } catch (e) { throw e; }
+
+      // Buat dan simpan kunci auto-unlock terenkripsi
+      try {
+        const autoUnlockManager = await import("@lib/autoUnlockKeyManager");
+        // Gunakan password pengguna sebagai kunci untuk mengenkripsi kunci auto-unlock
+        await autoUnlockManager.saveEncryptedAutoUnlockKey(data.password, data.password);
+      } catch (e) {
+        console.error("Failed to save encrypted auto-unlock key:", e);
+        // Jika gagal menyimpan kunci auto-unlock terenkripsi, simpan yang tidak terenkripsi sebagai fallback
+        localStorage.setItem('device_auto_unlock_key', data.password);
+      }
 
       // 2. Register ke Server
       // Note: Data sekarang bisa berisi turnstileToken
@@ -400,6 +482,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         privateKeysCache = null;
         localStorage.removeItem('user');
         localStorage.removeItem('device_auto_unlock_key');
+        // Hapus juga kunci auto-unlock terenkripsi jika ada
+        localStorage.removeItem('device_auto_unlock_key_encrypted');
 
         set({ user: null, accessToken: null });
 

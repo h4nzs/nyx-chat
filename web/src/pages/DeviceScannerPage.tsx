@@ -38,8 +38,27 @@ export default function DeviceScannerPage() {
         throw new Error("Invalid QR Code. Not a recognized Chat Lite code.");
       }
 
+      // Validasi struktur payload QR code
+      if (typeof data !== 'object' || data === null) {
+        throw new Error("Invalid QR Code format. Expected JSON object.");
+      }
+
       const { roomId, linkingPubKey } = data;
-      if (!roomId || !linkingPubKey) throw new Error('Invalid QR code data.');
+
+      // Validasi bahwa semua field yang diperlukan ada
+      if (!roomId || typeof roomId !== 'string' || !roomId.trim()) {
+        throw new Error('Missing or invalid roomId in QR code data.');
+      }
+
+      if (!linkingPubKey || typeof linkingPubKey !== 'string' || !linkingPubKey.trim()) {
+        throw new Error('Missing or invalid linkingPubKey in QR code data.');
+      }
+
+      // Validasi format Base64 untuk linkingPubKey
+      const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+      if (!base64Regex.test(linkingPubKey)) {
+        throw new Error('Invalid linkingPubKey format in QR code data.');
+      }
 
       const masterSeed = await getMasterSeed();
       if (!masterSeed) {
@@ -47,24 +66,30 @@ export default function DeviceScannerPage() {
       }
 
       const sodium = await getSodium();
-      
-      const linkingPubKeyBytes = sodium.from_base64(linkingPubKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+      let linkingPubKeyBytes;
+      try {
+        linkingPubKeyBytes = sodium.from_base64(linkingPubKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      } catch (e) {
+        throw new Error("Invalid linkingPubKey format. Failed to decode Base64.");
+      }
+
       const encryptedPayload = sodium.crypto_box_seal(masterSeed, linkingPubKeyBytes);
       const encryptedPayloadB64 = sodium.to_base64(encryptedPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       const socket = getSocket();
-      socket.emit('linking:send_payload', { 
-        roomId, 
-        encryptedMasterKey: encryptedPayloadB64 
+      socket.emit('linking:send_payload', {
+        roomId,
+        encryptedMasterKey: encryptedPayloadB64
       });
 
       setStatus('success');
       toast.success('Device successfully linked!', { id: 'linking-toast' });
-      
+
       if (scannerRef.current?.isScanning) {
         await scannerRef.current.stop();
       }
-      
+
       setTimeout(() => navigate('/settings/sessions'), 2000);
 
     } catch (err: any) {
