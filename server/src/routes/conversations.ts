@@ -10,6 +10,8 @@ import { ApiError } from "../utils/errors.js";
 const router: Router = Router();
 router.use(requireAuth);
 
+const MAX_GROUP_MEMBERS = 100; // Batasi member maksimal biar server gak meledak
+
 // GET all conversations for the current user
 router.get("/", async (req, res, next) => {
   try {
@@ -77,6 +79,14 @@ router.post("/", async (req, res, next) => {
     if (!req.user) throw new ApiError(401, "Authentication required.");
     const { title, userIds, isGroup, initialSession } = req.body;
     const creatorId = req.user.id;
+
+    if (!Array.isArray(userIds)) {
+      return res.status(400).json({ error: "userIds must be an array." });
+    }
+
+    if (userIds.length > MAX_GROUP_MEMBERS) {
+      return res.status(400).json({ error: `Group cannot have more than ${MAX_GROUP_MEMBERS} members.` });
+    }
 
     if (!isGroup) {
       const otherUserId = userIds.find((id: string) => id !== creatorId);
@@ -245,6 +255,13 @@ router.post("/:id/participants", async (req, res, next) => {
       where: { conversationId, userId: req.user.id, role: "ADMIN" },
     });
     if (!adminParticipant) return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
+
+    if (!Array.isArray(userIds)) return res.status(400).json({ error: "userIds must be an array." });
+
+    const currentCount = await prisma.participant.count({ where: { conversationId } });
+    if (currentCount + userIds.length > MAX_GROUP_MEMBERS) {
+       return res.status(400).json({ error: `Group limit reached (${MAX_GROUP_MEMBERS} members max).` });
+    }
 
     const newParticipants = await prisma.$transaction(async (tx) => {
       await Promise.all(userIds.map((userId: string) => 

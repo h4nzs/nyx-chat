@@ -1,8 +1,18 @@
 import rateLimit from "express-rate-limit";
 import { env } from "../config.js";
+import { Request } from "express";
 
 // Helper biar gak spam log saat development
 const skipInDev = () => env.nodeEnv === 'development';
+
+const keyGenerator = (req: Request): string => {
+  // Ambil dari header x-forwarded-for, atau fallback ke req.ip
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.ip || '127.0.0.1';
+};
 
 // 1. General Limiter: Untuk semua route API umum
 // Batas: 300 request per 15 menit per IP
@@ -12,6 +22,7 @@ export const generalLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   skip: skipInDev,
+  keyGenerator,
   validate: {
     trustProxy: false, // Matikan validasi proxy karena kita pakai Koyeb
   },
@@ -29,6 +40,7 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipInDev,
+  keyGenerator,
   validate: {
     trustProxy: false, // Matikan validasi proxy karena kita pakai Koyeb
   },
@@ -42,6 +54,7 @@ export const authLimiter = rateLimit({
 export const uploadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, 
   max: 20,
+  keyGenerator,
   validate: {
     trustProxy: false, // Matikan validasi proxy karena kita pakai Koyeb
   },
