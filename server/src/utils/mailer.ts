@@ -14,7 +14,7 @@ const transporter = nodemailer.createTransport({
 
 export const sendVerificationEmail = async (to: string, code: string) => {
   await transporter.sendMail({
-    from: '"Chat Lite Security" <no-reply@chatlite.com>',
+    from: '"Chat Lite Security" <chatlite.app@gmail.com>',
     to,
     subject: 'Your Verification Code - Chat Lite',
     html: `
