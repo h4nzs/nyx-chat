@@ -8,7 +8,7 @@ import { zodValidate } from "../utils/validate.js";
 import { env } from "../config.js";
 import { requireAuth } from "../middleware/auth.js";
 import { authLimiter } from "../middleware/rateLimiter.js";
-import { nanoid } from "nanoid"; // FIX: Import nanoid
+import { nanoid } from "nanoid";
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,
@@ -272,24 +272,26 @@ router.post("/webauthn/login/verify", async (req, res, next) => {
     if (!challenge) throw new ApiError(400, "Challenge expired or missing.");
 
     const credentialID = body.id;
-    const authenticator = await prisma.authenticator.findUnique({
+    // FIX: Ubah nama variabel jadi userAuthenticator biar gak bentrok sama nama properti di bawah
+    const userAuthenticator = await prisma.authenticator.findUnique({
       where: { credentialID: credentialID },
       include: { user: true }
     });
 
-    if (!authenticator) throw new ApiError(400, "Unknown device.");
+    if (!userAuthenticator) throw new ApiError(400, "Unknown device.");
 
-    // FIX: Gunakan 'as any' untuk menghindari error strict type TS yang tidak mengenali struktur authenticator
+    // FIX: Gunakan properti 'credential' (BUKAN authenticator)
+    // Library mengharapkan { credential: { id, publicKey, counter, ... } }
     const verification = await verifyAuthenticationResponse({
       response: body,
       expectedChallenge: challenge,
       expectedOrigin,
       expectedRPID: rpID,
-      authenticator: {
-        counter: Number(authenticator.counter),
-        credentialID: isoBase64URL.toBuffer(authenticator.credentialID),
-        credentialPublicKey: isoBase64URL.toBuffer(authenticator.credentialPublicKey),
-        transports: authenticator.transports ? (authenticator.transports.split(',') as any) : undefined,
+      credential: {
+        id: userAuthenticator.credentialID,
+        publicKey: isoBase64URL.toBuffer(userAuthenticator.credentialPublicKey),
+        counter: Number(userAuthenticator.counter),
+        transports: userAuthenticator.transports ? (userAuthenticator.transports.split(',') as any) : undefined,
       }, 
       requireUserVerification: false,
     } as any);
@@ -298,16 +300,16 @@ router.post("/webauthn/login/verify", async (req, res, next) => {
       const { authenticationInfo } = verification;
       
       await prisma.authenticator.update({
-        where: { id: authenticator.id },
+        where: { id: userAuthenticator.id },
         data: { counter: BigInt(authenticationInfo.newCounter) }
       });
 
-      const tokens = await issueTokens(authenticator.user, req);
+      const tokens = await issueTokens(userAuthenticator.user, req);
       setAuthCookies(res, tokens);
       
       res.clearCookie('webauthn_challenge');
       
-      res.json({ verified: true, user: authenticator.user, accessToken: tokens.access });
+      res.json({ verified: true, user: userAuthenticator.user, accessToken: tokens.access });
     } else {
       res.status(400).json({ verified: false });
     }
