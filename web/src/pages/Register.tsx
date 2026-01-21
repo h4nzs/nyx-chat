@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/auth";
 import AuthForm from "../components/AuthForm";
@@ -18,6 +18,8 @@ export default function Register() {
   const [otpCode, setOtpCode] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string>('');
+  const [isResending, setIsResending] = useState(false);
+  const [countdown, setCountdown] = useState(0);
 
   const navigate = useNavigate();
   const { registerAndGeneratePhrase, verifyEmail, resendVerification } = useAuthStore();
@@ -87,17 +89,42 @@ export default function Register() {
       toast.success("Email verified!");
       setStep('recovery'); // Pindah ke Recovery Phrase setelah sukses
     } catch (err: any) {
-      setError(err.message || "Verification failed");
+      // Tampilkan pesan kesalahan yang lebih spesifik
+      if (err.message.includes("expired")) {
+        setError("Verification code has expired. Please request a new one.");
+      } else if (err.message.includes("Invalid")) {
+        setError("Invalid verification code. Please try again.");
+      } else {
+        setError(err.message || "Verification failed");
+      }
     } finally {
       setIsVerifying(false);
     }
   };
 
+  // Countdown effect
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (countdown > 0) {
+      interval = setInterval(() => {
+        setCountdown((prev) => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [countdown]);
+
   const handleResend = async () => {
+    if (countdown > 0) return; // Jangan lakukan apa-apa jika masih dalam countdown
+
+    setIsResending(true);
     try {
       await resendVerification(emailForVerify);
+      toast.success("Verification code resent!");
+      setCountdown(60); // Countdown 60 detik sebelum bisa mengirim ulang
     } catch (err: any) {
       toast.error(err.message || "Failed to resend");
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -142,12 +169,13 @@ export default function Register() {
 
           <div className="mt-6 pt-4 border-t border-border">
             <p className="text-text-secondary text-xs mb-2">Didn't receive the code?</p>
-            <button 
+            <button
               onClick={handleResend}
               type="button"
-              className="flex items-center justify-center gap-2 w-full py-2 text-sm text-text-primary hover:bg-bg-hover rounded-lg transition-colors"
+              disabled={countdown > 0 || isResending}
+              className="flex items-center justify-center gap-2 w-full py-2 text-sm text-text-primary hover:bg-bg-hover rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <FiRefreshCw size={14} /> Resend Code
+              <FiRefreshCw size={14} /> {countdown > 0 ? `Resend in ${countdown}s` : "Resend Code"}
             </button>
           </div>
         </div>

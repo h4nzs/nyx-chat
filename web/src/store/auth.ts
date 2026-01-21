@@ -342,7 +342,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       if (res.user && res.accessToken) {
         set({ user: res.user, accessToken: res.accessToken });
         localStorage.setItem("user", JSON.stringify(res.user));
-        
+
         // Setelah verifikasi sukses, upload pre-key bundle (kunci enkripsi)
         setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
         connectSocket();
@@ -350,11 +350,16 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     resendVerification: async (email) => {
-      await api("/api/auth/resend-verification", {
-        method: "POST",
-        body: JSON.stringify({ email }),
-      });
-      toast.success("Verification code resent!");
+      try {
+        await api("/api/auth/resend-verification", {
+          method: "POST",
+          body: JSON.stringify({ email }),
+        });
+        toast.success("Verification code resent!");
+      } catch (error: any) {
+        console.error("Failed to resend verification code:", error);
+        throw error; // Lempar error agar bisa ditangani di komponen
+      }
     },
 
     logout: async () => {

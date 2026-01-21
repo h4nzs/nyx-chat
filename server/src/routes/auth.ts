@@ -7,7 +7,7 @@ import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
 import { env } from "../config.js";
 import { requireAuth } from "../middleware/auth.js";
-import { authLimiter } from "../middleware/rateLimiter.js";
+import { authLimiter, otpLimiter } from "../middleware/rateLimiter.js";
 import { nanoid } from "nanoid";
 import { sendVerificationEmail } from "../utils/mailer.js"; // Pastikan file utils/mailer.ts sudah ada
 import crypto from "crypto";
@@ -159,20 +159,20 @@ router.post("/register", authLimiter, zodValidate({
 );
 
 // Route Baru: Verifikasi Email
-router.post("/verify-email", authLimiter, zodValidate({
+router.post("/verify-email", otpLimiter, zodValidate({
     body: z.object({
       userId: z.string(),
       code: z.string().length(6)
     })
-  }), 
+  }),
   async (req, res, next) => {
     try {
       const { userId, code } = req.body;
 
       // Cek OTP di Redis
       const storedOtp = await redisClient.get(`verify:${userId}`);
-      if (!storedOtp) throw new ApiError(400, "Verification code expired or invalid.");
-      if (storedOtp !== code) throw new ApiError(400, "Invalid verification code.");
+      if (!storedOtp) throw new ApiError(400, "Verification code has expired. Please request a new one.");
+      if (storedOtp !== code) throw new ApiError(400, "Invalid verification code. Please try again.");
 
       // Update User jadi Verified
       const user = await prisma.user.update({

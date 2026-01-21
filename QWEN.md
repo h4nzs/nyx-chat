@@ -2,53 +2,40 @@
 
 ## Project Overview
 
-Chat Lite is a secure, modern, and customizable real-time messaging application built with a focus on user experience and end-to-end encryption. The application features a neumorphic UI design with both light and dark modes, and provides rich communication capabilities including secure messaging, media sharing, and real-time presence indicators.
+Chat Lite is a secure, modern, and customizable real-time messaging application built with a focus on user experience and end-to-end encryption. It's a full-stack application designed for users who prioritize privacy and a clean, modern user interface. At its core, it provides a robust end-to-end encryption (E2EE) system, ensuring that conversations remain private and secure.
 
 ### Key Features
-- Secure communication with end-to-end encryption using `libsodium`
-- Modern neumorphic UI with light/dark mode and theme customization
-- Real-time experience with WebSockets for instant messaging
-- Rich media sharing with in-app previews for various file types
-- Advanced UX features like command palette (Ctrl+K) and keyboard navigation
-- User onboarding with security concept explanations
+- **End-to-End Encryption**: All messages and files are secured using the audited `libsodium` cryptographic library
+- **Modern UI**: Beautiful Neumorphic UI with light and dark modes
+- **Real-time Communication**: Powered by WebSockets with typing indicators, read receipts, and online presence
+- **Responsive Design**: Adapts to desktop, tablet, and mobile devices
+- **Rich Media Support**: Secure file sharing with previews for various media types
+- **Account Recovery**: Via 24-word recovery phrase
+- **Device Linking**: Securely link new devices using QR codes
 
-### Tech Stack
-- **Frontend**: React, Vite, TypeScript, Zustand, Tailwind CSS
+### Technology Stack
+- **Frontend**: React, Vite, TypeScript, Zustand, Tailwind CSS, Framer Motion
 - **Backend**: Node.js, Express, Prisma, PostgreSQL, Socket.IO
-- **Other**: Redis for caching, WebSockets for real-time communication, libsodium for encryption
+- **Encryption**: `libsodium-wrappers`
+- **Additional**: Redis for caching, JWT for authentication
 
 ## Project Structure
+
 ```
 chat-lite/
-├── server/       # Backend (Node.js, Express, Prisma)
-├── web/          # Frontend (React, Vite)
-├── README.md     # Main project documentation
-├── DEPLOYMENT.md # Deployment guide
-├── start-dev.sh  # Development startup script
-└── ... (other documentation files)
+├── server/           # Backend (Node.js, Express, Prisma)
+│   ├── src/          # Source code
+│   ├── prisma/       # Database schema and migrations
+│   ├── tests/        # Test files
+│   └── package.json
+├── web/              # Frontend (React, Vite)
+│   ├── src/          # Source code
+│   ├── public/       # Static assets
+│   └── package.json
+├── docker-compose.yml # Docker orchestration
+├── start-dev.sh      # Development startup script
+└── README.md
 ```
-
-### Server Directory
-The backend is built with Node.js and Express, using Prisma ORM for PostgreSQL database interactions. It includes WebSocket support for real-time communication and implements end-to-end encryption.
-
-Key technologies:
-- TypeScript
-- Express.js
-- Prisma ORM
-- PostgreSQL
-- Socket.IO
-- libsodium (encryption)
-
-### Web Directory
-The frontend is a React application built with Vite, featuring a modern UI with neumorphic design principles. It uses Zustand for state management and Tailwind CSS for styling.
-
-Key technologies:
-- React 19+
-- TypeScript
-- Zustand (state management)
-- Tailwind CSS
-- Socket.IO client
-- libsodium (encryption)
 
 ## Building and Running
 
@@ -56,90 +43,101 @@ Key technologies:
 - Node.js (v18+)
 - pnpm (or npm/yarn)
 - PostgreSQL
-- Redis (for production)
+- Redis
 
-### Development Setup
-
-#### Backend
-```bash
-cd server
-npm install
-# Create .env file with proper configuration
-npx prisma migrate dev
-npm run dev
-```
-
-#### Frontend
-```bash
-cd web
-npm install
-npm run dev
-```
-
-#### All-in-One Development
-To run both frontend and backend concurrently:
+### Quick Start (Development)
+To run both frontend and backend servers concurrently:
 ```bash
 ./start-dev.sh
 ```
 
-### Environment Configuration
+### Manual Setup
 
-#### Server Environment Variables (.env)
-```env
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public"
-JWT_SECRET="your-super-secret-jwt-key"
-JWT_REFRESH_SECRET="your-refresh-jwt-key"
-PORT=4000
-CORS_ORIGIN="http://localhost:5173" (or your frontend URL)
-REDIS_URL="redis://localhost:6379"
-VAPID_SUBJECT="mailto:admin@yourdomain.com"
-VAPID_PUBLIC_KEY="your_vapid_public_key"
-VAPID_PRIVATE_KEY="your_vapid_private_key"
+#### Backend (Server)
+```bash
+cd server
+pnpm install
+
+# Create .env file with:
+# DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public"
+# JWT_SECRET="your-super-secret-jwt-key"
+# PORT=4000
+# CORS_ORIGIN="http://localhost:5173"
+
+npx prisma migrate dev
+pnpm run dev
 ```
 
-#### Frontend Environment Variables (.env.production)
-```env
-VITE_API_URL="https://yourdomain.com"
-VITE_WS_URL="https://yourdomain.com"
+#### Frontend (Web)
+```bash
+cd web
+pnpm install
+pnpm run dev
 ```
 
-## Development Conventions
+The application will be available at `http://localhost:5173`.
 
-### Architecture Patterns
-- **State Management**: Zustand is used for global state management in the frontend
-- **Real-time Communication**: Socket.IO is used for WebSockets
-- **Security**: End-to-end encryption using libsodium
-- **API Design**: RESTful API with JWT authentication
+### Key Commands
+- `pnpm run dev`: Starts the development server
+- `pnpm run build`: Builds the application for production
+- `pnpm run test`: Runs the tests
+- `npx prisma migrate dev`: Applies database migrations
+- `pnpm run seed`: Seeds the database with initial data (in server directory)
 
-### Code Organization
-- **Frontend**: Components, pages, store (Zustand), hooks, utils, lib
-- **Backend**: Routes, controllers, models (Prisma), middleware, utils, socket handlers
+## Architecture
 
-### Testing
-- Backend tests are located in the `server/tests` directory
-- Frontend tests can be run with Vitest
-- The project includes test configuration files (jest.config.js for backend)
+### Backend Architecture
+- **Express.js** server with middleware for security (Helmet, CORS, rate limiting)
+- **Prisma** ORM for PostgreSQL database interactions
+- **Socket.IO** for real-time WebSocket communication
+- **Redis** for caching and session management
+- **libsodium** for end-to-end encryption
+- Modular routing with separate modules for auth, users, conversations, messages, etc.
+
+### Frontend Architecture
+- **React** with TypeScript for type safety
+- **Zustand** for state management
+- **Tailwind CSS** for styling with custom Neumorphic design
+- **Socket.IO Client** for real-time communication
+- Component-based architecture with organized folder structure
+
+## Security Features
+- End-to-end encryption using libsodium
+- Account recovery via 24-word recovery phrase
+- Device linking with QR codes
+- Session management
+- CSRF protection
+- JWT-based authentication with refresh tokens
+- Input validation and sanitization
 
 ## Deployment
+The application supports both traditional deployment and Docker-based deployment. The `docker-compose.yml` file orchestrates PostgreSQL, Redis, backend, and frontend services.
 
-### Production Prerequisites
-- PostgreSQL (v12+)
-- Redis (v6+)
-- Nginx (as reverse proxy)
-- SSL certificate (e.g., Let's Encrypt)
+For production deployment, refer to `DEPLOYMENT.md` which includes:
+- Environment configuration
+- Nginx reverse proxy setup
+- SSL certificate configuration
+- Process management with PM2
 
-### Production Setup
-1. Set up PostgreSQL and Redis services
-2. Configure environment files for production
-3. Build both frontend and backend
-4. Set up Nginx reverse proxy configuration
-5. Use a process manager like PM2 for the backend
+## Development Conventions
+- TypeScript is used throughout for type safety
+- ESLint and Prettier for code formatting and linting
+- Component organization follows feature-based grouping
+- State management is centralized with Zustand stores
+- API calls are abstracted through custom hooks and service layers
+- Security best practices are implemented at both frontend and backend
 
-The project includes detailed deployment instructions in `DEPLOYMENT.md` with Nginx configuration examples and Docker setup options.
+## Testing
+- Frontend: vitest with jsdom environment
+- Backend: supertest for API testing
+- Both use Jest-style testing frameworks
+- Unit and integration tests are supported
 
-## Key Files and Documentation
-- `README.md`: Main project overview and getting started guide
-- `DEPLOYMENT.md`: Complete production deployment instructions
-- `src.md`: Development recommendations and future feature suggestions
-- `start-dev.sh`: Script for running both frontend and backend during development
-- Package.json files in both server and web directories for dependency management
+## Key Files and Directories
+- `start-dev.sh`: Script to run both frontend and backend simultaneously
+- `docker-compose.yml`: Container orchestration configuration
+- `server/src/index.ts`: Main backend entry point
+- `web/src/main.tsx`: Main frontend entry point
+- `server/src/app.ts`: Express application configuration
+- `web/src/App.tsx`: Main React application component
+- `server/prisma/schema.prisma`: Database schema definition
