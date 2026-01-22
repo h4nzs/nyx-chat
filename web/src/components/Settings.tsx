@@ -2,14 +2,14 @@ import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '@store/auth';
 import { toast } from 'react-hot-toast';
-import { Spinner } from '../components/Spinner'; // Sesuaikan path import jika perlu
+import { Spinner } from '../components/Spinner';
 import { toAbsoluteUrl } from '@utils/url';
 import { usePushNotifications } from '@hooks/usePushNotifications';
 import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
-import { FiChevronRight, FiEdit2 } from 'react-icons/fi';
+import { FiChevronRight, FiEdit2, FiHeart, FiCoffee } from 'react-icons/fi'; // Added FiHeart, FiCoffee
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
-import { api } from '@lib/api'; // Pastikan import api helper ada
+import { api } from '@lib/api';
 
 // Reusable component for a single setting row
 const SettingsRow = ({ title, description, children }: { title: string; description: string; children: React.ReactNode }) => (
@@ -20,11 +20,6 @@ const SettingsRow = ({ title, description, children }: { title: string; descript
     </div>
     <div>{children}</div>
   </div>
-);
-
-// Reusable component for a settings card
-const SettingsCard = ({ children }: { children: React.ReactNode }) => (
-  <div className="bg-bg-surface rounded-xl shadow-neumorphic-concave">{children}</div>
 );
 
 const ToggleSwitch = ({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled?: boolean }) => (
@@ -132,16 +127,9 @@ export default function Settings() {
   const handleRegisterPasskey = async () => {
     try {
       toast.loading("Preparing biometric setup...", { id: 'passkey' });
-
-      // 1. Minta options dari server
       const options = await api<any>("/api/auth/webauthn/register/options");
-
       toast.loading("Scan your fingerprint/face...", { id: 'passkey' });
-
-      // 2. Browser menangani biometric dialog
       const attResp = await startRegistration(options);
-
-      // 3. Kirim hasil ke server
       const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {
         method: "POST",
         body: JSON.stringify(attResp),
@@ -154,7 +142,6 @@ export default function Settings() {
       }
     } catch (error: any) {
       console.error(error);
-      // Handle error 'The user cancelled' agar tidak muncul error merah menakutkan
       if (error.name === 'NotAllowedError') {
         toast.error("Registration cancelled.", { id: 'passkey' });
       } else {
@@ -300,10 +287,11 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Notifications Card */}
+      {/* Notifications & Support Card */}
       <div className="card-neumorphic">
         <div className="p-6">
-          <h3 className="text-lg font-semibold text-text-primary mb-2">Notifications</h3>
+          <h3 className="text-lg font-semibold text-text-primary mb-2">Notifications & Support</h3>
+          
           <SettingsRow
             title="Push Notifications"
             description={pushLoading ? "Processing..." : isSubscribed ? "Enabled on this device." : "Receive notifications for new messages."}
@@ -314,6 +302,52 @@ export default function Settings() {
               disabled={pushLoading}
             />
           </SettingsRow>
+
+          <div className="border-t border-border my-6"></div>
+
+          {/* --- SOCIABUZZ DONATION SECTION --- */}
+          <div className="p-6 rounded-2xl bg-bg-main shadow-neumorphic-concave border border-white/10 relative overflow-hidden group">
+            
+            {/* Hiasan Background Abstrak */}
+            <div className="absolute -right-4 -top-4 w-24 h-24 bg-accent/5 rounded-full blur-2xl group-hover:bg-accent/10 transition-all duration-500"></div>
+
+            <div className="relative z-10">
+              <h3 className="text-lg font-bold text-foreground flex items-center gap-2 mb-2">
+                <FiHeart className="text-red-500 fill-current animate-pulse" />
+                Support Chat Lite
+              </h3>
+              
+              <p className="text-sm text-text-secondary mb-5 leading-relaxed">
+                This app was running on low server (Cheap Tier). 
+                help us to get faster server, better connections time, more storage space, and of course new features will always coming up.
+              </p>
+
+              <a 
+                href="https://sociabuzz.com/h4nzs/tribe" // GANTI USERNAME DISINI JIKA PERLU
+                target="_blank"
+                rel="noopener noreferrer"
+                className="
+                  flex items-center justify-center gap-3 w-full py-3.5 rounded-xl
+                  bg-bg-main text-accent font-bold tracking-wide
+                  shadow-neumorphic-convex 
+                  hover:text-accent-hover
+                  active:shadow-neumorphic-pressed active:scale-[0.98]
+                  transition-all duration-300
+                "
+              >
+                <FiCoffee size={20} />
+                <span>Buy Me Coffee / Server</span>
+              </a>
+              
+              <div className="mt-3 text-center">
+                <span className="text-[10px] uppercase tracking-widest text-text-tertiary">
+                  Via QRIS • GoPay • PayPal • Card
+                </span>
+              </div>
+            </div>
+          </div>
+          {/* --- END DONATION SECTION --- */}
+
         </div>
       </div>
 
