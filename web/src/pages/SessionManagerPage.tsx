@@ -35,7 +35,7 @@ const SessionCard = ({ session, onLogout, isCurrent }: { session: any, onLogout:
       {!isCurrent && (
         <button
           onClick={() => onLogout(session.jti)}
-          className="btn-destructive-neumorphic flex items-center gap-2 px-3 py-2 rounded-lg text-destructive transition-colors"
+          className="btn-destructive-neumorphic flex items-center gap-2 px-3 py-2 rounded-lg text-destructive-foreground transition-colors"
         >
           <FiLogOut />
           <span>Logout</span>

@@ -14,71 +14,84 @@ export default function HelpPage() {
         </div>
 
         <div className="space-y-6 text-text-secondary">
+
           <section>
-            <h2 className="text-xl font-semibold text-text-primary mb-3">My Messages Fail to Decrypt or Show "[Error]"</h2>
+            <h2 className="text-xl font-semibold text-text-primary mb-3">What's the easiest way to use my account on a new device?</h2>
             <p className="mb-2">
-              This is a normal part of end-to-end encryption security. Session encryption keys change frequently to maintain security.
-            </p>
-            <p className="mb-2">
-              If you see messages like "[Failed to decrypt message]" or "[Requesting key to decrypt...]", it means the session key used to encrypt that message is not available on your device. This can happen if:
+              The best and easiest method is to use the <span className="font-bold text-text-primary">Link Device</span> feature.
             </p>
             <ul className="list-disc list-inside ml-4 space-y-1">
-              <li>You or your contact have generated new encryption keys (e.g., after reinstalling the app or restoring an account).</li>
-              <li>The message was sent while you were offline, and the initial session key negotiation failed.</li>
+              <li>On your new, logged-out device, click "Link Device" on the login screen. It will show a QR code.</li>
+              <li>On your existing, logged-in device, go to <span className="font-mono bg-bg-main p-1 rounded">Settings &gt; Link Device</span> and scan the QR code.</li>
             </ul>
-            <h3 className="font-semibold text-text-primary mt-3">Solution:</h3>
-            <p>
-              Ask your contact to send a new message. This will force the creation of a new session key, which should allow subsequent messages to decrypt. For older messages that failed to decrypt, unfortunately, they cannot be recovered if the correct key is no longer available.
+            <p className="mt-2">
+              Your account will be securely transferred, and you will be logged in automatically on the new device.
             </p>
           </section>
 
           <div className="border-b border-border my-6" />
 
           <section>
-            <h2 className="text-xl font-semibold text-text-primary mb-3">Why Do I Need to Restore My Account on a New Device?</h2>
+            <h2 className="text-xl font-semibold text-text-primary mb-3">When should I use my 24-word Recovery Phrase?</h2>
             <p className="mb-2">
-              For maximum security, your private encryption keys are stored only on your device, never on our servers.
+              Your Recovery Phrase is your ultimate backup. You should only need it in one situation: <span className="font-bold text-text-primary">when you've lost access to ALL of your logged-in devices</span> (for example, if you lost your phone and have no other active sessions).
             </p>
-            <p className="mb-2">
-              When you log in on a new device (or after clearing your browser data), that device does not have the keys required to encrypt or decrypt messages. Without these keys, E2EE functionality will not work.
-            </p>
-            <h3 className="font-semibold text-text-primary mt-3">Solution:</h3>
             <p>
-              Use the 24-word Recovery Phrase you saved during registration to restore your keys on this new device. You can do this in Settings &gt; Key Management.
+              It allows you to regenerate your Master Key from scratch on a new device.
             </p>
           </section>
-
+          
           <div className="border-b border-border my-6" />
 
           <section>
-            <h2 className="text-xl font-semibold text-text-primary mb-3">What is a 'Safety Number' and Why Does It Change?</h2>
-            <p className="mb-2">
-              A 'Safety Number' is a visual way to verify the identity of your contact. It's a short representation of both your and your contact's encryption keys.
-            </p>
-            <p className="mb-2">
-              This number will change if you or your contact:
+            <h2 className="text-xl font-semibold text-text-primary mb-3">I forgot my password, but I have my Recovery Phrase. What do I do?</h2>
+             <p className="mb-2">
+              You can regain access by using the "Restore" feature.
             </p>
             <ul className="list-disc list-inside ml-4 space-y-1">
-              <li>Reinstall the application.</li>
-              <li>Switch devices.</li>
-              <li>Generate new encryption keys.</li>
+              <li>First, ensure you are logged out.</li>
+              <li>On the login screen, click "Restore Account".</li>
+              <li>Enter your 24-word Recovery Phrase and choose a <span className="font-bold text-text-primary">new password</span> for this device.</li>
             </ul>
-            <h3 className="font-semibold text-text-primary mt-3">Solution:</h3>
-            <p>
-              If the Safety Number changes, re-verify with your contact through an out-of-band method (e.g., a phone call or video call) to ensure you are still communicating with the correct person and to prevent "man-in-the-middle" attacks.
+            <p className="mt-2">
+              After restoring, you can log in with your email/username and the new password you just set.
             </p>
           </section>
 
           <div className="border-b border-border my-6" />
 
           <section>
-            <h2 className="text-xl font-semibold text-text-primary mb-3">I Forgot My Password AND My Recovery Phrase.</h2>
+            <h2 className="text-xl font-semibold text-text-primary mb-3">Why are my old messages not on my new device?</h2>
             <p className="mb-2">
-              Because this application is designed with privacy as a top priority, we never have access to your password, private keys, or recovery phrase.
+              This is a feature of the end-to-end encryption design. For your privacy, message contents are only stored on the devices involved in the conversation, not on our servers.
+            </p>
+            <p>
+              When you set up a new device, it will only start receiving new messages sent after it has been linked or restored. It cannot recover the history from other devices.
+            </p>
+          </section>
+
+          <div className="border-b border-border my-6" />
+          
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mb-3">Some messages show "[Failed to decrypt]". Why?</h2>
+            <p className="mb-2">
+              This can happen in E2EE chats when the session keys between you and your contact go out of sync. This usually occurs if one of you has reinstalled the app, restored from a phrase, or linked a new device, which generates new encryption keys.
             </p>
             <h3 className="font-semibold text-text-primary mt-3">Solution:</h3>
             <p>
-              Unfortunately, there is no way for us or anyone else to recover your account or messages in this case. You will need to create a new account. This is the trade-off for strong security and privacy.
+              Ask your contact to send a new message in the chat. This forces both your apps to establish a new, secure session key, and subsequent messages should decrypt correctly.
+            </p>
+          </section>
+
+          <div className="border-b border-border my-6" />
+
+          <section>
+            <h2 className="text-xl font-semibold text-text-primary mb-3">What if I lose BOTH my password and my Recovery Phrase?</h2>
+            <p className="mb-2 font-semibold text-destructive">
+              Unfortunately, in this case, your account is permanently irrecoverable.
+            </p>
+            <p>
+              Because of the privacy-first design, we never have access to your password, keys, or phrase. There is no "forgot password" link, and we have no way to access your account data. This is the trade-off for ensuring no one but you can ever access your conversations.
             </p>
           </section>
 
