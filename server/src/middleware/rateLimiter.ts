@@ -8,6 +8,11 @@ const skipInDev = () => env.nodeEnv === 'development';
 const keyGenerator = (req: Request): string => {
   // Ambil dari header x-forwarded-for, atau fallback ke req.ip
   const forwarded = req.headers['x-forwarded-for'];
+  console.log('IP CHECK:', { 
+    forwarded: forwarded, 
+    socket: req.socket.remoteAddress,
+    final: typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.ip 
+  });
   if (typeof forwarded === 'string') {
     return forwarded.split(',')[0].trim();
   }
