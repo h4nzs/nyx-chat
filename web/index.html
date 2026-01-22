@@ -2,18 +2,64 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="alternate icon" href="/favicon.ico" />
+    
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#f0f2f5" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
-  
+    
+    <title>Chat Lite — Secure, Private & Neumorphic Messaging</title>
+    <meta name="title" content="Chat Lite — Secure, Private & Neumorphic Messaging" />
+    <meta name="description" content="Chat Lite is a secure, end-to-end encrypted messaging app featuring a stunning Neumorphic design. Chat privately with friends without tracking, ads, or compromise." />
+    <meta name="keywords" content="chat app, secure messaging, end-to-end encryption, E2EE, neumorphism, private chat, pwa, react chat, webauthn" />
+    <meta name="author" content="Kenz" />
+    
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://chat-lite-weld.vercel.app/" /> <meta property="og:title" content="Chat Lite — The Future of Private Messaging" />
+    <meta property="og:description" content="Experience secure E2EE chat with a beautiful soft-ui design. No ads. No tracking. Just you and your friends." />
+    <meta property="og:image" content="/normal-desktop-dark.png" /> <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://chat-lite-weld.vercel.app/" />
+    <meta property="twitter:title" content="Chat Lite — Secure & Private Messaging" />
+    <meta property="twitter:description" content="Secure E2EE chat with Neumorphic design. Privacy focused." />
+    <meta property="twitter:image" content="/normal-desktop-dark.png" />
+
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Chat Lite">
     <link rel="apple-touch-icon" href="/pwa-192x192.png">
-    <title>Chat‑Lite</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "Chat Lite",
+      "operatingSystem": "Web, iOS, Android",
+      "applicationCategory": "CommunicationApplication",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "IDR"
+      },
+      "description": "A secure, end-to-end encrypted messaging application built with modern web technologies and neumorphic design.",
+      "author": {
+          "@type": "Person",
+          "name": "Dehan"
+      }
+    }
+    </script>
   </head>
-  <body class="min-h-screen bg-white dark:bg-gray-900">
+  <body class="min-h-screen bg-[#f0f2f5] dark:bg-gray-900 font-sans selection:bg-blue-500 selection:text-white">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    
+    <noscript>You need to enable JavaScript to run this app.</noscript>
   </body>
 </html>
