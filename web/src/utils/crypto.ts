@@ -99,52 +99,79 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
 
 // --- Group Key Management & Recovery ---
 
+// Menyimpan lock untuk mencegah race condition dalam ensureGroupSession
+const groupSessionLocks = new Set<string>();
+
 export async function ensureGroupSession(conversationId: string, participants: Participant[]): Promise<any[] | null> {
+  // Periksa apakah sudah ada promise pending
   const pending = pendingGroupSessionPromises.get(conversationId);
   if (pending) {
     return pending;
   }
 
-  const promise = (async () => {
-    console.log(`[crypto] ensureGroupSession called for ${conversationId}`);
-    const existingKey = await getGroupKey(conversationId);
-    if (existingKey) {
-      return null;
-    }
-    
-    console.log(`[crypto] No existing key. Generating a new group key for ${conversationId}.`);
-    const sodium = await getSodium();
-    const groupKey = await worker_generate_random_key();
-    await storeGroupKey(conversationId, groupKey);
-    console.log(`[crypto] New group key stored for ${conversationId}.`);
-
-    const myId = useAuthStore.getState().user?.id;
-    const otherParticipants = participants.filter(p => p.id !== myId);
-    
-    const missingKeys: string[] = [];
-
-    const distributionKeys = await Promise.all(
-      otherParticipants.map(async (p) => {
-        if (!p.publicKey) {
-          console.warn(`Participant ${p.username} has no public key. Cannot send group key.`);
-          missingKeys.push(p.username);
-          return null;
+  // Periksa apakah sedang ada proses pembuatan kunci grup berlangsung
+  if (groupSessionLocks.has(conversationId)) {
+    // Jika sudah ada proses berlangsung, tunggu sampai selesai
+    // Ini mencegah race condition di mana dua proses berjalan bersamaan
+    return new Promise((resolve) => {
+      const interval = setInterval(() => {
+        if (!groupSessionLocks.has(conversationId)) {
+          clearInterval(interval);
+          // Setelah lock dilepas, coba lagi
+          ensureGroupSession(conversationId, participants).then(resolve);
         }
-        const theirPublicKey = sodium.from_base64(p.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const encryptedKey = await worker_crypto_box_seal(groupKey, theirPublicKey);
-        return {
-          userId: p.id,
-          key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-          type: 'GROUP_KEY'
-        };
-      })
-    );
+      }, 10); // Cek setiap 10ms
+    });
+  }
 
-    if (missingKeys.length > 0) {
-      throw new Error(`Failed to encrypt for users: ${missingKeys.join(', ')}. They may need to set up their keys.`);
+  // Tambahkan lock untuk mencegah proses lain berjalan
+  groupSessionLocks.add(conversationId);
+
+  const promise = (async () => {
+    try {
+      console.log(`[crypto] ensureGroupSession called for ${conversationId}`);
+      const existingKey = await getGroupKey(conversationId);
+      if (existingKey) {
+        return null;
+      }
+
+      console.log(`[crypto] No existing key. Generating a new group key for ${conversationId}.`);
+      const sodium = await getSodium();
+      const groupKey = await worker_generate_random_key();
+      await storeGroupKey(conversationId, groupKey);
+      console.log(`[crypto] New group key stored for ${conversationId}.`);
+
+      const myId = useAuthStore.getState().user?.id;
+      const otherParticipants = participants.filter(p => p.id !== myId);
+
+      const missingKeys: string[] = [];
+
+      const distributionKeys = await Promise.all(
+        otherParticipants.map(async (p) => {
+          if (!p.publicKey) {
+            console.warn(`Participant ${p.username} has no public key. Cannot send group key.`);
+            missingKeys.push(p.username);
+            return null;
+          }
+          const theirPublicKey = sodium.from_base64(p.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+          const encryptedKey = await worker_crypto_box_seal(groupKey, theirPublicKey);
+          return {
+            userId: p.id,
+            key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+            type: 'GROUP_KEY'
+          };
+        })
+      );
+
+      if (missingKeys.length > 0) {
+        throw new Error(`Failed to encrypt for users: ${missingKeys.join(', ')}. They may need to set up their keys.`);
+      }
+
+      return distributionKeys.filter(Boolean);
+    } finally {
+      // Pastikan lock selalu dilepas setelah proses selesai
+      groupSessionLocks.delete(conversationId);
     }
-
-    return distributionKeys.filter(Boolean);
   })();
 
   pendingGroupSessionPromises.set(conversationId, promise);
@@ -419,7 +446,42 @@ interface ReceiveKeyPayload {
 }
 
 export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promise<void> {
+  // Validasi struktur dan isi payload
+  if (!payload || typeof payload !== 'object') {
+    console.error('[crypto] storeReceivedSessionKey: Invalid payload - not an object');
+    return;
+  }
+
   const { conversationId, sessionId, encryptedKey, type } = payload;
+
+  // Validasi conversationId
+  if (!conversationId || typeof conversationId !== 'string' || conversationId.trim() === '') {
+    console.error('[crypto] storeReceivedSessionKey: Invalid conversationId', { conversationId });
+    return;
+  }
+
+  // Validasi encryptedKey
+  if (!encryptedKey || typeof encryptedKey !== 'string' || encryptedKey.trim() === '') {
+    console.error('[crypto] storeReceivedSessionKey: Invalid encryptedKey', { encryptedKey });
+    return;
+  }
+
+  // Validasi type
+  if (type && type !== 'GROUP_KEY' && type !== 'SESSION_KEY') {
+    console.error('[crypto] storeReceivedSessionKey: Invalid key type', { type });
+    return;
+  }
+
+  // Jika type adalah SESSION_KEY, sessionId harus disediakan
+  if (type === 'SESSION_KEY' && (!sessionId || typeof sessionId !== 'string' || sessionId.trim() === '')) {
+    console.error('[crypto] storeReceivedSessionKey: Missing or invalid sessionId for SESSION_KEY type', { sessionId });
+    return;
+  }
+
+  // Jika type adalah GROUP_KEY, sessionId tidak boleh disediakan
+  if (type === 'GROUP_KEY' && sessionId) {
+    console.warn('[crypto] storeReceivedSessionKey: sessionId provided for GROUP_KEY type, ignoring', { sessionId });
+  }
 
   if (type === 'GROUP_KEY') {
     // Clear any pending timeout for this group key request

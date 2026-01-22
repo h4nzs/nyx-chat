@@ -1,4 +1,4 @@
- 1. Potensi Bug dalam Implementasi E2EE
+ 1. #### Potensi Bug dalam Implementasi E2EE
 
   a. Kekurangan dalam Verifikasi Tanda Tangan
   Dalam fungsi establishSessionFromPreKeyBundle di
