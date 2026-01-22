@@ -7,7 +7,7 @@ import { useMessageStore, decryptMessageObject } from "@store/message";
 import { useConnectionStore } from "@store/connection";
 import { usePresenceStore } from "@store/presence";
 import useNotificationStore from '@store/notification';
-import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest } from "@utils/crypto";
+import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest, schedulePeriodicGroupKeyRotation } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
 import type { Message } from "@store/conversation";
 import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
@@ -152,6 +152,12 @@ export function getSocket() {
     socket.on("conversation:new", (newConversation) => {
       conversationStore.addOrUpdateConversation(newConversation);
       socket?.emit("conversation:join", newConversation.id);
+
+      // Jika ini adalah percakapan grup, jadwalkan rotasi kunci berkala
+      if (newConversation.isGroup) {
+        schedulePeriodicGroupKeyRotation(newConversation.id);
+      }
+
       toast.success(`You've been added to "${newConversation.title || 'a new chat'}"`);
     });
 

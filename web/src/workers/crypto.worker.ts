@@ -207,17 +207,31 @@ self.onmessage = async (event: MessageEvent) => {
 
       case 'x3dh_initiator': {
         const { myIdentityKey, theirIdentityKey, theirSignedPreKey, theirSigningKey, signature } = payload;
-        
+
         if (!sodium.crypto_sign_verify_detached(signature, theirSignedPreKey, theirSigningKey)) {
           throw new Error("Invalid signature on signed pre-key.");
         }
 
+        // VERIFIKASI TAMBAHAN: Verifikasi bahwa kunci identitas cocok dengan kunci tanda tangan
+        // Dalam protokol X3DH standar, identity key seharusnya juga ditandatangani
+        // Kita bisa menambahkan verifikasi bahwa identity key cocok dengan informasi lain
+        // Misalnya dengan memverifikasi bahwa identity key cocok dengan informasi yang diperoleh dari server
+        // atau dengan menggunakan mekanisme verifikasi eksternal seperti safety numbers
+        const identityVerification = sodium.crypto_generichash(32, theirIdentityKey);
+
+        // Di sini kita bisa menambahkan logika untuk memverifikasi bahwa identity key
+        // cocok dengan informasi yang diperoleh dari server atau sumber tepercaya lainnya
+        // Untuk saat ini, kita hanya menambahkan verifikasi dasar bahwa kunci memiliki panjang yang benar
+        if (theirIdentityKey.length !== sodium.crypto_sign_PUBLICKEYBYTES) {
+          throw new Error("Invalid identity key length.");
+        }
+
         const ephemeralKeyPair = sodium.crypto_box_keypair();
-        
+
         const dh1 = sodium.crypto_scalarmult(myIdentityKey.privateKey, theirSignedPreKey);
         const dh2 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirIdentityKey);
         const dh3 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirSignedPreKey);
-      
+
         const sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
         const sessionKey = sodium.crypto_generichash(32, sharedSecret);
 

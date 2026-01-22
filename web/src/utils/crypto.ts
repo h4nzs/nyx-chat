@@ -163,9 +163,30 @@ export async function handleGroupKeyDistribution(conversationId: string, encrypt
   console.log(`[crypto] Received and stored a new group key for ${conversationId}`);
 }
 
-export async function rotateGroupKey(conversationId: string): Promise<void> {
-  console.log(`[crypto] Rotating group key for conversation ${conversationId} due to membership change.`);
+export async function rotateGroupKey(conversationId: string, reason: 'membership_change' | 'periodic_rotation' = 'membership_change'): Promise<void> {
+  console.log(`[crypto] Rotating group key for conversation ${conversationId} due to ${reason}.`);
   await deleteGroupKey(conversationId);
+
+  // Jika rotasi karena perubahan keanggotaan, buat kunci baru dan distribusikan
+  if (reason === 'membership_change') {
+    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+    if (conversation) {
+      const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
+      if (distributionKeys) {
+        emitGroupKeyDistribution(conversationId, distributionKeys);
+      }
+    }
+  }
+}
+
+export async function schedulePeriodicGroupKeyRotation(conversationId: string): Promise<void> {
+  // Jadwalkan rotasi kunci grup secara berkala (misalnya setiap 24 jam)
+  const rotationInterval = 24 * 60 * 60 * 1000; // 24 jam dalam milidetik
+
+  setInterval(async () => {
+    await rotateGroupKey(conversationId, 'periodic_rotation');
+    console.log(`[crypto] Periodic group key rotation completed for ${conversationId}`);
+  }, rotationInterval);
 }
 
 async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0) {
@@ -446,11 +467,30 @@ export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; ke
 export async function decryptFile(encryptedBlob: Blob, keyB64: string, originalType: string): Promise<Blob> {
   const sodium = await getSodium();
   const keyBytes = sodium.from_base64(keyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-  
+
   const combinedData = await encryptedBlob.arrayBuffer();
   if (combinedData.byteLength < IV_LENGTH) throw new Error("Encrypted file is too short.");
 
   const decryptedData = await worker_file_decrypt(combinedData, keyBytes);
 
   return new Blob([decryptedData], { type: originalType });
+}
+
+export async function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicKey: Uint8Array): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const id = Math.random().toString(36).substring(2, 15);
+    const handler = (event: MessageEvent) => {
+      if (event.data.id === id && event.data.type === 'generateSafetyNumber_result') {
+        resolve(event.data.result);
+        self.removeEventListener('message', handler);
+      }
+    };
+    self.addEventListener('message', handler);
+
+    postMessage({
+      type: 'generateSafetyNumber',
+      payload: { myPublicKey, theirPublicKey },
+      id
+    });
+  });
 }
