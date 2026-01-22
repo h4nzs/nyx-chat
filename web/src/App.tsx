@@ -3,6 +3,8 @@ import { useEffect, useCallback } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { FiLogOut, FiSettings } from 'react-icons/fi';
 import { motion } from 'framer-motion';
+import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 
 // Pages
 import Login from './pages/Login';
@@ -359,6 +361,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <AppContent />
+      <Analytics />
+      <SpeedInsights />
     </BrowserRouter>
   );
 }
