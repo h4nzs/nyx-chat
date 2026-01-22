@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.8.0] - 2026-01-19
+
+This is a major stability and architectural release focused on delivering a fully functional, robust, and user-friendly "Link Device" feature. It resolves a series of deep, interconnected bugs in the authentication, cryptography, and real-time state management layers.
+
+### Added
+
+-   **Fully Functional "Link Device" Feature:** Users can now seamlessly and reliably link a new device by scanning a QR code. The new device is set up automatically without requiring password entry, providing a modern and convenient onboarding experience.
+
+### Fixed
+
+-   **CRITICAL: Complete Overhaul of Device Linking Flow:** Diagnosed and fixed a cascade of critical bugs that previously made the feature unusable.
+    -   **UI Stability:** Resolved a persistent crash on the QR scanner page (`DeviceScannerPage`) by correctly managing the camera lifecycle within React.
+    -   **Race Condition Elimination:** Fixed a critical race condition where global application logic (`App.tsx`) would prematurely terminate the guest WebSocket connection or trigger unauthorized API calls during the linking process.
+    -   **Cryptographic Integrity:**
+        *   Resolved a fundamental data format mismatch between the client and the crypto worker, fixing an `incomplete input` error.
+        *   Fixed a subtle key derivation mismatch, where the encryption key did not match the decryption key, resolving the `wrong secret key for the given ciphertext` error.
+        *   Corrected the encrypted payload structure to match the exact format expected by the decryption function in the crypto worker.
+-   **Authentication Flow Robustness:**
+    -   **Registration:** Fixed a bug that caused the initial secure key upload (`setupAndUploadPreKeyBundle`) to fail after a user registered a new account.
+    -   **Login:** Improved the login flow to immediately decrypt and cache local keys using the login password, removing a redundant password prompt.
+-   **Build Stability:** Resolved multiple TypeScript syntax and type errors that were preventing successful production builds.
+
+### Changed
+
+- **Improved Help & FAQ:** The content of the Help page (`HelpPage.tsx`) and the security info modal (`ChatInfoModal.tsx`) has been completely rewritten to be more accurate, comprehensive, and to correctly explain the new "Link Device" feature as the primary method for adding devices.
+
 ## [1.7.1] - 2025-12-29
 
 This is a massive stability, security, and architectural hardening release that resolves numerous critical bugs, race conditions, and security vulnerabilities, particularly within the End-to-End Encryption (E2EE) and real-time state synchronization systems.
