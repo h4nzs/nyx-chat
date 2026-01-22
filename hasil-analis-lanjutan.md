@@ -13,7 +13,7 @@
   forward secrecy. Jika kunci grup bocor, semua pesan masa lalu dan
   masa depan bisa dibaca.
 
-  2. Potensi Bug dalam Manajemen Session Keys
+  2. #### Potensi Bug dalam Manajemen Session Keys
 
   a. Race Condition dalam ensureGroupSession
   Dalam fungsi ensureGroupSession di web/src/utils/crypto.ts, ada

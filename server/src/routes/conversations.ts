@@ -474,4 +474,48 @@ router.get('/:id/media', requireAuth, async (req, res, next) => {
   }
 });
 
+// Record key rotation event
+router.post("/:id/key-rotation", async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
+    const { id: conversationId } = req.params;
+    const { reason } = req.body;
+
+    // Validasi bahwa pengguna adalah anggota percakapan
+    const participant = await prisma.participant.findFirst({
+      where: {
+        conversationId,
+        userId: req.user!.id
+      }
+    });
+
+    if (!participant) {
+      return res.status(404).json({ error: "Conversation not found or you're not a participant" });
+    }
+
+    // Catat bahwa rotasi kunci telah terjadi
+    const updatedConversation = await prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        updatedAt: new Date(), // Ini akan memperbarui timestamp terakhir
+        // Di sini kita bisa menambahkan field khusus untuk melacak kapan kunci terakhir dirotasi
+      }
+    });
+
+    // Di sini kita bisa menambahkan logika tambahan seperti:
+    // - Mencatat rotasi kunci di tabel khusus
+    // - Memberi tahu anggota lain bahwa kunci telah dirotasi
+    // - Menandai kunci lama sebagai tidak valid
+
+    res.json({
+      success: true,
+      message: "Key rotation recorded successfully",
+      conversation: updatedConversation
+    });
+  } catch (error) {
+    console.error('Failed to record key rotation:', error);
+    next(error);
+  }
+});
+
 export default router;

@@ -145,12 +145,14 @@ export async function ensureGroupSession(conversationId: string, participants: P
       const otherParticipants = participants.filter(p => p.id !== myId);
 
       const missingKeys: string[] = [];
+      const participantsWithoutKeys: { id: string; username: string }[] = [];
 
       const distributionKeys = await Promise.all(
         otherParticipants.map(async (p) => {
           if (!p.publicKey) {
             console.warn(`Participant ${p.username} has no public key. Cannot send group key.`);
             missingKeys.push(p.username);
+            participantsWithoutKeys.push({ id: p.id, username: p.username });
             return null;
           }
           const theirPublicKey = sodium.from_base64(p.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -164,7 +166,16 @@ export async function ensureGroupSession(conversationId: string, participants: P
       );
 
       if (missingKeys.length > 0) {
-        throw new Error(`Failed to encrypt for users: ${missingKeys.join(', ')}. They may need to set up their keys.`);
+        // Jika ada anggota tanpa kunci publik, beri tahu admin grup
+        const myParticipant = participants.find(p => p.id === myId);
+
+        if (myParticipant?.role === 'ADMIN' || myParticipant?.role === 'MEMBER') {
+          // Tampilkan notifikasi bahwa beberapa anggota tidak bisa menerima kunci grup
+          console.warn(`[crypto] Some participants do not have public keys: ${missingKeys.join(', ')}. They may need to set up their keys.`);
+
+          // Alternatif: Kirim pesan sistem ke grup memberi tahu tentang masalah ini
+          // await sendSystemMessage(conversationId, 'Some participants do not have public keys and won\'t be able to read messages.');
+        }
       }
 
       return distributionKeys.filter(Boolean);
@@ -193,6 +204,17 @@ export async function handleGroupKeyDistribution(conversationId: string, encrypt
 export async function rotateGroupKey(conversationId: string, reason: 'membership_change' | 'periodic_rotation' = 'membership_change'): Promise<void> {
   console.log(`[crypto] Rotating group key for conversation ${conversationId} due to ${reason}.`);
   await deleteGroupKey(conversationId);
+
+  // Memberi tahu server bahwa kunci lama tidak valid
+  try {
+    await authFetch(`/api/conversations/${conversationId}/key-rotation`, {
+      method: 'POST',
+      body: JSON.stringify({ reason })
+    });
+  } catch (error) {
+    console.error(`[crypto] Failed to notify server about key rotation for ${conversationId}:`, error);
+    // Tetap lanjutkan proses meskipun server tidak merespons
+  }
 
   // Jika rotasi karena perubahan keanggotaan, buat kunci baru dan distribusikan
   if (reason === 'membership_change') {
