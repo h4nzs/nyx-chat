@@ -19,7 +19,7 @@ const NotificationItem = ({ notification }: { notification: any }) => {
   };
 
   const content = (
-    <div className="flex items-start gap-3 p-3 hover:bg-secondary transition-colors">
+    <div className="flex items-start gap-3 p-3 rounded-lg hover:bg-secondary transition-colors">
       <div className="mt-1 flex-shrink-0">
         <FiBell className="text-accent-color" />
       </div>
@@ -43,7 +43,7 @@ const NotificationPopover = () => {
   }));
 
   return (
-    <div className="w-80 bg-bg-surface border border-border rounded-lg shadow-lg">
+    <div className="w-80 card-neumorphic rounded-xl">
       <div className="p-3 flex justify-between items-center border-b border-border">
         <h3 className="font-bold text-text-primary">Notifications</h3>
         {notifications.length > 0 && (

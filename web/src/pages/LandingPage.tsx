@@ -185,7 +185,7 @@ export default function LandingPage() {
             <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary max-w-3xl mx-auto mb-8">
               An end-to-end encrypted chat application with a focus on privacy, user control, and a beautiful, modern interface.
             </motion.p>
-            <motion.div variants={itemVariants} className="flex justify-center items-center gap-4">
+            <motion.div variants={itemVariants} className="flex flex-col sm:flex-row justify-center items-center gap-4">
               <Link to="/register" className="btn btn-primary text-lg px-8 py-3">
                 Get Started
               </Link>
@@ -196,7 +196,7 @@ export default function LandingPage() {
             </motion.div>
           </motion.div>
 
-          <div className="mt-16 md:mt-24">
+          <div className="mt-16 md:mt-24 p-6 rounded-2xl bg-bg-surface shadow-neumorphic-convex max-w-4xl mx-auto">
             <ThemeComparisonSlider />
           </div>
         </main>
@@ -327,8 +327,8 @@ export default function LandingPage() {
         </section>
 
         {/* Footer */}
-        <footer className="bg-bg-surface py-8">
-          <div className="max-w-6xl mx-auto px-4 text-center text-text-secondary">
+        <footer className="py-8">
+          <div className="max-w-6xl mx-auto px-4 text-center text-text-secondary card-neumorphic">
             <p>&copy; {new Date().getFullYear()} Chat Lite. Built with ❤️.</p>
           </div>
         </footer>

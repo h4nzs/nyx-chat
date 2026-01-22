@@ -68,7 +68,7 @@ export default function RestorePage() {
             Enter your 12 or 24-word recovery phrase and set a new password for this device.
           </p>
         </div>
-        <form onSubmit={handleRestore} className="bg-bg-surface rounded-lg shadow-lg p-8 border border-border">
+        <form onSubmit={handleRestore} className="card-neumorphic p-8">
           <div className="space-y-6">
             <div className="form-control">
               <label className="label">
@@ -77,7 +77,7 @@ export default function RestorePage() {
               <textarea
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
-                className="textarea textarea-bordered w-full h-28"
+                className="w-full h-28 input-neumorphic resize-none"
                 placeholder="Enter your recovery phrase, separated by spaces..."
                 required
               />
@@ -90,7 +90,7 @@ export default function RestorePage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="input input-bordered w-full"
+                className="input-neumorphic w-full"
                 placeholder="Choose a strong password for this device"
                 required
               />

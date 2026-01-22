@@ -141,11 +141,11 @@ export default function LinkDevicePage() {
 
   return (
     <div className="relative flex flex-col items-center justify-center h-screen bg-bg-main text-text-primary p-4 overflow-hidden">
-      <Link to="/auth/login" className="absolute top-6 left-6 p-3 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary">
+      <Link to="/auth/login" className="absolute top-6 left-6 touch-target p-3 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary">
         <FiChevronLeft size={24} />
       </Link>
 
-      <div className="bg-bg-surface p-10 rounded-2xl shadow-neumorphic-flat text-center max-w-md w-full border border-white/5">
+      <div className="card-neumorphic p-10 text-center max-w-md w-full">
         <h1 className="text-3xl font-bold mb-2 bg-gradient-to-r from-text-primary to-text-secondary bg-clip-text text-transparent">Link Device</h1>
         <p className="text-text-secondary text-sm mb-8">
           Go to Settings &gt; Link Device on your phone
@@ -153,7 +153,7 @@ export default function LinkDevicePage() {
 
         {/* CONTAINER UI */}
         <div className="bg-white p-4 rounded-xl inline-block mb-8 shadow-inner min-w-[250px] min-h-[250px] flex items-center justify-center">
-          
+
           {status === 'success' ? (
             <div className="flex flex-col items-center animate-bounce-in">
               <FiCheckCircle size={100} className="text-green-500 mb-4" />

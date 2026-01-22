@@ -26,7 +26,7 @@ export default function PasswordPromptModal() {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-surface rounded-lg shadow-xl p-8 w-full max-w-sm border border-border">
+      <div className="card-neumorphic p-8 w-full max-w-sm">
         <div className="flex flex-col items-center text-center mb-6">
           <FiKey className="text-accent text-4xl mb-4" />
           <h2 className="text-xl font-bold text-text-primary">Password Required</h2>
@@ -39,7 +39,7 @@ export default function PasswordPromptModal() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full p-3 rounded-lg bg-bg-surface text-text-primary placeholder-text-secondary focus:outline-none focus:ring-0 shadow-neumorphic-concave mb-4"
+              className="w-full input-neumorphic mb-4"
               placeholder="Enter your password"
             />
           </div>
@@ -47,13 +47,13 @@ export default function PasswordPromptModal() {
             <button
               type="button"
               onClick={handleCancel}
-              className="w-full py-2 px-4 rounded-md bg-secondary text-text-primary hover:bg-secondary/80 transition-colors"
+              className="w-full py-2 px-4 rounded-lg bg-bg-surface text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="w-full btn btn-primary"
+              className="w-full py-2 px-4 rounded-lg bg-accent text-white shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
             >
               Continue
             </button>

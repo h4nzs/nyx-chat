@@ -4,9 +4,9 @@ import { FiChevronLeft, FiHelpCircle } from 'react-icons/fi';
 export default function HelpPage() {
   return (
     <div className="h-screen w-screen flex flex-col items-center justify-center bg-bg-main text-text-primary p-4">
-      <div className="w-full max-w-2xl bg-bg-surface rounded-lg shadow-neumorphic-convex p-8 border border-border overflow-y-auto max-h-[90vh]">
+      <div className="w-full max-w-2xl card-neumorphic p-8 overflow-y-auto max-h-[90vh]">
         <div className="flex items-center gap-4 mb-6 pb-4 border-b border-border">
-          <Link to="/settings" aria-label="Back to Settings" className="p-2 rounded-full text-text-secondary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all">
+          <Link to="/settings" aria-label="Back to Settings" className="touch-target p-2.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">
             <FiChevronLeft size={24} />
           </Link>
           <FiHelpCircle className="text-accent text-3xl" />

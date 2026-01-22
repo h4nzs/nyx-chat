@@ -84,16 +84,16 @@ export default function KeyManagementPage() {
 
   return (
     <div className="h-screen w-screen flex flex-col items-center justify-center bg-bg-main text-text-primary p-4">
-      <div className="w-full max-w-2xl bg-bg-surface rounded-lg shadow-lg p-8 border border-border">
+      <div className="w-full max-w-2xl card-neumorphic p-8">
         <div className="flex items-center gap-4 mb-6">
           <FiKey className="text-accent text-3xl" />
           <h1 className="text-2xl font-bold text-text-primary">Encryption Key Management</h1>
         </div>
         <p className="text-text-secondary mb-6">
-          Your end-to-end encryption keys ensure that only you and the recipient can read your messages. 
+          Your end-to-end encryption keys ensure that only you and the recipient can read your messages.
           Back up your key to restore your chat history on a new device.
         </p>
-        
+
         <div className="space-y-4">
           <button onClick={handleShowRecovery} disabled={isProcessing} className="btn btn-secondary w-full justify-center gap-3">
             {isProcessing ? <Spinner size="sm" /> : <FiShield />}

@@ -137,7 +137,7 @@ export default function Register() {
   if (step === 'otp') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg-main p-4">
-        <div className="w-full max-w-md bg-bg-surface rounded-xl p-8 shadow-neumorphic-concave text-center">
+        <div className="w-full max-w-md card-neumorphic p-8 text-center">
           <div className="mb-4 flex justify-center text-accent">
             <FiMail size={48} />
           </div>
@@ -149,17 +149,17 @@ export default function Register() {
           {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
 
           <form onSubmit={handleVerifyOtp} className="space-y-6">
-            <input 
-              type="text" 
+            <input
+              type="text"
               maxLength={6}
               value={otpCode}
               onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
               placeholder="123456"
-              className="w-full text-center text-3xl tracking-widest font-mono py-3 rounded-lg bg-bg-main text-text-primary border border-border focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all"
+              className="w-full text-center text-3xl tracking-widest font-mono py-3 rounded-lg bg-bg-surface text-text-primary border border-border focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all shadow-neumorphic-concave"
             />
-            
-            <button 
-              type="submit" 
+
+            <button
+              type="submit"
               disabled={isVerifying || otpCode.length < 6}
               className="w-full py-3 rounded-lg bg-accent text-white font-semibold shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -186,20 +186,20 @@ export default function Register() {
   // STEP 1: REGISTER FORM
   return (
     <div className="min-h-screen flex items-center justify-center bg-bg-main p-4">
-      <div className="w-full max-w-md bg-bg-surface rounded-xl p-8 shadow-neumorphic-concave">
+      <div className="w-full max-w-md card-neumorphic p-8">
         <h1 className="text-3xl font-bold text-center text-foreground mb-6">Register</h1>
-        
+
         {/* Pass error state down if AuthForm supports it, otherwise handle locally */}
         {error && step === 'form' && <div className="text-red-500 text-center mb-4 text-sm">{error}</div>}
 
-        <AuthForm 
+        <AuthForm
           onSubmit={handleRegister}
           button="Sign Up"
         />
 
         {/* Turnstile Widget */}
         <div className="mt-4 flex justify-center">
-          <Turnstile 
+          <Turnstile
             siteKey="0x4AAAAAACN0kvKqxA8cYt6U" // Ganti dengan Site Key Cloudflare kamu!
             onSuccess={setTurnstileToken}
             options={{ theme: 'auto' }}

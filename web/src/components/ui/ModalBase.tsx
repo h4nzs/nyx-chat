@@ -60,10 +60,10 @@ const ModalBase: React.FC<ModalBaseProps> = ({ isOpen, onClose, title, children,
             {/* Header */}
             <div className="flex items-center justify-between p-4">
               <h2 id="modal-title" className="text-lg font-semibold text-text-primary">{title}</h2>
-              <button 
-                onClick={onClose} 
+              <button
+                onClick={onClose}
                 aria-label="Close modal"
-                className="p-2 rounded-full text-text-secondary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+                className="touch-target p-2 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all"
               >
                 <FiX size={20} />
               </button>

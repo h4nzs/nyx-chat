@@ -107,7 +107,7 @@ export default function Chat() {
 
       {/* Desktop Sidebar (Left) */}
       {isDesktopLayout && (
-        <aside className="hidden md:absolute md:top-0 md:left-0 md:flex w-full max-w-sm md:w-1/3 lg:w-1/4 2xl:w-1/5 h-full bg-bg-surface/80 backdrop-blur-sm flex-col z-10 shadow-2xl">
+        <aside className="hidden md:absolute md:top-0 md:left-0 md:flex w-full max-w-sm md:w-1/3 lg:w-1/4 2xl:w-1/5 h-full bg-bg-surface flex-col z-10 shadow-neumorphic-convex">
           <ChatList />
         </aside>
       )}
@@ -120,7 +120,7 @@ export default function Chat() {
             {/* Mobile-only header with toggle */}
             {!isDesktopLayout && (
               <div className="md:hidden p-4 border-b border-border flex items-center flex-shrink-0">
-                <button onClick={toggleSidebar} className="p-2 text-text-secondary">
+                <button onClick={toggleSidebar} className="touch-target p-2.5 text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">
                   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
                 </button>
                 <p className="ml-4 font-semibold">Conversations</p>
@@ -128,9 +128,11 @@ export default function Chat() {
             )}
 
             {/* Placeholder Content */}
-            <div className="flex-1 flex flex-col gap-4 items-center justify-center text-text-secondary">
-              <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="opacity-50"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-              <p className="text-lg">Select a conversation to start messaging</p>
+            <div className="flex-1 flex flex-col gap-4 items-center justify-center text-text-secondary p-4">
+              <div className="p-6 rounded-full bg-bg-surface shadow-neumorphic-convex">
+                <svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="opacity-70"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <p className="text-lg font-medium">Select a conversation to start messaging</p>
             </div>
           </div>
         )}

@@ -22,7 +22,7 @@ export default function ConnectionStatusBanner() {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -40, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-          className="fixed top-0 left-0 w-full bg-yellow-500/90 backdrop-blur-sm text-black font-semibold text-center p-2 text-sm z-50 flex items-center justify-center gap-2 shadow-lg"
+          className="fixed top-0 left-0 w-full bg-yellow-500/90 backdrop-blur-sm text-black font-semibold text-center p-3 text-sm z-50 flex items-center justify-center gap-2 shadow-lg rounded-b-2xl"
         >
           <Spinner size="sm" />
           <span>{message}</span>

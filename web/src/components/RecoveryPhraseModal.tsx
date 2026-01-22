@@ -113,10 +113,10 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
       </div>
       <div className="flex flex-wrap gap-3 justify-center mb-6">
         {verificationWords.map((word, index) => (
-          <button 
+          <button
             key={index}
             onClick={() => handleWordClick(word)}
-            className="px-4 py-2 bg-secondary rounded-md hover:bg-secondary/80 transition-colors"
+            className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
           >
             {word}
           </button>
@@ -126,7 +126,7 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
         <button
           onClick={handleUndo}
           disabled={userInput.length === 0}
-          className="w-full py-3 px-4 rounded-md bg-secondary text-text-primary hover:bg-secondary/80 transition-colors disabled:opacity-50"
+          className="w-full py-3 px-4 rounded-lg bg-bg-surface text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all disabled:opacity-50"
         >
           Undo
         </button>
@@ -143,8 +143,8 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-surface rounded-xl shadow-2xl p-8 w-full max-w-md border border-border relative">
-        <button onClick={onClose} className="absolute top-4 right-4 text-text-secondary hover:text-text-primary">&times;</button>
+      <div className="card-neumorphic p-8 w-full max-w-md relative">
+        <button onClick={onClose} className="absolute top-4 right-4 touch-target p-1.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">&times;</button>
         {step === 1 && renderStep1()}
         {step === 2 && renderStep2()}
         {step === 3 && renderStep3()}

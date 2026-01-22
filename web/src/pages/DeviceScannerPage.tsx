@@ -151,19 +151,19 @@ export default function DeviceScannerPage() {
 
   return (
     <div className="flex flex-col h-screen bg-bg-main text-text-primary">
-      <header className="p-4 flex items-center border-b border-border bg-bg-surface">
-        <Link to="/settings" className="p-2 -ml-2 rounded-full hover:bg-bg-main transition-colors">
+      <header className="p-4 flex items-center border-b border-border">
+        <Link to="/settings" className="touch-target p-2.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">
           <FiChevronLeft size={24} />
         </Link>
         <h1 className="ml-2 text-xl font-bold">Scan QR Code</h1>
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-center p-4">
-        <div className="bg-bg-surface p-6 rounded-2xl shadow-neumorphic-concave text-center max-w-md w-full">
-          
+        <div className="card-neumorphic p-6 text-center max-w-md w-full">
+
           <div className="relative w-full aspect-square bg-black rounded-xl overflow-hidden shadow-inner mb-4">
             <div id="qr-code-scanner-region" ref={qrcodeRegionRef} className="w-full h-full" />
-            
+
             {status === 'scanning' && (
               <div className="absolute inset-0 border-2 border-accent/50 rounded-xl pointer-events-none">
                 <div className="absolute top-1/2 left-4 right-4 h-0.5 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-scan-line"></div>
@@ -197,9 +197,9 @@ export default function DeviceScannerPage() {
                 <FiXCircle size={40} className="mb-2" />
                 <span className="font-bold">{error ? 'Error' : 'Failed'}</span>
                 <span className="text-xs mt-1 text-text-secondary">{error || 'An unknown error occurred.'}</span>
-                <button 
+                <button
                   onClick={handleRetry}
-                  className="mt-4 px-4 py-2 bg-bg-main rounded-lg shadow-neumorphic-convex active:shadow-neumorphic-pressed text-sm font-medium text-text-primary"
+                  className="mt-4 px-4 py-2 rounded-lg shadow-neumorphic-convex active:shadow-neumorphic-pressed text-sm font-medium text-text-primary"
                 >
                   Try Again
                 </button>

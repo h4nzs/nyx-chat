@@ -92,36 +92,36 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
       title="Create New Group"
       footer={(
         <>
-          <button onClick={onClose} disabled={loading} className="px-4 py-2 border border-border rounded-lg text-text-primary hover:bg-secondary">
+          <button onClick={onClose} disabled={loading} className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all">
             Cancel
           </button>
-          <button onClick={handleCreateGroup} disabled={loading || !title.trim() || selectedUsers.length === 0} className="btn btn-primary">
+          <button onClick={handleCreateGroup} disabled={loading || !title.trim() || selectedUsers.length === 0} className="px-4 py-2 rounded-lg bg-accent text-white shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all">
             {loading ? 'Creating...' : 'Create Group'}
           </button>
         </>
       )}
     >
       <div className="flex flex-col gap-4">
-        <input 
-          type="text" 
+        <input
+          type="text"
           placeholder="Group Name"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full p-3 rounded-lg bg-bg-surface focus:outline-none focus:ring-2 focus:ring-accent shadow-neumorphic-concave mb-4"
+          className="w-full input-neumorphic mb-4"
         />
-        
+
         <div className="relative">
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search users to add..."
-            className="w-full p-3 border border-border bg-background text-text-primary rounded-lg"
+            className="w-full input-neumorphic"
           />
           {userList.length > 0 && (
-            <div className="absolute top-full left-0 right-0 bg-surface border border-border rounded-b-lg max-h-40 overflow-y-auto z-10 shadow-lg">
+            <div className="absolute top-full left-0 right-0 card-neumorphic max-h-40 overflow-y-auto z-10 rounded-b-xl">
               {userList.map(user => (
-                <div key={user.id} onClick={() => handleSelectUser(user)} className="p-3 hover:bg-secondary cursor-pointer text-text-primary">
+                <div key={user.id} onClick={() => handleSelectUser(user)} className="p-3 hover:bg-secondary cursor-pointer text-text-primary rounded-lg m-1">
                   {user.name} (@{user.username})
                 </div>
               ))}

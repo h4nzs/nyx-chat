@@ -89,15 +89,15 @@ export default function Login() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-bg-main p-4">
-      <div className="w-full max-w-md bg-bg-surface rounded-xl p-8 shadow-neumorphic-concave">
+      <div className="w-full max-w-md card-neumorphic p-8">
         <h1 className="text-3xl font-bold text-center text-foreground mb-6">Login</h1>
         {error && <p className="text-red-500 text-center mb-4">{error}</p>}
-        <AuthForm 
+        <AuthForm
           onSubmit={handleLogin}
           button="Login"
         />
         {isBiometricsAvailable && (
-          <button 
+          <button
             type="button"
             onClick={handleBiometricLogin}
             className="w-full flex items-center justify-center gap-3 mt-4 btn btn-secondary"
@@ -110,7 +110,7 @@ export default function Login() {
           <p className="text-text-secondary">
             Don't have an account? <Link to="/register" className="font-semibold text-accent hover:underline">Sign up</Link>
           </p>
-          <div className="flex justify-center gap-4 mt-4">
+          <div className="flex flex-col sm:flex-row justify-center gap-4 mt-4">
             <Link to="/restore" className="text-sm text-accent hover:underline">Restore from phrase</Link>
             <Link to="/link-device" className="text-sm text-accent hover:underline">Link a new device</Link>
           </div>
