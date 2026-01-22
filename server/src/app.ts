@@ -67,32 +67,84 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", isProd ? '' : "'unsafe-eval'", "https://*.ngrok-free.app"],
-      styleSrc: ["'self'", "'unsafe-inline'"], 
-      imgSrc: ["'self'", "data:", "blob:", "https://*.ngrok-free.app", "https://*.vercel.app"],
-      connectSrc: ["'self'", wsOrigin, "https://*.ngrok-free.app", "wss://*.ngrok-free.app", "https://*.vercel.app", "wss://*.vercel.app"],
+      scriptSrc: [
+        "'self'",
+        isProd ? "'strict-dynamic'" : "'unsafe-eval'",
+        isProd ? "" : "https://*.ngrok-free.app"
+      ].filter(Boolean),
+      styleSrc: [
+        "'self'",
+        "'unsafe-inline'", // Diperlukan untuk Tailwind CSS
+      ],
+      imgSrc: [
+        "'self'",
+        "data:",
+        "blob:",
+        "https://*.vercel.app",
+        "https://*.koyeb.app",
+        "https://*.upstash.io",
+        "https://*.supabase.co"
+      ],
+      connectSrc: [
+        "'self'",
+        wsOrigin,
+        "https://*.vercel.app",
+        "wss://*.vercel.app",
+        "https://*.koyeb.app",
+        "wss://*.koyeb.app",
+        "https://*.upstash.io", // Untuk Redis
+        "https://*.supabase.co" // Untuk Supabase
+      ],
+      fontSrc: [
+        "'self'",
+        "https://fonts.gstatic.com" // Jika menggunakan Google Fonts
+      ],
       objectSrc: ["'none'"],
-      frameAncestors: ["'none'"], 
+      frameAncestors: ["'none'"],
       ...(isProd && { upgradeInsecureRequests: [] }),
     },
   },
-  crossOriginResourcePolicy: { policy: "cross-origin" }, 
+  crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 
 app.disable('x-powered-by');
 
+// Fungsi untuk memvalidasi origins yang diizinkan
+const isAllowedOrigin = (origin: string): boolean => {
+  if (!origin) return true; // Untuk request tanpa origin (misalnya dari curl)
+
+  // Daftar origins yang diizinkan
+  const allowedOrigins = [
+    env.corsOrigin,
+    "http://localhost:5173",
+    "http://localhost:4173",
+    // Domain Vercel
+    "https://chat-lite-git-main-h4nzs.vercel.app",
+    "https://chat-lite-h4nzs.vercel.app",
+    "https://*.vercel.app",
+    // Domain Koyeb
+    "https://vast-aigneis-h4nzs-9319f44e.koyeb.app",
+    "https://*.koyeb.app",
+    // Domain Upstash
+    "https://*.upstash.io",
+    // Domain Supabase
+    "https://*.supabase.co",
+  ];
+
+  // Cek apakah origin cocok dengan salah satu dari daftar yang diizinkan
+  return allowedOrigins.some(allowedOrigin => {
+    if (allowedOrigin.includes('*')) {
+      // Jika ada wildcard, cocokkan dengan regex
+      const regex = new RegExp('^' + allowedOrigin.replace(/\*/g, '.*') + '$');
+      return regex.test(origin);
+    }
+    return allowedOrigin === origin;
+  });
+};
+
 const corsMiddleware = cors({
   origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    const allowedOrigins = [env.corsOrigin, "http://localhost:5173", "http://localhost:4173"];
-    
-    // Izinkan Vercel, Render, dan Ngrok
-    if (
-      allowedOrigins.includes(origin) || 
-      origin.endsWith('.ngrok-free.app') || 
-      origin.endsWith('.vercel.app') || 
-      origin.endsWith('.onrender.com')
-    ) {
+    if (isAllowedOrigin(origin)) {
       callback(null, true);
     } else {
       console.warn(`Blocked by CORS: ${origin}`);
@@ -135,7 +187,7 @@ app.use("/api", generalLimiter);
 // Koyeb punya timeout sendiri, tapi Node.js sebaiknya memutus lebih cepat
 // untuk membebaskan Event Loop.
 app.use((req, res, next) => {
-  res.setTimeout(20000, () => { // 20 Detik timeout
+  res.setTimeout(30000, () => { // 30 Detik timeout untuk konsistensi
     res.status(408).send({ error: "Request Timeout" });
   });
   next();

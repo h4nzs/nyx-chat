@@ -103,8 +103,8 @@ export function registerSocket(httpServer: HttpServer) {
       skipMiddlewares: true,
     },
     allowEIO3: true,
-    pingTimeout: 20000,
-    pingInterval: 25000
+    pingTimeout: 30000, // Diubah dari 20000 ke 30000 untuk konsistensi
+    pingInterval: 35000  // Diubah dari 25000 ke 35000 untuk konsistensi
   });
 
   // === MIDDLEWARE AUTH ===
