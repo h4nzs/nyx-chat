@@ -12,6 +12,8 @@ import { useGlobalEscape } from '../hooks/useGlobalEscape';
 import MediaGallery from './MediaGallery';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedTabs } from './ui/AnimatedTabs';
+import { uploadToR2 } from '@lib/r2'; // <--- Tambah Import ini
+import { compressImage } from '@lib/fileUtils'; // <--- Tambah Import ini
 
 const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; onClose: () => void; }) => {
   const { conversation } = useConversationStore(state => ({
@@ -22,7 +24,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
   const [isEditing, setIsEditing] = useState(false);
   const [isAddParticipantModalOpen, setIsAddParticipantModalOpen] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('details'); // State for tabs
+  const [activeTab, setActiveTab] = useState('details'); 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tabs = [
@@ -48,33 +50,53 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
 
   const amIAdmin = conversation.participants.find(p => p.id === user?.id)?.role === 'ADMIN';
 
+  // --- LOGIKA UPLOAD BARU (R2) ---
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.[0]) return;
 
-    const file = e.target.files[0];
-    const formData = new FormData();
-    formData.append('avatar', file);
+    const originalFile = e.target.files[0];
+    const toastId = toast.loading('Processing avatar...');
 
-    const toastId = toast.loading('Uploading avatar...');
     try {
+      // 1. Kompresi Gambar
+      let fileToUpload = originalFile;
+      try {
+        if (originalFile.type.startsWith('image/')) {
+           fileToUpload = await compressImage(originalFile);
+        }
+      } catch (err) {
+        console.warn("Compression failed, using original", err);
+      }
+
+      // 2. Upload ke Cloudflare R2
+      toast.loading('Uploading to cloud...', { id: toastId });
+      
+      const fileUrl = await uploadToR2(fileToUpload, 'groups', (progress) => {
+         // Opsional: update progress toast
+      });
+
+      // 3. Update Backend (Kirim URL)
+      toast.loading('Updating group info...', { id: toastId });
+      
       await api(`/api/uploads/groups/${conversation.id}/avatar`, {
         method: 'POST',
-        body: formData,
+        body: JSON.stringify({ fileUrl }), // Kirim JSON, bukan FormData
       });
+
       toast.success('Avatar updated!', { id: toastId });
     } catch (error: any) {
+      console.error(error);
       toast.error(`Failed to upload avatar: ${error.message || 'Unknown error'}`, { id: toastId });
     }
   };
+  // --------------------------------
 
   const handleLeaveGroup = async () => {
-    // We will use our custom ConfirmModal now
-    // This logic will be moved or triggered via the modal store
     const toastId = toast.loading('Leaving group...');
     try {
       await api(`/api/conversations/${conversation.id}/leave`, { method: 'DELETE' });
       toast.success('You have left the group.', { id: toastId });
-      handleClose(); // Close the panel on success
+      handleClose(); 
     } catch (error: any) {
       toast.error(`Failed to leave group: ${error.message || 'Unknown error'}`, { id: toastId });
     }
