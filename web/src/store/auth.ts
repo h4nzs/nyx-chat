@@ -7,6 +7,7 @@ import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";
 import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
+import { uploadToR2 } from "@lib/r2"; // <--- Import Helper R2
 import { compressImage } from "@lib/fileUtils"; // 1. Import fungsi compress
 import { 
   registerAndGenerateKeys,
@@ -439,10 +440,19 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       formData.append('avatar', fileToProcess);
 
       try {
-        toast.loading('Uploading avatar...', { id: toastId });
-        const updatedUser = await authFetch<User>('/api/uploads/avatars/upload', {
+        // 2. Upload ke R2 (Langsung dari browser)
+        toast.loading('Uploading Avatar...', { id: toastId });
+        
+        const fileUrl = await uploadToR2(fileToProcess, 'avatars', (percent) => {
+           // Opsional: Update progress toast jika mau
+        });
+
+        // 3. Simpan Metadata ke Backend (Endpoint BARU)
+        toast.loading('Saving profile...', { id: toastId });
+        
+        const updatedUser = await authFetch<User>('/api/uploads/avatars/save', {
           method: 'POST',
-          body: formData,
+          body: JSON.stringify({ fileUrl }), // Kirim JSON URL, bukan FormData
         });
         
         set({ user: updatedUser });
