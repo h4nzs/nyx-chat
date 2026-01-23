@@ -23,19 +23,26 @@ const router: Router = Router();
 // Helper: Hapus file lama (Support R2 & Legacy Supabase)
 async function deleteOldFile(url: string) {
   try {
-    if (!url) return;
-    
+    if (!url) {
+      console.log("[Delete File] No URL provided, skipping deletion");
+      return;
+    }
+
+    console.log(`[Delete File] Attempting to delete file: ${url}`);
+
     // Cek apakah file ada di R2 (berdasarkan domain)
     if (url.includes(env.r2PublicDomain)) {
       // Ambil key dari URL (misal: https://pub.r2.dev/avatars/user-123.jpg -> avatars/user-123.jpg)
       const key = url.replace(`${env.r2PublicDomain}/`, '');
       console.log(`[R2 Delete] Removing key: ${key}`);
       await deleteR2File(key);
-    } 
+      console.log(`[R2 Delete] Successfully removed key: ${key}`);
+    }
     // Jika bukan R2, asumsi file lama di Supabase
     else {
       console.log(`[Supabase Delete] Removing legacy file: ${url}`);
       await deleteFromSupabase(url);
+      console.log(`[Supabase Delete] Successfully removed legacy file: ${url}`);
     }
   } catch (error) {
     console.error("[Delete File Error]", error);
@@ -46,25 +53,53 @@ async function deleteOldFile(url: string) {
 router.post("/presigned", requireAuth, uploadLimiter, async (req, res, next) => {
   try {
     const { fileName, fileType, folder } = req.body;
-    
+
+    // Validasi input
+    if (!fileName || !fileType || !folder) {
+      return res.status(400).json({ error: "Missing required fields: fileName, fileType, or folder" });
+    }
+
     // Validasi folder biar rapi
     const allowedFolders = ['avatars', 'attachments', 'groups'];
     const targetFolder = allowedFolders.includes(folder) ? folder : 'misc';
 
+    // Validasi tipe file
+    const allowedTypes = [
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp', // Gambar
+      'video/mp4', 'video/webm', 'video/ogg', // Video
+      'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/aac', // Audio
+      'application/pdf', 'text/plain', 'application/msword', // Dokumen
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    ];
+
+    if (!allowedTypes.includes(fileType)) {
+      return res.status(400).json({ error: `File type not allowed: ${fileType}` });
+    }
+
+    // Validasi ekstensi file dari nama file
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    if (!ext) {
+      return res.status(400).json({ error: "File extension not found in filename" });
+    }
+
     // Bikin Key Unik: folder/USER_ID-RANDOM.ext
-    const ext = fileName.split('.').pop();
     const key = `${targetFolder}/${req.user!.id}-${nanoid()}.${ext}`;
 
     // Minta URL upload ke Cloudflare R2
     const uploadUrl = await getPresignedUploadUrl(key, fileType);
-    
+
     // Return URL Upload (buat PUT) & URL Public (buat simpan di DB)
-    res.json({ 
-      uploadUrl, 
+    res.json({
+      uploadUrl,
       key,
-      publicUrl: `${env.r2PublicDomain}/${key}` 
+      publicUrl: `${env.r2PublicDomain}/${key}`
     });
   } catch (error) {
+    console.error("[PRESIGNED-URL-ERROR]", error);
     next(error);
   }
 });

@@ -99,6 +99,10 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
             src={toAbsoluteUrl(avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${title}`}
             alt="Avatar"
             className="w-10 h-10 rounded-full object-cover bg-secondary"
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${title}`;
+            }}
           />
           <div>
             <div className="flex items-center gap-2">

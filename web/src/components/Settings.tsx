@@ -165,6 +165,10 @@ export default function Settings() {
                   src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
                   alt="Avatar Preview"
                   className="w-24 h-24 rounded-full bg-secondary object-cover"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
+                  }}
                 />
                 <button
                   type="button"

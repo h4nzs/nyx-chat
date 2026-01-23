@@ -18,7 +18,11 @@ export const getPresignedUploadUrl = async (key: string, contentType: string) =>
     Key: key,
     ContentType: contentType,
   });
-  return await getSignedUrl(r2, command, { expiresIn: 300 });
+
+  const url = await getSignedUrl(r2, command, { expiresIn: 300 });
+  console.log(`[R2] Generated presigned upload URL for key: ${key}`);
+
+  return url;
 };
 
 // Hapus file
@@ -27,5 +31,10 @@ export const deleteR2File = async (key: string) => {
     Bucket: env.r2BucketName,
     Key: key,
   });
-  return await r2.send(command);
+
+  console.log(`[R2] Attempting to delete file with key: ${key}`);
+  const result = await r2.send(command);
+  console.log(`[R2] Successfully deleted file with key: ${key}`);
+
+  return result;
 };

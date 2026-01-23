@@ -130,7 +130,19 @@ const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, 
             disabled={!peerUser}
             className="disabled:cursor-default"
           >
-            <img src={avatarSrc} alt="Avatar" className="w-12 h-12 rounded-full bg-secondary object-cover" />
+            <img
+              src={avatarSrc}
+              alt="Avatar"
+              className="w-12 h-12 rounded-full bg-secondary object-cover"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                if (conversation.isGroup) {
+                  target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`;
+                } else {
+                  target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${title}`;
+                }
+              }}
+            />
           </button>
           {peerUser && <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-bg-surface ${isOnline ? 'bg-green-500' : 'bg-gray-500'}`} />}
         </div>

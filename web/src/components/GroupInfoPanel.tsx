@@ -123,6 +123,10 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
                         src={avatarSrc}
                         alt="Group Avatar"
                         className="w-full h-full rounded-full object-cover bg-bg-primary"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`;
+                        }}
                       />
                       {amIAdmin && (
                         <>

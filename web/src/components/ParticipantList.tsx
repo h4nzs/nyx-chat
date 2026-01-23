@@ -80,10 +80,14 @@ const ParticipantList = ({ conversationId, participants, amIAdmin }: { conversat
       {participants.map(p => (
         <li key={p.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-secondary">
           <button onClick={() => handleProfileClick(p)} className="flex items-center gap-3 text-left">
-            <img 
+            <img
               src={toAbsoluteUrl(p.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${p.name}`}
               alt={p.name}
               className="w-10 h-10 rounded-full object-cover bg-bg-primary"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${p.name}`;
+              }}
             />
             <div>
               <p className="font-semibold text-text-primary">{p.name}</p>

@@ -95,10 +95,14 @@ export default function UserInfoModal() {
     if (user) {
       return (
         <div className="flex flex-col items-center text-center">
-          <img 
+          <img
             src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
             alt={user.name}
             className="w-24 h-24 rounded-full bg-secondary object-cover mb-4"
+            onError={(e) => {
+              const target = e.target as HTMLImageElement;
+              target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
+            }}
           />
           <h3 className="text-xl font-bold text-text-primary">{user.name}</h3>
           <p className="text-sm text-text-secondary">@{user.username}</p>
