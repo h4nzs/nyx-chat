@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Message } from '@store/conversation';
-import { decryptFile, decryptMessage } from '@utils/crypto'; // Import decryptMessage
+import { decryptFile, decryptMessage } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
-import { useConversationStore } from '@store/conversation'; // Import store untuk cek isGroup
+import { useConversationStore } from '@store/conversation';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
-import { FiClock, FiAlertTriangle, FiImage } from 'react-icons/fi';
+import { FiClock, FiAlertTriangle, FiImage, FiRefreshCw } from 'react-icons/fi';
+import { getSocket } from '@lib/socket'; // Pastikan import socket helper
 
 interface LazyImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src'> {
   message: Message;
@@ -22,30 +23,27 @@ export default function LazyImage({
   const [decryptionStatus, setDecryptionStatus] = useState<DecryptionStatus>('pending');
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0); // State untuk memaksa re-run useEffect
   
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
-  // Kita butuh akses ke conversation store untuk tahu apakah ini grup atau personal
   const conversations = useConversationStore(s => s.conversations);
   const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
     let objectUrl: string | null = null;
     let isMounted = true;
+    let retryTimeout: NodeJS.Timeout;
 
     const handleImageLoad = async () => {
-      // 1. Validasi URL Dasar
+      // 1. Validasi URL
       if (!message.fileUrl) {
-        if (isMounted) {
-            setDecryptionStatus('failed');
-            setError("No file URL.");
-        }
+        if (isMounted) { setDecryptionStatus('failed'); setError("No file URL."); }
         return;
       }
 
-      // 2. Cek apakah file Terenkripsi (E2EE)
+      // 2. Cek Enkripsi
       const isEncrypted = message.fileType?.includes('encrypted') || message.fileKey;
 
-      // --- KASUS 1: GAMBAR BIASA (Avatar/Public) ---
       if (!isEncrypted) {
         if (isMounted) {
           const absoluteUrl = toAbsoluteUrl(message.fileUrl);
@@ -55,14 +53,10 @@ export default function LazyImage({
         return;
       }
 
-      // --- KASUS 2: GAMBAR TERENKRIPSI (Chat Attachment) ---
-      const encryptedFileKey = message.fileKey; // Ini adalah KUNCI YANG TERENKRIPSI
-
+      // 3. Ambil Kunci
+      const encryptedFileKey = message.fileKey;
       if (!encryptedFileKey) {
-        if (isMounted) {
-          setDecryptionStatus('waiting_for_key');
-          setError("Waiting for key...");
-        }
+        if (isMounted) { setDecryptionStatus('waiting_for_key'); setError("Waiting for key..."); }
         return;
       }
 
@@ -72,7 +66,7 @@ export default function LazyImage({
       }
 
       try {
-        // A. DEKRIPSI KUNCI FILE DULU (Step Krusial yang Hilang Sebelumnya)
+        // A. DEKRIPSI KUNCI (DENGAN AUTO-RETRY LOGIC)
         const conversation = conversations.find(c => c.id === message.conversationId);
         const isGroup = conversation ? conversation.isGroup : false;
 
@@ -83,22 +77,38 @@ export default function LazyImage({
             message.sessionId
         );
 
-        // Handle jika Session Key/Group Key belum tersedia
+        // --- FIX UTAMA: HANDLING PENDING STATE ---
         if (keyResult.status === 'pending') {
             if (isMounted) {
                 setDecryptionStatus('waiting_for_key');
-                setError(keyResult.reason);
+                setError(keyResult.reason || "Key not found yet");
+                
+                // Minta Kunci ke Server via Socket (Active Fetch)
+                const socket = getSocket();
+                if (socket && socket.connected && message.sessionId) {
+                    console.log(`[LazyImage] Requesting missing key for session ${message.sessionId}`);
+                    socket.emit('session:request_key', {
+                        conversationId: message.conversationId,
+                        sessionId: message.sessionId
+                    });
+                }
+
+                // Coba lagi dalam 3 detik (Polling)
+                retryTimeout = setTimeout(() => {
+                    if (isMounted) setRetryCount(c => c + 1);
+                }, 3000);
             }
             return;
         }
+        // ------------------------------------------
 
         if (keyResult.status === 'error') {
             throw keyResult.error || new Error("Failed to decrypt file key");
         }
 
-        const rawFileKey = keyResult.value; // INI BARU RAW KEY YANG BENAR (Base64)
+        const rawFileKey = keyResult.value;
 
-        // B. DOWNLOAD & DEKRIPSI BLOB FILE
+        // B. DEKRIPSI FILE BLOB
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
         if (!absoluteUrl) throw new Error("Invalid URL");
 
@@ -107,8 +117,6 @@ export default function LazyImage({
         const encryptedBlob = await response.blob();
 
         const originalType = message.fileType?.split(';')[0] || 'image/jpeg';
-        
-        // Gunakan Raw Key hasil dekripsi tadi
         const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
         
         if (isMounted) {
@@ -130,57 +138,52 @@ export default function LazyImage({
     return () => {
       isMounted = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
+      clearTimeout(retryTimeout);
     };
-  }, [message.fileUrl, message.fileKey, message.fileType, message.conversationId, message.sessionId, lastKeychainUpdate, conversations]);
+  }, [message.fileUrl, message.fileKey, message.fileType, message.sessionId, lastKeychainUpdate, retryCount]); // Tambah retryCount
 
   // --- RENDER HELPERS ---
-
   const renderOverlay = () => {
     if (decryptionStatus === 'succeeded') return null;
 
-    const baseClasses = "absolute inset-0 flex flex-col items-center justify-center rounded-lg backdrop-blur-sm transition-all duration-300 z-10";
+    const baseClasses = "absolute inset-0 flex flex-col items-center justify-center rounded-lg backdrop-blur-sm transition-all duration-300 z-10 p-2 text-center";
 
     if (decryptionStatus === 'decrypting' || decryptionStatus === 'pending') {
-      return (
-        <div className={`${baseClasses} bg-gray-100/50 dark:bg-gray-800/50`}>
-          <Spinner size="sm" />
-        </div>
-      );
+      return <div className={`${baseClasses} bg-gray-100/50 dark:bg-gray-800/50`}><Spinner size="sm" /></div>;
     }
     
     if (decryptionStatus === 'waiting_for_key') {
       return (
-        <div className={`${baseClasses} bg-yellow-500/20 text-yellow-600 dark:text-yellow-400 p-2 text-center`}>
-          <FiClock className="mb-1 text-2xl" />
-          <span className="text-[10px] font-medium">{error || 'Decrypting keys...'}</span>
+        <div className={`${baseClasses} bg-yellow-500/20 text-yellow-600 dark:text-yellow-400`}>
+          <FiRefreshCw className="mb-1 text-xl animate-spin-slow" />
+          <span className="text-[10px] font-medium">Waiting for key...</span>
         </div>
       );
     }
 
     if (decryptionStatus === 'failed') {
       return (
-        <div className={`${baseClasses} bg-red-500/10 text-red-500 p-2 text-center`}>
-          <FiAlertTriangle className="mb-1 text-2xl" />
-          <span className="text-[10px] font-medium">{error || 'Failed to load'}</span>
+        <div 
+            className={`${baseClasses} bg-red-500/10 text-red-500 cursor-pointer`}
+            onClick={() => setRetryCount(c => c + 1)} // Manual Retry Click
+        >
+          <FiAlertTriangle className="mb-1 text-xl" />
+          <span className="text-[10px] font-medium">Failed. Click to retry.</span>
         </div>
       );
     }
-
     return null;
   };
 
   return (
     <div className={`relative overflow-hidden bg-gray-100 dark:bg-gray-800 rounded-lg ${className || ''}`}>
       {renderOverlay()}
-
       {imageUrl ? (
         <img
           ref={imgRef}
           src={imageUrl}
           alt={alt || "Message attachment"}
-          className={`w-full h-full object-cover transition-opacity duration-300 ${
-            decryptionStatus === 'succeeded' ? 'opacity-100' : 'opacity-0'
-          }`}
+          className={`w-full h-full object-cover transition-opacity duration-300 ${decryptionStatus === 'succeeded' ? 'opacity-100' : 'opacity-0'}`}
           {...props}
         />
       ) : (

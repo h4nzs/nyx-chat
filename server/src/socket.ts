@@ -386,6 +386,28 @@ export function registerSocket(httpServer: HttpServer) {
       });
     });
 
+    socket.on("session:request_missing", async ({ conversationId, sessionId }) => {
+  try {
+    const userId = socket.data.user?.id;
+    if (!userId) return;
+
+    // Cek apakah user member grup
+    // (Opsional: Query DB untuk validasi)
+
+    // Broadcast ke semua member di room percakapan
+    // "Hei, ada user (userId) yang butuh kunci sesi (sessionId) nih!"
+    socket.to(conversationId).emit("session:key_requested", {
+      requesterId: userId,
+      conversationId,
+      sessionId
+    });
+    
+    console.log(`[Socket] User ${userId} requested missing key for session ${sessionId}`);
+  } catch (error) {
+    console.error("Error handling session request:", error);
+  }
+});
+
     socket.on('session:request_key', async ({ conversationId, sessionId }: KeyRequestPayload) => {
       if (!conversationId || !sessionId) return;
       try {
