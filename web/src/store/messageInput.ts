@@ -1,5 +1,5 @@
 import { createWithEqualityFn } from "zustand/traditional";
-import { api, authFetch, apiUpload, handleApiError } from "@lib/api";
+import { api, authFetch, handleApiError } from "@lib/api";
 import { encryptMessage, ensureGroupSession, encryptFile } from "@utils/crypto";
 import { emitGroupKeyDistribution } from "@lib/socket";
 import toast from "react-hot-toast";
@@ -7,8 +7,9 @@ import { useAuthStore } from "./auth";
 import { useMessageStore } from "./message";
 import { useConversationStore } from "./conversation";
 import type { Message } from "./conversation";
-import { compressImage } from "@lib/fileUtils"; // Import fungsi kompresi
+import { compressImage } from "@lib/fileUtils";
 import useDynamicIslandStore, { UploadActivity } from "./dynamicIsland";
+import { uploadToR2 } from '../lib/r2'; // Import fungsi upload R2
 
 type State = {
   replyingTo: Message | null;
@@ -159,7 +160,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       sender: me,
       createdAt: new Date().toISOString(),
       optimistic: true,
-      fileUrl: URL.createObjectURL(file),
+      fileUrl: URL.createObjectURL(file), // Preview lokal
       fileName: file.name,
       fileType: file.type,
       fileSize: file.size,
@@ -169,10 +170,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     set({ replyingTo: null });
 
     try {
-      // --- LOGIKA KOMPRESI ---
+      // 1. KOMPRESI GAMBAR
       let fileToProcess = file;
-      
-      // Jika file adalah gambar, lakukan kompresi
       if (file.type.startsWith('image/')) {
         updateActivity(activityId, { progress: 10, fileName: `Compressing ${file.name}...` });
         try {
@@ -183,33 +182,49 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         }
       }
 
+      // 2. ENKRIPSI FILE
       updateActivity(activityId, { progress: 25, fileName: `Encrypting ${file.name}...` });
-      
-      // Enkripsi file hasil kompresi (atau original jika bukan gambar/gagal kompres)
       const { encryptedBlob, key: rawFileKey } = await encryptFile(fileToProcess);
+      
+      // Enkripsi Kunci File agar aman dikirim ke server
       const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(rawFileKey, conversationId, isGroup);
 
-      updateActivity(activityId, { progress: 50, fileName: `Uploading ${file.name}...` });
-      const form = new FormData();
-      // Defensive programming: Append metadata fields BEFORE the file blob.
-      form.append("fileKey", encryptedFileKey);
-      if (sessionId) form.append("sessionId", sessionId);
-      form.append("tempId", String(tempId));
-      if (replyingTo) form.append("repliedToId", replyingTo.id);
+      // 3. UPLOAD KE CLOUDFLARE R2 (Bypass Server)
+      updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
       
-      // Gunakan blob terenkripsi dan nama file asli (agar ekstensi tetap dikenali)
-      form.append("file", new File([encryptedBlob], file.name, { type: "application/octet-stream" }));
+      // Buat File object dari encryptedBlob agar punya properti name & type saat diupload
+      const encryptedFile = new File([encryptedBlob], file.name, { type: file.type });
+      
+      // Panggil fungsi R2
+      const fileUrl = await uploadToR2(encryptedFile, 'attachments', (percent) => {
+         // Progress upload R2 (30% - 90%)
+         const totalProgress = 30 + (percent * 0.6);
+         updateActivity(activityId, { progress: totalProgress });
+      });
 
-      await apiUpload<{ file: any }> ({
-        path: `/api/uploads/${conversationId}/upload`,
-        formData: form,
-        onUploadProgress: (progress) => updateActivity(activityId, { progress: 50 + (progress / 2) }),
+      // 4. KIRIM METADATA KE SERVER (Menyelesaikan proses)
+      updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
+      
+      await api(`/api/uploads/messages/${conversationId}`, {
+        method: "POST",
+        body: JSON.stringify({
+          fileUrl, // URL Publik dari R2
+          fileName: file.name,
+          fileType: file.type, // Tipe asli
+          fileSize: file.size,
+          duration: null,
+          tempId,
+          fileKey: encryptedFileKey, // Kunci dekripsi (terenkripsi)
+          sessionId,
+          repliedToId: replyingTo?.id
+        })
       });
       
-      updateActivity(activityId, { progress: 100, fileName: 'Finishing...' });
+      updateActivity(activityId, { progress: 100, fileName: 'Done!' });
       setTimeout(() => removeActivity(activityId), 1000); 
 
     } catch (error: any) {
+      console.error("Upload error:", error);
       const errorMsg = handleApiError(error);
       toast.error(`File upload failed: ${errorMsg}`);
       removeActivity(activityId);
@@ -219,7 +234,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
   handleStopRecording: async (conversationId, blob, duration) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
-    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: 'Encrypting & Uploading Voice...', progress: 0 };
+    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: 'Processing Voice...', progress: 0 };
     const activityId = addActivity(activity);
     const { replyingTo } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
@@ -258,27 +273,40 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     set({ replyingTo: null });
 
     try {
-      updateActivity(activityId, { progress: 25, fileName: 'Encrypting voice message...' });
+      // 1. ENKRIPSI VOICE
+      updateActivity(activityId, { progress: 20, fileName: 'Encrypting voice...' });
       const { encryptedBlob, key: rawFileKey } = await encryptFile(blob);
       const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(rawFileKey, conversationId, isGroup);
 
-      updateActivity(activityId, { progress: 50, fileName: 'Uploading voice message...' });
-      const form = new FormData();
-      // Defensive programming: Append metadata fields BEFORE the file blob.
-      form.append("fileKey", encryptedFileKey);
-      if (sessionId) form.append("sessionId", sessionId);
-      form.append("tempId", String(tempId));
-      form.append("duration", String(duration));
-      if (replyingTo) form.append("repliedToId", replyingTo.id);
-      form.append("file", new File([encryptedBlob], "voice-message.webm", { type: "application/octet-stream" }));
+      // 2. UPLOAD KE CLOUDFLARE R2
+      updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
+      
+      const encryptedFile = new File([encryptedBlob], "voice-message.webm", { type: "audio/webm" });
 
-      await apiUpload<{ file: any }> ({
-        path: `/api/uploads/${conversationId}/upload`,
-        formData: form,
-        onUploadProgress: (progress) => updateActivity(activityId, { progress: 50 + (progress / 2) }),
+      const fileUrl = await uploadToR2(encryptedFile, 'attachments', (percent) => {
+        const totalProgress = 40 + (percent * 0.5);
+        updateActivity(activityId, { progress: totalProgress });
+      });
+
+      // 3. KIRIM METADATA KE SERVER
+      updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
+
+      await api(`/api/uploads/messages/${conversationId}`, {
+        method: "POST",
+        body: JSON.stringify({
+          fileUrl,
+          fileName: "voice-message.webm",
+          fileType: "audio/webm",
+          fileSize: blob.size,
+          duration,
+          tempId,
+          fileKey: encryptedFileKey,
+          sessionId,
+          repliedToId: replyingTo?.id
+        })
       });
       
-      updateActivity(activityId, { progress: 100, fileName: 'Finishing...' });
+      updateActivity(activityId, { progress: 100, fileName: 'Sent!' });
       setTimeout(() => removeActivity(activityId), 1000); 
 
     } catch (error: any) {

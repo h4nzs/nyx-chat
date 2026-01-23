@@ -6,70 +6,97 @@ import { z } from "zod";
 import { zodValidate } from "../utils/validate.js";
 import { getIo } from "../socket.js";
 import { sendPushNotification } from "../utils/sendPushNotification.js";
-import multer from "multer";
+import { env } from "../config.js";
 import { nanoid } from "nanoid";
-import path from "path";
-import { uploadLimiter } from "../middleware/rateLimiter.js"; // Import
-import { uploadToSupabase, deleteFromSupabase } from "../utils/supabase.js"; // Import fungsi delete
+import { getPresignedUploadUrl, deleteR2File } from "../utils/r2.js"; // Pastikan deleteR2File ada di utils/r2.ts
+import { uploadLimiter } from "../middleware/rateLimiter.js";
+import { deleteFromSupabase } from "../utils/supabase.js"; // Tetap simpan buat hapus file lama (Legacy)
+
 const router: Router = Router();
 
-// KONFIGURASI MULTER (MEMORY STORAGE)
-const storage = multer.memoryStorage();
-const upload = multer({
-  storage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // Limit 50MB
+// ============================================================================
+// CATATAN MIGRASI R2:
+// - Multer dihapus karena upload dilakukan Client -> R2 langsung.
+// - Endpoint di bawah ini hanya menerima Metadata (URL, Nama File) untuk disimpan di DB.
+// ============================================================================
+
+// Helper: Hapus file lama (Support R2 & Legacy Supabase)
+async function deleteOldFile(url: string) {
+  try {
+    if (!url) return;
+    
+    // Cek apakah file ada di R2 (berdasarkan domain)
+    if (url.includes(env.r2PublicDomain)) {
+      // Ambil key dari URL (misal: https://pub.r2.dev/avatars/user-123.jpg -> avatars/user-123.jpg)
+      const key = url.replace(`${env.r2PublicDomain}/`, '');
+      console.log(`[R2 Delete] Removing key: ${key}`);
+      await deleteR2File(key);
+    } 
+    // Jika bukan R2, asumsi file lama di Supabase
+    else {
+      console.log(`[Supabase Delete] Removing legacy file: ${url}`);
+      await deleteFromSupabase(url);
+    }
+  } catch (error) {
+    console.error("[Delete File Error]", error);
+  }
+}
+
+// === 0. GENERATE PRESIGNED URL (Langkah 1) ===
+router.post("/presigned", requireAuth, uploadLimiter, async (req, res, next) => {
+  try {
+    const { fileName, fileType, folder } = req.body;
+    
+    // Validasi folder biar rapi
+    const allowedFolders = ['avatars', 'attachments', 'groups'];
+    const targetFolder = allowedFolders.includes(folder) ? folder : 'misc';
+
+    // Bikin Key Unik: folder/USER_ID-RANDOM.ext
+    const ext = fileName.split('.').pop();
+    const key = `${targetFolder}/${req.user!.id}-${nanoid()}.${ext}`;
+
+    // Minta URL upload ke Cloudflare R2
+    const uploadUrl = await getPresignedUploadUrl(key, fileType);
+    
+    // Return URL Upload (buat PUT) & URL Public (buat simpan di DB)
+    res.json({ 
+      uploadUrl, 
+      key,
+      publicUrl: `${env.r2PublicDomain}/${key}` 
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
-// ============================================================================
-// FIX: Route Statis & Spesifik WAJIB ditaruh DI ATAS route dinamis (/:id...)
-// agar tidak tertangkap/intersep oleh parameter dinamis.
-// ============================================================================
-
-// === 1. UPLOAD AVATAR USER ===
+// === 1. SIMPAN AVATAR USER (Langkah 2) ===
 router.post(
-  "/avatars/upload",
+  "/avatars/save", // Ganti nama route biar jelas ini cuma SAVE metadata
   requireAuth,
   uploadLimiter,
-  upload.single("avatar"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const { fileUrl } = req.body; // Client kirim URL R2 yang sudah sukses diupload
       if (!req.user) throw new ApiError(401, "Unauthorized");
-      if (!req.file) throw new ApiError(400, "No file uploaded.");
+      if (!fileUrl) throw new ApiError(400, "Missing fileUrl.");
 
       const userId = req.user.id;
       
-      // 1. Ambil data user lama untuk cek avatar sebelumnya
+      // 1. Cek Avatar Lama
       const oldUser = await prisma.user.findUnique({
         where: { id: userId },
         select: { avatarUrl: true }
       });
 
-      // 2. Jika ada avatar lama, HAPUS DARI SUPABASE
+      // 2. Hapus Avatar Lama (Background Process)
       if (oldUser?.avatarUrl) {
-        console.log(`[Avatar Upload] Deleting old avatar: ${oldUser.avatarUrl}`);
-        // Kita fire-and-forget (tidak await) agar response tidak lambat
-        deleteFromSupabase(oldUser.avatarUrl).catch(err => 
-           console.error("[Avatar Upload] Background delete failed:", err)
-        );
+        deleteOldFile(oldUser.avatarUrl).catch(console.error);
       }
-      
-      // 3. Upload File Baru ke Supabase (Folder: avatars)
-      const uniqueFilename = `${nanoid()}-${Date.now()}${path.extname(req.file.originalname)}`;
-      const supabasePath = `avatars/${userId}/${uniqueFilename}`;
 
-      console.log(`[Avatar Upload] Uploading to Supabase: ${supabasePath}`);
-
-      const publicUrl = await uploadToSupabase(
-        req.file.buffer,
-        supabasePath,
-        req.file.mimetype
-      );
-
-      // Update User di Database
-      // Kita kembalikan object user yang sudah diupdate agar frontend bisa langsung update state
+      // 3. Update Database
       const updatedUser = await prisma.user.update({
         where: { id: userId },
-        data: { avatarUrl: publicUrl },
+        data: { avatarUrl: fileUrl },
         select: {
           id: true,
           email: true,
@@ -82,65 +109,53 @@ router.post(
         }
       });
       
-      console.log(`[Avatar Upload] Success. URL: ${publicUrl}`);
+      console.log(`[Avatar Update] Success: ${fileUrl}`);
       res.json(updatedUser);
 
     } catch (e) {
-      console.error("[AVATAR-UPLOAD-ERROR]", e);
       next(e);
     }
   }
 );
 
-// === 2. UPLOAD AVATAR GROUP ===
+// === 2. SIMPAN AVATAR GROUP (Langkah 2) ===
 router.post(
   "/groups/:id/avatar", 
   uploadLimiter,
   requireAuth, 
-  upload.single("avatar"), 
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-        if (!req.user) throw new ApiError(401, "Unauthorized");
-        if (!req.file) throw new ApiError(400, "No file uploaded.");
-        
+        const { fileUrl } = req.body;
         const groupId = req.params.id;
+
+        if (!req.user) throw new ApiError(401, "Unauthorized");
+        if (!fileUrl) throw new ApiError(400, "Missing fileUrl.");
         
-        // Cek akses user ke grup - hanya admin yang bisa mengganti avatar grup
+        // Cek Admin
         const participant = await prisma.participant.findFirst({
             where: { userId: req.user.id, conversationId: groupId }
         });
-        if (!participant || participant.role !== "ADMIN") throw new ApiError(403, "Forbidden: You are not an admin of this group");
+        if (!participant || participant.role !== "ADMIN") throw new ApiError(403, "Forbidden: Only admin can change group avatar");
 
-        // 1. Ambil data grup lama
+        // 1. Cek Avatar Lama
         const oldGroup = await prisma.conversation.findUnique({
             where: { id: groupId },
             select: { avatarUrl: true }
         });
 
-        // 2. Hapus avatar lama jika ada
+        // 2. Hapus Avatar Lama
         if (oldGroup?.avatarUrl) {
-            deleteFromSupabase(oldGroup.avatarUrl).catch(console.error);
+            deleteOldFile(oldGroup.avatarUrl).catch(console.error);
         }
 
-        // 3. Upload File Baru
-        const uniqueFilename = `${nanoid()}-${Date.now()}${path.extname(req.file.originalname)}`;
-        const supabasePath = `groups/${groupId}/${uniqueFilename}`;
-
-        const publicUrl = await uploadToSupabase(
-            req.file.buffer,
-            supabasePath,
-            req.file.mimetype
-        );
-
-        // Update Database
+        // 3. Update Database
         const updatedConversation = await prisma.conversation.update({
             where: { id: groupId },
-            data: { avatarUrl: publicUrl },
+            data: { avatarUrl: fileUrl },
             include: {
               participants: {
                 select: {
                   user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } },
-                  isPinned: true,
                   role: true,
                 }
               },
@@ -148,62 +163,57 @@ router.post(
             },
           });
 
-        // Transformasi data agar konsisten dengan format yang digunakan di tempat lain
         const transformedConversation = {
           ...updatedConversation,
-          isGroup: updatedConversation.isGroup,
           participants: updatedConversation.participants.map(p => ({ ...p.user, role: p.role })),
         };
 
-        // Notifikasi realtime ke semua member grup - kirim hanya data yang relevan
-        const io = getIo();
-        io.to(groupId).emit("conversation:updated", {
+        // Notifikasi Socket
+        getIo().to(groupId).emit("conversation:updated", {
           id: groupId,
-          avatarUrl: publicUrl,
+          avatarUrl: fileUrl,
           lastUpdated: updatedConversation.updatedAt
         });
 
         res.json(transformedConversation);
 
     } catch (e) {
-        console.error("[GROUP-AVATAR-ERROR]", e);
         next(e);
     }
 });
 
-// === 3. UPLOAD ATTACHMENT CHAT (Dynamic Route) ===
-// Ditaruh PALING BAWAH agar "avatars" atau "groups" tidak dianggap sebagai "conversationId"
+// === 3. SIMPAN ATTACHMENT CHAT (Langkah 2) ===
+// Endpoint ini dipanggil setelah Frontend selesai upload ke R2
 router.post(
-  "/:conversationId/upload",
-  uploadLimiter, // <--- Pasang disini
+  "/messages/:conversationId", // Rename jadi lebih RESTful
+  uploadLimiter,
   requireAuth,
   zodValidate({ params: z.object({ conversationId: z.string().cuid() }) }),
-  upload.single("file"),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
       if (!req.user) throw new ApiError(401, "Authentication required.");
       const { conversationId } = req.params;
       const senderId = req.user.id;
-      const file = req.file;
       
-      const { fileKey, sessionId, repliedToId, tempId, duration } = req.body;
-      const parsedTempId = Number(tempId);
+      // Terima Metadata lengkap dari Frontend
+      const { 
+        fileUrl, 
+        fileName, 
+        fileType, 
+        fileSize, 
+        duration, 
+        tempId, 
+        fileKey, 
+        sessionId, 
+        repliedToId 
+      } = req.body;
 
-      // --- DEBUG LOG ---
-      console.log(`[UPLOAD-DEBUG] Incoming Request Body for ${conversationId}:`, {
-        fileKey: !!fileKey,
-        sessionId,
-        tempId,
-        isFilePresent: !!file
-      });
-
-      if (!file) throw new ApiError(400, "No file uploaded.");
-      if (!fileKey) throw new ApiError(400, "Missing required encrypted key.");
-      if (!tempId || !Number.isFinite(parsedTempId)) throw new ApiError(400, "Invalid tempId.");
+      if (!fileUrl) throw new ApiError(400, "Missing fileUrl.");
+      if (!fileKey) throw new ApiError(400, "Missing encrypted key (E2EE required).");
 
       const conversation = await prisma.conversation.findUnique({
         where: { id: conversationId },
-        include: { participants: true } // Include participants untuk validasi & push notif
+        include: { participants: true }
       });
 
       if (!conversation) throw new ApiError(404, "Conversation not found.");
@@ -212,17 +222,6 @@ router.post(
       const isParticipant = conversation.participants.some(p => p.userId === senderId);
       if (!isParticipant) throw new ApiError(403, "Forbidden.");
       
-      // Upload ke Supabase (Folder: attachments)
-      const uniqueFilename = `${nanoid()}${path.extname(file.originalname)}`;
-      const supabasePath = `attachments/${conversationId}/${uniqueFilename}`;
-
-      console.log(`[UPLOAD-DEBUG] Uploading to Supabase: ${supabasePath}`);
-      const fileUrl = await uploadToSupabase(
-        file.buffer,
-        supabasePath,
-        file.mimetype
-      );
-
       // Simpan Message ke DB
       const newMessage = await prisma.$transaction(async (tx) => {
         const msg = await tx.message.create({
@@ -233,9 +232,9 @@ router.post(
             fileKey,
             sessionId, 
             repliedToId,
-            fileName: file.originalname,
-            fileType: `${file.mimetype};encrypted=true`,
-            fileSize: file.size,
+            fileName,
+            fileType, // ex: "image/jpeg;encrypted=true"
+            fileSize,
             duration: duration ? parseInt(duration, 10) : undefined,
             statuses: {
               create: conversation.participants.map(p => ({
@@ -254,7 +253,7 @@ router.post(
         return msg;
       });
 
-      const messageToBroadcast = { ...newMessage, tempId: parsedTempId };
+      const messageToBroadcast = { ...newMessage, tempId: Number(tempId) };
       
       // Broadcast Socket
       const io = getIo();
@@ -262,7 +261,7 @@ router.post(
       
       // Push Notification
       const pushRecipients = conversation.participants.filter(p => p.userId !== senderId);
-      const pushBody = `Sent a file: ${file.originalname}`;
+      const pushBody = `Sent a file: ${fileName}`;
       pushRecipients.forEach(p => sendPushNotification(p.userId, { 
           title: newMessage.sender.name || newMessage.sender.username, 
           body: pushBody.substring(0, 200),
@@ -272,7 +271,7 @@ router.post(
       res.status(201).json(messageToBroadcast);
 
     } catch (e) {
-      console.error("[UPLOAD-ERROR]", e);
+      console.error("[MESSAGE-UPLOAD-ERROR]", e);
       next(e);
     }
   }
