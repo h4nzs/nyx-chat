@@ -65,19 +65,70 @@ router.post("/presigned", requireAuth, uploadLimiter, async (req, res, next) => 
 
     // Validasi tipe file
     const allowedTypes = [
-      'image/jpeg', 'image/png', 'image/gif', 'image/webp', // Gambar
-      'video/mp4', 'video/webm', 'video/ogg', // Video
-      'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/aac', // Audio
-      'application/pdf', 'text/plain', 'application/msword', // Dokumen
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'application/vnd.ms-powerpoint',
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        // Images
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  // Documents
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+  // Media
+  'video/mp4',
+  'video/quicktime',
+  'video/x-msvideo',
+  'audio/mpeg',
+  'audio/wav',
+  'audio/webm',
+  'audio/mp3',
+  // Archives
+  'application/zip',
+  'application/x-rar-compressed',
+  'application/octet-stream', // For encrypted files
     ];
 
     if (!allowedTypes.includes(fileType)) {
       return res.status(400).json({ error: `File type not allowed: ${fileType}` });
+    }
+
+    // Validasi ukuran file berdasarkan jenisnya
+    const fileSize = req.body.fileSize ? parseInt(req.body.fileSize, 10) : 0;
+    if (fileSize > 0) {
+      // Konversi MB ke bytes
+      const avatarMaxSize = 5 * 1024 * 1024; // 5MB
+      const imageMaxSize = 15 * 1024 * 1024; // 15MB
+      const videoMaxSize = 100 * 1024 * 1024; // 100MB
+      const documentMaxSize = 50 * 1024 * 1024; // 50MB
+
+      // Tentukan batas berdasarkan folder dan tipe file
+      let maxSize: number;
+      if (targetFolder === 'avatars') {
+        maxSize = avatarMaxSize;
+      } else if (fileType.startsWith('image/')) {
+        maxSize = imageMaxSize;
+      } else if (fileType.startsWith('video/')) {
+        maxSize = videoMaxSize;
+      } else if (fileType.startsWith('audio/')) {
+        maxSize = videoMaxSize; // Audio mengikuti batas video
+      } else if (fileType.startsWith('application/') || fileType === 'text/plain') {
+        maxSize = documentMaxSize;
+      } else {
+        // Untuk tipe file lain, gunakan batas umum
+        maxSize = documentMaxSize;
+      }
+
+      if (fileSize > maxSize) {
+        const maxSizeMB = maxSize / (1024 * 1024);
+        return res.status(400).json({
+          error: `File too large. Maximum size for this file type is ${maxSizeMB}MB. Current file size is ${(fileSize / (1024 * 1024)).toFixed(2)}MB.`
+        });
+      }
     }
 
     // Validasi ekstensi file dari nama file
@@ -231,20 +282,48 @@ router.post(
       const senderId = req.user.id;
       
       // Terima Metadata lengkap dari Frontend
-      const { 
-        fileUrl, 
-        fileName, 
-        fileType, 
-        fileSize, 
-        duration, 
-        tempId, 
-        fileKey, 
-        sessionId, 
-        repliedToId 
+      const {
+        fileUrl,
+        fileName,
+        fileType,
+        fileSize,
+        duration,
+        tempId,
+        fileKey,
+        sessionId,
+        repliedToId
       } = req.body;
 
       if (!fileUrl) throw new ApiError(400, "Missing fileUrl.");
       if (!fileKey) throw new ApiError(400, "Missing encrypted key (E2EE required).");
+
+      // Validasi ukuran file berdasarkan jenisnya
+      if (fileSize) {
+        // Konversi MB ke bytes
+        const imageMaxSize = 15 * 1024 * 1024; // 15MB
+        const videoMaxSize = 100 * 1024 * 1024; // 100MB
+        const documentMaxSize = 50 * 1024 * 1024; // 50MB
+
+        // Tentukan batas berdasarkan tipe file
+        let maxSize: number;
+        if (fileType.startsWith('image/')) {
+          maxSize = imageMaxSize;
+        } else if (fileType.startsWith('video/')) {
+          maxSize = videoMaxSize;
+        } else if (fileType.startsWith('audio/')) {
+          maxSize = videoMaxSize; // Audio mengikuti batas video
+        } else if (fileType.startsWith('application/') || fileType === 'text/plain') {
+          maxSize = documentMaxSize;
+        } else {
+          // Untuk tipe file lain, gunakan batas umum
+          maxSize = documentMaxSize;
+        }
+
+        if (fileSize > maxSize) {
+          const maxSizeMB = maxSize / (1024 * 1024);
+          throw new ApiError(400, `File too large. Maximum size for this file type is ${maxSizeMB}MB. Current file size is ${(fileSize / (1024 * 1024)).toFixed(2)}MB.`);
+        }
+      }
 
       const conversation = await prisma.conversation.findUnique({
         where: { id: conversationId },

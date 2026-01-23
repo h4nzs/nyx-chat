@@ -13,14 +13,26 @@ export async function uploadToR2(
 ): Promise<string> {
   
   // 1. Minta Presigned URL ke Server kita
-  const { uploadUrl, publicUrl } = await api<PresignedResponse>('/api/uploads/presigned', {
-    method: 'POST',
-    body: JSON.stringify({
-      fileName: (file as File).name || 'blob',
-      fileType: file.type,
-      folder
-    })
-  });
+  let presignedResponse: PresignedResponse;
+  try {
+    presignedResponse = await api<PresignedResponse>('/api/uploads/presigned', {
+      method: 'POST',
+      body: JSON.stringify({
+        fileName: (file as File).name || 'blob',
+        fileType: file.type,
+        folder,
+        fileSize: file.size
+      })
+    });
+  } catch (error: any) {
+    // Tangani error dari server jika ukuran file melebihi batas
+    if (error.message && error.message.includes('File too large')) {
+      throw new Error(error.message);
+    }
+    throw error;
+  }
+
+  const { uploadUrl, publicUrl } = presignedResponse;
 
   // 2. Upload LANGSUNG ke R2 (Bypass Server)
   return new Promise((resolve, reject) => {

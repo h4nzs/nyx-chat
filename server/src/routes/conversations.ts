@@ -3,7 +3,6 @@ import { prisma } from "../lib/prisma.js";
 import { Prisma } from "@prisma/client";
 import { requireAuth } from "../middleware/auth.js";
 import { getIo } from "../socket.js";
-import { upload } from "../utils/upload.js";
 import { rotateAndDistributeSessionKeys } from "../utils/sessionKeys.js";
 import { ApiError } from "../utils/errors.js";
 import { uploadToSupabase, deleteFromSupabase } from "../utils/supabase.js";

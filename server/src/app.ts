@@ -27,7 +27,6 @@ import previewsRouter from "./routes/previews.js";
 import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
 import webpush from "web-push";
-import { cleanupOrphanedFiles } from "./utils/cleanup.js";
 import { generalLimiter } from "./middleware/rateLimiter.js"; // Import ini
 
 // Set VAPID keys for web-push notifications
@@ -203,12 +202,7 @@ app.post("/api/admin/cleanup", async (req, res) => {
   // Tambahkan proteksi password sederhana pakai env variable
   if (req.headers["x-admin-key"] !== process.env.CHAT_SECRET) {
     return res.status(403).json({ error: "Forbidden" });
-  }
-  
-  // Jalankan di background (jangan tunggu selesai)
-  cleanupOrphanedFiles().catch(console.error);
-  
-  res.json({ message: "Cleanup started" });
+  }  
 });
 
 // === CSRF Protection ===
