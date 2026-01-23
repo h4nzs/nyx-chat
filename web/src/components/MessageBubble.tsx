@@ -4,6 +4,7 @@ import classNames from "classnames";
 import { FaCheck, FaCheckDouble } from "react-icons/fa";
 import FileAttachment from "./FileAttachment";
 import LinkPreviewCard from "./LinkPreviewCard";
+import LazyImage from "./LazyImage"; // <--- Import Component Ini
 import { useModalStore } from "@store/modal";
 import { toAbsoluteUrl } from "@utils/url";
 import { formatTime } from "@utils/date";
@@ -40,6 +41,7 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
   };
 
   const isFile = !!message.fileUrl || !!message.fileKey;
+  const isImage = message.fileType?.startsWith('image/'); // Cek apakah ini gambar
   const isDeleted = !!message.deletedAt;
 
   return (
@@ -86,6 +88,7 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
               "bg-accent text-white rounded-tr-sm": isOwn,
               "bg-bg-surface text-text-primary rounded-tl-sm": !isOwn,
               "italic text-text-secondary border border-border bg-transparent shadow-none": isDeleted,
+              "p-1": isImage && !message.content, // Padding kecil khusus gambar tanpa caption
             }
           )}
         >
@@ -106,11 +109,21 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
           ) : (
             <>
               {isFile && (
-                <FileAttachment 
-                  message={message} 
-                  isOwn={isOwn} 
-                  onImageClick={() => onImageClick?.(message)} 
-                />
+                isImage ? (
+                  // --- RENDER IMAGE (LazyImage) ---
+                  <LazyImage 
+                    message={message} 
+                    alt="Attachment"
+                    className="rounded-lg max-h-64 w-auto object-cover cursor-pointer mb-1 bg-black/10"
+                    onClick={() => onImageClick?.(message)}
+                  />
+                ) : (
+                  // --- RENDER FILE/VIDEO/PDF (FileAttachment) ---
+                  <FileAttachment 
+                    message={message} 
+                    isOwn={isOwn} 
+                  />
+                )
               )}
               
               {message.content && (
@@ -130,7 +143,8 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
           {/* Metadata: Waktu & Status */}
           <div className={classNames("flex items-center gap-1 justify-end mt-1 text-[10px]", {
             "text-white/70": isOwn,
-            "text-text-secondary": !isOwn
+            "text-text-secondary": !isOwn,
+            "absolute bottom-2 right-2 bg-black/30 px-1 rounded text-white": isImage && !message.content // Overlay waktu di atas gambar jika tidak ada caption
           })}>
             <span>{formatTime(message.createdAt)}</span>
             {isOwn && !isDeleted && getStatusIcon()}

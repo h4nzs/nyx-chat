@@ -9,7 +9,7 @@ import { useConversationStore } from "./conversation";
 import type { Message } from "./conversation";
 import { compressImage } from "@lib/fileUtils";
 import useDynamicIslandStore, { UploadActivity } from "./dynamicIsland";
-import { uploadToR2 } from '../lib/r2'; // Import fungsi upload R2
+import { uploadToR2 } from '../lib/r2'; // Pastikan helper ini ada
 
 type State = {
   replyingTo: Message | null;
@@ -130,6 +130,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     set({ replyingTo: null });
   },
   
+  // --- FUNGSI UPLOAD FILE BARU (R2) ---
   uploadFile: async (conversationId, file) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Processing ${file.name}...`, progress: 0 };
@@ -170,7 +171,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     set({ replyingTo: null });
 
     try {
-      // 1. KOMPRESI GAMBAR
+      // 1. KOMPRESI (Hanya untuk Gambar)
       let fileToProcess = file;
       if (file.type.startsWith('image/')) {
         updateActivity(activityId, { progress: 10, fileName: `Compressing ${file.name}...` });
@@ -186,35 +187,36 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       updateActivity(activityId, { progress: 25, fileName: `Encrypting ${file.name}...` });
       const { encryptedBlob, key: rawFileKey } = await encryptFile(fileToProcess);
       
-      // Enkripsi Kunci File agar aman dikirim ke server
+      // Enkripsi Kunci File (E2EE)
       const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(rawFileKey, conversationId, isGroup);
 
       // 3. UPLOAD KE CLOUDFLARE R2 (Bypass Server)
       updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
       
-      // Buat File object dari encryptedBlob agar punya properti name & type saat diupload
+      // Bungkus Blob enkripsi ke File Object agar nama & tipe terjaga
       const encryptedFile = new File([encryptedBlob], file.name, { type: file.type });
       
-      // Panggil fungsi R2
+      // Helper uploadToR2 (Client -> R2)
       const fileUrl = await uploadToR2(encryptedFile, 'attachments', (percent) => {
-         // Progress upload R2 (30% - 90%)
-         const totalProgress = 30 + (percent * 0.6);
+         const totalProgress = 30 + (percent * 0.6); // Skala progress bar (30% - 90%)
          updateActivity(activityId, { progress: totalProgress });
       });
 
-      // 4. KIRIM METADATA KE SERVER (Menyelesaikan proses)
+      // 4. KIRIM METADATA KE SERVER
       updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
       
+      // Perhatikan URL endpoint baru: /messages/ID (Bukan /upload)
+      // Dan Body berupa JSON (Bukan FormData)
       await api(`/api/uploads/messages/${conversationId}`, {
         method: "POST",
         body: JSON.stringify({
-          fileUrl, // URL Publik dari R2
+          fileUrl, // URL dari R2
           fileName: file.name,
-          fileType: file.type, // Tipe asli
+          fileType: file.type,
           fileSize: file.size,
           duration: null,
           tempId,
-          fileKey: encryptedFileKey, // Kunci dekripsi (terenkripsi)
+          fileKey: encryptedFileKey, // Kunci dekripsi
           sessionId,
           repliedToId: replyingTo?.id
         })
@@ -232,6 +234,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     }
   },
 
+  // --- FUNGSI VOICE MESSAGE BARU (R2) ---
   handleStopRecording: async (conversationId, blob, duration) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: 'Processing Voice...', progress: 0 };
@@ -278,7 +281,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       const { encryptedBlob, key: rawFileKey } = await encryptFile(blob);
       const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(rawFileKey, conversationId, isGroup);
 
-      // 2. UPLOAD KE CLOUDFLARE R2
+      // 2. UPLOAD KE R2
       updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
       
       const encryptedFile = new File([encryptedBlob], "voice-message.webm", { type: "audio/webm" });
