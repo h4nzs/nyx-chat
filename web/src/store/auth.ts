@@ -1,18 +1,17 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { authFetch, api } from "@lib/api";
 import { disconnectSocket, connectSocket } from "@lib/socket";
-import { eraseCookie, clearAuthCookies } from "@lib/tokenStorage";
+import { clearAuthCookies } from "@lib/tokenStorage";
 import { getSodium } from '@lib/sodiumInitializer';
 import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";
 import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
-import { uploadToR2 } from "@lib/r2"; // <--- Import Helper R2
-import { compressImage } from "@lib/fileUtils"; // 1. Import fungsi compress
+import { uploadToR2 } from "@lib/r2"; // <--- Helper Upload R2
+import { compressImage } from "@lib/fileUtils"; // Helper Kompresi
 import { 
   registerAndGenerateKeys,
   retrievePrivateKeys,
-  type RetrieveKeysResult,
   type RetrievedKeys,
 } from "@lib/crypto-worker-proxy";
 
@@ -70,7 +69,6 @@ type State = {
   hasRestoredKeys: boolean;
 };
 
-// Tipe return baru untuk register
 type RegisterResponse = {
   phrase: string;
   needVerification: boolean;
@@ -82,9 +80,9 @@ type Actions = {
   bootstrap: () => Promise<void>;
   tryAutoUnlock: () => Promise<boolean>;
   login: (emailOrUsername: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
-  registerAndGeneratePhrase: (data: any) => Promise<RegisterResponse>; // Update return type
-  verifyEmail: (userId: string, code: string) => Promise<void>; // New action
-  resendVerification: (email: string) => Promise<void>; // New action
+  registerAndGeneratePhrase: (data: any) => Promise<RegisterResponse>; 
+  verifyEmail: (userId: string, code: string) => Promise<void>;
+  resendVerification: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   getEncryptionKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getSigningPrivateKey: () => Promise<Uint8Array>;
@@ -104,12 +102,10 @@ const savedReadReceipts = localStorage.getItem('sendReadReceipts');
 let privateKeysCache: RetrievedKeys | null = null;
 
 export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => {
-  // Helper function to retrieve and cache keys
   const retrieveAndCacheKeys = (): Promise<RetrievedKeys> => {
     if (privateKeysCache) return Promise.resolve(privateKeysCache);
 
     return new Promise((resolve, reject) => {
-      // Cek Auto Unlock dulu di sini juga (untuk case refresh halaman)
       const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
       const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
 
@@ -189,7 +185,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       set({ isBootstrapping: true });
       let sessionStarted = false;
 
-      // --- Standard Refresh Token Flow ---
       if (!sessionStarted) {
         try {
           const refreshRes = await api<{ ok: boolean; accessToken?: string }>("/api/auth/refresh", { method: "POST" });
@@ -200,9 +195,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             set({ user: me, hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys') });
             localStorage.setItem("user", JSON.stringify(me));
 
-            // Coba auto-unlock saat bootstrap
             await get().tryAutoUnlock();
-
             connectSocket();
           } else {
             throw new Error("No valid session.");
@@ -210,14 +203,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         } catch (error: any) {
           console.error("Bootstrap error:", error);
 
-          // Jika refresh token gagal karena token tidak valid/expired, bersihkan state lokal
           privateKeysCache = null;
           set({ user: null, accessToken: null });
-
-          // Hapus cookie secara lokal jika server tidak membersihkannya
           clearAuthCookies();
-
-          // Hapus data pengguna dari localStorage
           localStorage.removeItem("user");
         }
       }
@@ -248,7 +236,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             if (autoUnlockKey) {
                console.log("🔐 Login: Detected linked device key. Using auto-unlock...");
                result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
-
                if (!result.success) {
                    console.warn("⚠️ Auto-unlock key invalid. Falling back to user password...");
                    result = await retrievePrivateKeys(encryptedKeys, password);
@@ -284,14 +271,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         connectSocket();
       } catch (error: any) {
         console.error("Login error:", error);
-        // Jika login gagal, bersihkan state
         set({ user: null, accessToken: null });
         throw error;
       }
     },
 
     registerAndGeneratePhrase: async (data) => {
-      // 1. Generate Kunci Lokal Dulu
       const {
         encryptionPublicKeyB64,
         signingPublicKeyB64,
@@ -299,23 +284,18 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         phrase
       } = await registerAndGenerateKeys(data.password);
 
-      // Simpan kunci (akan berguna setelah verifikasi email)
       localStorage.setItem('publicKey', encryptionPublicKeyB64);
       localStorage.setItem('signingPublicKey', signingPublicKeyB64);
       localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
       set({ hasRestoredKeys: true });
 
-      // Cache kunci di memori
       try {
         const result = await retrievePrivateKeys(encryptedPrivateKeys, data.password);
         if (result.success) privateKeysCache = result.keys;
       } catch (e) { throw e; }
 
-      // Simpan kunci auto-unlock (untuk digunakan saat login biasa)
       localStorage.setItem('device_auto_unlock_key', data.password);
 
-      // 2. Register ke Server
-      // Note: Data sekarang bisa berisi turnstileToken
       const res = await api<{ 
         user?: User; 
         accessToken?: string; 
@@ -331,7 +311,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         }),
       });
 
-      // 3. Cek apakah butuh verifikasi email
       if (res.needVerification && res.userId) {
         return { 
           phrase, 
@@ -341,7 +320,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         };
       }
 
-      // Legacy flow (jika verifikasi dimatikan atau tidak perlu)
       if (res.user && res.accessToken) {
         set({ user: res.user, accessToken: res.accessToken });
         localStorage.setItem("user", JSON.stringify(res.user));
@@ -362,8 +340,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       if (res.user && res.accessToken) {
         set({ user: res.user, accessToken: res.accessToken });
         localStorage.setItem("user", JSON.stringify(res.user));
-
-        // Setelah verifikasi sukses, upload pre-key bundle (kunci enkripsi)
         setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
         connectSocket();
       }
@@ -378,7 +354,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         toast.success("Verification code resent!");
       } catch (error: any) {
         console.error("Failed to resend verification code:", error);
-        throw error; // Lempar error agar bisa ditangani di komponen
+        throw error;
       }
     },
 
@@ -422,11 +398,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       toast.success('Profile updated!');
     },
 
+    // --- LOGIKA UPDATE AVATAR YANG BENAR ---
     updateAvatar: async (avatar: File) => {
       const toastId = toast.loading('Processing avatar...');
       let fileToProcess = avatar;
 
-      // 2. Logika Kompresi Avatar
+      // 1. Kompresi (Tetap jalan)
       if (avatar.type.startsWith('image/')) {
         try {
           fileToProcess = await compressImage(avatar);
@@ -436,12 +413,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         }
       }
 
-      const formData = new FormData();
-      formData.append('avatar', fileToProcess);
-
       try {
         // 2. Upload ke R2 (Langsung dari browser)
-        toast.loading('Uploading Avatar...', { id: toastId });
+        toast.loading('Uploading to Cloud...', { id: toastId });
         
         const fileUrl = await uploadToR2(fileToProcess, 'avatars', (percent) => {
            // Opsional: Update progress toast jika mau
@@ -452,15 +426,16 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         
         const updatedUser = await authFetch<User>('/api/uploads/avatars/save', {
           method: 'POST',
-          body: JSON.stringify({ fileUrl }), // Kirim JSON URL, bukan FormData
+          body: JSON.stringify({ fileUrl }), // Kirim JSON URL (Metadata)
         });
         
         set({ user: updatedUser });
         localStorage.setItem("user", JSON.stringify(updatedUser));
         toast.success('Avatar updated!', { id: toastId });
+
       } catch (e: any) {
         console.error(e);
-        toast.error(`Upload failed: ${e.message}`, { id: toastId });
+        toast.error(`Update failed: ${e.message}`, { id: toastId });
         throw e;
       }
     },
