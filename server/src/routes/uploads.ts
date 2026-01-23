@@ -155,9 +155,13 @@ router.post(
           participants: updatedConversation.participants.map(p => ({ ...p.user, role: p.role })),
         };
 
-        // Notifikasi realtime ke semua member grup
+        // Notifikasi realtime ke semua member grup - kirim hanya data yang relevan
         const io = getIo();
-        io.to(groupId).emit("conversation:updated", transformedConversation);
+        io.to(groupId).emit("conversation:updated", {
+          id: groupId,
+          avatarUrl: publicUrl,
+          lastUpdated: updatedConversation.updatedAt
+        });
 
         res.json(transformedConversation);
 
