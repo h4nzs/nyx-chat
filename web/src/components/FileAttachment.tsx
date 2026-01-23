@@ -5,8 +5,9 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { Spinner } from "./Spinner"; 
-import { decryptFile } from '@utils/crypto';
+import { decryptFile, decryptMessage } from '@utils/crypto'; // Import decryptMessage
 import { useKeychainStore } from '@store/keychain';
+import { useConversationStore } from '@store/conversation'; // Import store
 import { FiAlertTriangle, FiFile, FiDownload, FiPlayCircle, FiMusic } from 'react-icons/fi';
 
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
@@ -30,34 +31,31 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   const [isDecrypting, setIsDecrypting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
+  const conversations = useConversationStore(s => s.conversations);
 
   useEffect(() => {
     let objectUrl: string | null = null;
     let isMounted = true;
 
     const handleDecryption = async () => {
-      // 1. Validasi URL
       if (!message.fileUrl) {
         if (isMounted) setError("No file URL.");
         return;
       }
 
-      // 2. Cek apakah Encrypted
       const isEncrypted = message.fileType?.includes('encrypted') || message.fileKey;
 
       if (!isEncrypted) {
         if (isMounted) {
            const url = toAbsoluteUrl(message.fileUrl);
-           // FIX 1: Handle undefined -> null
            setDecryptedUrl(url || null);
         }
         return;
       }
 
-      // 3. Ambil Kunci 
-      const fileKey = message.fileKey;
+      const encryptedFileKey = message.fileKey;
 
-      if (!fileKey) {
+      if (!encryptedFileKey) {
         if (isMounted) setError("Waiting for key...");
         return;
       }
@@ -68,6 +66,29 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
       }
 
       try {
+        // A. DEKRIPSI FILE KEY
+        const conversation = conversations.find(c => c.id === message.conversationId);
+        const isGroup = conversation ? conversation.isGroup : false;
+
+        const keyResult = await decryptMessage(
+            encryptedFileKey,
+            message.conversationId,
+            isGroup,
+            message.sessionId
+        );
+
+        if (keyResult.status === 'pending') {
+            if (isMounted) setError(keyResult.reason);
+            return;
+        }
+
+        if (keyResult.status === 'error') {
+            throw keyResult.error;
+        }
+
+        const rawFileKey = keyResult.value; // Raw Key yang Valid
+
+        // B. DOWNLOAD & DEKRIPSI FILE
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
         if (!absoluteUrl) throw new Error("Invalid URL");
 
@@ -77,8 +98,8 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
 
         const originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
         
-        // FIX 2: Tambahkan parameter ke-3 (originalType)
-        const decryptedBlob = await decryptFile(encryptedBlob, fileKey, originalType);
+        // Pass Raw Key ke decryptFile
+        const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
         
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);
@@ -98,9 +119,9 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
       isMounted = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [message.fileUrl, message.fileKey, message.fileType, lastKeychainUpdate]);
+  }, [message.fileUrl, message.fileKey, message.fileType, message.conversationId, message.sessionId, lastKeychainUpdate, conversations]);
 
-  // --- RENDERING STATES ---
+  // --- RENDER STATES (Sama seperti sebelumnya) ---
 
   const containerClass = `flex items-center gap-3 p-3 rounded-lg my-2 max-w-sm transition-colors ${
     isOwn ? 'bg-primary-dark/20 hover:bg-primary-dark/30' : 'bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -128,7 +149,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
 
   const fileType = message.fileType?.split(';')[0] || '';
 
-  // 1. PDF PREVIEW
   if (fileType === 'application/pdf') {
     return (
       <a href={decryptedUrl} target="_blank" rel="noopener noreferrer" download={message.fileName} className="block group">
@@ -146,7 +166,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
     );
   }
 
-  // 2. VIDEO PLAYER
   if (fileType.startsWith('video/')) {
     return (
       <div className="my-2 max-w-sm rounded-lg overflow-hidden bg-black">
@@ -158,7 +177,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
     );
   }
 
-  // 3. AUDIO PLAYER (Non-Voice Message)
   if (fileType.startsWith('audio/') && !message.duration) { 
     return (
       <div className={containerClass + " flex-col items-start"}>
@@ -173,7 +191,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
     );
   }
 
-  // 4. GENERIC FILE DOWNLOAD
   return (
     <a href={decryptedUrl} download={message.fileName || 'download'} className={containerClass}>
       <div className="p-3 bg-gray-200 dark:bg-gray-700 rounded-full text-gray-500 dark:text-gray-300">

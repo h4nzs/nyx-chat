@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Message } from '@store/conversation';
-import { decryptFile } from '@utils/crypto';
+import { decryptFile, decryptMessage } from '@utils/crypto'; // Import decryptMessage
 import { useKeychainStore } from '@store/keychain';
+import { useConversationStore } from '@store/conversation'; // Import store untuk cek isGroup
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
 import { FiClock, FiAlertTriangle, FiImage } from 'react-icons/fi';
@@ -23,6 +24,8 @@ export default function LazyImage({
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
+  // Kita butuh akses ke conversation store untuk tahu apakah ini grup atau personal
+  const conversations = useConversationStore(s => s.conversations);
   const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
@@ -42,21 +45,20 @@ export default function LazyImage({
       // 2. Cek apakah file Terenkripsi (E2EE)
       const isEncrypted = message.fileType?.includes('encrypted') || message.fileKey;
 
-      // --- JIKA TIDAK TERENKRIPSI (Avatar/Public Image) ---
+      // --- KASUS 1: GAMBAR BIASA (Avatar/Public) ---
       if (!isEncrypted) {
         if (isMounted) {
           const absoluteUrl = toAbsoluteUrl(message.fileUrl);
-          // FIX 1: Handle undefined -> null
           setImageUrl(absoluteUrl || null);
           setDecryptionStatus('succeeded');
         }
         return;
       }
 
-      // --- JIKA TERENKRIPSI (Attachment Chat) ---
-      const fileKey = message.fileKey;
+      // --- KASUS 2: GAMBAR TERENKRIPSI (Chat Attachment) ---
+      const encryptedFileKey = message.fileKey; // Ini adalah KUNCI YANG TERENKRIPSI
 
-      if (!fileKey) {
+      if (!encryptedFileKey) {
         if (isMounted) {
           setDecryptionStatus('waiting_for_key');
           setError("Waiting for key...");
@@ -70,18 +72,44 @@ export default function LazyImage({
       }
 
       try {
+        // A. DEKRIPSI KUNCI FILE DULU (Step Krusial yang Hilang Sebelumnya)
+        const conversation = conversations.find(c => c.id === message.conversationId);
+        const isGroup = conversation ? conversation.isGroup : false;
+
+        const keyResult = await decryptMessage(
+            encryptedFileKey,
+            message.conversationId,
+            isGroup,
+            message.sessionId
+        );
+
+        // Handle jika Session Key/Group Key belum tersedia
+        if (keyResult.status === 'pending') {
+            if (isMounted) {
+                setDecryptionStatus('waiting_for_key');
+                setError(keyResult.reason);
+            }
+            return;
+        }
+
+        if (keyResult.status === 'error') {
+            throw keyResult.error || new Error("Failed to decrypt file key");
+        }
+
+        const rawFileKey = keyResult.value; // INI BARU RAW KEY YANG BENAR (Base64)
+
+        // B. DOWNLOAD & DEKRIPSI BLOB FILE
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
         if (!absoluteUrl) throw new Error("Invalid URL");
 
-        // A. Download Encrypted Blob
         const response = await fetch(absoluteUrl);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const encryptedBlob = await response.blob();
 
-        // B. Decrypt Blob
-        // FIX 2: Tentukan tipe asli gambar (fallback ke jpeg) dan masukkan ke parameter ke-3
         const originalType = message.fileType?.split(';')[0] || 'image/jpeg';
-        const decryptedBlob = await decryptFile(encryptedBlob, fileKey, originalType);
+        
+        // Gunakan Raw Key hasil dekripsi tadi
+        const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
         
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);
@@ -103,14 +131,14 @@ export default function LazyImage({
       isMounted = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [message.fileUrl, message.fileKey, message.fileType, lastKeychainUpdate]);
+  }, [message.fileUrl, message.fileKey, message.fileType, message.conversationId, message.sessionId, lastKeychainUpdate, conversations]);
 
   // --- RENDER HELPERS ---
 
   const renderOverlay = () => {
     if (decryptionStatus === 'succeeded') return null;
 
-    const baseClasses = "absolute inset-0 flex flex-col items-center justify-center rounded-lg backdrop-blur-sm transition-all duration-300";
+    const baseClasses = "absolute inset-0 flex flex-col items-center justify-center rounded-lg backdrop-blur-sm transition-all duration-300 z-10";
 
     if (decryptionStatus === 'decrypting' || decryptionStatus === 'pending') {
       return (
@@ -143,10 +171,8 @@ export default function LazyImage({
 
   return (
     <div className={`relative overflow-hidden bg-gray-100 dark:bg-gray-800 rounded-lg ${className || ''}`}>
-      {/* Overlay Status (Loading/Error) */}
       {renderOverlay()}
 
-      {/* Gambar Utama */}
       {imageUrl ? (
         <img
           ref={imgRef}
@@ -158,8 +184,7 @@ export default function LazyImage({
           {...props}
         />
       ) : (
-        // Placeholder saat belum ada URL (biar layout gak gepeng)
-        <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600">
+        <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600 min-h-[150px]">
            <FiImage size={48} />
         </div>
       )}
