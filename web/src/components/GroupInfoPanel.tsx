@@ -57,7 +57,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
 
     const toastId = toast.loading('Uploading avatar...');
     try {
-      await api(`/api/conversations/${conversation.id}/avatar`, {
+      await api(`/api/uploads/groups/${conversation.id}/avatar`, {
         method: 'POST',
         body: formData,
       });

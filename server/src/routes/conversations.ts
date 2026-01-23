@@ -6,6 +6,9 @@ import { getIo } from "../socket.js";
 import { upload } from "../utils/upload.js";
 import { rotateAndDistributeSessionKeys } from "../utils/sessionKeys.js";
 import { ApiError } from "../utils/errors.js";
+import { uploadToSupabase, deleteFromSupabase } from "../utils/supabase.js";
+import { nanoid } from "nanoid";
+import path from "path";
 
 const router: Router = Router();
 router.use(requireAuth);
@@ -222,28 +225,6 @@ router.put("/:id/details", async (req, res, next) => {
   }
 });
 
-// UPLOAD group avatar
-router.post("/:id/avatar", upload.single('avatar'), async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, "Authentication required.");
-    const { id } = req.params;
-    const participant = await prisma.participant.findFirst({
-      where: { conversationId: id, userId: req.user.id },
-    });
-    if (!participant || participant.role !== "ADMIN") return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
-    if (!req.file) return res.status(400).json({ error: "No avatar file provided." });
-
-    const avatarUrl = `/uploads/images/${req.file.filename}`;
-    const updatedConversation = await prisma.conversation.update({
-      where: { id },
-      data: { avatarUrl },
-    });
-    getIo().to(id).emit("conversation:updated", { id, avatarUrl });
-    res.json({ avatarUrl });
-  } catch (error) {
-    next(error);
-  }
-});
 
 // ADD new members to a group
 router.post("/:id/participants", async (req, res, next) => {

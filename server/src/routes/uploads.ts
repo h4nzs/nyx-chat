@@ -105,11 +105,11 @@ router.post(
         
         const groupId = req.params.id;
         
-        // Cek akses user ke grup
+        // Cek akses user ke grup - hanya admin yang bisa mengganti avatar grup
         const participant = await prisma.participant.findFirst({
             where: { userId: req.user.id, conversationId: groupId }
         });
-        if (!participant) throw new ApiError(403, "You are not a member of this group");
+        if (!participant || participant.role !== "ADMIN") throw new ApiError(403, "Forbidden: You are not an admin of this group");
 
         // 1. Ambil data grup lama
         const oldGroup = await prisma.conversation.findUnique({
@@ -133,16 +133,33 @@ router.post(
         );
 
         // Update Database
-        await prisma.conversation.update({
+        const updatedConversation = await prisma.conversation.update({
             where: { id: groupId },
-            data: { avatarUrl: publicUrl }
-        });
-        
+            data: { avatarUrl: publicUrl },
+            include: {
+              participants: {
+                select: {
+                  user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } },
+                  isPinned: true,
+                  role: true,
+                }
+              },
+              creator: { select: { id: true, username: true } },
+            },
+          });
+
+        // Transformasi data agar konsisten dengan format yang digunakan di tempat lain
+        const transformedConversation = {
+          ...updatedConversation,
+          isGroup: updatedConversation.isGroup,
+          participants: updatedConversation.participants.map(p => ({ ...p.user, role: p.role })),
+        };
+
         // Notifikasi realtime ke semua member grup
         const io = getIo();
-        io.to(groupId).emit("conversation:updated", { id: groupId, avatarUrl: publicUrl });
+        io.to(groupId).emit("conversation:updated", transformedConversation);
 
-        res.json({ url: publicUrl });
+        res.json(transformedConversation);
 
     } catch (e) {
         console.error("[GROUP-AVATAR-ERROR]", e);
