@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore } from "../store/auth";
 import AuthForm from "../components/AuthForm";
 import RecoveryPhraseModal from "@components/RecoveryPhraseModal";
@@ -11,7 +11,7 @@ export default function Register() {
   const [error, setError] = useState("");
   const [step, setStep] = useState<'form' | 'otp' | 'recovery'>('form');
   const [recoveryPhrase, setRecoveryPhrase] = useState('');
-  
+
   // State untuk Verifikasi
   const [userId, setUserId] = useState('');
   const [emailForVerify, setEmailForVerify] = useState('');
@@ -21,8 +21,32 @@ export default function Register() {
   const [isResending, setIsResending] = useState(false);
   const [countdown, setCountdown] = useState(0);
 
+  const location = useLocation();
   const navigate = useNavigate();
   const { registerAndGeneratePhrase, verifyEmail, resendVerification } = useAuthStore();
+
+  // Check if we should show verification form based on location state or stored verification state
+  useEffect(() => {
+    const locationState = location.state;
+    if (locationState?.showVerification && locationState?.userId && locationState?.email) {
+      // User was redirected from login because they have pending verification
+      setUserId(locationState.userId);
+      setEmailForVerify(locationState.email);
+      setStep('otp');
+      // Clear the location state to prevent showing it again on refresh
+      window.history.replaceState({}, document.title);
+    } else {
+      // Check if there's stored verification state
+      import('@utils/verificationPersistence').then(({ getVerificationState }) => {
+        const storedState = getVerificationState();
+        if (storedState) {
+          setUserId(storedState.userId);
+          setEmailForVerify(storedState.email);
+          setStep('otp');
+        }
+      });
+    }
+  }, [location.state]);
 
   async function handleRegister(data: { name?: string, d?: string, c?: string, b?: string }) {
     const { name, d: username, c: email, b: password } = data;
@@ -64,6 +88,14 @@ export default function Register() {
       if (result.needVerification && result.userId) {
         setUserId(result.userId);
         setEmailForVerify(result.email || email);
+        // Save verification state to localStorage so it persists if user closes the tab
+        import('@utils/verificationPersistence').then(({ saveVerificationState }) => {
+          saveVerificationState({
+            userId: result.userId!,
+            email: result.email || email,
+            timestamp: Date.now()
+          });
+        });
         setStep('otp');
         toast.success("Registration successful! Please check your email for the code.");
       } else {
@@ -87,6 +119,10 @@ export default function Register() {
     try {
       await verifyEmail(userId, otpCode);
       toast.success("Email verified!");
+      // Clear the verification state since verification is completed
+      import('@utils/verificationPersistence').then(({ clearVerificationState }) => {
+        clearVerificationState();
+      });
       setStep('recovery'); // Pindah ke Recovery Phrase setelah sukses
     } catch (err: any) {
       // Tampilkan pesan kesalahan yang lebih spesifik

@@ -31,7 +31,18 @@ export default function Login() {
     try {
       const restoredNotSynced = location.state?.restoredNotSynced === true;
       await login(data.a, data.b, restoredNotSynced);
-      navigate("/chat");
+
+      // Check if user has pending email verification
+      const verificationState = await import('@utils/verificationPersistence').then(
+        ({ getVerificationState }) => getVerificationState()
+      );
+
+      if (verificationState) {
+        // User has pending verification, redirect to verification page
+        navigate("/register", { state: { showVerification: true, ...verificationState } });
+      } else {
+        navigate("/chat");
+      }
 
     } catch (err: any) {
       setError(err.message || "Login failed. Please check your credentials.");
@@ -62,7 +73,17 @@ export default function Login() {
         // Auto-unlock keys jika ada di localStorage (dari sesi sebelumnya/link device)
         useAuthStore.getState().tryAutoUnlock();
 
-        navigate("/chat");
+        // Check if user has pending email verification
+        const verificationState = await import('@utils/verificationPersistence').then(
+          ({ getVerificationState }) => getVerificationState()
+        );
+
+        if (verificationState) {
+          // User has pending verification, redirect to verification page
+          navigate("/register", { state: { showVerification: true, ...verificationState } });
+        } else {
+          navigate("/chat");
+        }
       }
     } catch (err: any) {
       console.error("Biometric login error:", err);

@@ -279,4 +279,58 @@ router.get("/me/blocked", async (req, res, next) => {
   }
 });
 
+// GET User by Email (for verification purposes) - NO AUTH REQUIRED
+router.get("/by-email/:email", async (req, res, next) => {
+  try {
+    const { email } = req.params;
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        name: true,
+        avatarUrl: true,
+        isEmailVerified: true
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(user);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET User by Username (for verification purposes) - NO AUTH REQUIRED
+router.get("/by-username/:username", async (req, res, next) => {
+  try {
+    const { username } = req.params;
+
+    const user = await prisma.user.findUnique({
+      where: { username },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        name: true,
+        avatarUrl: true,
+        isEmailVerified: true
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json(user);
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

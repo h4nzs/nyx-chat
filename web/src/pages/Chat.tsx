@@ -66,7 +66,7 @@ export default function Chat() {
     if (user && user.hasCompletedOnboarding === false) {
       setIsTourOpen(true);
     }
-  }, [user]);
+  }, [user?.hasCompletedOnboarding, user]);
 
   const handleCloseTour = useCallback(() => {
     setIsTourOpen(false);

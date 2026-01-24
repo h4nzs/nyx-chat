@@ -1,10 +1,11 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { env } from "../config.js";
+import { generalLimiter } from "../middleware/rateLimiter.js";
 
 const router: Router = Router();
 
-router.post("/", requireAuth, async (req, res, next) => {
+router.post("/", generalLimiter, requireAuth, async (req, res, next) => {
   try {
     const { title, description, deviceInfo } = req.body;
     const user = req.user!; // Dari middleware requireAuth

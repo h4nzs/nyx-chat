@@ -280,6 +280,36 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         connectSocket();
       } catch (error: any) {
         console.error("Login error:", error);
+        // Check if the error is related to email verification
+        if (error.message && error.message.includes("Email not verified")) {
+          // Since the backend doesn't return user details in the error, we need to get them separately
+          // First, determine if the input was an email or username
+          const isEmail = emailOrUsername.includes('@');
+
+          try {
+            let userData: User | null = null;
+
+            if (isEmail) {
+              // If it's an email, fetch user by email
+              userData = await api<User>("/api/users/by-email/" + emailOrUsername);
+            } else {
+              // If it's a username, fetch user by username
+              userData = await api<User>("/api/users/by-username/" + emailOrUsername);
+            }
+
+            if (userData?.id && userData?.email) {
+              import('@utils/verificationPersistence').then(({ saveVerificationState }) => {
+                saveVerificationState({
+                  userId: userData!.id,
+                  email: userData!.email!,
+                  timestamp: Date.now()
+                });
+              });
+            }
+          } catch (userFetchErr) {
+            console.error("Could not fetch user details for verification persistence:", userFetchErr);
+          }
+        }
         set({ user: null, accessToken: null });
         throw error;
       }
