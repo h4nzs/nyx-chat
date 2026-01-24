@@ -9,12 +9,14 @@ import type { User } from "@store/auth";
 
 const ParticipantActions = ({ conversationId, participant, amIAdmin }: { conversationId: string, participant: Participant, amIAdmin: boolean }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const { user } = useAuthStore();
+  const { user, blockUser, unblockUser, blockedUserIds } = useAuthStore();
   const showConfirm = useModalStore(s => s.showConfirm);
 
-  if (!amIAdmin || user?.id === participant.id) {
+  if (user?.id === participant.id) {
     return null;
   }
+
+  const isBlocked = blockedUserIds.includes(participant.id);
 
   const handleRoleChange = async (newRole: "ADMIN" | "MEMBER") => {
     setIsOpen(false);
@@ -47,6 +49,21 @@ const ParticipantActions = ({ conversationId, participant, amIAdmin }: { convers
     );
   };
 
+  const handleBlockToggle = async () => {
+    setIsOpen(false);
+    try {
+      if (isBlocked) {
+        await unblockUser(participant.id);
+        toast.success(`${participant.name} unblocked.`);
+      } else {
+        await blockUser(participant.id);
+        toast.success(`${participant.name} blocked.`);
+      }
+    } catch (error: any) {
+      toast.error(`Failed to ${isBlocked ? 'unblock' : 'block'} user: ${error.message || 'Unknown error'}`);
+    }
+  };
+
   return (
     <div className="relative">
       <button onClick={() => setIsOpen(!isOpen)} className="p-2 text-text-secondary hover:text-text-primary">
@@ -55,12 +72,18 @@ const ParticipantActions = ({ conversationId, participant, amIAdmin }: { convers
       {isOpen && (
         <div className="absolute right-0 mt-2 w-48 bg-bg-primary rounded-md shadow-lg z-10 border border-border">
           <ul className="py-1">
-            {participant.role === 'MEMBER' ? (
+            {amIAdmin && participant.role === 'MEMBER' && (
               <li><button onClick={() => handleRoleChange('ADMIN')} className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-surface">Make Admin</button></li>
-            ) : (
+            )}
+            {amIAdmin && participant.role === 'ADMIN' && user?.id !== participant.id && (
               <li><button onClick={() => handleRoleChange('MEMBER')} className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-surface">Dismiss as Admin</button></li>
             )}
-            <li><button onClick={handleRemove} className="w-full text-left px-4 py-2 text-sm text-destructive hover:bg-destructive hover:text-destructive-foreground">Remove from Group</button></li>
+            {amIAdmin && user?.id !== participant.id && (
+              <li><button onClick={handleRemove} className="w-full text-left px-4 py-2 text-sm text-destructive hover:bg-destructive hover:text-destructive-foreground">Remove from Group</button></li>
+            )}
+            <li><button onClick={handleBlockToggle} className={`w-full text-left px-4 py-2 text-sm ${isBlocked ? 'text-green-500 hover:bg-green-500/10' : 'text-destructive hover:bg-destructive/10'}`}>
+              {isBlocked ? 'Unblock User' : 'Block User'}
+            </button></li>
           </ul>
         </div>
       )}

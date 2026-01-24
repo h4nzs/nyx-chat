@@ -10,6 +10,7 @@ import { getSodium } from '@lib/sodiumInitializer';
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
 import { useVerificationStore } from '@store/verification';
+import { useAuthStore } from '@store/auth';
 import ModalBase from './ui/ModalBase';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
@@ -147,6 +148,29 @@ export default function UserInfoModal() {
                   >
                     Verify Security
                   </button>
+                  {user && user.id !== useAuthStore.getState().user?.id && (
+                    <>
+                      {useAuthStore.getState().blockedUserIds.includes(user.id) ? (
+                        <button
+                          onClick={() => {
+                            useAuthStore.getState().unblockUser(user.id).catch(console.error);
+                          }}
+                          className="w-full p-3 rounded-lg font-semibold text-white bg-destructive shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+                        >
+                          Unblock User
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            useAuthStore.getState().blockUser(user.id).catch(console.error);
+                          }}
+                          className="w-full p-3 rounded-lg font-semibold text-white bg-destructive/80 hover:bg-destructive shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+                        >
+                          Block User
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
             </>

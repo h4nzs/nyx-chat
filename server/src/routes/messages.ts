@@ -58,9 +58,26 @@ router.post("/", async (req, res, next) => {
 
     const participants = await prisma.participant.findMany({
       where: { conversationId },
-      select: { userId: true },
+      include: { user: true }, // Include user info untuk cek blocking
     });
     if (!participants.some(p => p.userId === senderId)) return res.status(403).json({ error: "You are not a participant." });
+
+    // CEK BLOCKING: Jika ini percakapan 1-1, cek apakah pengirim diblokir oleh penerima
+    if (participants.length === 2) { // Percakapan 1-1
+      const otherParticipant = participants.find(p => p.userId !== senderId);
+      if (otherParticipant) {
+        const isBlocked = await prisma.blockedUser.findFirst({
+          where: {
+            blockerId: otherParticipant.userId, // Penerima sebagai pemblokir
+            blockedId: senderId                  // Pengirim sebagai yang diblokir
+          }
+        });
+
+        if (isBlocked) {
+          throw new ApiError(403, "You have been blocked by this user.");
+        }
+      }
+    }
 
     if (repliedToId) {
       let currentId: string | null = repliedToId;

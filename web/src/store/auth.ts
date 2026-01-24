@@ -94,6 +94,10 @@ type Actions = {
   updateAvatar: (avatar: File) => Promise<void>;
   setReadReceipts: (value: boolean) => void;
   setHasRestoredKeys: (hasKeys: boolean) => void;
+  blockUser: (userId: string) => Promise<void>;
+  unblockUser: (userId: string) => Promise<void>;
+  loadBlockedUsers: () => Promise<void>;
+  blockedUserIds: string[];
 };
 
 const savedUser = localStorage.getItem("user");
@@ -151,6 +155,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     isBootstrapping: true,
     sendReadReceipts: savedReadReceipts ? JSON.parse(savedReadReceipts) : true,
     hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys'),
+    blockedUserIds: [], // Tambahkan state untuk menyimpan ID pengguna yang diblokir
 
     setHasRestoredKeys: (hasKeys) => set({ hasRestoredKeys: hasKeys }),
     setAccessToken: (token) => set({ accessToken: token }),
@@ -197,6 +202,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
             await get().tryAutoUnlock();
             connectSocket();
+
+            // Muat daftar pengguna yang diblokir
+            get().loadBlockedUsers();
           } else {
             throw new Error("No valid session.");
           }
@@ -204,7 +212,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           console.error("Bootstrap error:", error);
 
           privateKeysCache = null;
-          set({ user: null, accessToken: null });
+          set({ user: null, accessToken: null, blockedUserIds: [] });
           clearAuthCookies();
           localStorage.removeItem("user");
         }
@@ -224,7 +232,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
         const hasKeys = !!localStorage.getItem('encryptedPrivateKeys');
 
-        set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeys });
+        set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeys, blockedUserIds: [] });
         localStorage.setItem("user", JSON.stringify(res.user));
 
         if (hasKeys) {
@@ -253,6 +261,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             toast.error("Could not decrypt your stored keys. Please restore your account if the password has changed.");
           }
         }
+
+        // Muat daftar pengguna yang diblokir
+        get().loadBlockedUsers();
 
         if (restoredNotSynced) {
           try {
@@ -467,6 +478,59 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     setUser: (user) => {
       set({ user });
       localStorage.setItem("user", JSON.stringify(user));
+    },
+
+    // Fungsi untuk memblokir pengguna
+    blockUser: async (userId) => {
+      const toastId = toast.loading('Blocking user...');
+      try {
+        await authFetch(`/api/users/${userId}/block`, {
+          method: 'POST'
+        });
+        toast.success('User blocked', { id: toastId });
+
+        // Update state lokal
+        set(state => ({
+          blockedUserIds: [...state.blockedUserIds, userId]
+        }));
+      } catch (error: any) {
+        const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
+        toast.error(`Block failed: ${errorMsg}`, { id: toastId });
+        throw error;
+      }
+    },
+
+    // Fungsi untuk membuka blokir pengguna
+    unblockUser: async (userId) => {
+      const toastId = toast.loading('Unblocking user...');
+      try {
+        await authFetch(`/api/users/${userId}/block`, {
+          method: 'DELETE'
+        });
+        toast.success('User unblocked', { id: toastId });
+
+        // Update state lokal
+        set(state => ({
+          blockedUserIds: state.blockedUserIds.filter(id => id !== userId)
+        }));
+      } catch (error: any) {
+        const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
+        toast.error(`Unblock failed: ${errorMsg}`, { id: toastId });
+        throw error;
+      }
+    },
+
+    // Fungsi untuk memuat daftar pengguna yang diblokir
+    loadBlockedUsers: async () => {
+      try {
+        const blockedUsers = await authFetch<{ id: string }[]>('/api/users/me/blocked');
+        const blockedIds = blockedUsers.map(user => user.id);
+
+        set({ blockedUserIds: blockedIds });
+      } catch (error) {
+        console.error('Failed to load blocked users:', error);
+        // Jangan tampilkan error ke user karena ini bukan fungsi kritis
+      }
     },
   };
 }, Object.is);

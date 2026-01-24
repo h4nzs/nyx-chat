@@ -213,4 +213,70 @@ router.post("/me/complete-onboarding", async (req, res, next) => {
   }
 });
 
+// BLOCK USER
+router.post("/:id/block", async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
+    const blockerId = req.user.id;
+    const blockedId = req.params.id;
+
+    if (blockerId === blockedId) {
+      throw new ApiError(400, "You cannot block yourself");
+    }
+
+    await prisma.blockedUser.create({
+      data: {
+        blockerId,
+        blockedId
+      }
+    });
+
+    res.json({ success: true, message: "User blocked" });
+  } catch (error: any) {
+    // Handle unique constraint violation (kalau udah diblokir sebelumnya)
+    if (error.code === 'P2002') {
+      return res.json({ success: true, message: "User already blocked" });
+    }
+    next(error);
+  }
+});
+
+// UNBLOCK USER
+router.delete("/:id/block", async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
+    const blockerId = req.user.id;
+    const blockedId = req.params.id;
+
+    await prisma.blockedUser.deleteMany({
+      where: {
+        blockerId,
+        blockedId
+      }
+    });
+
+    res.json({ success: true, message: "User unblocked" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET BLOCKED USERS LIST (buat list di settings)
+router.get("/me/blocked", async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
+    const blocked = await prisma.blockedUser.findMany({
+      where: { blockerId: req.user.id },
+      include: {
+        blocked: {
+          select: { id: true, username: true, avatarUrl: true, name: true }
+        }
+      }
+    });
+    res.json(blocked.map(b => b.blocked));
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

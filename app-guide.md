@@ -1,66 +1,241 @@
-# Panduan Arsitektur & Alur Kerja Chat Lite (Socket Real-time)
+Konsepnya:
 
-Dokumen ini merinci cara kerja fungsionalitas *real-time* di versi stabil aplikasi untuk dijadikan referensi perbaikan.
+1. **Database:** Tabel untuk menyimpan siapa memblokir siapa.
+2. **API:** Endpoint untuk `block`, `unblock`, dan cek status.
+3. **Middleware/Logic:** Saat user mau kirim pesan (`sendMessage`), cek dulu apakah dia diblokir oleh penerima. Jika ya -> Tolak (Error 403).
 
-## 1. Arsitektur Umum Socket
+Berikut panduan langkah demi langkahnya:
 
-- **Inisialisasi:** Satu instance Socket.IO klien dibuat dan dibagikan di seluruh aplikasi (pola singleton) di `web/src/lib/socket.ts`. Koneksi tidak dibuat secara otomatis (`autoConnect: false`).
-- **Koneksi:** Fungsi `connectSocket()` dipanggil secara eksplisit setelah pengguna berhasil *login* atau saat aplikasi di-*bootstrap* (`web/src/store/auth.ts`).
-- **Otentikasi:** Koneksi *socket* diautentikasi di *backend* melalui `socketAuthMiddleware` (`server/src/middleware/auth.ts`), yang memverifikasi token JWT dari *cookie* (`at`). Koneksi yang gagal otentikasi diperlakukan sebagai "tamu".
-- **Manajemen State:** *Event* yang diterima dari server memicu *action* di *store* Zustand yang relevan (`useMessageStore`, `usePresenceStore`, dll.) untuk memperbarui UI.
+### TAHAP 1: Update Database Schema
 
-## 2. Alur Event Kunci
+Kita perlu relasi baru di `schema.prisma` untuk menyimpan data blokir.
 
-### Alur 1: Pengiriman & Penerimaan Pesan Baru
+Buka **`server/prisma/schema.prisma`**:
 
-1.  **Pengirim (Klien):**
-    -   Pengguna mengetik dan menekan kirim. Fungsi `sendMessage` di `web/src/store/message.ts` dipanggil.
-    -   Pesan dienkripsi secara lokal.
-    -   Pesan "optimis" ditambahkan ke UI.
-    -   **Poin Kunci:** Klien **tidak** melakukan `POST /api/messages`. Sebaliknya, ia memancarkan *event socket*: `socket.emit("message:send", { ... }, callback)`.
+```prisma
+// Di dalam model User, tambahkan dua field relasi ini:
+model User {
+  // ... field lainnya (id, email, dll)
+  
+  // Relasi Blocking
+  blockedUsers BlockedUser[] @relation("Blocker") // User ini memblokir siapa aja
+  blockedBy    BlockedUser[] @relation("Blocked") // User ini diblokir sama siapa aja
+}
 
-2.  **Server:**
-    -   `server/src/socket.ts` menerima `socket.on("message:send", ...)`.
-    -   Server menyimpan pesan ke *database*.
-    -   Server menyiarkan `message:new` ke semua anggota lain di *room* percakapan: `socket.broadcast.to(conversationId).emit("message:new", ...)`.
-    -   Server mengirim konfirmasi kembali ke pengirim asli melalui `callback`.
+// Tambahkan Model Baru di bawah
+model BlockedUser {
+  id        String   @id @default(cuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
 
-3.  **Penerima (Klien):**
-    -   `web/src/lib/socket.ts` menerima `socket.on("message:new", ...)`.
-    -   Pesan yang masuk didekripsi.
-    -   `addIncomingMessage` dari `useMessageStore` dipanggil untuk menambahkan pesan ke *state*.
-    -   Penerima kemudian memancarkan `message:ack_delivered` kembali ke server.
+  blocker   User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
 
-### Alur 2: Status Kehadiran (Online/Offline)
+  @@unique([blockerId, blockedId]) // Mencegah duplikasi (blokir orang yang sama 2x)
+  @@index([blockerId])
+  @@index([blockedId])
+}
 
-1.  **Koneksi (Server):**
-    -   Saat `io.on("connection", ...)` berhasil (setelah otentikasi), server menambahkan `userId` ke set `online_users` di Redis.
-    -   Server memancarkan `presence:init` ke klien yang baru terhubung dengan daftar lengkap semua pengguna online.
-    -   Server menyiarkan `presence:user_joined` ke semua klien lain.
+```
 
-2.  **Koneksi (Klien):**
-    -   `web/src/lib/socket.ts` mendengarkan `socket.on("presence:init", ...)` dan memanggil `setOnlineUsers` di `usePresenceStore`.
-    -   Ia juga mendengarkan `socket.on("presence:user_joined", ...)` dan memanggil `userJoined`.
+Setelah update, jangan lupa jalankan di terminal server:
 
-3.  **Diskoneksi:**
-    -   Saat `socket.on("disconnect", ...)` terjadi, server menghapus `userId` dari Redis dan menyiarkan `presence:user_left`.
-    -   Klien mendengarkan `socket.on("presence:user_left", ...)` dan memanggil `userLeft`.
+```bash
+npx prisma db push
+# atau npx prisma migrate dev --name add_blocked_user
 
-### Alur 3: Indikator Mengetik
-
-1.  **Pengguna Mengetik (Klien):**
-    -   Saat pengguna mengetik di `MessageInput`, `handleTyping` dipanggil, yang memancarkan `socket.emit("typing:start", ...)`.
-    -   Sebuah *timeout* juga diatur untuk mengirim `typing:stop`.
-
-2.  **Server:**
-    -   `server/src/socket.ts` menerima `socket.on("typing:start", ...)` atau `typing:stop`.
-    -   Server langsung menyiarkan `typing:update` ke semua anggota lain di *room*: `socket.to(conversationId).emit("typing:update", ...)`.
-
-3.  **Penerima (Klien):**
-    -   `web/src/lib/socket.ts` mendengarkan `socket.on("typing:update", ...)`.
-    -   Ia memanggil `addOrUpdate` di `usePresenceStore` untuk memperbarui UI.
+```
 
 ---
 
-**Ringkasan untuk Perbaikan:**
-Versi kode terbaru harus mereplikasi alur ini. Ini berarti `web/src/lib/socket.ts` **harus** memiliki semua *event listener* (`message:new`, `presence:init`, dll.), dan `web/src/store/message.ts` **harus** menggunakan `socket.emit("message:send")`, bukan `POST /api/messages`. Selain itu, `web/src/store/presence.ts` harus ada.
+### TAHAP 2: Buat API Block & Unblock
+
+Kita perlu endpoint agar frontend bisa melakukan aksi blokir.
+Buka **`server/src/routes/users.ts`** dan tambahkan route ini:
+
+```typescript
+// ... imports
+
+// BLOCK USER
+router.post("/:id/block", requireAuth, async (req, res, next) => {
+  try {
+    const blockerId = req.user!.id;
+    const blockedId = req.params.id;
+
+    if (blockerId === blockedId) {
+      throw new ApiError(400, "You cannot block yourself");
+    }
+
+    await prisma.blockedUser.create({
+      data: {
+        blockerId,
+        blockedId
+      }
+    });
+
+    res.json({ success: true, message: "User blocked" });
+  } catch (error: any) {
+    // Handle unique constraint violation (kalau udah diblokir sebelumnya)
+    if (error.code === 'P2002') {
+      return res.json({ success: true, message: "User already blocked" });
+    }
+    next(error);
+  }
+});
+
+// UNBLOCK USER
+router.delete("/:id/block", requireAuth, async (req, res, next) => {
+  try {
+    const blockerId = req.user!.id;
+    const blockedId = req.params.id;
+
+    await prisma.blockedUser.deleteMany({
+      where: {
+        blockerId,
+        blockedId
+      }
+    });
+
+    res.json({ success: true, message: "User unblocked" });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET BLOCKED USERS LIST (buat list di settings)
+router.get("/me/blocked", requireAuth, async (req, res, next) => {
+  try {
+    const blocked = await prisma.blockedUser.findMany({
+      where: { blockerId: req.user!.id },
+      include: { 
+        blocked: { 
+          select: { id: true, username: true, avatarUrl: true, name: true } 
+        } 
+      }
+    });
+    res.json(blocked.map(b => b.blocked));
+  } catch (error) {
+    next(error);
+  }
+});
+
+```
+
+---
+
+### TAHAP 3: Cegah Pengiriman Pesan (The Gatekeeper)
+
+Ini bagian terpenting. Saat user mengirim pesan, sistem harus mengecek apakah dia diblokir.
+
+Buka **`server/src/routes/messages.ts`** (atau `conversations.ts` tergantung di mana logic kirim pesan berada).
+Di dalam route `POST /:conversationId` (kirim pesan):
+
+```typescript
+// ... di dalam router.post messages ...
+
+const senderId = req.user!.id;
+
+// 1. Ambil data conversation beserta partisipan
+const conversation = await prisma.conversation.findUnique({
+  where: { id: conversationId },
+  include: { participants: true }
+});
+
+// 2. LOGIC BLOKIR: Cek apakah SENDER diblokir oleh SIAPAPUN di chat itu (khusus Personal Chat)
+if (!conversation.isGroup) {
+  const otherParticipant = conversation.participants.find(p => p.userId !== senderId);
+  
+  if (otherParticipant) {
+    // Cek apakah 'otherParticipant' memblokir 'senderId'
+    const isBlocked = await prisma.blockedUser.findUnique({
+      where: {
+        blockerId_blockedId: {
+          blockerId: otherParticipant.userId, // Orang lain sebagai pemblokir
+          blockedId: senderId                 // Kita sebagai yang diblokir
+        }
+      }
+    });
+
+    if (isBlocked) {
+      throw new ApiError(403, "You have been blocked by this user.");
+      // Atau bisa return success palsu biar user ga tau kalau dia diblokir (Shadow ban style)
+    }
+  }
+}
+
+// ... lanjut simpan pesan ke DB ...
+
+```
+
+---
+
+### TAHAP 4: Integrasi Frontend (UI/UX)
+
+Di Frontend (`web/`), kamu perlu update store dan UI.
+
+**1. Update Store (`web/src/store/user.ts` atau `auth.ts`)**
+Tambahkan state `blockedUserIds` agar UI bisa bereaksi instan (misal: tombol berubah jadi "Unblock").
+
+```typescript
+// Di useAuthStore atau sejenisnya
+type State = {
+  // ...
+  blockedUserIds: string[];
+  blockUser: (userId: string) => Promise<void>;
+  unblockUser: (userId: string) => Promise<void>;
+};
+
+// Di implementation:
+blockUser: async (userId) => {
+  await api.post(`/api/users/${userId}/block`);
+  set(state => ({ blockedUserIds: [...state.blockedUserIds, userId] }));
+},
+unblockUser: async (userId) => {
+  await api.delete(`/api/users/${userId}/block`);
+  set(state => ({ blockedUserIds: state.blockedUserIds.filter(id => id !== userId) }));
+}
+// Jangan lupa load blockedUserIds saat 'bootstrap' atau login awal
+
+```
+
+**2. Update UI Chat (`ChatWindow.tsx` atau `MessageInput.tsx`)**
+Cek apakah user lawan bicara ada di list `blockedUserIds` (kita yang blokir dia) atau API return 403 (kita diblokir dia).
+
+* **Skenario 1: Kita Blokir Dia** -> Disable input text, ganti jadi tombol "Unblock to send message".
+* **Skenario 2: Dia Blokir Kita** -> Saat kirim pesan, muncul Toast Error: *"Message not delivered. You might be blocked."*
+
+**Contoh UI di ChatWindow (React):**
+
+```tsx
+// Di dalam komponen ChatWindow
+const { blockedUserIds, unblockUser } = useAuthStore();
+const isBlockedByMe = blockedUserIds.includes(otherUserId);
+
+return (
+  <div className="flex flex-col h-full">
+    <MessageList />
+    
+    {isBlockedByMe ? (
+      <div className="p-4 bg-red-50 dark:bg-red-900/20 text-center border-t border-red-200">
+        <p className="text-sm text-red-600 mb-2">You blocked this contact.</p>
+        <button 
+          onClick={() => unblockUser(otherUserId)}
+          className="bg-white text-red-600 px-4 py-1 rounded border border-red-200 text-sm"
+        >
+          Unblock to chat
+        </button>
+      </div>
+    ) : (
+      <MessageInput />
+    )}
+  </div>
+);
+
+```
+tambahkan juga ui tombol block di titik tiga atau dropdown dalam chatlist hanya untuk percakapan 1-1, dan dalam userinfomodal dan profilepage.
+
+### Tips Tambahan:
+
+* **Privacy:** Jangan kasih notifikasi "Kamu telah diblokir" ke user yang diblokir. Biarkan mereka tahu hanya saat mencoba mengirim pesan (gagal kirim), atau buat seolah-olah terkirim tapi centang satu (seperti WA).
+* **Profile Picture:** Biasanya kalau diblokir, user tidak bisa melihat foto profil dan status "Online". Kamu bisa update endpoint `getUser` untuk menyembunyikan field ini jika `req.user.id` ada di tabel `blockedUser` target.
