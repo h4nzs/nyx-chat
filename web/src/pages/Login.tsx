@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore, type User } from "../store/auth";
+import { useModalStore } from "../store/modal";
 import AuthForm from "../components/AuthForm";
 import { IoFingerPrint } from "react-icons/io5";
 import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api } from "@lib/api";
+import { retrievePrivateKeys } from "@lib/crypto-worker-proxy";
 
 export default function Login() {
   const [error, setError] = useState("");
@@ -70,8 +72,44 @@ export default function Login() {
         useAuthStore.getState().setAccessToken(result.accessToken);
         useAuthStore.getState().setUser(result.user);
 
-        // Auto-unlock keys jika ada di localStorage (dari sesi sebelumnya/link device)
-        useAuthStore.getState().tryAutoUnlock();
+        // For biometric login, we need to handle key decryption
+        // Try auto-unlock first (this works if device_auto_unlock_key is available)
+        const autoUnlockSuccess = await useAuthStore.getState().tryAutoUnlock();
+
+        // If auto-unlock failed and we have encrypted keys, we need to prompt for password now
+        // This provides better UX than prompting later when user tries to send a message
+        const hasEncryptedKeys = !!localStorage.getItem('encryptedPrivateKeys');
+        if (!autoUnlockSuccess && hasEncryptedKeys) {
+          // Prompt for password to decrypt keys now
+          useModalStore.getState().showPasswordPrompt(async (password) => {
+            if (!password) {
+              // If user cancels, they can still use the app but won't be able to send messages
+              // until they provide the password
+              console.log("User cancelled password prompt. Keys remain locked.");
+              return;
+            }
+
+            try {
+              const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
+              if (!encryptedKeys) {
+                console.error("No encrypted keys found in storage");
+                return;
+              }
+
+              const result = await retrievePrivateKeys(encryptedKeys, password);
+              if (result.success) {
+                // Set the decrypted keys directly in the store
+                useAuthStore.getState().setDecryptedKeys(result.keys);
+                console.log("✅ Keys decrypted and cached successfully via biometric login.");
+              } else {
+                console.error("Failed to decrypt keys:", result.reason);
+                // Optionally show an error to the user
+              }
+            } catch (e) {
+              console.error("Error during key decryption:", e);
+            }
+          });
+        }
 
         // Check if user has pending email verification
         const verificationState = await import('@utils/verificationPersistence').then(

@@ -98,6 +98,7 @@ type Actions = {
   unblockUser: (userId: string) => Promise<void>;
   loadBlockedUsers: () => Promise<void>;
   blockedUserIds: string[];
+  setDecryptedKeys: (keys: RetrievedKeys) => void;
 };
 
 const savedUser = localStorage.getItem("user");
@@ -184,6 +185,13 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         }
       }
       return false;
+    },
+
+    // Function to set decrypted keys directly (for biometric login)
+    setDecryptedKeys: (keys: RetrievedKeys) => {
+      privateKeysCache = keys;
+      set({ hasRestoredKeys: true });
+      console.log("✅ Decrypted keys set directly from biometric authentication.");
     },
 
     bootstrap: async () => {
