@@ -20,7 +20,7 @@ import Lightbox from "./Lightbox";
 import GroupInfoPanel from './GroupInfoPanel';
 import clsx from "clsx";
 import { useVerificationStore } from '@store/verification';
-import { FiShield, FiSmile, FiMic, FiSquare } from 'react-icons/fi';
+import { FiShield, FiSmile, FiMic, FiSquare, FiAlertTriangle } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -163,7 +163,13 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
     );
   };
   
-  const MessageInput = ({ onSend, onTyping, onFileChange, onVoiceSend }: { onSend: (data: { content: string }) => void; onTyping: () => void; onFileChange: (e: ChangeEvent<HTMLInputElement>) => void; onVoiceSend: (blob: Blob, duration: number) => void; }) => {
+  const MessageInput = ({ onSend, onTyping, onFileChange, onVoiceSend, conversation }: {
+    onSend: (data: { content: string }) => void;
+    onTyping: () => void;
+    onFileChange: (e: ChangeEvent<HTMLInputElement>) => void;
+    onVoiceSend: (blob: Blob, duration: number) => void;
+    conversation: any; // Pass conversation to check if other participant is blocked
+  }) => {
   const [text, setText] = useState('');
   const [isPressed, setIsPressed] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -171,6 +177,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview } = useMessageInputStore();
   const { status: connectionStatus } = useConnectionStore();
+  const blockedUserIds = useAuthStore(state => state.blockedUserIds);
 
   // --- Voice Recording State ---
   const [isRecording, setIsRecording] = useState(false);
@@ -181,8 +188,14 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const audioChunksRef = useRef<Blob[]>([]);
   // --- End Voice Recording State ---
 
+  // Cek apakah ini percakapan 1-1 dan lawan bicara diblokir
+  const isOneToOne = !conversation.isGroup;
+  const otherParticipant = isOneToOne && conversation.participants?.find((p: any) => p.id !== useAuthStore.getState().user?.id);
+  const isOtherParticipantBlocked = isOneToOne && otherParticipant && blockedUserIds.includes(otherParticipant.id);
+
   const isConnected = connectionStatus === 'connected';
   const hasText = text.trim().length > 0;
+  const isInputDisabled = !isConnected || isOtherParticipantBlocked;
 
   const debouncedFetchPreview = useCallback(
     debounce((inputText: string) => {
@@ -331,14 +344,30 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
               <p className="text-text-secondary font-mono">{new Date(recordingTime * 1000).toISOString().substr(14, 5)}</p>
             </div>
           </div>
+        ) : isOtherParticipantBlocked ? (
+          // Tampilkan pesan bahwa lawan bicara diblokir
+          <div className="flex items-center justify-between p-4 bg-destructive/20 rounded-lg border border-destructive/30">
+            <div className="flex items-center gap-3">
+              <FiAlertTriangle className="text-destructive" size={20} />
+              <span className="text-text-primary">You have blocked this user.</span>
+            </div>
+            <button
+              onClick={() => {
+                useAuthStore.getState().unblockUser(otherParticipant.id).catch(console.error);
+              }}
+              className="px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90 transition-colors"
+            >
+              Unblock
+            </button>
+          </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex items-center gap-3">
-            <button type="button" onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className={`${fileButtonClasses} touch-target`} disabled={!isConnected}>
+            <button type="button" onClick={() => fileInputRef.current?.click()} aria-label="Attach file" className={`${fileButtonClasses} touch-target`} disabled={isInputDisabled}>
               <motion.svg
                 whileHover={{ scale: 1.1, rotate: -15 }}
                 xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></motion.svg>
             </button>
-            <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} aria-label="Open emoji picker" className={`${fileButtonClasses} touch-target`} disabled={!isConnected}>
+            <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} aria-label="Open emoji picker" className={`${fileButtonClasses} touch-target`} disabled={isInputDisabled}>
               <motion.div whileHover={{ scale: 1.1 }}>
                 <FiSmile size={22} />
               </motion.div>
@@ -348,7 +377,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
               type="file"
               className="hidden"
               onChange={onFileChange}
-              disabled={!isConnected}
+              disabled={isInputDisabled}
             />
             <input
               type="text"
@@ -356,12 +385,12 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
               onChange={handleTextChange}
               placeholder={isConnected ? "Type a message..." : "Disconnected..."}
               className={textInputClasses}
-              disabled={!isConnected}
+              disabled={isInputDisabled}
             />
             {hasText ? (
               <button
                 type="submit"
-                disabled={!hasText || !isConnected}
+                disabled={!hasText || isInputDisabled}
                 onMouseDown={() => hasText && setIsPressed(true)}
                 onMouseUp={() => setIsPressed(false)}
                 onMouseLeave={() => setIsPressed(false)}
@@ -371,7 +400,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
                 <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               </button>
             ) : (
-              <button type="button" onClick={handleStartRecording} aria-label="Start recording" className={`${fileButtonClasses} touch-target`} disabled={!isConnected}>
+              <button type="button" onClick={handleStartRecording} aria-label="Start recording" className={`${fileButtonClasses} touch-target`} disabled={isInputDisabled}>
                 <motion.div whileHover={{ scale: 1.1 }}>
                   <FiMic size={22} />
                 </motion.div>
@@ -553,7 +582,13 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                 )}
               </div>
               {conversation.keyRotationPending && <KeyRotationBanner />}
-              <MessageInput onSend={handleSendMessage} onTyping={handleTyping} onFileChange={handleFileChange} onVoiceSend={handleVoiceSend} />
+              <MessageInput
+                onSend={handleSendMessage}
+                onTyping={handleTyping}
+                onFileChange={handleFileChange}
+                onVoiceSend={handleVoiceSend}
+                conversation={conversation}
+              />
               {lightboxMessage && <Lightbox message={lightboxMessage} onClose={() => setLightboxMessage(null)} />}
               {isGroupInfoOpen && <GroupInfoPanel conversationId={id} onClose={() => setIsGroupInfoOpen(false)} />}
             </>

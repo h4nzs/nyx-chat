@@ -75,10 +75,13 @@ const SearchResults = ({ results, onSelect }: { results: User[], onSelect: (user
   />
 );
 
-const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, onClick, onUserClick, onMenuSelect, onTogglePin }: {
+const ConversationItem = ({ conversation, meId, presence, blockedUserIds, blockUser, unblockUser, isActive, isSelected, onClick, onUserClick, onMenuSelect, onTogglePin }: {
   conversation: Conversation;
   meId?: string;
   presence: string[];
+  blockedUserIds: string[];
+  blockUser: (userId: string) => Promise<void>;
+  unblockUser: (userId: string) => Promise<void>;
   isActive: boolean;
   isSelected: boolean;
   onClick: () => void;
@@ -204,6 +207,46 @@ const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, 
                   </>
                 )}
               </DropdownMenu.Item>
+              {!conversation.isGroup && (
+                <>
+                  <DropdownMenu.Separator className="my-1 h-px bg-border" />
+                  <DropdownMenu.Item
+                    onSelect={() => {
+                      const otherParticipant = conversation.participants.find((p: any) => p.id !== meId);
+                      if (otherParticipant) {
+                        const isBlocked = blockedUserIds.includes(otherParticipant.id);
+                        if (isBlocked) {
+                          unblockUser(otherParticipant.id).catch(console.error);
+                        } else {
+                          blockUser(otherParticipant.id).catch(console.error);
+                        }
+                      }
+                    }}
+                    className="block w-full text-left px-3 py-2 text-sm rounded cursor-pointer outline-none hover:bg-secondary"
+                  >
+                    {conversation.participants && conversation.participants.find((p: any) => p.id !== meId) && blockedUserIds.includes(conversation.participants.find((p: any) => p.id !== meId)!.id) ? (
+                      <>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                          <circle cx="9" cy="7" r="4"/>
+                          <path d="M22 21v-2a4 8 0 0 0-3-3.87"/>
+                          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                        </svg>
+                        Unblock User
+                      </>
+                    ) : (
+                      <>
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                          <circle cx="9" cy="7" r="4"/>
+                          <line x1="22" y1="22" x2="16" y2="16"/>
+                        </svg>
+                        Block User
+                      </>
+                    )}
+                  </DropdownMenu.Item>
+                </>
+              )}
               <DropdownMenu.Separator className="my-1 h-px bg-border" />
               <DropdownMenu.Item
                 onSelect={() => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat')}
@@ -358,6 +401,9 @@ export default function ChatList() {
                 conversation={c}
                 meId={meId}
                 presence={presence}
+                blockedUserIds={useAuthStore.getState().blockedUserIds}
+                blockUser={useAuthStore.getState().blockUser}
+                unblockUser={useAuthStore.getState().unblockUser}
                 isActive={c.id === activeId}
                 isSelected={index === selectedIndex}
                 onClick={() => handleConversationClick(c.id)}

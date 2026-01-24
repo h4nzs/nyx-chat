@@ -62,19 +62,29 @@ router.post("/", async (req, res, next) => {
     });
     if (!participants.some(p => p.userId === senderId)) return res.status(403).json({ error: "You are not a participant." });
 
-    // CEK BLOCKING: Jika ini percakapan 1-1, cek apakah pengirim diblokir oleh penerima
+    // CEK BLOCKING: Jika ini percakapan 1-1, cek apakah ada blocking dalam dua arah
     if (participants.length === 2) { // Percakapan 1-1
       const otherParticipant = participants.find(p => p.userId !== senderId);
       if (otherParticipant) {
-        const isBlocked = await prisma.blockedUser.findFirst({
+        // Cek apakah pengirim memblokir penerima
+        const isBlockedBySender = await prisma.blockedUser.findFirst({
           where: {
-            blockerId: otherParticipant.userId, // Penerima sebagai pemblokir
-            blockedId: senderId                  // Pengirim sebagai yang diblokir
+            blockerId: senderId,                // Pengirim sebagai pemblokir
+            blockedId: otherParticipant.userId // Penerima sebagai yang diblokir
           }
         });
 
-        if (isBlocked) {
-          throw new ApiError(403, "You have been blocked by this user.");
+        // Cek apakah penerima memblokir pengirim
+        const isBlockedByReceiver = await prisma.blockedUser.findFirst({
+          where: {
+            blockerId: otherParticipant.userId, // Penerima sebagai pemblokir
+            blockedId: senderId                 // Pengirim sebagai yang diblokir
+          }
+        });
+
+        // Jika ada blocking dalam dua arah, tolak pengiriman pesan
+        if (isBlockedBySender || isBlockedByReceiver) {
+          throw new ApiError(403, "Messaging unavailable due to blocking.");
         }
       }
     }
