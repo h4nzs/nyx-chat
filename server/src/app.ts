@@ -28,6 +28,7 @@ import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
 import webpush from "web-push";
 import { generalLimiter } from "./middleware/rateLimiter.js"; // Import ini
+import { reportRoutes } from "./routes/reports";
 
 // Set VAPID keys for web-push notifications
 if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
@@ -249,10 +250,11 @@ app.use("/api/uploads", uploadsRouter);
 app.use("/api/previews", previewsRouter);
 app.use("/api/session-keys", sessionKeysRouter);
 app.use("/api/sessions", sessionsRouter);
+app.use("/api/reports", reportRoutes);
 
 // === HEALTH CHECK ===
 app.get("/health", (_req: Request, res: Response) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok bang" });
 });
 
 // === ERROR HANDLING ===

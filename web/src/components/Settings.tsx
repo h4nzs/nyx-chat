@@ -6,9 +6,10 @@ import { Spinner } from '../components/Spinner';
 import { toAbsoluteUrl } from '@utils/url';
 import { usePushNotifications } from '@hooks/usePushNotifications';
 import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
-import { FiChevronRight, FiEdit2, FiHeart, FiCoffee } from 'react-icons/fi'; // Added FiHeart, FiCoffee
+import { FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
+import ReportBugModal from '../components/ReportBugModal';
 import { api } from '@lib/api';
 
 // Reusable component for a single setting row
@@ -42,7 +43,7 @@ const ToggleSwitch = ({ checked, onChange, disabled }: { checked: boolean; onCha
   </button>
 );
 
-export default function Settings() {
+export default function SettingsPage() {
   const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts } = useAuthStore();
   const { theme, toggleTheme, accent, setAccent } = useThemeStore();
 
@@ -60,6 +61,7 @@ export default function Settings() {
   const [showEmail, setShowEmail] = useState(user?.showEmailToOthers || false);
   const [readReceipts, setReadReceiptsState] = useState(sendReadReceipts);
   const [isLoading, setIsLoading] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const colorMap: Record<AccentColor, string> = {
@@ -123,13 +125,15 @@ export default function Settings() {
     }
   };
 
-  // --- WEBAUTHN LOGIC START ---
+  // --- WEBAUTHN LOGIC ---
   const handleRegisterPasskey = async () => {
     try {
       toast.loading("Preparing biometric setup...", { id: 'passkey' });
       const options = await api<any>("/api/auth/webauthn/register/options");
+      
       toast.loading("Scan your fingerprint/face...", { id: 'passkey' });
       const attResp = await startRegistration(options);
+      
       const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {
         method: "POST",
         body: JSON.stringify(attResp),
@@ -149,22 +153,23 @@ export default function Settings() {
       }
     }
   };
-  // --- WEBAUTHN LOGIC END ---
 
   if (!user) return <div className="flex justify-center items-center h-full"><Spinner /></div>;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 pb-20">
+    <div className="max-w-4xl mx-auto space-y-8 pb-20 p-4">
+      
       {/* Profile Card */}
       <form onSubmit={handleProfileSubmit}>
         <div className="card-neumorphic">
-          <div className="p-6 space-y-4">
-            <div className="flex items-center gap-6">
-              <div className="relative">
+          <div className="p-6 space-y-6">
+            <h3 className="text-lg font-semibold text-text-primary">Profile</h3>
+            <div className="flex flex-col sm:flex-row items-center gap-6">
+              <div className="relative group">
                 <img
                   src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
                   alt="Avatar Preview"
-                  className="w-24 h-24 rounded-full bg-secondary object-cover"
+                  className="w-24 h-24 rounded-full bg-secondary object-cover shadow-sm"
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
                     target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
@@ -173,20 +178,21 @@ export default function Settings() {
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="absolute bottom-0 right-0 bg-bg-surface text-text-primary p-2 rounded-full transition-all shadow-neumorphic-convex active:shadow-neumorphic-pressed"
+                  className="absolute bottom-0 right-0 bg-bg-surface text-text-primary p-2 rounded-full shadow-neumorphic-convex active:shadow-neumorphic-pressed hover:text-accent transition-colors"
                   aria-label="Change avatar"
                 >
                   <FiEdit2 size={16} />
                 </button>
                 <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/png, image/jpeg, image/gif" className="hidden" />
               </div>
-              <div className="flex-1 space-y-2">
+              <div className="flex-1 w-full space-y-3">
                  <input
                   type="text"
                   id="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full input-neumorphic text-xl font-bold"
+                  className="w-full input-neumorphic text-lg font-bold px-4 py-2"
+                  placeholder="Your Name"
                 />
                 <textarea
                   id="description"
@@ -194,14 +200,14 @@ export default function Settings() {
                   onChange={(e) => setDescription(e.target.value)}
                   rows={2}
                   maxLength={150}
-                  className="w-full input-neumorphic text-sm resize-none"
+                  className="w-full input-neumorphic text-sm px-4 py-2 resize-none"
                   placeholder="About me..."
                 />
               </div>
             </div>
-            <div className="flex justify-end">
-              <button type="submit" disabled={isLoading} className="px-4 py-2 rounded-lg font-semibold text-white bg-accent shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center">
-                {isLoading && <Spinner size="sm" className="mr-2" />}
+            <div className="flex justify-end pt-2">
+              <button type="submit" disabled={isLoading} className="btn-primary flex items-center gap-2">
+                {isLoading && <Spinner size="sm" className="text-white" />}
                 {isLoading ? 'Saving...' : 'Save Profile'}
               </button>
             </div>
@@ -224,7 +230,7 @@ export default function Settings() {
                   key={color}
                   onClick={() => setAccent(color)}
                   style={{ backgroundColor: colorMap[color] }}
-                  className={`w-8 h-8 rounded-full transition-all shadow-neumorphic-convex active:shadow-neumorphic-pressed ${
+                  className={`w-8 h-8 rounded-full transition-all shadow-neumorphic-convex active:shadow-neumorphic-pressed hover:scale-110 ${
                     accent === color ? 'ring-2 ring-offset-2 ring-offset-bg-surface ring-text-primary' : ''
                   }`}
                   aria-label={`Set accent color to ${color}`}
@@ -237,64 +243,75 @@ export default function Settings() {
 
       {/* Privacy & Security Card */}
       <div className="card-neumorphic">
-        <div className="p-6 space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold text-text-primary mb-2">Privacy & Security</h3>
+        <div className="p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-semibold text-text-primary">Privacy & Security</h3>
+            <button onClick={handlePrivacySubmit} className="text-sm text-accent hover:underline font-medium">
+              Save Privacy
+            </button>
+          </div>
 
-            {/* --- WEBAUTHN UI START --- */}
+          <div className="space-y-1">
             <SettingsRow
               title="Biometric Login"
               description="Use Fingerprint or Face ID to login securely."
             >
               <button
                 onClick={handleRegisterPasskey}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-main text-text-primary border border-border hover:bg-bg-hover transition-colors shadow-neumorphic-convex active:shadow-neumorphic-pressed"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-bg-main text-text-primary border border-border hover:bg-bg-hover transition-colors shadow-neumorphic-convex active:shadow-neumorphic-pressed text-sm"
               >
                 <IoFingerPrint size={18} />
-                <span>Register This Device</span>
+                <span>Register Device</span>
               </button>
             </SettingsRow>
-            {/* --- WEBAUTHN UI END --- */}
 
             <SettingsRow title="Send Read Receipts" description="Let others know you have read their messages.">
               <ToggleSwitch checked={readReceipts} onChange={() => setReadReceiptsState(!readReceipts)} />
             </SettingsRow>
+            
             <SettingsRow title="Show Email Address" description="Allow others to see your email on your profile.">
               <ToggleSwitch checked={showEmail} onChange={() => setShowEmail(!showEmail)} />
             </SettingsRow>
-            <Link to="/settings/keys" className="block w-full text-left">
-              <SettingsRow title="Encryption Keys" description="Manage your end-to-end encryption keys.">
-                <FiChevronRight size={20} className="text-text-secondary" />
-              </SettingsRow>
+
+            <div className="border-t border-border my-4"></div>
+
+            <Link to="/settings/keys" className="block w-full group">
+              <div className="flex items-center justify-between py-3">
+                <div>
+                  <p className="font-medium text-text-primary group-hover:text-accent transition-colors">Encryption Keys</p>
+                  <p className="text-sm text-text-secondary">Manage your end-to-end encryption keys.</p>
+                </div>
+                <FiChevronRight size={20} className="text-text-secondary group-hover:text-accent" />
+              </div>
             </Link>
-            <Link to="/settings/sessions" className="block w-full text-left">
-              <SettingsRow title="Active Sessions" description="View and manage where your account is logged in.">
-                <FiChevronRight size={20} className="text-text-secondary" />
-              </SettingsRow>
+            
+            <Link to="/settings/sessions" className="block w-full group">
+              <div className="flex items-center justify-between py-3">
+                <div>
+                  <p className="font-medium text-text-primary group-hover:text-accent transition-colors">Active Sessions</p>
+                  <p className="text-sm text-text-secondary">View and manage where your account is logged in.</p>
+                </div>
+                <FiChevronRight size={20} className="text-text-secondary group-hover:text-accent" />
+              </div>
             </Link>
-            <Link to="/settings/link-device" className="block w-full text-left">
-              <SettingsRow title="Link a New Device" description="Connect a new device to your account by scanning a QR code.">
-                <FiChevronRight size={20} className="text-text-secondary" />
-              </SettingsRow>
-            </Link>
-            <Link to="/help" className="block w-full text-left">
-              <SettingsRow title="Help & Support" description="Find answers to common questions and troubleshooting tips.">
-                <FiChevronRight size={20} className="text-text-secondary" />
-              </SettingsRow>
+            
+            <Link to="/settings/link-device" className="block w-full group">
+              <div className="flex items-center justify-between py-3">
+                <div>
+                  <p className="font-medium text-text-primary group-hover:text-accent transition-colors">Link a New Device</p>
+                  <p className="text-sm text-text-secondary">Connect a new device via QR code.</p>
+                </div>
+                <FiChevronRight size={20} className="text-text-secondary group-hover:text-accent" />
+              </div>
             </Link>
           </div>
-          <div className="flex justify-end">
-              <button onClick={handlePrivacySubmit} className="px-4 py-2 rounded-lg font-semibold text-white bg-accent shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all">
-                Save Privacy Settings
-              </button>
-            </div>
         </div>
       </div>
 
       {/* Notifications & Support Card */}
       <div className="card-neumorphic">
         <div className="p-6">
-          <h3 className="text-lg font-semibold text-text-primary mb-2">Notifications & Support</h3>
+          <h3 className="text-lg font-semibold text-text-primary mb-4">Notifications & Support</h3>
           
           <SettingsRow
             title="Push Notifications"
@@ -307,40 +324,63 @@ export default function Settings() {
             />
           </SettingsRow>
 
+          <Link to="/help" className="block w-full group border-t border-border mt-2 pt-2">
+            <div className="flex items-center justify-between py-3">
+              <div>
+                <p className="font-medium text-text-primary group-hover:text-accent transition-colors">Help & Support</p>
+                <p className="text-sm text-text-secondary">Find answers to common questions.</p>
+              </div>
+              <FiChevronRight size={20} className="text-text-secondary group-hover:text-accent" />
+            </div>
+          </Link>
+
+          {/* Report Bug Button */}
+          <button 
+            onClick={() => setShowReportModal(true)}
+            className="w-full flex items-center justify-between py-3 text-left group"
+          >
+            <div>
+              <p className="font-medium text-text-primary group-hover:text-red-500 transition-colors">Report a Problem</p>
+              <p className="text-sm text-text-secondary">Found a bug? Let us know.</p>
+            </div>
+            <div className="p-2 rounded-full bg-red-100 dark:bg-red-900/30 text-red-500 group-hover:scale-110 transition-transform">
+                <FiFlag size={18} />
+            </div>
+          </button>
+
           <div className="border-t border-border my-6"></div>
 
           {/* --- SOCIABUZZ DONATION SECTION --- */}
-          <div className="p-6 rounded-2xl bg-bg-main shadow-neumorphic-concave border border-white/10 relative overflow-hidden group">
+          <div className="p-6 rounded-2xl bg-bg-main shadow-neumorphic-concave border border-white/10 dark:border-white/5 relative overflow-hidden group">
             
             {/* Hiasan Background Abstrak */}
-            <div className="absolute -right-4 -top-4 w-24 h-24 bg-accent/5 rounded-full blur-2xl group-hover:bg-accent/10 transition-all duration-500"></div>
+            <div className="absolute -right-4 -top-4 w-24 h-24 bg-accent/10 rounded-full blur-2xl group-hover:bg-accent/20 transition-all duration-500"></div>
 
             <div className="relative z-10">
-              <h3 className="text-lg font-bold text-foreground flex items-center gap-2 mb-2">
+              <h3 className="text-lg font-bold text-text-primary flex items-center gap-2 mb-2">
                 <FiHeart className="text-red-500 fill-current animate-pulse" />
                 Support Chat Lite
               </h3>
               
               <p className="text-sm text-text-secondary mb-5 leading-relaxed">
-                This app was running on low server (Cheap Tier). 
-                help us to get faster server, better connections time, more storage space, and of course new features will always coming up.
+                This app runs on a low-cost server. Help us upgrade to a faster server, get more storage, and develop new features.
               </p>
 
               <a 
-                href="https://sociabuzz.com/h4nzs/tribe" // GANTI USERNAME DISINI JIKA PERLU
+                href="https://sociabuzz.com/h4nzs/tribe" 
                 target="_blank"
                 rel="noopener noreferrer"
                 className="
                   flex items-center justify-center gap-3 w-full py-3.5 rounded-xl
-                  bg-bg-main text-accent font-bold tracking-wide
+                  bg-bg-surface text-accent font-bold tracking-wide
                   shadow-neumorphic-convex 
-                  hover:text-accent-hover
+                  hover:text-accent-hover hover:scale-[1.02]
                   active:shadow-neumorphic-pressed active:scale-[0.98]
                   transition-all duration-300
                 "
               >
                 <FiCoffee size={20} />
-                <span>Buy Me Coffee / Server</span>
+                <span>Buy Me a Coffee</span>
               </a>
               
               <div className="mt-3 text-center">
@@ -354,6 +394,11 @@ export default function Settings() {
 
         </div>
       </div>
+
+      {/* Render Report Modal */}
+      {showReportModal && (
+        <ReportBugModal onClose={() => setShowReportModal(false)} />
+      )}
 
     </div>
   );
