@@ -2,7 +2,7 @@ import { Router } from "express";
 import { requireAuth } from "../middleware/auth";
 import { env } from "../config";
 
-const router = Router();
+const router: Router = Router();
 
 router.post("/", requireAuth, async (req, res, next) => {
   try {
