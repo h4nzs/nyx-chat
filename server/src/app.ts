@@ -28,7 +28,7 @@ import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
 import webpush from "web-push";
 import { generalLimiter } from "./middleware/rateLimiter.js"; // Import ini
-import { reportRoutes } from "./routes/reports";
+import { reportRoutes } from "./routes/reports.js";
 
 // Set VAPID keys for web-push notifications
 if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
