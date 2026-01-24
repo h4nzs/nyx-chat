@@ -177,17 +177,40 @@ router.post("/verify-email", otpLimiter, zodValidate({
       // Update User jadi Verified
       const user = await prisma.user.update({
         where: { id: userId },
-        data: { isEmailVerified: true }
+        data: { isEmailVerified: true },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          isEmailVerified: true
+        }
       });
 
       // Hapus OTP dari Redis
       await redisClient.del(`verify:${userId}`);
 
       // Login otomatis setelah verifikasi
-      const tokens = await issueTokens(user, req);
+      // Ambil user tanpa field sensitif untuk response
+      const safeUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          isEmailVerified: true
+        }
+      });
+
+      if (!safeUser) throw new ApiError(404, "User not found after verification.");
+
+      const tokens = await issueTokens(safeUser, req);
       setAuthCookies(res, tokens);
 
-      res.json({ message: "Email verified successfully.", user, accessToken: tokens.access });
+      res.json({ message: "Email verified successfully.", user: safeUser, accessToken: tokens.access });
     } catch(e) {
       next(e);
     }
@@ -200,16 +223,26 @@ router.post("/resend-verification", authLimiter, zodValidate({
 }), async (req, res, next) => {
   try {
     const { email } = req.body;
-    const user = await prisma.user.findUnique({ where: { email } });
-    
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        name: true,
+        avatarUrl: true,
+        isEmailVerified: true
+      }
+    });
+
     if (!user) throw new ApiError(404, "User not found.");
     if (user.isEmailVerified) throw new ApiError(400, "Email already verified.");
 
     const otp = crypto.randomInt(100000, 999999).toString();
     await redisClient.setEx(`verify:${user.id}`, 300, otp);
-    
+
     sendVerificationEmail(email, otp).catch(console.error);
-    
+
     res.json({ message: "Verification code sent." });
   } catch (e) { next(e); }
 });
@@ -220,8 +253,19 @@ router.post("/login", authLimiter, zodValidate({
   async (req, res, next) => {
     try {
       const { emailOrUsername, password } = req.body;
-      const user = await prisma.user.findFirst({ where: { OR: [{ email: emailOrUsername }, { username: emailOrUsername }] } });
-      
+      const user = await prisma.user.findFirst({
+        where: { OR: [{ email: emailOrUsername }, { username: emailOrUsername }] },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          isEmailVerified: true,
+          passwordHash: true // Tetap diperlukan untuk verifikasi password
+        }
+      });
+
       if (!user) throw new ApiError(401, "Invalid credentials");
       const ok = await bcrypt.compare(password, user.passwordHash);
       if (!ok) throw new ApiError(401, "Invalid credentials");
@@ -231,9 +275,22 @@ router.post("/login", authLimiter, zodValidate({
         throw new ApiError(403, "Email not verified. Please verify your email first.");
       }
 
-      const tokens = await issueTokens(user, req);
+      // Ambil ulang user tanpa passwordHash untuk response
+      const safeUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          isEmailVerified: true
+        }
+      });
+
+      const tokens = await issueTokens(safeUser, req);
       setAuthCookies(res, tokens);
-      res.json({ user, accessToken: tokens.access });
+      res.json({ user: safeUser, accessToken: tokens.access });
     } catch (e) {
       next(e);
     }
@@ -276,7 +333,17 @@ router.post("/refresh", async (req, res, next) => {
       throw new ApiError(401, "Refresh token expired/revoked");
     }
 
-    const user = await prisma.user.findUnique({ where: { id: payload.sub } });
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        name: true,
+        avatarUrl: true,
+        isEmailVerified: true
+      }
+    });
     if (!user) throw new ApiError(401, "User not found");
     const tokens = await issueTokens(user, req);
     setAuthCookies(res, tokens);
@@ -451,12 +518,27 @@ router.post("/webauthn/login/verify", async (req, res, next) => {
         data: { counter: BigInt(authenticationInfo.newCounter) }
       });
 
-      const tokens = await issueTokens(userAuthenticator.user, req);
+      // Ambil user tanpa field sensitif untuk response
+      const safeUser = await prisma.user.findUnique({
+        where: { id: userAuthenticator.user.id },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          isEmailVerified: true
+        }
+      });
+
+      if (!safeUser) throw new ApiError(404, "User not found");
+
+      const tokens = await issueTokens(safeUser, req);
       setAuthCookies(res, tokens);
-      
+
       res.clearCookie('webauthn_challenge');
-      
-      res.json({ verified: true, user: userAuthenticator.user, accessToken: tokens.access });
+
+      res.json({ verified: true, user: safeUser, accessToken: tokens.access });
     } else {
       res.status(400).json({ verified: false });
     }
@@ -474,9 +556,19 @@ router.post(
       if (!userId) throw new ApiError(401, "Invalid or expired linking token.");
 
       await redisClient.del(linkingToken);
-      const user = await prisma.user.findUnique({ where: { id: userId } });
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          isEmailVerified: true
+        }
+      });
       if (!user) throw new ApiError(404, "User not found.");
-      
+
       const tokens = await issueTokens(user, req);
       setAuthCookies(res, tokens);
       res.json({ user, accessToken: tokens.access });

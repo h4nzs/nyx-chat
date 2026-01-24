@@ -230,16 +230,14 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         if (hasKeys) {
           try {
             const encryptedKeys = localStorage.getItem('encryptedPrivateKeys')!;
-            const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
+            const isAutoUnlockReady = localStorage.getItem('device_auto_unlock_ready') === 'true';
             let result;
 
-            if (autoUnlockKey) {
+            if (isAutoUnlockReady) {
                console.log("🔐 Login: Detected linked device key. Using auto-unlock...");
-               result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
-               if (!result.success) {
-                   console.warn("⚠️ Auto-unlock key invalid. Falling back to user password...");
-                   result = await retrievePrivateKeys(encryptedKeys, password);
-               }
+               // Kita tidak bisa menggunakan kunci yang disimpan di localStorage karena tidak aman
+               // Jadi kita harus meminta password pengguna untuk membuka kunci
+               result = await retrievePrivateKeys(encryptedKeys, password);
             } else {
                result = await retrievePrivateKeys(encryptedKeys, password);
             }
@@ -294,7 +292,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         if (result.success) privateKeysCache = result.keys;
       } catch (e) { throw e; }
 
-      localStorage.setItem('device_auto_unlock_key', data.password);
+      // JANGAN SIMPAN PASSWORD MENTAH KE LOCALSTORAGE
+      // localStorage.setItem('device_auto_unlock_key', data.password);
+
+      // Sebagai gantinya, kita hanya menyimpan indikator bahwa kunci sudah siap untuk dibuka otomatis
+      // dan kunci aktual akan di-cache di memori sementara dan dihapus saat logout
+      localStorage.setItem('device_auto_unlock_ready', 'true');
 
       const res = await api<{ 
         user?: User; 
@@ -379,7 +382,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         clearAuthCookies();
         privateKeysCache = null;
         localStorage.removeItem('user');
-        localStorage.removeItem('device_auto_unlock_key');
+        localStorage.removeItem('device_auto_unlock_key'); // Hapus legacy key
+        localStorage.removeItem('device_auto_unlock_ready'); // Hapus indikator baru
 
         set({ user: null, accessToken: null });
 

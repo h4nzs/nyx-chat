@@ -70,18 +70,24 @@ router.put("/me",
       const updatedUser = await prisma.user.update({
         where: { id: req.user.id },
         data: dataToUpdate,
-        select: { 
-          id: true, 
-          email: true, 
-          username: true, 
-          name: true, 
-          avatarUrl: true, 
-          description: true, 
-          showEmailToOthers: true 
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          description: true,
+          showEmailToOthers: true
         },
       });
 
-      getIo().emit('user:updated', updatedUser);
+      // Hanya sertakan email jika pengguna mengizinkan tampilan email ke orang lain
+      const userForBroadcast = {
+        ...updatedUser,
+        email: updatedUser.showEmailToOthers ? updatedUser.email : undefined
+      };
+
+      getIo().emit('user:updated', userForBroadcast);
       res.json(updatedUser);
     } catch (error) {
       next(error);

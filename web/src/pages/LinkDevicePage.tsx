@@ -108,8 +108,8 @@ export default function LinkDevicePage() {
       if (result.encryptionPublicKeyB64) localStorage.setItem('publicKey', result.encryptionPublicKeyB64);
       if (result.signingPublicKeyB64) localStorage.setItem('signingPublicKey', result.signingPublicKeyB64);
 
-      // Simpan kunci pembuka otomatis (untuk digunakan saat login di perangkat baru)
-      localStorage.setItem('device_auto_unlock_key', devicePassword);
+      // Simpan indikator bahwa kunci pembuka otomatis siap (tanpa menyimpan password mentah)
+      localStorage.setItem('device_auto_unlock_ready', 'true');
 
       console.log("✅ Keys re-encrypted by worker and saved.");
       
