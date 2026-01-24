@@ -173,6 +173,36 @@ const AppContent = () => {
     root.dataset.accent = accent;
   }, [theme, accent]);
 
+  // 5. Visibility Change Handler (Fix for state drift)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log("👀 App in focus, checking connection & syncing...");
+
+        // Cek koneksi socket
+        const socket = getSocket();
+        if (!socket?.connected) {
+          if (user) {
+            connectSocket();
+          }
+        }
+
+        // Fetch data terbaru (ringan)
+        if (user) {
+          useConversationStore.getState().resyncState();
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleVisibilityChange); // Tambahan buat mobile
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleVisibilityChange);
+    };
+  }, [user]);
+
   return (
     <>
       <Toaster

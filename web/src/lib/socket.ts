@@ -65,11 +65,23 @@ export function getSocket() {
     const conversationStore = useConversationStore.getState();
 
     // --- System Listeners ---
-    socket.on("connect", () => {
+    socket.on("connect", async () => {
       setStatus('connected');
       const user = useAuthStore.getState().user;
       if (user) {
         socket?.emit("presence:update", { userId: user.id, online: true });
+
+        // === THE SYNC PROTOCOL: Sync data on connect/reconnect ===
+        console.log("🔄 Syncing data after connection...");
+
+        // 1. Refetch Conversation List (Biar urutan chat bener & snippet update)
+        await useConversationStore.getState().loadConversations();
+
+        // 2. Resend pending messages that might have failed during disconnection
+        useMessageStore.getState().resendPendingMessages();
+
+        // 3. Update Status Online User Lain
+        // (Handled by presence:init event that's already implemented)
       }
       console.log("✅ Socket connected:", socket?.id);
     });

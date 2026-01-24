@@ -100,6 +100,7 @@ type Actions = {
   reDecryptPendingMessages: (conversationId: string) => Promise<void>;
   failPendingMessages: (conversationId: string, reason: string) => void;
   reset: () => void;
+  resendPendingMessages: () => void;
 };
 
 const initialState: State = {
@@ -459,6 +460,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     }));
     // Use the original content from the 'preview' field for the retry
     get().sendMessage(conversationId, { content: preview, fileUrl, fileName, fileType, fileSize, repliedToId });
+  },
+
+  // Resend all pending messages (for sync after reconnect)
+  resendPendingMessages: () => {
+    const state = get();
+    Object.entries(state.messages).forEach(([conversationId, messages]) => {
+      messages
+        .filter(m => m.optimistic && !m.error) // Only optimistic messages that haven't failed yet
+        .forEach(m => {
+          // Retry sending the message
+          get().retrySendMessage(m);
+        });
+    });
   },
 
   addSystemMessage: (conversationId, content) => {

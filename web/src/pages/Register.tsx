@@ -190,7 +190,7 @@ export default function Register() {
               maxLength={6}
               value={otpCode}
               onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-              placeholder="123456"
+              placeholder="Verification Code"
               className="w-full text-center text-3xl tracking-widest font-mono py-3 rounded-lg bg-bg-surface text-text-primary border border-border focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all shadow-neumorphic-concave"
             />
 
