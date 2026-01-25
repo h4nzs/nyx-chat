@@ -184,7 +184,8 @@ router.post("/verify-email", otpLimiter, zodValidate({
           username: true,
           name: true,
           avatarUrl: true,
-          isEmailVerified: true
+          isEmailVerified: true,
+          hasCompletedOnboarding: true
         }
       });
 
@@ -262,7 +263,8 @@ router.post("/login", authLimiter, zodValidate({
           name: true,
           avatarUrl: true,
           isEmailVerified: true,
-          passwordHash: true // Tetap diperlukan untuk verifikasi password
+          passwordHash: true, // Tetap diperlukan untuk verifikasi password
+          hasCompletedOnboarding: true
         }
       });
 
