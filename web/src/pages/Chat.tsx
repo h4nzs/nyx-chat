@@ -62,11 +62,13 @@ export default function Chat() {
   }, [conversationId, activeId, openConversation]);
 
   // Check if onboarding tour needs to be shown
+  const isBootstrapping = useAuthStore(state => state.isBootstrapping);
+
   useEffect(() => {
-    if (user && user.hasCompletedOnboarding === false) {
+    if (user && !isBootstrapping && user.hasCompletedOnboarding === false) {
       setIsTourOpen(true);
     }
-  }, [user?.hasCompletedOnboarding, user]);
+  }, [user?.hasCompletedOnboarding, user, isBootstrapping]);
 
   const handleCloseTour = useCallback(() => {
     setIsTourOpen(false);
