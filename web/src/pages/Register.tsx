@@ -172,47 +172,128 @@ export default function Register() {
   // STEP 2: OTP FORM
   if (step === 'otp') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-bg-main p-4">
-        <div className="w-full max-w-md card-neumorphic p-8 text-center">
-          <div className="mb-4 flex justify-center text-accent">
-            <FiMail size={48} />
+      <div className="min-h-screen flex flex-col md:flex-row bg-stone-900">
+        {/* Left Panel - Concrete Security Panel */}
+        <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
+             style={{
+               boxShadow: 'inset -10px -10px 30px rgba(0, 0, 0, 0.5)'
+             }}>
+          <div className="max-w-md w-full mx-auto">
+            <div className="flex items-center justify-center mb-8">
+              <div className="w-12 h-12 rounded-lg bg-teal-500 flex items-center justify-center mr-3">
+                <div className="w-8 h-8 rounded bg-teal-300"></div>
+              </div>
+              <h1 className="text-3xl font-black text-white tracking-tighter">SECURE<span className="text-teal-500">VAULT</span></h1>
+            </div>
+
+            <div className="mb-8">
+              <h2 className="text-2xl font-bold text-teal-400 mb-2">EMAIL VERIFICATION</h2>
+              <p className="text-stone-400">Confirm your email to activate your account</p>
+            </div>
+
+            {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+
+            <form onSubmit={handleVerifyOtp} className="space-y-6">
+              <div className="relative">
+                <input
+                  type="text"
+                  maxLength={6}
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder="Verification Code"
+                  className="w-full text-center text-3xl tracking-widest font-mono py-4 rounded-lg bg-stone-800 text-white focus:outline-none transition-all duration-300"
+                  style={{
+                    boxShadow: 'inset 5px 5px 10px rgba(0, 0, 0, 0.6), inset -5px -5px 10px rgba(255, 255, 255, 0.05)'
+                  }}
+                />
+                <div className="absolute right-3 top-1/2 transform -translate-y-1/2 w-2 h-2 rounded-full bg-transparent"></div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isVerifying || otpCode.length < 6}
+                className="w-full py-3 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 text-white font-semibold transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  boxShadow: '5px 5px 15px rgba(0,150,150,0.4), -5px -5px 15px rgba(100,200,200,0.2)'
+                }}
+              >
+                {isVerifying ? "Verifying..." : "Verify Code"}
+              </button>
+            </form>
+
+            <div className="mt-6 pt-4 border-t border-stone-700">
+              <p className="text-stone-500 text-xs mb-2">Didn't receive the code?</p>
+              <button
+                onClick={handleResend}
+                type="button"
+                disabled={countdown > 0 || isResending}
+                className="flex items-center justify-center gap-2 w-full py-2 text-sm text-stone-300 hover:bg-stone-700/50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  boxShadow: '3px 3px 6px rgba(0, 0, 0, 0.4), -3px -3px 6px rgba(255, 255, 255, 0.05)'
+                }}
+              >
+                <FiRefreshCw size={14} /> {countdown > 0 ? `Resend in ${countdown}s` : "Resend Code"}
+              </button>
+            </div>
+
+            <div className="text-center mt-8">
+              <p className="text-stone-500 text-sm">
+                Already have an account? <Link to="/login" className="font-semibold text-teal-500 hover:underline">Login</Link>
+              </p>
+            </div>
           </div>
-          <h1 className="text-2xl font-bold text-foreground mb-2">Verify your Email</h1>
-          <p className="text-text-secondary text-sm mb-6">
-            We sent a verification code to <br/> <span className="font-semibold text-text-primary">{emailForVerify}</span>
-          </p>
+        </div>
 
-          {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+        {/* Right Panel - Dynamic Visualization */}
+        <div className="w-full md:w-3/5 bg-gradient-to-br from-stone-900 to-black relative overflow-hidden flex items-center justify-center p-8">
+          {/* Abstract 3D visualization */}
+          <div className="absolute inset-0 z-0">
+            <div className="absolute top-1/4 left-1/4 w-32 h-32 rounded-full bg-teal-500/10 blur-3xl animate-pulse"></div>
+            <div className="absolute bottom-1/3 right-1/3 w-48 h-48 rounded-full bg-blue-500/10 blur-3xl animate-pulse delay-1000"></div>
+            <div className="absolute top-1/3 right-1/4 w-24 h-24 rounded-full bg-orange-500/10 blur-3xl animate-pulse delay-500"></div>
+          </div>
 
-          <form onSubmit={handleVerifyOtp} className="space-y-6">
-            <input
-              type="text"
-              maxLength={6}
-              value={otpCode}
-              onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-              placeholder="Verification Code"
-              className="w-full text-center text-3xl tracking-widest font-mono py-3 rounded-lg bg-bg-surface text-text-primary border border-border focus:border-accent focus:ring-1 focus:ring-accent outline-none transition-all shadow-neumorphic-concave"
-            />
+          {/* Grid pattern */}
+          <div className="absolute inset-0 z-0 opacity-20"
+               style={{
+                 backgroundImage: `linear-gradient(stone 1px, transparent 1px), linear-gradient(to right, stone 1px, transparent 1px)`,
+                 backgroundSize: '40px 40px'
+               }}></div>
 
-            <button
-              type="submit"
-              disabled={isVerifying || otpCode.length < 6}
-              className="w-full py-3 rounded-lg bg-accent text-white font-semibold shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isVerifying ? "Verifying..." : "Verify Code"}
-            </button>
-          </form>
+          {/* Central security graphic */}
+          <div className="relative z-10 text-center max-w-lg">
+            <div className="inline-block mb-8 relative">
+              <div className="w-48 h-48 rounded-full border-4 border-teal-500/30 flex items-center justify-center">
+                <div className="w-32 h-32 rounded-full border-4 border-teal-500/20 flex items-center justify-center">
+                  <div className="w-20 h-20 rounded-full border-4 border-teal-500/10 flex items-center justify-center">
+                    <div className="w-12 h-12 rounded-full bg-gradient-to-r from-teal-500 to-teal-700 flex items-center justify-center">
+                      <div className="w-6 h-6 rounded-full bg-teal-300 animate-pulse"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-          <div className="mt-6 pt-4 border-t border-border">
-            <p className="text-text-secondary text-xs mb-2">Didn't receive the code?</p>
-            <button
-              onClick={handleResend}
-              type="button"
-              disabled={countdown > 0 || isResending}
-              className="flex items-center justify-center gap-2 w-full py-2 text-sm text-text-primary hover:bg-bg-hover rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <FiRefreshCw size={14} /> {countdown > 0 ? `Resend in ${countdown}s` : "Resend Code"}
-            </button>
+              {/* Scanning animation */}
+              <div className="absolute inset-0 rounded-full border-4 border-teal-500 animate-ping opacity-20"></div>
+            </div>
+
+            <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">ACCOUNT<span className="text-teal-500">-</span>SETUP</h2>
+            <p className="text-stone-400 mb-6">Complete your registration to join the secure communication network.</p>
+
+            <div className="grid grid-cols-3 gap-4 mt-12">
+              <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
+                <div className="text-teal-500 text-2xl mb-2">🔒</div>
+                <h3 className="font-bold text-white text-sm">E2E ENCRYPTED</h3>
+              </div>
+              <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
+                <div className="text-teal-500 text-2xl mb-2">🔑</div>
+                <h3 className="font-bold text-white text-sm">KEY OWNERSHIP</h3>
+              </div>
+              <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
+                <div className="text-teal-500 text-2xl mb-2">🛡️</div>
+                <h3 className="font-bold text-white text-sm">PRIVACY FIRST</h3>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -221,31 +302,99 @@ export default function Register() {
 
   // STEP 1: REGISTER FORM
   return (
-    <div className="min-h-screen flex items-center justify-center bg-bg-main p-4">
-      <div className="w-full max-w-md card-neumorphic p-8">
-        <h1 className="text-3xl font-bold text-center text-foreground mb-6">Register</h1>
+    <div className="min-h-screen flex flex-col md:flex-row bg-stone-900">
+      {/* Left Panel - Concrete Security Panel */}
+      <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
+           style={{
+             boxShadow: 'inset -10px -10px 30px rgba(0, 0, 0, 0.5)'
+           }}>
+        <div className="max-w-md w-full mx-auto">
+          <div className="flex items-center justify-center mb-8">
+            <div className="w-12 h-12 rounded-lg bg-teal-500 flex items-center justify-center mr-3">
+              <div className="w-8 h-8 rounded bg-teal-300"></div>
+            </div>
+            <h1 className="text-3xl font-black text-white tracking-tighter">SECURE<span className="text-teal-500">VAULT</span></h1>
+          </div>
 
-        {/* Pass error state down if AuthForm supports it, otherwise handle locally */}
-        {error && step === 'form' && <div className="text-red-500 text-center mb-4 text-sm">{error}</div>}
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold text-teal-400 mb-2">NEW ACCOUNT SETUP</h2>
+            <p className="text-stone-400">Register to create your secure communication vault</p>
+          </div>
 
-        <AuthForm
-          onSubmit={handleRegister}
-          button="Sign Up"
-        />
+          {error && step === 'form' && <div className="text-red-500 text-center mb-4 text-sm">{error}</div>}
 
-        {/* Turnstile Widget */}
-        <div className="mt-4 flex justify-center">
-          <Turnstile
-            siteKey="0x4AAAAAACN0kvKqxA8cYt6U" // Ganti dengan Site Key Cloudflare kamu!
-            onSuccess={setTurnstileToken}
-            options={{ theme: 'auto' }}
+          <AuthForm
+            onSubmit={handleRegister}
+            button="Sign Up"
           />
+
+          {/* Turnstile Widget */}
+          <div className="mt-4 flex justify-center">
+            <Turnstile
+              siteKey="0x4AAAAAACN0kvKqxA8cYt6U" // Ganti dengan Site Key Cloudflare kamu!
+              onSuccess={setTurnstileToken}
+              options={{ theme: 'auto' }}
+            />
+          </div>
+
+          <div className="text-center mt-6">
+            <p className="text-stone-500 text-sm">
+              Already have an account? <Link to="/login" className="font-semibold text-teal-500 hover:underline">Login</Link>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Right Panel - Dynamic Visualization */}
+      <div className="w-full md:w-3/5 bg-gradient-to-br from-stone-900 to-black relative overflow-hidden flex items-center justify-center p-8">
+        {/* Abstract 3D visualization */}
+        <div className="absolute inset-0 z-0">
+          <div className="absolute top-1/4 left-1/4 w-32 h-32 rounded-full bg-teal-500/10 blur-3xl animate-pulse"></div>
+          <div className="absolute bottom-1/3 right-1/3 w-48 h-48 rounded-full bg-blue-500/10 blur-3xl animate-pulse delay-1000"></div>
+          <div className="absolute top-1/3 right-1/4 w-24 h-24 rounded-full bg-orange-500/10 blur-3xl animate-pulse delay-500"></div>
         </div>
 
-        <div className="text-center mt-6">
-          <p className="text-text-secondary">
-            Already have an account? <Link to="/login" className="font-semibold text-accent hover:underline">Login</Link>
-          </p>
+        {/* Grid pattern */}
+        <div className="absolute inset-0 z-0 opacity-20"
+             style={{
+               backgroundImage: `linear-gradient(stone 1px, transparent 1px), linear-gradient(to right, stone 1px, transparent 1px)`,
+               backgroundSize: '40px 40px'
+             }}></div>
+
+        {/* Central security graphic */}
+        <div className="relative z-10 text-center max-w-lg">
+          <div className="inline-block mb-8 relative">
+            <div className="w-48 h-48 rounded-full border-4 border-teal-500/30 flex items-center justify-center">
+              <div className="w-32 h-32 rounded-full border-4 border-teal-500/20 flex items-center justify-center">
+                <div className="w-20 h-20 rounded-full border-4 border-teal-500/10 flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-r from-teal-500 to-teal-700 flex items-center justify-center">
+                    <div className="w-6 h-6 rounded-full bg-teal-300 animate-pulse"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Scanning animation */}
+            <div className="absolute inset-0 rounded-full border-4 border-teal-500 animate-ping opacity-20"></div>
+          </div>
+
+          <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">INDUSTRIAL-<span className="text-teal-500">GRADE</span> SECURITY</h2>
+          <p className="text-stone-400 mb-6">Your communications are protected with end-to-end encryption using the Signal Protocol.</p>
+
+          <div className="grid grid-cols-3 gap-4 mt-12">
+            <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
+              <div className="text-teal-500 text-2xl mb-2">🔒</div>
+              <h3 className="font-bold text-white text-sm">E2E ENCRYPTED</h3>
+            </div>
+            <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
+              <div className="text-teal-500 text-2xl mb-2">🔑</div>
+              <h3 className="font-bold text-white text-sm">KEY OWNERSHIP</h3>
+            </div>
+            <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
+              <div className="text-teal-500 text-2xl mb-2">🛡️</div>
+              <h3 className="font-bold text-white text-sm">PRIVACY FIRST</h3>
+            </div>
+          </div>
         </div>
       </div>
     </div>
