@@ -176,6 +176,12 @@ const AppContent = () => {
   // 5. Visibility Change Handler (Fix for state drift)
   useEffect(() => {
     const handleVisibilityChange = () => {
+      // Skip reconnect/resync when on link-device route
+      if (location.pathname.startsWith('/link-device')) {
+        console.log("🔗 On Linking Page: Skipping visibility change handler.");
+        return;
+      }
+
       if (document.visibilityState === 'visible') {
         console.log("👀 App in focus, checking connection & syncing...");
 
@@ -187,9 +193,11 @@ const AppContent = () => {
           }
         }
 
-        // Fetch data terbaru (ringan)
+        // Fetch data terbaru (ringan) and handle the promise to avoid unhandled rejections
         if (user) {
-          useConversationStore.getState().resyncState();
+          useConversationStore.getState().resyncState().catch(err => {
+            console.error("❌ Error during resync:", err);
+          });
         }
       }
     };
@@ -201,7 +209,7 @@ const AppContent = () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleVisibilityChange);
     };
-  }, [user]);
+  }, [user, location.pathname]);
 
   return (
     <>

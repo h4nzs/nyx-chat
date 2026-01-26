@@ -29,6 +29,9 @@ export default function UserInfoModal() {
   const [safetyNumber, setSafetyNumber] = useState('');
   const [activeTab, setActiveTab] = useState('about');
 
+  // Subscribe to blockedUserIds changes to ensure UI updates when blocking/unblocking
+  const blockedUserIds = useAuthStore(state => state.blockedUserIds);
+
   const tabs = [
     { id: 'about', label: 'About' },
     { id: 'media', label: 'Media' },
@@ -150,7 +153,7 @@ export default function UserInfoModal() {
                   </button>
                   {user && user.id !== useAuthStore.getState().user?.id && (
                     <>
-                      {useAuthStore.getState().blockedUserIds.includes(user.id) ? (
+                      {blockedUserIds.includes(user.id) ? (
                         <button
                           onClick={() => {
                             useAuthStore.getState().unblockUser(user.id).catch(console.error);

@@ -33,8 +33,8 @@ export default function Register() {
       setUserId(locationState.userId);
       setEmailForVerify(locationState.email);
       setStep('otp');
-      // Clear the location state to prevent showing it again on refresh
-      window.history.replaceState({}, document.title);
+      // Clear the location state to prevent showing it again on refresh using router navigation
+      navigate('.', { replace: true, state: {} });
     } else {
       // Check if there's stored verification state
       import('@utils/verificationPersistence').then(({ getVerificationState }) => {
@@ -46,7 +46,7 @@ export default function Register() {
         }
       });
     }
-  }, [location.state]);
+  }, [location.state, navigate]);
 
   async function handleRegister(data: { name?: string, d?: string, c?: string, b?: string }) {
     const { name, d: username, c: email, b: password } = data;

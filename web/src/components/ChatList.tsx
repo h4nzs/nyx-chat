@@ -284,7 +284,17 @@ export default function ChatList() {
     deleteConversation,
     togglePinConversation,
   } = useChatList();
-  
+
+  const {
+    blockedUserIds,
+    blockUser,
+    unblockUser
+  } = useAuthStore(state => ({
+    blockedUserIds: state.blockedUserIds,
+    blockUser: state.blockUser,
+    unblockUser: state.unblockUser
+  }));
+
   const { showConfirm, openProfileModal } = useModalStore(state => ({
     showConfirm: state.showConfirm,
     openProfileModal: state.openProfileModal,
@@ -401,9 +411,9 @@ export default function ChatList() {
                 conversation={c}
                 meId={meId}
                 presence={presence}
-                blockedUserIds={useAuthStore.getState().blockedUserIds}
-                blockUser={useAuthStore.getState().blockUser}
-                unblockUser={useAuthStore.getState().unblockUser}
+                blockedUserIds={blockedUserIds}
+                blockUser={blockUser}
+                unblockUser={unblockUser}
                 isActive={c.id === activeId}
                 isSelected={index === selectedIndex}
                 onClick={() => handleConversationClick(c.id)}

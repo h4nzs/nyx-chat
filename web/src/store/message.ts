@@ -80,7 +80,7 @@ type Actions = {
   setReplyingTo: (message: Message | null) => void;
   fetchTypingLinkPreview: (text: string) => void;
   clearTypingLinkPreview: () => void;
-  sendMessage: (conversationId: string, data: Partial<Message>) => Promise<void>;
+  sendMessage: (conversationId: string, data: Partial<Message>, tempId?: number) => Promise<void>;
   uploadFile: (conversationId: string, file: File) => Promise<void>;
   loadMessagesForConversation: (id: string) => Promise<void>;
   loadPreviousMessages: (conversationId: string) => Promise<void>;
@@ -132,7 +132,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   
   clearTypingLinkPreview: () => set({ typingLinkPreview: null }),
 
-  sendMessage: async (conversationId, data) => {
+  sendMessage: async (conversationId, data, tempId?: number) => {
     const { user, hasRestoredKeys } = useAuthStore.getState();
     if (!user) return;
 
@@ -163,19 +163,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
     }
 
-    const tempId = Date.now();
+    const actualTempId = tempId !== undefined ? tempId : Date.now();
     try {
       const optimisticMessage: Message = {
         ...data,
-        id: `temp_${tempId}`,
-        tempId: tempId,
+        id: `temp_${actualTempId}`,
+        tempId: actualTempId,
         optimistic: true,
         sender: user,
         senderId: user.id,
         createdAt: new Date().toISOString(),
         conversationId,
         reactions: [],
-        statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${tempId}`, id: `temp_status_${tempId}`, updatedAt: new Date().toISOString() }],
+        statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${actualTempId}`, id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
       };
 
       // Store original content for potential retry before encrypting
@@ -197,17 +197,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       set({ replyingTo: null, typingLinkPreview: null });
       
       getSocket()?.emit("message:send", optimisticMessage, (res: { ok: boolean, msg?: Message, error?: string }) => {
-        if (res.ok && res.msg) {
+        if (res.ok && res.msg && tempId !== undefined) {
           get().replaceOptimisticMessage(conversationId, tempId, res.msg);
-        } else {
+        } else if (!res.ok) {
           console.error("Failed to send message:", res.error);
           toast.error(`Failed to send message: ${res.error}`);
-          set(state => ({
-            messages: {
-              ...state.messages,
-              [conversationId]: state.messages[conversationId]?.map(m => m.tempId === tempId ? { ...m, error: true } : m) || [],
-            },
-          }));
+          if (tempId !== undefined) {
+            set(state => ({
+              messages: {
+                ...state.messages,
+                [conversationId]: state.messages[conversationId]?.map(m => m.tempId === tempId ? { ...m, error: true } : m) || [],
+              },
+            }));
+          }
         }
       });
 
@@ -458,8 +460,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     set(state => ({
       messages: { ...state.messages, [conversationId]: state.messages[conversationId]?.filter(m => m.tempId !== tempId) || [] },
     }));
-    // Use the original content from the 'preview' field for the retry
-    get().sendMessage(conversationId, { content: preview, fileUrl, fileName, fileType, fileSize, repliedToId });
+    // Use the original content from the 'preview' field for the retry and preserve the original tempId
+    get().sendMessage(conversationId, { content: preview, fileUrl, fileName, fileType, fileSize, repliedToId }, tempId);
   },
 
   // Resend all pending messages (for sync after reconnect)

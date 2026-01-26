@@ -299,10 +299,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
             if (isEmail) {
               // If it's an email, fetch user by email
-              userData = await api<User>("/api/users/by-email/" + emailOrUsername);
+              userData = await api<User>("/api/users/by-email/" + encodeURIComponent(emailOrUsername));
             } else {
               // If it's a username, fetch user by username
-              userData = await api<User>("/api/users/by-username/" + emailOrUsername);
+              userData = await api<User>("/api/users/by-username/" + encodeURIComponent(emailOrUsername));
             }
 
             if (userData?.id && userData?.email) {

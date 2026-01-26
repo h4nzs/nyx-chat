@@ -280,7 +280,7 @@ router.get("/me/blocked", async (req, res, next) => {
   }
 });
 
-// GET User by Email (for verification purposes) - NO AUTH REQUIRED
+// GET User by Email (for verification purposes) - AUTH REQUIRED
 router.get("/by-email/:email", async (req, res, next) => {
   try {
     const { email } = req.params;
@@ -293,7 +293,8 @@ router.get("/by-email/:email", async (req, res, next) => {
         username: true,
         name: true,
         avatarUrl: true,
-        isEmailVerified: true
+        isEmailVerified: true,
+        showEmailToOthers: true
       },
     });
 
@@ -301,13 +302,25 @@ router.get("/by-email/:email", async (req, res, next) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json(user);
+    const publicProfile: Partial<typeof user> & { id: string } = {
+      id: user.id,
+      username: user.username,
+      name: user.name,
+      avatarUrl: user.avatarUrl,
+      isEmailVerified: user.isEmailVerified,
+    };
+
+    if (user.showEmailToOthers) {
+      publicProfile.email = user.email;
+    }
+
+    res.json(publicProfile);
   } catch (error) {
     next(error);
   }
 });
 
-// GET User by Username (for verification purposes) - NO AUTH REQUIRED
+// GET User by Username (for verification purposes) - AUTH REQUIRED
 router.get("/by-username/:username", async (req, res, next) => {
   try {
     const { username } = req.params;
@@ -320,7 +333,8 @@ router.get("/by-username/:username", async (req, res, next) => {
         username: true,
         name: true,
         avatarUrl: true,
-        isEmailVerified: true
+        isEmailVerified: true,
+        showEmailToOthers: true
       },
     });
 
@@ -328,7 +342,19 @@ router.get("/by-username/:username", async (req, res, next) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json(user);
+    const publicProfile: Partial<typeof user> & { id: string } = {
+      id: user.id,
+      username: user.username,
+      name: user.name,
+      avatarUrl: user.avatarUrl,
+      isEmailVerified: user.isEmailVerified,
+    };
+
+    if (user.showEmailToOthers) {
+      publicProfile.email = user.email;
+    }
+
+    res.json(publicProfile);
   } catch (error) {
     next(error);
   }

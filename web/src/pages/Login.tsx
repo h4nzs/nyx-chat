@@ -7,6 +7,7 @@ import { IoFingerPrint } from "react-icons/io5";
 import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api } from "@lib/api";
 import { retrievePrivateKeys } from "@lib/crypto-worker-proxy";
+import { connectSocket } from "@lib/socket";
 
 export default function Login() {
   const [error, setError] = useState("");
@@ -101,6 +102,10 @@ export default function Login() {
                 // Set the decrypted keys directly in the store
                 useAuthStore.getState().setDecryptedKeys(result.keys);
                 console.log("✅ Keys decrypted and cached successfully via biometric login.");
+
+                // Initialize post-login functionality after setting decrypted keys
+                await useAuthStore.getState().loadBlockedUsers();
+                connectSocket();
               } else {
                 console.error("Failed to decrypt keys:", result.reason);
                 // Optionally show an error to the user
@@ -109,6 +114,11 @@ export default function Login() {
               console.error("Error during key decryption:", e);
             }
           });
+        } else if (autoUnlockSuccess || !hasEncryptedKeys) {
+          // If auto-unlock succeeded or there are no encrypted keys,
+          // initialize post-login functionality immediately
+          await useAuthStore.getState().loadBlockedUsers();
+          connectSocket();
         }
 
         // Check if user has pending email verification

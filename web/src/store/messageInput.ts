@@ -19,7 +19,7 @@ type State = {
   setReplyingTo: (message: Message | null) => void;
   fetchTypingLinkPreview: (text: string) => void;
   clearTypingLinkPreview: () => void;
-  sendMessage: (conversationId: string, data: { content: string }) => Promise<void>;
+  sendMessage: (conversationId: string, data: { content: string }, tempId?: number) => Promise<void>;
   uploadFile: (conversationId: string, file: File) => Promise<void>;
   handleStopRecording: (conversationId: string, blob: Blob, duration: number) => Promise<void>;
   retrySendMessage: (message: Message) => void;
@@ -73,13 +73,13 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
   clearTypingLinkPreview: () => set({ typingLinkPreview: null }),
 
-  sendMessage: async (conversationId, data) => {
+  sendMessage: async (conversationId, data, tempId?: number) => {
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     const { replyingTo } = get();
 
     if (!await ensureGroupSessionIfNeeded(conversationId)) return;
-    
+
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
     const isGroup = conversation.isGroup;
 
@@ -93,11 +93,11 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       toast.error(`Encryption failed: ${e.message}`);
       return;
     }
-    
-    const tempId = Date.now();
+
+    const actualTempId = tempId !== undefined ? tempId : Date.now();
     const optimisticMessage: Message = {
-      id: `temp-${tempId}`,
-      tempId,
+      id: `temp-${actualTempId}`,
+      tempId: actualTempId,
       conversationId,
       senderId: me!.id,
       sender: me!,
@@ -108,12 +108,12 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     };
 
     addOptimisticMessage(conversationId, optimisticMessage);
-    
-    const finalPayload = { 
+
+    const finalPayload = {
       conversationId,
-      tempId,
+      tempId: actualTempId,
       repliedToId: replyingTo?.id,
-      ...payload, 
+      ...payload,
     };
 
     try {
@@ -124,7 +124,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     } catch (error) {
       const errorMessage = handleApiError(error);
       toast.error(`Failed to send message: ${errorMessage}`);
-      updateMessage(conversationId, `temp-${tempId}`, { error: true, optimistic: false });
+      updateMessage(conversationId, `temp-${actualTempId}`, { error: true, optimistic: false });
     }
 
     set({ replyingTo: null });
@@ -321,18 +321,18 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   },
 
   retrySendMessage: (message: Message) => {
-    const { conversationId, content, fileUrl, repliedTo } = message;
-    
+    const { conversationId, content, fileUrl, repliedTo, tempId } = message;
+
     useMessageStore.getState().removeMessage(conversationId, message.id);
 
     if (fileUrl) {
       toast.error("Cannot retry file messages automatically. Please try uploading again.");
       return;
     }
-    
+
     if (repliedTo) {
       set({ replyingTo: repliedTo });
     }
-    get().sendMessage(conversationId, { content: content || '' });
+    get().sendMessage(conversationId, { content: content || '' }, tempId);
   },
 }));
