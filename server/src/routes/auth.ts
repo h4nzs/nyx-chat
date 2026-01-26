@@ -184,8 +184,7 @@ router.post("/verify-email", otpLimiter, zodValidate({
           username: true,
           name: true,
           avatarUrl: true,
-          isEmailVerified: true,
-          hasCompletedOnboarding: true
+          isEmailVerified: true
         }
       });
 
@@ -286,7 +285,8 @@ router.post("/login", authLimiter, zodValidate({
           username: true,
           name: true,
           avatarUrl: true,
-          isEmailVerified: true
+          isEmailVerified: true,
+          hasCompletedOnboarding: true
         }
       });
 
@@ -529,7 +529,8 @@ router.post("/webauthn/login/verify", async (req, res, next) => {
           username: true,
           name: true,
           avatarUrl: true,
-          isEmailVerified: true
+          isEmailVerified: true,
+          hasCompletedOnboarding: true
         }
       });
 

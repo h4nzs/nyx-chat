@@ -77,7 +77,8 @@ router.put("/me",
           name: true,
           avatarUrl: true,
           description: true,
-          showEmailToOthers: true
+          showEmailToOthers: true,
+          hasCompletedOnboarding: true
         },
       });
 
