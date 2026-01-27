@@ -16,7 +16,7 @@ const LinkPreviewCard = ({ preview }: LinkPreviewProps) => {
       href={preview.url} 
       target="_blank" 
       rel="noopener noreferrer" 
-      className="block mt-2 bg-bg-primary/50 p-3 rounded-lg hover:bg-secondary transition-colors max-w-sm border border-border"
+      className="block mt-2 bg-bg-surface/50 p-3 rounded-lg hover:bg-secondary transition-colors max-w-sm border border-black/5 dark:border-white/5"
     >
       {preview.image && (
         <img src={preview.image} alt={preview.title} className="w-full h-32 object-cover rounded-t-lg" />

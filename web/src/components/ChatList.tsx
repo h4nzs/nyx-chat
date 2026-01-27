@@ -240,7 +240,7 @@ const ConversationItem = ({ conversation, meId, presence, blockedUserIds, blockU
               onClick={(e) => e.stopPropagation()} 
               aria-label="Options" 
               className="
-                p-1.5 rounded-full text-text-secondary 
+                p-2 rounded-full text-text-secondary 
                 hover:bg-bg-main hover:text-accent
                 transition-colors
               "

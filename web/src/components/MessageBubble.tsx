@@ -92,7 +92,7 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
               "bg-accent text-white rounded-2xl rounded-tr-none": isOwn && !isDeleted,
               
               // Peer Message
-              "bg-bg-surface text-text-primary rounded-2xl rounded-tl-none": !isOwn && !isDeleted,
+              "bg-bg-surface text-text-primary rounded-2xl rounded-tl-none border border-black/5 dark:border-white/5": !isOwn && !isDeleted,
               
               // Deleted Message
               "bg-bg-main text-text-secondary rounded-xl shadow-neumorphic-concave italic text-xs py-2 px-3": isDeleted,
