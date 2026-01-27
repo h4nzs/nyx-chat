@@ -238,8 +238,8 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
               />
               
               {/* Main Display Screen */}
-              <div className="flex-1 min-h-0 relative z-0 shadow-neumorphic-concave mx-4 my-2 rounded-2xl bg-bg-main overflow-hidden">
-                <div className="h-full px-2 md:px-6 pt-6 pb-2">
+              <div className="flex-1 min-h-0 relative z-0 shadow-neumorphic-concave-sm md:shadow-neumorphic-concave mx-2 md:mx-4 my-2 rounded-2xl bg-bg-main overflow-hidden">
+                <div className="h-full px-4 md:px-6 pt-6 pb-2">
                   <Virtuoso
                     ref={virtuosoRef}
                     initialTopMostItemIndex={messages.length - 1}

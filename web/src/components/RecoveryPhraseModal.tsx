@@ -52,99 +52,151 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
 
   const renderStep1 = () => (
     <>
-      <div className="flex flex-col items-center text-center mb-6">
-        <FiShield className="text-accent text-5xl mb-4" />
-        <h2 className="text-2xl font-bold text-text-primary">Your Recovery Phrase</h2>
-        <p className="text-text-secondary mt-2">
-          This is the **only** way to recover your account if you lose access. Write it down and store it in a secure, offline location.
+      <div className="flex flex-col items-center text-center mb-8">
+        <div className="p-4 rounded-full bg-bg-main shadow-neumorphic-convex text-accent mb-4">
+           <FiShield size={32} />
+        </div>
+        <h2 className="text-xl font-black uppercase tracking-wide text-text-primary">Protocol: Recovery</h2>
+        <p className="text-xs text-text-secondary mt-2 leading-relaxed font-mono">
+          Initiating master key export sequence. 
+          <br />Secure environment mandatory.
         </p>
       </div>
-      <div className="bg-destructive/10 text-destructive p-4 rounded-lg text-sm mb-6">
-        <p className="font-bold">NEVER share this phrase with anyone. Anyone with this phrase can access all your messages.</p>
+      
+      <div className="bg-bg-main p-4 rounded-xl shadow-neumorphic-concave border-l-4 border-red-500 mb-8">
+        <div className="flex items-center gap-2 mb-1 text-red-500 font-bold uppercase text-[10px] tracking-widest">
+           <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+           Warning: Classified Data
+        </div>
+        <p className="text-xs text-text-secondary">
+          Possession of this phrase grants total system access. Do not transmit digitally.
+        </p>
       </div>
+      
       <button
         onClick={() => setStep(2)}
-        className="w-full btn btn-primary"
+        className="
+          w-full py-3 rounded-xl 
+          bg-bg-surface text-text-primary font-bold uppercase tracking-wider text-xs
+          shadow-neumorphic-convex active:shadow-neumorphic-pressed
+          hover:text-accent transition-all
+        "
       >
-        I Understand, Show My Phrase
+        Acknowledge & Proceed
       </button>
     </>
   );
 
   const renderStep2 = () => (
     <>
-      <h2 className="text-2xl font-bold text-text-primary text-center mb-4">Save Your Phrase</h2>
-      <p className="text-text-secondary text-center mb-6">Write down these {words.length} words in order. Keep them safe.</p>
-      <div className="relative bg-background p-4 rounded-lg border border-border mb-4">
-        <div className={`grid grid-cols-3 gap-x-6 gap-y-4 text-lg ${!showPhrase ? 'blur-md' : ''}`}>
+      <h2 className="text-xl font-black uppercase tracking-wide text-text-primary text-center mb-2">Secure Phrase</h2>
+      <p className="text-xs text-text-secondary text-center mb-6 font-mono">Record the sequence. Priority Alpha.</p>
+      
+      <div className="relative bg-bg-main p-6 rounded-2xl shadow-neumorphic-concave mb-6 border border-white/5">
+        <div className={`grid grid-cols-3 gap-3 ${!showPhrase ? 'blur-sm opacity-50' : ''} transition-all duration-500`}>
           {words.map((word, index) => (
-            <span key={index} className="text-text-primary font-mono">{index + 1}. {word}</span>
+            <div key={index} className="flex items-center gap-2 p-2 rounded bg-black/10 dark:bg-white/5 border border-white/10">
+               <span className="text-[10px] text-text-secondary font-mono w-4">{index + 1}.</span>
+               <span className="text-sm font-bold text-text-primary tracking-wide">{word}</span>
+            </div>
           ))}
         </div>
+        
         {!showPhrase && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-lg">
-            <p className="text-white font-semibold">Click the eye to reveal</p>
+          <div className="absolute inset-0 flex items-center justify-center z-10">
+            <button 
+              onClick={() => setShowPhrase(true)}
+              className="
+                flex items-center gap-2 px-6 py-3 rounded-full 
+                bg-bg-surface text-text-primary font-bold text-sm
+                shadow-neumorphic-convex active:shadow-neumorphic-pressed
+                transition-all
+              "
+            >
+              <FiEye /> Reveal Data
+            </button>
           </div>
         )}
-        <div className="absolute top-3 right-3 flex gap-2">
-          <button onClick={() => setShowPhrase(!showPhrase)} className="text-text-secondary hover:text-text-primary">
-            {showPhrase ? <FiEyeOff /> : <FiEye />}
-          </button>
-          <button onClick={handleCopyToClipboard} className="text-text-secondary hover:text-text-primary">
-            <FiClipboard />
-          </button>
-        </div>
+        
+        {showPhrase && (
+           <div className="absolute top-2 right-2 flex gap-2">
+             <button onClick={() => setShowPhrase(false)} className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"><FiEyeOff size={14} /></button>
+             <button onClick={handleCopyToClipboard} className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"><FiClipboard size={14} /></button>
+           </div>
+        )}
       </div>
+      
       <button
         onClick={() => setStep(3)}
-        className="w-full btn btn-primary"
+        className="w-full py-3 rounded-xl bg-accent text-white font-bold uppercase tracking-wider shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
       >
-        I've Saved It, Now Verify
+        Sequence Recorded
       </button>
     </>
   );
 
   const renderStep3 = () => (
     <>
-      <h2 className="text-2xl font-bold text-text-primary text-center mb-4">Verify Your Phrase</h2>
-      <p className="text-text-secondary text-center mb-6">Tap the words in the correct order to confirm your backup.</p>
-      <div className="bg-background p-4 rounded-lg border border-border min-h-[100px] mb-4 font-mono text-lg text-center">
-        {userInput.join(' ') || <span className="text-text-secondary">Your selected words will appear here...</span>}
+      <h2 className="text-xl font-black uppercase tracking-wide text-text-primary text-center mb-2">Verify Sequence</h2>
+      <p className="text-xs text-text-secondary text-center mb-6 font-mono">Reconstruct the key phrase.</p>
+      
+      <div className="
+        bg-bg-main p-4 rounded-xl shadow-neumorphic-concave 
+        min-h-[100px] mb-6 font-mono text-sm text-center flex flex-wrap gap-2 justify-center items-center
+        border border-white/5
+      ">
+        {userInput.length === 0 && <span className="text-text-secondary/40">Select words below...</span>}
+        {userInput.map((word, i) => (
+           <span key={i} className="px-2 py-1 rounded bg-accent/20 text-accent border border-accent/30">{word}</span>
+        ))}
       </div>
-      <div className="flex flex-wrap gap-3 justify-center mb-6">
+      
+      <div className="flex flex-wrap gap-2 justify-center mb-8">
         {verificationWords.map((word, index) => (
           <button
             key={index}
             onClick={() => handleWordClick(word)}
-            className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+            disabled={userInput.includes(word) && false} // Optional: disable used words
+            className="
+              px-3 py-2 rounded-lg 
+              bg-bg-surface text-text-primary text-xs font-bold
+              shadow-neumorphic-convex active:shadow-neumorphic-pressed 
+              hover:-translate-y-0.5 transition-all
+            "
           >
             {word}
           </button>
         ))}
       </div>
+      
       <div className="flex gap-4">
         <button
           onClick={handleUndo}
           disabled={userInput.length === 0}
-          className="w-full py-3 px-4 rounded-lg bg-bg-surface text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all disabled:opacity-50"
+          className="flex-1 py-3 rounded-xl bg-bg-surface text-text-secondary font-bold uppercase text-xs shadow-neumorphic-convex active:shadow-neumorphic-pressed disabled:opacity-50 transition-all"
         >
           Undo
         </button>
         <button
           onClick={handleVerify}
           disabled={userInput.length !== words.length}
-          className="w-full btn btn-primary disabled:opacity-50"
+          className="flex-1 py-3 rounded-xl bg-accent text-white font-bold uppercase text-xs shadow-neumorphic-convex active:shadow-neumorphic-pressed disabled:opacity-50 disabled:shadow-none transition-all"
         >
-          Verify
+          Confirm
         </button>
       </div>
     </>
   );
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="card-neumorphic p-8 w-full max-w-md relative">
-        <button onClick={onClose} className="absolute top-4 right-4 touch-target p-1.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">&times;</button>
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+      <div className="bg-bg-surface p-8 rounded-3xl shadow-neumorphic-convex w-full max-w-md relative border border-white/10">
+        <button 
+          onClick={onClose} 
+          className="absolute top-4 right-4 p-2 rounded-full text-text-secondary shadow-neumorphic-convex active:shadow-neumorphic-pressed hover:text-red-500 transition-all"
+        >
+          &times;
+        </button>
         {step === 1 && renderStep1()}
         {step === 2 && renderStep2()}
         {step === 3 && renderStep3()}

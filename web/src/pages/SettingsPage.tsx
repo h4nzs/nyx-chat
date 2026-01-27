@@ -1,6 +1,7 @@
 import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@store/auth';
+import { useModalStore } from '@store/modal';
 import { toast } from 'react-hot-toast';
 import { Spinner } from '../components/Spinner';
 import { toAbsoluteUrl } from '@utils/url';
@@ -94,6 +95,7 @@ export default function SettingsPage() {
   const navigate = useNavigate();
   const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout } = useAuthStore();
   const { theme, toggleTheme, accent, setAccent } = useThemeStore();
+  const { showConfirm } = useModalStore();
 
   const { 
     isSubscribed, 
@@ -189,11 +191,16 @@ export default function SettingsPage() {
     }
   };
 
+
   const handleLogout = async () => {
-    if (window.confirm("CONFIRM EMERGENCY EJECT: Terminate all active sessions?")) {
-      await logout();
-      navigate('/login');
-    }
+    showConfirm(
+      "Emergency Eject",
+      "WARNING: You are about to terminate all active sessions. Proceed?",
+      async () => {
+        await logout();
+        navigate('/login');
+      }
+    );
   };
 
   if (!user) return <div className="h-screen w-full flex items-center justify-center bg-bg-main"><Spinner /></div>;

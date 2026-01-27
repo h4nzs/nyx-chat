@@ -95,27 +95,44 @@ export default function UserInfoModal() {
 
   const renderContent = () => {
     if (loading) return <div className="flex justify-center items-center min-h-[200px]"><Spinner /></div>;
-    if (error) return <p className="text-center text-destructive">{error}</p>;
+    if (error) return <p className="text-center text-red-500 font-mono text-sm">{error}</p>;
     if (user) {
       return (
         <div className="flex flex-col items-center text-center">
-          <img
-            src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
-            alt={user.name}
-            className="w-24 h-24 rounded-full bg-secondary object-cover mb-4"
-            onError={(e) => {
-              const target = e.target as HTMLImageElement;
-              target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
-            }}
-          />
-          <h3 className="text-xl font-bold text-text-primary">{user.name}</h3>
-          <p className="text-sm text-text-secondary">@{user.username}</p>
-          {user.email && (
-            <p className="text-sm text-accent mt-1">{user.email}</p>
-          )}
-          <p className="text-text-secondary mt-2 text-sm">
-            {user.description || 'This user prefers to keep an air of mystery.'}
-          </p>
+          <div className="relative mb-6">
+             <div className="w-28 h-28 rounded-full shadow-neumorphic-pressed-light dark:shadow-neu-pressed-dark p-2 bg-bg-main">
+                <img
+                  src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
+                  alt={user.name}
+                  className="w-full h-full rounded-full object-cover grayscale contrast-125"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
+                  }}
+                />
+             </div>
+             {/* Status Dot */}
+             <div className="absolute bottom-1 right-1 w-4 h-4 bg-green-500 rounded-full border-4 border-bg-main shadow-sm"></div>
+          </div>
+          
+          <div className="mb-6 w-full">
+            <h3 className="text-2xl font-black uppercase tracking-tight text-text-primary">{user.name}</h3>
+            <div className="inline-block mt-1 px-3 py-0.5 rounded-md bg-bg-surface border border-accent/20 text-accent font-mono text-xs">
+               @{user.username}
+            </div>
+          </div>
+
+          <div className="w-full text-left">
+             <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2 mb-1 block">Bio-Data</label>
+             <div className="
+               w-full p-4 rounded-xl min-h-[80px]
+               bg-bg-main text-text-primary text-sm font-medium
+               shadow-neumorphic-concave
+               border border-white/5
+             ">
+               {user.description || <span className="opacity-40 italic">No data available.</span>}
+             </div>
+          </div>
         </div>
       );
     }
@@ -138,18 +155,28 @@ export default function UserInfoModal() {
             <>
               {renderContent()}
               {user && (
-                <div className="w-full flex flex-col space-y-2 pt-4 border-t border-border">
+                <div className="w-full flex flex-col space-y-3 pt-6 border-t border-white/5">
                   <button
                     onClick={handleViewProfile}
-                    className="w-full p-3 rounded-lg font-semibold text-white bg-accent shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+                    className="
+                      w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
+                      bg-bg-surface text-text-primary
+                      shadow-neumorphic-convex active:shadow-neumorphic-pressed
+                      hover:text-accent transition-all
+                    "
                   >
-                    View Full Profile
+                    View Personnel File
                   </button>
                   <button
                     onClick={handleVerifySecurity}
-                    className="w-full p-3 rounded-lg font-semibold text-text-primary bg-bg-surface shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+                    className="
+                      w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
+                      bg-bg-surface text-text-primary
+                      shadow-neumorphic-convex active:shadow-neumorphic-pressed
+                      hover:text-green-500 transition-all
+                    "
                   >
-                    Verify Security
+                    Verify Encryption Handshake
                   </button>
                   {user && user.id !== useAuthStore.getState().user?.id && (
                     <>
@@ -158,18 +185,28 @@ export default function UserInfoModal() {
                           onClick={() => {
                             useAuthStore.getState().unblockUser(user.id).catch(console.error);
                           }}
-                          className="w-full p-3 rounded-lg font-semibold text-white bg-destructive shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+                          className="
+                            w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
+                            bg-bg-surface text-red-500
+                            shadow-neumorphic-convex active:shadow-neumorphic-pressed
+                            hover:bg-red-500 hover:text-white transition-all
+                          "
                         >
-                          Unblock User
+                          Unblock Signal
                         </button>
                       ) : (
                         <button
                           onClick={() => {
                             useAuthStore.getState().blockUser(user.id).catch(console.error);
                           }}
-                          className="w-full p-3 rounded-lg font-semibold text-white bg-destructive/80 hover:bg-destructive shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+                          className="
+                            w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
+                            bg-bg-surface text-text-secondary
+                            shadow-neumorphic-convex active:shadow-neumorphic-pressed
+                            hover:text-red-500 transition-all
+                          "
                         >
-                          Block User
+                          Block Signal
                         </button>
                       )}
                     </>

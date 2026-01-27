@@ -249,9 +249,10 @@ const AppContent = () => {
       <ChatInfoModal />
       <DynamicIsland />
 
-      <Routes>
-        {/* Public Routes */}
-        <Route path="/" element={
+      <div className="w-full h-full max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/" element={
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -390,7 +391,8 @@ const AppContent = () => {
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+        </Routes>
+      </div>
     </>
   );
 };

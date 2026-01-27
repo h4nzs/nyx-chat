@@ -1,7 +1,7 @@
 
 import { useState, useEffect } from 'react';
 import QRCode from 'react-qr-code';
-import { FiShield, FiX } from 'react-icons/fi';
+import { FiShield, FiX, FiCheck } from 'react-icons/fi';
 import { Spinner } from './Spinner';
 
 interface SafetyNumberModalProps {
@@ -30,17 +30,29 @@ export default function SafetyNumberModal({
   const formattedNumber = safetyNumber.replace(/(\d{5})/g, '$1 ').trim();
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div className="bg-surface rounded-xl shadow-2xl p-8 w-full max-w-md border border-border relative" onClick={e => e.stopPropagation()}>
-        <button onClick={onClose} className="absolute top-4 right-4 text-text-secondary hover:text-text-primary">
-          <FiX size={24} />
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div 
+        className="
+          bg-bg-surface rounded-3xl p-8 w-full max-w-md relative 
+          shadow-neumorphic-convex border border-white/10
+        " 
+        onClick={e => e.stopPropagation()}
+      >
+        <button 
+          onClick={onClose} 
+          className="absolute top-4 right-4 p-2 rounded-full text-text-secondary shadow-neumorphic-convex active:shadow-neumorphic-pressed hover:text-red-500 transition-all"
+        >
+          <FiX size={20} />
         </button>
         
         <div className="flex flex-col items-center text-center">
-          <FiShield className="text-accent text-5xl mb-4" />
-          <h2 className="text-2xl font-bold text-text-primary">Verify Safety Number</h2>
-          <p className="text-text-secondary mt-2 mb-6">
-            To ensure your conversation with <span className="font-bold text-text-primary">{userName}</span> is end-to-end encrypted, compare this safety number. It should be the same for both of you.
+          <div className="p-4 rounded-full bg-bg-main shadow-neumorphic-convex text-accent mb-4">
+             <FiShield size={32} />
+          </div>
+          
+          <h2 className="text-xl font-black uppercase tracking-wide text-text-primary">Safety Number</h2>
+          <p className="text-xs text-text-secondary mt-2 mb-6 font-mono max-w-xs">
+            Verify end-to-end encryption integrity with <span className="font-bold text-text-primary">{userName}</span>.
           </p>
 
           {isLoading ? (
@@ -49,27 +61,42 @@ export default function SafetyNumberModal({
             </div>
           ) : (
             <>
-              <div className="my-4 p-4 bg-white rounded-lg">
+              <div className="my-2 p-6 bg-white rounded-2xl shadow-neumorphic-concave border-4 border-bg-main">
                 <QRCode
                   value={formattedNumber}
-                  size={192}
+                  size={160}
                   viewBox={`0 0 256 256`}
                 />
               </div>
-              <div className="font-mono text-2xl tracking-wider text-text-primary my-4 p-4 bg-background rounded-lg w-full">
-                {formattedNumber}
+              
+              <div className="w-full mt-6 mb-6">
+                 <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary mb-2 block text-left pl-2">Fingerprint Hash</label>
+                 <div className="
+                   font-mono text-lg tracking-widest text-accent text-center
+                   p-4 bg-bg-main rounded-xl shadow-neumorphic-concave
+                   border border-white/5 break-all
+                 ">
+                   {formattedNumber}
+                 </div>
               </div>
             </>
           )}
 
           {isVerified ? (
-            <p className="text-accent font-semibold">You have already verified this contact.</p>
+            <div className="flex items-center gap-2 text-green-500 font-bold uppercase text-xs tracking-wider bg-green-500/10 px-4 py-2 rounded-full">
+               <FiCheck /> Verification Confirmed
+            </div>
           ) : (
             <button 
               onClick={onVerify}
-              className="w-full mt-4 btn btn-primary"
+              className="
+                w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
+                bg-accent text-white
+                shadow-neumorphic-convex active:shadow-neumorphic-pressed
+                hover:brightness-110 transition-all
+              "
             >
-              Mark as Verified
+              Confirm Safety Number
             </button>
           )}
         </div>
