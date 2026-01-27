@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useConversationStore } from '@store/conversation';
 import { motion, AnimatePresence } from 'framer-motion';
 import useDynamicIslandStore, { Activity, NotificationActivity, UploadActivity } from '@store/dynamicIsland';
-import { FiFile, FiX } from 'react-icons/fi';
+import { FiFile, FiX, FiMessageSquare, FiUploadCloud } from 'react-icons/fi';
 
 const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
   const openConversation = useConversationStore(state => state.openConversation);
@@ -19,20 +19,26 @@ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
   };
 
   return (
-    <div onClick={handleClick} className="relative p-px rounded-full bg-accent-gradient cursor-pointer">
-      <div className="bg-bg-surface/80 backdrop-blur-xl rounded-full">
-        <div className="p-2 flex items-center gap-3">
-          <img 
-            src={activity.sender?.avatarUrl ? toAbsoluteUrl(activity.sender.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${activity.sender?.name}`}
-            alt="Sender Avatar"
-            className="w-10 h-10 rounded-full bg-bg-primary object-cover"
-          />
-          <div className="flex-1 min-w-0">
-            <p className="font-bold text-text-primary truncate">{activity.sender?.name || 'New Message'}</p>
-            <p className="text-sm text-text-secondary truncate">{activity.message.substring(activity.message.indexOf(':') + 2)}</p>
-          </div>
-          <div className="w-10 h-10 flex-shrink-0"></div> {/* Spacer */}
+    <div onClick={handleClick} className="w-full h-full flex items-center gap-3 px-1 cursor-pointer group">
+      <div className="relative">
+        <img 
+          src={activity.sender?.avatarUrl ? toAbsoluteUrl(activity.sender.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${activity.sender?.name}`}
+          alt="Avatar"
+          className="w-8 h-8 rounded-full object-cover border border-white/10"
+        />
+        <div className="absolute -bottom-1 -right-1 bg-accent rounded-full p-0.5 border border-black">
+           <FiMessageSquare size={8} className="text-white" />
         </div>
+      </div>
+      
+      <div className="flex-1 min-w-0 flex flex-col justify-center">
+        <div className="flex justify-between items-baseline">
+           <p className="text-[10px] font-bold text-white/90 uppercase tracking-wider">{activity.sender?.name || 'Unknown'}</p>
+           <span className="text-[8px] text-white/40 font-mono">NOW</span>
+        </div>
+        <p className="text-xs text-white/70 truncate font-medium group-hover:text-white transition-colors">
+          {activity.message.substring(activity.message.indexOf(':') + 2)}
+        </p>
       </div>
     </div>
   );
@@ -42,57 +48,69 @@ const UploadView = ({ activity }: { activity: UploadActivity }) => {
   const removeActivity = useDynamicIslandStore(state => state.removeActivity);
 
   return (
-    <div className="relative p-px rounded-full bg-gray-500">
-      <div className="bg-bg-surface/80 backdrop-blur-xl rounded-full">
-        <div className="p-2 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-bg-primary flex items-center justify-center">
-            <FiFile className="text-text-secondary" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-bold text-text-primary truncate">{activity.fileName}</p>
-            <div className="flex items-center gap-2">
-              <div className="w-full bg-gray-600 rounded-full h-1.5">
-                <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${activity.progress}%` }}></div>
-              </div>
-              <p className="text-xs text-text-secondary">{Math.round(activity.progress)}%</p>
-            </div>
-          </div>
-          <button onClick={() => removeActivity(activity.id)} className="w-10 h-10 flex-shrink-0 flex items-center justify-center">
-            <FiX />
-          </button>
+    <div className="w-full h-full flex items-center gap-3 px-1">
+      <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-white/80">
+        <FiUploadCloud size={14} className="animate-pulse" />
+      </div>
+      
+      <div className="flex-1 min-w-0 flex flex-col justify-center gap-1">
+        <div className="flex justify-between items-center">
+           <p className="text-[10px] font-bold text-white/90 uppercase tracking-wider truncate max-w-[120px]">{activity.fileName}</p>
+           <span className="text-[9px] font-mono text-accent">{Math.round(activity.progress)}%</span>
+        </div>
+        <div className="w-full bg-white/10 rounded-full h-1 overflow-hidden">
+          <motion.div 
+            className="bg-accent h-full rounded-full shadow-[0_0_10px_rgba(var(--accent),0.8)]" 
+            initial={{ width: 0 }}
+            animate={{ width: `${activity.progress}%` }}
+            transition={{ type: "spring", damping: 20 }}
+          />
         </div>
       </div>
+      
+      <button 
+        onClick={(e) => { e.stopPropagation(); removeActivity(activity.id); }}
+        className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-white/10 text-white/50 hover:text-white transition-all"
+      >
+        <FiX size={12} />
+      </button>
     </div>
   );
 };
 
 const DynamicIsland = () => {
   const activities = useDynamicIslandStore(state => state.activities);
-  const currentActivity = activities[0]; // We only show the most recent activity
+  const currentActivity = activities[0]; 
 
   const renderActivity = (activity: Activity) => {
     switch (activity.type) {
-      case 'notification':
-        return <NotificationView activity={activity} />;
-      case 'upload':
-        return <UploadView activity={activity} />;
-      default:
-        return null;
+      case 'notification': return <NotificationView activity={activity} />;
+      case 'upload': return <UploadView activity={activity} />;
+      default: return null;
     }
   }
 
   return (
-    <div className="fixed top-4 left-0 right-0 z-50 pointer-events-none">
+    <div className="fixed top-2 left-0 right-0 z-[100] pointer-events-none flex justify-center">
       <AnimatePresence>
         {currentActivity && (
           <motion.div
             key={currentActivity.id}
-            initial={{ opacity: 0, scale: 0.7, x: "-50%" }}
-            animate={{ opacity: 1, scale: 1, x: "-50%" }}
-            exit={{ opacity: 0, scale: 0.7, x: "-50%" }}
-            transition={{ type: "spring", damping: 15, stiffness: 300 }}
-            className="absolute left-1/2 min-w-[280px] max-w-sm pointer-events-auto shadow-lg"
+            initial={{ height: 0, width: 100, opacity: 0, y: -20 }}
+            animate={{ height: 48, width: 'auto', opacity: 1, y: 0, minWidth: 300 }}
+            exit={{ height: 0, width: 100, opacity: 0, y: -20 }}
+            transition={{ type: "spring", damping: 25, stiffness: 400 }}
+            className="
+              relative pointer-events-auto overflow-hidden
+              bg-black/80 backdrop-blur-xl
+              rounded-full px-2
+              border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.5)]
+              flex items-center
+            "
           >
+            {/* Glossy Reflection */}
+            <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
+            
             {renderActivity(currentActivity)}
           </motion.div>
         )}

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { FiChevronLeft, FiCheckCircle, FiXCircle } from 'react-icons/fi';
+import { FiChevronLeft, FiCheckCircle, FiXCircle, FiCamera, FiRefreshCw } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 import { useAuthStore } from '@store/auth';
 import { getSocket } from '@lib/socket';
@@ -40,7 +40,6 @@ export default function DeviceScannerPage() {
 
       const { roomId, linkingPubKey } = data;
 
-      // Validasi bahwa semua field yang diperlukan ada
       if (!roomId || typeof roomId !== 'string' || !roomId.trim()) {
         throw new Error('Missing or invalid roomId in QR code data.');
       }
@@ -93,10 +92,7 @@ export default function DeviceScannerPage() {
   }, [getMasterSeed, navigate]);
 
   useEffect(() => {
-    if (!qrcodeRegionRef.current) {
-      console.error("QR Code region ref is not available.");
-      return;
-    }
+    if (!qrcodeRegionRef.current) return;
     
     const html5QrCode = new Html5Qrcode(qrcodeRegionRef.current.id);
     scannerRef.current = html5QrCode;
@@ -151,61 +147,101 @@ export default function DeviceScannerPage() {
 
   return (
     <div className="flex flex-col h-screen bg-bg-main text-text-primary">
-      <header className="p-4 flex items-center border-b border-border">
-        <Link to="/settings" className="touch-target p-2.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">
-          <FiChevronLeft size={24} />
+      <header className="p-4 flex items-center justify-between border-b border-white/10 dark:border-black/10 shadow-neu-flat-light dark:shadow-neu-flat-dark z-10">
+        <Link 
+          to="/settings" 
+          className="
+            p-3 rounded-xl bg-bg-main text-text-secondary
+            shadow-neu-flat-light dark:shadow-neu-flat-dark
+            active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+            transition-all
+          "
+        >
+          <FiChevronLeft size={20} />
         </Link>
-        <h1 className="ml-2 text-xl font-bold">Scan QR Code</h1>
+        <h1 className="text-sm font-black uppercase tracking-widest text-text-primary">Optical Scanner</h1>
+        <div className="w-10"></div> {/* Spacer for balance */}
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center p-4">
-        <div className="card-neumorphic p-6 text-center max-w-md w-full">
+      <main className="flex-1 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        {/* Scanner Housing */}
+        <div className="
+          relative w-full max-w-sm aspect-square 
+          bg-black/90 rounded-3xl overflow-hidden
+          shadow-neu-pressed-light dark:shadow-neu-pressed-dark
+          border-4 border-bg-main
+        ">
+          {/* Camera Feed */}
+          <div id="qr-code-scanner-region" ref={qrcodeRegionRef} className="w-full h-full opacity-80" />
 
-          <div className="relative w-full aspect-square bg-black rounded-xl overflow-hidden shadow-inner mb-4">
-            <div id="qr-code-scanner-region" ref={qrcodeRegionRef} className="w-full h-full" />
-
-            {status === 'scanning' && (
-              <div className="absolute inset-0 border-2 border-accent/50 rounded-xl pointer-events-none">
-                <div className="absolute top-1/2 left-4 right-4 h-0.5 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] animate-scan-line"></div>
-              </div>
-            )}
+          {/* HUD Overlay */}
+          <div className="absolute inset-0 pointer-events-none p-6">
+             <div className="w-full h-full border-2 border-accent/30 rounded-2xl relative">
+                {/* Corners */}
+                <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-accent"></div>
+                <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-accent"></div>
+                <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-accent"></div>
+                <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-accent"></div>
+                
+                {/* Scan Line */}
+                {status === 'scanning' && (
+                   <div className="w-full h-0.5 bg-red-500 absolute top-1/2 shadow-[0_0_10px_red] animate-scan-line"></div>
+                )}
+             </div>
           </div>
+        </div>
 
-          <div className="min-h-[80px]">
-            {status === 'scanning' && (
-              <p className="text-text-secondary text-sm">
-                Point your camera at the QR code shown on the new device.
-              </p>
-            )}
+        {/* Status Deck */}
+        <div className="mt-8 w-full max-w-sm">
+           <div className="
+             p-4 rounded-2xl bg-bg-main
+             shadow-neu-flat-light dark:shadow-neu-flat-dark
+             flex flex-col items-center text-center
+           ">
+              {status === 'scanning' && (
+                <>
+                  <div className="flex items-center gap-2 text-accent mb-2">
+                     <FiCamera className="animate-pulse" />
+                     <span className="font-mono text-xs uppercase tracking-wider">Acquiring Target</span>
+                  </div>
+                  <p className="text-xs text-text-secondary">Align QR Code within the viewfinder.</p>
+                </>
+              )}
 
-            {status === 'processing' && (
-              <div className="flex items-center justify-center gap-2 text-accent">
-                <Spinner size="sm" />
-                <span className="font-medium">Securely verifying...</span>
-              </div>
-            )}
+              {status === 'processing' && (
+                <div className="flex flex-col items-center gap-3">
+                   <Spinner size="md" />
+                   <span className="font-mono text-xs uppercase tracking-wider text-text-primary">Decrypting Handshake...</span>
+                </div>
+              )}
 
-            {status === 'success' && (
-              <div className="flex flex-col items-center text-green-500 animate-bounce-in">
-                <FiCheckCircle size={40} className="mb-2" />
-                <span className="font-bold">Linked Successfully!</span>
-              </div>
-            )}
+              {status === 'success' && (
+                <div className="flex flex-col items-center gap-2 text-green-500">
+                   <FiCheckCircle size={32} className="animate-bounce-in" />
+                   <span className="font-bold uppercase tracking-wide">Uplink Established</span>
+                </div>
+              )}
 
-            {status === 'failed' && (
-              <div className="flex flex-col items-center text-red-500">
-                <FiXCircle size={40} className="mb-2" />
-                <span className="font-bold">{error ? 'Error' : 'Failed'}</span>
-                <span className="text-xs mt-1 text-text-secondary">{error || 'An unknown error occurred.'}</span>
-                <button
-                  onClick={handleRetry}
-                  className="mt-4 px-4 py-2 rounded-lg shadow-neumorphic-convex active:shadow-neumorphic-pressed text-sm font-medium text-text-primary"
-                >
-                  Try Again
-                </button>
-              </div>
-            )}
-          </div>
+              {status === 'failed' && (
+                <div className="flex flex-col items-center gap-3">
+                   <div className="flex items-center gap-2 text-red-500">
+                      <FiXCircle size={24} />
+                      <span className="font-bold uppercase">{error || 'Connection Failed'}</span>
+                   </div>
+                   <button 
+                     onClick={handleRetry}
+                     className="
+                       flex items-center gap-2 px-4 py-2 rounded-lg 
+                       bg-bg-main text-text-primary text-xs font-bold uppercase
+                       shadow-neu-flat-light dark:shadow-neu-flat-dark
+                       active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                     "
+                   >
+                      <FiRefreshCw /> Retry
+                   </button>
+                </div>
+              )}
+           </div>
         </div>
       </main>
     </div>

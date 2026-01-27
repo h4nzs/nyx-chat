@@ -4,7 +4,7 @@ import classNames from "classnames";
 import { FaCheck, FaCheckDouble } from "react-icons/fa";
 import FileAttachment from "./FileAttachment";
 import LinkPreviewCard from "./LinkPreviewCard";
-import LazyImage from "./LazyImage"; // <--- Import Component Ini
+import LazyImage from "./LazyImage";
 import { useModalStore } from "@store/modal";
 import { toAbsoluteUrl } from "@utils/url";
 import { formatTime } from "@utils/date";
@@ -35,23 +35,23 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
     const readCount = statuses.filter((s: MessageStatus) => s.status === 'READ' && s.userId !== user?.id).length;
     const deliveredCount = statuses.filter((s: MessageStatus) => s.status === 'DELIVERED').length;
 
-    if (readCount > 0) return <FaCheckDouble className="text-blue-500 text-[10px]" />;
-    if (deliveredCount > 0) return <FaCheckDouble className="text-text-secondary text-[10px]" />;
-    return <FaCheck className="text-text-secondary text-[10px]" />;
+    if (readCount > 0) return <FaCheckDouble className="text-white/90 text-[10px]" />;
+    if (deliveredCount > 0) return <FaCheckDouble className="text-white/60 text-[10px]" />;
+    return <FaCheck className="text-white/60 text-[10px]" />;
   };
 
   const isFile = !!message.fileUrl || !!message.fileKey;
-  const isImage = message.fileType?.startsWith('image/'); // Cek apakah ini gambar
+  const isImage = message.fileType?.startsWith('image/');
   const isDeleted = !!message.deletedAt;
 
   return (
     <div 
-      className={classNames("flex items-end gap-2 group mb-1", { 
+      className={classNames("flex items-end gap-3 group mb-3", { 
         "justify-end": isOwn, 
         "justify-start": !isOwn 
       })}
     >
-      {/* Avatar (Kiri - untuk pesan orang lain) */}
+      {/* Avatar (Left - Peer) */}
       {!isOwn && (
         <div className="w-8 h-8 flex-shrink-0">
           {showAvatar && message.sender ? (
@@ -59,7 +59,10 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
               src={toAbsoluteUrl(message.sender.avatarUrl)}
               alt={message.sender.username}
               onClick={handleAvatarClick}
-              className="w-8 h-8 rounded-full object-cover cursor-pointer shadow-sm hover:opacity-80 transition-opacity"
+              className="
+                w-8 h-8 rounded-full object-cover cursor-pointer 
+                shadow-neumorphic-convex hover:scale-105 transition-transform
+              "
             />
           ) : (
             <div className="w-8"></div> 
@@ -68,13 +71,13 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
       )}
 
       {/* Bubble Container */}
-      <div className={classNames("relative max-w-[75%] sm:max-w-[60%]", { "items-end": isOwn, "items-start": !isOwn })}>
+      <div className={classNames("relative max-w-[85%] sm:max-w-[70%]", { "items-end": isOwn, "items-start": !isOwn })}>
         
-        {/* Nama Pengirim (Grup) */}
+        {/* Sender Name (Group) */}
         {!isOwn && isGroup && showName && message.sender && (
           <span 
             onClick={handleAvatarClick}
-            className="text-xs text-text-secondary ml-1 mb-1 block cursor-pointer hover:underline"
+            className="text-[10px] font-bold text-accent ml-3 mb-1 block cursor-pointer hover:underline uppercase tracking-wide"
           >
             {message.sender.name || message.sender.username}
           </span>
@@ -83,42 +86,48 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
         {/* Bubble Body */}
         <div
           className={classNames(
-            "relative px-4 py-2 rounded-2xl text-sm shadow-sm break-words",
+            "relative px-4 py-3 text-sm break-words transition-all shadow-neumorphic-convex",
             {
-              "bg-accent text-white rounded-tr-sm": isOwn,
-              "bg-bg-surface text-text-primary rounded-tl-sm": !isOwn,
-              "italic text-text-secondary border border-border bg-transparent shadow-none": isDeleted,
-              "p-1": isImage && !message.content, // Padding kecil khusus gambar tanpa caption
+              // Own Message
+              "bg-accent text-white rounded-2xl rounded-tr-none": isOwn && !isDeleted,
+              
+              // Peer Message
+              "bg-bg-surface text-text-primary rounded-2xl rounded-tl-none": !isOwn && !isDeleted,
+              
+              // Deleted Message
+              "bg-bg-main text-text-secondary rounded-xl shadow-neumorphic-concave italic text-xs py-2 px-3": isDeleted,
+              
+              "p-1": isImage && !message.content, 
             }
           )}
         >
           {/* Reply Context */}
           {message.repliedTo && (
-            <div className={classNames("mb-2 p-2 rounded text-xs border-l-2 opacity-80 cursor-pointer", {
-              "bg-white/20 border-white/50": isOwn,
-              "bg-black/5 border-accent": !isOwn
+            <div className={classNames("mb-2 p-2 rounded-lg text-xs border-l-2 cursor-pointer bg-black/5 dark:bg-white/5", {
+              "border-white/50 text-white/90": isOwn,
+              "border-accent text-text-secondary": !isOwn
             })}>
-              <p className="font-bold">{message.repliedTo.sender?.username || 'Unknown'}</p>
-              <p className="truncate">{message.repliedTo.content || 'Attachment'}</p>
+              <p className="font-bold uppercase tracking-wider text-[10px]">{message.repliedTo.sender?.username || 'Unknown'}</p>
+              <p className="truncate opacity-80">{message.repliedTo.content || 'Attachment'}</p>
             </div>
           )}
 
-          {/* Content: File or Text */}
+          {/* Content */}
           {isDeleted ? (
-            <span>🚫 Message deleted</span>
+            <span className="flex items-center gap-2 opacity-60">
+              🚫 Message deleted
+            </span>
           ) : (
             <>
               {isFile && (
                 isImage ? (
-                  // --- RENDER IMAGE (LazyImage) ---
                   <LazyImage 
                     message={message} 
                     alt="Attachment"
-                    className="rounded-lg max-h-64 w-auto object-cover cursor-pointer mb-1 bg-black/10"
+                    className="rounded-xl max-h-64 w-auto object-cover cursor-pointer mb-1 hover:opacity-95"
                     onClick={() => onImageClick?.(message)}
                   />
                 ) : (
-                  // --- RENDER FILE/VIDEO/PDF (FileAttachment) ---
                   <FileAttachment 
                     message={message} 
                     isOwn={isOwn} 
@@ -127,7 +136,7 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
               )}
               
               {message.content && (
-                <div className={classNames("markdown-content", { "text-white": isOwn, "text-text-primary": !isOwn })}>
+                <div className={classNames("markdown-content leading-relaxed", { "text-white drop-shadow-sm": isOwn, "text-text-primary": !isOwn })}>
                   <MarkdownMessage content={message.content} />
                 </div>
               )}
@@ -140,13 +149,13 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
             </>
           )}
 
-          {/* Metadata: Waktu & Status */}
-          <div className={classNames("flex items-center gap-1 justify-end mt-1 text-[10px]", {
-            "text-white/70": isOwn,
+          {/* Metadata Footer */}
+          <div className={classNames("flex items-center gap-1.5 justify-end mt-1.5 select-none", {
+            "text-white/80": isOwn,
             "text-text-secondary": !isOwn,
-            "absolute bottom-2 right-2 bg-black/30 px-1 rounded text-white": isImage && !message.content // Overlay waktu di atas gambar jika tidak ada caption
+            "absolute bottom-2 right-2 bg-black/40 backdrop-blur-sm px-1.5 py-0.5 rounded text-white shadow-sm": isImage && !message.content 
           })}>
-            <span>{formatTime(message.createdAt)}</span>
+            <span className="text-[9px] font-medium tracking-wide opacity-80">{formatTime(message.createdAt)}</span>
             {isOwn && !isDeleted && getStatusIcon()}
           </div>
         </div>

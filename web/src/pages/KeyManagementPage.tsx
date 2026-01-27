@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { FiKey, FiShield, FiRefreshCw } from 'react-icons/fi';
+import { FiKey, FiShield, FiRefreshCw, FiChevronLeft, FiAlertTriangle } from 'react-icons/fi';
 import { useState } from 'react';
 import { useAuthStore, setupAndUploadPreKeyBundle } from '@store/auth';
 import toast from 'react-hot-toast';
@@ -29,14 +29,14 @@ export default function KeyManagementPage() {
         
         const phrase = await getRecoveryPhrase(encryptedKeys, password);
         if (!phrase) {
-          throw new Error("Failed to decrypt keys or master seed. The password may be incorrect.");
+          throw new Error("Failed to decrypt keys. Password mismatch.");
         }
         
         setRecoveryPhrase(phrase);
         setShowRecoveryModal(true);
 
       } catch (error: any) {
-        toast.error(error.message || "Failed to generate recovery phrase.");
+        toast.error(error.message || "Operation failed.");
       } finally {
         setIsProcessing(false);
       }
@@ -45,35 +45,32 @@ export default function KeyManagementPage() {
 
   const handleGenerateNew = () => {
     showConfirm(
-      "Generate New Keys",
-      "WARNING: This is a destructive action. You will lose access to all past encrypted messages. This cannot be undone.",
+      "INITIATE KEY ROTATION?",
+      "WARNING: DESTRUCTIVE ACTION. Previous message history will become undecryptable. This action is irreversible.",
       () => {
         showPasswordPrompt(async (password) => {
           if (!password) return;
           setIsProcessing(true);
           try {
-            // 1. Generate new keys using the worker
             const {
               encryptedPrivateKeys,
               encryptionPublicKeyB64,
               signingPublicKeyB64,
             } = await generateNewKeys(password);
             
-            // 2. Store them in localStorage
             localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
             localStorage.setItem('publicKey', encryptionPublicKeyB64);
             localStorage.setItem('signingPublicKey', signingPublicKeyB64);
             
-            // 3. Upload the new pre-key bundle to the server
             await setupAndUploadPreKeyBundle();
 
-            toast.success('New keys generated and uploaded! For security, you will be logged out.', { duration: 5000 });
+            toast.success('Keys Rotated. Rebooting Session...');
             setTimeout(() => {
               logout();
             }, 2000);
 
           } catch (error: any) {
-            toast.error(error.message || "Failed to generate new keys.");
+            toast.error(error.message || "Rotation failed.");
           } finally {
             setIsProcessing(false);
           }
@@ -83,34 +80,110 @@ export default function KeyManagementPage() {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col items-center justify-center bg-bg-main text-text-primary p-4">
-      <div className="w-full max-w-2xl card-neumorphic p-8">
-        <div className="flex items-center gap-4 mb-6">
-          <FiKey className="text-accent text-3xl" />
-          <h1 className="text-2xl font-bold text-text-primary">Encryption Key Management</h1>
-        </div>
-        <p className="text-text-secondary mb-6">
-          Your end-to-end encryption keys ensure that only you and the recipient can read your messages.
-          Back up your key to restore your chat history on a new device.
-        </p>
+    <div className="min-h-screen bg-bg-main flex flex-col items-center justify-center p-4 sm:p-8">
+      
+      {/* Back Button */}
+      <div className="w-full max-w-2xl mb-8">
+        <Link 
+          to="/settings" 
+          className="
+            inline-flex items-center gap-2 p-3 rounded-xl
+            bg-bg-main text-text-secondary
+            shadow-neu-flat-light dark:shadow-neu-flat-dark
+            active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+            hover:text-accent transition-all
+          "
+        >
+          <FiChevronLeft size={20} />
+          <span className="font-bold text-sm uppercase tracking-wide">Return</span>
+        </Link>
+      </div>
 
-        <div className="space-y-4">
-          <button onClick={handleShowRecovery} disabled={isProcessing} className="btn btn-secondary w-full justify-center gap-3">
-            {isProcessing ? <Spinner size="sm" /> : <FiShield />}
-            <span>{isProcessing ? 'Processing...' : 'Show Recovery Phrase'}</span>
-          </button>
-          <button onClick={handleGenerateNew} disabled={isProcessing} className="btn-destructive-neumorphic w-full justify-center gap-3">
-            {isProcessing ? <Spinner size="sm" /> : <FiRefreshCw />}
-            <span>{isProcessing ? 'Generating...' : 'Generate New Keys'}</span>
-          </button>
+      <div className="
+        w-full max-w-2xl relative overflow-hidden
+        bg-bg-main rounded-3xl
+        shadow-neu-flat-light dark:shadow-neu-flat-dark
+        border border-white/20 dark:border-black/20
+      ">
+        {/* Vault Header */}
+        <div className="bg-bg-surface p-8 border-b border-black/5 dark:border-white/5 relative">
+          <div className="flex items-center gap-6">
+            <div className="p-4 rounded-full bg-bg-main shadow-neu-pressed-light dark:shadow-neu-pressed-dark text-accent">
+               <FiKey size={32} />
+            </div>
+            <div>
+              <h1 className="text-2xl font-black uppercase tracking-tighter text-text-primary">Cryptographic Vault</h1>
+              <p className="text-xs font-mono text-text-secondary mt-1 uppercase tracking-widest">End-to-End Encryption Protocol</p>
+            </div>
+          </div>
+          
+          {/* Decorative Bolts */}
+          <div className="absolute top-4 right-4 w-3 h-3 rounded-full bg-text-secondary/20 shadow-inner"></div>
+          <div className="absolute bottom-4 right-4 w-3 h-3 rounded-full bg-text-secondary/20 shadow-inner"></div>
         </div>
 
-        <div className="mt-8 text-center">
-          <Link to="/settings" className="text-accent-color hover:underline">
-            &larr; Back to Settings
-          </Link>
+        <div className="p-8 space-y-8">
+          <p className="text-sm text-text-secondary leading-relaxed font-medium">
+            Your private keys are the only way to decrypt your messages. They are stored locally on this device. 
+            <strong className="text-text-primary"> Losing these keys means losing your message history forever.</strong>
+          </p>
+
+          <div className="space-y-6">
+            {/* Recovery Option */}
+            <div className="p-6 rounded-2xl bg-bg-main shadow-neu-pressed-light dark:shadow-neu-pressed-dark border border-white/10">
+              <div className="flex items-start gap-4 mb-4">
+                 <FiShield className="text-green-500 mt-1" size={20} />
+                 <div>
+                   <h3 className="font-bold text-text-primary">Master Recovery Phrase</h3>
+                   <p className="text-xs text-text-secondary mt-1">Reveal your 12-word seed phrase for backup.</p>
+                 </div>
+              </div>
+              <button 
+                onClick={handleShowRecovery} 
+                disabled={isProcessing} 
+                className="
+                  w-full py-3 rounded-xl font-bold uppercase tracking-wider text-sm
+                  bg-bg-main text-text-primary
+                  shadow-neu-flat-light dark:shadow-neu-flat-dark
+                  active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                  hover:text-green-500 transition-colors
+                "
+              >
+                {isProcessing ? <Spinner size="sm" /> : 'Reveal Phrase'}
+              </button>
+            </div>
+
+            {/* Danger Zone */}
+            <div className="relative p-6 rounded-2xl bg-red-500/5 border border-red-500/20 overflow-hidden">
+              {/* Warning Stripes */}
+              <div className="absolute top-0 left-0 w-full h-1 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,#ef4444_10px,#ef4444_20px)] opacity-50"></div>
+              
+              <div className="flex items-start gap-4 mb-4">
+                 <FiAlertTriangle className="text-red-500 mt-1" size={20} />
+                 <div>
+                   <h3 className="font-bold text-red-600 dark:text-red-400">Key Rotation (Destructive)</h3>
+                   <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-1">Generates new identity keys. Old messages will become unreadable.</p>
+                 </div>
+              </div>
+              
+              <button 
+                onClick={handleGenerateNew} 
+                disabled={isProcessing} 
+                className="
+                  w-full py-3 rounded-xl font-bold uppercase tracking-wider text-sm
+                  bg-bg-main text-red-500
+                  shadow-neu-flat-light dark:shadow-neu-flat-dark
+                  active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                  hover:bg-red-500 hover:text-white transition-all
+                "
+              >
+                {isProcessing ? <Spinner size="sm" /> : 'Rotate Keys'}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
+      
       {showRecoveryModal && <RecoveryPhraseModal phrase={recoveryPhrase} onClose={() => setShowRecoveryModal(false)} />}
     </div>
   );
