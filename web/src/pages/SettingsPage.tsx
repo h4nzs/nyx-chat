@@ -206,7 +206,7 @@ export default function SettingsPage() {
   if (!user) return <div className="h-screen w-full flex items-center justify-center bg-bg-main"><Spinner /></div>;
 
   return (
-    <div className="min-h-screen bg-bg-main text-text-primary p-4 md:p-8 font-sans selection:bg-accent selection:text-white pb-32">
+    <div className="w-full bg-bg-main text-text-primary p-4 md:p-8 font-sans selection:bg-accent selection:text-white pb-32">
       
       {/* HEADER */}
       <header className="max-w-7xl mx-auto mb-10 flex items-center gap-6">

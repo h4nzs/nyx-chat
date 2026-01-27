@@ -71,6 +71,18 @@ const Home = () => {
   return <Chat />;
 };
 
+const PageWrapper = ({ children, noScroll = false }: { children: React.ReactNode, noScroll?: boolean }) => (
+  <motion.div
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    transition={{ duration: 0.3 }}
+    className={noScroll ? "h-full w-full overflow-hidden" : "h-full w-full overflow-y-auto"}
+  >
+    {children}
+  </motion.div>
+);
+
 const AppContent = () => {
   const { theme, accent } = useThemeStore();
   const { bootstrap, logout, user } = useAuthStore();
@@ -80,7 +92,7 @@ const AppContent = () => {
     removeCommands: s.removeCommands,
   }));
   const navigate = useNavigate();
-  const location = useLocation(); // <--- Tambahkan ini
+  const location = useLocation();
 
   // --- Shortcuts & Commands ---
   
@@ -88,11 +100,11 @@ const AppContent = () => {
   
   const logoutAction = useCallback(() => {
     logout();
-    disconnectSocket(); // Pastikan socket putus saat logout
+    disconnectSocket();
   }, [logout]);
 
   useGlobalShortcut(['Control', 'k'], openCommandPalette);
-  useGlobalShortcut(['Meta', 'k'], openCommandPalette); // Support macOS Cmd+K
+  useGlobalShortcut(['Meta', 'k'], openCommandPalette);
 
   useEffect(() => {
     const commands = [
@@ -119,15 +131,13 @@ const AppContent = () => {
 
   // --- Lifecycle & Effects ---
 
-  // 1. Bootstrap Auth (Cek session saat load)
+  // 1. Bootstrap Auth
   useEffect(() => {
     bootstrap();
   }, [bootstrap]);
 
-  // 2. Manage Socket Connection (Centralized)
+  // 2. Manage Socket Connection
   useEffect(() => {
-    // Prevent global socket logic from interfering with the device linking page,
-    // which manages its own guest socket connection.
     if (location.pathname.startsWith('/link-device')) {
       console.log("🔗 On Linking Page: Global socket management is paused.");
       return;
@@ -141,11 +151,9 @@ const AppContent = () => {
     }
   }, [user, location.pathname]);
 
-  // 3. Sync Encryption Keys (Once per session)
+  // 3. Sync Encryption Keys
   useEffect(() => {
     const sync = async () => {
-      // Cek apakah user ada, belum disync di session ini, dan tidak sedang proses sync
-      // FIX: Jangan jalankan sync di halaman linking device
       if (user && !location.pathname.startsWith('/link-device') && sessionStorage.getItem('keys_synced') !== 'true' && !isSyncing) {
         try {
           isSyncing = true;
@@ -168,15 +176,13 @@ const AppContent = () => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(theme);
-    // Set CSS variable untuk accent color jika diperlukan oleh Tailwind/CSS
     root.style.setProperty('--color-accent', `var(--accent-${accent})`);
     root.dataset.accent = accent;
   }, [theme, accent]);
 
-  // 5. Visibility Change Handler (Fix for state drift)
+  // 5. Visibility Change Handler
   useEffect(() => {
     const handleVisibilityChange = () => {
-      // Skip reconnect/resync when on link-device route
       if (location.pathname.startsWith('/link-device')) {
         console.log("🔗 On Linking Page: Skipping visibility change handler.");
         return;
@@ -185,7 +191,6 @@ const AppContent = () => {
       if (document.visibilityState === 'visible') {
         console.log("👀 App in focus, checking connection & syncing...");
 
-        // Cek koneksi socket
         const socket = getSocket();
         if (!socket?.connected) {
           if (user) {
@@ -193,7 +198,6 @@ const AppContent = () => {
           }
         }
 
-        // Fetch data terbaru (ringan) and handle the promise to avoid unhandled rejections
         if (user) {
           useConversationStore.getState().resyncState().catch(err => {
             console.error("❌ Error during resync:", err);
@@ -203,7 +207,7 @@ const AppContent = () => {
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("focus", handleVisibilityChange); // Tambahan buat mobile
+    window.addEventListener("focus", handleVisibilityChange);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -252,145 +256,28 @@ const AppContent = () => {
       <div className="w-full h-full max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
         <Routes>
           {/* Public Routes */}
-          <Route path="/" element={
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <LandingPage />
-          </motion.div>
-        } />
-        <Route path="/login" element={
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <Login />
-          </motion.div>
-        } />
-        <Route path="/register" element={
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <Register />
-          </motion.div>
-        } />
-        <Route path="/restore" element={
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <Restore />
-          </motion.div>
-        } />
-        <Route path="/link-device" element={
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <LinkDevicePage />
-          </motion.div>
-        } />
-        <Route path="/help" element={
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <HelpPage />
-          </motion.div>
-        } />
+          <Route path="/" element={<PageWrapper><LandingPage /></PageWrapper>} />
+          <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
+          <Route path="/register" element={<PageWrapper><Register /></PageWrapper>} />
+          <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
+          <Route path="/link-device" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
+          <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
 
-        {/* Protected Routes (Butuh Login) */}
-        <Route element={<ProtectedRoute />}>
-          <Route path="/chat" element={
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <Home />
-            </motion.div>
-          } />
-          <Route path="/chat/:conversationId" element={
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <Chat />
-            </motion.div>
-          } />
+          {/* Protected Routes */}
+          <Route element={<ProtectedRoute />}>
+            <Route path="/chat" element={<PageWrapper noScroll={true}><Home /></PageWrapper>} />
+            <Route path="/chat/:conversationId" element={<PageWrapper noScroll={true}><Chat /></PageWrapper>} />
 
-          <Route path="/settings" element={
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <SettingsPage />
-            </motion.div>
-          } />
-          <Route path="/settings/keys" element={
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <KeyManagementPage />
-            </motion.div>
-          } />
-          <Route path="/settings/sessions" element={
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <SessionManagerPage />
-            </motion.div>
-          } />
-          <Route path="/settings/link-device" element={
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <DeviceScannerPage />
-            </motion.div>
-          } />
+            <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />
+            <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
+            <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
+            <Route path="/settings/link-device" element={<PageWrapper><DeviceScannerPage /></PageWrapper>} />
 
-          <Route path="/profile/:userId" element={
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <ProfilePage />
-            </motion.div>
-          } />
-        </Route>
+            <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
+          </Route>
 
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
     </>
