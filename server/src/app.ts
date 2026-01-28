@@ -199,11 +199,24 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" })); // Tambahkan limit juga disini
 app.use("/api/keys", keysRouter);
 app.use("/api/sessions", sessionsRouter);
+import crypto from "crypto";
+
+// ... imports
+
 app.post("/api/admin/cleanup", async (req, res) => {
-  // Tambahkan proteksi password sederhana pakai env variable
-  if (req.headers["x-admin-key"] !== process.env.CHAT_SECRET) {
+  const providedKey = req.headers["x-admin-key"];
+  const secretKey = process.env.CHAT_SECRET;
+
+  if (!providedKey || typeof providedKey !== 'string' || !secretKey) {
     return res.status(403).json({ error: "Forbidden" });
-  }  
+  }
+
+  const providedBuffer = Buffer.from(providedKey);
+  const secretBuffer = Buffer.from(secretKey);
+
+  if (providedBuffer.length !== secretBuffer.length || !crypto.timingSafeEqual(providedBuffer, secretBuffer)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
 });
 
 // === CSRF Protection ===
