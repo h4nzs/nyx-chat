@@ -1,148 +1,206 @@
-Content-Security-Policy: The page’s settings blocked WebAssembly (script-src) from being executed because it violates the following directive: “script-src 'self'” (Missing 'wasm-unsafe-eval' or 'unsafe-eval') index-DKpkIRYV.js:200:684539
-👤 User not authenticated, disconnecting socket... index-DKpkIRYV.js:706:3576
-GET
-http://localhost:4173/_vercel/insights/script.js
-[HTTP/1.1 404 Not Found 6ms]
-
-	
-GET
-	http://localhost:4173/_vercel/insights/script.js
-Status
-404
-Not Found
-VersionHTTP/1.1
-Transferred152 B (0 B size)
-Referrer Policystrict-origin-when-cross-origin
-DNS ResolutionSystem
-
-GET
-http://localhost:4173/_vercel/speed-insights/script.js
-[HTTP/1.1 404 Not Found 0ms]
-
-	
-GET
-	http://localhost:4173/_vercel/speed-insights/script.js
-Status
-404
-Not Found
-VersionHTTP/1.1
-Transferred152 B (0 B size)
-Referrer Policystrict-origin-when-cross-origin
-DNS ResolutionSystem
-
-Uncaught (in promise) RuntimeError: Aborted(CompileError: call to WebAssembly.instantiate() blocked by CSP). Build with -sASSERTIONS for more info.
-    Pt http://localhost:4173/assets/index-DKpkIRYV.js:200
-    _t http://localhost:4173/assets/index-DKpkIRYV.js:200
-    promise callback*kJ/r/l.ready</_t< http://localhost:4173/assets/index-DKpkIRYV.js:200
-    ready http://localhost:4173/assets/index-DKpkIRYV.js:200
-    r http://localhost:4173/assets/index-DKpkIRYV.js:200
-    kJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    kJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    kJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    NJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    NJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    NJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    <anonymous> http://localhost:4173/assets/index-DKpkIRYV.js:200
-index-DKpkIRYV.js:200:490187
-    Pt http://localhost:4173/assets/index-DKpkIRYV.js:200
-    _t http://localhost:4173/assets/index-DKpkIRYV.js:200
-    (Async: promise callback)
-    _t http://localhost:4173/assets/index-DKpkIRYV.js:200
-    ready http://localhost:4173/assets/index-DKpkIRYV.js:200
-    r http://localhost:4173/assets/index-DKpkIRYV.js:200
-    kJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    kJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    kJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    NJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    NJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    NJ http://localhost:4173/assets/index-DKpkIRYV.js:200
-    <anonymous> http://localhost:4173/assets/index-DKpkIRYV.js:200
-Loading failed for the <script> with source “http://localhost:4173/_vercel/insights/script.js”. login:1:1
-[Vercel Web Analytics] Failed to load script from /_vercel/insights/script.js. Be sure to enable Web Analytics for your project and deploy again. See https://vercel.com/docs/analytics/quickstart for more information. index-DKpkIRYV.js:195:78692
-Loading failed for the <script> with source “http://localhost:4173/_vercel/speed-insights/script.js”. login:1:1
-[Vercel Speed Insights] Failed to load script from /_vercel/speed-insights/script.js. Please check if any content blockers are enabled and try again. index-DKpkIRYV.js:195:80624
+👤 User not authenticated, disconnecting socket... index-BGTC45AI.js:706:3576
 Crypto worker loaded. crypto.worker-B5bAY6uS.js:2:9809
-Crypto worker initialized successfully. index-DKpkIRYV.js:707:4591
+Crypto worker initialized successfully. index-BGTC45AI.js:707:4591
 XHRPOST
-http://localhost:4173/api/auth/refresh
-[HTTP/1.1 401 Unauthorized 34ms]
-
-	
-POST
-	http://localhost:4173/api/auth/refresh
-Status
-401
-Unauthorized
-VersionHTTP/1.1
-Transferred1.29 kB (28 B size)
-Referrer Policystrict-origin-when-cross-origin
-DNS ResolutionSystem
+https://chat-lite-weld.vercel.app/api/auth/refresh
+[HTTP/2 401  92ms]
 
 Bootstrap error: ApiError: No refresh token
-    qw http://localhost:4173/assets/index-DKpkIRYV.js:200
-    _r http://localhost:4173/assets/index-DKpkIRYV.js:200
-    bootstrap http://localhost:4173/assets/index-DKpkIRYV.js:222
-    d0e http://localhost:4173/assets/index-DKpkIRYV.js:706
-    Vu http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Ng http://localhost:4173/assets/index-DKpkIRYV.js:8
-    tC http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Ke http://localhost:4173/assets/index-DKpkIRYV.js:1
-    PQ http://localhost:4173/assets/index-DKpkIRYV.js:1
-    PQ http://localhost:4173/assets/index-DKpkIRYV.js:1
-    OQ http://localhost:4173/assets/index-DKpkIRYV.js:1
-    UQ http://localhost:4173/assets/index-DKpkIRYV.js:1
-    HQ http://localhost:4173/assets/index-DKpkIRYV.js:9
-    <anonymous> http://localhost:4173/assets/index-DKpkIRYV.js:9
-index-DKpkIRYV.js:222:5460
-    bootstrap http://localhost:4173/assets/index-DKpkIRYV.js:222
-    d0e http://localhost:4173/assets/index-DKpkIRYV.js:706
-    Vu http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    F0 http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Oy http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Ng http://localhost:4173/assets/index-DKpkIRYV.js:8
-    tC http://localhost:4173/assets/index-DKpkIRYV.js:8
-    Ke http://localhost:4173/assets/index-DKpkIRYV.js:1
-    (Async: EventHandlerNonNull)
-    PQ http://localhost:4173/assets/index-DKpkIRYV.js:1
-    PQ http://localhost:4173/assets/index-DKpkIRYV.js:1
-    OQ http://localhost:4173/assets/index-DKpkIRYV.js:1
-    UQ http://localhost:4173/assets/index-DKpkIRYV.js:1
-    HQ http://localhost:4173/assets/index-DKpkIRYV.js:9
-    <anonymous> http://localhost:4173/assets/index-DKpkIRYV.js:9
-👤 User authenticated, connecting socket... index-DKpkIRYV.js:706:3510
-🔌 Connecting socket with token: Token Present index-DKpkIRYV.js:203:34824
-✅ Key cache successfully populated during login. index-DKpkIRYV.js:222:6197
-🔌 Connecting socket with token: Token Present index-DKpkIRYV.js:203:34824
-Libsodium initialized successfully index-DKpkIRYV.js:200:815095
-🔄 Syncing data after connection... index-DKpkIRYV.js:203:31208
-👤 User authenticated, connecting socket... index-DKpkIRYV.js:706:3510
-Pre-key bundle uploaded successfully. index-DKpkIRYV.js:222:3214
-✅ Socket connected: 2WqHiCdX0ycR5as0AAAF index-DKpkIRYV.js:203:31393
+    qw https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:200
+    _r https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:200
+    bootstrap https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:222
+    d0e https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:706
+    Vu https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Ng https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    tC https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Ke https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:1
+    PQ https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:1
+    PQ https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:1
+    OQ https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:1
+    UQ https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:1
+    HQ https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:9
+    <anonymous> https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:9
+index-BGTC45AI.js:222:5460
+👀 App in focus, checking connection & syncing... index-BGTC45AI.js:706:4442
+👤 User authenticated, connecting socket... index-BGTC45AI.js:706:3510
+🔌 Connecting socket with token: Token Present index-BGTC45AI.js:203:34869
+✅ Key cache successfully populated during login. index-BGTC45AI.js:222:6197
+🔌 Connecting socket with token: Token Present index-BGTC45AI.js:203:34869
+Libsodium initialized successfully index-BGTC45AI.js:200:815095
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/avatars/cmknvot99000113sjj60s69r8-dF-sLrkvjdoCTIBF2Hm4K.jpg because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” index-BGTC45AI.js:9:676
+👤 User authenticated, connecting socket... index-BGTC45AI.js:706:3510
+🔌 Connecting socket with token: Token Present index-BGTC45AI.js:203:34869
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/avatars/cmknvot99000113sjj60s69r8-dF-sLrkvjdoCTIBF2Hm4K.jpg because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” index-BGTC45AI.js:8:96218
+Pre-key bundle uploaded successfully. index-BGTC45AI.js:222:3214
+Source map error: Error: URL constructor:  is not a valid URL.
+Stack in the worker:resolveSourceMapURL@resource://devtools/client/shared/source-map-loader/utils/fetchSourceMap.js:56:22
+getOriginalURLs@resource://devtools/client/shared/source-map-loader/source-map.js:74:24
+workerHandler/</<@resource://devtools/client/shared/worker-utils.js:115:52
+workerHandler/<@resource://devtools/client/shared/worker-utils.js:113:13
+
+Resource URL: wasm:https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js%20line%20200%20%3E%20WebAssembly.instantiate
+Source Map URL: null
+[keychainDb] Getting group key for conversation: cmkp7dlcw001410s48ocvc45g index-BGTC45AI.js:200:819698
+[keychainDb] Key for cmkp7dlcw001410s48ocvc45g found index-BGTC45AI.js:200:819816
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/avatars/cmknvot99000113sjj60s69r8-dF-sLrkvjdoCTIBF2Hm4K.jpg because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” index-BGTC45AI.js:9:676
+👤 User authenticated, connecting socket... index-BGTC45AI.js:706:3510
+🔌 Connecting socket with token: Token Present index-BGTC45AI.js:203:34869
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/avatars/cmknvot99000113sjj60s69r8-dF-sLrkvjdoCTIBF2Hm4K.jpg because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” index-BGTC45AI.js:8:96218
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/avatars/cmknyj31k000413sjhjj9ngxp-kaUPy-B5niXfNsUSJHgiM.jpg because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” index-BGTC45AI.js:8:96218
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/avatars/cmknyj31k000413sjhjj9ngxp-kaUPy-B5niXfNsUSJHgiM.jpg because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” index-BGTC45AI.js:8:96218
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/groups/cmknvot99000113sjj60s69r8-oEqwwYypi4dmKk6mmMvOz.png?t=undefined because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” index-BGTC45AI.js:8:96218
+🔄 Syncing data after connection... index-BGTC45AI.js:203:31253
+[keychainDb] Getting group key for conversation: cmkp7dlcw001410s48ocvc45g index-BGTC45AI.js:200:819698
+[keychainDb] Key for cmkp7dlcw001410s48ocvc45g found index-BGTC45AI.js:200:819816
+✅ Socket connected: XL4PND8kTuaNv_wZAAAB index-BGTC45AI.js:203:31438
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/avatars/cmknyj31k000413sjhjj9ngxp-kaUPy-B5niXfNsUSJHgiM.jpg because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” index-BGTC45AI.js:8:96218
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/avatars/cmknyj31k000413sjhjj9ngxp-kaUPy-B5niXfNsUSJHgiM.jpg because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” index-BGTC45AI.js:8:96218
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/groups/cmknvot99000113sjj60s69r8-oEqwwYypi4dmKk6mmMvOz.png?t=undefined because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” index-BGTC45AI.js:8:96218
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/avatars/cmknyj31k000413sjhjj9ngxp-kaUPy-B5niXfNsUSJHgiM.jpg because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” index-BGTC45AI.js:8:96218
+This site appears to use a scroll-linked positioning effect. This may not work well with asynchronous panning; see https://firefox-source-docs.mozilla.org/performance/scroll-linked_effects.html for further details and to join the discussion on related tools and features! cmknyml3b000913sjkgtogee5
+Content-Security-Policy: The page’s settings blocked the loading of a resource (img-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/avatars/cmknyj31k000413sjhjj9ngxp-kaUPy-B5niXfNsUSJHgiM.jpg because it violates the following directive: “img-src 'self' data: blob: https://api.dicebear.com” 2 index-BGTC45AI.js:8:96218
+Image load/decrypt failed: TypeError: NetworkError when attempting to fetch resource.
+    yte https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:364
+    yte https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:364
+    Vu https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Ng https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    gA https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Xh https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    tC https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Vy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Jy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    sC https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    mA https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Vh https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Cb https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:9
+    flushSync https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:1
+    b https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:257
+    sL https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:257
+    Vu https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    F0 https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+    Oy https://chat-lite-weld.vercel.app/assets/index-BGTC45AI.js:8
+index-BGTC45AI.js:364:9144
+Content-Security-Policy: The page’s settings blocked the loading of a resource (connect-src) at https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev/attachments/cmknvot99000113sjj60s69r8-MttiWMiYlvtN41HcB8b2e.jpg because it violates the following directive: “connect-src 'self' http://localhost:4000 ws://localhost:4000 https://chat-lite-weld.vercel.app wss://chat-lite-weld.vercel.app https://*.koyeb.app wss://*.koyeb.app https://*.vercel-insights.com” index-BGTC45AI.js:364:8913
