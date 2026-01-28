@@ -1,21 +1,14 @@
 import express, { Express, Request, Response, NextFunction } from "express";
 
-declare global {
-  namespace Express {
-    interface Request {
-      csrfToken(): string;
-    }
-  }
-}
-
 import cookieParser from "cookie-parser";
 import logger from "morgan";
 import cors from "cors";
 import helmet from "helmet";
 import { rateLimit } from "express-rate-limit";
-import csrf from "csurf";
+import { doubleCsrf } from "csrf-csrf";
 import { env } from "./config.js";
 import path from "path";
+import crypto from "crypto";
 
 import authRouter from "./routes/auth.js";
 import usersRouter from "./routes/users.js";
@@ -199,7 +192,6 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" })); // Tambahkan limit juga disini
 app.use("/api/keys", keysRouter);
 app.use("/api/sessions", sessionsRouter);
-import crypto from "crypto";
 
 // ... imports
 
@@ -221,17 +213,26 @@ app.post("/api/admin/cleanup", async (req, res) => {
 
 // === CSRF Protection ===
 // 'lax' cocok untuk arsitektur Proxy/Rewrite (First-Party simulation)
-const csrfProtection = csrf({
-  cookie: { 
-    httpOnly: true, 
-    sameSite: "lax", 
-    secure: isProd 
-  }
+const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
+  getSecret: () => env.jwtSecret,
+  getSessionIdentifier: (req) => "api", // Stateless: relying on signed cookie matching header
+  cookieName: "x-csrf-token",
+  cookieOptions: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: isProd,
+    path: "/",
+  },
+  size: 64,
+  ignoredMethods: ["GET", "HEAD", "OPTIONS"],
+  getCsrfTokenFromRequest: (req) => req.headers["csrf-token"] as string,
 });
-app.use(csrfProtection);
+
+app.use(doubleCsrfProtection);
 
 app.get("/api/csrf-token", (req: Request, res: Response) => {
-  res.json({ csrfToken: req.csrfToken() });
+  const csrfToken = generateCsrfToken(req, res);
+  res.json({ csrfToken });
 });
 
 // === STATIC FILES (UPLOAD) ===
