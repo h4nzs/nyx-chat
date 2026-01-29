@@ -13,6 +13,7 @@ export const generalLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   skip: skipInDev,
+  validate: { trustProxy: false },
   message: {
     error: "Too many requests, please try again later."
   }
@@ -27,6 +28,7 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipInDev,
+  validate: { trustProxy: false },
   message: {
     error: "Too many login attempts. Please try again after an hour."
   }
@@ -37,6 +39,7 @@ export const authLimiter = rateLimit({
 export const uploadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 20,
+  validate: { trustProxy: false },
   message: {
     error: "Upload limit reached. Please wait a while."
   }
@@ -50,6 +53,7 @@ export const otpLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipInDev,
+  validate: { trustProxy: false },
   message: {
     error: "Too many OTP verification attempts. Please try again later."
   }
