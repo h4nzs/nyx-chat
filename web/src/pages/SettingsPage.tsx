@@ -9,7 +9,7 @@ import { usePushNotifications } from '@hooks/usePushNotifications';
 import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
-  FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft 
+  FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
@@ -265,14 +265,23 @@ export default function SettingsPage() {
 
                 {/* Info Fields */}
                 <div className="flex-1 w-full space-y-6">
+                  {/* Username (Read Only) */}
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">Codename</label>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">Username (ID)</label>
+                    <div className="w-full bg-black/5 dark:bg-white/5 text-sm font-mono text-text-primary p-4 rounded-xl flex items-center border border-transparent">
+                      <span className="text-accent mr-1">@</span>{user.username}
+                      <FiLock className="ml-auto text-text-secondary opacity-50" size={12} />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">Display Name</label>
                     <input
                       type="text"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       className="
-                        w-full bg-transparent text-2xl font-bold tracking-tight text-text-primary
+                        w-full bg-transparent text-xl font-bold tracking-tight text-text-primary
                         p-4 rounded-xl outline-none transition-all
                         shadow-neu-pressed-light dark:shadow-neu-pressed-dark
                         focus:ring-2 focus:ring-accent/50
