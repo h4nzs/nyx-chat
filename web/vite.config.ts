@@ -116,6 +116,19 @@ export default defineConfig({
       }
     }
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'ui-vendor': ['framer-motion', 'react-icons', 'clsx', 'classnames'],
+          'crypto-vendor': ['libsodium-wrappers', 'crypto-js', 'bip39', '@simplewebauthn/browser'],
+          'utils-vendor': ['lodash', 'uuid', 'axios', 'zustand'],
+        }
+      }
+    },
+    chunkSizeWarningLimit: 1000,
+  },
   test: {
     globals: true,
     environment: 'jsdom',

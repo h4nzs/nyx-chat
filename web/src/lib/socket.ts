@@ -192,7 +192,12 @@ export function getSocket() {
     socket.on('user:updated', (updatedUser) => {
       const { user, setUser } = useAuthStore.getState();
       if (user?.id === updatedUser.id) {
-        setUser({ ...user, ...updatedUser } as User);
+        // Prevent overwriting private fields (email) with undefined from public broadcast
+        const preservedUser = { ...user, ...updatedUser };
+        if (updatedUser.email === undefined && user.email) {
+           preservedUser.email = user.email;
+        }
+        setUser(preservedUser as User);
       }
       useConversationStore.getState().updateParticipantDetails(updatedUser);
       useMessageStore.getState().updateSenderDetails(updatedUser);

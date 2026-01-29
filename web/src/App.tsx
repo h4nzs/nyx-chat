@@ -1,24 +1,24 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, Suspense, lazy } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { FiLogOut, FiSettings } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { Analytics } from '@vercel/analytics/react';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 
-// Pages
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Restore from './pages/Restore';
-import Chat from './pages/Chat';
-import SettingsPage from './pages/SettingsPage';
-import KeyManagementPage from './pages/KeyManagementPage';
-import SessionManagerPage from './pages/SessionManagerPage';
-import LinkDevicePage from './pages/LinkDevicePage';
-import DeviceScannerPage from './pages/DeviceScannerPage';
-import ProfilePage from './pages/ProfilePage';
-import LandingPage from './pages/LandingPage';
-import HelpPage from './pages/HelpPage'; 
+// Lazy Loaded Pages
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const Restore = lazy(() => import('./pages/Restore'));
+const Chat = lazy(() => import('./pages/Chat'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const KeyManagementPage = lazy(() => import('./pages/KeyManagementPage'));
+const SessionManagerPage = lazy(() => import('./pages/SessionManagerPage'));
+const LinkDevicePage = lazy(() => import('./pages/LinkDevicePage'));
+const DeviceScannerPage = lazy(() => import('./pages/DeviceScannerPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const HelpPage = lazy(() => import('./pages/HelpPage'));
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -28,6 +28,7 @@ import PasswordPromptModal from './components/PasswordPromptModal';
 import ChatInfoModal from './components/ChatInfoModal';
 import DynamicIsland from './components/DynamicIsland';
 import CommandPalette from './components/CommandPalette';
+import { Spinner } from './components/Spinner';
 
 // Stores & Hooks
 import { useAuthStore } from './store/auth';
@@ -48,6 +49,12 @@ getSocket();
 
 // --- Components ---
 
+const LoadingScreen = () => (
+  <div className="w-full h-screen flex items-center justify-center bg-bg-main">
+    <Spinner size="lg" />
+  </div>
+);
+
 const Home = () => {
   const { conversations, loading } = useConversationStore(state => ({
     conversations: state.conversations,
@@ -55,11 +62,7 @@ const Home = () => {
   }));
 
   if (loading) {
-    return (
-      <div className="w-screen h-screen flex items-center justify-center bg-bg-base text-text-primary">
-        <p>Loading conversations...</p>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   // Jika user punya percakapan, redirect ke yang paling terakhir/pertama
@@ -254,31 +257,33 @@ const AppContent = () => {
       <DynamicIsland />
 
       <div className="w-full h-full max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<PageWrapper><LandingPage /></PageWrapper>} />
-          <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
-          <Route path="/register" element={<PageWrapper><Register /></PageWrapper>} />
-          <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
-          <Route path="/link-device" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
-          <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
+        <Suspense fallback={<LoadingScreen />}>
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/" element={<PageWrapper><LandingPage /></PageWrapper>} />
+            <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
+            <Route path="/register" element={<PageWrapper><Register /></PageWrapper>} />
+            <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
+            <Route path="/link-device" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
+            <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
 
-          {/* Protected Routes */}
-          <Route element={<ProtectedRoute />}>
-            <Route path="/chat" element={<PageWrapper noScroll={true}><Home /></PageWrapper>} />
-            <Route path="/chat/:conversationId" element={<PageWrapper noScroll={true}><Chat /></PageWrapper>} />
+            {/* Protected Routes */}
+            <Route element={<ProtectedRoute />}>
+              <Route path="/chat" element={<PageWrapper noScroll={true}><Home /></PageWrapper>} />
+              <Route path="/chat/:conversationId" element={<PageWrapper noScroll={true}><Chat /></PageWrapper>} />
 
-            <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />
-            <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
-            <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
-            <Route path="/settings/link-device" element={<PageWrapper><DeviceScannerPage /></PageWrapper>} />
+              <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />
+              <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
+              <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
+              <Route path="/settings/link-device" element={<PageWrapper><DeviceScannerPage /></PageWrapper>} />
 
-            <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
-          </Route>
+              <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
+            </Route>
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </div>
     </>
   );

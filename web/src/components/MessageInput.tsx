@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, ChangeEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
@@ -197,12 +197,14 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
       {/* Emoji Picker Popover */}
       {showEmojiPicker && (
         <div ref={emojiPickerRef} className="absolute bottom-24 left-4 z-50 shadow-2xl rounded-xl overflow-hidden">
-          <EmojiPicker
-            onEmojiClick={handleEmojiClick}
-            autoFocusSearch={false}
-            lazyLoadEmojis={true}
-            theme={theme as any}
-          />
+          <Suspense fallback={<div className="w-[350px] h-[450px] bg-bg-surface flex items-center justify-center text-text-secondary">Loading Emojis...</div>}>
+            <EmojiPicker
+              onEmojiClick={handleEmojiClick}
+              autoFocusSearch={false}
+              lazyLoadEmojis={true}
+              theme={theme as any}
+            />
+          </Suspense>
         </div>
       )}
 
