@@ -251,6 +251,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               type="button" 
               onClick={() => fileInputRef.current?.click()} 
               disabled={isInputDisabled}
+              aria-label="Attach file"
               className="
                 p-3 rounded-full text-text-secondary
                 shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm
@@ -263,6 +264,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               type="button" 
               onClick={() => setShowEmojiPicker(!showEmojiPicker)} 
               disabled={isInputDisabled}
+              aria-label="Insert emoji"
               className="
                 p-3 rounded-full text-text-secondary
                 shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm
@@ -282,6 +284,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               value={text}
               onChange={handleTextChange}
               disabled={isInputDisabled}
+              aria-label="Message text"
               placeholder={isConnected ? "Type a message..." : "Connection Lost"}
               className="
                 w-full h-12 px-6 rounded-full
@@ -299,6 +302,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
              <button
               type="submit"
               disabled={isInputDisabled}
+              aria-label="Send message"
               className="
                 p-3 rounded-full bg-accent text-white
                 shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm
@@ -312,6 +316,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               type="button"
               onClick={handleStartRecording}
               disabled={isInputDisabled}
+              aria-label="Record voice message"
               className="
                 p-3 rounded-full text-text-secondary
                 shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm

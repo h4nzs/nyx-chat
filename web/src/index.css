@@ -40,7 +40,7 @@
     --ring: 217 91% 60%;         /* Blue 500 */
 
     --text-primary: 222 47% 11%;   /* Slate 900 */
-    --text-secondary: 215 25% 50%; /* Slate 500 - Darker for contrast */
+    --text-secondary: 215 25% 45%; /* Slate 500 - Darker for contrast (was 50%) */
 
     --primary: 222 47% 11%;
     --primary-foreground: 210 40% 98%;

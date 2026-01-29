@@ -74,14 +74,14 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
         <button 
           onClick={onMenuClick} 
           aria-label="Menu" 
-          className="md:hidden p-2 text-text-secondary active:scale-95 transition-transform"
+          className="md:hidden p-3 text-text-secondary active:scale-95 transition-transform"
         >
           <FiMoreHorizontal size={24} />
         </button>
         <button 
           onClick={onBack} 
           aria-label="Back" 
-          className="hidden md:block p-2 text-text-secondary hover:text-accent active:scale-95 transition-transform"
+          className="hidden md:block p-3 text-text-secondary hover:text-accent active:scale-95 transition-transform"
         >
           <FiArrowLeft size={20} />
         </button>

@@ -127,9 +127,13 @@ const ChatPreview = () => {
           <input
             type="text"
             placeholder="Type a message..."
+            aria-label="Type a demo message"
             className="flex-1 bg-bg-main rounded-l-lg px-4 py-2 shadow-[inset_2px_2px_4px_rgba(0,0,0,0.2),inset_-2px_-2px_4px_rgba(255,255,255,0.1)] focus:outline-none focus:ring-1 focus:ring-accent"
           />
-          <button className="bg-accent text-white px-4 py-2 rounded-r-lg shadow-[2px_2px_4px_rgba(0,0,0,0.2),-2px_-2px_4px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_2px_rgba(0,0,0,0.2)] transition-all">
+          <button 
+            aria-label="Send demo message"
+            className="bg-accent text-white px-4 py-2 rounded-r-lg shadow-[2px_2px_4px_rgba(0,0,0,0.2),-2px_-2px_4px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_2px_rgba(0,0,0,0.2)] transition-all"
+          >
             <FiArrowRight />
           </button>
         </div>
@@ -161,6 +165,38 @@ const TestimonialCard = ({ children, author, role }: { children: ReactNode; auth
     <p className="font-bold text-accent">{author}</p>
     <p className="text-sm text-text-secondary">{role}</p>
   </motion.div>
+);
+
+const FAQSection = () => (
+  <section className="py-16 md:py-24">
+    <AnimatedSection>
+      <div className="max-w-3xl mx-auto px-4">
+        <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">FREQUENTLY ASKED QUESTIONS</motion.h2>
+        <div className="space-y-4">
+          {[
+            { q: "Is Chat Lite end-to-end encrypted?", a: "Yes. We use the Signal Protocol (Double Ratchet Algorithm) to ensure that only you and the person you're communicating with can read what's sent. Not even the server can decrypt your messages." },
+            { q: "Do I need to install an app?", a: "No. Chat Lite is a Progressive Web App (PWA). You can use it directly in your browser or install it to your home screen for a native-like experience without the app store friction." },
+            { q: "Is it completely free?", a: "Yes, Chat Lite is open-source and free to use. There are no hidden fees, ads, or data tracking." },
+            { q: "How do I recover my account?", a: "When you sign up, you receive a 24-word recovery phrase. This is the ONLY way to restore your keys and messages on a new device. We do not store this phrase." }
+          ].map((item, i) => (
+            <motion.div variants={itemVariants} key={i} className="bg-bg-surface rounded-lg shadow-[4px_4px_8px_rgba(0,0,0,0.1),-4px_-4px_8px_rgba(255,255,255,0.05)] overflow-hidden">
+              <details className="group">
+                <summary className="flex justify-between items-center font-bold cursor-pointer list-none p-6 text-text-primary hover:text-accent transition-colors">
+                  <span>{item.q}</span>
+                  <span className="transition group-open:rotate-180">
+                    <svg fill="none" height="24" shapeRendering="geometricPrecision" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
+                  </span>
+                </summary>
+                <div className="text-text-secondary px-6 pb-6 pt-0 leading-relaxed">
+                  {item.a}
+                </div>
+              </details>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </AnimatedSection>
+  </section>
 );
 
 export default function LandingPage() {
@@ -341,6 +377,9 @@ export default function LandingPage() {
             </div>
           </AnimatedSection>
         </section>
+
+        {/* FAQ Section */}
+        <FAQSection />
 
         {/* Final CTA Section */}
         <section className="py-16 md:py-24">
