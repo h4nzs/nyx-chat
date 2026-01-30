@@ -198,11 +198,34 @@ router.post("/:messageId/reactions", async (req, res, next) => {
     const userId = req.user.id;
     if (!emoji) return res.status(400).json({ error: "Emoji is required." });
 
-    const message = await prisma.message.findUnique({ where: { id: messageId }, select: { conversationId: true } });
+    const message = await prisma.message.findUnique({ 
+      where: { id: messageId }, 
+      select: { conversationId: true, senderId: true } 
+    });
     if (!message) return res.status(404).json({ error: "Message not found." });
+
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: message.conversationId },
+      select: { isGroup: true }
+    });
 
     const participant = await prisma.participant.findFirst({ where: { userId, conversationId: message.conversationId } });
     if (!participant) return res.status(403).json({ error: "You are not a participant of this conversation." });
+
+    // BLOCKING CHECK
+    if (conversation && !conversation.isGroup && message.senderId !== userId) {
+      const isBlocked = await prisma.blockedUser.findFirst({
+        where: {
+          OR: [
+            { blockerId: userId, blockedId: message.senderId },
+            { blockerId: message.senderId, blockedId: userId }
+          ]
+        }
+      });
+      if (isBlocked) {
+        return res.status(403).json({ error: "Interaction restricted due to blocking." });
+      }
+    }
 
     const newReaction = await prisma.messageReaction.create({
       data: { messageId, emoji, userId },

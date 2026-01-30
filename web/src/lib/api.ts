@@ -69,6 +69,7 @@ export async function api<T = any>(
   }
 
   const res = await fetch(API_URL + path, {
+    cache: 'no-store', // Disable browser caching
     ...options,
     credentials: "include", // Penting untuk kirim Cookie (RefreshToken/Session)
     headers,

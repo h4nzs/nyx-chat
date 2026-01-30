@@ -255,6 +255,15 @@ app.use("/uploads",
   })
 );
 
+// === DISABLE CACHING FOR API ===
+app.use("/api", (req, res, next) => {
+  res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.set("Pragma", "no-cache");
+  res.set("Expires", "0");
+  res.set("Surrogate-Control", "no-store");
+  next();
+});
+
 // === ROUTES ===
 app.use("/api/auth", authRouter);
 app.use("/api/users", usersRouter);
