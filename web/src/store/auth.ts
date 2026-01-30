@@ -447,8 +447,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         method: 'PUT',
         body: JSON.stringify(data),
       });
-      set({ user: updatedUser });
-      localStorage.setItem("user", JSON.stringify(updatedUser));
+      set(state => {
+        const newUser = { ...state.user!, ...updatedUser };
+        localStorage.setItem("user", JSON.stringify(newUser));
+        return { user: newUser };
+      });
       toast.success('Profile updated!');
     },
 

@@ -1,105 +1,31 @@
-XHRPUT
-https://chat-lite-weld.vercel.app/api/users/me
-[HTTP/2 522  20048ms]
+👤 User not authenticated, disconnecting socket... index-CKS0FFkj.js:286:8556
+Crypto worker loaded. crypto.worker-B5bAY6uS.js:2:9809
+Crypto worker initialized successfully. index-CKS0FFkj.js:287:4582
+👤 User authenticated, connecting socket... index-CKS0FFkj.js:286:8490
+🔌 Connecting socket with token: Token Present 2 index-CKS0FFkj.js:189:33180
+🔄 Syncing data after connection... index-CKS0FFkj.js:189:29506
+Libsodium initialized successfully index-CKS0FFkj.js:186:69188
+[keychainDb] Getting group key for conversation: cmkp7dlcw001410s48ocvc45g index-CKS0FFkj.js:186:73791
+[keychainDb] Key for cmkp7dlcw001410s48ocvc45g found index-CKS0FFkj.js:186:73909
+✅ Socket connected: 2Ong9OegJ6H08G-UAAAB index-CKS0FFkj.js:189:29691
+👀 App in focus, checking connection & syncing... index-CKS0FFkj.js:286:9421
+👤 User authenticated, connecting socket... index-CKS0FFkj.js:286:8490
+✅ Key cache successfully populated during login. index-CKS0FFkj.js:208:6197
+👤 User authenticated, connecting socket... index-CKS0FFkj.js:286:8490
+Pre-key bundle uploaded successfully. index-CKS0FFkj.js:208:3214
+👤 User authenticated, connecting socket... index-CKS0FFkj.js:286:8490
+This site appears to use a scroll-linked positioning effect. This may not work well with asynchronous panning; see https://firefox-source-docs.mozilla.org/performance/scroll-linked_effects.html for further details and to join the discussion on related tools and features! cmknyml3b000913sjkgtogee5
+Source map error: Error: URL constructor:  is not a valid URL.
+Stack in the worker:resolveSourceMapURL@resource://devtools/client/shared/source-map-loader/utils/fetchSourceMap.js:56:22
+getOriginalURLs@resource://devtools/client/shared/source-map-loader/source-map.js:74:24
+workerHandler/</<@resource://devtools/client/shared/worker-utils.js:115:52
+workerHandler/<@resource://devtools/client/shared/worker-utils.js:113:13
 
-	
-PUT
-	https://chat-lite-weld.vercel.app/api/users/me
-Status
-522
-VersionHTTP/2
-Transferred451.30 kB (450.77 kB size)
-Referrer Policystrict-origin-when-cross-origin
-Request PriorityHighest
-DNS ResolutionSystem
-
-	
-cache-control
-	private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0
-cf-ray
-	9c57f17ee9492035-SIN
-content-length
-	450771
-content-type
-	text/html; charset=UTF-8
-date
-	Thu, 29 Jan 2026 10:11:23 GMT
-expires
-	Thu, 01 Jan 1970 00:00:01 GMT
-referrer-policy
-	same-origin
-server
-	Vercel
-strict-transport-security
-	max-age=63072000; includeSubDomains; preload
-X-Firefox-Spdy
-	h2
-x-frame-options
-	SAMEORIGIN
-x-vercel-cache
-	MISS
-x-vercel-id
-	sin1::x2tw9-1769681464118-35b4ac1c7f0c
-	
-Accept
-	*/*
-Accept-Encoding
-	gzip, deflate, br, zstd
-Accept-Language
-	en-US,en;q=0.5
-Connection
-	keep-alive
-Content-Length
-	44
-Content-Type
-	application/json
-Cookie
-	_csrf=94-ksXAumDBmgkZ52g-J6eUI; x-csrf-token=f79463dac126bc9b51459e32cc5674492863933f4f2d60affa23b53daf404fec.70fddee8e8d8f141d822a68275c61837930afe5dbe0a7ac158bb2e35e7ef5d1e52bc5447e6a38dce4edcbd104474aa6dfaed364046055a1ad992b087f7e36ad4; at=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImNta252b3Q5OTAwMDExM3NqajYwczY5cjgiLCJlbWFpbCI6InNha3VyYWFtYWRhNTlAZ21haWwuY29tIiwidXNlcm5hbWUiOiJzYWt1cmEiLCJpYXQiOjE3Njk2ODEyMzQsImV4cCI6MTc2OTY4MjEzNH0.14FIA39P1CS_-of234WetT6f2KXP631RlZ9cs59XkLw; rt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbWtudm90OTkwMDAxMTNzamo2MHM2OXI4IiwianRpIjoiYTY5YWEwMzAtMjdkZS00ZjNhLWI0YjAtMjg4NzQwZjMzMGE1IiwiaWF0IjoxNzY5NjgxMjM0LCJleHAiOjE3NzIyNzMyMzR9.C0KdMcFPUB7FY_jxtQBDJVnRi-AHC8LF2-BnhinPdAg
-CSRF-Token
-	f79463dac126bc9b51459e32cc5674492863933f4f2d60affa23b53daf404fec.70fddee8e8d8f141d822a68275c61837930afe5dbe0a7ac158bb2e35e7ef5d1e52bc5447e6a38dce4edcbd104474aa6dfaed364046055a1ad992b087f7e36ad4
-Host
-	chat-lite-weld.vercel.app
-Origin
-	https://chat-lite-weld.vercel.app
-Priority
-	u=0
-Referer
-	https://chat-lite-weld.vercel.app/settings
-Sec-Fetch-Dest
-	empty
-Sec-Fetch-Mode
-	cors
-Sec-Fetch-Site
-	same-origin
-Sec-GPC
-	1
-TE
-	trailers
-User-Agent
-	Mozilla/5.0 (X11; Linux x86_64; rv:146.0) Gecko/20100101 Firefox/146.0
-Uncaught (in promise) SyntaxError: JSON.parse: unexpected character at line 1 column 2 of the JSON data
-    G https://chat-lite-weld.vercel.app/assets/SettingsPage-C4QeGn1W.js:23
-    M0 https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:9
-    Hu https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:9
-    zf https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:9
-    Hu https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:9
-    ec https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:10
-    hm https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:10
-    k0 https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:9
-    ju https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:9
-    qu https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:9
-    qu https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:9
-    createRoot https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:10
-    <anonymous> https://chat-lite-weld.vercel.app/assets/index-CKS0FFkj.js:287
-SettingsPage-C4QeGn1W.js:23:1309
-
-ValidationError: The Express 'trust proxy' setting is true, which allows anyone to trivially bypass IP-based rate limiting. See https://express-rate-limit.github.io/ERR_ERL_PERMISSIVE_TRUST_PROXY/ for more information.
-    at Object.trustProxy (file:///app/node_modules/.pnpm/express-rate-limit@7.5.1_express@4.21.2/node_modules/express-rate-limit/dist/index.mjs:139:13)
-    at wrappedValidations.<computed> [as trustProxy] (file:///app/node_modules/.pnpm/express-rate-limit@7.5.1_express@4.21.2/node_modules/express-rate-limit/dist/index.mjs:369:22)
-    at Object.keyGenerator (file:///app/node_modules/.pnpm/express-rate-limit@7.5.1_express@4.21.2/node_modules/express-rate-limit/dist/index.mjs:629:20)
-    at file:///app/node_modules/.pnpm/express-rate-limit@7.5.1_express@4.21.2/node_modules/express-rate-limit/dist/index.mjs:682:32
-    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
-    at async file:///app/node_modules/.pnpm/express-rate-limit@7.5.1_express@4.21.2/node_modules/express-rate-limit/dist/index.mjs:663:5 {
-  code: 'ERR_ERL_PERMISSIVE_TRUST_PROXY',
-  help: 'https://express-rate-limit.github.io/ERR_ERL_PERMISSIVE_TRUST_PROXY/'
-}
+Resource URL: wasm:https://chat-lite-weld.vercel.app/assets/crypto-vendor-CbU2VErz.js%20line%201%20%3E%20WebAssembly.instantiate
+Source Map URL: null
+👀 App in focus, checking connection & syncing... index-CKS0FFkj.js:286:9421
+Adding optimistic message: 
+Object { id: "temp-1769757235146", tempId: 1769757235146, conversationId: "cmknyml3b000913sjkgtogee5", senderId: "cmknvot99000113sjj60s69r8", sender: {…}, createdAt: "2026-01-30T07:13:55.146Z", optimistic: true, fileUrl: "blob:https://chat-lite-weld.vercel.app/4d35ee43-9af6-4224-91ba-65add234e099", fileName: "voice-message.webm", fileType: "audio/webm", … }
+index-CKS0FFkj.js:189:16013
+Content-Security-Policy: The page’s settings blocked the loading of a resource (media-src) at blob:https://chat-lite-weld.vercel.app/4d35ee43-9af6-4224-91ba-65add234e099 because it violates the following directive: “media-src 'self' https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev” index-CKS0FFkj.js:10:673
+Content-Security-Policy: The page’s settings blocked the loading of a resource (connect-src) at https://chat-uploads.671c89ebedc700a07fdade45a9b3867f.r2.cloudflarestorage.com/attachments/cmknvot99000113sjj60s69r8-tfxw0le-aXtMEHsEUy3W2.webm?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=a956bd0b7f80cab6b2e4dce078d5bca4%2F20260130%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20260130T071355Z&X-Amz-Expires=300&X-Amz-Signature=9a918d8149913900c40cd038c7eb76cfaded8f1f2d2540e8f1834db1bc0cfd17&X-Amz-SignedHeaders=host&x-amz-checksum-crc32=AAAAAA%3D%3D&x-amz-sdk-checksum-algorithm=CRC32&x-id=PutObject because it violates the following directive: “connect-src 'self' http://localhost:4000 ws://localhost:4000 https://chat-lite-weld.vercel.app wss://chat-lite-weld.vercel.app https://*.koyeb.app wss://*.koyeb.app https://*.vercel-insights.com https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev” index-CKS0FFkj.js:189:35151
