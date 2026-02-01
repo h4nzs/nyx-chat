@@ -46,7 +46,7 @@ const UserProfile = () => {
           <img 
             src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} 
             alt="Avatar" 
-            className="w-10 h-10 rounded-full object-cover shadow-neumorphic-convex border-2 border-bg-surface" 
+            className="w-10 h-10 rounded-full object-cover shadow-neu-flat dark:shadow-neu-flat-dark border-2 border-bg-main" 
           />
           <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border border-bg-surface"></div>
         </div>
@@ -94,8 +94,8 @@ const SearchResults = ({ results, onSelect }: { results: User[], onSelect: (user
         onClick={() => onSelect(user.id)}
         className="
           w-[calc(100%-32px)] mx-4 mb-3 p-3 flex items-center gap-4 rounded-xl text-left
-          bg-bg-surface transition-all
-          shadow-neumorphic-convex hover:shadow-neumorphic-convex-sm
+          bg-bg-main transition-all
+          shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5
         "
       >
         <img src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
@@ -150,8 +150,8 @@ const ConversationItem = ({ conversation, meId, presence, blockedUserIds, blockU
       className={clsx(
         'relative mx-4 my-3 rounded-2xl p-1 transition-all duration-200 select-none group',
         isActive 
-          ? 'bg-bg-surface shadow-neumorphic-pressed' 
-          : 'bg-bg-surface shadow-neumorphic-convex hover:-translate-y-0.5'
+          ? 'bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark border border-transparent' 
+          : 'bg-bg-main shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5 hover:-translate-y-0.5'
       )}
     >
       <div className="w-full text-left p-3 pr-8 flex items-center gap-4 cursor-pointer rounded-xl" onClick={onClick}>
@@ -250,8 +250,9 @@ const ConversationItem = ({ conversation, meId, presence, blockedUserIds, blockU
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content sideOffset={5} align="end" className="
-              min-w-[160px] bg-bg-surface 
-              rounded-xl shadow-neumorphic-convex
+              min-w-[160px] bg-bg-main 
+              rounded-xl shadow-neu-float dark:shadow-neu-float-dark
+              border border-white/50 dark:border-white/5
               p-1.5 z-50
             ">
               <DropdownMenu.Item
@@ -360,7 +361,7 @@ export default function ChatList() {
             className="
               w-full h-12 pl-12 pr-12 rounded-full
               bg-bg-main text-text-primary font-medium
-              shadow-neumorphic-concave
+              shadow-neu-pressed dark:shadow-neu-pressed-dark
               focus:ring-2 focus:ring-accent/50 outline-none
               transition-all placeholder:text-text-secondary/50
             "

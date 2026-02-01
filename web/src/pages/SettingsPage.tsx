@@ -24,31 +24,26 @@ const RockerSwitch = ({ checked, onChange, disabled, label }: { checked: boolean
     onClick={disabled ? undefined : onChange}
     disabled={disabled}
     className={`
-      relative group flex items-center justify-between w-full p-4 rounded-xl transition-all duration-300
-      ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer active:scale-[0.99]'}
-      ${checked ? 'shadow-neu-pressed-light dark:shadow-neu-pressed-dark' : 'shadow-neu-flat-light dark:shadow-neu-flat-dark'}
+      group flex items-center justify-between w-full p-3 rounded-lg transition-all
+      hover:bg-accent/5 active:scale-[0.99]
+      ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
     `}
     role="switch"
     aria-checked={checked}
   >
-    <div className="flex flex-col items-start">
-      <span className="font-bold text-sm tracking-wide text-text-primary uppercase">{label}</span>
-      <span className={`text-[10px] font-mono mt-1 ${checked ? 'text-accent' : 'text-text-secondary'}`}>
-        {checked ? 'ACTIVE' : 'STANDBY'}
-      </span>
-    </div>
+    <span className="font-bold text-sm tracking-wide text-text-primary uppercase">{label}</span>
     
-    {/* Physical Switch Visual */}
+    {/* The Track */}
     <div className={`
-      relative w-14 h-8 rounded-lg transition-all duration-300 overflow-hidden
-      ${checked ? 'bg-bg-main' : 'bg-bg-main'}
-      shadow-inner
+      w-12 h-6 rounded-full transition-colors duration-300 flex items-center px-1
+      shadow-neu-pressed dark:shadow-neu-pressed-dark
+      ${checked ? 'bg-accent/10' : 'bg-transparent'}
     `}>
+      {/* The Knob */}
       <div className={`
-        absolute top-1 bottom-1 w-6 rounded-md transition-all duration-300 shadow-md
-        ${checked 
-          ? 'right-1 bg-accent shadow-[0_0_10px_rgba(var(--accent),0.5)]' 
-          : 'left-1 bg-text-secondary/20'}
+        w-4 h-4 rounded-full shadow-neu-flat dark:shadow-neu-flat-dark bg-bg-main
+        transform transition-transform duration-300
+        ${checked ? 'translate-x-6 bg-accent' : 'translate-x-0'}
       `} />
     </div>
   </button>
@@ -56,17 +51,29 @@ const RockerSwitch = ({ checked, onChange, disabled, label }: { checked: boolean
 
 const ControlModule = ({ title, children, className = '', icon: Icon }: { title: string; children: React.ReactNode; className?: string; icon?: any }) => (
   <div className={`
-    bg-bg-main rounded-3xl p-6 relative overflow-hidden
-    shadow-neu-flat-light dark:shadow-neu-flat-dark
-    border border-white/20 dark:border-black/20
+    relative bg-bg-main rounded-xl p-6 overflow-hidden
+    shadow-neu-flat dark:shadow-neu-flat-dark
+    border-t border-white/40 dark:border-white/5
     ${className}
   `}>
-    <div className="flex items-center gap-3 mb-6 opacity-70">
-      {Icon && <Icon className="text-accent" />}
+    {/* VISUAL ANCHORS (The "Rivets") */}
+    <div className="absolute top-3 left-3 w-1.5 h-1.5 rounded-full bg-text-secondary/20 shadow-neu-pressed dark:shadow-neu-pressed-dark" />
+    <div className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full bg-text-secondary/20 shadow-neu-pressed dark:shadow-neu-pressed-dark" />
+    <div className="absolute bottom-3 left-3 w-1.5 h-1.5 rounded-full bg-text-secondary/20 shadow-neu-pressed dark:shadow-neu-pressed-dark" />
+    <div className="absolute bottom-3 right-3 w-1.5 h-1.5 rounded-full bg-text-secondary/20 shadow-neu-pressed dark:shadow-neu-pressed-dark" />
+
+    {/* Header with "Groove" line */}
+    <div className="flex items-center gap-4 mb-6 pl-2">
+      <div className="p-2 rounded-lg bg-bg-main shadow-neu-icon dark:shadow-neu-icon-dark text-accent">
+        {Icon && <Icon size={16} />}
+      </div>
       <h3 className="text-xs font-black tracking-[0.2em] uppercase text-text-secondary">{title}</h3>
-      <div className="h-[1px] flex-1 bg-text-secondary/20"></div>
+      <div className="h-[2px] flex-1 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark rounded-full"></div>
     </div>
-    {children}
+    
+    <div className="relative z-10 pl-2 pr-2">
+      {children}
+    </div>
   </div>
 );
 
@@ -76,8 +83,8 @@ const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?
     className={`
       w-full flex items-center justify-between p-4 rounded-xl transition-all duration-200
       bg-bg-main
-      shadow-neu-flat-light dark:shadow-neu-flat-dark
-      hover:text-accent active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark active:scale-[0.98]
+      shadow-neu-flat dark:shadow-neu-flat-dark
+      hover:text-accent active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark active:scale-[0.98]
       ${danger ? 'text-red-500 hover:text-red-600' : 'text-text-primary'}
     `}
   >
@@ -228,7 +235,7 @@ export default function SettingsPage() {
       </header>
 
       {/* BENTO GRID LAYOUT */}
-      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8">
+      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-12 gap-4">
         
         {/* 1. IDENTITY SLOT (Profile) */}
         <div className="col-span-1 md:col-span-12 lg:col-span-8">

@@ -65,8 +65,8 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   return (
     <div className="
       flex items-center justify-between px-4 py-3 z-30
-      bg-bg-surface
-      shadow-neumorphic-convex
+      bg-bg-main
+      shadow-neu-flat dark:shadow-neu-flat-dark
       relative
     ">
       <div className="flex items-center gap-4">
@@ -92,7 +92,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
           className="group flex items-center gap-3 p-1 pr-4 rounded-xl transition-all"
         >
           <div className="relative">
-             <div className="w-10 h-10 rounded-full shadow-neumorphic-convex-sm border-2 border-bg-surface p-0.5">
+             <div className="w-10 h-10 rounded-full shadow-neu-pressed dark:shadow-neu-pressed-dark border-2 border-bg-main p-0.5">
                 <img
                   src={toAbsoluteUrl(avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${title}`}
                   alt="ID"
@@ -121,9 +121,9 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
           onClick={openChatInfoModal} 
           className="
             flex items-center justify-center w-9 h-9 rounded-full 
-            bg-bg-surface text-text-secondary
-            shadow-neumorphic-convex hover:text-accent
-            active:shadow-neumorphic-pressed transition-all duration-200
+            bg-bg-main text-text-secondary
+            shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent
+            active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all duration-200
           "
         >
           {conversation.isGroup ? <FiUsers size={18} /> : <FiInfo size={18} />}
@@ -238,7 +238,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
               />
               
               {/* Main Display Screen */}
-              <div className="flex-1 min-h-0 relative z-0 shadow-neumorphic-concave-sm md:shadow-neumorphic-concave mx-2 md:mx-4 my-2 rounded-2xl bg-bg-main overflow-hidden">
+              <div className="flex-1 min-h-0 relative z-0 shadow-neu-pressed dark:shadow-neu-pressed-dark mx-2 md:mx-4 my-2 rounded-2xl bg-bg-main overflow-hidden">
                 <div className="h-full px-4 md:px-6 pt-6 pb-2">
                   <Virtuoso
                     ref={virtuosoRef}

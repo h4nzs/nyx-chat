@@ -92,8 +92,8 @@ const ModalBase: React.FC<ModalBaseProps> = ({ isOpen, onClose, title, children,
                   group
                   p-2 rounded-full 
                   text-text-secondary 
-                  shadow-neu-flat-light dark:shadow-neu-flat-dark
-                  active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                  shadow-neu-flat dark:shadow-neu-flat-dark
+                  active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark
                   hover:text-red-500
                   transition-all duration-200
                 "

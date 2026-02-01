@@ -180,8 +180,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
 
   return (
     <div className="
-      p-4 bg-bg-surface 
-      shadow-neumorphic-convex
+      p-4 bg-bg-main border-t border-white/10
       z-20 relative
     ">
       {/* Previews Stack */}
@@ -235,7 +234,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
           >
              <FiSquare fill="currentColor" size={20} />
           </button>
-          <div className="flex-1 bg-bg-main shadow-neumorphic-concave rounded-full h-12 flex items-center px-6 gap-3">
+          <div className="flex-1 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark rounded-full h-12 flex items-center px-6 gap-3">
              <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_red]"></div>
              <span className="font-mono text-lg text-text-primary tracking-widest">
                 {new Date(recordingTime * 1000).toISOString().substr(14, 5)}
@@ -244,23 +243,27 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
           </div>
         </div>
       ) : (
-        // Text Input Mode
-        <form onSubmit={handleSubmit} className="flex items-center gap-3">
+        // Text Input Mode - TRENCH DESIGN
+        <form onSubmit={handleSubmit} className="
+          relative flex items-center gap-2 p-2 rounded-2xl
+          bg-bg-main w-full
+          shadow-neu-pressed dark:shadow-neu-pressed-dark
+        ">
           
           {/* Action Buttons (Left) */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <button 
               type="button" 
               onClick={() => fileInputRef.current?.click()} 
               disabled={isInputDisabled}
               aria-label="Attach file"
               className="
-                p-3 rounded-full text-text-secondary
-                shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm
-                hover:text-accent transition-all
+                p-3 rounded-xl text-text-secondary transition-all
+                hover:text-accent active:scale-95
+                shadow-neu-icon dark:shadow-neu-icon-dark
               "
             >
-              <FiPaperclip size={20} />
+              <FiPaperclip size={18} />
             </button>
             <button 
               type="button" 
@@ -268,12 +271,12 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               disabled={isInputDisabled}
               aria-label="Insert emoji"
               className="
-                p-3 rounded-full text-text-secondary
-                shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm
-                hover:text-yellow-500 transition-all
+                p-3 rounded-xl text-text-secondary transition-all
+                hover:text-yellow-500 active:scale-95
+                shadow-neu-icon dark:shadow-neu-icon-dark
               "
             >
-              <FiSmile size={20} />
+              <FiSmile size={18} />
             </button>
           </div>
 
@@ -287,14 +290,11 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               onChange={handleTextChange}
               disabled={isInputDisabled}
               aria-label="Message text"
-              placeholder={isConnected ? "Type a message..." : "Connection Lost"}
+              placeholder={isConnected ? "Transmit secure message..." : "Connection Lost"}
               className="
-                w-full h-12 px-6 rounded-full
-                bg-bg-main text-text-primary font-medium
-                shadow-neumorphic-concave
-                focus:ring-2 focus:ring-accent/50 focus:shadow-none
-                outline-none transition-all
-                placeholder:text-text-secondary/40
+                w-full bg-transparent border-none outline-none 
+                text-text-primary placeholder:text-text-secondary/50
+                h-10 px-2 font-medium
               "
             />
           </div>
@@ -306,12 +306,12 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               disabled={isInputDisabled}
               aria-label="Send message"
               className="
-                p-3 rounded-full bg-accent text-white
-                shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm
-                hover:scale-105 active:scale-95 transition-all
+                p-3 rounded-xl bg-accent text-white
+                shadow-neu-flat dark:shadow-neu-flat-dark
+                hover:-translate-y-0.5 active:translate-y-0 transition-all
               "
              >
-               <FiSend size={20} className={hasText ? 'translate-x-0.5' : ''} />
+               <FiSend size={18} className={hasText ? 'translate-x-0.5' : ''} />
              </button>
           ) : (
              <button
@@ -320,12 +320,12 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               disabled={isInputDisabled}
               aria-label="Record voice message"
               className="
-                p-3 rounded-full text-text-secondary
-                shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm
-                hover:text-red-500 transition-all
+                p-3 rounded-xl text-text-secondary
+                shadow-neu-icon dark:shadow-neu-icon-dark
+                hover:text-red-500 active:scale-95 transition-all
               "
              >
-               <FiMic size={20} />
+               <FiMic size={18} />
              </button>
           )}
 

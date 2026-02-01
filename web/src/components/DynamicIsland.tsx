@@ -102,9 +102,11 @@ const DynamicIsland = () => {
             transition={{ type: "spring", damping: 25, stiffness: 400 }}
             className="
               relative pointer-events-auto overflow-hidden
-              bg-black/80 backdrop-blur-xl
-              rounded-full px-2
-              border border-white/10 shadow-[0_4px_20px_rgba(0,0,0,0.5)]
+              bg-bg-main
+              rounded-full px-4
+              border border-white/50 dark:border-white/10
+              shadow-[0_20px_40px_-10px_rgba(0,0,0,0.3)]
+              dark:shadow-[0_20px_40px_-10px_rgba(0,0,0,0.7)]
               flex items-center
             "
           >

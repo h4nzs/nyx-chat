@@ -59,11 +59,15 @@ const FeatureCard = ({ icon, title, children }: { icon: React.ReactNode; title: 
         mass: 3
       }
     }}
-    className="bg-bg-surface p-6 rounded-lg shadow-[8px_8px_16px_rgba(0,0,0,0.2),-8px_-8px_16px_rgba(255,255,255,0.1)] text-center cursor-pointer border border-transparent hover:border-accent/30 transition-all duration-300"
-    style={{
-      backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.1) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(0,0,0,0.1) 0%, transparent 40%)',
-      backgroundBlendMode: 'overlay'
-    }}
+    className="
+      bg-bg-main p-8 rounded-2xl
+      shadow-neu-flat dark:shadow-neu-flat-dark
+      hover:shadow-neu-pressed dark:hover:shadow-neu-pressed-dark
+      hover:scale-[0.98]
+      transition-all duration-300
+      border border-white/50 dark:border-white/5
+      text-center cursor-pointer
+    "
   >
     <div className="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4">
       {icon}

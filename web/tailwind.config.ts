@@ -11,11 +11,35 @@ export default {
       '2xl': '1920px',
     },
     extend: {
-      neumorph: {
+      colors: {
+        bg: {
+          main: 'var(--bg-main)', // Define this in CSS (e.g., #e0e5ec)
+          surface: 'var(--bg-surface)',
+        },
+        neu: {
+          base: '#e0e5ec',
+          dark: '#1a1b1e',
+        },
+        neumorph: {
           light: '#e0e5ec', // Putih keabuan (Classic)
           dark: '#1a1b1e',  // Dark slate
         },
+      },
       boxShadow: {
+        // The "Industrial" Shadow Set (Sharper, Heavy)
+        'neu-flat': '6px 6px 12px #b8b9be, -6px -6px 12px #ffffff',
+        'neu-pressed': 'inset 6px 6px 10px #b8b9be, inset -6px -6px 10px #ffffff',
+        'neu-icon': '3px 3px 6px #b8b9be, -3px -3px 6px #ffffff',
+        
+        // Dark Mode Variants
+        'neu-flat-dark': '5px 5px 10px #0b0c0e, -5px -5px 10px #292a2e',
+        'neu-pressed-dark': 'inset 5px 5px 10px #0b0c0e, inset -5px -5px 10px #292a2e',
+        'neu-icon-dark': '3px 3px 6px #0b0c0e, -3px -3px 6px #292a2e',
+
+        // FLOATING (Modals)
+        'neu-float': '20px 20px 60px #d1d9e6, -20px -20px 60px #ffffff',
+        'neu-float-dark': '20px 20px 60px #000000, -20px -20px 60px #292a2e',
+
         'neumorphic-convex': '5px 5px 10px hsl(var(--shadow-dark)), -5px -5px 10px hsl(var(--shadow-light))',
         'neumorphic-convex-sm': '2px 2px 5px hsl(var(--shadow-dark)), -2px -2px 5px hsl(var(--shadow-light))',
         'neumorphic-concave': 'inset 5px 5px 10px hsl(var(--shadow-dark)), inset -5px -5px 10px hsl(var(--shadow-light))',
