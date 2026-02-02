@@ -193,8 +193,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       // 3. UPLOAD KE CLOUDFLARE R2 (Bypass Server)
       updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
       
-      // Bungkus Blob enkripsi ke File Object agar nama & tipe terjaga
-      const encryptedFile = new File([encryptedBlob], file.name, { type: file.type });
+      // Bungkus Blob enkripsi ke File Object agar nama & tipe terjaga (tapi tipe jadi octet-stream untuk upload)
+      const encryptedFile = new File([encryptedBlob], file.name, { type: "application/octet-stream" });
       
       // Helper uploadToR2 (Client -> R2)
       const fileUrl = await uploadToR2(encryptedFile, 'attachments', (percent) => {
@@ -212,7 +212,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         body: JSON.stringify({
           fileUrl, // URL dari R2
           fileName: file.name,
-          fileType: file.type,
+          fileType: file.type + ';encrypted=true',
           fileSize: file.size,
           duration: null,
           tempId,
@@ -284,7 +284,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       // 2. UPLOAD KE R2
       updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
       
-      const encryptedFile = new File([encryptedBlob], "voice-message.webm", { type: "audio/webm" });
+      // Upload as octet-stream to avoid browser/R2 MIME type sniffing issues with encrypted data
+      const encryptedFile = new File([encryptedBlob], "voice-message.webm", { type: "application/octet-stream" });
 
       const fileUrl = await uploadToR2(encryptedFile, 'attachments', (percent) => {
         const totalProgress = 40 + (percent * 0.5);
@@ -299,7 +300,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         body: JSON.stringify({
           fileUrl,
           fileName: "voice-message.webm",
-          fileType: "audio/webm",
+          fileType: "audio/webm;encrypted=true",
           fileSize: blob.size,
           duration,
           tempId,

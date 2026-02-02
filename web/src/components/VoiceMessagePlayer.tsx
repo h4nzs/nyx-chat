@@ -81,7 +81,7 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
       }
     };
 
-    if (message.fileType?.includes('encrypted=true')) {
+    if (message.fileType?.includes('encrypted=true') || message.fileKey) {
       handleDecryption();
     } else if (message.fileUrl) {
       const absoluteUrl = toAbsoluteUrl(message.fileUrl);
