@@ -333,6 +333,8 @@ export default function Register() {
             <Turnstile
               siteKey="0x4AAAAAACN0kvKqxA8cYt6U" // Ganti dengan Site Key Cloudflare kamu!
               onSuccess={setTurnstileToken}
+              onError={() => toast.error("Security check failed. Please refresh.")}
+              onExpire={() => setTurnstileToken('')}
               options={{ theme: 'auto' }}
             />
           </div>

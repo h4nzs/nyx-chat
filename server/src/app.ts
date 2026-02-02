@@ -63,7 +63,8 @@ app.use(helmet({
       scriptSrc: [
         "'self'",
         isProd ? "'strict-dynamic'" : "'unsafe-eval'",
-        isProd ? "" : "https://*.ngrok-free.app"
+        isProd ? "" : "https://*.ngrok-free.app",
+        "https://challenges.cloudflare.com"
       ].filter(Boolean),
       styleSrc: [
         "'self'",
@@ -93,6 +94,7 @@ app.use(helmet({
         "https://fonts.gstatic.com" // Jika menggunakan Google Fonts
       ],
       objectSrc: ["'none'"],
+      frameSrc: ["'self'", "https://challenges.cloudflare.com"],
       frameAncestors: ["'none'"],
       ...(isProd && { upgradeInsecureRequests: [] }),
     },
