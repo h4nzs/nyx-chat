@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Message } from '@store/conversation';
 import { decryptFile, decryptMessage } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
@@ -25,7 +26,12 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    // Lock scroll when open
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = 'unset';
+    };
   }, [onClose]);
 
   // Decryption logic
@@ -136,9 +142,9 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
     };
   }, [message, lastKeychainUpdate]);
 
-  return (
+  const content = (
     <div
-      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center animate-fade-in p-4 md:p-8"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 backdrop-blur-xl animate-fade-in p-4 md:p-8"
       onClick={onClose}
     >
       <button
@@ -163,8 +169,8 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
         {!isLoading && !error && decryptedUrl && (
           <img
             src={decryptedUrl}
-            alt="Lightbox view"
-            className="object-contain max-w-full max-h-full"
+            alt={message.fileName || "Lightbox view"}
+            className="object-contain max-w-full max-h-[90vh] select-none shadow-2xl rounded-lg"
             onError={() => {
               setError("Failed to load image.");
               setIsLoading(false);
@@ -174,4 +180,6 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
       </div>
     </div>
   );
+
+  return createPortal(content, document.body);
 }

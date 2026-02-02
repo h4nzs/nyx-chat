@@ -29,15 +29,15 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
     let isMounted = true;
 
     const handleDecryption = async () => {
-      // The decrypted file key is now expected to be in message.content
-      const fileKey = message.content;
+      // Prefer message.fileKey, fallback to message.content
+      const fileKey = message.fileKey || message.content;
 
       if (!message.fileUrl || !fileKey) {
         if (isMounted) setError("Incomplete message data for decryption.");
         return;
       }
       
-      // Handle pending/error states passed from the store
+      // Handle pending/error states
       if (fileKey === 'waiting_for_key' || fileKey.startsWith('[')) {
         if (isMounted) setError(fileKey);
         return;
@@ -53,6 +53,7 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
         if (!absoluteUrl) {
           throw new Error("File URL is invalid.");
         }
+        
         // 1. Fetch the encrypted file
         const response = await fetch(absoluteUrl);
         if (!response.ok) {
@@ -64,6 +65,7 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
         const encryptedBlob = await response.blob();
 
         // 2. Decrypt the file blob
+        // decryptFile expects (blob, keyString, mimeType)
         const decryptedBlob = await decryptFile(encryptedBlob, fileKey, 'audio/webm');
         
         if (isMounted) {
