@@ -66,7 +66,8 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
     <div className="
       flex items-center justify-between px-4 py-3 z-30
       bg-bg-main
-      shadow-neu-flat dark:shadow-neu-flat-dark
+      border-b border-white/10
+      shadow-[0_1px_0_rgba(255,255,255,0.05)] dark:shadow-[0_1px_0_rgba(0,0,0,0.2)]
       relative
     ">
       <div className="flex items-center gap-4">

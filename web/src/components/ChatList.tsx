@@ -345,7 +345,11 @@ export default function ChatList() {
   }, [addCommands, removeCommands, openCreateGroupModal]);
 
   return (
-    <div className="h-full flex flex-col bg-bg-main relative overflow-hidden">
+    <div className="
+      h-full flex flex-col bg-bg-main relative overflow-hidden
+      border-r border-black/5 dark:border-white/5 
+      shadow-[1px_0_0_rgba(255,255,255,0.5)] dark:shadow-[1px_0_0_rgba(0,0,0,0.5)]
+    ">
       {/* Top Section */}
       <UserProfile />
       

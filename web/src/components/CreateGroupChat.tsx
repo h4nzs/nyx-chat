@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { useConversationStore, type Conversation } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
 import { authFetch } from '@lib/api';
+import { toAbsoluteUrl } from '@utils/url';
 import { getSocket } from '@lib/socket';
 import toast from 'react-hot-toast';
 import ModalBase from './ui/ModalBase';
+import { FiCheck } from 'react-icons/fi';
 
 type UserSearchResult = {
   id: string;
@@ -119,12 +121,42 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
             className="w-full input-neumorphic"
           />
           {userList.length > 0 && (
-            <div className="absolute top-full left-0 right-0 card-neumorphic max-h-40 overflow-y-auto z-10 rounded-b-xl">
-              {userList.map(user => (
-                <div key={user.id} onClick={() => handleSelectUser(user)} className="p-3 hover:bg-secondary cursor-pointer text-text-primary rounded-lg m-1">
-                  {user.name} (@{user.username})
-                </div>
-              ))}
+            <div className="absolute top-full left-0 right-0 max-h-60 overflow-y-auto z-10 rounded-xl p-2 space-y-2 bg-bg-main/50 backdrop-blur-md shadow-neu-flat dark:shadow-neu-flat-dark border border-white/10 mt-2">
+              {userList.map(user => {
+                const isSelected = selectedUsers.some(u => u.id === user.id);
+                return (
+                  <div 
+                    key={user.id}
+                    onClick={() => handleSelectUser(user)}
+                    className={`
+                      relative flex items-center gap-4 p-3 rounded-xl cursor-pointer transition-all duration-300
+                      border border-transparent
+                      bg-bg-main shadow-[5px_5px_10px_rgba(0,0,0,0.1),-5px_-5px_10px_rgba(255,255,255,0.8)] dark:shadow-[4px_4px_8px_rgba(0,0,0,0.4),-4px_-4px_8px_rgba(255,255,255,0.03)] hover:-translate-y-0.5
+                    `}
+                  >
+                    <div className="relative">
+                      <img 
+                        src={user.avatarUrl ? toAbsoluteUrl(user.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} 
+                        className={`w-10 h-10 rounded-full object-cover transition-all ${isSelected ? 'grayscale-0' : 'grayscale opacity-80'}`}
+                        alt={user.name}
+                      />
+                      <div className={`
+                        absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center transition-all duration-300
+                        ${isSelected ? 'bg-accent scale-100 shadow-[0_0_10px_rgba(var(--accent),0.6)]' : 'bg-transparent scale-0'}
+                      `}>
+                        <FiCheck size={10} className="text-white" />
+                      </div>
+                    </div>
+
+                    <div className="flex-1">
+                      <h4 className={`text-sm font-bold transition-colors ${isSelected ? 'text-accent' : 'text-text-primary'}`}>
+                        {user.name}
+                      </h4>
+                      <p className="text-xs text-text-secondary font-mono">@{user.username}</p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
