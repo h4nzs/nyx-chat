@@ -42,23 +42,70 @@
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "Chat Lite",
-      "operatingSystem": "Web, iOS, Android",
-      "applicationCategory": "CommunicationApplication",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "IDR"
+    [
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Chat Lite",
+        "operatingSystem": "Web, iOS, Android",
+        "applicationCategory": "CommunicationApplication",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "IDR"
+        },
+        "description": "A secure, end-to-end encrypted messaging application built with modern web technologies and neumorphic design.",
+        "author": {
+            "@type": "Person",
+            "name": "Dehan"
+        }
       },
-      "description": "A secure, end-to-end encrypted messaging application built with modern web technologies and neumorphic design.",
-      "author": {
-          "@type": "Person",
-          "name": "Dehan"
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "Chat Lite",
+        "url": "https://chat-lite-weld.vercel.app",
+        "logo": "https://chat-lite-weld.vercel.app/pwa-512x512.png"
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Is Chat Lite end-to-end encrypted?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. We use the Signal Protocol (Double Ratchet Algorithm) to ensure that only you and the person you're communicating with can read what's sent. Not even the server can decrypt your messages."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need to install an app?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Chat Lite is a Progressive Web App (PWA). You can use it directly in your browser or install it to your home screen for a native-like experience without the app store friction."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is it completely free?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes, Chat Lite is open-source and free to use. There are no hidden fees, ads, or data tracking."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How do I recover my account?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "When you sign up, you receive a 24-word recovery phrase. This is the ONLY way to restore your keys and messages on a new device. We do not store this phrase."
+            }
+          }
+        ]
       }
-    }
+    ]
     </script>
   </head>
   <body class="min-h-screen bg-[#f0f2f5] dark:bg-gray-900 font-sans selection:bg-blue-500 selection:text-white">
