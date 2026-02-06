@@ -23,13 +23,13 @@ import { useMessageStore } from '@store/message';
 import toast from 'react-hot-toast';
 import MarkdownMessage from './MarkdownMessage';
 
-const MessageStatusIcon = ({ message, conversation }: { message: Message; conversation: Conversation | undefined }) => {
+const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
   const meId = useAuthStore((s) => s.user?.id);
   const retrySendMessage = useMessageInputStore(s => s.retrySendMessage);
   if (message.senderId !== meId) return null;
   if (message.error) return <button onClick={() => retrySendMessage(message)} title="Failed to send. Click to retry."><FiRefreshCw className="text-destructive cursor-pointer" size={16} /></button>;
   if (message.optimistic) return <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><title>Sending...</title><circle cx="12" cy="12" r="10"/></svg>;
-  const otherParticipants = conversation?.participants?.filter((p: Participant) => p.id !== meId) || [];
+  const otherParticipants = participants.filter((p: Participant) => p.id !== meId) || [];
   if (otherParticipants.length === 0) return <FaCheck size={16} />;
   const statuses = message.statuses || [];
   const isReadAll = otherParticipants.every((p: Participant) => statuses.some((s: MessageStatus) => s.userId === p.id && s.status === 'READ'));
@@ -56,7 +56,7 @@ const ReplyQuote = ({ message }: { message: Message }) => {
   );
 };
 
-const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversation }: { message: Message; mine: boolean; isLastInSequence: boolean; onImageClick: (message: Message) => void; conversation: Conversation | undefined; }) => {
+const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, participants }: { message: Message; mine: boolean; isLastInSequence: boolean; onImageClick: (message: Message) => void; participants: Participant[]; }) => {
   const content = message.content || '';
   const isPlaceholder = content === 'waiting_for_key' || content.startsWith('[') || content === 'Decryption failed';
   const isImage = message.fileType?.startsWith('image/');
@@ -84,7 +84,7 @@ const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, conversa
       {message.linkPreview && <LinkPreviewCard preview={message.linkPreview} />}
       <div className={`text-xs mt-1.5 flex items-center gap-1.5 ${isImage ? 'absolute bottom-2 right-2 bg-black/50 text-white rounded-full px-2 py-1 pointer-events-none' : `justify-end ${mine ? 'text-accent-foreground/60' : 'text-text-secondary/80'}`}`}>
         <span>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-        <MessageStatusIcon message={message} conversation={conversation} />
+        <MessageStatusIcon message={message} participants={participants} />
       </div>
     </div>
   );
@@ -109,14 +109,15 @@ const ReactionsDisplay = ({ reactions }: { reactions: Message['reactions'] }) =>
 
 interface MessageItemProps {
   message: Message;
-  conversation: Conversation | undefined;
+  isGroup: boolean;
+  participants: Participant[];
   isHighlighted?: boolean;
   onImageClick: (message: Message) => void;
   isFirstInSequence: boolean;
   isLastInSequence: boolean;
 }
 
-const MessageItem = ({ message, conversation, isHighlighted, onImageClick, isFirstInSequence, isLastInSequence }: MessageItemProps) => {
+const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageClick, isFirstInSequence, isLastInSequence }: MessageItemProps) => {
   const meId = useAuthStore((s) => s.user?.id);
   const setReplyingTo = useMessageInputStore(state => state.setReplyingTo);
   const showConfirm = useModalStore(state => state.showConfirm);
@@ -180,8 +181,8 @@ const MessageItem = ({ message, conversation, isHighlighted, onImageClick, isFir
       {!mine && <div className="w-8 flex-shrink-0 mb-1 self-end">{isLastInSequence && <img src={toAbsoluteUrl(message.sender?.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${message.sender?.name || 'U'}`} alt="Avatar" className="w-8 h-8 rounded-full bg-secondary object-cover" />}</div>}
       <div className={`flex items-center gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
         <div className="flex flex-col">
-          {!mine && conversation?.isGroup && message.sender?.name && <p className="text-xs font-semibold mb-1 user-color-name" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>{message.sender.name}</p>}
-          <MessageBubble message={message} mine={mine} isLastInSequence={isLastInSequence} onImageClick={onImageClick} conversation={conversation} />
+          {!mine && isGroup && message.sender?.name && <p className="text-xs font-semibold mb-1 user-color-name" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>{message.sender.name}</p>}
+          <MessageBubble message={message} mine={mine} isLastInSequence={isLastInSequence} onImageClick={onImageClick} participants={participants} />
           <ReactionsDisplay reactions={message.reactions} />
         </div>
         <div className="opacity-0 group-hover:opacity-100 transition-opacity">

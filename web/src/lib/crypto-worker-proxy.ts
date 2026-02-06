@@ -1,10 +1,21 @@
 // web/src/lib/crypto-worker-proxy.ts
 
-// Create a new worker instance.
-// Vite automatically infers and bundles this as a worker.
-const worker = new Worker(new URL('../workers/crypto.worker.ts', import.meta.url), {
-  type: 'module',
-});
+// Lazy initialization of the worker
+let worker: Worker | null = null;
+
+function getWorker(): Worker {
+  if (!worker) {
+    worker = new Worker(new URL('../workers/crypto.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+
+    // Attach event handlers
+    worker.onmessage = handleWorkerMessage;
+    worker.onerror = handleWorkerError;
+    worker.onmessageerror = handleWorkerMessageError;
+  }
+  return worker;
+}
 
 // A map to store resolvers for pending requests
 const pendingRequests = new Map<number, { 
@@ -29,7 +40,7 @@ export type RetrieveKeysResult =
 // --- Worker Event Handlers ---
 
 // Handle successfully processed messages from the worker
-worker.onmessage = (event: MessageEvent) => {
+const handleWorkerMessage = (event: MessageEvent) => {
   try {
     // 1. Validate incoming data structure
     if (typeof event.data !== 'object' || event.data === null || typeof event.data.id === 'undefined' || !event.data.type) {
@@ -71,7 +82,7 @@ worker.onmessage = (event: MessageEvent) => {
 };
 
 // Handle unhandled exceptions in the worker
-worker.onerror = (event: ErrorEvent) => {
+const handleWorkerError = (event: ErrorEvent) => {
   console.error(
     `[Crypto Worker] Unhandled Error: ${event.message}\n` +
     `  File: ${event.filename}\n` +
@@ -89,7 +100,7 @@ worker.onerror = (event: ErrorEvent) => {
 };
 
 // Handle messages that can't be deserialized
-worker.onmessageerror = (event: MessageEvent) => {
+const handleWorkerMessageError = (event: MessageEvent) => {
   console.error("[Crypto Worker] Failed to deserialize message:", event);
 };
 
@@ -121,7 +132,8 @@ function callWorker<T = any>(type: string, payload: any): Promise<T> {
 
     pendingRequests.set(id, { resolve, reject, timerId });
     
-    worker.postMessage({ type, payload: { ...payload, appSecret }, id });
+    // Lazy get worker and post message
+    getWorker().postMessage({ type, payload: { ...payload, appSecret }, id });
   });
 }
 

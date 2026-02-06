@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
@@ -24,17 +24,17 @@ import { Spinner } from './Spinner';
 
 // --- Sub-components ---
 
-const UserProfile = () => {
+const UserProfile = memo(() => {
   const { user, logout } = useAuthStore(state => ({ user: state.user, logout: state.logout }));
   const { showConfirm } = useModalStore();
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     showConfirm(
       "Confirm Logout",
       "Are you sure you want to end your session?",
       logout
     );
-  };
+  }, [logout, showConfirm]);
 
   if (!user) return null;
 
@@ -78,9 +78,9 @@ const UserProfile = () => {
       </div>
     </div>
   );
-};
+});
 
-const SearchResults = ({ results, onSelect }: { results: User[], onSelect: (userId: string) => void }) => (
+const SearchResults = memo(({ results, onSelect }: { results: User[], onSelect: (userId: string) => void }) => (
   <Virtuoso
     style={{ height: '100%' }}
     data={results}
@@ -106,13 +106,26 @@ const SearchResults = ({ results, onSelect }: { results: User[], onSelect: (user
       </button>
     )}
   />
-);
+));
 
-const ConversationItem = ({ conversation, meId, presence, blockedUserIds, blockUser, unblockUser, isActive, isSelected, onClick, onUserClick, onMenuSelect, onTogglePin }: {
+const ConversationItem = memo(({ 
+  conversation, 
+  meId, 
+  isOnline, 
+  isBlocked, 
+  blockUser, 
+  unblockUser, 
+  isActive, 
+  isSelected, 
+  onClick, 
+  onUserClick, 
+  onMenuSelect, 
+  onTogglePin 
+}: {
   conversation: Conversation;
   meId?: string;
-  presence: string[];
-  blockedUserIds: string[];
+  isOnline: boolean;
+  isBlocked: boolean;
   blockUser: (userId: string) => Promise<void>;
   unblockUser: (userId: string) => Promise<void>;
   isActive: boolean;
@@ -124,7 +137,6 @@ const ConversationItem = ({ conversation, meId, presence, blockedUserIds, blockU
 }) => {
   const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
   const title = conversation.isGroup ? conversation.title : peerUser?.name || 'Conversation';
-  const isOnline = peerUser ? presence.includes(peerUser.id) : false;
   const isUnread = conversation.unreadCount > 0;
   const isPinnedByMe = Boolean(conversation.participants?.some(p => p.id === meId && p.isPinned));
 
@@ -145,14 +157,17 @@ const ConversationItem = ({ conversation, meId, presence, blockedUserIds, blockU
 
   return (
     <motion.div 
-      layout 
+      // Removed 'layout' prop for performance
       key={conversation.id} 
       className={clsx(
         'relative mx-4 my-3 rounded-2xl p-1 transition-all duration-200 select-none group',
         isActive 
           ? 'bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark border border-transparent' 
-          : 'bg-bg-main shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5 hover:-translate-y-0.5'
+          : 'bg-bg-main shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5 active:scale-[0.98]'
       )}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
     >
       <div className="w-full text-left p-3 pr-8 flex items-center gap-4 cursor-pointer rounded-xl" onClick={onClick}>
         {/* Avatar */}
@@ -266,11 +281,13 @@ const ConversationItem = ({ conversation, meId, presence, blockedUserIds, blockU
                 <DropdownMenu.Item
                   onSelect={() => {
                     const other = conversation.participants.find(p => p.id !== meId);
-                    if (other) blockedUserIds.includes(other.id) ? unblockUser(other.id) : blockUser(other.id);
+                    if (other) {
+                      isBlocked ? unblockUser(other.id) : blockUser(other.id);
+                    }
                   }}
                   className="w-full text-left px-3 py-2 text-xs font-medium rounded-lg cursor-pointer hover:bg-bg-main hover:text-accent outline-none transition-colors"
                 >
-                   {conversation.participants.find(p => p.id !== meId) && blockedUserIds.includes(conversation.participants.find(p => p.id !== meId)!.id) ? 'Unblock' : 'Block'} User
+                   {isBlocked ? 'Unblock' : 'Block'} User
                 </DropdownMenu.Item>
               )}
               
@@ -288,7 +305,17 @@ const ConversationItem = ({ conversation, meId, presence, blockedUserIds, blockU
       </div>
     </motion.div>
   );
-};
+}, (prev, next) => {
+  // Custom comparison for Memo
+  return (
+    prev.conversation === next.conversation &&
+    prev.isActive === next.isActive &&
+    prev.isSelected === next.isSelected &&
+    prev.isOnline === next.isOnline &&
+    prev.isBlocked === next.isBlocked &&
+    prev.meId === next.meId
+  );
+});
 
 
 // --- Main Component ---
@@ -343,6 +370,33 @@ export default function ChatList() {
     addCommands(commands);
     return () => removeCommands(commands.map(c => c.id));
   }, [addCommands, removeCommands, openCreateGroupModal]);
+
+  // Memoized Item Renderer to prevent re-creating the function on every render
+  const itemContent = useCallback((index: number, c: Conversation) => {
+    const peerUser = !c.isGroup ? c.participants?.find(p => p.id !== meId) : null;
+    const isOnline = peerUser ? presence.includes(peerUser.id) : false;
+    const isBlocked = peerUser ? blockedUserIds.includes(peerUser.id) : false;
+
+    return (
+      <ConversationItem
+        conversation={c}
+        meId={meId}
+        isOnline={isOnline}
+        isBlocked={isBlocked}
+        blockUser={blockUser}
+        unblockUser={unblockUser}
+        isActive={c.id === activeId}
+        isSelected={index === selectedIndex}
+        onClick={() => handleConversationClick(c.id)}
+        onUserClick={openProfileModal}
+        onMenuSelect={(action) => {
+           if (action === 'deleteGroup') deleteGroup(c.id);
+           else deleteConversation(c.id);
+        }}
+        onTogglePin={togglePinConversation}
+      />
+    );
+  }, [meId, presence, blockedUserIds, activeId, selectedIndex, handleConversationClick, openProfileModal, deleteGroup, deleteConversation, togglePinConversation, blockUser, unblockUser]);
 
   return (
     <div className="
@@ -423,25 +477,7 @@ export default function ChatList() {
                   </div>
                 ),
               }}
-              itemContent={(index, c) => (
-                <ConversationItem
-                  conversation={c}
-                  meId={meId}
-                  presence={presence}
-                  blockedUserIds={blockedUserIds}
-                  blockUser={blockUser}
-                  unblockUser={unblockUser}
-                  isActive={c.id === activeId}
-                  isSelected={index === selectedIndex}
-                  onClick={() => handleConversationClick(c.id)}
-                  onUserClick={openProfileModal}
-                  onMenuSelect={(action) => {
-                     if (action === 'deleteGroup') deleteGroup(c.id);
-                     else deleteConversation(c.id);
-                  }}
-                  onTogglePin={togglePinConversation}
-                />
-              )}
+              itemContent={itemContent}
             />
           )
         )}

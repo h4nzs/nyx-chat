@@ -1,4 +1,4 @@
-import { useCallback, useRef, ChangeEvent, useState, useEffect } from "react";
+import { useCallback, useRef, ChangeEvent, useState, useEffect, useMemo } from "react";
 import { useAuthStore } from "@store/auth";
 import { getSocket } from "@lib/socket";
 import { Virtuoso } from "react-virtuoso";
@@ -163,7 +163,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     if (id) loadMessagesForConversation(id);
   }, [id, loadMessagesForConversation]);
 
-  const handleImageClick = (message: Message) => setLightboxMessage(message);
+  const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);
 
   useEffect(() => {
     if (highlightedMessageId && virtuosoRef.current && messages.length > 0) {
@@ -200,6 +200,31 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const handleVoiceSend = (blob: Blob, duration: number) => {
     handleStopRecording(id, blob, duration);
   };
+
+  // Memoize stable conversation parts to prevent list re-renders
+  const participants = useMemo(() => conversation?.participants || [], [conversation?.participants]);
+  const isGroup = conversation?.isGroup || false;
+
+  const itemContent = useCallback((index: number, message: Message) => {
+    const prevMessage = messages[index - 1];
+    const nextMessage = messages[index + 1];
+    const isFirstInSequence = !prevMessage || prevMessage.senderId !== message.senderId;
+    const isLastInSequence = !nextMessage || nextMessage.senderId !== message.senderId;
+
+    return (
+      <div className="px-1 md:px-4 py-0.5" key={message.id}>
+        <MessageItem 
+          message={message} 
+          isGroup={isGroup}
+          participants={participants}
+          isHighlighted={message.id === highlightedMessageId}
+          onImageClick={handleImageClick}
+          isFirstInSequence={isFirstInSequence}
+          isLastInSequence={isLastInSequence}
+        />
+      </div>
+    );
+  }, [messages, isGroup, participants, highlightedMessageId, handleImageClick]);
 
   return (
     <AnimatePresence mode="wait">
@@ -247,25 +272,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                     data={messages}
                     startReached={actions.loadPrevious}
                     components={{ Header: () => isFetchingMore ? <ChatSpinner /> : <div className="h-4" /> }}
-                    itemContent={(index, message) => {
-                      const prevMessage = messages[index - 1];
-                      const nextMessage = messages[index + 1];
-                      const isFirstInSequence = !prevMessage || prevMessage.senderId !== message.senderId;
-                      const isLastInSequence = !nextMessage || nextMessage.senderId !== message.senderId;
-
-                      return (
-                        <div className="px-1 md:px-4 py-0.5" key={message.id}>
-                          <MessageItem 
-                            message={message} 
-                            conversation={conversation} 
-                            isHighlighted={message.id === highlightedMessageId}
-                            onImageClick={handleImageClick}
-                            isFirstInSequence={isFirstInSequence}
-                            isLastInSequence={isLastInSequence}
-                          />
-                        </div>
-                      );
-                    }}
+                    itemContent={itemContent}
                     followOutput="auto"
                   />
                 </div>
