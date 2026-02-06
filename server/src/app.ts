@@ -64,7 +64,8 @@ app.use(helmet({
         "'self'",
         isProd ? "'strict-dynamic'" : "'unsafe-eval'",
         isProd ? "" : "https://*.ngrok-free.app",
-        "https://challenges.cloudflare.com"
+        "https://challenges.cloudflare.com",
+        "https://cdn.jsdelivr.net"
       ].filter(Boolean),
       styleSrc: [
         "'self'",

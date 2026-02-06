@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.0] - 2026-02-02
+
+This major release focuses on "Performance & Polish". It introduces a complete visual overhaul to "Industrial Neumorphism", implements a rigorous "Crypto Quarantine" for faster initial load times, and resolves critical bugs in voice messaging and security.
+
+### Added
+
+-   **Performance: Crypto Quarantine (Lazy Loading):**
+    -   Refactored the application architecture to **lazy load** the massive cryptographic libraries (`libsodium`, `crypto-worker`). The ~750KB crypto bundle is now only downloaded when a user logs in or performs an encrypted action, significantly improving the "Time to Interactive" on the Landing Page.
+    -   Added visual loading states (`isInitializingCrypto`) to provide feedback while the security module initializes.
+-   **Performance: Virtualized Lists:** Implemented `react-virtuoso` virtualization with optimized memoization for both the Chat List and Message Window. This resolves severe scrolling lag on mobile devices by only rendering items currently in view.
+-   **SEO & GEO Optimization:**
+    -   Added `robots.txt` and `sitemap.xml` to properly index the application.
+    -   Injected rich JSON-LD schema (`SoftwareApplication`, `Organization`, `FAQPage`) into `index.html` to optimize for AI citation (GEO) and Google Rich Results.
+-   **Security: Cloudflare Turnstile:** Integrated Cloudflare Turnstile on the Registration page to prevent bot abuse, complete with proper Content-Security-Policy (CSP) configuration.
+
+### Changed
+
+-   **UI Overhaul: Industrial Neumorphism:**
+    -   **Design System:** Fully implemented a new "Industrial Neumorphism" design language featuring custom `neu-*` shadows, "Seam" separators, and "Trench" inputs for a tactile, physical feel.
+    -   **Profile Page:** Redesigned into a "Personnel File" dashboard layout.
+    -   **Modals:** Refactored `UserInfoModal` into a "Digital Identity Card" design.
+    -   **Dynamic Island:** Updated with "Heavy Levitation" physics.
+-   **Asset Diet:** Removed over **4MB** of unused background assets and moved documentation screenshots out of the production build, further reducing the initial download size.
+
+### Fixed
+
+-   **Voice Message Decryption:** Fixed a critical bug where voice messages failed to play with the error "Data provided to an operation does not meet requirements". The player now correctly decrypts the *file key* using the session key before attempting to decrypt the audio file.
+-   **Voice Uploads:** Fixed `OpaqueResponseBlocking` errors by ensuring encrypted voice files are uploaded with the `application/octet-stream` MIME type to Cloudflare R2.
+-   **Lightbox Z-Index:** Fixed an issue where the image lightbox was clipped by sidebars or modals. It now uses a React Portal to render at the top level of the DOM.
+-   **Content-Security-Policy (CSP):**
+    -   Hardened CSP to allow Web Workers (`blob:`) and Cloudflare Turnstile (`challenges.cloudflare.com`) while blocking unauthorized scripts.
+    -   Aligned the backend `helmet` CSP configuration with the frontend meta tags.
+-   **Bio/Profile Caching:** Fixed a bug where profile bio updates were not visible immediately due to aggressive API caching. Added `Cache-Control: no-store` headers to API responses.
+
 ## [1.8.0] - 2026-01-19
 
 This is a major stability and architectural release focused on delivering a fully functional, robust, and user-friendly "Link Device" feature. It resolves a series of deep, interconnected bugs in the authentication, cryptography, and real-time state management layers.
