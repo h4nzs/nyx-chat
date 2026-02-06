@@ -2,7 +2,7 @@
 
 A secure, modern, and customizable real-time messaging application built with a focus on user experience and end-to-end encryption.
 
-![App Screenshot](./web/public/hero-dark.png)
+![App Screenshot](./screenshots/hero-dark.png)
 
 ## 📸 Screenshots
 

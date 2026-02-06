@@ -1,67 +1,75 @@
-👤 User not authenticated, disconnecting socket... index-CPqNPra2.js:292:8550
-Cookie “_cfuvid” will soon be rejected because it is foreign and does not have the “Partitioned“ attribute. api.js
-Source map error: Error: URL constructor:  is not a valid URL.
-Stack in the worker:resolveSourceMapURL@resource://devtools/client/shared/source-map-loader/utils/fetchSourceMap.js:56:22
-getOriginalURLs@resource://devtools/client/shared/source-map-loader/source-map.js:74:24
-workerHandler/</<@resource://devtools/client/shared/worker-utils.js:115:52
-workerHandler/<@resource://devtools/client/shared/worker-utils.js:113:13
+**MISSION:** PHASE 1 - CRYPTO QUARANTINE (LAZY LOADING)
+**TARGET FILE:** `web/src/store/auth.ts`
+**GOAL:** Increase "Time to Interactive" on the Landing Page by decoupling `libsodium` and `crypto-worker` from the initial bundle.
 
-Resource URL: wasm:https://chat-lite-weld.vercel.app/assets/crypto-vendor-CbU2VErz.js%20line%201%20%3E%20WebAssembly.instantiate:18135d40696e5a22
-Source Map URL: null
-XHRPOST
-https://chat-lite-weld.vercel.app/api/auth/refresh
-[HTTP/2 401  193ms]
+**CURRENT STATUS:**
+The file `store/auth.ts` statically imports heavy dependencies (`@lib/sodiumInitializer`, `@lib/crypto-worker-proxy`). This causes the entire crypto engine to load immediately when the app starts, even for unauthenticated users visiting the Landing Page.
 
-Feature Policy: Skipping unsupported feature name “cross-origin-isolated”. api.js:1:33648
-Feature Policy: Skipping unsupported feature name “autoplay”. api.js:1:33648
-Feature Policy: Skipping unsupported feature name “cross-origin-isolated”. api.js:1:33686
-Feature Policy: Skipping unsupported feature name “autoplay”. api.js:1:33686
-Feature Policy: Skipping unsupported feature name “cross-origin-isolated”. api.js:1:34491
-Feature Policy: Skipping unsupported feature name “autoplay”. api.js:1:34491
-Bootstrap error: ApiError: No refresh token
-    Ds https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:186
-    Et https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:186
-    bootstrap https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:208
-    f3 https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:292
-    Sr https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    Wh https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    _n https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    Wh https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    _n https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    Wh https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    _n https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    Wh https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    _n https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    Wh https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    _n https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    Wh https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    _n https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    Wh https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    _n https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    Wh https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    x0 https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    g0 https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:9
-    Y https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:2
-    Rm https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:2
-    Rm https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:2
-    Dm https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:2
-    zm https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:2
-    Lm https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:10
-    <anonymous> https://chat-lite-weld.vercel.app/assets/index-CPqNPra2.js:10
-index-CPqNPra2.js:208:5460
-Partitioned cookie or storage access was provided to “https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/f/ov2/av0/rch/8kesv/0x4AAAAAACN0kvKqxA8cYt6U/auto/fbE/new/normal?lang=auto” because it is loaded in the third-party context and dynamic state partitioning is enabled. normal:1:171650
-Crypto worker loaded. crypto.worker-B5bAY6uS.js:2:9809
-Crypto worker initialized successfully. index-CPqNPra2.js:293:4582
-Window.fullScreen attribute is deprecated and will be removed in the future. normal:1:187604
-InstallTrigger is deprecated and will be removed in the future. normal:1:187604
-onmozfullscreenchange is deprecated. normal:1:187604
-onmozfullscreenerror is deprecated. normal:1:187604
-Request for the Private Access Token challenge. normal:1:134911
-XHRGET
-https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/pat/9c770677ed606baa/1770007382859/a01c30ae9ba93babf25c5a9eaad9f080325fd3b6dabe9f1fd36689d62877d449/J2iuqGzGKyD5QGP
-[HTTP/3 401  70ms]
+**TASK INSTRUCTIONS:**
 
-WEBGL_debug_renderer_info is deprecated in Firefox and will be removed. Please use RENDERER. normal:1:134911
-This page is in Quirks Mode. Page layout may be impacted. For Standards Mode use “<!DOCTYPE html>”. normal:1:134911
-<empty string> normal:1:134911
-The resource at “https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/cmg/1” preloaded with link preload was not used within a few seconds. Make sure all attributes of the preload tag are set correctly. normal
+1.  **Remove Static Imports:**
+    Remove the top-level imports for:
+    - `@lib/sodiumInitializer` (`getSodium`)
+    - `@lib/crypto-worker-proxy` (All imports)
+    - `@lib/fileUtils` (`compressImage`) - Optional, but good practice.
+    - `@lib/r2` (`uploadToR2`) - Optional.
+
+2.  **Implement Dynamic Imports (Code Splitting):**
+    Refactor the following actions to load these dependencies ONLY when executed:
+    - `setupAndUploadPreKeyBundle` -> Import `getSodium` inside.
+    - `login` -> Import `retrievePrivateKeys` inside.
+    - `registerAndGeneratePhrase` -> Import `registerAndGenerateKeys` and `retrievePrivateKeys` inside.
+    - `tryAutoUnlock` -> Import `retrievePrivateKeys` inside.
+    - `updateAvatar` -> Import `compressImage` and `uploadToR2` inside.
+    - getters like `getEncryptionKeyPair` -> Import `getSodium` inside.
+
+3.  **Refactor `bootstrap` Logic (CRITICAL):**
+    - The `bootstrap` function runs on app load.
+    - **Logic Change:** DO NOT load crypto libraries immediately.
+    - ONLY if a valid `accessToken` is found (user is logged in), THEN trigger the dynamic import of crypto libraries to prepare the session.
+    - If no user is found (Landing Page visitor), the crypto libraries must remains unloaded.
+
+4.  **Add Loading State:**
+    - Add a new state property: `isInitializingCrypto: boolean` (default `false`).
+    - Set this to `true` while the dynamic imports are resolving during `login` or `bootstrap`.
+    - This allows the UI to show a spinner instead of freezing.
+
+**EXAMPLE PATTERN:**
+
+*Before:*
+```typescript
+import { heavyFunction } from "heavy-lib";
+// ...
+login: async () => {
+  heavyFunction();
+}
+
+```
+
+*After:*
+
+```typescript
+// No import at top
+// ...
+login: async () => {
+  set({ isInitializingCrypto: true }); // UI Feedback
+  try {
+    const { heavyFunction } = await import("heavy-lib"); // Browser downloads chunk here
+    heavyFunction();
+  } finally {
+    set({ isInitializingCrypto: false });
+  }
+}
+
+```
+
+**CONSTRAINTS:**
+
+* **NO Logic Changes:** Do not change how encryption works (Argon2, X3DH, etc). Only change *when* the code is loaded.
+* **Type Safety:** Ensure TypeScript types for the imported modules are preserved.
+* **Error Handling:** If the network fails to download the chunk, `login` should throw a clear error ("Failed to load security module. Please check your connection.").
+
+**EXECUTION:**
+Refactor `web/src/store/auth.ts` now applying these rules.
+
+```

@@ -4,8 +4,8 @@ import { toAbsoluteUrl } from '@utils/url';
 import { authFetch, handleApiError } from '@lib/api';
 import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
-import { generateSafetyNumber } from '@lib/crypto-worker-proxy';
-import { getSodium } from '@lib/sodiumInitializer';
+// import { generateSafetyNumber } from '@lib/crypto-worker-proxy'; // Dynamic
+// import { getSodium } from '@lib/sodiumInitializer'; // Dynamic
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
 import { useVerificationStore } from '@store/verification';
@@ -68,6 +68,10 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
     }
 
     try {
+      // Dynamic imports
+      const { generateSafetyNumber } = await import('@lib/crypto-worker-proxy');
+      const { getSodium } = await import('@lib/sodiumInitializer');
+
       const myPublicKeyB64 = localStorage.getItem('publicKey');
       if (!myPublicKeyB64) {
         throw new Error("Your public key is not found. Please set up your keys first.");
