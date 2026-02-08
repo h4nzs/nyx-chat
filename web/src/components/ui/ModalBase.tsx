@@ -13,25 +13,26 @@ interface ModalBaseProps {
 
 const dropIn: Variants = {
   hidden: {
-    y: "-50px",
+    y: "20px",
     opacity: 0,
-    scale: 0.95,
+    scale: 0.98,
   },
   visible: {
     y: "0",
     opacity: 1,
     scale: 1,
     transition: {
-      duration: 0.2,
-      type: "spring",
-      damping: 25,
-      stiffness: 500,
+      duration: 0.3,
+      ease: [0.23, 1, 0.32, 1], // Cubic bezier for mechanical feel
     },
   },
   exit: {
-    y: "50px",
+    y: "20px",
     opacity: 0,
-    scale: 0.95,
+    scale: 0.98,
+    transition: {
+      duration: 0.2,
+    },
   },
 };
 
@@ -45,7 +46,15 @@ const ModalBase: React.FC<ModalBaseProps> = ({ isOpen, onClose, title, children,
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           onMouseDown={onClose}
         >
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
+          {/* Backdrop */}
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/60 backdrop-blur-md" 
+            aria-hidden="true" 
+          />
+          
           <motion.div
             variants={dropIn}
             initial="hidden"
@@ -54,29 +63,57 @@ const ModalBase: React.FC<ModalBaseProps> = ({ isOpen, onClose, title, children,
             role="dialog"
             aria-modal="true"
             aria-labelledby="modal-title"
-            className="relative w-full max-w-md bg-bg-surface rounded-xl shadow-neumorphic-convex flex flex-col max-h-[90vh]"
+            className="
+              relative w-full max-w-md 
+              bg-bg-main 
+              rounded-2xl 
+              shadow-neu-flat-light dark:shadow-neu-flat-dark
+              border border-white/20 dark:border-black/20
+              flex flex-col max-h-[90vh] overflow-hidden
+            "
             onMouseDown={(e) => e.stopPropagation()}
           >
-            {/* Header */}
-            <div className="flex items-center justify-between p-4">
-              <h2 id="modal-title" className="text-lg font-semibold text-text-primary">{title}</h2>
-              <button 
-                onClick={onClose} 
+            {/* Mechanical Header */}
+            <div className="
+              flex items-center justify-between px-6 py-4 
+              border-b border-black/5 dark:border-white/5
+              bg-bg-main
+            ">
+              <div className="flex items-center gap-3">
+                <div className="w-1.5 h-4 bg-accent rounded-full shadow-[0_0_8px_rgba(var(--accent),0.6)]"></div>
+                <h2 id="modal-title" className="text-sm font-black uppercase tracking-widest text-text-primary">
+                  {title}
+                </h2>
+              </div>
+              <button
+                onClick={onClose}
                 aria-label="Close modal"
-                className="p-2 rounded-full text-text-secondary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+                className="
+                  group
+                  p-2 rounded-full 
+                  text-text-secondary 
+                  shadow-neu-flat dark:shadow-neu-flat-dark
+                  active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark
+                  hover:text-red-500
+                  transition-all duration-200
+                "
               >
-                <FiX size={20} />
+                <FiX size={18} className="group-hover:rotate-90 transition-transform duration-200" />
               </button>
             </div>
 
-            {/* Content */}
-            <div className="p-4 overflow-y-auto flex-grow">
+            {/* Content Well */}
+            <div className="p-6 overflow-y-auto flex-grow scrollbar-hide">
               {children}
             </div>
 
-            {/* Footer */}
+            {/* Footer Control Deck */}
             {footer && (
-              <div className="flex justify-end gap-3 p-4 bg-bg-surface rounded-b-xl">
+              <div className="
+                flex justify-end gap-4 px-6 py-4 
+                bg-bg-main 
+                border-t border-black/5 dark:border-white/5
+              ">
                 {footer}
               </div>
             )}

@@ -1,42 +1,60 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
-import Login from './pages/Login';
-import Register from './pages/Register';
-import Restore from './pages/Restore';
-import Chat from './pages/Chat';
-import SettingsPage from './pages/SettingsPage';
-import KeyManagementPage from './pages/KeyManagementPage';
-import SessionManagerPage from './pages/SessionManagerPage';
-import LinkDevicePage from './pages/LinkDevicePage';
-import DeviceScannerPage from './pages/DeviceScannerPage';
-import ProfilePage from './pages/ProfilePage';
-import LandingPage from './pages/LandingPage';
-import HelpPage from './pages/HelpPage'; // Import HelpPage
-
-import ProtectedRoute from './components/ProtectedRoute';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useCallback, Suspense, lazy } from 'react';
 import { Toaster } from 'react-hot-toast';
-import { useAuthStore } from './store/auth';
-import { useEffect, useCallback } from 'react';
+import { FiLogOut, FiSettings } from 'react-icons/fi';
+import { motion } from 'framer-motion';
+import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
+
+// Lazy Loaded Pages
+const Login = lazy(() => import('./pages/Login'));
+const Register = lazy(() => import('./pages/Register'));
+const Restore = lazy(() => import('./pages/Restore'));
+const Chat = lazy(() => import('./pages/Chat'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const KeyManagementPage = lazy(() => import('./pages/KeyManagementPage'));
+const SessionManagerPage = lazy(() => import('./pages/SessionManagerPage'));
+const LinkDevicePage = lazy(() => import('./pages/LinkDevicePage'));
+const DeviceScannerPage = lazy(() => import('./pages/DeviceScannerPage'));
+const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+const LandingPage = lazy(() => import('./pages/LandingPage'));
+const HelpPage = lazy(() => import('./pages/HelpPage'));
+
+// Components
+import ProtectedRoute from './components/ProtectedRoute';
 import ConfirmModal from './components/ConfirmModal';
 import UserInfoModal from './components/UserInfoModal';
 import PasswordPromptModal from './components/PasswordPromptModal';
 import ChatInfoModal from './components/ChatInfoModal';
 import DynamicIsland from './components/DynamicIsland';
-
-import { useThemeStore } from './store/theme';
-import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
-import { useGlobalShortcut } from './hooks/useGlobalShortcut';
-import { useCommandPaletteStore } from './store/commandPalette';
 import CommandPalette from './components/CommandPalette';
-import { FiLogOut, FiSettings } from 'react-icons/fi';
-import { syncSessionKeys } from './utils/sessionSync';
-import { useConversationStore } from './store/conversation';
+import { Spinner } from './components/Spinner';
 
+// Stores & Hooks
+import { useAuthStore } from './store/auth';
+import { useThemeStore } from './store/theme';
+import { useCommandPaletteStore } from './store/commandPalette';
+import { useConversationStore } from './store/conversation';
+import { useGlobalShortcut } from './hooks/useGlobalShortcut';
+
+// Libs & Utils
+import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
+import { syncSessionKeys } from './utils/sessionSync';
+
+// Variabel global untuk mencegah double-sync saat render cepat
 let isSyncing = false;
 
-// Initialize socket listeners once
+// Initialize socket instance once
 getSocket();
 
-// New component to handle root navigation
+// --- Components ---
+
+const LoadingScreen = () => (
+  <div className="w-full h-screen flex items-center justify-center bg-bg-main">
+    <Spinner size="lg" />
+  </div>
+);
+
 const Home = () => {
   const { conversations, loading } = useConversationStore(state => ({
     conversations: state.conversations,
@@ -44,21 +62,29 @@ const Home = () => {
   }));
 
   if (loading) {
-    return (
-      <div className="w-screen h-screen flex items-center justify-center">
-        {/* You can replace this with a proper Spinner component */}
-        <p>Loading conversations...</p>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
+  // Jika user punya percakapan, redirect ke yang paling terakhir/pertama
   if (conversations.length > 0) {
     return <Navigate to={`/chat/${conversations[0].id}`} replace />;
   }
 
-  // If there are no conversations, render the Chat page in a welcome/empty state
+  // Jika tidak ada percakapan, tampilkan halaman Chat kosong (Welcome state)
   return <Chat />;
 };
+
+const PageWrapper = ({ children, noScroll = false }: { children: React.ReactNode, noScroll?: boolean }) => (
+  <motion.div
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    transition={{ duration: 0.3 }}
+    className={noScroll ? "h-full w-full overflow-hidden" : "h-full w-full overflow-y-auto"}
+  >
+    {children}
+  </motion.div>
+);
 
 const AppContent = () => {
   const { theme, accent } = useThemeStore();
@@ -69,17 +95,19 @@ const AppContent = () => {
     removeCommands: s.removeCommands,
   }));
   const navigate = useNavigate();
+  const location = useLocation();
 
+  // --- Shortcuts & Commands ---
+  
   const settingsAction = useCallback(() => navigate('/settings'), [navigate]);
   
-  // We need to ensure logout also disconnects the socket
   const logoutAction = useCallback(() => {
     logout();
     disconnectSocket();
   }, [logout]);
 
   useGlobalShortcut(['Control', 'k'], openCommandPalette);
-  useGlobalShortcut(['Meta', 'k'], openCommandPalette); // For macOS
+  useGlobalShortcut(['Meta', 'k'], openCommandPalette);
 
   useEffect(() => {
     const commands = [
@@ -104,49 +132,91 @@ const AppContent = () => {
     return () => removeCommands(commands.map(c => c.id));
   }, [addCommands, removeCommands, settingsAction, logoutAction]);
 
+  // --- Lifecycle & Effects ---
+
+  // 1. Bootstrap Auth
   useEffect(() => {
     bootstrap();
-  }, []);
+  }, [bootstrap]);
 
-  // --- NEW: Centralized connection management ---
+  // 2. Manage Socket Connection
   useEffect(() => {
+    if (location.pathname.startsWith('/link-device')) {
+      console.log("🔗 On Linking Page: Global socket management is paused.");
+      return;
+    }
     if (user) {
-      console.log("User found, connecting socket...");
+      console.log("👤 User authenticated, connecting socket...");
       connectSocket();
     } else {
-      console.log("No user, disconnecting socket...");
+      console.log("👤 User not authenticated, disconnecting socket...");
       disconnectSocket();
     }
-    // No return cleanup needed as disconnect is handled explicitly
-  }, [user]);
-  // --- END NEW ---
+  }, [user, location.pathname]);
 
-  // --- NEW: Trigger key sync after user is loaded and UI is ready ---
+  // 3. Sync Encryption Keys
   useEffect(() => {
     const sync = async () => {
-      if (user && sessionStorage.getItem('keys_synced') !== 'true' && !isSyncing) {
+      if (user && !location.pathname.startsWith('/link-device') && sessionStorage.getItem('keys_synced') !== 'true' && !isSyncing) {
         try {
           isSyncing = true;
+          console.log("🔑 Starting session key synchronization...");
           await syncSessionKeys();
           sessionStorage.setItem('keys_synced', 'true');
+          console.log("✅ Keys synced successfully.");
         } catch (error) {
-          console.error("An error occurred during key synchronization:", error);
-          // The toast in syncSessionKeys should handle user feedback
+          console.error("❌ Key synchronization failed:", error);
         } finally {
           isSyncing = false;
         }
       }
     };
     sync();
-  }, [user]);
-  // --- END NEW ---
+  }, [user, location.pathname]);
 
+  // 4. Apply Theme
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(theme);
+    root.style.setProperty('--color-accent', `var(--accent-${accent})`);
     root.dataset.accent = accent;
   }, [theme, accent]);
+
+  // 5. Visibility Change Handler
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (location.pathname.startsWith('/link-device')) {
+        console.log("🔗 On Linking Page: Skipping visibility change handler.");
+        return;
+      }
+
+      if (document.visibilityState === 'visible') {
+        console.log("👀 App in focus, checking connection & syncing...");
+
+        const socket = getSocket();
+        if (!socket?.connected) {
+          if (user) {
+            connectSocket();
+          }
+        }
+
+        if (user) {
+          useConversationStore.getState().resyncState().catch(err => {
+            console.error("❌ Error during resync:", err);
+          });
+        }
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleVisibilityChange);
+    };
+  }, [user, location.pathname]);
 
   return (
     <>
@@ -157,55 +227,64 @@ const AppContent = () => {
           duration: 5000,
           className: 'glass-toast',
           style: {
-            background: 'hsl(var(--bg-surface) / 0.8)',
-            color: 'hsl(var(--text-primary))',
-            border: '1px solid hsl(var(--border))',
+            background: 'var(--bg-surface)',
+            color: 'var(--text-primary)',
+            border: '1px solid var(--border)',
+            boxShadow: 'var(--shadow-convex)',
           },
           success: {
             duration: 3000,
             iconTheme: {
-              primary: 'hsl(var(--accent))',
-              secondary: 'hsl(var(--accent-foreground))',
+              primary: 'var(--color-accent, #3b82f6)',
+              secondary: '#fff',
             },
           },
           error: {
             iconTheme: {
-              primary: 'hsl(var(--destructive))',
-              secondary: 'hsl(var(--destructive-foreground))',
+              primary: '#ef4444',
+              secondary: '#fff',
             },
           },
         }}
       />
 
+      {/* Global Modals & UI Elements */}
       <CommandPalette />
       <ConfirmModal />
       <UserInfoModal />
       <PasswordPromptModal />
       <ChatInfoModal />
       <DynamicIsland />
-      <Routes>
-        {/* Public routes */}
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/restore" element={<Restore />} />
-        <Route path="/link-device" element={<LinkDevicePage />} />
-        <Route path="/help" element={<HelpPage />} /> {/* New Help Page Route */}
 
-        {/* Protected routes */}
-        <Route element={<ProtectedRoute />}>
-          <Route path="/chat" element={<Home />} />
-          <Route path="/chat/:conversationId" element={<Chat />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/settings/keys" element={<KeyManagementPage />} />
-          <Route path="/settings/sessions" element={<SessionManagerPage />} />
-          <Route path="/settings/link-device" element={<DeviceScannerPage />} />
-          <Route path="/profile/:userId" element={<ProfilePage />} />
-        </Route>
+      <div className="w-full h-full max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
+        <Suspense fallback={<LoadingScreen />}>
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/" element={<PageWrapper><LandingPage /></PageWrapper>} />
+            <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
+            <Route path="/register" element={<PageWrapper><Register /></PageWrapper>} />
+            <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
+            <Route path="/link-device" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
+            <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
 
-        {/* Fallback route */}
-        <Route path="*" element={<Navigate to="/" />} />
-      </Routes>
+            {/* Protected Routes */}
+            <Route element={<ProtectedRoute />}>
+              <Route path="/chat" element={<PageWrapper noScroll={true}><Home /></PageWrapper>} />
+              <Route path="/chat/:conversationId" element={<PageWrapper noScroll={true}><Chat /></PageWrapper>} />
+
+              <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />
+              <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
+              <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
+              <Route path="/settings/link-device" element={<PageWrapper><DeviceScannerPage /></PageWrapper>} />
+
+              <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
+            </Route>
+
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
+      </div>
     </>
   );
 };
@@ -214,6 +293,8 @@ export default function App() {
   return (
     <BrowserRouter>
       <AppContent />
+      <Analytics />
+      <SpeedInsights />
     </BrowserRouter>
   );
 }

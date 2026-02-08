@@ -7,14 +7,14 @@ import { useMessageStore, decryptMessageObject } from "@store/message";
 import { useConnectionStore } from "@store/connection";
 import { usePresenceStore } from "@store/presence";
 import useNotificationStore from '@store/notification';
-import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest } from "@utils/crypto";
+import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest, schedulePeriodicGroupKeyRotation } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
 import type { Message } from "@store/conversation";
 import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
 
-const WS_URL = import.meta.env.VITE_WS_URL || "https://chat-lite-api.onrender.com";
+// FIX: Gunakan VITE_WS_URL (Koyeb) jika ada, kalau tidak ada (dev) baru pakai API_URL
+const WS_URL = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL;
 let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
-
 
 const handleKeyRotation = async (conversationId: string) => {
   const MAX_RETRIES = 3;
@@ -23,21 +23,18 @@ const handleKeyRotation = async (conversationId: string) => {
   while (attempt < MAX_RETRIES) {
     try {
       await rotateGroupKey(conversationId);
-      // On success, clear any pending rotation flag
       useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: false });
       console.log(`[socket] Key rotation for ${conversationId} successful.`);
-      return; // Success, exit the function
+      return; 
     } catch (err: any) {
       attempt++;
       console.error(`[socket] Key rotation attempt ${attempt} failed for ${conversationId}:`, err);
       if (attempt >= MAX_RETRIES) {
-        // All retries have failed
         console.error(`[socket] All key rotation retries failed for ${conversationId}. Marking as pending.`);
         useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: true });
         toast.error(`CRITICAL: Failed to rotate keys for group. The chat is insecure.`, { duration: 10000 });
       } else {
-        // Wait before retrying
-        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff (2s, 4s, ...)
+        const delay = Math.pow(2, attempt) * 1000;
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -46,30 +43,56 @@ const handleKeyRotation = async (conversationId: string) => {
 
 export function getSocket() {
   if (!socket) {
+    // Inisialisasi awal (token mungkin masih null, tidak apa-apa)
+    const token = useAuthStore.getState().accessToken;
+
     socket = io(WS_URL, {
       withCredentials: true,
-      transports: ["websocket", "polling"],
+      transports: ['websocket', 'polling'], // Prioritaskan WebSocket
       autoConnect: false,
+      reconnection: true,
+      reconnectionAttempts: 20,
+      reconnectionDelay: 2000,
       path: "/socket.io",
+      auth: {
+        token: token 
+      }
     });
 
     const { setStatus } = useConnectionStore.getState();
     const { addOrUpdate, setOnlineUsers, userJoined, userLeft } = usePresenceStore.getState();
-    const { addIncomingMessage, updateMessage, addReaction, removeReaction, updateMessageStatus } = useMessageStore.getState();
+    const { updateMessage, addReaction, removeReaction, updateMessageStatus } = useMessageStore.getState();
     const conversationStore = useConversationStore.getState();
 
     // --- System Listeners ---
-    socket.on("connect", () => {
+    socket.on("connect", async () => {
       setStatus('connected');
       const user = useAuthStore.getState().user;
       if (user) {
         socket?.emit("presence:update", { userId: user.id, online: true });
+
+        try {
+          // === THE SYNC PROTOCOL: Sync data on connect/reconnect ===
+          console.log("🔄 Syncing data after connection...");
+
+          // 1. Refetch Conversation List (Biar urutan chat bener & snippet update)
+          await useConversationStore.getState().loadConversations();
+
+          // 2. Resend pending messages that might have failed during disconnection
+          useMessageStore.getState().resendPendingMessages();
+
+          // 3. Update Status Online User Lain
+          // (Handled by presence:init event that's already implemented)
+        } catch (error) {
+          console.error("socket connect sync failed", error);
+        }
       }
       console.log("✅ Socket connected:", socket?.id);
     });
 
     socket.on("disconnect", (reason) => {
       setStatus('disconnected');
+      // Jangan toast jika disconnect manual/navigasi
       if (reason !== "io client disconnect") toast.error("Disconnected. Reconnecting...");
       console.log("⚠️ Socket disconnected:", reason);
     });
@@ -81,21 +104,11 @@ export function getSocket() {
 
     // --- Application-specific Listeners ---
     socket.on("message:new", async (newMessage) => {
-      // --- DEBUG LOG 4: Client Reception ---
-      console.log("🔥 [SOCKET-DEBUG] Received message:new event", {
-        id: newMessage.id,
-        sessionId: newMessage.sessionId, // Is this undefined/null?
-        fileKey: !!newMessage.fileKey,
-        content: newMessage.content,
-        conversationId: newMessage.conversationId
-      });
-      console.log("🔥 [SOCKET-DEBUG] Raw Object:", JSON.stringify(newMessage));
+      console.log("🔥 [SOCKET] Received message:new", newMessage.id);
 
-      // Defensive check: If the client receives a message for a conversation it's not in, ignore it.
-      // This can happen briefly after being removed from a group.
       const convExists = useConversationStore.getState().conversations.some(c => c.id === newMessage.conversationId);
       if (!convExists) {
-        console.warn(`[socket] Ignored message for unknown or removed conversation ${newMessage.conversationId}`);
+        console.warn(`[socket] Ignored message for unknown conversation ${newMessage.conversationId}`);
         return;
       }
 
@@ -104,14 +117,11 @@ export function getSocket() {
         const { replaceOptimisticMessage, addIncomingMessage } = useMessageStore.getState();
         const decryptedMessage = await decryptMessageObject(newMessage);
 
-        // If the message has a tempId AND is from the current user, it's a confirmation for an optimistic message.
         if (newMessage.tempId && me && newMessage.senderId === me.id) {
           replaceOptimisticMessage(decryptedMessage.conversationId, newMessage.tempId, decryptedMessage);
         } else {
-          // Otherwise, it's a new incoming message from another user.
           addIncomingMessage(decryptedMessage.conversationId, decryptedMessage);
           
-          // Trigger Notification store if the message is for an inactive conversation
           const activeId = useConversationStore.getState().activeId;
           if (decryptedMessage.conversationId !== activeId && decryptedMessage.sender) {
             const { addNotification } = useNotificationStore.getState();
@@ -147,11 +157,9 @@ export function getSocket() {
       const { user: me } = useAuthStore.getState();
       const { replaceOptimisticReaction, addReaction } = useMessageStore.getState();
 
-      // If the reaction has a tempId AND is from the current user, it's a confirmation for an optimistic update.
       if (reaction.tempId && me && reaction.userId === me.id) {
         replaceOptimisticReaction(conversationId, messageId, reaction.tempId, reaction);
       } else {
-        // Otherwise, it's a new reaction from another user.
         addReaction(conversationId, messageId, reaction);
       }
     });
@@ -160,6 +168,12 @@ export function getSocket() {
     socket.on("conversation:new", (newConversation) => {
       conversationStore.addOrUpdateConversation(newConversation);
       socket?.emit("conversation:join", newConversation.id);
+
+      // Jika ini adalah percakapan grup, jadwalkan rotasi kunci berkala
+      if (newConversation.isGroup) {
+        schedulePeriodicGroupKeyRotation(newConversation.id);
+      }
+
       toast.success(`You've been added to "${newConversation.title || 'a new chat'}"`);
     });
 
@@ -167,33 +181,29 @@ export function getSocket() {
     socket.on("conversation:deleted", ({ id }) => conversationStore.removeConversation(id));
 
     socket.on("conversation:participants_added", ({ conversationId, newParticipants }) => {
-      console.log(`[socket] ${newParticipants.length} participant(s) added to ${conversationId}. Updating UI.`);
       useConversationStore.getState().addParticipants(conversationId, newParticipants);
     });
 
     socket.on("conversation:participant_removed", ({ conversationId, userId }) => {
-      console.log(`[socket] Participant ${userId} removed from ${conversationId}. Rotating key and updating UI.`);
-      
-      // Remove participant from the UI state
       useConversationStore.getState().removeParticipant(conversationId, userId);
-      
-      // Rotate the group key for security
       handleKeyRotation(conversationId);
     });
 
     socket.on('user:updated', (updatedUser) => {
-      // Update the user's own info if it's them
       const { user, setUser } = useAuthStore.getState();
       if (user?.id === updatedUser.id) {
-        setUser({ ...user, ...updatedUser } as User);
+        // Prevent overwriting private fields (email) with undefined from public broadcast
+        const preservedUser = { ...user, ...updatedUser };
+        if (updatedUser.email === undefined && user.email) {
+           preservedUser.email = user.email;
+        }
+        setUser(preservedUser as User);
       }
-      // Update user details in conversation participants and message senders
       useConversationStore.getState().updateParticipantDetails(updatedUser);
       useMessageStore.getState().updateSenderDetails(updatedUser);
     });
 
     socket.on('message:status_updated', (payload) => {
-      console.log('[STATUS] Received message:status_updated:', payload); // Diagnostic Log
       const { conversationId, messageId, deliveredTo, readBy, status } = payload;
       const userId = deliveredTo || readBy;
       if (userId) {
@@ -201,16 +211,15 @@ export function getSocket() {
       }
     });
     
-    socket.on('session:fulfill_request', (data) => fulfillKeyRequest(data).catch(error => console.error('Failed to fulfill key request:', error)));
-    socket.on('group:fulfill_key_request', (data) => fulfillGroupKeyRequest(data).catch(error => console.error('Failed to fulfill group key request:', error)));
+    socket.on('session:fulfill_request', (data) => fulfillKeyRequest(data).catch(console.error));
+    socket.on('group:fulfill_key_request', (data) => fulfillGroupKeyRequest(data).catch(console.error));
     socket.on('session:new_key', (data) => {
       storeReceivedSessionKey(data)
         .then(() => {
           useKeychainStore.getState().keysUpdated();
-          // After a new key is stored, try to re-decrypt any pending messages for that conversation
           useMessageStore.getState().reDecryptPendingMessages(data.conversationId);
         })
-        .catch(error => console.error('Failed to store or process received session key:', error));
+        .catch(console.error);
     });
     socket.on('force_logout', () => {
       toast.error("This session has been logged out remotely.");
@@ -234,7 +243,23 @@ export function getSocket() {
 }
 
 export function connectSocket() {
-  if (socket && !socket.connected) socket.connect();
+  // 1. Pastikan instance ada
+  if (!socket) getSocket();
+
+  // 2. AMBIL TOKEN TERBARU DARI STORE
+  const token = useAuthStore.getState().accessToken;
+
+  if (socket) {
+    // 3. UPDATE TOKEN DI SOCKET AUTH (FIX UTAMA)
+    // Ini memastikan socket menggunakan token baru hasil refresh, bukan token null saat init
+    (socket.auth as any) = { token };
+
+    // 4. Connect hanya jika belum connect
+    if (!socket.connected) {
+      console.log("🔌 Connecting socket with token:", token ? "Token Present" : "No Token");
+      socket.connect();
+    }
+  }
 }
 
 export function disconnectSocket() {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
@@ -12,11 +12,10 @@ import { useAuthStore } from '@store/auth';
 import type { User } from '@store/auth';
 import type { Conversation } from '@store/conversation';
 
-import { sanitizeText } from '@utils/sanitize';
 import { toAbsoluteUrl } from '@utils/url';
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { FiUsers } from 'react-icons/fi';
+import { FiUsers, FiSearch, FiMoreVertical, FiSettings, FiLogOut } from 'react-icons/fi';
 
 import CreateGroupChat from './CreateGroupChat';
 import NotificationBell from './NotificationBell';
@@ -25,60 +24,110 @@ import { Spinner } from './Spinner';
 
 // --- Sub-components ---
 
-const UserProfile = () => {
+const UserProfile = memo(() => {
   const { user, logout } = useAuthStore(state => ({ user: state.user, logout: state.logout }));
+  const { showConfirm } = useModalStore();
+
+  const handleLogout = useCallback(() => {
+    showConfirm(
+      "Confirm Logout",
+      "Are you sure you want to end your session?",
+      logout
+    );
+  }, [logout, showConfirm]);
+
   if (!user) return null;
 
   return (
-    <div className="p-4 flex items-center justify-between">
-      <div className="flex items-center gap-4">
-        <img src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
-        <div>
-          <p className="text-lg font-semibold text-text-primary">{user.name}</p>
-          <p className="text-xs text-text-secondary">Available</p>
+    <div className="flex items-center justify-between px-6 py-6 bg-bg-main z-10">
+      {/* Identity Slot */}
+      <div className="flex items-center gap-3 overflow-hidden">
+        <div className="relative flex-shrink-0">
+          <img 
+            src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} 
+            alt="Avatar" 
+            className="w-10 h-10 rounded-full object-cover shadow-neu-flat dark:shadow-neu-flat-dark border-2 border-bg-main" 
+          />
+          <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border border-bg-surface"></div>
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-text-primary truncate">{user.name}</p>
+          <p className="text-[10px] font-medium text-text-secondary truncate opacity-70">@{user.username}</p>
         </div>
       </div>
-      <div className="flex items-center gap-1">
+
+      {/* Control Cluster */}
+      <div className="flex items-center gap-1 flex-shrink-0">
         <NotificationBell />
-        <Link to="/settings" aria-label="Settings" className="btn-flat p-2 rounded-full text-text-secondary transition-all">
-          <motion.svg whileHover={{ rotate: 90 }} xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06-.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></motion.svg>
+        
+        <Link 
+          to="/settings" 
+          aria-label="Settings" 
+          className="btn-flat p-2 rounded-full text-text-secondary hover:text-text-primary transition-all"
+        >
+          <FiSettings size={20} />
         </Link>
-        <button onClick={logout} aria-label="Logout" className="btn-flat p-2 rounded-full text-text-secondary transition-all">
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        
+        <button 
+          onClick={handleLogout} 
+          aria-label="Logout" 
+          className="btn-flat p-2 rounded-full text-text-secondary hover:text-red-500 transition-all"
+        >
+          <FiLogOut size={20} />
         </button>
       </div>
     </div>
   );
-};
+});
 
-const SearchResults = ({ results, onSelect }: { results: User[], onSelect: (userId: string) => void }) => (
+const SearchResults = memo(({ results, onSelect }: { results: User[], onSelect: (userId: string) => void }) => (
   <Virtuoso
     style={{ height: '100%' }}
     data={results}
     components={{
-      Header: () => <p className="text-xs font-bold text-text-secondary px-4 mb-2">SEARCH RESULTS</p>,
-      EmptyPlaceholder: () => <div className="p-4 text-center text-sm text-text-secondary">No users found.</div>,
+      Header: () => <p className="text-xs font-bold text-text-secondary px-6 mb-4 mt-2">GLOBAL SEARCH</p>,
+      EmptyPlaceholder: () => <div className="p-6 text-center text-xs text-text-secondary">No users found.</div>,
     }}
     itemContent={(index, user) => (
       <button 
         key={user.id}
         onClick={() => onSelect(user.id)}
-        className="w-full text-left p-3 flex items-center gap-3 rounded-lg hover:bg-secondary transition-colors"
+        className="
+          w-[calc(100%-32px)] mx-4 mb-3 p-3 flex items-center gap-4 rounded-xl text-left
+          bg-bg-main transition-all
+          shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5
+        "
       >
-        <img src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} alt="Avatar" className="w-12 h-12 rounded-full bg-secondary object-cover" />
+        <img src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
         <div className="flex-1 min-w-0">
-          <p className="text-base font-semibold truncate text-text-primary">{user.name}</p>
-          <p className="text-sm truncate text-text-secondary">@{user.username}</p>
+          <p className="font-bold text-sm text-text-primary">{user.name}</p>
+          <p className="text-xs text-text-secondary">@{user.username}</p>
         </div>
       </button>
     )}
   />
-);
+));
 
-const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, onClick, onUserClick, onMenuSelect, onTogglePin }: {
+const ConversationItem = memo(({ 
+  conversation, 
+  meId, 
+  isOnline, 
+  isBlocked, 
+  blockUser, 
+  unblockUser, 
+  isActive, 
+  isSelected, 
+  onClick, 
+  onUserClick, 
+  onMenuSelect, 
+  onTogglePin 
+}: {
   conversation: Conversation;
   meId?: string;
-  presence: string[];
+  isOnline: boolean;
+  isBlocked: boolean;
+  blockUser: (userId: string) => Promise<void>;
+  unblockUser: (userId: string) => Promise<void>;
   isActive: boolean;
   isSelected: boolean;
   onClick: () => void;
@@ -88,7 +137,6 @@ const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, 
 }) => {
   const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
   const title = conversation.isGroup ? conversation.title : peerUser?.name || 'Conversation';
-  const isOnline = peerUser ? presence.includes(peerUser.id) : false;
   const isUnread = conversation.unreadCount > 0;
   const isPinnedByMe = Boolean(conversation.participants?.some(p => p.id === meId && p.isPinned));
 
@@ -105,20 +153,24 @@ const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, 
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }, []);
 
-  const itemClasses = clsx(
-    'relative flex items-center justify-between mx-3 my-2 rounded-lg transition-all duration-200',
-    {
-      'bg-bg-surface shadow-neumorphic-pressed': isActive,
-      'shadow-neumorphic-convex hover:shadow-neumorphic-pressed': !isActive,
-      'ring-2 ring-accent ring-offset-2 ring-offset-bg-main': isSelected,
-    }
-  );
-
   const previewText = conversation.lastMessage?.content || conversation.lastMessage?.preview || 'No messages yet';
 
   return (
-    <motion.div layout key={conversation.id} className={itemClasses}>
-      <div className="w-full text-left p-3 pr-10 flex items-center gap-3" onClick={onClick}>
+    <motion.div 
+      // Removed 'layout' prop for performance
+      key={conversation.id} 
+      className={clsx(
+        'relative mx-4 my-3 rounded-2xl p-1 transition-all duration-200 select-none group',
+        isActive 
+          ? 'bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark border border-transparent' 
+          : 'bg-bg-main shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5 active:scale-[0.98]'
+      )}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+    >
+      <div className="w-full text-left p-3 pr-8 flex items-center gap-4 cursor-pointer rounded-xl" onClick={onClick}>
+        {/* Avatar */}
         <div className="relative flex-shrink-0">
           <button 
             onClick={(e) => {
@@ -128,74 +180,122 @@ const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, 
               }
             }}
             disabled={!peerUser}
-            className="disabled:cursor-default"
+            className="block"
           >
-            <img src={avatarSrc} alt="Avatar" className="w-12 h-12 rounded-full bg-secondary object-cover" />
-          </button>
-          {peerUser && <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-bg-surface ${isOnline ? 'bg-green-500' : 'bg-gray-500'}`} />}
-        </div>
-        <div className="flex-1 min-w-0 cursor-pointer">
-          <div className="flex justify-between items-start">
-            <div className="flex items-center">
-              {isPinnedByMe && (
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 text-accent flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path>
-                  <circle cx="12" cy="10" r="3"></circle>
-                </svg>
+            <img
+              src={avatarSrc}
+              alt="Avatar"
+              className={clsx(
+                "w-12 h-12 rounded-full object-cover border-2 transition-all",
+                isActive ? "border-bg-surface shadow-inner" : "border-bg-main shadow-sm"
               )}
-              <p className={`text-base font-semibold truncate ${isActive ? 'text-accent' : 'text-text-primary'}`}>{title}</p>
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                if (conversation.isGroup) {
+                  target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`;
+                } else {
+                  target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${title}`;
+                }
+              }}
+            />
+          </button>
+          {peerUser && (
+            <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-bg-surface ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+          )}
+        </div>
+
+        {/* Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex justify-between items-center mb-0.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              {isPinnedByMe && (
+                <span className="text-accent flex-shrink-0">
+                   <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 8 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                </span>
+              )}
+              <p className={clsx(
+                "text-sm font-bold truncate transition-colors",
+                isActive ? 'text-accent' : 'text-text-primary'
+              )}>
+                {title}
+              </p>
             </div>
-            {conversation.lastMessage && <p className={`text-xs flex-shrink-0 ml-2 ${isActive ? 'text-text-secondary' : 'text-text-secondary'}`}>{formatConversationTime(conversation.lastMessage.createdAt)}</p>}
+            {conversation.lastMessage && (
+              <p className="text-[10px] font-medium text-text-secondary flex-shrink-0 opacity-80">
+                {formatConversationTime(conversation.lastMessage.createdAt)}
+              </p>
+            )}
           </div>
-          <div className="flex justify-between items-center mt-1">
-            <p className={`text-sm truncate ${isUnread ? 'font-bold text-text-primary' : 'text-text-secondary'}`}>
+          
+          <div className="flex justify-between items-center">
+            <p className={clsx(
+              "text-xs truncate max-w-[85%]",
+              isUnread ? 'font-bold text-text-primary' : 'text-text-secondary opacity-80'
+            )}>
               {previewText}
             </p>
             {isUnread && (
-              <span className="bg-accent text-accent-foreground text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center flex-shrink-0 ml-2">
+              <span className="
+                flex items-center justify-center min-w-[1.25rem] h-5 px-1.5
+                bg-accent text-white text-[10px] font-bold 
+                rounded-full shadow-sm
+              ">
                 {conversation.unreadCount}
               </span>
             )}
           </div>
         </div>
       </div>
-      <div className="absolute right-2 top-1/2 -translate-y-1/2">
+
+      {/* Dropdown Menu */}
+      <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
         <DropdownMenu.Root>
-                                <DropdownMenu.Trigger asChild>
-                                  <button onClick={(e) => e.stopPropagation()} aria-label="Conversation options" className={clsx(
-                                    'p-2 rounded-full text-text-secondary active:shadow-neumorphic-pressed transition-all',
-                                    { 'shadow-neumorphic-convex-sm': isActive }
-                                  )}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-text-secondary" viewBox="0 0 20 20" fill="currentColor"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
-                                  </button>
-                                </DropdownMenu.Trigger>          <DropdownMenu.Portal>
-            <DropdownMenu.Content sideOffset={5} align="end" className="min-w-[180px] bg-surface/80 backdrop-blur-sm rounded-md shadow-lg z-50 p-1">
+          <DropdownMenu.Trigger asChild>
+            <button 
+              onClick={(e) => e.stopPropagation()} 
+              aria-label="Options" 
+              className="
+                p-3 rounded-full text-text-secondary 
+                hover:bg-bg-main hover:text-accent
+                transition-colors
+              "
+            >
+              <FiMoreVertical size={16} />
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content sideOffset={5} align="end" className="
+              min-w-[160px] bg-bg-main 
+              rounded-xl shadow-neu-float dark:shadow-neu-float-dark
+              border border-white/50 dark:border-white/5
+              p-1.5 z-50
+            ">
               <DropdownMenu.Item
                 onSelect={() => onTogglePin(conversation.id)}
-                className="block w-full text-left px-3 py-2 text-sm rounded cursor-pointer outline-none hover:bg-secondary"
+                className="w-full text-left px-3 py-2 text-xs font-medium rounded-lg cursor-pointer hover:bg-bg-main hover:text-accent outline-none transition-colors"
               >
-                {isPinnedByMe ? (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <line x1="2" y1="5" x2="22" y2="5"/>
-                      <path d="M12 5v14l6-6H6z"/>
-                    </svg>
-                    Unpin Conversation
-                  </>
-                ) : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline mr-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <line x1="2" y1="5" x2="22" y2="5"/>
-                      <path d="M12 5v14l6-6H6z"/>
-                    </svg>
-                    Pin Conversation
-                  </>
-                )}
+                {isPinnedByMe ? 'Unpin' : 'Pin'} Chat
               </DropdownMenu.Item>
-              <DropdownMenu.Separator className="my-1 h-px bg-border" />
+              
+              {!conversation.isGroup && (
+                <DropdownMenu.Item
+                  onSelect={() => {
+                    const other = conversation.participants.find(p => p.id !== meId);
+                    if (other) {
+                      isBlocked ? unblockUser(other.id) : blockUser(other.id);
+                    }
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs font-medium rounded-lg cursor-pointer hover:bg-bg-main hover:text-accent outline-none transition-colors"
+                >
+                   {isBlocked ? 'Unblock' : 'Block'} User
+                </DropdownMenu.Item>
+              )}
+              
+              <div className="h-px bg-border my-1" />
+              
               <DropdownMenu.Item
                 onSelect={() => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat')}
-                className="block w-full text-left px-3 py-2 text-sm text-destructive rounded cursor-pointer outline-none hover:bg-destructive hover:text-destructive-foreground"
+                className="w-full text-left px-3 py-2 text-xs font-medium text-red-500 rounded-lg cursor-pointer hover:bg-red-500/10 outline-none transition-colors"
               >
                 {conversation.isGroup ? 'Delete Group' : 'Delete Chat'}
               </DropdownMenu.Item>
@@ -205,7 +305,17 @@ const ConversationItem = ({ conversation, meId, presence, isActive, isSelected, 
       </div>
     </motion.div>
   );
-};
+}, (prev, next) => {
+  // Custom comparison for Memo
+  return (
+    prev.conversation === next.conversation &&
+    prev.isActive === next.isActive &&
+    prev.isSelected === next.isSelected &&
+    prev.isOnline === next.isOnline &&
+    prev.isBlocked === next.isBlocked &&
+    prev.meId === next.meId
+  );
+});
 
 
 // --- Main Component ---
@@ -229,7 +339,17 @@ export default function ChatList() {
     deleteConversation,
     togglePinConversation,
   } = useChatList();
-  
+
+  const {
+    blockedUserIds,
+    blockUser,
+    unblockUser
+  } = useAuthStore(state => ({
+    blockedUserIds: state.blockedUserIds,
+    blockUser: state.blockUser,
+    unblockUser: state.unblockUser
+  }));
+
   const { showConfirm, openProfileModal } = useModalStore(state => ({
     showConfirm: state.showConfirm,
     openProfileModal: state.openProfileModal,
@@ -251,52 +371,58 @@ export default function ChatList() {
     return () => removeCommands(commands.map(c => c.id));
   }, [addCommands, removeCommands, openCreateGroupModal]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (showSearchResults || conversations.length === 0) return;
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        const nextIndex = (selectedIndex + 1) % conversations.length;
-        setSelectedIndex(nextIndex);
-        virtuosoRef.current?.scrollToIndex({ index: nextIndex, align: 'center' });
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        const nextIndex = (selectedIndex - 1 + conversations.length) % conversations.length;
-        setSelectedIndex(nextIndex);
-        virtuosoRef.current?.scrollToIndex({ index: nextIndex, align: 'center' });
-      } else if (e.key === 'Enter') {
-        if (selectedIndex >= 0 && selectedIndex < conversations.length) {
-          e.preventDefault();
-          handleConversationClick(conversations[selectedIndex].id);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIndex, conversations, handleConversationClick, showSearchResults]);
+  // Memoized Item Renderer to prevent re-creating the function on every render
+  const itemContent = useCallback((index: number, c: Conversation) => {
+    const peerUser = !c.isGroup ? c.participants?.find(p => p.id !== meId) : null;
+    const isOnline = peerUser ? presence.includes(peerUser.id) : false;
+    const isBlocked = peerUser ? blockedUserIds.includes(peerUser.id) : false;
 
-  const handleMenuSelect = (id: string, action: 'deleteGroup' | 'deleteChat') => {
-    const handler = action === 'deleteGroup' ? deleteGroup : deleteConversation;
-    const title = action === 'deleteGroup' ? 'Delete Group' : 'Delete Chat';
-    const message = action === 'deleteGroup' 
-      ? 'Are you sure you want to permanently delete this group? This action cannot be undone.'
-      : 'Are you sure you want to hide this chat? It will be removed from your conversation list.';
-    showConfirm(title, message, () => handler(id));
-  };
+    return (
+      <ConversationItem
+        conversation={c}
+        meId={meId}
+        isOnline={isOnline}
+        isBlocked={isBlocked}
+        blockUser={blockUser}
+        unblockUser={unblockUser}
+        isActive={c.id === activeId}
+        isSelected={index === selectedIndex}
+        onClick={() => handleConversationClick(c.id)}
+        onUserClick={openProfileModal}
+        onMenuSelect={(action) => {
+           if (action === 'deleteGroup') deleteGroup(c.id);
+           else deleteConversation(c.id);
+        }}
+        onTogglePin={togglePinConversation}
+      />
+    );
+  }, [meId, presence, blockedUserIds, activeId, selectedIndex, handleConversationClick, openProfileModal, deleteGroup, deleteConversation, togglePinConversation, blockUser, unblockUser]);
 
   return (
-    <div className="h-full flex flex-col bg-bg-main">
+    <div className="
+      h-full flex flex-col bg-bg-main relative overflow-hidden
+      border-r border-black/5 dark:border-white/5 
+      shadow-[1px_0_0_rgba(255,255,255,0.5)] dark:shadow-[1px_0_0_rgba(0,0,0,0.5)]
+    ">
+      {/* Top Section */}
       <UserProfile />
-      <div className="p-4 border-b border-border">
-        <div className="relative flex items-center">
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary z-10">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      
+      <div className="px-6 pb-6">
+        <div className="relative group">
+          <div className="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary z-10 pointer-events-none">
+            <FiSearch size={18} />
           </div>
-          <input 
+          <input
             id="global-search-input"
-            type="text" 
-            placeholder="Search or start new chat..." 
-            className="w-full p-3 pl-10 pr-12 bg-bg-surface rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-accent transition-all shadow-neumorphic-concave"
+            type="text"
+            placeholder="Search..."
+            className="
+              w-full h-12 pl-12 pr-12 rounded-full
+              bg-bg-main text-text-primary font-medium
+              shadow-neu-pressed dark:shadow-neu-pressed-dark
+              focus:ring-2 focus:ring-accent/50 outline-none
+              transition-all placeholder:text-text-secondary/50
+            "
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -304,59 +430,59 @@ export default function ChatList() {
             <button 
               onClick={openCreateGroupModal} 
               title="New Group Chat"
-              aria-label="Create new group chat"
-              className="p-2 rounded-full bg-accent text-accent-foreground shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed transition-all"
+              className="
+                p-2 rounded-full text-text-secondary
+                hover:text-accent active:scale-95 transition-all
+              "
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></svg>
+              <FiUsers size={20} />
             </button>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      {/* List */}
+      <div className="flex-1 overflow-y-auto min-h-0 pb-4 scrollbar-hide">
         {isLoading && (
           <div className="flex justify-center items-center h-full">
             <Spinner />
           </div>
         )}
+        
         {error && !isLoading && (
-          <div className="p-4 m-3 text-center text-destructive bg-destructive/10 border border-destructive/20 rounded-lg">
-            <p className="mb-2 text-sm">{error}</p>
+          <div className="p-6 mx-4 text-center">
+            <div className="text-red-500 font-bold mb-2 text-sm">Connection Error</div>
             <button 
               onClick={handleRetry}
-              className="px-3 py-1 text-sm font-semibold bg-destructive/80 text-white rounded-md hover:bg-destructive"
+              className="px-4 py-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-xs font-bold hover:text-red-500 active:shadow-neumorphic-pressed"
             >
-              Retry
+              Reconnect
             </button>
           </div>
         )}
-        {!error && !isLoading && showSearchResults ? (
-          <SearchResults results={searchResults} onSelect={handleSelectUser} />
-        ) : (
-          <Virtuoso
-            ref={virtuosoRef}
-            style={{ height: '100%' }}
-            data={conversations}
-            components={{
-              Header: () => <p className="text-xs font-bold text-text-secondary px-4 pt-2 mb-2">CONVERSATIONS</p>,
-              EmptyPlaceholder: () => <div className="text-center p-4 text-text-secondary">No conversations yet.</div>,
-            }}
-            itemContent={(index, c) => (
-              <ConversationItem
-                conversation={c}
-                meId={meId}
-                presence={presence}
-                isActive={c.id === activeId}
-                isSelected={index === selectedIndex}
-                onClick={() => handleConversationClick(c.id)}
-                onUserClick={openProfileModal}
-                onMenuSelect={(action) => handleMenuSelect(c.id, action)}
-                onTogglePin={togglePinConversation}
-              />
-            )}
-          />
+
+        {!error && !isLoading && (
+          showSearchResults ? (
+            <SearchResults results={searchResults} onSelect={handleSelectUser} />
+          ) : (
+            <Virtuoso
+              ref={virtuosoRef}
+              style={{ height: '100%' }}
+              data={conversations}
+              components={{
+                Header: () => <div className="h-2"></div>,
+                EmptyPlaceholder: () => (
+                  <div className="flex flex-col items-center justify-center h-40 text-text-secondary/50">
+                    <p className="text-sm font-medium">No conversations yet</p>
+                  </div>
+                ),
+              }}
+              itemContent={itemContent}
+            />
+          )
         )}
       </div>
+      
       {showGroupModal && <CreateGroupChat onClose={() => setShowGroupModal(false)} />}
     </div>
   );

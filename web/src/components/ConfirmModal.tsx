@@ -19,7 +19,7 @@ const ConfirmModal = () => {
         <>
           <button
             onClick={hideConfirm}
-            className="px-4 py-2 rounded-md bg-secondary text-text-primary hover:bg-secondary/80 transition-colors"
+            className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
           >
             Cancel
           </button>
@@ -28,7 +28,7 @@ const ConfirmModal = () => {
               onConfirm();
               hideConfirm();
             }}
-            className="px-4 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+            className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
           >
             Confirm
           </button>

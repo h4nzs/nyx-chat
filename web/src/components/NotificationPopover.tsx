@@ -19,13 +19,18 @@ const NotificationItem = ({ notification }: { notification: any }) => {
   };
 
   const content = (
-    <div className="flex items-start gap-3 p-3 hover:bg-secondary transition-colors">
+    <div className="
+      flex items-start gap-3 p-3 rounded-lg 
+      bg-bg-main border-l-2 border-accent/50 
+      hover:shadow-neu-pressed dark:hover:shadow-neu-pressed-dark 
+      transition-all cursor-pointer
+    ">
       <div className="mt-1 flex-shrink-0">
-        <FiBell className="text-accent-color" />
+        <FiBell className="text-accent" />
       </div>
       <div>
-        <p className="text-sm text-text-primary">{notification.message}</p>
-        <p className="text-xs text-text-secondary mt-0.5">{timeAgo(notification.timestamp)}</p>
+        <p className="text-sm font-medium text-text-primary">{notification.message}</p>
+        <p className="text-[10px] font-mono text-text-secondary mt-1 opacity-60">{timeAgo(notification.timestamp)}</p>
       </div>
     </div>
   );
@@ -43,18 +48,24 @@ const NotificationPopover = () => {
   }));
 
   return (
-    <div className="w-80 bg-bg-surface border border-border rounded-lg shadow-lg">
-      <div className="p-3 flex justify-between items-center border-b border-border">
-        <h3 className="font-bold text-text-primary">Notifications</h3>
+    <div className="
+      w-80 rounded-b-2xl rounded-tr-none rounded-tl-2xl
+      bg-bg-main
+      shadow-neu-flat dark:shadow-neu-flat-dark
+      border-t-4 border-accent
+      overflow-hidden
+    ">
+      <div className="p-4 flex justify-between items-center bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark mb-2">
+        <h3 className="font-black text-xs uppercase tracking-widest text-text-primary">System Logs</h3>
         {notifications.length > 0 && (
-          <button onClick={clearNotifications} className="text-sm text-accent-color hover:underline">
-            Clear All
+          <button onClick={clearNotifications} className="text-[10px] font-mono text-accent hover:underline">
+            PURGE_ALL
           </button>
         )}
       </div>
-      <div className="max-h-96 overflow-y-auto">
+      <div className="max-h-96 overflow-y-auto p-2 space-y-2">
         {notifications.length === 0 ? (
-          <p className="p-4 text-center text-text-secondary">No new notifications.</p>
+          <p className="p-4 text-center text-xs font-mono text-text-secondary opacity-60">System nominal. No logs.</p>
         ) : (
           notifications.map(notif => <NotificationItem key={notif.id} notification={notif} />)
         )}

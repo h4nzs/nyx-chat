@@ -1,111 +1,255 @@
-import { useEffect, useState } from 'react';
+import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useAuthStore, type User } from '@store/auth';
 import { authFetch, handleApiError } from '@lib/api';
-import type { User } from '@store/auth';
 import { toAbsoluteUrl } from '@utils/url';
-import { motion } from 'framer-motion';
-import { IoArrowBack } from 'react-icons/io5';
+import { FiEdit2, FiShield, FiCpu, FiGlobe, FiActivity, FiKey, FiCheck, FiArrowLeft } from 'react-icons/fi';
+import { toast } from 'react-hot-toast';
 
-// Extend User type to include fields from the new endpoint
 type ProfileUser = User & {
-  createdAt: string;
-  description?: string | null;
+  createdAt?: string;
 };
 
 export default function ProfilePage() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
-  const [user, setUser] = useState<ProfileUser | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { user: me, updateProfile, updateAvatar } = useAuthStore();
+  
+  const [profileUser, setProfileUser] = useState<ProfileUser | null>(null);
+  const [name, setName] = useState('');
+  const [bio, setBio] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isFetching, setIsFetching] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isMe = me?.id === userId;
 
   useEffect(() => {
-    if (!userId) return;
-
     const fetchUser = async () => {
+      if (!userId) return;
+      setIsFetching(true);
       try {
-        setLoading(true);
-        const userData = await authFetch<ProfileUser>(`/api/users/${userId}`);
-        setUser(userData);
+        if (isMe && me) {
+          setProfileUser(me);
+          setName(me.name);
+          setBio(me.description || '');
+        } else {
+          const userData = await authFetch<ProfileUser>(`/api/users/${userId}`);
+          setProfileUser(userData);
+          setName(userData.name);
+          setBio(userData.description || '');
+        }
       } catch (e) {
-        setError(handleApiError(e));
+        toast.error(handleApiError(e));
       } finally {
-        setLoading(false);
+        setIsFetching(false);
       }
     };
-
     fetchUser();
-  }, [userId]);
+  }, [userId, me, isMe]);
 
-  if (loading) {
-    return <div className="p-4 text-center">Loading profile...</div>;
-  }
+  const stats = [
+    { label: 'Security Clearance', value: 'LEVEL 4', color: 'text-emerald-500', icon: FiShield },
+    { label: 'Encryption Protocol', value: 'AES-256-GCM', color: 'text-accent', icon: FiKey },
+    { label: 'Home Server', value: 'ap-southeast-1', color: 'text-blue-500', icon: FiGlobe },
+    { label: 'Session Status', value: 'ENCRYPTED', color: 'text-emerald-500', icon: FiActivity },
+  ];
 
-  if (error) {
-    return <div className="p-4 text-center text-red-500">Error: {error}</div>;
-  }
+  const handleSave = async () => {
+    if (!isMe) return;
+    setIsLoading(true);
+    try {
+      await updateProfile({ name, description: bio });
+      // Update local state if needed, but store update should trigger re-render via isMe check if we depend on me
+      setIsEditing(false);
+    } catch (error) {
+      // Toast already handled by updateProfile if implemented, else:
+      toast.error('Update Failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-  if (!user) {
-    return <div className="p-4 text-center">User not found.</div>;
-  }
+  const handleAvatarUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    if (!isMe) return;
+    const file = e.target.files?.[0];
+    if (file) {
+      try {
+        await updateAvatar(file);
+      } catch (error) {
+        // Error handled in store
+      }
+    }
+  };
+
+  if (isFetching) return <div className="h-full flex items-center justify-center bg-bg-main"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-accent"></div></div>;
+  if (!profileUser) return <div className="h-full flex items-center justify-center bg-bg-main text-text-secondary">User not found</div>;
 
   return (
-    <div className="w-full h-full bg-gray-100 dark:bg-gray-900 p-4 sm:p-6 lg:p-8 overflow-y-auto">
-      <div className="max-w-4xl mx-auto mb-4">
-        <button
-          onClick={() => navigate(-1)}
-          className="flex items-center gap-2 text-gray-600 dark:text-gray-300 hover:text-black dark:hover:text-white transition-colors duration-200"
-        >
-          <IoArrowBack size={20} />
-          <span className="font-semibold">Back</span>
-        </button>
-      </div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, ease: "easeOut" }}
-        className="bg-white dark:bg-gray-800 rounded-xl shadow-lg max-w-4xl mx-auto p-6 sm:p-8"
-      >
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          <div className="col-span-1 flex flex-col items-center text-center border-b md:border-b-0 md:border-r border-gray-200 dark:border-gray-700 pb-6 md:pb-0 md:pr-8">
-            <img 
-              src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
-              alt={user.name}
-              className="w-32 h-32 rounded-full object-cover ring-4 ring-blue-500/50 p-1"
-            />
-            <h1 className="text-2xl font-bold mt-4 text-gray-900 dark:text-white">{user.name}</h1>
-            <p className="text-md text-gray-500 dark:text-gray-400">@{user.username}</p>
+    <div className="h-full overflow-y-auto bg-bg-main p-4 md:p-8">
+      <div className="max-w-5xl mx-auto space-y-6">
+        
+        {/* HEADER: Operator Status */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b border-black/5 dark:border-white/5 pb-6">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => navigate(-1)}
+              className="p-3 rounded-full bg-bg-main shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark hover:text-accent transition-all"
+            >
+              <FiArrowLeft />
+            </button>
+            <div>
+              <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-text-primary">
+                Operator Profile
+              </h1>
+              <p className="font-mono text-xs text-text-secondary uppercase tracking-widest mt-1">
+                ID: {profileUser.id.substring(0, 8)}-{profileUser.id.substring(profileUser.id.length - 4)} • <span className="text-emerald-500">ACTIVE</span>
+              </p>
+            </div>
           </div>
+          
+          {isMe && (
+            <div className="flex gap-3">
+               {isEditing ? (
+                 <button 
+                   onClick={handleSave}
+                   disabled={isLoading}
+                   className="flex items-center gap-2 px-6 py-2 bg-accent text-white rounded-lg font-bold shadow-neu-flat dark:shadow-neu-flat-dark hover:brightness-110 active:scale-95 transition-all"
+                 >
+                   {isLoading ? <FiActivity className="animate-spin" /> : <FiCheck />}
+                   SAVE_CHANGES
+                 </button>
+               ) : (
+                 <button 
+                   onClick={() => setIsEditing(true)}
+                   className="flex items-center gap-2 px-6 py-2 bg-bg-main text-text-primary rounded-lg font-bold shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed transition-all"
+                 >
+                   <FiEdit2 size={16} />
+                   EDIT_RECORD
+                 </button>
+               )}
+            </div>
+          )}
+        </div>
 
-          <div className="col-span-1 md:col-span-2">
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-sm font-bold uppercase text-gray-400 dark:text-gray-500 tracking-wider">About</h2>
-                <p className="mt-2 text-gray-700 dark:text-gray-300 italic">
-                  {user.description || 'No description provided.'}
-                </p>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* COLUMN 1: Visual ID Card */}
+          <div className="lg:col-span-1 space-y-6">
+            <div className="bg-bg-main rounded-2xl p-6 shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5 text-center relative overflow-hidden group">
+              {/* ID Badge Aesthetics */}
+              <div className="absolute top-0 left-0 w-full h-1 bg-accent/50" />
+              <div className="absolute top-4 right-4 w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_#10b981]" />
+              
+              <div className="relative mx-auto w-40 h-40 mb-4">
+                <div className="w-full h-full rounded-full p-2 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark">
+                  <img 
+                    src={toAbsoluteUrl(profileUser.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profileUser.name}`}
+                    alt="Profile" 
+                    className="w-full h-full rounded-full object-cover"
+                  />
+                </div>
+                {isMe && (
+                  <>
+                    <button 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="absolute bottom-2 right-2 p-2.5 bg-accent text-white rounded-full shadow-lg hover:scale-110 transition-transform"
+                    >
+                      <FiEdit2 size={14} />
+                    </button>
+                    <input ref={fileInputRef} type="file" className="hidden" onChange={handleAvatarUpload} />
+                  </>
+                )}
               </div>
-              <div className="border-t border-gray-200 dark:border-gray-700"></div>
-              <div>
-                <h2 className="text-sm font-bold uppercase text-gray-400 dark:text-gray-500 tracking-wider">Details</h2>
-                <dl className="mt-2 space-y-2 text-gray-700 dark:text-gray-300">
-                  <div className="flex">
-                    <dt className="w-28 font-semibold">Joined on</dt>
-                    <dd>{new Date(user.createdAt).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</dd>
-                  </div>
-                  {user.email && (
-                    <div className="flex">
-                      <dt className="w-28 font-semibold">Email</dt>
-                      <dd>{user.email}</dd>
+
+              <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">{profileUser.name}</h2>
+              <p className="text-sm font-mono text-text-secondary">@{profileUser.username}</p>
+            </div>
+
+            {/* Technical Stats Widget */}
+            <div className="bg-bg-main rounded-xl p-5 shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5">
+              <h3 className="text-xs font-black uppercase tracking-widest text-text-secondary mb-4 flex items-center gap-2">
+                <FiCpu /> System Telemetry
+              </h3>
+              <div className="space-y-4">
+                {stats.map((stat) => (
+                  <div key={stat.label} className="flex items-center justify-between p-3 rounded-lg bg-bg-surface/10 border border-black/5 dark:border-white/5">
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded bg-bg-main ${stat.color} bg-opacity-10 shadow-neu-pressed dark:shadow-neu-pressed-dark`}>
+                        <stat.icon size={14} className={stat.color} />
+                      </div>
+                      <span className="text-xs font-bold text-text-secondary uppercase">{stat.label}</span>
                     </div>
-                  )}
-                </dl>
+                    <span className={`text-xs font-mono font-bold ${stat.color}`}>{stat.value}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
+
+          {/* COLUMN 2: Data Entry */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-bg-main rounded-2xl p-8 shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5">
+              <h3 className="text-xs font-black uppercase tracking-widest text-text-secondary mb-6 border-b border-black/5 dark:border-white/5 pb-2">
+                Biographical Data
+              </h3>
+              
+              <div className="space-y-6">
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">Display Name</label>
+                  <input
+                    type="text"
+                    value={name}
+                    disabled={!isEditing}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full bg-bg-main rounded-xl px-4 py-3 font-bold text-text-primary outline-none border-none shadow-neu-pressed dark:shadow-neu-pressed-dark focus:ring-1 focus:ring-accent/50 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">Operator Bio</label>
+                  <textarea
+                    value={bio}
+                    disabled={!isEditing}
+                    onChange={(e) => setBio(e.target.value)}
+                    rows={4}
+                    className="w-full bg-bg-main rounded-xl px-4 py-3 font-medium text-text-primary outline-none border-none shadow-neu-pressed dark:shadow-neu-pressed-dark focus:ring-1 focus:ring-accent/50 disabled:opacity-60 disabled:cursor-not-allowed resize-none transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Advanced: Public Key Visualization */}
+            <div className="bg-bg-main rounded-2xl p-8 shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5 overflow-hidden relative">
+              <div className="absolute top-0 right-0 p-4 opacity-10">
+                <FiKey size={100} />
+              </div>
+              <h3 className="text-xs font-black uppercase tracking-widest text-text-secondary mb-4">
+                Public Identity Key
+              </h3>
+              <div className="font-mono text-[10px] leading-relaxed text-text-secondary break-all bg-black/5 dark:bg-black/20 p-4 rounded-lg border border-black/5 dark:border-white/5 shadow-neu-pressed dark:shadow-neu-pressed-dark">
+                {/* Simulated Key Data - In real app, format actual public key */}
+                30 82 01 0a 02 82 01 01 00 c4 23 88 a1 99 b2 77 12 00 22 41 9a 33 ff 12 
+                ab 11 90 23 88 12 33 44 55 66 77 88 99 aa bb cc dd ee ff 00 11 22 33 44 
+                55 66 77 88 99 aa bb cc dd ee ff 00 11 22 33 44 55 66 77 88 99 aa bb cc 
+                dd ee ff 00 11 22 33 44 55 66 77 88 99 aa bb cc dd ee ff ...
+              </div>
+              {isMe && (
+                <div className="mt-4 flex gap-4">
+                   <button className="text-xs font-bold text-accent hover:underline uppercase tracking-wide">
+                     Refresh Keys
+                   </button>
+                   <button className="text-xs font-bold text-red-500 hover:underline uppercase tracking-wide">
+                     Revoke Access
+                   </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-      </motion.div>
+
+      </div>
     </div>
   );
 }

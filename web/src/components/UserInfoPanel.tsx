@@ -4,8 +4,8 @@ import { toAbsoluteUrl } from '@utils/url';
 import { authFetch, handleApiError } from '@lib/api';
 import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
-import { generateSafetyNumber } from '@lib/crypto-worker-proxy';
-import { getSodium } from '@lib/sodiumInitializer';
+// import { generateSafetyNumber } from '@lib/crypto-worker-proxy'; // Dynamic
+// import { getSodium } from '@lib/sodiumInitializer'; // Dynamic
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
 import { useVerificationStore } from '@store/verification';
@@ -68,6 +68,10 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
     }
 
     try {
+      // Dynamic imports
+      const { generateSafetyNumber } = await import('@lib/crypto-worker-proxy');
+      const { getSodium } = await import('@lib/sodiumInitializer');
+
       const myPublicKeyB64 = localStorage.getItem('publicKey');
       if (!myPublicKeyB64) {
         throw new Error("Your public key is not found. Please set up your keys first.");
@@ -93,10 +97,14 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
       return (
         <div className="space-y-6">
           <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-6 text-center">
-            <img 
+            <img
               src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
               alt={user.name}
               className="w-24 h-24 rounded-full bg-secondary object-cover mb-4 mx-auto"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
+              }}
             />
             <h3 className="text-xl font-bold text-text-primary">{user.name}</h3>
             <p className="text-sm text-text-secondary">@{user.username}</p>

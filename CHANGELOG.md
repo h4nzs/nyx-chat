@@ -2,6 +2,66 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.9.0] - 2026-02-02
+
+This major release focuses on "Performance & Polish". It introduces a complete visual overhaul to "Industrial Neumorphism", implements a rigorous "Crypto Quarantine" for faster initial load times, and resolves critical bugs in voice messaging and security.
+
+### Added
+
+-   **Performance: Crypto Quarantine (Lazy Loading):**
+    -   Refactored the application architecture to **lazy load** the massive cryptographic libraries (`libsodium`, `crypto-worker`). The ~750KB crypto bundle is now only downloaded when a user logs in or performs an encrypted action, significantly improving the "Time to Interactive" on the Landing Page.
+    -   Added visual loading states (`isInitializingCrypto`) to provide feedback while the security module initializes.
+-   **Performance: Virtualized Lists:** Implemented `react-virtuoso` virtualization with optimized memoization for both the Chat List and Message Window. This resolves severe scrolling lag on mobile devices by only rendering items currently in view.
+-   **SEO & GEO Optimization:**
+    -   Added `robots.txt` and `sitemap.xml` to properly index the application.
+    -   Injected rich JSON-LD schema (`SoftwareApplication`, `Organization`, `FAQPage`) into `index.html` to optimize for AI citation (GEO) and Google Rich Results.
+-   **Security: Cloudflare Turnstile:** Integrated Cloudflare Turnstile on the Registration page to prevent bot abuse, complete with proper Content-Security-Policy (CSP) configuration.
+
+### Changed
+
+-   **UI Overhaul: Industrial Neumorphism:**
+    -   **Design System:** Fully implemented a new "Industrial Neumorphism" design language featuring custom `neu-*` shadows, "Seam" separators, and "Trench" inputs for a tactile, physical feel.
+    -   **Profile Page:** Redesigned into a "Personnel File" dashboard layout.
+    -   **Modals:** Refactored `UserInfoModal` into a "Digital Identity Card" design.
+    -   **Dynamic Island:** Updated with "Heavy Levitation" physics.
+-   **Asset Diet:** Removed over **4MB** of unused background assets and moved documentation screenshots out of the production build, further reducing the initial download size.
+
+### Fixed
+
+-   **Voice Message Decryption:** Fixed a critical bug where voice messages failed to play with the error "Data provided to an operation does not meet requirements". The player now correctly decrypts the *file key* using the session key before attempting to decrypt the audio file.
+-   **Voice Uploads:** Fixed `OpaqueResponseBlocking` errors by ensuring encrypted voice files are uploaded with the `application/octet-stream` MIME type to Cloudflare R2.
+-   **Lightbox Z-Index:** Fixed an issue where the image lightbox was clipped by sidebars or modals. It now uses a React Portal to render at the top level of the DOM.
+-   **Content-Security-Policy (CSP):**
+    -   Hardened CSP to allow Web Workers (`blob:`) and Cloudflare Turnstile (`challenges.cloudflare.com`) while blocking unauthorized scripts.
+    -   Aligned the backend `helmet` CSP configuration with the frontend meta tags.
+-   **Bio/Profile Caching:** Fixed a bug where profile bio updates were not visible immediately due to aggressive API caching. Added `Cache-Control: no-store` headers to API responses.
+
+## [1.8.0] - 2026-01-19
+
+This is a major stability and architectural release focused on delivering a fully functional, robust, and user-friendly "Link Device" feature. It resolves a series of deep, interconnected bugs in the authentication, cryptography, and real-time state management layers.
+
+### Added
+
+-   **Fully Functional "Link Device" Feature:** Users can now seamlessly and reliably link a new device by scanning a QR code. The new device is set up automatically without requiring password entry, providing a modern and convenient onboarding experience.
+
+### Fixed
+
+-   **CRITICAL: Complete Overhaul of Device Linking Flow:** Diagnosed and fixed a cascade of critical bugs that previously made the feature unusable.
+    -   **UI Stability:** Resolved a persistent crash on the QR scanner page (`DeviceScannerPage`) by correctly managing the camera lifecycle within React.
+    -   **Race Condition Elimination:** Fixed a critical race condition where global application logic (`App.tsx`) would prematurely terminate the guest WebSocket connection or trigger unauthorized API calls during the linking process.
+    -   **Cryptographic Integrity:**
+        *   Resolved a fundamental data format mismatch between the client and the crypto worker, fixing an `incomplete input` error.
+        *   Fixed a subtle key derivation mismatch, where the encryption key did not match the decryption key, resolving the `wrong secret key for the given ciphertext` error.
+        *   Corrected the encrypted payload structure to match the exact format expected by the decryption function in the crypto worker.
+-   **Authentication Flow Robustness:**
+    -   **Registration:** Fixed a bug that caused the initial secure key upload (`setupAndUploadPreKeyBundle`) to fail after a user registered a new account.
+    -   **Login:** Improved the login flow to immediately decrypt and cache local keys using the login password, removing a redundant password prompt.
+-   **Build Stability:** Resolved multiple TypeScript syntax and type errors that were preventing successful production builds.
+
+### Changed
+
+- **Improved Help & FAQ:** The content of the Help page (`HelpPage.tsx`) and the security info modal (`ChatInfoModal.tsx`) has been completely rewritten to be more accurate, comprehensive, and to correctly explain the new "Link Device" feature as the primary method for adding devices.
+
 ## [1.7.1] - 2025-12-29
 
 This is a massive stability, security, and architectural hardening release that resolves numerous critical bugs, race conditions, and security vulnerabilities, particularly within the End-to-End Encryption (E2EE) and real-time state synchronization systems.

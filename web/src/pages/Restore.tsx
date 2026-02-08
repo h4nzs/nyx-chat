@@ -59,53 +59,81 @@ export default function RestorePage() {
   };
 
   return (
-    <div className="h-screen w-screen flex flex-col items-center justify-center bg-bg-main text-text-primary p-4">
+    <div className="min-h-screen w-full flex flex-col items-center justify-center bg-bg-main text-text-primary p-4 font-mono">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <FiKey className="mx-auto text-accent text-5xl mb-4" />
-          <h1 className="text-3xl font-bold">Restore Account</h1>
-          <p className="text-text-secondary mt-2">
-            Enter your 12 or 24-word recovery phrase and set a new password for this device.
+          <div className="inline-flex p-4 rounded-full bg-bg-surface shadow-neumorphic-convex mb-4 text-accent">
+             <FiKey size={40} />
+          </div>
+          <h1 className="text-2xl font-black uppercase tracking-[0.2em] text-text-primary">System Recovery</h1>
+          <p className="text-xs text-text-secondary mt-2 tracking-widest uppercase">
+            Initialize Key Restoration Protocol
           </p>
         </div>
-        <form onSubmit={handleRestore} className="bg-bg-surface rounded-lg shadow-lg p-8 border border-border">
+        
+        <form onSubmit={handleRestore} className="bg-bg-surface p-8 rounded-2xl shadow-neumorphic-convex border border-white/5 relative overflow-hidden">
+          {/* Decorative Screw Heads */}
+          <div className="absolute top-3 left-3 w-2 h-2 rounded-full bg-text-secondary/20 shadow-inner"></div>
+          <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-text-secondary/20 shadow-inner"></div>
+          <div className="absolute bottom-3 left-3 w-2 h-2 rounded-full bg-text-secondary/20 shadow-inner"></div>
+          <div className="absolute bottom-3 right-3 w-2 h-2 rounded-full bg-text-secondary/20 shadow-inner"></div>
+
           <div className="space-y-6">
             <div className="form-control">
-              <label className="label">
-                <span className="label-text text-text-secondary">Recovery Phrase</span>
+              <label className="label mb-2 block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Recovery Phrase Mnemonic</span>
               </label>
               <textarea
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
-                className="textarea textarea-bordered w-full h-28"
-                placeholder="Enter your recovery phrase, separated by spaces..."
+                className="
+                  w-full h-32 p-4 rounded-xl resize-none
+                  bg-bg-main text-text-primary font-mono text-sm
+                  shadow-neumorphic-concave focus:outline-none focus:ring-1 focus:ring-accent/50
+                  placeholder:text-text-secondary/30
+                "
+                placeholder="ENTER_12_WORD_SEED_PHRASE..."
                 required
               />
             </div>
             <div className="form-control">
-              <label className="label">
-                <span className="label-text text-text-secondary">New Password</span>
+              <label className="label mb-2 block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">New Secure Password</span>
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="input input-bordered w-full"
-                placeholder="Choose a strong password for this device"
+                className="
+                  w-full p-4 rounded-xl
+                  bg-bg-main text-text-primary font-mono text-sm
+                  shadow-neumorphic-concave focus:outline-none focus:ring-1 focus:ring-accent/50
+                  placeholder:text-text-secondary/30
+                "
+                placeholder="SET_NEW_ENCRYPTION_KEY..."
                 required
               />
             </div>
           </div>
           <div className="mt-8">
-            <button type="submit" className="btn btn-primary w-full" disabled={isRestoring}>
-              {isRestoring ? <Spinner /> : <FiUpload className="mr-2" />}
-              {isRestoring ? 'Restoring...' : 'Restore & Set Password'}
+            <button 
+              type="submit" 
+              className="
+                w-full py-4 rounded-xl font-bold uppercase tracking-wider text-sm
+                bg-accent text-white
+                shadow-neumorphic-convex active:shadow-neumorphic-pressed
+                hover:brightness-110 transition-all flex items-center justify-center gap-3
+              " 
+              disabled={isRestoring}
+            >
+              {isRestoring ? <Spinner size="sm" className="text-white" /> : <FiUpload />}
+              {isRestoring ? 'RESTORING_KEYS...' : 'EXECUTE_RESTORE'}
             </button>
           </div>
         </form>
-        <div className="mt-6 text-center">
-          <Link to="/login" className="text-accent-color hover:underline">
-            &larr; Back to Login
+        <div className="mt-8 text-center">
+          <Link to="/login" className="text-xs font-mono text-text-secondary hover:text-accent uppercase tracking-widest transition-colors">
+            [ ABORT_SEQUENCE ]
           </Link>
         </div>
       </div>

@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
-import { FiGithub, FiLock, FiKey, FiSmartphone, FiSun, FiMoon, FiChevronsLeft, FiChevronsRight, FiUserPlus, FiMessageSquare, FiShield } from 'react-icons/fi';
+import { FiGithub, FiLock, FiKey, FiSmartphone, FiSun, FiMoon, FiChevronsLeft, FiChevronsRight, FiUserPlus, FiMessageSquare, FiShield, FiArrowRight } from 'react-icons/fi';
 import { motion, useMotionValue, useTransform, useInView } from 'framer-motion';
 import { useState, useRef, useEffect, ReactNode } from 'react';
-import { useThemeStore } from '@store/theme'; // Import useThemeStore
+import { useThemeStore } from '@store/theme';
 
 // Animation Variants
 const containerVariants = {
@@ -36,14 +36,40 @@ const AnimatedSection = ({ children }: { children: ReactNode }) => {
   );
 };
 
+// Chiseled Depth Feature Card with Mass Physics
 const FeatureCard = ({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) => (
-  <motion.div 
+  <motion.div
     variants={itemVariants}
-    whileHover={{ scale: 1.08, y: -8 }}
-    transition={{ type: 'spring', stiffness: 300 }}
-    className="bg-bg-surface p-6 rounded-xl shadow-neumorphic-convex text-center cursor-pointer"
+    whileHover={{
+      scale: 0.98,
+      y: 4,
+      transition: {
+        type: 'spring',
+        stiffness: 500,
+        damping: 20,
+        mass: 2
+      }
+    }}
+    whileTap={{
+      scale: 0.95,
+      transition: {
+        type: 'spring',
+        stiffness: 800,
+        damping: 25,
+        mass: 3
+      }
+    }}
+    className="
+      bg-bg-main p-8 rounded-2xl
+      shadow-neu-flat dark:shadow-neu-flat-dark
+      hover:shadow-neu-pressed dark:hover:shadow-neu-pressed-dark
+      hover:scale-[0.98]
+      transition-all duration-300
+      border border-white/50 dark:border-white/5
+      text-center cursor-pointer
+    "
   >
-    <div className="inline-block p-4 bg-bg-main rounded-full shadow-neumorphic-concave mb-4">
+    <div className="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4">
       {icon}
     </div>
     <h3 className="text-xl font-bold text-text-primary mb-2">{title}</h3>
@@ -51,83 +77,78 @@ const FeatureCard = ({ icon, title, children }: { icon: React.ReactNode; title: 
   </motion.div>
 );
 
-const ThemeComparisonSlider = () => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const x = useMotionValue(0);
-  const [isMounted, setIsMounted] = useState(false);
-
-  useEffect(() => {
-    const setInitialPosition = () => {
-      if (containerRef.current) {
-        const containerWidth = containerRef.current.offsetWidth;
-        x.set(containerWidth / 2);
-        setIsMounted(true); // Mark as mounted after initial position is set
-      }
-    };
-
-    // Set initial position after a short delay to ensure layout is stable
-    const timer = setTimeout(setInitialPosition, 100);
-
-    const handleResize = () => {
-      if (containerRef.current) {
-        const containerWidth = containerRef.current.offsetWidth;
-        const currentX = x.get();
-        // Keep the slider handle at the same relative position
-        x.set(Math.max(0, Math.min(currentX, containerWidth)));
-      }
-    };
-
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [x]);
-
-  const lightImageClipPath = useTransform(x, val => `inset(0 calc(100% - ${val}px) 0 0)`);
-
+// Chiseled Depth Chat Interface Preview
+const ChatPreview = () => {
   return (
-    <motion.div
-      ref={containerRef}
-      className="relative w-full max-w-4xl mx-auto rounded-xl shadow-2xl cursor-ew-resize select-none overflow-hidden"
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ duration: 0.5, delay: 0.3 }}
-      style={{ opacity: isMounted ? 1 : 0 }} // Hide until correctly positioned
-    >
-      {/* Dark mode image (bottom layer) */}
-      <img src="/hero-dark.png" alt="Chat Lite dark mode" className="block w-full h-auto object-contain rounded-xl" />
-
-      {/* Light mode image (top layer, clipped) */}
-      <motion.div
-        className="absolute inset-0 w-full h-full"
-        style={{ clipPath: lightImageClipPath }}
-      >
-        <img src="/hero-light.png" alt="Chat Lite light mode" className="block w-full h-auto object-contain rounded-xl" />
-      </motion.div>
-
-      {/* Draggable Handle */}
-      <motion.div
-        drag="x"
-        dragConstraints={containerRef}
-        dragElastic={0.1}
-        dragMomentum={false}
-        style={{ x }}
-        className="absolute top-0 bottom-0 w-1.5 bg-white/80 backdrop-blur-sm cursor-ew-resize flex items-center justify-center"
-      >
-        <div className="w-10 h-10 rounded-full bg-white/80 shadow-lg flex items-center justify-center text-gray-700">
-          <FiChevronsLeft />
-          <FiChevronsRight />
+    <div className="w-full max-w-4xl mx-auto">
+      <div className="bg-bg-surface rounded-xl shadow-[12px_12px_24px_rgba(0,0,0,0.3),-12px_-12px_24px_rgba(255,255,255,0.1)] p-6 border border-transparent hover:border-accent/30 transition-all duration-300"
+        style={{
+          backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.1) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(0,0,0,0.1) 0%, transparent 40%)',
+          backgroundBlendMode: 'overlay'
+        }}>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center">
+            <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center mr-3">
+              <div className="w-6 h-6 rounded-full bg-accent"></div>
+            </div>
+            <div>
+              <h3 className="font-bold text-text-primary">Alex Johnson</h3>
+              <p className="text-xs text-text-secondary">Online</p>
+            </div>
+          </div>
+          <div className="flex space-x-2">
+            <button className="w-8 h-8 rounded-full bg-bg-main shadow-[2px_2px_4px_rgba(0,0,0,0.2),-2px_-2px_4px_rgba(255,255,255,0.1)] flex items-center justify-center">
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="1"></circle>
+                <circle cx="12" cy="5" r="1"></circle>
+                <circle cx="12" cy="19" r="1"></circle>
+              </svg>
+            </button>
+          </div>
         </div>
-      </motion.div>
-    </motion.div>
+
+        <div className="space-y-4 max-h-64 overflow-y-auto pr-2">
+          <div className="flex justify-start">
+            <div className="max-w-xs p-3 rounded-br-xl rounded-tr-xl rounded-tl-xl bg-accent/10 text-text-primary shadow-[2px_2px_4px_rgba(0,0,0,0.1)]">
+              Hey there! How's the new project going?
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <div className="max-w-xs p-3 rounded-bl-xl rounded-tl-xl rounded-tr-xl bg-accent text-white shadow-[2px_2px_4px_rgba(0,0,0,0.2)]">
+              It's coming along great! Just finished the UI redesign.
+            </div>
+          </div>
+
+          <div className="flex justify-start">
+            <div className="max-w-xs p-3 rounded-br-xl rounded-tr-xl rounded-tl-xl bg-accent/10 text-text-primary shadow-[2px_2px_4px_rgba(0,0,0,0.1)]">
+              That's awesome! Can you share some screenshots?
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex">
+          <input
+            type="text"
+            placeholder="Type a message..."
+            aria-label="Type a demo message"
+            className="flex-1 bg-bg-main rounded-l-lg px-4 py-2 shadow-[inset_2px_2px_4px_rgba(0,0,0,0.2),inset_-2px_-2px_4px_rgba(255,255,255,0.1)] focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+          <button 
+            aria-label="Send demo message"
+            className="bg-accent text-white px-4 py-2 rounded-r-lg shadow-[2px_2px_4px_rgba(0,0,0,0.2),-2px_-2px_4px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_2px_rgba(0,0,0,0.2)] transition-all"
+          >
+            <FiArrowRight />
+          </button>
+        </div>
+      </div>
+    </div>
   );
 };
 
 const HowItWorksStep = ({ icon, title, children, isLast }: { icon: React.ReactNode; title: string; children: React.ReactNode; isLast?: boolean; }) => (
   <motion.div variants={itemVariants} className="relative flex flex-col items-center text-center">
-    <div className="inline-block p-4 bg-bg-main rounded-full shadow-neumorphic-concave mb-4 z-10">
+    <div className="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4 z-10">
       {icon}
     </div>
     <h3 className="text-xl font-bold text-text-primary mb-2">{title}</h3>
@@ -139,73 +160,158 @@ const HowItWorksStep = ({ icon, title, children, isLast }: { icon: React.ReactNo
 );
 
 const TestimonialCard = ({ children, author, role }: { children: ReactNode; author: string; role: string; }) => (
-  <motion.div variants={itemVariants} className="bg-bg-surface p-8 rounded-xl shadow-neumorphic-convex">
+  <motion.div variants={itemVariants} className="bg-bg-surface p-8 rounded-lg shadow-[8px_8px_16px_rgba(0,0,0,0.2),-8px_-8px_16px_rgba(255,255,255,0.1)] border border-transparent hover:border-accent/30 transition-all duration-300"
+    style={{
+      backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.1) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(0,0,0,0.1) 0%, transparent 40%)',
+      backgroundBlendMode: 'overlay'
+    }}>
     <p className="text-lg italic text-text-primary mb-4">"{children}"</p>
     <p className="font-bold text-accent">{author}</p>
     <p className="text-sm text-text-secondary">{role}</p>
   </motion.div>
 );
 
+const FAQSection = () => (
+  <section className="py-16 md:py-24">
+    <AnimatedSection>
+      <div className="max-w-3xl mx-auto px-4">
+        <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">FREQUENTLY ASKED QUESTIONS</motion.h2>
+        <div className="space-y-4">
+          {[
+            { q: "Is Chat Lite end-to-end encrypted?", a: "Yes. We use the Signal Protocol (Double Ratchet Algorithm) to ensure that only you and the person you're communicating with can read what's sent. Not even the server can decrypt your messages." },
+            { q: "Do I need to install an app?", a: "No. Chat Lite is a Progressive Web App (PWA). You can use it directly in your browser or install it to your home screen for a native-like experience without the app store friction." },
+            { q: "Is it completely free?", a: "Yes, Chat Lite is open-source and free to use. There are no hidden fees, ads, or data tracking." },
+            { q: "How do I recover my account?", a: "When you sign up, you receive a 24-word recovery phrase. This is the ONLY way to restore your keys and messages on a new device. We do not store this phrase." }
+          ].map((item, i) => (
+            <motion.div variants={itemVariants} key={i} className="bg-bg-surface rounded-lg shadow-[4px_4px_8px_rgba(0,0,0,0.1),-4px_-4px_8px_rgba(255,255,255,0.05)] overflow-hidden">
+              <details className="group">
+                <summary className="flex justify-between items-center font-bold cursor-pointer list-none p-6 text-text-primary hover:text-accent transition-colors">
+                  <span>{item.q}</span>
+                  <span className="transition group-open:rotate-180">
+                    <svg fill="none" height="24" shapeRendering="geometricPrecision" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
+                  </span>
+                </summary>
+                <div className="text-text-secondary px-6 pb-6 pt-0 leading-relaxed">
+                  {item.a}
+                </div>
+              </details>
+            </motion.div>
+          ))}
+        </div>
+      </div>
+    </AnimatedSection>
+  </section>
+);
+
 export default function LandingPage() {
   const { theme } = useThemeStore(); // Get current theme
-  const backgroundImage = theme === 'dark' ? '/landing-bg-dark.jpg' : '/landing-bg-light.jpg';
+  const [grainOpacity, setGrainOpacity] = useState(0.05);
+
+  useEffect(() => {
+    // Adjust grain opacity based on theme
+    setGrainOpacity(theme === 'dark' ? 0.08 : 0.05);
+  }, [theme]);
 
   return (
-    <div 
-      className="bg-bg-main min-h-screen font-sans text-text-primary overflow-y-auto relative"
+    <div
+      className="min-h-screen font-sans text-text-primary overflow-y-auto relative"
       style={{
-        backgroundImage: `url(${backgroundImage})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundAttachment: 'fixed',
+        backgroundColor: theme === 'dark' ? '#1a1a1a' : '#f5f0e6',
+        backgroundImage: `radial-gradient(circle at 10% 20%, rgba(255,255,255,${grainOpacity}), transparent 20%),
+                          radial-gradient(circle at 90% 80%, rgba(0,0,0,${grainOpacity * 0.8}), transparent 20%)`,
       }}
     >
-      <div className="relative z-10 bg-bg-main/80"> {/* Removed backdrop-blur-sm */}
+      {/* Grain texture overlay */}
+      <div
+        className="fixed inset-0 pointer-events-none z-0"
+        style={{
+          background: `url("data:image/svg+xml,%3Csvg viewBox='0 0 250 250' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.1'/%3E%3C/svg%3E")`,
+          opacity: theme === 'dark' ? 0.15 : 0.1,
+        }}
+      ></div>
+
+      <div className="relative z-10">
         {/* Header */}
-        <motion.header 
-          initial="hidden" 
-          animate="visible" 
-          variants={containerVariants} 
+        <motion.header
+          initial="hidden"
+          animate="visible"
+          variants={containerVariants}
           className="p-4 flex justify-between items-center max-w-6xl mx-auto"
         >
-          <motion.h1 variants={itemVariants} className="text-2xl font-bold">Chat Lite</motion.h1>
+          <motion.div variants={itemVariants} className="flex items-center">
+            <img
+              src="/pwa-512x512.png"
+              alt="Chat Lite Logo"
+              className="w-8 h-8 mr-2"
+            />
+            <span className="text-2xl font-bold tracking-tighter">CHAT LITE</span>
+          </motion.div>
           <motion.div variants={itemVariants}>
-            <Link to="/login" className="btn btn-secondary">
+            <Link to="/login" className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all">
               Login
             </Link>
           </motion.div>
         </motion.header>
 
-        {/* Hero Section */}
-        <main className="max-w-6xl mx-auto px-4 py-16 md:py-24 text-center">
-          <motion.div initial="hidden" animate="visible" variants={containerVariants}>
-            <motion.h1 variants={itemVariants} className="text-4xl md:text-6xl font-extrabold tracking-tight mb-4">
-              Private Conversations, <span className="text-accent">Secured by You.</span>
-            </motion.h1>
-            <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary max-w-3xl mx-auto mb-8">
-              An end-to-end encrypted chat application with a focus on privacy, user control, and a beautiful, modern interface.
-            </motion.p>
-            <motion.div variants={itemVariants} className="flex justify-center items-center gap-4">
-              <Link to="/register" className="btn btn-primary text-lg px-8 py-3">
-                Get Started
-              </Link>
-              <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="btn btn-secondary text-lg px-8 py-3">
-                <FiGithub className="mr-2" />
-                View on GitHub
-              </a>
-            </motion.div>
-          </motion.div>
+        {/* Hero Section - Asymmetric 90/10 Layout */}
+        <main className="max-w-6xl mx-auto px-4 py-8 md:py-16">
+          <div className="grid grid-cols-1 lg:grid-cols-10 gap-8 items-center">
+            <div className="lg:col-span-9">
+              <motion.div initial="hidden" animate="visible" variants={containerVariants}>
+                <motion.h1 variants={itemVariants} className="text-5xl md:text-7xl font-black tracking-tighter leading-none mb-6">
+                  PRIVATE<br />
+                  <span className="text-accent" style={{ textShadow: '2px 2px 4px rgba(255, 107, 53, 0.3)' }}>CONVERSATIONS</span><br />
+                  SECURED BY YOU
+                </motion.h1>
+                <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary max-w-2xl mb-8">
+                  End-to-end encrypted messaging with a tactile, industrial design that puts privacy and control in your hands.
+                </motion.p>
+                <motion.div variants={itemVariants} className="flex flex-col sm:flex-row justify-start items-start gap-4">
+                  <Link to="/register" className="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] transition-all flex items-center">
+                    GET STARTED <FiArrowRight className="ml-2" />
+                  </Link>
+                  <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="px-8 py-4 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all flex items-center">
+                    <FiGithub className="mr-2" />
+                    VIEW ON GITHUB
+                  </a>
+                </motion.div>
+              </motion.div>
+            </div>
 
-          <div className="mt-16 md:mt-24">
-            <ThemeComparisonSlider />
+            {/* Embedded Chat Interface - 10% column */}
+            <div className="lg:col-span-1 flex justify-center">
+              <div className="w-24 h-24 rounded-full bg-accent/10 flex items-center justify-center shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]">
+                <img
+                  src="/pwa-512x512.png"
+                  alt="Chat Lite Logo"
+                  className="w-12 h-12"
+                />
+              </div>
+            </div>
           </div>
         </main>
+
+        {/* Embedded Chat Preview Section */}
+        <section className="py-16 md:py-24">
+          <AnimatedSection>
+            <div className="max-w-6xl mx-auto px-4">
+              <div className="text-center mb-12">
+                <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-4 tracking-tighter">EXPERIENCE THE TACTILE INTERFACE</motion.h2>
+                <motion.p variants={itemVariants} className="text-lg text-text-secondary max-w-2xl mx-auto">
+                  Our mutated neumorphic design creates a physical presence that feels substantial and interactive.
+                </motion.p>
+              </div>
+
+              <ChatPreview />
+            </div>
+          </AnimatedSection>
+        </section>
 
         {/* Why Chat Lite Section */}
         <section className="py-16 md:py-24">
           <AnimatedSection>
             <div className="max-w-4xl mx-auto px-4 text-center">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-bold mb-6">Why Chat Lite?</motion.h2>
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">WHY CHAT LITE?</motion.h2>
               <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary mb-4">
                 Tired of complicated sign-ups and mandatory app downloads? Chat Lite is your solution. Access it instantly from your favorite browser—no installation needed.
               </motion.p>
@@ -217,91 +323,41 @@ export default function LandingPage() {
         </section>
 
         {/* Features Section */}
-        <section className="py-16 md:py-24 bg-bg-surface">
+        <section className="py-16 md:py-24" style={{ backgroundColor: theme === 'dark' ? '#222222' : '#e8e2d5' }}>
           <AnimatedSection>
             <div className="max-w-6xl mx-auto px-4">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-bold text-center mb-12">Features Built for You</motion.h2>
-              <motion.div variants={containerVariants} className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-                <FeatureCard icon={<FiLock size={24} className="text-accent" />} title="End-to-End Encryption">
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">FEATURES BUILT FOR PRIVACY</motion.h2>
+              <motion.div variants={containerVariants} className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <FeatureCard icon={<FiLock size={24} className="text-accent" />} title="END-TO-END ENCRYPTION">
                   Your messages are sealed. Only you and the recipient can read them, powered by the Double Ratchet algorithm.
                 </FeatureCard>
-                <FeatureCard icon={<FiKey size={24} className="text-accent" />} title="User-Controlled Keys">
+                <FeatureCard icon={<FiKey size={24} className="text-accent" />} title="USER-CONTROLLED KEYS">
                   You own your keys. Restore your account on any device with your unique 24-word recovery phrase.
                 </FeatureCard>
-                <FeatureCard icon={<FiSmartphone size={24} className="text-accent" />} title="Seamless Device Linking">
+                <FeatureCard icon={<FiSmartphone size={24} className="text-accent" />} title="SEAMLESS DEVICE LINKING">
                   Securely link new devices using a simple QR code, without ever needing to re-enter your password.
                 </FeatureCard>
-                <FeatureCard icon={<div className="flex gap-2"><FiSun size={24} className="text-accent" /><FiMoon size={24} className="text-accent" /></div>} title="Modern, Themed UI">
-                  A beautiful, fully-themed interface with light and dark modes, built with a tactile Neumorphic design.
+                <FeatureCard icon={<div className="flex gap-2"><FiSun size={24} className="text-accent" /><FiMoon size={24} className="text-accent" /></div>} title="MUTATED NEUMORPHISM">
+                  A tactile, industrial interface with chiseled depth and grain texture for a premium physical feel.
                 </FeatureCard>
               </motion.div>
-            </div>
-          </AnimatedSection>
-        </section>
-        
-        {/* More Visuals Section */}
-        <section className="py-16 md:py-24">
-          <AnimatedSection>
-            <div className="max-w-6xl mx-auto px-4 grid md:grid-cols-2 gap-8 items-center">
-              <motion.div variants={itemVariants} className="text-center md:text-left">
-                <h2 className="text-3xl md:text-4xl font-bold mb-4">Works Everywhere</h2>
-                <p className="text-lg text-text-secondary">Enjoy a consistent experience whether you're on your desktop or on the go, with a fully responsive design that adapts to your screen.</p>
-              </motion.div>
-              <div className="grid grid-cols-2 gap-4 items-start">
-                <motion.img 
-                  initial={{ opacity: 0, scale: 0.9, rotate: 2 }}
-                  whileInView={{ opacity: 1, scale: 1, rotate: 2 }}
-                  viewport={{ once: true, amount: 0.5 }}
-                  transition={{ duration: 0.5, delay: 0.1 }}
-                  src="/normal-desktop-dark.png" 
-                  alt="Desktop view" 
-                  className="rounded-lg shadow-xl z-10"
-                />
-                <motion.img 
-                  initial={{ opacity: 0, scale: 0.9, rotate: -4, y: 16 }}
-                  whileInView={{ opacity: 1, scale: 1, rotate: -4, y: 16 }}
-                  viewport={{ once: true, amount: 0.5 }}
-                  transition={{ duration: 0.5, delay: 0.2 }}
-                  src="/tablet-dark.png" 
-                  alt="Tablet dark mode" 
-                  className="rounded-lg shadow-xl"
-                />
-                <motion.img 
-                  initial={{ opacity: 0, scale: 0.9, rotate: -3, y: -16 }}
-                  whileInView={{ opacity: 1, scale: 1, rotate: -3, y: -16 }}
-                  viewport={{ once: true, amount: 0.5 }}
-                  transition={{ duration: 0.5, delay: 0.3 }}
-                  src="/tablet-light-show-sidebar.png" 
-                  alt="Tablet light mode with sidebar" 
-                  className="rounded-lg shadow-xl z-10"
-                />
-                <motion.img 
-                  initial={{ opacity: 0, scale: 0.9, rotate: 5, y: 16 }}
-                  whileInView={{ opacity: 1, scale: 1, rotate: 5, y: 16 }}
-                  viewport={{ once: true, amount: 0.5 }}
-                  transition={{ duration: 0.5, delay: 0.4 }}
-                  src="/mobile-light.png" 
-                  alt="Mobile view" 
-                  className="rounded-lg shadow-xl"
-                />
-              </div>
             </div>
           </AnimatedSection>
         </section>
 
         {/* How It Works Section */}
-        <section className="py-16 md:py-24 bg-bg-surface">
+        <section className="py-16 md:py-24">
           <AnimatedSection>
             <div className="max-w-6xl mx-auto px-4">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-bold text-center mb-16">Simple, Secure, Transparent.</motion.h2>
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-16 tracking-tighter">SIMPLE, SECURE, TRANSPARENT.</motion.h2>
               <motion.div variants={containerVariants} className="relative grid md:grid-cols-3 gap-12">
-                <HowItWorksStep icon={<FiUserPlus size={24} className="text-accent" />} title="1. Create Your Account">
+                <HowItWorksStep icon={<FiUserPlus size={24} className="text-accent" />} title="1. CREATE YOUR ACCOUNT">
                   Sign up and automatically generate your unique, private encryption keys.
                 </HowItWorksStep>
-                <HowItWorksStep icon={<FiMessageSquare size={24} className="text-accent" />} title="2. Start a Conversation">
+                <HowItWorksStep icon={<FiMessageSquare size={24} className="text-accent" />} title="2. START A CONVERSATION">
                   Your messages are end-to-end encrypted from the very first word.
                 </HowItWorksStep>
-                <HowItWorksStep icon={<FiShield size={24} className="text-accent" />} title="3. Verify Your Contacts" isLast>
+                <HowItWorksStep icon={<FiShield size={24} className="text-accent" />} title="3. VERIFY YOUR CONTACTS" isLast>
                   Use Safety Numbers to ensure you're talking to the right person, free from man-in-the-middle attacks.
                 </HowItWorksStep>
               </motion.div>
@@ -310,10 +366,10 @@ export default function LandingPage() {
         </section>
 
         {/* Testimonials Section */}
-        <section className="py-16 md:py-24">
+        <section className="py-16 md:py-24" style={{ backgroundColor: theme === 'dark' ? '#222222' : '#e8e2d5' }}>
           <AnimatedSection>
             <div className="max-w-4xl mx-auto px-4">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-bold text-center mb-12">Trusted by Teams Who Value Privacy</motion.h2>
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">TRUSTED BY PRIVACY ADVOCATES</motion.h2>
               <motion.div variants={containerVariants} className="grid md:grid-cols-2 gap-8">
                 <TestimonialCard author="Yosep." role="Privacy Advocate">
                   Finally, a chat app that respects my privacy without sacrificing a beautiful user experience. The fact that I control my own keys is a game-changer.
@@ -326,10 +382,37 @@ export default function LandingPage() {
           </AnimatedSection>
         </section>
 
+        {/* FAQ Section */}
+        <FAQSection />
+
+        {/* Final CTA Section */}
+        <section className="py-16 md:py-24">
+          <AnimatedSection>
+            <div className="max-w-4xl mx-auto px-4 text-center">
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">READY TO TAKE CONTROL OF YOUR PRIVACY?</motion.h2>
+              <motion.p variants={itemVariants} className="text-lg text-text-secondary mb-8 max-w-2xl mx-auto">
+                Join thousands of users who trust Chat Lite with their most sensitive conversations.
+              </motion.p>
+              <motion.div variants={itemVariants}>
+                <Link to="/register" className="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] transition-all inline-flex items-center">
+                  START SECURE MESSAGING NOW <FiArrowRight className="ml-2" />
+                </Link>
+              </motion.div>
+            </div>
+          </AnimatedSection>
+        </section>
+
         {/* Footer */}
-        <footer className="bg-bg-surface py-8">
+        <footer className="py-8">
           <div className="max-w-6xl mx-auto px-4 text-center text-text-secondary">
-            <p>&copy; {new Date().getFullYear()} Chat Lite. Built with ❤️.</p>
+            <div className="flex justify-center items-center mb-2">
+              <img
+                src="/pwa-512x512.png"
+                alt="Chat Lite Logo"
+                className="w-6 h-6 mr-2"
+              />
+              <p className="text-sm">&copy; {new Date().getFullYear()} CHAT LITE. ENGINEERED WITH PRECISION.</p>
+            </div>
           </div>
         </footer>
       </div>

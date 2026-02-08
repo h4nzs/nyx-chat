@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useCommandPaletteStore, Command } from '@store/commandPalette';
-import { FiSearch } from 'react-icons/fi';
+import { FiSearch, FiTerminal, FiChevronRight } from 'react-icons/fi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useGlobalEscape } from '../hooks/useGlobalEscape';
 
@@ -11,7 +11,6 @@ export default function CommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const activeItemRef = useRef<HTMLButtonElement>(null);
 
-  // Filter commands based on search query
   const filteredCommands = useMemo(() => {
     if (!searchQuery) return commands;
     const lowerCaseQuery = searchQuery.toLowerCase();
@@ -22,28 +21,20 @@ export default function CommandPalette() {
     );
   }, [searchQuery, commands]);
 
-  // Reset search and selection when opening
   useEffect(() => {
     if (isOpen) {
       setSearchQuery('');
       setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 100); // Delay focus slightly
+      setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [isOpen]);
 
-  // Scroll active item into view
   useEffect(() => {
-    activeItemRef.current?.scrollIntoView({
-      block: 'nearest',
-    });
+    activeItemRef.current?.scrollIntoView({ block: 'nearest' });
   }, [selectedIndex]);
 
-  // Handle closing with Escape key
-  useGlobalEscape(() => {
-    if (isOpen) close();
-  });
+  useGlobalEscape(() => { if (isOpen) close(); });
 
-  // Handle keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen || filteredCommands.length === 0) return;
@@ -57,9 +48,7 @@ export default function CommandPalette() {
       } else if (e.key === 'Enter') {
         e.preventDefault();
         const command = filteredCommands[selectedIndex];
-        if (command) {
-          executeCommand(command);
-        }
+        if (command) executeCommand(command);
       }
     };
 
@@ -76,35 +65,58 @@ export default function CommandPalette() {
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={close}
-            className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm"
           />
-          {/* Palette */}
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: -20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            transition={{ duration: 0.2 }}
-            className="fixed top-[20vh] left-1/2 -translate-x-1/2 z-50 w-full max-w-lg"
+            transition={{ type: "spring", bounce: 0, duration: 0.3 }}
+            className="fixed top-[15vh] left-1/2 -translate-x-1/2 z-50 w-full max-w-xl px-4"
           >
-            <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex flex flex-col">
-              <div className="p-3 flex items-center gap-3 border-b border-border">
-                <FiSearch className="text-text-secondary" />
+            <div className="
+              relative overflow-hidden rounded-lg
+              bg-black border border-accent/50
+              shadow-[0_0_30px_rgba(var(--accent),0.2)]
+            ">
+              {/* Terminal Header */}
+              <div className="flex items-center justify-between px-4 py-2 bg-accent/10 border-b border-accent/20">
+                <div className="flex items-center gap-2 text-accent">
+                  <FiTerminal size={14} />
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider">System Command Line</span>
+                </div>
+                <div className="flex gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full bg-red-500/50"></div>
+                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50"></div>
+                  <div className="w-2.5 h-2.5 rounded-full bg-green-500/50"></div>
+                </div>
+              </div>
+
+              {/* Input Area */}
+              <div className="p-4 flex items-center gap-3">
+                <FiChevronRight className="text-accent animate-pulse" />
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder="Type a command or search..."
+                  placeholder="EXECUTE_COMMAND..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-transparent text-text-primary placeholder-text-secondary focus:outline-none"
+                  className="
+                    w-full bg-transparent 
+                    text-lg font-mono text-white 
+                    placeholder-white/20 
+                    focus:outline-none caret-accent
+                  "
                 />
               </div>
-              <div className="max-h-[40vh] overflow-y-auto p-2">
+
+              {/* Command List */}
+              <div className="max-h-[50vh] overflow-y-auto px-2 pb-2">
                 {filteredCommands.length > 0 ? (
                   filteredCommands.map((cmd, index) => (
                     <button
@@ -112,17 +124,29 @@ export default function CommandPalette() {
                       key={cmd.id}
                       onClick={() => executeCommand(cmd)}
                       onMouseMove={() => setSelectedIndex(index)}
-                      className={`w-full text-left p-3 flex items-center gap-4 rounded-md transition-colors ${
-                        index === selectedIndex ? 'bg-accent text-white' : 'hover:bg-secondary'
-                      }`}
+                      className={`
+                        w-full text-left p-3 flex items-center gap-4 rounded-md transition-all font-mono text-sm
+                        ${index === selectedIndex 
+                          ? 'bg-accent/20 text-accent border border-accent/30 shadow-[inset_0_0_10px_rgba(var(--accent),0.1)]' 
+                          : 'text-white/60 hover:text-white hover:bg-white/5'}
+                      `}
                     >
-                      {cmd.icon && <span className="flex-shrink-0 w-5 text-text-secondary">{cmd.icon}</span>}
-                      <span className="flex-1">{cmd.name}</span>
+                      <span className="opacity-50">{cmd.icon || <FiTerminal />}</span>
+                      <span className="flex-1 uppercase tracking-tight">{cmd.name}</span>
+                      {index === selectedIndex && <span className="text-[10px] animate-pulse">Running...</span>}
                     </button>
                   ))
                 ) : (
-                  <p className="text-center text-text-secondary p-4">No results found.</p>
+                  <p className="text-center text-red-500 font-mono text-sm p-4 border-t border-dashed border-red-500/30">
+                    ERROR: UNKNOWN_COMMAND
+                  </p>
                 )}
+              </div>
+              
+              {/* Footer */}
+              <div className="px-4 py-1.5 bg-accent/5 border-t border-accent/10 flex justify-between text-[10px] font-mono text-accent/50 uppercase">
+                 <span>v2.4.0-stable</span>
+                 <span>ready</span>
               </div>
             </div>
           </motion.div>

@@ -124,10 +124,14 @@ const AddParticipantModal = ({ conversationId, onClose }: {
                 onClick={() => handleSelectUser(user.id)}
               >
                 <div className="flex items-center gap-3">
-                  <img 
+                  <img
                     src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
                     alt={user.name}
                     className="w-8 h-8 rounded-full object-cover bg-secondary"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
+                    }}
                   />
                   <p className="text-text-primary">{user.name} (@{user.username})</p>
                 </div>

@@ -5,11 +5,11 @@ import { toAbsoluteUrl } from '@utils/url';
 import { authFetch, handleApiError } from '@lib/api';
 import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
-import { generateSafetyNumber } from '@lib/crypto-worker-proxy';
-import { getSodium } from '@lib/sodiumInitializer';
+
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
 import { useVerificationStore } from '@store/verification';
+import { useAuthStore } from '@store/auth';
 import ModalBase from './ui/ModalBase';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
@@ -27,6 +27,9 @@ export default function UserInfoModal() {
   const [showSafetyModal, setShowSafetyModal] = useState(false);
   const [safetyNumber, setSafetyNumber] = useState('');
   const [activeTab, setActiveTab] = useState('about');
+
+  // Subscribe to blockedUserIds changes to ensure UI updates when blocking/unblocking
+  const blockedUserIds = useAuthStore(state => state.blockedUserIds);
 
   const tabs = [
     { id: 'about', label: 'About' },
@@ -71,6 +74,9 @@ export default function UserInfoModal() {
     }
 
     try {
+      const { generateSafetyNumber } = await import('@lib/crypto-worker-proxy');
+      const { getSodium } = await import('@lib/sodiumInitializer');
+
       const myPublicKeyB64 = localStorage.getItem('publicKey');
       if (!myPublicKeyB64) {
         throw new Error("Your public key is not found. Please set up your keys first.");
@@ -91,23 +97,47 @@ export default function UserInfoModal() {
 
   const renderContent = () => {
     if (loading) return <div className="flex justify-center items-center min-h-[200px]"><Spinner /></div>;
-    if (error) return <p className="text-center text-destructive">{error}</p>;
+    if (error) return <p className="text-center text-red-500 font-mono text-sm">{error}</p>;
     if (user) {
       return (
-        <div className="flex flex-col items-center text-center">
-          <img 
-            src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
-            alt={user.name}
-            className="w-24 h-24 rounded-full bg-secondary object-cover mb-4"
-          />
-          <h3 className="text-xl font-bold text-text-primary">{user.name}</h3>
-          <p className="text-sm text-text-secondary">@{user.username}</p>
-          {user.email && (
-            <p className="text-sm text-accent mt-1">{user.email}</p>
-          )}
-          <p className="text-text-secondary mt-2 text-sm">
-            {user.description || 'This user prefers to keep an air of mystery.'}
-          </p>
+        <div className="flex flex-col gap-6">
+          <div className="flex items-start gap-6">
+            {/* Avatar: INSET (Pressed in) - Looks like a porthole */}
+            <div className="relative w-24 h-24 rounded-full shadow-neu-pressed dark:shadow-neu-pressed-dark flex items-center justify-center p-1 bg-bg-main">
+               <img
+                 src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
+                 alt={user.name}
+                 className="w-full h-full rounded-full object-cover"
+                 onError={(e) => {
+                   const target = e.target as HTMLImageElement;
+                   target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
+                 }}
+               />
+               <div className="absolute bottom-1 right-1 w-4 h-4 bg-green-500 border-2 border-bg-main rounded-full shadow-neu-flat dark:shadow-neu-flat-dark" />
+            </div>
+
+            {/* Info: Left Aligned */}
+            <div className="flex-1 pt-2">
+              <h3 className="text-2xl font-bold tracking-tight text-text-primary">{user.name}</h3>
+              {/* ID Badge: Extruded pill */}
+              <div className="inline-flex items-center gap-2 mt-2 px-3 py-1 rounded-full shadow-neu-flat dark:shadow-neu-flat-dark bg-bg-main">
+                 <span className="text-xs font-mono text-text-secondary uppercase">ID</span>
+                 <span className="text-sm font-mono text-accent">@{user.username}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="w-full text-left">
+             <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2 mb-1 block">Bio-Data</label>
+             <div className="
+               w-full p-4 rounded-xl min-h-[80px]
+               bg-bg-main text-text-primary text-sm font-medium
+               shadow-neu-pressed dark:shadow-neu-pressed-dark
+               border border-white/5
+             ">
+               {user.description || <span className="opacity-40 italic">No data available.</span>}
+             </div>
+          </div>
         </div>
       );
     }
@@ -130,19 +160,66 @@ export default function UserInfoModal() {
             <>
               {renderContent()}
               {user && (
-                <div className="w-full flex flex-col space-y-2 pt-4 border-t border-border">
+                <div className="w-full grid grid-cols-1 gap-3 pt-6 border-t border-white/5">
                   <button
                     onClick={handleViewProfile}
-                    className="w-full p-3 rounded-lg font-semibold text-white bg-accent shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+                    className="
+                      w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
+                      bg-bg-main text-text-primary
+                      shadow-neu-flat dark:shadow-neu-flat-dark 
+                      active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark
+                      hover:text-accent transition-all
+                    "
                   >
-                    View Full Profile
+                    View Personnel File
                   </button>
                   <button
                     onClick={handleVerifySecurity}
-                    className="w-full p-3 rounded-lg font-semibold text-text-primary bg-bg-surface shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+                    className="
+                      w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
+                      bg-bg-main text-text-primary
+                      shadow-neu-flat dark:shadow-neu-flat-dark 
+                      active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark
+                      hover:text-green-500 transition-all
+                    "
                   >
-                    Verify Security
+                    Verify Encryption Handshake
                   </button>
+                  {user && user.id !== useAuthStore.getState().user?.id && (
+                    <>
+                      {blockedUserIds.includes(user.id) ? (
+                        <button
+                          onClick={() => {
+                            useAuthStore.getState().unblockUser(user.id).catch(console.error);
+                          }}
+                          className="
+                            w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
+                            bg-bg-main text-red-500
+                            shadow-neu-flat dark:shadow-neu-flat-dark 
+                            active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark
+                            hover:bg-red-500 hover:text-white transition-all
+                          "
+                        >
+                          Unblock Signal
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            useAuthStore.getState().blockUser(user.id).catch(console.error);
+                          }}
+                          className="
+                            w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
+                            bg-bg-main text-text-secondary
+                            shadow-neu-flat dark:shadow-neu-flat-dark 
+                            active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark
+                            hover:text-red-500 transition-all
+                          "
+                        >
+                          Block Signal
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
             </>

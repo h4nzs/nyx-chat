@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+
+# AI Crawlers (Explicitly Allowed for GEO)
+User-agent: GPTBot
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+Sitemap: https://chat-lite-weld.vercel.app/sitemap.xml

@@ -25,3 +25,10 @@ export function eraseCookie(name: string) {
   if (typeof document === "undefined") return;
   document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
 }
+
+// Hapus semua cookie auth
+export function clearAuthCookies() {
+  if (typeof document === "undefined") return;
+  document.cookie = "at=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+  document.cookie = "rt=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
+}

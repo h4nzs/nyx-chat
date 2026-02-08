@@ -1,5 +1,5 @@
 import { createWithEqualityFn } from "zustand/traditional";
-import { api, authFetch, apiUpload, handleApiError } from "@lib/api";
+import { api, authFetch, handleApiError } from "@lib/api";
 import { encryptMessage, ensureGroupSession, encryptFile } from "@utils/crypto";
 import { emitGroupKeyDistribution } from "@lib/socket";
 import toast from "react-hot-toast";
@@ -7,7 +7,9 @@ import { useAuthStore } from "./auth";
 import { useMessageStore } from "./message";
 import { useConversationStore } from "./conversation";
 import type { Message } from "./conversation";
+import { compressImage } from "@lib/fileUtils";
 import useDynamicIslandStore, { UploadActivity } from "./dynamicIsland";
+import { uploadToR2 } from '../lib/r2'; // Pastikan helper ini ada
 
 type State = {
   replyingTo: Message | null;
@@ -17,7 +19,7 @@ type State = {
   setReplyingTo: (message: Message | null) => void;
   fetchTypingLinkPreview: (text: string) => void;
   clearTypingLinkPreview: () => void;
-  sendMessage: (conversationId: string, data: { content: string }) => Promise<void>;
+  sendMessage: (conversationId: string, data: { content: string }, tempId?: number) => Promise<void>;
   uploadFile: (conversationId: string, file: File) => Promise<void>;
   handleStopRecording: (conversationId: string, blob: Blob, duration: number) => Promise<void>;
   retrySendMessage: (message: Message) => void;
@@ -71,13 +73,13 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
   clearTypingLinkPreview: () => set({ typingLinkPreview: null }),
 
-  sendMessage: async (conversationId, data) => {
+  sendMessage: async (conversationId, data, tempId?: number) => {
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     const { replyingTo } = get();
 
     if (!await ensureGroupSessionIfNeeded(conversationId)) return;
-    
+
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
     const isGroup = conversation.isGroup;
 
@@ -91,11 +93,11 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       toast.error(`Encryption failed: ${e.message}`);
       return;
     }
-    
-    const tempId = Date.now();
+
+    const actualTempId = tempId !== undefined ? tempId : Date.now();
     const optimisticMessage: Message = {
-      id: `temp-${tempId}`,
-      tempId,
+      id: `temp-${actualTempId}`,
+      tempId: actualTempId,
       conversationId,
       senderId: me!.id,
       sender: me!,
@@ -106,12 +108,12 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     };
 
     addOptimisticMessage(conversationId, optimisticMessage);
-    
-    const finalPayload = { 
+
+    const finalPayload = {
       conversationId,
-      tempId,
+      tempId: actualTempId,
       repliedToId: replyingTo?.id,
-      ...payload, 
+      ...payload,
     };
 
     try {
@@ -122,15 +124,16 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     } catch (error) {
       const errorMessage = handleApiError(error);
       toast.error(`Failed to send message: ${errorMessage}`);
-      updateMessage(conversationId, `temp-${tempId}`, { error: true, optimistic: false });
+      updateMessage(conversationId, `temp-${actualTempId}`, { error: true, optimistic: false });
     }
 
     set({ replyingTo: null });
   },
   
+  // --- FUNGSI UPLOAD FILE BARU (R2) ---
   uploadFile: async (conversationId, file) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
-    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Encrypting ${file.name}...`, progress: 0 };
+    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Processing ${file.name}...`, progress: 0 };
     const activityId = addActivity(activity);
     const { replyingTo } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
@@ -158,7 +161,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       sender: me,
       createdAt: new Date().toISOString(),
       optimistic: true,
-      fileUrl: URL.createObjectURL(file),
+      fileUrl: URL.createObjectURL(file), // Preview lokal
       fileName: file.name,
       fileType: file.type,
       fileSize: file.size,
@@ -168,29 +171,62 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     set({ replyingTo: null });
 
     try {
+      // 1. KOMPRESI (Hanya untuk Gambar)
+      let fileToProcess = file;
+      if (file.type.startsWith('image/')) {
+        updateActivity(activityId, { progress: 10, fileName: `Compressing ${file.name}...` });
+        try {
+          fileToProcess = await compressImage(file);
+          console.log(`📉 Image compressed: ${(file.size / 1024).toFixed(2)}KB -> ${(fileToProcess.size / 1024).toFixed(2)}KB`);
+        } catch (e) {
+          console.warn("Image compression failed, using original file.", e);
+        }
+      }
+
+      // 2. ENKRIPSI FILE
       updateActivity(activityId, { progress: 25, fileName: `Encrypting ${file.name}...` });
-      const { encryptedBlob, key: rawFileKey } = await encryptFile(file);
+      const { encryptedBlob, key: rawFileKey } = await encryptFile(fileToProcess);
+      
+      // Enkripsi Kunci File (E2EE)
       const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(rawFileKey, conversationId, isGroup);
 
-      updateActivity(activityId, { progress: 50, fileName: `Uploading ${file.name}...` });
-      const form = new FormData();
-      // Defensive programming: Append metadata fields BEFORE the file blob.
-      form.append("fileKey", encryptedFileKey);
-      if (sessionId) form.append("sessionId", sessionId);
-      form.append("tempId", String(tempId));
-      if (replyingTo) form.append("repliedToId", replyingTo.id);
-      form.append("file", new File([encryptedBlob], file.name, { type: "application/octet-stream" }));
+      // 3. UPLOAD KE CLOUDFLARE R2 (Bypass Server)
+      updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
+      
+      // Bungkus Blob enkripsi ke File Object agar nama & tipe terjaga (tapi tipe jadi octet-stream untuk upload)
+      const encryptedFile = new File([encryptedBlob], file.name, { type: "application/octet-stream" });
+      
+      // Helper uploadToR2 (Client -> R2)
+      const fileUrl = await uploadToR2(encryptedFile, 'attachments', (percent) => {
+         const totalProgress = 30 + (percent * 0.6); // Skala progress bar (30% - 90%)
+         updateActivity(activityId, { progress: totalProgress });
+      });
 
-      await apiUpload<{ file: any }> ({
-        path: `/api/uploads/${conversationId}/upload`,
-        formData: form,
-        onUploadProgress: (progress) => updateActivity(activityId, { progress: 50 + (progress / 2) }),
+      // 4. KIRIM METADATA KE SERVER
+      updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
+      
+      // Perhatikan URL endpoint baru: /messages/ID (Bukan /upload)
+      // Dan Body berupa JSON (Bukan FormData)
+      await api(`/api/uploads/messages/${conversationId}`, {
+        method: "POST",
+        body: JSON.stringify({
+          fileUrl, // URL dari R2
+          fileName: file.name,
+          fileType: file.type + ';encrypted=true',
+          fileSize: file.size,
+          duration: null,
+          tempId,
+          fileKey: encryptedFileKey, // Kunci dekripsi
+          sessionId,
+          repliedToId: replyingTo?.id
+        })
       });
       
-      updateActivity(activityId, { progress: 100, fileName: 'Finishing...' });
+      updateActivity(activityId, { progress: 100, fileName: 'Done!' });
       setTimeout(() => removeActivity(activityId), 1000); 
 
     } catch (error: any) {
+      console.error("Upload error:", error);
       const errorMsg = handleApiError(error);
       toast.error(`File upload failed: ${errorMsg}`);
       removeActivity(activityId);
@@ -198,9 +234,10 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     }
   },
 
+  // --- FUNGSI VOICE MESSAGE BARU (R2) ---
   handleStopRecording: async (conversationId, blob, duration) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
-    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: 'Encrypting & Uploading Voice...', progress: 0 };
+    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: 'Processing Voice...', progress: 0 };
     const activityId = addActivity(activity);
     const { replyingTo } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
@@ -239,27 +276,41 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     set({ replyingTo: null });
 
     try {
-      updateActivity(activityId, { progress: 25, fileName: 'Encrypting voice message...' });
+      // 1. ENKRIPSI VOICE
+      updateActivity(activityId, { progress: 20, fileName: 'Encrypting voice...' });
       const { encryptedBlob, key: rawFileKey } = await encryptFile(blob);
       const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(rawFileKey, conversationId, isGroup);
 
-      updateActivity(activityId, { progress: 50, fileName: 'Uploading voice message...' });
-      const form = new FormData();
-      // Defensive programming: Append metadata fields BEFORE the file blob.
-      form.append("fileKey", encryptedFileKey);
-      if (sessionId) form.append("sessionId", sessionId);
-      form.append("tempId", String(tempId));
-      form.append("duration", String(duration));
-      if (replyingTo) form.append("repliedToId", replyingTo.id);
-      form.append("file", new File([encryptedBlob], "voice-message.webm", { type: "application/octet-stream" }));
+      // 2. UPLOAD KE R2
+      updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
+      
+      // Upload as octet-stream to avoid browser/R2 MIME type sniffing issues with encrypted data
+      const encryptedFile = new File([encryptedBlob], "voice-message.webm", { type: "application/octet-stream" });
 
-      await apiUpload<{ file: any }> ({
-        path: `/api/uploads/${conversationId}/upload`,
-        formData: form,
-        onUploadProgress: (progress) => updateActivity(activityId, { progress: 50 + (progress / 2) }),
+      const fileUrl = await uploadToR2(encryptedFile, 'attachments', (percent) => {
+        const totalProgress = 40 + (percent * 0.5);
+        updateActivity(activityId, { progress: totalProgress });
+      });
+
+      // 3. KIRIM METADATA KE SERVER
+      updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
+
+      await api(`/api/uploads/messages/${conversationId}`, {
+        method: "POST",
+        body: JSON.stringify({
+          fileUrl,
+          fileName: "voice-message.webm",
+          fileType: "audio/webm;encrypted=true",
+          fileSize: blob.size,
+          duration,
+          tempId,
+          fileKey: encryptedFileKey,
+          sessionId,
+          repliedToId: replyingTo?.id
+        })
       });
       
-      updateActivity(activityId, { progress: 100, fileName: 'Finishing...' });
+      updateActivity(activityId, { progress: 100, fileName: 'Sent!' });
       setTimeout(() => removeActivity(activityId), 1000); 
 
     } catch (error: any) {
@@ -271,18 +322,18 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   },
 
   retrySendMessage: (message: Message) => {
-    const { conversationId, content, fileUrl, repliedTo } = message;
-    
+    const { conversationId, content, fileUrl, repliedTo, tempId } = message;
+
     useMessageStore.getState().removeMessage(conversationId, message.id);
 
     if (fileUrl) {
       toast.error("Cannot retry file messages automatically. Please try uploading again.");
       return;
     }
-    
+
     if (repliedTo) {
       set({ replyingTo: repliedTo });
     }
-    get().sendMessage(conversationId, { content: content || '' });
+    get().sendMessage(conversationId, { content: content || '' }, tempId);
   },
 }));

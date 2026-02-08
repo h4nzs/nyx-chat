@@ -31,9 +31,14 @@ export function useChatList() {
       deleteConversation: state.deleteConversation,
       togglePinConversation: state.togglePinConversation,
     }));
-  
+
     const onlineUsers = usePresenceStore(state => state.onlineUsers);
     const meId = useAuthStore(state => state.user?.id);
+    const { blockUser, unblockUser, blockedUserIds } = useAuthStore(state => ({
+      blockUser: state.blockUser,
+      unblockUser: state.unblockUser,
+      blockedUserIds: state.blockedUserIds,
+    }));
   
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<User[]>([]);
@@ -96,6 +101,7 @@ export function useChatList() {
       activeId,
       presence: Array.from(onlineUsers),
       meId,
+      blockedUserIds,
       // Actions
       setSearchQuery,
       handleConversationClick,
@@ -104,5 +110,7 @@ export function useChatList() {
       deleteGroup,
       deleteConversation,
       togglePinConversation,
+      blockUser,
+      unblockUser,
     };
   }

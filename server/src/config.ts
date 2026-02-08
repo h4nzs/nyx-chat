@@ -20,7 +20,7 @@ export const env = {
   // --- DITAMBAHKAN AGAR BUILD BERHASIL ---
   appUrl: process.env.APP_URL || 'http://localhost:4000',
   // ---------------------------------------
-
+  
   jwtSecret: process.env.JWT_SECRET || (() => {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('JWT_SECRET is required in production environment')
@@ -35,5 +35,13 @@ export const env = {
   s3SecretKey: process.env.S3_SECRET_KEY || '',
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
-  chatSecret: process.env.CHAT_SECRET || ''
+  chatSecret: process.env.CHAT_SECRET || '',
+  supabaseUrl: process.env.SUPABASE_URL || "",
+  supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY || "",
+  r2AccountId: process.env.R2_ACCOUNT_ID || "",
+  r2AccessKeyId: process.env.R2_ACCESS_KEY_ID || "",
+  r2SecretAccessKey: process.env.R2_SECRET_ACCESS_KEY || "",
+  r2BucketName: process.env.R2_BUCKET_NAME || "",
+  r2PublicDomain: process.env.R2_PUBLIC_DOMAIN || "",
+  discordReportWebhookUrl: process.env.DISCORD_REPORT_WEBHOOK_URL,
 }

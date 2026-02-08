@@ -32,8 +32,13 @@ export default function TypingIndicator({ conversationId }: { conversationId: st
   }
 
   return (
-    <div className="text-sm text-text-secondary pl-2 py-1 italic">
-      {message}
+    <div className="text-sm text-text-secondary pl-2 py-1 italic flex items-center gap-2">
+      <div className="flex gap-1">
+        <span className="w-1.5 h-1.5 bg-current rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+        <span className="w-1.5 h-1.5 bg-current rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+        <span className="w-1.5 h-1.5 bg-current rounded-full animate-bounce"></span>
+      </div>
+      <span>{message}</span>
     </div>
   );
 }

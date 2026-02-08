@@ -3,12 +3,16 @@ import { prisma } from "../lib/prisma.js";
 import { Prisma } from "@prisma/client";
 import { requireAuth } from "../middleware/auth.js";
 import { getIo } from "../socket.js";
-import { upload } from "../utils/upload.js";
 import { rotateAndDistributeSessionKeys } from "../utils/sessionKeys.js";
 import { ApiError } from "../utils/errors.js";
+import { uploadToSupabase, deleteFromSupabase } from "../utils/supabase.js";
+import { nanoid } from "nanoid";
+import path from "path";
 
 const router: Router = Router();
 router.use(requireAuth);
+
+const MAX_GROUP_MEMBERS = 100; // Batasi member maksimal biar server gak meledak
 
 // GET all conversations for the current user
 router.get("/", async (req, res, next) => {
@@ -77,6 +81,14 @@ router.post("/", async (req, res, next) => {
     if (!req.user) throw new ApiError(401, "Authentication required.");
     const { title, userIds, isGroup, initialSession } = req.body;
     const creatorId = req.user.id;
+
+    if (!Array.isArray(userIds)) {
+      return res.status(400).json({ error: "userIds must be an array." });
+    }
+
+    if (userIds.length > MAX_GROUP_MEMBERS) {
+      return res.status(400).json({ error: `Group cannot have more than ${MAX_GROUP_MEMBERS} members.` });
+    }
 
     if (!isGroup) {
       const otherUserId = userIds.find((id: string) => id !== creatorId);
@@ -212,28 +224,6 @@ router.put("/:id/details", async (req, res, next) => {
   }
 });
 
-// UPLOAD group avatar
-router.post("/:id/avatar", upload.single('avatar'), async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, "Authentication required.");
-    const { id } = req.params;
-    const participant = await prisma.participant.findFirst({
-      where: { conversationId: id, userId: req.user.id },
-    });
-    if (!participant || participant.role !== "ADMIN") return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
-    if (!req.file) return res.status(400).json({ error: "No avatar file provided." });
-
-    const avatarUrl = `/uploads/images/${req.file.filename}`;
-    const updatedConversation = await prisma.conversation.update({
-      where: { id },
-      data: { avatarUrl },
-    });
-    getIo().to(id).emit("conversation:updated", { id, avatarUrl });
-    res.json({ avatarUrl });
-  } catch (error) {
-    next(error);
-  }
-});
 
 // ADD new members to a group
 router.post("/:id/participants", async (req, res, next) => {
@@ -245,6 +235,13 @@ router.post("/:id/participants", async (req, res, next) => {
       where: { conversationId, userId: req.user.id, role: "ADMIN" },
     });
     if (!adminParticipant) return res.status(403).json({ error: "Forbidden: You are not an admin of this group." });
+
+    if (!Array.isArray(userIds)) return res.status(400).json({ error: "userIds must be an array." });
+
+    const currentCount = await prisma.participant.count({ where: { conversationId } });
+    if (currentCount + userIds.length > MAX_GROUP_MEMBERS) {
+       return res.status(400).json({ error: `Group limit reached (${MAX_GROUP_MEMBERS} members max).` });
+    }
 
     const newParticipants = await prisma.$transaction(async (tx) => {
       await Promise.all(userIds.map((userId: string) => 
@@ -454,6 +451,50 @@ router.get('/:id/media', requireAuth, async (req, res, next) => {
   } catch (error) {
     console.error('Failed to fetch media:', error);
     next(error)
+  }
+});
+
+// Record key rotation event
+router.post("/:id/key-rotation", async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, "Authentication required.");
+    const { id: conversationId } = req.params;
+    const { reason } = req.body;
+
+    // Validasi bahwa pengguna adalah anggota percakapan
+    const participant = await prisma.participant.findFirst({
+      where: {
+        conversationId,
+        userId: req.user!.id
+      }
+    });
+
+    if (!participant) {
+      return res.status(404).json({ error: "Conversation not found or you're not a participant" });
+    }
+
+    // Catat bahwa rotasi kunci telah terjadi
+    const updatedConversation = await prisma.conversation.update({
+      where: { id: conversationId },
+      data: {
+        updatedAt: new Date(), // Ini akan memperbarui timestamp terakhir
+        // Di sini kita bisa menambahkan field khusus untuk melacak kapan kunci terakhir dirotasi
+      }
+    });
+
+    // Di sini kita bisa menambahkan logika tambahan seperti:
+    // - Mencatat rotasi kunci di tabel khusus
+    // - Memberi tahu anggota lain bahwa kunci telah dirotasi
+    // - Menandai kunci lama sebagai tidak valid
+
+    res.json({
+      success: true,
+      message: "Key rotation recorded successfully",
+      conversation: updatedConversation
+    });
+  } catch (error) {
+    console.error('Failed to record key rotation:', error);
+    next(error);
   }
 });
 

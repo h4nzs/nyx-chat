@@ -11,7 +11,7 @@ const EncryptionStatusNotification = () => {
       if (!isAvailable) {
         // Show notification about encryption not being available
         toast((t) => (
-          <div className="p-4 bg-yellow-100 dark:bg-yellow-900 border border-yellow-300 dark:border-yellow-700 rounded-lg max-w-sm">
+          <div className="p-4 card-neumorphic max-w-sm border border-yellow-300 dark:border-yellow-700 rounded-xl">
             <div className="flex items-start">
               <div className="flex-shrink-0">
                 <svg className="h-5 w-5 text-yellow-600 dark:text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
@@ -34,7 +34,7 @@ const EncryptionStatusNotification = () => {
                       // In a real app, navigate to the encryption settings
                       window.location.hash = '#encryption-settings';
                     }}
-                    className="inline-flex items-center px-3 py-1 border border-transparent text-xs font-medium rounded text-yellow-800 dark:text-yellow-200 bg-yellow-50 dark:bg-yellow-800 hover:bg-yellow-100 dark:hover:bg-yellow-700 focus:outline-none"
+                    className="inline-flex items-center px-3 py-1 rounded-lg text-xs font-medium text-yellow-800 dark:text-yellow-200 bg-yellow-50 dark:bg-yellow-800 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
                   >
                     Enable Encryption
                   </button>

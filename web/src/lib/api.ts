@@ -1,46 +1,20 @@
 import axios from 'axios';
+import toast from 'react-hot-toast'; // Pastikan sudah diinstall
 
 // PERBAIKAN: Baca dari Environment Variable
 const envUrl = import.meta.env.VITE_API_URL || "";
 
 // Hapus '/api' di akhir URL jika user tidak sengaja memasukkannya di .env
-// karena di kode bawah kita sudah menulis '/api/...' secara eksplisit.
+// Hasilnya bersih: "https://api.domain.com"
 const API_URL = envUrl.replace(/\/api\/?$/, "").replace(/\/$/, "");
 
 // Cache untuk token CSRF
 let csrfTokenCache: string | null = null;
-// Handler for auth failure, to be injected from the UI layer
+// Handler for auth failure (Logout)
 let onAuthFailure: (() => Promise<void>) | null = null;
 
-/**
- * Injects a callback to be executed on a final, unrecoverable authentication failure.
- * This breaks the circular dependency between the api layer and the auth store.
- * @param handler The async function to call on auth failure (e.g., logout).
- */
 export function setAuthFailureHandler(handler: () => Promise<void>) {
   onAuthFailure = handler;
-}
-
-/**
- * Mengambil token CSRF dari server dan menyimpannya di cache.
- */
-export async function getCsrfToken(): Promise<string> {
-  if (csrfTokenCache) {
-    return csrfTokenCache;
-  }
-  try {
-    const res = await fetch(`${API_URL}/api/csrf-token`, { credentials: "include" });
-    if (!res.ok) {
-      throw new Error(`Failed to fetch CSRF token: ${res.status}`);
-    }
-    const data = await res.json();
-    csrfTokenCache = data.csrfToken;
-    return csrfTokenCache!;
-  } catch (error) {
-    console.error("Error fetching CSRF token:", error);
-    csrfTokenCache = null;
-    throw error;
-  }
 }
 
 export class ApiError extends Error {
@@ -54,6 +28,28 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Mengambil token CSRF. 
+ * Note: Jika backend kamu stateless (JWT murni di header), ini mungkin tidak perlu.
+ * Tapi jika pakai Cookie + CSRF protection, ini wajib.
+ */
+export async function getCsrfToken(): Promise<string> {
+  if (csrfTokenCache) return csrfTokenCache;
+  
+  try {
+    const res = await fetch(`${API_URL}/api/csrf-token`, { credentials: "include" });
+    if (!res.ok) throw new Error(`Failed to fetch CSRF token: ${res.status}`);
+    
+    const data = await res.json();
+    csrfTokenCache = data.csrfToken;
+    return csrfTokenCache!;
+  } catch (error) {
+    console.error("Error fetching CSRF token:", error);
+    // Jangan throw error di sini agar request GET biasa tetap jalan meski tanpa CSRF
+    return ""; 
+  }
+}
+
 export async function api<T = any>(
   path: string,
   options: RequestInit = {}
@@ -62,38 +58,59 @@ export async function api<T = any>(
     ...(options.headers as Record<string, string> || {}),
   };
 
+  // Attach CSRF Token hanya untuk method non-GET (mutasi)
   if (options.method && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method.toUpperCase())) {
     if (!(options.body instanceof FormData)) {
         headers['Content-Type'] = 'application/json';
     }
-    try {
-      const token = await getCsrfToken();
-      headers['CSRF-Token'] = token;
-    } catch {
-      console.error("Could not attach CSRF token");
-    }
+    // Coba ambil token, kalau gagal lanjut aja (mungkin endpoint public)
+    const token = await getCsrfToken().catch(() => "");
+    if (token) headers['CSRF-Token'] = token;
   }
 
-  // API_URL sekarang sudah berisi domain Render yang benar
   const res = await fetch(API_URL + path, {
+    cache: 'no-store', // Disable browser caching
     ...options,
-    credentials: "include",
+    credentials: "include", // Penting untuk kirim Cookie (RefreshToken/Session)
     headers,
   });
 
+  // --- ERROR HANDLING BLOCK ---
   if (!res.ok) {
     const text = await res.text();
-    if (res.status === 403 && text.includes('invalid csrf token')) {
+    
+    // 1. Handle CSRF Invalid -> Clear Cache
+    if (res.status === 403 && text.toLowerCase().includes('csrf')) {
         csrfTokenCache = null;
     }
-    // Try to parse the error details from the response body
+
+    // 2. Parse Error Details (JSON vs HTML/Text)
     let details;
+    let errorMessage = res.statusText;
     try {
       details = JSON.parse(text);
+      if (details.error) errorMessage = details.error;
+      if (details.message) errorMessage = details.message;
     } catch (e) {
-      details = { message: text }; // Fallback for non-JSON responses
+      errorMessage = text || `Request failed with status ${res.status}`;
+      details = { raw: text };
     }
-    throw new ApiError(res.status, details.message || res.statusText, details);
+
+    // 3. ✨ NEW: Handle Rate Limit (429) dengan Toast
+    if (res.status === 429) {
+      toast.error(errorMessage, {
+        id: 'rate-limit-error', // ID biar gak muncul duplikat toast
+        duration: 5000,
+        icon: '⏳',
+        style: {
+          background: '#fee2e2',
+          color: '#b91c1c',
+          fontWeight: '600',
+        }
+      });
+    }
+
+    throw new ApiError(res.status, errorMessage, details);
   }
 
   if (res.status === 204) {
@@ -103,6 +120,10 @@ export async function api<T = any>(
   return res.json();
 }
 
+/**
+ * Wrapper untuk request yang butuh Auth.
+ * Otomatis mencoba refresh token jika kena 401.
+ */
 export async function authFetch<T>(
   url: string,
   options: RequestInit = {}
@@ -110,27 +131,24 @@ export async function authFetch<T>(
   try {
     return await api<T>(url, options);
   } catch (err) {
-    if (
-      err instanceof ApiError &&
-      (err.status === 401 || /Unauthorized/i.test(err.message))
-    ) {
+    if (err instanceof ApiError && err.status === 401) {
       try {
+        // Coba refresh token
         const refreshRes = await api<{ ok: boolean }>("/api/auth/refresh", {
           method: "POST",
         });
 
-        if (refreshRes.ok) {
+        // Jika refresh sukses, ulangi request awal
+        if (refreshRes) {
           return await api<T>(url, options);
         }
-        // If refresh fails, trigger the auth failure handler
-        if (onAuthFailure) await onAuthFailure();
-        throw err;
       } catch (refreshErr) {
-        // This catch block handles failure of the refresh token endpoint itself
-        if (onAuthFailure) await onAuthFailure();
-        // Re-throw the original error that triggered the refresh attempt
-        throw err;
+        // Jika refresh gagal, biarkan lanjut ke logout logic di bawah
+        console.error("Token refresh failed:", refreshErr);
       }
+
+      // Jika sampai sini berarti refresh gagal/token expired permanen -> Logout
+      if (onAuthFailure) await onAuthFailure();
     }
     throw err;
   }
@@ -138,33 +156,26 @@ export async function authFetch<T>(
 
 export function handleApiError(e: unknown): string {
   if (e instanceof ApiError) {
-    // Prioritize specific error message from the server response body
-    if (e.details?.message) return e.details.message;
-    if (e.details?.error) return e.details.error;
+    // Pesan spesifik dari backend lebih diprioritaskan
+    if (e.message) return e.message;
 
-    // Fallback to generic messages based on status code
+    // Fallback status code
     switch (e.status) {
-      case 0:
-        return "Network connection failed. Please check your internet connection.";
-      case 400:
-        return `Invalid request: ${e.message}`;
-      case 401:
-        return "Authentication failed. Please log in again.";
-      case 403:
-        return "Access denied. You don't have permission to perform this action.";
-      case 404:
-        return "Resource not found.";
-      case 500:
-        return "Server error. Please try again later.";
-      default:
-        return e.message || "An error occurred. Please try again.";
+      case 0: return "Network error. Check your connection.";
+      case 400: return "Invalid request.";
+      case 401: return "Session expired. Please login again.";
+      case 403: return "You don't have permission.";
+      case 404: return "Resource not found.";
+      case 429: return "Too many requests. Please wait.";
+      case 500: return "Server internal error.";
+      default: return `Error (${e.status})`;
     }
   }
-
   if (e instanceof Error) return e.message;
-  return "Something went wrong";
+  return "An unexpected error occurred";
 }
 
+// Upload menggunakan Axios (untuk Progress Bar)
 export async function apiUpload<T = any>({
   path,
   formData,
@@ -175,13 +186,13 @@ export async function apiUpload<T = any>({
   onUploadProgress: (progress: number) => void;
 }): Promise<T> {
   try {
-    const csrfToken = await getCsrfToken();
+    const csrfToken = await getCsrfToken().catch(() => "");
 
     const response = await axios.post<T>(
-      API_URL + path,
+      API_URL + path, // Gunakan konstanta API_URL yang sama
       formData,
       {
-        withCredentials: true,
+        withCredentials: true, // Kirim Cookie
         headers: {
           'CSRF-Token': csrfToken,
         },
@@ -196,9 +207,17 @@ export async function apiUpload<T = any>({
     return response.data;
   } catch (error) {
     if (axios.isAxiosError(error) && error.response) {
+      // Mapping Error Axios ke ApiError kita biar konsisten
+      const message = error.response.data?.error || error.response.data?.message || error.message;
+      
+      // Handle 429 di upload juga
+      if (error.response.status === 429) {
+         toast.error(message, { icon: '⏳', style: { background: '#fee2e2', color: '#b91c1c' } });
+      }
+
       throw new ApiError(
         error.response.status,
-        error.response.data?.error || error.message,
+        message,
         error.response.data
       );
     }

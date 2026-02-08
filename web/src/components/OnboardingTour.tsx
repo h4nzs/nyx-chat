@@ -2,7 +2,7 @@ import { useState } from 'react';
 import ModalBase from './ui/ModalBase';
 import { useAuthStore } from '@store/auth';
 import { api } from '@lib/api';
-import { FiKey, FiShield, FiSmile, FiCheckCircle } from 'react-icons/fi';
+import { FiKey, FiShield, FiSmile, FiCoffee } from 'react-icons/fi'; // Tambah FiCoffee
 
 interface OnboardingTourProps {
   isOpen: boolean;
@@ -65,9 +65,16 @@ export default function OnboardingTour({ isOpen, onClose }: OnboardingTourProps)
       content: <p>Each conversation has a unique "Safety Number". You can compare this number with your contact out-of-band (e.g., in person or on a video call) to verify your end-to-end encryption connection and ensure you're talking to the right person.</p>
     },
     {
-      icon: <FiCheckCircle size={32} className="text-accent" />,
-      title: "You're All Set!",
-      content: <p>Enjoy secure and private messaging. Remember to verify your contacts for maximum security.</p>
+      // --- SLIDE BARU: Server Status & Support ---
+      icon: <FiCoffee size={32} className="text-accent" />,
+      title: "Community & Performance",
+      content: (
+        <>
+          <p>Chat Lite runs on <strong>free-tier infrastructure</strong>, so you might experience occasional delays or reconnection moments.</p>
+          <p className="mt-2">If you enjoy the app, you can help us upgrade to faster servers anytime! Just go to <strong>Settings</strong> and scroll to the bottom to support the project.</p>
+          <p className="font-bold mt-2 text-accent">Enjoy your secure chats!</p>
+        </>
+      )
     }
   ];
 

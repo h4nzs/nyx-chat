@@ -19,7 +19,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 
   try {
     const payload = jwt.verify(token, env.jwtSecret) as AuthPayload;
-    console.log('[Auth Middleware] Pengguna terotentikasi:', payload); 
+    // console.log('[Auth Middleware] Pengguna terotentikasi:', payload); 
     req.user = payload;
     next();
   } catch (err) {

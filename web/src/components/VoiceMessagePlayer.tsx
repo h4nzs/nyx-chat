@@ -2,9 +2,10 @@ import { useState, useRef, useEffect } from 'react';
 import { FiPlay, FiPause, FiDownload, FiAlertTriangle } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 import { Message } from '@store/conversation';
-import { decryptFile } from '@utils/crypto';
+import { decryptFile, decryptMessage } from '@utils/crypto';
 import { toAbsoluteUrl } from '@utils/url';
 import { useKeychainStore } from '@store/keychain';
+import { useConversationStore } from '@store/conversation';
 import { Spinner } from './Spinner';
 
 interface VoiceMessagePlayerProps {
@@ -29,17 +30,17 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
     let isMounted = true;
 
     const handleDecryption = async () => {
-      // The decrypted file key is now expected to be in message.content
-      const fileKey = message.content;
+      // Prefer message.fileKey, fallback to message.content
+      const encryptedFileKey = message.fileKey || message.content;
 
-      if (!message.fileUrl || !fileKey) {
+      if (!message.fileUrl || !encryptedFileKey) {
         if (isMounted) setError("Incomplete message data for decryption.");
         return;
       }
       
-      // Handle pending/error states passed from the store
-      if (fileKey === 'waiting_for_key' || fileKey.startsWith('[')) {
-        if (isMounted) setError(fileKey);
+      // Handle pending/error states
+      if (encryptedFileKey === 'waiting_for_key' || encryptedFileKey.startsWith('[')) {
+        if (isMounted) setError(encryptedFileKey);
         return;
       }
 
@@ -53,6 +54,7 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
         if (!absoluteUrl) {
           throw new Error("File URL is invalid.");
         }
+        
         // 1. Fetch the encrypted file
         const response = await fetch(absoluteUrl);
         if (!response.ok) {
@@ -63,11 +65,36 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
         }
         const encryptedBlob = await response.blob();
 
-        // 2. Decrypt the file blob
-        const decryptedBlob = await decryptFile(encryptedBlob, fileKey, 'audio/webm');
+        // 2. Decrypt the FILE KEY first
+        const conversation = useConversationStore.getState().conversations.find(c => c.id === message.conversationId);
+        const isGroup = conversation?.isGroup || false;
+
+        const keyResult = await decryptMessage(
+          encryptedFileKey,
+          message.conversationId,
+          isGroup,
+          message.sessionId
+        );
+
+        if (keyResult.status === 'pending') {
+          if (isMounted) {
+            setError(keyResult.reason || "Waiting for key...");
+            setIsLoading(false);
+          }
+          return;
+        }
+
+        if (keyResult.status === 'error') {
+          throw keyResult.error || new Error("Failed to decrypt file key.");
+        }
+
+        const rawFileKey = keyResult.value;
+
+        // 3. Decrypt the file blob using the raw key
+        const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, 'audio/webm');
         
         if (isMounted) {
-          // 3. Create a playable URL
+          // 4. Create a playable URL
           objectUrl = URL.createObjectURL(decryptedBlob);
           setAudioSrc(objectUrl);
         }
@@ -79,7 +106,7 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
       }
     };
 
-    if (message.fileType?.includes('encrypted=true')) {
+    if (message.fileType?.includes('encrypted=true') || message.fileKey) {
       handleDecryption();
     } else if (message.fileUrl) {
       const absoluteUrl = toAbsoluteUrl(message.fileUrl);
@@ -97,7 +124,7 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [message, lastKeychainUpdate]); // Re-run when a new key might have arrived
+  }, [message, lastKeychainUpdate]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -119,7 +146,7 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
       audio.removeEventListener('canplay', handleCanPlay);
       audio.removeEventListener('ended', handleEnded);
     };
-  }, [audioSrc]); // Re-attach listeners if src changes
+  }, [audioSrc]);
 
   const togglePlay = () => {
     if (audioRef.current) {

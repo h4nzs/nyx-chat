@@ -40,7 +40,7 @@
     --ring: 217 91% 60%;         /* Blue 500 */
 
     --text-primary: 222 47% 11%;   /* Slate 900 */
-    --text-secondary: 215 25% 50%; /* Slate 500 - Darker for contrast */
+    --text-secondary: 215 25% 45%; /* Slate 500 - Darker for contrast (was 50%) */
 
     --primary: 222 47% 11%;
     --primary-foreground: 210 40% 98%;
@@ -132,7 +132,7 @@
 @layer components {
   /* Base Button Style */
   .btn {
-    @apply px-4 py-2 rounded-lg font-semibold shadow-sm transition-colors transition-shadow duration-200 flex items-center justify-center;
+    @apply px-4 py-2 rounded-lg font-semibold shadow-sm transition-all duration-200 flex items-center justify-center;
     @apply disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
@@ -177,15 +177,60 @@
     box-shadow: inset 2px 2px 5px hsl(var(--shadow-dark)), inset -2px -2px 5px hsl(var(--shadow-light));
   }
 
+  /* Enhanced Neumorphic Input Fields */
+  .input-neumorphic {
+    @apply bg-bg-surface text-text-primary rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-accent shadow-neumorphic-concave transition-all duration-200;
+  }
+
+  /* Enhanced Neumorphic Card */
+  .card-neumorphic {
+    @apply bg-bg-surface rounded-xl p-6 shadow-neumorphic-convex transition-all duration-200;
+  }
+
+  /* Touch Target Improvements for PWA */
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px] flex items-center justify-center;
+  }
+
+  /* Enhanced Typography */
+  .text-display {
+    @apply text-4xl font-bold leading-tight;
+  }
+
+  .text-heading {
+    @apply text-2xl font-bold leading-snug;
+  }
+
+  .text-subheading {
+    @apply text-lg font-semibold leading-relaxed;
+  }
+
+  .text-body {
+    @apply text-base leading-normal;
+  }
+
+  .text-caption {
+    @apply text-sm leading-relaxed text-text-secondary;
+  }
+
+  /* Enhanced Neumorphic Toggle Switch */
+  .toggle-neumorphic {
+    @apply relative inline-flex items-center h-7 w-12 flex-shrink-0 rounded-full shadow-neumorphic-concave-sm transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-accent cursor-pointer;
+  }
+
+  .toggle-neumorphic-thumb {
+    @apply inline-block h-5 w-5 transform rounded-full shadow-neumorphic-convex-sm ring-0 transition duration-200 ease-in-out;
+  }
+
   /* Global Focus-Visible Styles for Accessibility */
-  .btn, 
-  button, 
-  a, 
+  .btn,
+  button,
+  a,
   input[type="text"],
   input[type="password"],
   input[type="email"],
   textarea {
-    @apply transition-colors duration-200 ease-in-out;
+    @apply transition-all duration-200 ease-in-out;
     @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-accent focus-visible:ring-offset-bg-surface;
   }
 }
