@@ -116,6 +116,17 @@ jobs:
             # Jalankan generate pakai binary lokal yang baru diinstall
             echo "🔧 Generating Prisma Client..."
             pnpm prisma generate
+
+            # --- DEPLOY FRONTEND TO NGINX ---
+            echo "🎨 Deploying Frontend to Nginx..."
+            # 1. Pastikan folder tujuan ada
+            sudo mkdir -p /var/www/nyx-web
+            # 2. Bersihkan file lama
+            sudo rm -rf /var/www/nyx-web/*
+            # 3. Copy hasil build baru dari /root/ ke /var/www/
+            sudo cp -r /root/nyx-app/web/dist/* /var/www/nyx-web/
+            # 4. Reload Nginx biar refresh cache
+            sudo systemctl reload nginx
             # ---------------------------------
             
             # Restart Apps
