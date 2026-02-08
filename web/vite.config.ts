@@ -63,6 +63,7 @@ export default defineConfig({
       '@hooks': path.resolve(__dirname, './src/hooks'),
       '@services': path.resolve(__dirname, './src/services'),
       '@tests': path.resolve(__dirname, './src/tests'),
+      'libsodium-wrappers': 'libsodium-wrappers/dist/modules/libsodium-wrappers.js',
     },
   },
 
