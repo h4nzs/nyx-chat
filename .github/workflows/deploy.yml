@@ -3,7 +3,7 @@ name: Deploy NYX to VPS (PNPM Monorepo)
 on:
   push:
     branches:
-      - setup-deploy # Sesuaikan branch lu
+      - main # Sesuaikan branch lu
 
 jobs:
   build-and-deploy:
