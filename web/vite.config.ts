@@ -22,8 +22,8 @@ export default defineConfig({
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, 
         },
         manifest: {
-          name: 'Chat Lite',
-          short_name: 'ChatLite',
+          name: 'Nyx Chat',
+          short_name: 'Nyx',
           description: 'Secure, lightweight messaging app.',
           theme_color: '#ffffff', // Sesuaikan tema terang/gelap
           background_color: '#ffffff',
@@ -64,6 +64,12 @@ export default defineConfig({
       '@services': path.resolve(__dirname, './src/services'),
       '@tests': path.resolve(__dirname, './src/tests'),
     },
+  },
+
+  optimizeDeps: {
+    // Paksa Vite untuk tidak meng-optimasi libsodium-wrappers
+    // Ini memperbaiki error "Could not resolve ./libsodium.mjs"
+    exclude: ['libsodium-wrappers']
   },
   define: {
     'global.Buffer': ['buffer', 'Buffer'],
