@@ -78,12 +78,16 @@ app.use(helmet({
         "https://*.vercel.app",
         "https://*.koyeb.app",
         "https://*.upstash.io",
+        "https://nyx-app.my.id",       // <--- TAMBAHIN INI (Frontend Production)
+    "https://www.nyx-app.my.id",
         "https://*.supabase.co"
       ],
       connectSrc: [
         "'self'",
         wsOrigin,
         "https://*.vercel.app",
+        "https://*.nyx-app.my.id",       // <--- TAMBAHIN INI (Frontend Production)
+    "https://www.nyx-app.my.id",
         "wss://*.vercel.app",
         "https://*.koyeb.app",
         "wss://*.koyeb.app",
@@ -125,6 +129,8 @@ const isAllowedOrigin = (origin: string): boolean => {
     "https://*.upstash.io",
     // Domain Supabase
     "https://*.supabase.co",
+    "https://nyx-app.my.id",       // <--- TAMBAHIN INI (Frontend Production)
+    "https://www.nyx-app.my.id",
   ];
 
   // Cek apakah origin cocok dengan salah satu dari daftar yang diizinkan
