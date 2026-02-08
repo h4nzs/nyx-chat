@@ -2,6 +2,10 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
+import { createRequire } from 'module';
+
+// Bikin fungsi 'require' palsu karena kita di environment Module (ESM)
+const require = createRequire(import.meta.url);
 
 export default defineConfig({
   plugins: [
@@ -63,7 +67,7 @@ export default defineConfig({
       '@hooks': path.resolve(__dirname, './src/hooks'),
       '@services': path.resolve(__dirname, './src/services'),
       '@tests': path.resolve(__dirname, './src/tests'),
-      'libsodium-wrappers': 'libsodium-wrappers/dist/modules/libsodium-wrappers.js',
+      'libsodium-wrappers': require.resolve('libsodium-wrappers'),
     },
   },
 
