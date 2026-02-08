@@ -3,7 +3,7 @@ name: Deploy NYX to VPS (PNPM Monorepo)
 on:
   push:
     branches:
-      - main # Sesuaikan branch lu
+      - main # Pastikan ini sesuai branch lu
 
 jobs:
   build-and-deploy:
@@ -24,14 +24,11 @@ jobs:
         with:
           node-version: '20'
           cache: 'pnpm'
-          # Cache lockfile root
           cache-dependency-path: 'pnpm-lock.yaml'
 
       # --- PHASE 1: INSTALL SEMUA (ROOT) ---
       - name: 📦 Install Dependencies (Root)
-        # JANGAN PAKE working-directory ./web
-        # Kita install dari luar biar pnpm baca workspace yang bener
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       # --- PHASE 2: BUILD WEB ---
       - name: 🎨 Build Web (Frontend)
@@ -40,13 +37,17 @@ jobs:
           VITE_WS_URL: ${{ secrets.VITE_WS_URL }}
           VITE_APP_SECRET: ${{ secrets.VITE_APP_SECRET }}
           VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
-        # Pake --filter buat nyuruh pnpm build folder web doang
         run: pnpm --filter ./web run build
 
-      # --- PHASE 3: BUILD SERVER ---
+      # --- PHASE 3: BUILD SERVER (YANG DIPERBAIKI) ---
       - name: ⚙️ Build Server (Backend)
-        # Build server doang
-        run: pnpm --filter ./server run build
+        working-directory: ./server
+        run: |
+          # WAJIB: Generate Prisma Client dulu biar TypeScript kenal tipe datanya
+          npx prisma generate
+          
+          # Baru di-build
+          pnpm run build
 
       # --- PHASE 4: PACKAGING ---
       - name: 🗜️ Prepare Artifacts for Deploy
@@ -61,8 +62,7 @@ jobs:
           mkdir -p deploy_package/server
           cp -r server/dist deploy_package/server/
           cp server/package.json deploy_package/server/
-          # Kita copy pnpm-lock dari server folder (kalau ada) atau root
-          # Untuk aman, kita copy package.json server aja, nanti install ulang di vps
+          cp -r server/prisma deploy_package/server/
           
           # Zip semuanya
           cd deploy_package
@@ -105,10 +105,10 @@ jobs:
             echo "📦 Installing Backend Dependencies..."
             cd /root/nyx-app/server
             
-            # Install prod dependencies doang (tanpa lockfile gapapa di server, biar fleksibel)
+            # Install prod dependencies
             pnpm install --prod
             
-            # Generate Prisma
+            # Generate Prisma (Di VPS juga perlu biar runtime-nya jalan)
             npx prisma generate
             
             # Restart Apps
