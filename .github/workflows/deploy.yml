@@ -1,0 +1,124 @@
+name: Deploy NYX to VPS (PNPM)
+
+on:
+  push:
+    branches:
+      - main # Sesuaikan dengan branch lu
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      # --- SETUP PNPM ENV ---
+      - name: 🦀 Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9 # Menggunakan versi pnpm terbaru
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: '**/pnpm-lock.yaml'
+
+      # --- PHASE 1: BUILD FRONTEND (WEB) ---
+      - name: 📦 Install & Build Web (Frontend)
+        working-directory: ./web
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_WS_URL: ${{ secrets.VITE_WS_URL }}
+          VITE_APP_SECRET: ${{ secrets.VITE_APP_SECRET }}
+          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      # --- PHASE 2: BUILD BACKEND (SERVER) ---
+      - name: ⚙️ Install & Build Server (Backend)
+        working-directory: ./server
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      # --- PHASE 3: PACKAGING ---
+      - name: 🗜️ Prepare Artifacts for Deploy
+        run: |
+          mkdir deploy_package
+          
+          # Copy Frontend Build
+          mkdir -p deploy_package/web
+          cp -r web/dist deploy_package/web/
+          
+          # Copy Backend Build & Configs
+          mkdir -p deploy_package/server
+          cp -r server/dist deploy_package/server/
+          cp server/package.json deploy_package/server/
+          cp server/pnpm-lock.yaml deploy_package/server/  # PENTING: Bawa lockfile
+          cp -r server/prisma deploy_package/server/
+          
+          # Zip semuanya
+          cd deploy_package
+          zip -r ../nyx-deploy.zip .
+
+      # --- PHASE 4: SHIP TO VPS ---
+      - name: 🚀 Upload to VPS via SCP
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          source: "nyx-deploy.zip"
+          target: "/root/"
+
+      # --- PHASE 5: EXECUTE ON VPS ---
+      - name: 🔧 Unzip & Restart on VPS
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            echo "🚧 Starting Deployment (PNPM Mode)..."
+            
+            # 0. Pastikan PNPM terinstall di VPS
+            if ! command -v pnpm &> /dev/null; then
+                echo "Installing pnpm on VPS..."
+                npm install -g pnpm
+            fi
+
+            # 1. Bersihin folder lama (sisakan node_modules biar cache jalan)
+            mkdir -p /root/nyx-app
+            
+            # 2. Unzip paket baru
+            unzip -o /root/nyx-deploy.zip -d /root/nyx-app/
+            rm /root/nyx-deploy.zip
+            
+            # 3. Setup Backend
+            echo "📦 Installing Backend Dependencies..."
+            cd /root/nyx-app/server
+            
+            # Pake pnpm install --prod (hanya dependencies production)
+            pnpm install --prod --frozen-lockfile
+            
+            # 4. Generate Prisma & Migrate
+            npx prisma generate
+            # npx prisma migrate deploy # Uncomment kalo mau auto-migrate
+            
+            # 5. Restart PM2
+            echo "🔄 Restarting Apps..."
+            
+            # Restart API
+            pm2 restart nyx-api || pm2 start dist/index.js --name "nyx-api"
+            
+            # Restart Web (Serve)
+            # Kita install 'serve' pake npx/pnpm dlx biar gak perlu install global
+            pm2 restart nyx-web || pm2 start "pnpm dlx serve -s ../web/dist -l 3000" --name "nyx-web"
+            
+            echo "✅ Deployment Success!"
