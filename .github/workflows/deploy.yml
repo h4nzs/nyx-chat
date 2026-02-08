@@ -44,7 +44,7 @@ jobs:
         working-directory: ./server
         run: |
           # WAJIB: Generate Prisma Client dulu biar TypeScript kenal tipe datanya
-          npx prisma generate
+          npx prisma@5.22.0 generate
           
           # Baru di-build
           pnpm run build
