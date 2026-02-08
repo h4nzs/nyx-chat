@@ -2,13 +2,17 @@ import { Server, Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
 import { env } from "./config.js";
 import { prisma } from "./lib/prisma.js";
-import { verifyJwt, signAccessToken } from "./utils/jwt.js"; // Pastikan signAccessToken diimport
+import { verifyJwt, signAccessToken } from "./utils/jwt.js";
 import { sendPushNotification } from "./utils/sendPushNotification.js";
-import { redisClient } from "./lib/redis.js";
+import { redisClient } from "./lib/redis.js"; // Client untuk data aplikasi (Presence, dll)
 import { Message } from "@prisma/client";
 import { AuthPayload } from "./types/auth.js";
 import cookie from "cookie"; 
 import crypto from "crypto";
+
+// --- REDIS ADAPTER IMPORTS ---
+import { createClient } from "redis";
+import { createAdapter } from "@socket.io/redis-adapter";
 
 // --- Type Definitions for Socket Payloads ---
 interface TypingPayload {
@@ -78,7 +82,12 @@ export function registerSocket(httpServer: HttpServer) {
         const allowedOrigins = [
           env.corsOrigin, 
           "http://localhost:5173", 
-          "http://localhost:4173"
+          "http://localhost:4173",
+          // Tambahkan domain HTTP untuk support Cloudflare Tunnel
+          "http://nyx-app.my.id",
+          "https://nyx-app.my.id",
+          "http://*.nyx-app.my.id",
+          "https://*.nyx-app.my.id"
         ];
         if (
           allowedOrigins.includes(origin) || 
@@ -103,9 +112,24 @@ export function registerSocket(httpServer: HttpServer) {
       skipMiddlewares: true,
     },
     allowEIO3: true,
-    pingTimeout: 30000, // Diubah dari 20000 ke 30000 untuk konsistensi
-    pingInterval: 35000  // Diubah dari 25000 ke 35000 untuk konsistensi
+    pingTimeout: 30000,
+    pingInterval: 35000 
   });
+
+  // === REDIS ADAPTER SETUP (CLUSTER MODE SUPPORT) ===
+  // Kita menggunakan process.env.REDIS_URL yang sama dengan lib/redis.ts
+  const pubClient = createClient({ url: process.env.REDIS_URL });
+  const subClient = pubClient.duplicate();
+
+  Promise.all([pubClient.connect(), subClient.connect()])
+    .then(() => {
+      io.adapter(createAdapter(pubClient, subClient));
+      console.log("✅ Socket.IO Redis Adapter initialized (Cluster Mode Ready)");
+    })
+    .catch((err) => {
+      console.error("❌ Socket.IO Redis Adapter Connection Failed:", err);
+    });
+  // ==================================================
 
   // === MIDDLEWARE AUTH ===
   io.use(async (socket: AuthenticatedSocket, next) => {

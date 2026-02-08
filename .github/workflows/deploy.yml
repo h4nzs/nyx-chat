@@ -120,7 +120,9 @@ jobs:
             
             # Restart Apps
             echo "🔄 Restarting Apps..."
-            pm2 restart nyx-api || pm2 start dist/index.js --name "nyx-api"
-            pm2 restart nyx-web || pm2 start "pnpm dlx serve -s ../web/dist -l 3000" --name "nyx-web"
+            pm2 delete nyx-api || true
+            pm2 start dist/index.js --name "nyx-api" -i max
+            pm2 delete nyx-web || true
+            pm2 save
             
             echo "✅ Deployment Success!"
