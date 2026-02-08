@@ -130,7 +130,7 @@ const isAllowedOrigin = (origin: string): boolean => {
     // Domain Supabase
     "https://*.supabase.co",
     "https://nyx-app.my.id",       // <--- TAMBAHIN INI (Frontend Production)
-    "https://www.nyx-app.my.id",
+    "https://*.nyx-app.my.id",
   ];
 
   // Cek apakah origin cocok dengan salah satu dari daftar yang diizinkan
