@@ -6,7 +6,7 @@ export const redisClient: RedisClientType = createClient({
   url: process.env.REDIS_URL,
   socket: {
     // FIX 2: Gunakan 'false' (boolean) bukan 0
-    keepAlive: false, 
+    keepAlive: true,
     // Strategi Reconnect (Penting buat Upstash)
     reconnectStrategy: (retries) => {
       if (retries > 20) {

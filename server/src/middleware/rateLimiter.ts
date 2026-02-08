@@ -1,6 +1,8 @@
 import rateLimit from "express-rate-limit";
 import { env } from "../config.js";
 import { Request } from "express";
+import { RedisStore } from 'rate-limit-redis';
+import { redisClient } from '../lib/redis.js';
 
 // Helper biar gak spam log saat development
 const skipInDev = () => env.nodeEnv === 'development';
@@ -16,7 +18,10 @@ export const generalLimiter = rateLimit({
   validate: { trustProxy: false },
   message: {
     error: "Too many requests, please try again later."
-  }
+  },
+  store: new RedisStore({
+    sendCommand: (...args: string[]) => redisClient.sendCommand(args),
+  }),
 });
 
 // 2. Auth Limiter: Sangat Ketat untuk Login/Register/Restore
