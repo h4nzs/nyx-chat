@@ -1,11 +1,13 @@
 // Datasource & Generator
 generator client {
   provider = "prisma-client-js"
+  previewFeatures = ["fullTextSearch", "postgresqlExtensions"]
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  extensions = [pg_trgm, pg_graphql, pg_stat_statements, pgcrypto, supabase_vault, uuid_ossp(map: "uuid-ossp")]
 }
 
 model User {
@@ -43,8 +45,6 @@ model User {
   blockedUsers BlockedUser[] @relation("Blocker") // User ini memblokir siapa aja
   blockedBy    BlockedUser[] @relation("Blocked") // User ini diblokir sama siapa aja
 
-  @@index([email])
-  @@index([username])
   @@index([createdAt])
 }
 
@@ -75,7 +75,7 @@ model Conversation {
   messages      Message[]
   hiddenBy      UserHiddenConversation[]
 
-  @@index([lastMessageAt])
+  @@index([lastMessageAt(sort: Desc)])
   @@index([createdAt])
   @@index([isGroup])
 }
@@ -124,11 +124,12 @@ model Message {
   repliedTo           Message?        @relation("Replies", fields: [repliedToId], references: [id], onDelete: SetNull, onUpdate: NoAction)
   replies             Message[]       @relation("Replies")
 
-  @@index([conversationId, createdAt])
+  @@index([conversationId, createdAt(sort: Desc)])
   @@index([senderId])
   @@index([sessionId])
   @@index([createdAt])
   @@index([repliedToId])
+  @@index([content(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
 
@@ -149,7 +150,8 @@ model MessageStatus {
   updatedAt DateTime        @updatedAt
 
   @@unique([messageId, userId])
-  @@index([userId])
+  @@index([userId, status])
+  @@index([messageId])
   @@index([status])
   @@index([updatedAt])
 }
@@ -204,9 +206,7 @@ model SessionKey {
   createdAt             DateTime @default(now())
   expiresAt             DateTime?
 
-  @@index([conversationId])
-  @@index([userId])
-  @@index([sessionId])
+  @@index([conversationId, userId, sessionId])
 }
 
 model PushSubscription {

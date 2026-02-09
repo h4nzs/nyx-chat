@@ -186,6 +186,7 @@ router.post("/verify-email", otpLimiter, zodValidate({
           avatarUrl: true,
           showEmailToOthers: true,
           description: true,
+          hasCompletedOnboarding: true,
           isEmailVerified: true
         }
       });
@@ -204,7 +205,8 @@ router.post("/verify-email", otpLimiter, zodValidate({
           name: true,
           avatarUrl: true,
           isEmailVerified: true,
-          description: true, 
+          description: true,
+          hasCompletedOnboarding: true,
           showEmailToOthers: true
         }
       });
