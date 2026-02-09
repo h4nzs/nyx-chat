@@ -94,6 +94,7 @@ export function registerSocket(httpServer: HttpServer) {
           origin.endsWith('.vercel.app') || 
           origin.endsWith('.koyeb.app') ||
           origin.endsWith('.onrender.com') ||
+          origin.endsWith('.nyx-app.my.id') ||
           origin.endsWith('.ngrok-free.app')
         ) {
           callback(null, true);
