@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "start": "node --max-old-space-size=192 dist/index.js",
+    "start": "node --max-old-space-size=768 dist/index.js",
     "dev": "tsx watch src/index.ts",
     "test": "tsx --test tests/api.test.ts",
     "seed": "tsx prisma/seed.ts",
