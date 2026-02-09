@@ -1,26 +1,31 @@
 import { createClient, type RedisClientType } from 'redis';
 import { env } from '../config.js';
 
+const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+
 export const redisClient: RedisClientType = createClient({
-  // FIX 1: Langsung pakai process.env untuk bypass error type di 'env'
-  url: process.env.REDIS_URL,
+  url: redisUrl,
   socket: {
-    // FIX 2: Gunakan 'false' (boolean) bukan 0
     keepAlive: true,
-    // Strategi Reconnect (Penting buat Upstash)
+    // Strategi Reconnect untuk VPS/Local (Cepat pulih jika service restart)
     reconnectStrategy: (retries) => {
-      if (retries > 20) {
+      if (retries > 50) {
         console.error('❌ Redis Connection Retries Exhausted');
         return new Error('Redis connection retries exhausted');
       }
-      return Math.min(retries * 100, 3000);
+      // Retry setiap 500ms, max 2 detik
+      return Math.min(retries * 50, 2000);
     },
-    connectTimeout: 10000,
+    connectTimeout: 5000,
   }
 });
 
 redisClient.on('error', (err) => console.error('❌ Redis Client Error:', err));
-redisClient.on('connect', () => console.log('✅ Redis Client Connected'));
+redisClient.on('connect', () => {
+  // Masking URL untuk keamanan log, tapi cukup untuk verifikasi host
+  const maskedUrl = redisUrl.replace(/(:[^:@]+@)/, ':****@'); 
+  console.log(`✅ Redis Client Connected to ${maskedUrl}`);
+});
 
 // Auto Connect
 (async () => {

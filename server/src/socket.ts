@@ -118,14 +118,25 @@ export function registerSocket(httpServer: HttpServer) {
   });
 
   // === REDIS ADAPTER SETUP (CLUSTER MODE SUPPORT) ===
-  // Kita menggunakan process.env.REDIS_URL yang sama dengan lib/redis.ts
-  const pubClient = createClient({ url: process.env.REDIS_URL });
+  const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+  
+  // Opsi socket yang sama dengan main client agar konsisten
+  const redisOptions = {
+    url: redisUrl,
+    socket: {
+      keepAlive: true,
+      reconnectStrategy: (retries: number) => Math.min(retries * 50, 2000),
+    }
+  };
+
+  const pubClient = createClient(redisOptions);
   const subClient = pubClient.duplicate();
 
   Promise.all([pubClient.connect(), subClient.connect()])
     .then(() => {
       io.adapter(createAdapter(pubClient, subClient));
-      console.log("✅ Socket.IO Redis Adapter initialized (Cluster Mode Ready)");
+      const maskedUrl = redisUrl.replace(/(:[^:@]+@)/, ':****@');
+      console.log(`✅ Socket.IO Redis Adapter initialized connected to ${maskedUrl}`);
     })
     .catch((err) => {
       console.error("❌ Socket.IO Redis Adapter Connection Failed:", err);
