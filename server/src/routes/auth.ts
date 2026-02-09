@@ -32,7 +32,7 @@ const getRpID = () => {
   }
 };
 const rpID = getRpID();
-const expectedOrigin = env.corsOrigin || "http://localhost:5173";
+const expectedOrigin = env.corsOrigin || "https://nyx-app.my.id";
 
 function setAuthCookies(res: Response, { access, refresh }: { access: string; refresh: string }) {
   const isProd = env.nodeEnv === "production";
