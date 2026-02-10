@@ -265,14 +265,21 @@ self.onmessage = async (event: MessageEvent) => {
       case 'x3dh_initiator': {
         const { myIdentityKey, theirIdentityKey, theirSignedPreKey, theirSigningKey, signature } = payload;
 
-        if (!sodium.crypto_sign_verify_detached(signature, theirSignedPreKey, theirSigningKey)) {
+        const signatureBytes = new Uint8Array(signature);
+        const theirSignedPreKeyBytes = new Uint8Array(theirSignedPreKey);
+        const theirSigningKeyBytes = new Uint8Array(theirSigningKey);
+
+        if (!sodium.crypto_sign_verify_detached(signatureBytes, theirSignedPreKeyBytes, theirSigningKeyBytes)) {
           throw new Error("Invalid signature on signed pre-key.");
         }
 
+        const myIdentityKeyPrivateBytes = new Uint8Array(myIdentityKey.privateKey);
+        const theirIdentityKeyBytes = new Uint8Array(theirIdentityKey);
+        
         const ephemeralKeyPair = sodium.crypto_box_keypair();
-        const dh1 = sodium.crypto_scalarmult(myIdentityKey.privateKey, theirSignedPreKey);
-        const dh2 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirIdentityKey);
-        const dh3 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirSignedPreKey);
+        const dh1 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirSignedPreKeyBytes);
+        const dh2 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirIdentityKeyBytes);
+        const dh3 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirSignedPreKeyBytes);
 
         const sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
         const sessionKey = sodium.crypto_generichash(32, sharedSecret);
@@ -285,10 +292,15 @@ self.onmessage = async (event: MessageEvent) => {
       }
       case 'x3dh_recipient': {
         const { myIdentityKey, mySignedPreKey, theirIdentityKey, theirEphemeralKey } = payload;
+        
+        const myIdentityKeyPrivateBytes = new Uint8Array(myIdentityKey.privateKey);
+        const mySignedPreKeyPrivateBytes = new Uint8Array(mySignedPreKey.privateKey);
+        const theirIdentityKeyBytes = new Uint8Array(theirIdentityKey);
+        const theirEphemeralKeyBytes = new Uint8Array(theirEphemeralKey);
 
-        const dh1 = sodium.crypto_scalarmult(mySignedPreKey.privateKey, theirIdentityKey);
-        const dh2 = sodium.crypto_scalarmult(myIdentityKey.privateKey, theirEphemeralKey);
-        const dh3 = sodium.crypto_scalarmult(mySignedPreKey.privateKey, theirEphemeralKey);
+        const dh1 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirIdentityKeyBytes);
+        const dh2 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirEphemeralKeyBytes);
+        const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirEphemeralKeyBytes);
       
         const sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
         result = sodium.crypto_generichash(32, sharedSecret); // Returns the sessionKey
