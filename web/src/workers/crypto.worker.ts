@@ -249,17 +249,30 @@ self.onmessage = async (event: MessageEvent) => {
       }
       case 'crypto_secretbox_easy': {
         const { message, nonce, key } = payload;
-        result = sodium.crypto_secretbox_easy(message, nonce, key);
+        // Handle message as string or array
+        const messageBytes = typeof message === 'string' ? new TextEncoder().encode(message) : new Uint8Array(message);
+        const nonceBytes = new Uint8Array(nonce);
+        const keyBytes = new Uint8Array(key);
+        
+        result = sodium.crypto_secretbox_easy(messageBytes, nonceBytes, keyBytes);
         break;
       }
       case 'crypto_secretbox_open_easy': {
         const { ciphertext, nonce, key } = payload;
-        result = sodium.crypto_secretbox_open_easy(ciphertext, nonce, key);
+        const ciphertextBytes = new Uint8Array(ciphertext);
+        const nonceBytes = new Uint8Array(nonce);
+        const keyBytes = new Uint8Array(key);
+
+        result = sodium.crypto_secretbox_open_easy(ciphertextBytes, nonceBytes, keyBytes);
         break;
       }
       case 'crypto_box_seal_open': {
         const { ciphertext, publicKey, privateKey } = payload;
-        result = sodium.crypto_box_seal_open(ciphertext, publicKey, privateKey);
+        const ciphertextBytes = new Uint8Array(ciphertext);
+        const publicKeyBytes = new Uint8Array(publicKey);
+        const privateKeyBytes = new Uint8Array(privateKey);
+        
+        result = sodium.crypto_box_seal_open(ciphertextBytes, publicKeyBytes, privateKeyBytes);
         break;
       }
       case 'x3dh_initiator': {
@@ -308,7 +321,10 @@ self.onmessage = async (event: MessageEvent) => {
       }
       case 'crypto_box_seal': {
         const { message, publicKey } = payload;
-        result = sodium.crypto_box_seal(message, publicKey);
+        const messageBytes = new Uint8Array(message);
+        const publicKeyBytes = new Uint8Array(publicKey);
+        
+        result = sodium.crypto_box_seal(messageBytes, publicKeyBytes);
         break;
       }
       case 'file_encrypt': {
