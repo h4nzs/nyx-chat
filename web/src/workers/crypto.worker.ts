@@ -244,7 +244,10 @@ self.onmessage = async (event: MessageEvent) => {
       }
       case 'generateSafetyNumber': {
         const { myPublicKey, theirPublicKey } = payload;
-        result = generateSafetyNumber(myPublicKey, theirPublicKey);
+        const myPublicKeyBytes = new Uint8Array(myPublicKey);
+        const theirPublicKeyBytes = new Uint8Array(theirPublicKey);
+        
+        result = generateSafetyNumber(myPublicKeyBytes, theirPublicKeyBytes);
         break;
       }
       case 'crypto_secretbox_easy': {
