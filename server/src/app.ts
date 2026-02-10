@@ -59,32 +59,42 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: [
         "'self'",
-        isProd ? "'strict-dynamic'" : "'unsafe-eval'",
-        isProd ? "" : "https://*.ngrok-free.app",
+        "'unsafe-inline'", // Diperlukan karena index.html pakai inline script
+        "'wasm-unsafe-eval'", // Diperlukan untuk modul crypto WASM
         "https://challenges.cloudflare.com",
-        "https://cdn.jsdelivr.net",
-        "https://static.cloudflareinsights.com"
+        "https://static.cloudflareinsights.com",
+        "https://cloudflareinsights.com",
+        "https://*.cloudflare.com",
+        isProd ? "" : "'unsafe-eval'" // Dev mode kadang butuh eval
       ].filter(Boolean),
       styleSrc: [
         "'self'",
         "'unsafe-inline'",
+        "https://fonts.googleapis.com"
       ],
       imgSrc: [
         "'self'",
         "data:",
         "blob:",
+        "https://api.dicebear.com",
+        "https://*.r2.dev",
+        "https://cdn.jsdelivr.net",
+        "https://*.cloudflarestorage.com",
         "https://nyx-app.my.id",
-        "https://*.nyx-app.my.id",
-        "https://*.supabase.co"
+        "https://*.nyx-app.my.id"
       ],
       connectSrc: [
         "'self'",
         wsOrigin,
-        "https://*.nyx-app.my.id",
-        "https://www.nyx-app.my.id",
-        "wss://*.nyx-app.my.id",
+        "https://api.nyx-app.my.id",
+        "wss://api.nyx-app.my.id",
         "https://nyx-app.my.id",
-        "https://*.supabase.co"
+        "wss://nyx-app.my.id",
+        "https://*.nyx-app.my.id",
+        "https://*.cloudflareinsights.com",
+        "https://cloudflareinsights.com",
+        "https://*.r2.dev",
+        "https://*.cloudflarestorage.com"
       ],
       fontSrc: [
         "'self'",
@@ -93,9 +103,11 @@ app.use(helmet({
       objectSrc: ["'none'"],
       frameSrc: ["'self'", "https://challenges.cloudflare.com"],
       frameAncestors: ["'none'"],
-      ...(isProd && { upgradeInsecureRequests: [] }),
+      // Matikan upgradeInsecureRequests jika di local/http agar tidak force HTTPS
+      ...(isProd ? { upgradeInsecureRequests: [] } : {}),
     },
   },
+  // Izinkan resource diload cross-origin (misal gambar avatar)
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 
