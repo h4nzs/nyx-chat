@@ -76,14 +76,15 @@ export default function UserInfoModal() {
     try {
       const { generateSafetyNumber } = await import('@lib/crypto-worker-proxy');
       const { getSodium } = await import('@lib/sodiumInitializer');
+      const { getEncryptionKeyPair } = useAuthStore.getState();
 
-      const myPublicKeyB64 = localStorage.getItem('publicKey');
-      if (!myPublicKeyB64) {
+      const keyPair = await getEncryptionKeyPair();
+      if (!keyPair || !keyPair.publicKey) {
         throw new Error("Your public key is not found. Please set up your keys first.");
       }
 
       const sodium = await getSodium();
-      const myPublicKey = sodium.from_base64(myPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const myPublicKey = keyPair.publicKey;
       const theirPublicKey = sodium.from_base64(user.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       const sn = await generateSafetyNumber(myPublicKey, theirPublicKey);
