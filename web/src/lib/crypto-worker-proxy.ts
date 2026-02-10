@@ -1,6 +1,6 @@
 // web/src/lib/crypto-worker-proxy.ts
 import CryptoWorker from '../workers/crypto.worker.ts?worker';
-import crypto from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
 
 const worker = new CryptoWorker();
 
@@ -19,7 +19,7 @@ worker.onmessage = (e) => {
 
 function sendToWorker<T>(type: string, payload: any): Promise<T> {
   return new Promise((resolve, reject) => {
-    const id = crypto.randomUUID();
+    const id = uuidv4();
     pendingRequests.set(id, { resolve, reject });
     worker.postMessage({ id, type, payload });
   });

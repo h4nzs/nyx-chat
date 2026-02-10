@@ -5,6 +5,7 @@ import { Buffer } from 'buffer/';
 import sodium from 'libsodium-wrappers';
 import * as bip39 from 'bip39';
 import { argon2id } from 'hash-wasm'; // <-- New import
+import { v4 as uuidv4 } from 'uuid';
 
 let isReady = false;
 const B64_VARIANT = 'URLSAFE_NO_PADDING';
@@ -55,7 +56,7 @@ function storePrivateKeys(keys: {
 
       // Send ENCRYPT_DATA message to self (worker) to encrypt the keys JSON
       const encryptedData = await new Promise<string>((res, rej) => {
-        const msgId = crypto.randomUUID();
+        const msgId = uuidv4();
         self.postMessage({ id: msgId, type: 'ENCRYPT_DATA', payload: { keyBytes: kek, data: privateKeysJson } });
         self.onmessage = (e) => {
           if (e.data.id === msgId) {
@@ -98,7 +99,7 @@ function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: string)
 
       // Send DERIVE_KEY message to self (worker) to get the KEK
       const kek = await new Promise<Uint8Array>((res, rej) => {
-        const msgId = crypto.randomUUID();
+        const msgId = uuidv4();
         self.postMessage({ id: msgId, type: 'DERIVE_KEY', payload: { password, salt: Array.from(salt) } });
         self.onmessage = (e) => {
           if (e.data.id === msgId) {
@@ -110,7 +111,7 @@ function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: string)
 
       // Send DECRYPT_DATA message to self (worker) to decrypt the keys JSON
       const privateKeysJson = await new Promise<string>((res, rej) => {
-        const msgId = crypto.randomUUID();
+        const msgId = uuidv4();
         self.postMessage({ id: msgId, type: 'DECRYPT_DATA', payload: { keyBytes: kek, encryptedString } });
         self.onmessage = (e) => {
           if (e.data.id === msgId) {

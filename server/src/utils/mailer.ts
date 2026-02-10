@@ -95,7 +95,7 @@ const getHtmlTemplate = (code: string) => `
     </div>
     <div class="content">
       <h2>Verify your identity</h2>
-      <p>Someone requested to log in to your NYX account. Enter the following code to complete the verification process.</p>
+      <p>Someone requested to sign up to your NYX account. Enter the following code to complete the verification process.</p>
       
       <div class="code-box">
         <span class="code">${code}</span>
