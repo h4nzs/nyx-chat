@@ -1,9 +1,8 @@
 // server/src/utils/mailer.ts
-import { Resend } from 'resend';
-import { env } from '../config.js';
+import { Resend } from 'resend'
 
 // Inisialisasi Resend (Pastikan RESEND_API_KEY ada di .env)
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 // Template HTML yang Elegan & Profesional
 const getHtmlTemplate = (code: string) => `
@@ -113,30 +112,29 @@ const getHtmlTemplate = (code: string) => `
   </div>
 </body>
 </html>
-`;
+`
 
 export const sendVerificationEmail = async (to: string, code: string) => {
   try {
     // Gunakan domain yang sudah diverifikasi di Resend
     // Format: "Nama Pengirim <email@domain-verified.com>"
-    const fromEmail = 'NYX Security <security@nyx-app.my.id>'; 
+    const fromEmail = 'NYX Security <security@nyx-app.my.id>'
 
-    const { data, error } = await resend.emails.send({
+    const { error } = await resend.emails.send({
       from: fromEmail,
       to: [to], // Resend butuh array string
       subject: `Your Verification Code: ${code}`,
-      html: getHtmlTemplate(code),
-    });
+      html: getHtmlTemplate(code)
+    })
 
     if (error) {
-      console.error("❌ Resend API Error:", error);
-      return false;
+      console.error('❌ Resend API Error:', error)
+      return false
     }
 
-    return true;
-
+    return true
   } catch (err) {
-    console.error("❌ Failed to send email:", err);
-    return false;
+    console.error('❌ Failed to send email:', err)
+    return false
   }
-};
+}

@@ -26,7 +26,6 @@ if (!import.meta.env.VITE_APP_SECRET) {
     throw new Error(errorMessage);
   } else {
     // In development, show a prominent warning
-    console.warn(`%c${errorMessage}`, 'color: red; font-size: 1.5em; font-weight: bold;');
     alert(errorMessage);
   }
 }

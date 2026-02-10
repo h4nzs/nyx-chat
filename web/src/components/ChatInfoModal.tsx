@@ -1,6 +1,6 @@
 import ModalBase from './ui/ModalBase';
 import { useModalStore } from '@store/modal';
-import { FiShield, FiKey, FiAlertTriangle, FiZap, FiLock, FiHelpCircle } from 'react-icons/fi';
+import { FiKey, FiAlertTriangle, FiZap, FiLock, FiHelpCircle } from 'react-icons/fi';
 
 const InfoSection = ({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) => (
   <div className="flex items-start gap-4">

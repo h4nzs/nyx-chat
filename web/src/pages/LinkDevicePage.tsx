@@ -17,7 +17,7 @@ export default function LinkDevicePage() {
   const ephemeralKeyPair = useRef<{ publicKey: Uint8Array; privateKey: Uint8Array } | null>(null);
 
   useEffect(() => {
-    let isMounted = true;
+    const isMounted = true;
     const socket = getSocket();
 
     const initializeSession = async () => {

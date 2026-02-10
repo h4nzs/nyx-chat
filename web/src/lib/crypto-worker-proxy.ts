@@ -44,7 +44,6 @@ const handleWorkerMessage = (event: MessageEvent) => {
   try {
     // 1. Validate incoming data structure
     if (typeof event.data !== 'object' || event.data === null || typeof event.data.id === 'undefined' || !event.data.type) {
-      console.warn("[Crypto Worker] Received malformed message:", event.data);
       return;
     }
     const { type, id, result, error } = event.data;
@@ -53,7 +52,6 @@ const handleWorkerMessage = (event: MessageEvent) => {
     const promise = pendingRequests.get(id);
     if (!promise) {
       // This can happen if the request timed out before the worker responded.
-      console.warn(`[Crypto Worker] Received response for timed out or unknown request id: ${id}, type: ${type}`);
       return;
     }
     

@@ -99,9 +99,7 @@ export function registerSocket(httpServer: HttpServer) {
         ) {
           callback(null, true);
         } else {
-          console.warn(`[Socket] Blocked CORS origin: ${origin}`);
-          callback(new Error('Not allowed by CORS'));
-        }
+                callback(new Error('Not allowed by CORS'));        }
       },
       credentials: true,
       methods: ["GET", "POST"]
@@ -156,14 +154,12 @@ export function registerSocket(httpServer: HttpServer) {
 
       if (!token) {
         // ALLOW GUEST for Device Linking
-        console.log(`[Socket] Guest connection allowed: ${socket.id}`);
         socket.user = undefined;
         return next(); 
       }
 
       const payload = verifyJwt(token);
       if (!payload || typeof payload === 'string') {
-        console.warn(`[Socket] Invalid token, treating as guest: ${socket.id}`);
         socket.user = undefined;
         return next();
       }

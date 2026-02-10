@@ -50,7 +50,6 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
     } else if (result.status === 'pending') {
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
-      console.warn(`[Decrypt] Failed for msg ${message.id}:`, result.error);
       decryptedMsg.content = 'Decryption failed';
     }
 

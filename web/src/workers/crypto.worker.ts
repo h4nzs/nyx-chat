@@ -373,5 +373,3 @@ self.onmessage = async (event: MessageEvent) => {
     });
   }
 };
-
-console.log('Crypto worker loaded.');

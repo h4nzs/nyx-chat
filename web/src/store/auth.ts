@@ -182,7 +182,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             set({ hasRestoredKeys: true });
             return true;
           }
-          console.warn("Auto-unlock failed.");
+          console.error("Auto-unlock failed.");
         } catch (e) {
            console.error("Error during auto-unlock:", e);
         } finally {
@@ -199,7 +199,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
     bootstrap: async () => {
       set({ isBootstrapping: true });
-      let sessionStarted = false;
+      const sessionStarted = false;
 
       if (!sessionStarted) {
         try {
@@ -468,7 +468,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         try {
           fileToProcess = await compressImage(avatar);
         } catch (e) {
-          console.warn("Avatar compression failed, using original file:", e);
+          // Fallback, do nothing
         }
       }
 

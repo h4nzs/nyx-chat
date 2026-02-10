@@ -83,7 +83,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
     const isGroup = conversation.isGroup;
 
-    let payload: Partial<Message> = { ...data };
+    const payload: Partial<Message> = { ...data };
 
     try {
       const { ciphertext, sessionId } = await encryptMessage(data.content, conversationId, isGroup);

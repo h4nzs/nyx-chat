@@ -42,7 +42,6 @@ export async function compressImage(file: File): Promise<File> {
     const compressedFile = await imageCompression(file, options);
     return compressedFile;
   } catch (error) {
-    console.warn("Image compression failed, using original file:", error);
     return file;
   }
 }

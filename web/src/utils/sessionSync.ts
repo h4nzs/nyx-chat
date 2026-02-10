@@ -29,7 +29,7 @@ export async function syncSessionKeys() {
               await addSessionKey(conversationId, keyInfo.sessionId, sessionKey);
               syncedKeyCount++;
             } catch (decryptionError) {
-              console.warn(`Failed to decrypt session key ${keyInfo.sessionId} for convo ${conversationId}. Skipping.`, decryptionError);
+              // Failed to decrypt, skip.
             }
           }
         }
