@@ -1,6 +1,6 @@
 import { Router, Response, CookieOptions } from "express";
 import { prisma } from "../lib/prisma.js";
-import bcrypt from "bcrypt";
+import { hashPassword, verifyPassword, needsRehash } from "../utils/password.js";
 import { ApiError } from "../utils/errors.js";
 import { newJti, refreshExpiryDate, signAccessToken, verifyJwt } from "../utils/jwt.js";
 import { z } from "zod";
@@ -121,7 +121,7 @@ router.post("/register", authLimiter, zodValidate({
       if (existingUser) throw new ApiError(409, "Email or username already exists.");
 
       // 3. Buat User (Unverified)
-      const passwordHash = await bcrypt.hash(password, 10);
+      const passwordHash = await hashPassword(password);
       const user = await prisma.user.create({
         data: { 
           email, 
@@ -276,8 +276,19 @@ router.post("/login", authLimiter, zodValidate({
       });
 
       if (!user) throw new ApiError(401, "Invalid credentials");
-      const ok = await bcrypt.compare(password, user.passwordHash);
+      const ok = await verifyPassword(password, user.passwordHash);
       if (!ok) throw new ApiError(401, "Invalid credentials");
+
+      // [LAZY MIGRATION] Cek apakah user ini masih pake Bcrypt?
+      if (needsRehash(user.passwordHash)) {
+        // Kalau iya, update hash-nya ke Argon2 di background (gak perlu await biar user gak nunggu)
+        hashPassword(password).then((newHash) => {
+          prisma.user.update({
+            where: { id: user.id },
+            data: { passwordHash: newHash }
+          }).catch(err => console.error("Failed to migrate password hash:", err));
+        });
+      }
 
       // Cek Status Verifikasi
       if (!user.isEmailVerified) {

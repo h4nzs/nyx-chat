@@ -1,75 +1,165 @@
-**MISSION:** PHASE 1 - CRYPTO QUARANTINE (LAZY LOADING)
-**TARGET FILE:** `web/src/store/auth.ts`
-**GOAL:** Increase "Time to Interactive" on the Landing Page by decoupling `libsodium` and `crypto-worker` from the initial bundle.
+Bcrypt (Kondisi Sekarang):
+    Dia bersifat CPU-Blocking. Saat 1 user login, CPU 1 Core kamu "dibajak" penuh. Node.js (yang single-threaded) berhenti total. Request lain antri di belakang.
 
-**CURRENT STATUS:**
-The file `store/auth.ts` statically imports heavy dependencies (`@lib/sodiumInitializer`, `@lib/crypto-worker-proxy`). This causes the entire crypto engine to load immediately when the app starts, even for unauthenticated users visiting the Landing Page.
+    Argon2 (Solusi Baru):
+    Dia berjalan di Worker Thread (C++) di luar Event Loop utama Node.js.
+    Saat ada user login:
 
-**TASK INSTRUCTIONS:**
+        Tugas hashing dilempar ke background thread.
 
-1.  **Remove Static Imports:**
-    Remove the top-level imports for:
-    - `@lib/sodiumInitializer` (`getSodium`)
-    - `@lib/crypto-worker-proxy` (All imports)
-    - `@lib/fileUtils` (`compressImage`) - Optional, but good practice.
-    - `@lib/r2` (`uploadToR2`) - Optional.
+        Event Loop utama Node.js TETAP JALAN melayani request lain (chat, load page, dll).
 
-2.  **Implement Dynamic Imports (Code Splitting):**
-    Refactor the following actions to load these dependencies ONLY when executed:
-    - `setupAndUploadPreKeyBundle` -> Import `getSodium` inside.
-    - `login` -> Import `retrievePrivateKeys` inside.
-    - `registerAndGeneratePhrase` -> Import `registerAndGenerateKeys` and `retrievePrivateKeys` inside.
-    - `tryAutoUnlock` -> Import `retrievePrivateKeys` inside.
-    - `updateAvatar` -> Import `compressImage` and `uploadToR2` inside.
-    - getters like `getEncryptionKeyPair` -> Import `getSodium` inside.
+        User yang login mungkin tetap nunggu 300ms (wajar buat keamanan), tapi server GAK MACET buat user lain.
 
-3.  **Refactor `bootstrap` Logic (CRITICAL):**
-    - The `bootstrap` function runs on app load.
-    - **Logic Change:** DO NOT load crypto libraries immediately.
-    - ONLY if a valid `accessToken` is found (user is logged in), THEN trigger the dynamic import of crypto libraries to prepare the session.
-    - If no user is found (Landing Page visitor), the crypto libraries must remains unloaded.
+Rekomendasi Setting (Sweet Spot)
 
-4.  **Add Loading State:**
-    - Add a new state property: `isInitializingCrypto: boolean` (default `false`).
-    - Set this to `true` while the dynamic imports are resolving during `login` or `bootstrap`.
-    - This allows the UI to show a spinner instead of freezing.
+Biar kamu tidur nyenyak dan gak takut RAM jebol pas ada spike traffic, kita bisa "tuning" Argon2 biar lebih hemat RAM tapi tetap super aman (jauh lebih aman dari Bcrypt cost 8).
 
-**EXAMPLE PATTERN:**
+Gunakan konfigurasi 32 MB RAM saja. Ini sudah sangat keras untuk di-crack hacker, tapi sangat ringan buat VPS.
 
-*Before:*
-```typescript
-import { heavyFunction } from "heavy-lib";
-// ...
-login: async () => {
-  heavyFunction();
-}
+Mari kita bedah faktanya biar lu paham kenapa ini solusi cerdas:
+
+### 1. Kenapa Bcrypt "Jahat" buat VPS 1 Core?
+
+* **Fakta:** Bcrypt itu algoritma yang *sengaja* dibikin boros CPU. Tujuannya biar hacker butuh ribuan tahun buat nebak password.
+* **Masalahnya:** Di VPS 1 vCPU, saat ada 1 orang login, CPU lu kerja 100% buat ngitung hash itu. Karena cuma ada 1 jalur (1 Core), request lain (chat, load gambar) terpaksa "ngantri". Ini yang bikin *lag spike* saat ada yang login.
+* **Koreksi Dikit:** Node.js `bcrypt` yang lu pake (native) sebenernya jalan di *Worker Thread* juga (gak nge-block total Event Loop utama), **TAPI** karena CPU lu cuma satu, worker thread itu tetep rebutan jatah CPU sama main thread. Hasilnya sama aja: **Macet.**
+
+### 2. Kenapa Argon2 Lebih Baik?
+
+* **Memory-Hard:** Argon2 bisa kita suruh: *"Eh, jangan pake CPU banyak-banyak, pake RAM aja."*
+* **Tuning:** Kita bisa atur mau pake berapa RAM (Memory Cost) dan berapa CPU (Time Cost).
+* **Efeknya:** Beban digeser dari CPU (yang lagi sekarat di VPS lu) ke RAM (yang masih sisa banyak, tadi `free -h` lu sisa ~700MB kan?).
+
+---
+
+### 🔥 Solusi: Migrasi ke Argon2 (Tanpa Bikin User Lama Error)
+
+Masalah terbesar ganti algoritma adalah: **Database lu isinya hash Bcrypt.** Kalau lu ganti kodingan jadi Argon2 sekarang, **SEMUA USER LAMA GAK BISA LOGIN.**
+
+**Triknya:** Kita pakai strategi **"Lazy Migration"**.
+
+1. Pas user login, cek hash-nya.
+2. Kalau hash-nya **Bcrypt** (user lama) -> Verifikasi pake Bcrypt -> Kalau bener, **Update** jadi Argon2 di database.
+3. Kalau hash-nya **Argon2** (user baru/migrated) -> Verifikasi biasa.
+
+Ini kodenya. Lu tinggal copy-paste.
+
+#### Langkah 1: Install Library
+
+Masuk ke folder `server` dan install `argon2`.
+
+```bash
+cd server
+pnpm add argon2
+pnpm uninstall bcrypt # Opsional, tapi jangan dihapus dulu biar type-nya gak error sblm refactor
+pnpm remove @types/bcrypt
 
 ```
 
-*After:*
+#### Langkah 2: Buat Helper Password (`server/src/utils/password.ts`)
+
+Buat file baru ini. Kita setting Argon2 biar pake **Memory: 32MB** (aman buat VPS lu) dan **Parallelism: 1** (karena cuma 1 core).
 
 ```typescript
-// No import at top
-// ...
-login: async () => {
-  set({ isInitializingCrypto: true }); // UI Feedback
-  try {
-    const { heavyFunction } = await import("heavy-lib"); // Browser downloads chunk here
-    heavyFunction();
-  } finally {
-    set({ isInitializingCrypto: false });
+import argon2 from "argon2";
+import bcrypt from "bcrypt";
+
+// Konfigurasi "Sweet Spot" buat VPS 1GB RAM / 1 vCPU
+const ARGON_CONFIG = {
+  type: argon2.argon2id,
+  memoryCost: 2 ** 15, // 32 MB (32 * 1024 kb)
+  timeCost: 3,         // Jumlah putaran hashing (3x cukup aman & cepat)
+  parallelism: 1,      // Sesuai jumlah vCPU lu
+};
+
+export const hashPassword = async (password: string): Promise<string> => {
+  return await argon2.hash(password, ARGON_CONFIG);
+};
+
+export const verifyPassword = async (password: string, hash: string): Promise<boolean> => {
+  // 1. Cek apakah ini hash Bcrypt (User lama)
+  // Bcrypt hash biasanya diawali $2b$, $2a$, atau $2y$
+  if (hash.startsWith("$2")) {
+    return await bcrypt.compare(password, hash);
   }
-}
+
+  // 2. Kalau bukan, anggap Argon2
+  try {
+    return await argon2.verify(hash, password);
+  } catch (err) {
+    console.error("Hash verification failed:", err);
+    return false;
+  }
+};
+
+export const needsRehash = (hash: string): boolean => {
+  // Kalau hash-nya masih format Bcrypt, berarti perlu di-update ke Argon2
+  return hash.startsWith("$2");
+};
 
 ```
 
-**CONSTRAINTS:**
+#### Langkah 3: Update Auth Controller (`server/src/routes/auth.ts`)
 
-* **NO Logic Changes:** Do not change how encryption works (Argon2, X3DH, etc). Only change *when* the code is loaded.
-* **Type Safety:** Ensure TypeScript types for the imported modules are preserved.
-* **Error Handling:** If the network fails to download the chunk, `login` should throw a clear error ("Failed to load security module. Please check your connection.").
+Sekarang kita update logika login & register buat pake helper tadi.
 
-**EXECUTION:**
-Refactor `web/src/store/auth.ts` now applying these rules.
+**Edit `server/src/routes/auth.ts`:**
+
+1. Hapus import `bcrypt`.
+2. Import helper baru kita.
+3. Update bagian `register` dan `login`.
+
+```typescript
+// ... import lain ...
+// HAPUS INI: import bcrypt from "bcrypt";
+// GANTI DENGAN:
+import { hashPassword, verifyPassword, needsRehash } from "../utils/password.js";
+
+// ...
+
+// === DI BAGIAN REGISTER ===
+// Cari baris: const passwordHash = await bcrypt.hash(password, 10);
+// GANTI JADI:
+const passwordHash = await hashPassword(password);
+
+// ...
+
+// === DI BAGIAN LOGIN ===
+// Cari logic login, ubah jadi gini:
+
+router.post("/login", authLimiter, zodValidate({ /*...*/ }), async (req, res, next) => {
+  try {
+    const { emailOrUsername, password } = req.body;
+    
+    // 1. Cari user
+    const user = await prisma.user.findFirst({
+      where: { OR: [{ email: emailOrUsername }, { username: emailOrUsername }] },
+      // ... select fields ...
+    });
+
+    if (!user) throw new ApiError(401, "Invalid credentials");
+
+    // 2. Verifikasi Password (Bisa handle Bcrypt & Argon2)
+    const isValid = await verifyPassword(password, user.passwordHash);
+    if (!isValid) throw new ApiError(401, "Invalid credentials");
+
+    // 3. [LAZY MIGRATION] Cek apakah user ini masih pake Bcrypt?
+    if (needsRehash(user.passwordHash)) {
+      // Kalau iya, update hash-nya ke Argon2 di background (gak perlu await biar user gak nunggu)
+      hashPassword(password).then((newHash) => {
+        prisma.user.update({
+          where: { id: user.id },
+          data: { passwordHash: newHash }
+        }).catch(err => console.error("Failed to migrate password hash:", err));
+      });
+    }
+
+    // ... sisa logic login (issue tokens dll) ...
 
 ```
+
+### Kesimpulan
+
+* User baru otomatis dapet Argon2.
+* User lama pas login pertama kali bakal terasa "normal", tapi login kedua kalinya bakal jauh lebih ngebut karena udah dimigrasi ke Argon2.
