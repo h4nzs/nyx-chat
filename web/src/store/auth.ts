@@ -266,6 +266,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
             if (result.success) {
               privateKeysCache = result.keys;
+              // If decryption was successful with a password, save it as the auto-unlock key for next time.
+              await saveDeviceAutoUnlockKey(password);
+              await setDeviceAutoUnlockReady(true);
             } else {
               throw new Error(`Login successful, but failed to decrypt keys: ${result.reason}`);
             }
