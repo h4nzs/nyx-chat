@@ -448,7 +448,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         clearAuthCookies();
         privateKeysCache = null;
         localStorage.removeItem('user');
-        await clearKeys(); // Clear all keys from IndexedDB
+        // await clearKeys(); // DO NOT clear keys on logout, user expects them to persist on the device.
 
         set({ user: null, accessToken: null });
 
