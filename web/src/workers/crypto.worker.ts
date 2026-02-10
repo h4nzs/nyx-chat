@@ -329,18 +329,28 @@ self.onmessage = async (event: MessageEvent) => {
       }
       case 'file_encrypt': {
         const { fileBuffer } = payload;
+        // Ensure fileBuffer is Uint8Array
+        const fileBytes = new Uint8Array(fileBuffer);
+        
         const key = await crypto.subtle.generateKey({ name: ALGO, length: KEY_LENGTH }, true, ['encrypt', 'decrypt']);
         const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
-        const encryptedData = await crypto.subtle.encrypt({ name: ALGO, iv }, key, fileBuffer);
+        const encryptedData = await crypto.subtle.encrypt({ name: ALGO, iv }, key, fileBytes);
         const exportedKey = await crypto.subtle.exportKey('raw', key);
         result = { encryptedData, iv, key: new Uint8Array(exportedKey) };
         break;
       }
       case 'file_decrypt': {
         const { combinedData, keyBytes } = payload;
-        const key = await crypto.subtle.importKey('raw', keyBytes, { name: ALGO }, false, ['decrypt']);
-        const iv = combinedData.slice(0, IV_LENGTH);
-        const encryptedData = combinedData.slice(IV_LENGTH);
+        
+        // Convert plain array keyBytes to Uint8Array for importKey
+        const keyBytesUint8 = new Uint8Array(keyBytes);
+        const key = await crypto.subtle.importKey('raw', keyBytesUint8, { name: ALGO }, false, ['decrypt']);
+        
+        // Ensure combinedData is a Uint8Array for slicing
+        const dataBytes = new Uint8Array(combinedData);
+        const iv = dataBytes.slice(0, IV_LENGTH);
+        const encryptedData = dataBytes.slice(IV_LENGTH);
+        
         result = await crypto.subtle.decrypt({ name: ALGO, iv }, key, encryptedData);
         break;
       }
