@@ -33,8 +33,6 @@ registerRoute(
 // --- 5. Push Notification Logic ---
 
 self.addEventListener('push', (event: PushEvent) => {
-  console.log('Service Worker: Push Received.');
-  
   if (!event.data) return;
 
   try {

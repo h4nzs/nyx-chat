@@ -30,7 +30,6 @@ export async function sendPushNotification(userId: string, payload: object) {
       ).catch(error => {
         // Jika subscription tidak valid (misal: user uninstall app), hapus dari DB
         if (error.statusCode === 410 || error.statusCode === 404) {
-          console.log("Push subscription has expired or is invalid. Deleting.");
           return prisma.pushSubscription.delete({ where: { id: sub.id } });
         }
         console.error("Error sending push notification:", error);

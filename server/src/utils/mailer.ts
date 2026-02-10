@@ -133,7 +133,6 @@ export const sendVerificationEmail = async (to: string, code: string) => {
       return false;
     }
 
-    console.log(`✅ Email sent to ${to}, ID: ${data?.id}`);
     return true;
 
   } catch (err) {

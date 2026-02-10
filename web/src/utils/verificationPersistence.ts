@@ -62,7 +62,6 @@ export function getVerificationState(): VerificationState | null {
 
     // Validate the shape of the parsed object
     if (!isValidVerificationState(parsed)) {
-      console.warn('Invalid verification state found, clearing...');
       clearVerificationState();
       return null;
     }

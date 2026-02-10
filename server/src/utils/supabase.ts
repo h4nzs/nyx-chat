@@ -53,8 +53,6 @@ export async function deleteFromSupabase(publicUrl: string): Promise<void> {
 
     if (error) {
       console.error(`[Supabase Delete] Failed to delete ${filePath}:`, error.message);
-    } else {
-      console.log(`[Supabase Delete] Deleted old file: ${filePath}`);
     }
   } catch (e) {
     console.error("[Supabase Delete] Error parsing URL:", e);

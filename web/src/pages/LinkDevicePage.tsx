@@ -60,7 +60,6 @@ export default function LinkDevicePage() {
   }, []);
 
   const handleLinkingSuccess = useCallback(async (data: any) => {
-    console.log("📦 Payload received!");
     setStatus('processing');
     toast.loading("Processing keys...", { id: 'link-process' });
 
@@ -91,8 +90,6 @@ export default function LinkDevicePage() {
 
       localStorage.setItem('device_auto_unlock_ready', 'true');
 
-      console.log("✅ Keys re-encrypted by worker and saved.");
-      
       setStatus('success');
       toast.success("Paired! Redirecting to Login...", { id: 'link-process' });
 

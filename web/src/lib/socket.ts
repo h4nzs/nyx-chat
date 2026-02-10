@@ -24,7 +24,6 @@ const handleKeyRotation = async (conversationId: string) => {
     try {
       await rotateGroupKey(conversationId);
       useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: false });
-      console.log(`[socket] Key rotation for ${conversationId} successful.`);
       return; 
     } catch (err: any) {
       attempt++;
@@ -73,8 +72,6 @@ export function getSocket() {
 
         try {
           // === THE SYNC PROTOCOL: Sync data on connect/reconnect ===
-          console.log("🔄 Syncing data after connection...");
-
           // 1. Refetch Conversation List (Biar urutan chat bener & snippet update)
           await useConversationStore.getState().loadConversations();
 
@@ -87,14 +84,12 @@ export function getSocket() {
           console.error("socket connect sync failed", error);
         }
       }
-      console.log("✅ Socket connected:", socket?.id);
     });
 
     socket.on("disconnect", (reason) => {
       setStatus('disconnected');
       // Jangan toast jika disconnect manual/navigasi
       if (reason !== "io client disconnect") toast.error("Disconnected. Reconnecting...");
-      console.log("⚠️ Socket disconnected:", reason);
     });
 
     socket.on("connect_error", (err) => {
@@ -104,11 +99,8 @@ export function getSocket() {
 
     // --- Application-specific Listeners ---
     socket.on("message:new", async (newMessage) => {
-      console.log("🔥 [SOCKET] Received message:new", newMessage.id);
-
       const convExists = useConversationStore.getState().conversations.some(c => c.id === newMessage.conversationId);
       if (!convExists) {
-        console.warn(`[socket] Ignored message for unknown conversation ${newMessage.conversationId}`);
         return;
       }
 
@@ -256,7 +248,6 @@ export function connectSocket() {
 
     // 4. Connect hanya jika belum connect
     if (!socket.connected) {
-      console.log("🔌 Connecting socket with token:", token ? "Token Present" : "No Token");
       socket.connect();
     }
   }

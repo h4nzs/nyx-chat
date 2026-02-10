@@ -9,7 +9,6 @@ export function registerServiceWorker() {
       // This event is fired when the new service worker has taken control.
       // It's a good time to reload data if a new SW has taken over.
       if (event.isUpdate) {
-        console.log('New service worker has been activated. Resyncing data...');
         // Use the store action to re-fetch conversations
         useConversationStore.getState().resyncState();
       }

@@ -20,7 +20,6 @@ export const getPresignedUploadUrl = async (key: string, contentType: string) =>
   });
 
   const url = await getSignedUrl(r2, command, { expiresIn: 300 });
-  console.log(`[R2] Generated presigned upload URL for key: ${key}`);
 
   return url;
 };
@@ -32,9 +31,7 @@ export const deleteR2File = async (key: string) => {
     Key: key,
   });
 
-  console.log(`[R2] Attempting to delete file with key: ${key}`);
   const result = await r2.send(command);
-  console.log(`[R2] Successfully deleted file with key: ${key}`);
 
   return result;
 };

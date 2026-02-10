@@ -43,7 +43,6 @@ export async function setupAndUploadPreKeyBundle() {
       method: "POST",
       body: JSON.stringify(bundle),
     });
-    console.log("Pre-key bundle uploaded successfully.");
   } catch (e) {
     console.error("Failed to set up and upload pre-key bundle:", e);
   }
@@ -174,7 +173,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
 
       if (autoUnlockKey && encryptedKeys) {
-        console.log("Auto-unlock key found. Attempting to decrypt keys...");
         set({ isInitializingCrypto: true });
         try {
           const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
@@ -182,7 +180,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           if (result.success) {
             privateKeysCache = result.keys;
             set({ hasRestoredKeys: true });
-            console.log("✅ Auto-unlock successful. Keys are cached.");
             return true;
           }
           console.warn("Auto-unlock failed.");
@@ -198,7 +195,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     setDecryptedKeys: (keys: RetrievedKeys) => {
       privateKeysCache = keys;
       set({ hasRestoredKeys: true });
-      console.log("✅ Decrypted keys set directly from biometric authentication.");
     },
 
     bootstrap: async () => {
@@ -261,7 +257,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             let result;
 
             if (isAutoUnlockReady) {
-               console.log("🔐 Login: Detected linked device key. Using auto-unlock...");
                result = await retrievePrivateKeys(encryptedKeys, password);
             } else {
                result = await retrievePrivateKeys(encryptedKeys, password);
@@ -269,7 +264,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
             if (result.success) {
               privateKeysCache = result.keys;
-              console.log("✅ Key cache successfully populated during login.");
             } else {
               throw new Error(`Login successful, but failed to decrypt keys: ${result.reason}`);
             }
@@ -473,7 +467,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       if (avatar.type.startsWith('image/')) {
         try {
           fileToProcess = await compressImage(avatar);
-          console.log(`🖼️ Avatar compressed: ${(avatar.size / 1024).toFixed(2)}KB -> ${(fileToProcess.size / 1024).toFixed(2)}KB`);
         } catch (e) {
           console.warn("Avatar compression failed, using original file:", e);
         }

@@ -24,25 +24,18 @@ const router: Router = Router();
 async function deleteOldFile(url: string) {
   try {
     if (!url) {
-      console.log("[Delete File] No URL provided, skipping deletion");
       return;
     }
-
-    console.log(`[Delete File] Attempting to delete file: ${url}`);
 
     // Cek apakah file ada di R2 (berdasarkan domain)
     if (url.includes(env.r2PublicDomain)) {
       // Ambil key dari URL (misal: https://pub.r2.dev/avatars/user-123.jpg -> avatars/user-123.jpg)
       const key = url.replace(`${env.r2PublicDomain}/`, '');
-      console.log(`[R2 Delete] Removing key: ${key}`);
       await deleteR2File(key);
-      console.log(`[R2 Delete] Successfully removed key: ${key}`);
     }
     // Jika bukan R2, asumsi file lama di Supabase
     else {
-      console.log(`[Supabase Delete] Removing legacy file: ${url}`);
       await deleteFromSupabase(url);
-      console.log(`[Supabase Delete] Successfully removed legacy file: ${url}`);
     }
   } catch (error) {
     console.error("[Delete File Error]", error);
@@ -195,7 +188,6 @@ router.post(
         }
       });
       
-      console.log(`[Avatar Update] Success: ${fileUrl}`);
       res.json(updatedUser);
 
     } catch (e) {

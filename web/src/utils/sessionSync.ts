@@ -9,11 +9,8 @@ export async function syncSessionKeys() {
   await toast.promise(
     (async () => {
       try {
-        console.log("Starting session key synchronization...");
-
         const allEncryptedKeys = await authFetch<SyncResponse>("/api/session-keys/sync");
         if (!allEncryptedKeys || Object.keys(allEncryptedKeys).length === 0) {
-          console.log("No session keys to sync.");
           return;
         }
 
@@ -36,8 +33,6 @@ export async function syncSessionKeys() {
             }
           }
         }
-
-        console.log(`Synchronization complete. Synced ${syncedKeyCount} session keys.`);
       } catch (error: any) {
         console.error("Session key synchronization failed:", error);
         if (error.message.includes("Incorrect password")) {

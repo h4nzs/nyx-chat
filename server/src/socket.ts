@@ -135,8 +135,6 @@ export function registerSocket(httpServer: HttpServer) {
   Promise.all([pubClient.connect(), subClient.connect()])
     .then(() => {
       io.adapter(createAdapter(pubClient, subClient));
-      const maskedUrl = redisUrl.replace(/(:[^:@]+@)/, ':****@');
-      console.log(`✅ Socket.IO Redis Adapter initialized connected to ${maskedUrl}`);
     })
     .catch((err) => {
       console.error("❌ Socket.IO Redis Adapter Connection Failed:", err);
@@ -197,20 +195,16 @@ export function registerSocket(httpServer: HttpServer) {
     if (!userId) {
       // Event 1: Request QR Token (Dipanggil oleh LinkDevicePage)
       socket.on("auth:request_linking_qr", async (payload: { publicKey: string }, callback) => {
-         console.log(`[Socket] Generating QR token for guest ${socket.id}`);
          
          const linkingToken = crypto.randomBytes(32).toString('hex');
          await socket.join(`linking:${linkingToken}`);
          
-         console.log(`[Socket] Guest joined room: linking:${linkingToken}`);
-
          if (typeof callback === 'function') {
             callback({ token: linkingToken });
          }
       });
 
       socket.on("disconnect", () => {
-        console.log(`[Socket] Guest disconnected: ${socket.id}`);
       });
 
       // STOP! Guest tidak boleh lanjut ke logika user
@@ -234,7 +228,6 @@ export function registerSocket(httpServer: HttpServer) {
 
     // --- FITUR LINKING DEVICE (Sisi Scanner/HP Lama) ---
     socket.on("linking:send_payload", async (data: { roomId: string, encryptedMasterKey: string }) => {
-      console.log(`[Linking] User ${userId} authorizing login for room ${data.roomId}`);
       
       try {
         // 1. Generate Token Baru untuk device baru
@@ -252,7 +245,6 @@ export function registerSocket(httpServer: HttpServer) {
             encryptedMasterKey: data.encryptedMasterKey // Kunci enkripsi
         });
 
-        console.log(`[Linking] Success sending auth data to room ${data.roomId}`);
       } catch (e) {
         console.error("[Linking] Failed to sign token or send payload:", e);
       }
@@ -438,7 +430,6 @@ export function registerSocket(httpServer: HttpServer) {
           sessionId
         });
 
-        console.log(`[Socket] User ${userId} requested missing key for session ${sessionId}`);
       } catch (error) {
         console.error("Error handling session request:", error);
       }

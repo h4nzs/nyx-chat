@@ -140,14 +140,11 @@ const AppContent = () => {
   // 2. Manage Socket Connection
   useEffect(() => {
     if (location.pathname.startsWith('/link-device')) {
-      console.log("🔗 On Linking Page: Global socket management is paused.");
       return;
     }
     if (user) {
-      console.log("👤 User authenticated, connecting socket...");
       connectSocket();
     } else {
-      console.log("👤 User not authenticated, disconnecting socket...");
       disconnectSocket();
     }
   }, [user, location.pathname]);
@@ -158,10 +155,8 @@ const AppContent = () => {
       if (user && !location.pathname.startsWith('/link-device') && sessionStorage.getItem('keys_synced') !== 'true' && !isSyncing) {
         try {
           isSyncing = true;
-          console.log("🔑 Starting session key synchronization...");
           await syncSessionKeys();
           sessionStorage.setItem('keys_synced', 'true');
-          console.log("✅ Keys synced successfully.");
         } catch (error) {
           console.error("❌ Key synchronization failed:", error);
         } finally {
@@ -185,12 +180,10 @@ const AppContent = () => {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (location.pathname.startsWith('/link-device')) {
-        console.log("🔗 On Linking Page: Skipping visibility change handler.");
         return;
       }
 
       if (document.visibilityState === 'visible') {
-        console.log("👀 App in focus, checking connection & syncing...");
 
         const socket = getSocket();
         if (!socket?.connected) {

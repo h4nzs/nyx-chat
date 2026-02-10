@@ -78,7 +78,6 @@ export async function getLatestSessionKey(
  * This overwrites any existing key for the conversation.
  */
 export async function storeGroupKey(conversationId: string, key: Uint8Array): Promise<void> {
-  console.log(`[keychainDb] Storing group key for conversation: ${conversationId}`);
   const db = await getDb();
   await db.put(GROUP_KEYS_STORE_NAME, key, conversationId);
 }
@@ -87,10 +86,8 @@ export async function storeGroupKey(conversationId: string, key: Uint8Array): Pr
  * Retrieves the group key for a specific conversation.
  */
 export async function getGroupKey(conversationId: string): Promise<Uint8Array | null> {
-  console.log(`[keychainDb] Getting group key for conversation: ${conversationId}`);
   const db = await getDb();
   const key = (await db.get(GROUP_KEYS_STORE_NAME, conversationId)) || null;
-  console.log(`[keychainDb] Key for ${conversationId}`, key ? 'found' : 'NOT found');
   return key;
 }
 
@@ -106,7 +103,6 @@ export async function receiveGroupKey(conversationId: string, key: Uint8Array): 
  * Deletes the group key for a specific conversation.
  */
 export async function deleteGroupKey(conversationId: string): Promise<void> {
-  console.log(`[keychainDb] Deleting group key for conversation: ${conversationId}`);
   const db = await getDb();
   await db.delete(GROUP_KEYS_STORE_NAME, conversationId);
 }

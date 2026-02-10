@@ -14,7 +14,6 @@ const NewMessageToast = ({ t, senderName, senderAvatar, message, conversationId 
   const handleClick = () => {
     // Here you would typically navigate to the conversation
     // For now, we just log it and dismiss the toast.
-    console.log(`Navigating to conversation: ${conversationId}`);
     toast.dismiss(t.id);
   };
 

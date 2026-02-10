@@ -177,9 +177,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         updateActivity(activityId, { progress: 10, fileName: `Compressing ${file.name}...` });
         try {
           fileToProcess = await compressImage(file);
-          console.log(`📉 Image compressed: ${(file.size / 1024).toFixed(2)}KB -> ${(fileToProcess.size / 1024).toFixed(2)}KB`);
         } catch (e) {
-          console.warn("Image compression failed, using original file.", e);
         }
       }
 
