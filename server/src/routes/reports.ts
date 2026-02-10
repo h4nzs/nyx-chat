@@ -18,7 +18,7 @@ router.post('/', generalLimiter, requireAuth, async (req, res, _next) => {
 
     // Format Payload untuk Discord Webhook
     const discordPayload = {
-      username: 'ChatLite Reporter',
+      username: 'NYX Reporter',
       avatar_url: 'https://cdn-icons-png.flaticon.com/512/4961/4961759.png', // Ikon Bug
       embeds: [
         {
@@ -43,7 +43,7 @@ router.post('/', generalLimiter, requireAuth, async (req, res, _next) => {
             }
           ],
           footer: {
-            text: 'ChatLite System • Report Module'
+            text: 'NYX System • Report Module'
           }
         }
       ]

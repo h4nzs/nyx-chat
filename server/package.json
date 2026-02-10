@@ -1,5 +1,5 @@
 {
-  "name": "chat-lite-server",
+  "name": "nyx-server",
   "version": "1.0.0",
   "description": "",
   "main": "dist/index.js",

@@ -23,7 +23,7 @@ import { redisClient } from '../lib/redis.js'
 
 const router: Router = Router()
 
-const rpName = 'Chat Lite'
+const rpName = 'NYX'
 const getRpID = () => {
   try {
     return env.nodeEnv === 'production' ? new URL(env.corsOrigin).hostname : 'localhost'

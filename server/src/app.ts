@@ -42,7 +42,7 @@ app.set('trust proxy', true);
 const isProd = env.nodeEnv === 'production';
 
 // Ambil origin untuk WebSocket secara dinamis
-let wsOrigin = 'ws://localhost:4000';
+let wsOrigin = 'wss://127.0.0.1:4000';
 if (env.appUrl) {
   try {
     const url = new URL(env.appUrl);
@@ -73,23 +73,17 @@ app.use(helmet({
         "'self'",
         "data:",
         "blob:",
-        "https://*.vercel.app",
-        "https://*.koyeb.app",
-        "https://*.upstash.io",
         "https://nyx-app.my.id",
-        "https://www.nyx-app.my.id",
+        "https://*.nyx-app.my.id",
         "https://*.supabase.co"
       ],
       connectSrc: [
         "'self'",
         wsOrigin,
-        "https://*.vercel.app",
         "https://*.nyx-app.my.id",
         "https://www.nyx-app.my.id",
-        "wss://*.vercel.app",
-        "https://*.koyeb.app",
-        "wss://*.koyeb.app",
-        "https://*.upstash.io",
+        "wss://*.nyx-app.my.id",
+        "https://nyx-app.my.id",
         "https://*.supabase.co"
       ],
       fontSrc: [
@@ -115,12 +109,6 @@ const isAllowedOrigin = (origin: string): boolean => {
     env.corsOrigin,
     "http://localhost:5173",
     "http://localhost:4173",
-    "https://chat-lite-git-main-h4nzs.vercel.app",
-    "https://chat-lite-h4nzs.vercel.app",
-    "https://*.vercel.app",
-    "https://vast-aigneis-h4nzs-9319f44e.koyeb.app",
-    "https://*.koyeb.app",
-    "https://*.upstash.io",
     "https://*.supabase.co",
     // IZINKAN HTTP & HTTPS UNTUK CLOUDFLARE TUNNEL
     "https://nyx-app.my.id",

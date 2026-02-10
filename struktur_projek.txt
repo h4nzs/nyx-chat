@@ -21,7 +21,7 @@
 ├── README.md
 ├── server
 │   ├── babel.config.js
-│   ├── chat-lite-server@1.0.0
+│   ├── nyx-server@1.0.0
 │   ├── dist
 │   ├── Dockerfile
 │   ├── jest.config.js

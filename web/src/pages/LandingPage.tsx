@@ -178,9 +178,9 @@ const FAQSection = () => (
         <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">FREQUENTLY ASKED QUESTIONS</motion.h2>
         <div className="space-y-4">
           {[
-            { q: "Is Chat Lite end-to-end encrypted?", a: "Yes. We use the Signal Protocol (Double Ratchet Algorithm) to ensure that only you and the person you're communicating with can read what's sent. Not even the server can decrypt your messages." },
-            { q: "Do I need to install an app?", a: "No. Chat Lite is a Progressive Web App (PWA). You can use it directly in your browser or install it to your home screen for a native-like experience without the app store friction." },
-            { q: "Is it completely free?", a: "Yes, Chat Lite is open-source and free to use. There are no hidden fees, ads, or data tracking." },
+            { q: "Is NYX end-to-end encrypted?", a: "Yes. We use the Signal Protocol (Double Ratchet Algorithm) to ensure that only you and the person you're communicating with can read what's sent. Not even the server can decrypt your messages." },
+            { q: "Do I need to install an app?", a: "No. NYX is a Progressive Web App (PWA). You can use it directly in your browser or install it to your home screen for a native-like experience without the app store friction." },
+            { q: "Is it completely free?", a: "Yes, NYX is open-source and free to use. There are no hidden fees, ads, or data tracking." },
             { q: "How do I recover my account?", a: "When you sign up, you receive a 24-word recovery phrase. This is the ONLY way to restore your keys and messages on a new device. We do not store this phrase." }
           ].map((item, i) => (
             <motion.div variants={itemVariants} key={i} className="bg-bg-surface rounded-lg shadow-[4px_4px_8px_rgba(0,0,0,0.1),-4px_-4px_8px_rgba(255,255,255,0.05)] overflow-hidden">
@@ -241,10 +241,10 @@ export default function LandingPage() {
           <motion.div variants={itemVariants} className="flex items-center">
             <img
               src="/pwa-512x512.png"
-              alt="Chat Lite Logo"
+              alt="NYX Logo"
               className="w-8 h-8 mr-2"
             />
-            <span className="text-2xl font-bold tracking-tighter">CHAT LITE</span>
+            <span className="text-2xl font-bold tracking-tighter">NYX</span>
           </motion.div>
           <motion.div variants={itemVariants}>
             <Link to="/login" className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all">
@@ -283,7 +283,7 @@ export default function LandingPage() {
               <div className="w-24 h-24 rounded-full bg-accent/10 flex items-center justify-center shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]">
                 <img
                   src="/pwa-512x512.png"
-                  alt="Chat Lite Logo"
+                  alt="NYX Logo"
                   className="w-12 h-12"
                 />
               </div>
@@ -307,16 +307,16 @@ export default function LandingPage() {
           </AnimatedSection>
         </section>
 
-        {/* Why Chat Lite Section */}
+        {/* Why Nyx Section */}
         <section className="py-16 md:py-24">
           <AnimatedSection>
             <div className="max-w-4xl mx-auto px-4 text-center">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">WHY CHAT LITE?</motion.h2>
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">WHY NYX?</motion.h2>
               <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary mb-4">
-                Tired of complicated sign-ups and mandatory app downloads? Chat Lite is your solution. Access it instantly from your favorite browser—no installation needed.
+                Tired of complicated sign-ups and mandatory app downloads? NYX is your solution. Access it instantly from your favorite browser—no installation needed.
               </motion.p>
               <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary">
-                Worried about your data? We are too. Chat Lite is built on a foundation of privacy, acting only as a secure bridge between you and your contacts. Your data is yours, and yours alone.
+                Worried about your data? We are too. NYX is built on a foundation of privacy, acting only as a secure bridge between you and your contacts. Your data is yours, and yours alone.
               </motion.p>
             </div>
           </AnimatedSection>
@@ -375,7 +375,7 @@ export default function LandingPage() {
                   Finally, a chat app that respects my privacy without sacrificing a beautiful user experience. The fact that I control my own keys is a game-changer.
                 </TestimonialCard>
                 <TestimonialCard author="Sarah T." role="Remote Team Lead">
-                  Chat Lite has become essential for our team. It's simple, secure, and a pleasure to use every day.
+                  Nyx has become essential for our team. It's simple, secure, and a pleasure to use every day.
                 </TestimonialCard>
               </motion.div>
             </div>
@@ -391,7 +391,7 @@ export default function LandingPage() {
             <div className="max-w-4xl mx-auto px-4 text-center">
               <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">READY TO TAKE CONTROL OF YOUR PRIVACY?</motion.h2>
               <motion.p variants={itemVariants} className="text-lg text-text-secondary mb-8 max-w-2xl mx-auto">
-                Join thousands of users who trust Chat Lite with their most sensitive conversations.
+                Join thousands of users who trust NYX with their most sensitive conversations.
               </motion.p>
               <motion.div variants={itemVariants}>
                 <Link to="/register" className="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] transition-all inline-flex items-center">
@@ -408,10 +408,10 @@ export default function LandingPage() {
             <div className="flex justify-center items-center mb-2">
               <img
                 src="/pwa-512x512.png"
-                alt="Chat Lite Logo"
+                alt="NYX Logo"
                 className="w-6 h-6 mr-2"
               />
-              <p className="text-sm">&copy; {new Date().getFullYear()} CHAT LITE. ENGINEERED WITH PRECISION.</p>
+              <p className="text-sm">&copy; {new Date().getFullYear()} NYX. ENGINEERED WITH PRECISION.</p>
             </div>
           </div>
         </footer>

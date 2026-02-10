@@ -2,7 +2,7 @@ services:
   # 1. Database PostgreSQL
   postgres:
     image: postgres:15-alpine
-    container_name: chat-lite-db
+    container_name: nyx-db
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER}      # <--- Mengambil dari .env
@@ -16,7 +16,7 @@ services:
   # 2. Redis Cache
   redis:
     image: redis:alpine
-    container_name: chat-lite-redis
+    container_name: nyx-redis
     restart: always
     networks:
       - chat-net
@@ -24,7 +24,7 @@ services:
   # 3. Backend (API)
   server:
     build: ./server
-    container_name: chat-lite-api
+    container_name: nyx-api
     restart: always
     depends_on:
       - postgres
@@ -43,7 +43,7 @@ services:
   # 4. Frontend (Web + Nginx Reverse Proxy)
   web:
     build: ./web
-    container_name: chat-lite-web
+    container_name: nyx-web
     restart: always
     depends_on:
       - server

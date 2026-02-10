@@ -19,7 +19,7 @@ export default function ChatInfoModal() {
     <ModalBase
       isOpen={isChatInfoModalOpen}
       onClose={closeChatInfoModal}
-      title="Understanding Your Security on Chat-Lite"
+      title="Understanding Your Security on NYX"
     >
       <div className="space-y-6">
 
@@ -28,7 +28,7 @@ export default function ChatInfoModal() {
             All your conversations are protected by strong <span className="font-semibold text-text-primary">End-to-End Encryption</span>, inspired by the Signal Protocol. Think of it as a private digital vault.
           </p>
           <p>
-            Only you and the recipient have the keys to unlock messages. No one in between—not even the Chat-Lite servers—can ever read their content. This protection is automatic and always on.
+            Only you and the recipient have the keys to unlock messages. No one in between—not even the NYX servers—can ever read their content. This protection is automatic and always on.
           </p>
         </InfoSection>
 

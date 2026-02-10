@@ -1,4 +1,4 @@
-# 💬 Chat Lite
+# 💬 NYX
 
 A secure, modern, and customizable real-time messaging application built with a focus on user experience and end-to-end encryption.
 
@@ -12,9 +12,9 @@ A secure, modern, and customizable real-time messaging application built with a 
 
 ## About The Project
 
-Chat Lite is a full-stack messaging application designed for users who prioritize privacy and a clean, modern user interface. At its core, it provides a robust end-to-end encryption (E2EE) system, ensuring that your conversations remain private and secure. No one outside of your conversation—not even the server—can read your messages.
+NYX is a full-stack messaging application designed for users who prioritize privacy and a clean, modern user interface. At its core, it provides a robust end-to-end encryption (E2EE) system, ensuring that your conversations remain private and secure. No one outside of your conversation—not even the server—can read your messages.
 
-Built with a modern tech stack, Chat Lite offers a seamless real-time experience across devices, wrapped in a beautiful, tactile Neumorphic UI that is both visually appealing and highly functional.
+Built with a modern tech stack, NYX offers a seamless real-time experience across devices, wrapped in a beautiful, tactile Neumorphic UI that is both visually appealing and highly functional.
 
 ## ✨ Core Features
 
@@ -43,7 +43,7 @@ Built with a modern tech stack, Chat Lite offers a seamless real-time experience
 
 ## 🔐 How It Works: The Security Model
 
-Chat Lite's E2EE is built on established cryptographic principles to ensure no one can intercept your messages.
+NYX's E2EE is built on established cryptographic principles to ensure no one can intercept your messages.
 
 1.  **Key Generation**: When you register, your device generates a **Master Seed**. From this seed, three distinct key pairs are deterministically created: an **Identity Key** (for encryption), a **Signing Key** (for verifying authenticity), and a **Signed Pre-Key** (for initiating secure chats).
 2.  **Secure Storage**: Your private keys never leave your device. They are encrypted with a key derived from your password and stored securely in your browser's local storage.
@@ -145,7 +145,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 ## 📁 Project Structure
 
 ```
-chat-lite/
+nyx/
 ├── server/       # Backend (Node.js, Express, Prisma)
 └── web/          # Frontend (React, Vite)
 ```

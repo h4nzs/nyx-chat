@@ -1,7 +1,7 @@
-# Chat Lite - Comprehensive Analysis
+# NYX - Comprehensive Analysis
 
 ## Overview
-Chat Lite is a secure, modern, and customizable real-time messaging application built with a focus on user experience and end-to-end encryption. It's a full-stack application designed for users who prioritize privacy and a clean, modern user interface.
+NYX is a secure, modern, and customizable real-time messaging application built with a focus on user experience and end-to-end encryption. It's a full-stack application designed for users who prioritize privacy and a clean, modern user interface.
 
 ## Architecture
 
@@ -13,7 +13,7 @@ Chat Lite is a secure, modern, and customizable real-time messaging application 
 
 ### Project Structure
 ```
-chat-lite/
+nyx/
 ├── server/       # Backend (Node.js, Express, Prisma)
 └── web/          # Frontend (React, Vite)
 ```
@@ -171,6 +171,6 @@ The encryption is implemented using:
 
 ## Conclusion
 
-Chat Lite is a well-designed, secure messaging application with a strong focus on privacy and user experience. The architecture properly separates concerns between frontend and backend, with robust security measures implemented throughout. The end-to-end encryption system is sophisticated and follows established cryptographic principles. The application provides a modern, responsive UI with many advanced features while maintaining a clean, intuitive interface.
+NYX is a well-designed, secure messaging application with a strong focus on privacy and user experience. The architecture properly separates concerns between frontend and backend, with robust security measures implemented throughout. The end-to-end encryption system is sophisticated and follows established cryptographic principles. The application provides a modern, responsive UI with many advanced features while maintaining a clean, intuitive interface.
 
 The codebase demonstrates good practices in terms of security, architecture, and maintainability, making it a solid foundation for a secure messaging platform.

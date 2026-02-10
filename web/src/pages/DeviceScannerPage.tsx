@@ -35,7 +35,7 @@ export default function DeviceScannerPage() {
       try {
         data = JSON.parse(decodedText);
       } catch (e) {
-        throw new Error("Invalid QR Code. Not a recognized Chat Lite code.");
+        throw new Error("Invalid QR Code. Not a recognized Nyx code.");
       }
 
       const { roomId, linkingPubKey } = data;

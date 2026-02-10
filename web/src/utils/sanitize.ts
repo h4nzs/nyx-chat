@@ -1,4 +1,4 @@
-// Shared sanitization utilities for ChatLite
+// Shared sanitization utilities for NYX
 
 /**
  * Sanitizes text content to prevent XSS while preserving plain text
