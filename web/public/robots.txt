@@ -11,4 +11,4 @@ Allow: /
 User-agent: Google-Extended
 Allow: /
 
-Sitemap: https://chat-lite-weld.vercel.app/sitemap.xml
+Sitemap: https://nyx-app.my.id/sitemap.xml
