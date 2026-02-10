@@ -14,6 +14,7 @@ router.post(
   zodValidate({
     body: z.object({
       identityKey: z.string(),
+      signingKey: z.string().optional(), // New: Accept signingKey update
       signedPreKey: z.object({
         key: z.string(),
         signature: z.string()
@@ -24,7 +25,13 @@ router.post(
     try {
       if (!req.user) throw new ApiError(401, 'Authentication required.')
       const userId = req.user.id
-      const { identityKey, signedPreKey } = req.body
+      const { identityKey, signedPreKey, signingKey } = req.body
+
+      // Prepare user update data
+      const userUpdateData: any = { publicKey: identityKey }
+      if (signingKey) {
+        userUpdateData.signingKey = signingKey
+      }
 
       // Use a transaction to ensure both operations succeed or fail together
       await prisma.$transaction([
@@ -44,7 +51,7 @@ router.post(
         }),
         prisma.user.update({
           where: { id: userId },
-          data: { publicKey: identityKey }
+          data: userUpdateData
         })
       ])
 
