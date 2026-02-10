@@ -27,11 +27,13 @@ export async function setupAndUploadPreKeyBundle() {
     const { publicKey: signedPreKey } = await getSignedPreKeyPair();
 
     const identityKeyB64 = sodium.to_base64(identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    const signingPublicKey = sodium.crypto_sign_ed25519_sk_to_pk(signingPrivateKey);
 
     const signature = sodium.crypto_sign_detached(signedPreKey, signingPrivateKey);
 
     const bundle = {
       identityKey: identityKeyB64,
+      signingKey: sodium.to_base64(signingPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
       signedPreKey: {
         key: sodium.to_base64(signedPreKey, sodium.base64_variants.URLSAFE_NO_PADDING),
         signature: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING),
