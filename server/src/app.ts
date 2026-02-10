@@ -42,7 +42,7 @@ app.set('trust proxy', true);
 const isProd = env.nodeEnv === 'production';
 
 // Ambil origin untuk WebSocket secara dinamis
-let wsOrigin = 'wss://127.0.0.1:4000';
+let wsOrigin = 'ws://127.0.0.1:4000';
 if (env.appUrl) {
   try {
     const url = new URL(env.appUrl);
