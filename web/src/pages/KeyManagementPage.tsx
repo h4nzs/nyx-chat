@@ -8,6 +8,7 @@ import { useModalStore } from '@store/modal';
 import RecoveryPhraseModal from '@components/RecoveryPhraseModal';
 import { api } from '@lib/api';
 import { getRecoveryPhrase, generateNewKeys } from '@lib/crypto-worker-proxy';
+import { getEncryptedKeys, saveEncryptedKeys } from '@lib/keyStorage';
 
 export default function KeyManagementPage() {
   const { logout } = useAuthStore(state => ({ 
@@ -24,7 +25,7 @@ export default function KeyManagementPage() {
 
       setIsProcessing(true);
       try {
-        const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
+        const encryptedKeys = await getEncryptedKeys();
         if (!encryptedKeys) throw new Error("No encrypted key found in storage.");
         
         const phrase = await getRecoveryPhrase(encryptedKeys, password);
@@ -58,9 +59,7 @@ export default function KeyManagementPage() {
               signingPublicKeyB64,
             } = await generateNewKeys(password);
             
-            localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
-            localStorage.setItem('publicKey', encryptionPublicKeyB64);
-            localStorage.setItem('signingPublicKey', signingPublicKeyB64);
+            await saveEncryptedKeys(encryptedPrivateKeys);
             
             await setupAndUploadPreKeyBundle();
 

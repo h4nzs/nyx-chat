@@ -6,6 +6,7 @@ import { Spinner } from '@components/Spinner';
 import { getSocket, connectSocket } from '@lib/socket';
 import { getSodium } from '@lib/sodiumInitializer';
 import { reEncryptBundleFromMasterKey } from '@lib/crypto-worker-proxy';
+import { saveEncryptedKeys, setDeviceAutoUnlockReady } from '@lib/keyStorage';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@store/auth';
 
@@ -82,13 +83,11 @@ export default function LinkDevicePage() {
 
       const result = await reEncryptBundleFromMasterKey(masterSeed, devicePassword);
 
-      localStorage.removeItem('encryptedPrivateKeys');
-      localStorage.setItem('encryptedPrivateKeys', result.encryptedPrivateKeys);
+      // Save the new encrypted bundle
+      await saveEncryptedKeys(result.encryptedPrivateKeys);
       
-      if (result.encryptionPublicKeyB64) localStorage.setItem('publicKey', result.encryptionPublicKeyB64);
-      if (result.signingPublicKeyB64) localStorage.setItem('signingPublicKey', result.signingPublicKeyB64);
-
-      localStorage.setItem('device_auto_unlock_ready', 'true');
+      // Set auto-unlock ready status
+      await setDeviceAutoUnlockReady(true);
 
       setStatus('success');
       toast.success("Paired! Redirecting to Login...", { id: 'link-process' });

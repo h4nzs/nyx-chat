@@ -1,165 +1,272 @@
-Bcrypt (Kondisi Sekarang):
-    Dia bersifat CPU-Blocking. Saat 1 user login, CPU 1 Core kamu "dibajak" penuh. Node.js (yang single-threaded) berhenti total. Request lain antri di belakang.
+### 📦 1. Install Library Baru (di folder `web`)
 
-    Argon2 (Solusi Baru):
-    Dia berjalan di Worker Thread (C++) di luar Event Loop utama Node.js.
-    Saat ada user login:
+Jalanin perintah ini dulu di terminal:
 
-        Tugas hashing dilempar ke background thread.
+```bash
+cd web
+pnpm add hash-wasm idb-keyval
 
-        Event Loop utama Node.js TETAP JALAN melayani request lain (chat, load page, dll).
-
-        User yang login mungkin tetap nunggu 300ms (wajar buat keamanan), tapi server GAK MACET buat user lain.
-
-Rekomendasi Setting (Sweet Spot)
-
-Biar kamu tidur nyenyak dan gak takut RAM jebol pas ada spike traffic, kita bisa "tuning" Argon2 biar lebih hemat RAM tapi tetap super aman (jauh lebih aman dari Bcrypt cost 8).
-
-Gunakan konfigurasi 32 MB RAM saja. Ini sudah sangat keras untuk di-crack hacker, tapi sangat ringan buat VPS.
-
-Mari kita bedah faktanya biar lu paham kenapa ini solusi cerdas:
-
-### 1. Kenapa Bcrypt "Jahat" buat VPS 1 Core?
-
-* **Fakta:** Bcrypt itu algoritma yang *sengaja* dibikin boros CPU. Tujuannya biar hacker butuh ribuan tahun buat nebak password.
-* **Masalahnya:** Di VPS 1 vCPU, saat ada 1 orang login, CPU lu kerja 100% buat ngitung hash itu. Karena cuma ada 1 jalur (1 Core), request lain (chat, load gambar) terpaksa "ngantri". Ini yang bikin *lag spike* saat ada yang login.
-* **Koreksi Dikit:** Node.js `bcrypt` yang lu pake (native) sebenernya jalan di *Worker Thread* juga (gak nge-block total Event Loop utama), **TAPI** karena CPU lu cuma satu, worker thread itu tetep rebutan jatah CPU sama main thread. Hasilnya sama aja: **Macet.**
-
-### 2. Kenapa Argon2 Lebih Baik?
-
-* **Memory-Hard:** Argon2 bisa kita suruh: *"Eh, jangan pake CPU banyak-banyak, pake RAM aja."*
-* **Tuning:** Kita bisa atur mau pake berapa RAM (Memory Cost) dan berapa CPU (Time Cost).
-* **Efeknya:** Beban digeser dari CPU (yang lagi sekarat di VPS lu) ke RAM (yang masih sisa banyak, tadi `free -h` lu sisa ~700MB kan?).
+```
 
 ---
 
-### 🔥 Solusi: Migrasi ke Argon2 (Tanpa Bikin User Lama Error)
+### 🗄️ 2. Buat File Storage Baru (`web/src/lib/keyStorage.ts`)
 
-Masalah terbesar ganti algoritma adalah: **Database lu isinya hash Bcrypt.** Kalau lu ganti kodingan jadi Argon2 sekarang, **SEMUA USER LAMA GAK BISA LOGIN.**
+Kita buat file khusus buat ngurusin IndexedDB pake `idb-keyval`. Ini jauh lebih aman dan performan daripada `localStorage`.
 
-**Triknya:** Kita pakai strategi **"Lazy Migration"**.
+```typescript
+// web/src/lib/keyStorage.ts
+import { get, set, del } from 'idb-keyval';
 
-1. Pas user login, cek hash-nya.
-2. Kalau hash-nya **Bcrypt** (user lama) -> Verifikasi pake Bcrypt -> Kalau bener, **Update** jadi Argon2 di database.
-3. Kalau hash-nya **Argon2** (user baru/migrated) -> Verifikasi biasa.
+const STORAGE_KEYS = {
+  ENCRYPTED_KEYS: 'nyx_encrypted_keys',
+  DEVICE_ID: 'nyx_device_id', // Opsional, buat future proofing
+};
 
-Ini kodenya. Lu tinggal copy-paste.
+/**
+ * Menyimpan Encrypted Private Keys ke IndexedDB
+ */
+export const saveEncryptedKeys = async (keysData: string) => {
+  try {
+    await set(STORAGE_KEYS.ENCRYPTED_KEYS, keysData);
+  } catch (error) {
+    console.error('Failed to save keys to IndexedDB:', error);
+    throw new Error('Storage failure');
+  }
+};
 
-#### Langkah 1: Install Library
+/**
+ * Mengambil Encrypted Private Keys dari IndexedDB
+ */
+export const getEncryptedKeys = async (): Promise<string | undefined> => {
+  try {
+    return await get<string>(STORAGE_KEYS.ENCRYPTED_KEYS);
+  } catch (error) {
+    console.error('Failed to retrieve keys from IndexedDB:', error);
+    return undefined;
+  }
+};
 
-Masuk ke folder `server` dan install `argon2`.
+/**
+ * Menghapus Keys (Logout/Reset)
+ */
+export const clearKeys = async () => {
+  try {
+    await del(STORAGE_KEYS.ENCRYPTED_KEYS);
+  } catch (error) {
+    console.error('Failed to clear keys:', error);
+  }
+};
 
-```bash
-cd server
-pnpm add argon2
-pnpm uninstall bcrypt # Opsional, tapi jangan dihapus dulu biar type-nya gak error sblm refactor
-pnpm remove @types/bcrypt
+/**
+ * Cek apakah user punya keys tersimpan (buat logic redirect login)
+ */
+export const hasStoredKeys = async (): Promise<boolean> => {
+  const keys = await getEncryptedKeys();
+  return !!keys;
+};
 
 ```
 
-#### Langkah 2: Buat Helper Password (`server/src/utils/password.ts`)
+---
 
-Buat file baru ini. Kita setting Argon2 biar pake **Memory: 32MB** (aman buat VPS lu) dan **Parallelism: 1** (karena cuma 1 core).
+### 🔒 3. Upgrade Worker (`web/src/workers/crypto.worker.ts`)
+
+Ini jantung barunya. Kita ganti PBKDF2 bawaan dengan **Argon2id** via `hash-wasm`. Ini yang bikin hacker nangis kalau mau nge-brute-force password user.
 
 ```typescript
-import argon2 from "argon2";
-import bcrypt from "bcrypt";
+// web/src/workers/crypto.worker.ts
+import { argon2id } from 'hash-wasm';
 
-// Konfigurasi "Sweet Spot" buat VPS 1GB RAM / 1 vCPU
+// Konfigurasi Argon2 (Harus imbang antara keamanan & performa di HP kentang)
 const ARGON_CONFIG = {
-  type: argon2.argon2id,
-  memoryCost: 2 ** 15, // 32 MB (32 * 1024 kb)
-  timeCost: 3,         // Jumlah putaran hashing (3x cukup aman & cepat)
-  parallelism: 1,      // Sesuai jumlah vCPU lu
+  parallelism: 1,
+  iterations: 3,
+  memorySize: 32768, // 32 MB
+  hashLength: 32,    // 32 bytes (256 bits) untuk AES-GCM Key
+  outputType: 'binary' as const,
 };
 
-export const hashPassword = async (password: string): Promise<string> => {
-  return await argon2.hash(password, ARGON_CONFIG);
-};
+self.onmessage = async (e) => {
+  const { id, type, payload } = e.data;
 
-export const verifyPassword = async (password: string, hash: string): Promise<boolean> => {
-  // 1. Cek apakah ini hash Bcrypt (User lama)
-  // Bcrypt hash biasanya diawali $2b$, $2a$, atau $2y$
-  if (hash.startsWith("$2")) {
-    return await bcrypt.compare(password, hash);
-  }
-
-  // 2. Kalau bukan, anggap Argon2
   try {
-    return await argon2.verify(hash, password);
-  } catch (err) {
-    console.error("Hash verification failed:", err);
-    return false;
-  }
-};
+    switch (type) {
+      // === KDF: Derive Key dari Password (ARGON2) ===
+      case 'DERIVE_KEY': {
+        const { password, salt } = payload;
+        
+        // 1. Generate Key Encryption Key (KEK) pakai Argon2id
+        // Ini jauh lebih berat & aman daripada PBKDF2
+        const derivedKey = await argon2id({
+          ...ARGON_CONFIG,
+          password,
+          salt: new Uint8Array(salt), // Pastikan salt Uint8Array
+        });
 
-export const needsRehash = (hash: string): boolean => {
-  // Kalau hash-nya masih format Bcrypt, berarti perlu di-update ke Argon2
-  return hash.startsWith("$2");
+        // Kirim balik raw bytes kuncinya
+        self.postMessage({ id, success: true, result: derivedKey });
+        break;
+      }
+
+      // === ENCRYPT: Encrypt Data dengan Key (AES-GCM) ===
+      case 'ENCRYPT_DATA': {
+        const { keyBytes, data } = payload; // data bisa string atau object
+        
+        // Import Key ke WebCrypto
+        const key = await crypto.subtle.importKey(
+          'raw',
+          keyBytes,
+          { name: 'AES-GCM' },
+          false,
+          ['encrypt']
+        );
+
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const encodedData = new TextEncoder().encode(JSON.stringify(data));
+
+        const encryptedContent = await crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv },
+          key,
+          encodedData
+        );
+
+        // Gabungkan IV + Ciphertext lalu jadiin Base64 string buat disimpen
+        // Format: JSON string -> { iv: [array], data: [array] }
+        // (Atau bisa pake format gabungan biner biar lebih hemat, tapi JSON lebih gampang didebug)
+        const result = JSON.stringify({
+          iv: Array.from(iv),
+          data: Array.from(new Uint8Array(encryptedContent))
+        });
+
+        self.postMessage({ id, success: true, result });
+        break;
+      }
+
+      // === DECRYPT: Decrypt Data dengan Key (AES-GCM) ===
+      case 'DECRYPT_DATA': {
+        const { keyBytes, encryptedString } = payload;
+
+        // Import Key
+        const key = await crypto.subtle.importKey(
+          'raw',
+          keyBytes,
+          { name: 'AES-GCM' },
+          false,
+          ['decrypt']
+        );
+
+        // Parse format penyimpanan kita
+        const { iv: ivArr, data: dataArr } = JSON.parse(encryptedString);
+        const iv = new Uint8Array(ivArr);
+        const ciphertext = new Uint8Array(dataArr);
+
+        const decryptedContent = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv },
+          key,
+          ciphertext
+        );
+
+        const decryptedString = new TextDecoder().decode(decryptedContent);
+        // Coba parse JSON kalau isinya objek, kalau enggak balikin string
+        let result;
+        try {
+          result = JSON.parse(decryptedString);
+        } catch {
+          result = decryptedString;
+        }
+
+        self.postMessage({ id, success: true, result });
+        break;
+      }
+
+      default:
+        throw new Error(`Unknown message type: ${type}`);
+    }
+  } catch (error: any) {
+    console.error('[CryptoWorker] Error:', error);
+    self.postMessage({ id, success: false, error: error.message });
+  }
 };
 
 ```
 
-#### Langkah 3: Update Auth Controller (`server/src/routes/auth.ts`)
+---
 
-Sekarang kita update logika login & register buat pake helper tadi.
+### 🔌 4. Update Proxy (`web/src/lib/crypto-worker-proxy.ts`)
 
-**Edit `server/src/routes/auth.ts`:**
-
-1. Hapus import `bcrypt`.
-2. Import helper baru kita.
-3. Update bagian `register` dan `login`.
+Proxy ini jembatan antara UI React lu sama Worker di atas. Gw update biar support fungsi KDF baru.
 
 ```typescript
-// ... import lain ...
-// HAPUS INI: import bcrypt from "bcrypt";
-// GANTI DENGAN:
-import { hashPassword, verifyPassword, needsRehash } from "../utils/password.js";
+// web/src/lib/crypto-worker-proxy.ts
+import CryptoWorker from '../workers/crypto.worker.ts?worker';
 
-// ...
+const worker = new CryptoWorker();
 
-// === DI BAGIAN REGISTER ===
-// Cari baris: const passwordHash = await bcrypt.hash(password, 10);
-// GANTI JADI:
-const passwordHash = await hashPassword(password);
+// Map untuk nyimpen Promise yang nunggu balasan worker
+const pendingRequests = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>();
 
-// ...
+worker.onmessage = (e) => {
+  const { id, success, result, error } = e.data;
+  if (pendingRequests.has(id)) {
+    const { resolve, reject } = pendingRequests.get(id)!;
+    if (success) resolve(result);
+    else reject(new Error(error));
+    pendingRequests.delete(id);
+  }
+};
 
-// === DI BAGIAN LOGIN ===
-// Cari logic login, ubah jadi gini:
+function sendToWorker<T>(type: string, payload: any): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const id = crypto.randomUUID();
+    pendingRequests.set(id, { resolve, reject });
+    worker.postMessage({ id, type, payload });
+  });
+}
 
-router.post("/login", authLimiter, zodValidate({ /*...*/ }), async (req, res, next) => {
-  try {
-    const { emailOrUsername, password } = req.body;
-    
-    // 1. Cari user
-    const user = await prisma.user.findFirst({
-      where: { OR: [{ email: emailOrUsername }, { username: emailOrUsername }] },
-      // ... select fields ...
-    });
+// === PUBLIC API ===
 
-    if (!user) throw new ApiError(401, "Invalid credentials");
+/**
+ * Membuat Key Encryption Key (KEK) dari Password User
+ * Output: Uint8Array (32 bytes)
+ */
+export const deriveKeyFromPassword = async (password: string, salt: Uint8Array): Promise<Uint8Array> => {
+  return sendToWorker<Uint8Array>('DERIVE_KEY', { password, salt });
+};
 
-    // 2. Verifikasi Password (Bisa handle Bcrypt & Argon2)
-    const isValid = await verifyPassword(password, user.passwordHash);
-    if (!isValid) throw new ApiError(401, "Invalid credentials");
+/**
+ * Mengenkripsi Private Keys (atau data sensitif lain)
+ * Output: String (JSON representation of IV + Ciphertext)
+ */
+export const encryptWithKey = async (keyBytes: Uint8Array, data: any): Promise<string> => {
+  return sendToWorker<string>('ENCRYPT_DATA', { keyBytes, data });
+};
 
-    // 3. [LAZY MIGRATION] Cek apakah user ini masih pake Bcrypt?
-    if (needsRehash(user.passwordHash)) {
-      // Kalau iya, update hash-nya ke Argon2 di background (gak perlu await biar user gak nunggu)
-      hashPassword(password).then((newHash) => {
-        prisma.user.update({
-          where: { id: user.id },
-          data: { passwordHash: newHash }
-        }).catch(err => console.error("Failed to migrate password hash:", err));
-      });
-    }
-
-    // ... sisa logic login (issue tokens dll) ...
+/**
+ * Mendekripsi Data
+ * Output: Original Data (Object / String)
+ */
+export const decryptWithKey = async (keyBytes: Uint8Array, encryptedString: string): Promise<any> => {
+  return sendToWorker<any>('DECRYPT_DATA', { keyBytes, encryptedString });
+};
 
 ```
 
-### Kesimpulan
+---
 
-* User baru otomatis dapet Argon2.
-* User lama pas login pertama kali bakal terasa "normal", tapi login kedua kalinya bakal jauh lebih ngebut karena udah dimigrasi ke Argon2.
+### ⚠️ PENTING: Dampak Perubahan Ini
+
+1. **User Lama (Jika ada):**
+* Karena lu ganti cara simpan kunci dari `localStorage` ke `IndexedDB` dan ganti algoritma enkripsi (PBKDF2 -> Argon2), **user lama bakal otomatis logout**.
+* Mereka harus login ulang atau restore pake Recovery Phrase.
+* Karena aplikasi lu masih tahap dev/baru rilis, ini momen paling tepat buat "Reset".
+
+
+2. **Integrasi di Login.tsx:**
+* Lu perlu update file `Login.tsx` buat pake `keyStorage.ts` (IndexedDB) alih-alih `localStorage`.
+* Contoh: Ganti `localStorage.getItem('encryptedPrivateKeys')` jadi `await getEncryptedKeys()`.
+
+
+
+**Saran Gw:**
+Langsung terapkan ini. Ini bikin level keamanan klien lu setara sama aplikasi enterprise. XSS biasa gak bakal bisa ngambil kunci lu semudah di localStorage.

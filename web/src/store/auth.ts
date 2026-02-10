@@ -7,8 +7,7 @@ import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";
 import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
-// import { uploadToR2 } from "@lib/r2"; // Removed top-level import
-// import { compressImage } from "@lib/fileUtils"; // Removed top-level import
+import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; // Only import TYPE
 
 /**
@@ -28,7 +27,6 @@ export async function setupAndUploadPreKeyBundle() {
     const { publicKey: signedPreKey } = await getSignedPreKeyPair();
 
     const identityKeyB64 = sodium.to_base64(identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-    localStorage.setItem('publicKey', identityKeyB64);
 
     const signature = sodium.crypto_sign_detached(signedPreKey, signingPrivateKey);
 
@@ -100,29 +98,31 @@ type Actions = {
   setDecryptedKeys: (keys: RetrievedKeys) => void;
 };
 
-const savedUser = localStorage.getItem("user");
-const savedReadReceipts = localStorage.getItem('sendReadReceipts');
-
 let privateKeysCache: RetrievedKeys | null = null;
 
 export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => {
+  const savedUser = localStorage.getItem("user"); // User is still in localStorage
+  const savedReadReceipts = localStorage.getItem('sendReadReceipts');
+
   const retrieveAndCacheKeys = async (): Promise<RetrievedKeys> => {
     if (privateKeysCache) return Promise.resolve(privateKeysCache);
 
     // Dynamic import for retrievePrivateKeys
     const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
 
-    return new Promise((resolve, reject) => {
-      const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
-      const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
+    return new Promise(async (resolve, reject) => {
+      const autoUnlockKey = await getDeviceAutoUnlockKey();
+      const encryptedKeys = await getEncryptedKeys();
 
       if (autoUnlockKey && encryptedKeys) {
+        // Pass autoUnlockKey as password to retrievePrivateKeys
         retrievePrivateKeys(encryptedKeys, autoUnlockKey)
           .then((result) => {
             if (result.success) {
               privateKeysCache = result.keys;
               resolve(result.keys);
             } else {
+              // If auto-unlock key fails, try prompting for password
               promptForPassword(retrievePrivateKeys);
             }
           })
@@ -135,7 +135,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         useModalStore.getState().showPasswordPrompt(async (password) => {
           if (!password) return reject(new Error("Password not provided."));
 
-          const encryptedKeysInner = localStorage.getItem('encryptedPrivateKeys');
+          const encryptedKeysInner = await getEncryptedKeys();
           if (!encryptedKeysInner) return reject(new Error("Encrypted private keys not found."));
 
           const result = await retrieveFn(encryptedKeysInner, password);
@@ -158,10 +158,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     isBootstrapping: true,
     isInitializingCrypto: false,
     sendReadReceipts: savedReadReceipts ? JSON.parse(savedReadReceipts) : true,
-    hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys'),
+    hasRestoredKeys: false, // Initial state, will be updated by bootstrap
     blockedUserIds: [],
 
-    setHasRestoredKeys: (hasKeys) => set({ hasRestoredKeys: hasKeys }),
+    setHasRestoredKeys: async (hasKeys) => set({ hasRestoredKeys: await hasStoredKeys() }),
     setAccessToken: (token) => set({ accessToken: token }),
     setReadReceipts: (value) => {
       set({ sendReadReceipts: value });
@@ -169,8 +169,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     tryAutoUnlock: async () => {
-      const autoUnlockKey = localStorage.getItem('device_auto_unlock_key');
-      const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
+      const autoUnlockKey = await getDeviceAutoUnlockKey();
+      const encryptedKeys = await getEncryptedKeys();
 
       if (autoUnlockKey && encryptedKeys) {
         set({ isInitializingCrypto: true });
@@ -180,6 +180,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           if (result.success) {
             privateKeysCache = result.keys;
             set({ hasRestoredKeys: true });
+            await setDeviceAutoUnlockReady(true);
             return true;
           }
           console.error("Auto-unlock failed.");
@@ -192,9 +193,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       return false;
     },
 
-    setDecryptedKeys: (keys: RetrievedKeys) => {
+    setDecryptedKeys: async (keys: RetrievedKeys) => {
       privateKeysCache = keys;
       set({ hasRestoredKeys: true });
+      await setDeviceAutoUnlockReady(true);
     },
 
     bootstrap: async () => {
@@ -208,7 +210,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             set({ accessToken: refreshRes.accessToken });
 
             const me = await authFetch<User>("/api/users/me");
-            set({ user: me, hasRestoredKeys: !!localStorage.getItem('encryptedPrivateKeys') });
+            set({ user: me, hasRestoredKeys: await hasStoredKeys() });
             localStorage.setItem("user", JSON.stringify(me));
 
             // Only load crypto if we have a valid session
@@ -242,7 +244,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           body: JSON.stringify({ emailOrUsername, password }),
         });
 
-        const hasKeys = !!localStorage.getItem('encryptedPrivateKeys');
+        const hasKeys = await hasStoredKeys();
 
         set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeys, blockedUserIds: [] });
         localStorage.setItem("user", JSON.stringify(res.user));
@@ -252,14 +254,14 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             // Dynamic import
             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
             
-            const encryptedKeys = localStorage.getItem('encryptedPrivateKeys')!;
-            const isAutoUnlockReady = localStorage.getItem('device_auto_unlock_ready') === 'true';
+            const encryptedKeys = await getEncryptedKeys();
+            const isAutoUnlockReady = await getDeviceAutoUnlockReady();
             let result;
 
             if (isAutoUnlockReady) {
-               result = await retrievePrivateKeys(encryptedKeys, password);
+               result = await retrievePrivateKeys(encryptedKeys!, password);
             } else {
-               result = await retrievePrivateKeys(encryptedKeys, password);
+               result = await retrievePrivateKeys(encryptedKeys!, password);
             }
 
             if (result.success) {
@@ -333,9 +335,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           phrase
         } = await registerAndGenerateKeys(data.password);
 
-        localStorage.setItem('publicKey', encryptionPublicKeyB64);
-        localStorage.setItem('signingPublicKey', signingPublicKeyB64);
-        localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
+        await saveEncryptedKeys(encryptedPrivateKeys);
         set({ hasRestoredKeys: true });
 
         try {
@@ -343,7 +343,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           if (result.success) privateKeysCache = result.keys;
         } catch (e) { throw e; }
 
-        localStorage.setItem('device_auto_unlock_ready', 'true');
+        await setDeviceAutoUnlockReady(true);
 
         const res = await api<{ 
           user?: User; 
@@ -392,6 +392,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       if (res.user && res.accessToken) {
         set({ user: res.user, accessToken: res.accessToken });
         localStorage.setItem("user", JSON.stringify(res.user));
+        // Public keys and encrypted keys are already saved during registerAndGeneratePhrase
         setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
         connectSocket();
       }
@@ -431,8 +432,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         clearAuthCookies();
         privateKeysCache = null;
         localStorage.removeItem('user');
-        localStorage.removeItem('device_auto_unlock_key');
-        localStorage.removeItem('device_auto_unlock_ready');
+        await clearKeys(); // Clear all keys from IndexedDB
 
         set({ user: null, accessToken: null });
 

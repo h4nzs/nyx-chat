@@ -4,9 +4,19 @@ import { Buffer } from 'buffer/';
 
 import sodium from 'libsodium-wrappers';
 import * as bip39 from 'bip39';
+import { argon2id } from 'hash-wasm'; // <-- New import
 
 let isReady = false;
 const B64_VARIANT = 'URLSAFE_NO_PADDING';
+
+// Konfigurasi Argon2 (Harus imbang antara keamanan & performa di HP kentang)
+const ARGON_CONFIG = {
+  parallelism: 1,
+  iterations: 3,
+  memorySize: 32768, // 32 MB
+  hashLength: 32,    // 32 bytes (256 bits) untuk AES-GCM Key
+  outputType: 'binary' as const,
+};
 
 // --- HELPER FUNCTIONS (Moved from keyManagement.ts and auth.ts) ---
 
@@ -19,7 +29,7 @@ function storePrivateKeys(keys: {
   signing: Uint8Array,
   signedPreKey: Uint8Array,
   masterSeed?: Uint8Array
-}, password: string, appSecret: string): string {
+}, password: string): Promise<string> {
   const privateKeysJson = JSON.stringify({
     encryption: sodium.to_base64(keys.encryption, sodium.base64_variants[B64_VARIANT]),
     signing: sodium.to_base64(keys.signing, sodium.base64_variants[B64_VARIANT]),
@@ -27,22 +37,41 @@ function storePrivateKeys(keys: {
     masterSeed: keys.masterSeed ? sodium.to_base64(keys.masterSeed, sodium.base64_variants[B64_VARIANT]) : undefined,
   });
 
-  const salt = sodium.randombytes_buf(32);
-  const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
+  const salt = crypto.getRandomValues(new Uint8Array(16)); // Generate random salt for Argon2
 
-  const combinedPass = `${appSecret}-${password}`;
-  const keyInput = new Uint8Array(salt.length + sodium.from_string(combinedPass).length);
-  keyInput.set(salt);
-  keyInput.set(sodium.from_string(combinedPass), salt.length);
-  const key = sodium.crypto_generichash(sodium.crypto_secretbox_KEYBYTES, keyInput);
+  return new Promise(async (resolve, reject) => {
+    try {
+      // Send DERIVE_KEY message to self (worker) to get the KEK
+      const kek = await new Promise<Uint8Array>((res, rej) => {
+        const msgId = crypto.randomUUID();
+        self.postMessage({ id: msgId, type: 'DERIVE_KEY', payload: { password, salt: Array.from(salt) } });
+        self.onmessage = (e) => {
+          if (e.data.id === msgId) {
+            if (e.data.success) res(new Uint8Array(e.data.result));
+            else rej(new Error(e.data.error));
+          }
+        };
+      });
 
-  const ciphertext = sodium.crypto_secretbox_easy(privateKeysJson, nonce, key);
-  const result = new Uint8Array(salt.length + nonce.length + ciphertext.length);
-  result.set(salt, 0);
-  result.set(nonce, salt.length);
-  result.set(ciphertext, salt.length + nonce.length);
+      // Send ENCRYPT_DATA message to self (worker) to encrypt the keys JSON
+      const encryptedData = await new Promise<string>((res, rej) => {
+        const msgId = crypto.randomUUID();
+        self.postMessage({ id: msgId, type: 'ENCRYPT_DATA', payload: { keyBytes: kek, data: privateKeysJson } });
+        self.onmessage = (e) => {
+          if (e.data.id === msgId) {
+            if (e.data.success) res(e.data.result);
+            else rej(new Error(e.data.error));
+          }
+        };
+      });
 
-  return sodium.to_base64(result, sodium.base64_variants[B64_VARIANT]);
+      // Combine salt and encrypted data (now a string)
+      resolve(sodium.to_base64(salt, sodium.base64_variants[B64_VARIANT]) + '.' + encryptedData);
+
+    } catch (error) {
+      reject(error);
+    }
+  });
 }
 
 type RetrievedKeys = {
@@ -56,40 +85,61 @@ type RetrieveKeysResult =
   | { success: true; keys: RetrievedKeys }
   | { success: false; reason: 'incorrect_password' | 'legacy_bundle' | 'keys_not_found' | 'decryption_failed' | 'app_secret_missing' };
 
-function retrievePrivateKeys(encryptedDataStr: string, password: string, appSecret: string): RetrieveKeysResult {
-  try {
-    if (!encryptedDataStr) return { success: false, reason: 'keys_not_found' };
+function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: string): Promise<RetrieveKeysResult> {
+  return new Promise(async (resolve) => {
+    try {
+      if (!encryptedDataWithSaltStr) return resolve({ success: false, reason: 'keys_not_found' });
 
-    const encryptedData = sodium.from_base64(encryptedDataStr, sodium.base64_variants[B64_VARIANT]);
-    const salt = encryptedData.slice(0, 32);
-    const nonce = encryptedData.slice(32, 32 + sodium.crypto_secretbox_NONCEBYTES);
-    const encryptedJson = encryptedData.slice(32 + sodium.crypto_secretbox_NONCEBYTES);
+      const parts = encryptedDataWithSaltStr.split('.');
+      if (parts.length !== 2) return resolve({ success: false, reason: 'decryption_failed' }); // Format is salt.encryptedJson
 
-    const combinedPass = `${appSecret}-${password}`;
-    const keyInput = new Uint8Array(salt.length + sodium.from_string(combinedPass).length);
-    keyInput.set(salt);
-    keyInput.set(sodium.from_string(combinedPass), salt.length);
-    const key = sodium.crypto_generichash(sodium.crypto_secretbox_KEYBYTES, keyInput);
+      const salt = sodium.from_base64(parts[0], sodium.base64_variants[B64_VARIANT]);
+      const encryptedString = parts[1];
 
-    const decryptedJson = sodium.crypto_secretbox_open_easy(encryptedJson, nonce, key);
-    if (!decryptedJson) return { success: false, reason: 'incorrect_password' };
-    
-    const keys = JSON.parse(sodium.to_string(decryptedJson));
-    if (!keys.signedPreKey) return { success: false, reason: 'legacy_bundle' };
+      // Send DERIVE_KEY message to self (worker) to get the KEK
+      const kek = await new Promise<Uint8Array>((res, rej) => {
+        const msgId = crypto.randomUUID();
+        self.postMessage({ id: msgId, type: 'DERIVE_KEY', payload: { password, salt: Array.from(salt) } });
+        self.onmessage = (e) => {
+          if (e.data.id === msgId) {
+            if (e.data.success) res(new Uint8Array(e.data.result));
+            else rej(new Error(e.data.error));
+          }
+        };
+      });
 
-    return {
-      success: true,
-      keys: {
-        encryption: sodium.from_base64(keys.encryption, sodium.base64_variants[B64_VARIANT]),
-        signing: sodium.from_base64(keys.signing, sodium.base64_variants[B64_VARIANT]),
-        signedPreKey: sodium.from_base64(keys.signedPreKey, sodium.base64_variants[B64_VARIANT]),
-        masterSeed: keys.masterSeed ? sodium.from_base64(keys.masterSeed, sodium.base64_variants[B64_VARIANT]) : undefined,
+      // Send DECRYPT_DATA message to self (worker) to decrypt the keys JSON
+      const privateKeysJson = await new Promise<string>((res, rej) => {
+        const msgId = crypto.randomUUID();
+        self.postMessage({ id: msgId, type: 'DECRYPT_DATA', payload: { keyBytes: kek, encryptedString } });
+        self.onmessage = (e) => {
+          if (e.data.id === msgId) {
+            if (e.data.success) res(e.data.result);
+            else rej(new Error(e.data.error));
+          }
+        };
+      });
+
+      const keys = JSON.parse(privateKeysJson);
+      if (!keys.signedPreKey) return resolve({ success: false, reason: 'legacy_bundle' });
+
+      resolve({
+        success: true,
+        keys: {
+          encryption: sodium.from_base64(keys.encryption, sodium.base64_variants[B64_VARIANT]),
+          signing: sodium.from_base64(keys.signing, sodium.base64_variants[B64_VARIANT]),
+          signedPreKey: sodium.from_base64(keys.signedPreKey, sodium.base64_variants[B64_VARIANT]),
+          masterSeed: keys.masterSeed ? sodium.from_base64(keys.masterSeed, sodium.base64_variants[B64_VARIANT]) : undefined,
+        }
+      });
+    } catch (error: any) {
+      if (error.message && error.message.includes('incorrect_password')) {
+        return resolve({ success: false, reason: 'incorrect_password' });
       }
-    };
-  } catch (error) {
-    console.error("Failed to retrieve private keys due to unexpected error:", error);
-    return { success: false, reason: 'decryption_failed' };
-  }
+      console.error("Failed to retrieve private keys due to unexpected error:", error);
+      return resolve({ success: false, reason: 'decryption_failed' });
+    }
+  });
 }
 
 function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicKey: Uint8Array): string {
@@ -131,18 +181,80 @@ self.onmessage = async (event: MessageEvent) => {
       return;
     }
   }
-
-  // App secret is required for most operations
-  const appSecret = payload?.appSecret || import.meta.env.VITE_APP_SECRET;
-  if (!appSecret && type !== 'init' && type !== 'generateSafetyNumber') {
-      self.postMessage({ type: 'error', id, error: "VITE_APP_SECRET is required for crypto operations." });
-      return;
-  }
-
-  try {
-    let result: any;
-    switch (type) {
-      case 'registerAndGenerateKeys': {
+        try {
+          let result: any;
+          switch (type) {
+            // === KDF: Derive Key dari Password (ARGON2) ===
+            case 'DERIVE_KEY': {
+              const { password, salt } = payload;
+  
+              const derivedKey = await argon2id({
+                ...ARGON_CONFIG,
+                password,
+                salt: new Uint8Array(salt),
+              });
+              result = derivedKey;
+              break;
+            }
+  
+            // === ENCRYPT: Encrypt Data dengan Key (AES-GCM) ===
+            case 'ENCRYPT_DATA': {
+              const { keyBytes, data } = payload;
+              
+              const key = await crypto.subtle.importKey(
+                'raw',
+                keyBytes,
+                { name: 'AES-GCM' },
+                false,
+                ['encrypt']
+              );
+  
+              const iv = crypto.getRandomValues(new Uint8Array(12));
+              const encodedData = new TextEncoder().encode(JSON.stringify(data));
+  
+              const encryptedContent = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv },
+                key,
+                encodedData
+              );
+  
+              result = JSON.stringify({
+                iv: Array.from(iv),
+                data: Array.from(new Uint8Array(encryptedContent))
+              });
+              break;
+            }
+  
+            // === DECRYPT: Decrypt Data dengan Key (AES-GCM) ===
+            case 'DECRYPT_DATA': {
+              const { keyBytes, encryptedString } = payload;
+  
+              const key = await crypto.subtle.importKey(
+                'raw',
+                keyBytes,
+                { name: 'AES-GCM' },
+                false,
+                ['decrypt']
+              );
+  
+              const { iv: ivArr, data: dataArr } = JSON.parse(encryptedString);
+              const iv = new Uint8Array(ivArr);
+              const ciphertext = new Uint8Array(dataArr);
+  
+              const decryptedContent = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv },
+                key,
+                ciphertext
+              );
+  
+              const decryptedString = new TextDecoder().decode(decryptedContent);
+              try {
+                result = JSON.parse(decryptedString);
+              } catch {
+                result = decryptedString;
+              }
+              break;
+            }      case 'registerAndGenerateKeys': {
         const { password } = payload;
         const masterSeed = sodium.randombytes_buf(32);
         const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
@@ -156,12 +268,12 @@ self.onmessage = async (event: MessageEvent) => {
         const encryptionPublicKeyB64 = exportPublicKey(encryptionKeyPair.publicKey);
         const signingPublicKeyB64 = exportPublicKey(signingKeyPair.publicKey);
         
-        const encryptedPrivateKeys = storePrivateKeys({
+        const encryptedPrivateKeys = await storePrivateKeys({
           encryption: encryptionKeyPair.privateKey,
           signing: signingKeyPair.privateKey,
           signedPreKey: signedPreKeyPair.privateKey,
           masterSeed: masterSeed
-        }, password, appSecret);
+        }, password);
 
         // FIX: Tambahkan 'as any' karena tipe Buffer polyfill tidak identik dengan Buffer Node.js
         const phrase = await bip39.entropyToMnemonic(Buffer.from(masterSeed) as any);
@@ -177,7 +289,7 @@ self.onmessage = async (event: MessageEvent) => {
 
       case 'retrievePrivateKeys': {
         const { encryptedDataStr, password } = payload;
-        result = retrievePrivateKeys(encryptedDataStr, password, appSecret);
+        result = await retrievePrivateKeys(encryptedDataStr, password);
         break;
       }
 
@@ -285,7 +397,7 @@ self.onmessage = async (event: MessageEvent) => {
 
       case 'getRecoveryPhrase': {
         const { encryptedDataStr, password } = payload;
-        const resultData = retrievePrivateKeys(encryptedDataStr, password, appSecret);
+        const resultData = await retrievePrivateKeys(encryptedDataStr, password);
         if (resultData.success && resultData.keys.masterSeed) {
           // FIX: Tambahkan 'as any'
           result = await bip39.entropyToMnemonic(Buffer.from(resultData.keys.masterSeed) as any);
@@ -311,12 +423,12 @@ self.onmessage = async (event: MessageEvent) => {
         const encryptionPublicKeyB64 = exportPublicKey(encryptionKeyPair.publicKey);
         const signingPublicKeyB64 = exportPublicKey(signingKeyPair.publicKey);
         
-        const encryptedPrivateKeys = storePrivateKeys({
+        const encryptedPrivateKeys = await storePrivateKeys({
           encryption: encryptionKeyPair.privateKey,
           signing: signingKeyPair.privateKey,
           signedPreKey: signedPreKeyPair.privateKey,
           masterSeed: masterSeed
-        }, password, appSecret);
+        }, password);
 
         result = {
           encryptionPublicKeyB64,
@@ -344,12 +456,12 @@ self.onmessage = async (event: MessageEvent) => {
         const encryptionPublicKeyB64 = exportPublicKey(encryptionKeyPair.publicKey);
         const signingPublicKeyB64 = exportPublicKey(signingKeyPair.publicKey);
 
-        const encryptedPrivateKeys = storePrivateKeys({
+        const encryptedPrivateKeys = await storePrivateKeys({
           encryption: encryptionKeyPair.privateKey,
           signing: signingKeyPair.privateKey,
           signedPreKey: signedPreKeyPair.privateKey,
           masterSeed: masterKey,
-        }, newPassword, appSecret);
+        }, newPassword);
 
         result = {
           encryptedPrivateKeys,

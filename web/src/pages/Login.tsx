@@ -8,6 +8,7 @@ import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewe
 import { api } from "@lib/api";
 import { retrievePrivateKeys } from "@lib/crypto-worker-proxy";
 import { connectSocket } from "@lib/socket";
+import { getEncryptedKeys } from "@lib/keyStorage";
 
 export default function Login() {
   const [error, setError] = useState("");
@@ -77,11 +78,9 @@ export default function Login() {
         // Try auto-unlock first (this works if device_auto_unlock_key is available)
         const autoUnlockSuccess = await useAuthStore.getState().tryAutoUnlock();
 
-        // If auto-unlock failed and we have encrypted keys, we need to prompt for password now
-                  // This provides better UX than prompting later when user tries to send a message
-                const hasEncryptedKeys = !!localStorage.getItem('encryptedPrivateKeys');
-                if (!autoUnlockSuccess && hasEncryptedKeys) {
-                  // Prompt for password to decrypt keys now
+        const hasEncryptedKeys = await getEncryptedKeys(); // Changed from localStorage
+        if (!autoUnlockSuccess && hasEncryptedKeys) {
+          // Prompt for password to decrypt keys now
                   useModalStore.getState().showPasswordPrompt(async (password) => {
                     if (!password) {
                       // If user cancels, they can still use the app but won't be able to send messages
@@ -90,7 +89,7 @@ export default function Login() {
                     }
         
                     try {
-                      const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
+                      const encryptedKeys = await getEncryptedKeys(); // Changed from localStorage
                       if (!encryptedKeys) {
                         console.error("No encrypted keys found in storage");
                         return;

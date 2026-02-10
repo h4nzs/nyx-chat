@@ -4,6 +4,7 @@ import { FiKey, FiUpload } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import { Spinner } from '@components/Spinner';
 import { restoreFromPhrase } from '@lib/crypto-worker-proxy';
+import { saveEncryptedKeys } from '@lib/keyStorage';
 import { useAuthStore } from '@store/auth';
 
 export default function RestorePage() {
@@ -34,10 +35,7 @@ export default function RestorePage() {
         throw new Error("Failed to restore keys. The phrase may be invalid.");
       }
 
-      // Store the new encrypted bundle and public keys in localStorage
-      localStorage.setItem('encryptedPrivateKeys', encryptedPrivateKeys);
-      localStorage.setItem('publicKey', encryptionPublicKeyB64);
-      localStorage.setItem('signingPublicKey', signingPublicKeyB64);
+      await saveEncryptedKeys(encryptedPrivateKeys);
       
       // Manually update the auth store state
       useAuthStore.getState().setHasRestoredKeys(true);
