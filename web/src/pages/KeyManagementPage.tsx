@@ -64,9 +64,10 @@ export default function KeyManagementPage() {
             await setupAndUploadPreKeyBundle();
 
             toast.success('Keys Rotated. Rebooting Session...');
+            // Force a reload to re-bootstrap the app with the new keys
             setTimeout(() => {
-              logout();
-            }, 2000);
+              window.location.reload();
+            }, 1000);
 
           } catch (error: any) {
             toast.error(error.message || "Rotation failed.");

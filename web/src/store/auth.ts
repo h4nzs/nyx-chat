@@ -200,38 +200,43 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     bootstrap: async () => {
-      set({ isBootstrapping: true });
-      const sessionStarted = false;
-
-      if (!sessionStarted) {
-        try {
-          const refreshRes = await api<{ ok: boolean; accessToken?: string }>("/api/auth/refresh", { method: "POST" });
-          if (refreshRes.accessToken) {
-            set({ accessToken: refreshRes.accessToken });
-
-            const me = await authFetch<User>("/api/users/me");
-            set({ user: me, hasRestoredKeys: await hasStoredKeys() });
-            localStorage.setItem("user", JSON.stringify(me));
-
-            // Only load crypto if we have a valid session
-            await get().tryAutoUnlock();
-            connectSocket();
-
-            get().loadBlockedUsers();
-          } else {
-            throw new Error("No valid session.");
-          }
-        } catch (error: any) {
-          console.error("Bootstrap error:", error);
-
-          privateKeysCache = null;
-          set({ user: null, accessToken: null, blockedUserIds: [] });
-          clearAuthCookies();
-          localStorage.removeItem("user");
-        }
+      // [FIX] Cek apakah kita baru saja register/login manual?
+      // Jika accessToken sudah ada (dari register), jangan bootstrap dulu biar gak tabrakan.
+      if (get().accessToken) {
+        console.log("Bootstrap skipped: Session already active from register/login.");
+        set({ isBootstrapping: false });
+        return;
       }
 
-      set({ isBootstrapping: false });
+      set({ isBootstrapping: true });
+      try {
+        const refreshRes = await api<{ ok: boolean; accessToken?: string }>("/api/auth/refresh", { method: "POST" });
+        if (refreshRes.accessToken) {
+          set({ accessToken: refreshRes.accessToken });
+
+          const me = await authFetch<User>("/api/users/me");
+          set({ user: me, hasRestoredKeys: await hasStoredKeys() });
+          localStorage.setItem("user", JSON.stringify(me));
+
+          // Only load crypto if we have a valid session
+          await get().tryAutoUnlock();
+          connectSocket();
+
+          get().loadBlockedUsers();
+        } else {
+          throw new Error("No valid session.");
+        }
+      } catch (error: any) {
+        console.log("Bootstrap failed (No session):", error);
+        // [FIX] Jangan panggil logout() atau clearKeys() di sini!
+        // Cukup bersihkan state memori & localstorage user, TAPI JANGAN hapus kunci IndexedDB.
+        privateKeysCache = null;
+        set({ user: null, accessToken: null, blockedUserIds: [] });
+        clearAuthCookies();
+        localStorage.removeItem("user");
+      } finally {
+        set({ isBootstrapping: false });
+      }
     },
 
     login: async (emailOrUsername, password, restoredNotSynced = false) => {
@@ -338,16 +343,24 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           phrase
         } = await registerAndGenerateKeys(data.password);
 
+        // 1. Simpan Kunci Terenkripsi ke IndexedDB
         await saveEncryptedKeys(encryptedPrivateKeys);
-        set({ hasRestoredKeys: true });
-
-        try {
-          const result = await retrievePrivateKeys(encryptedPrivateKeys, data.password);
-          if (result.success) privateKeysCache = result.keys;
-        } catch (e) { throw e; }
-
+        
+        // [FIX] 2. Simpan Kunci Auto-Unlock (Biar ga minta password lagi pas refresh/chat)
+        await saveDeviceAutoUnlockKey(data.password);
         await setDeviceAutoUnlockReady(true);
 
+        set({ hasRestoredKeys: true });
+
+        // 3. Cache di memori untuk sesi sekarang
+        try {
+          const result = await retrievePrivateKeys(encryptedPrivateKeys, data.password);
+          if (result.success) {
+             privateKeysCache = result.keys;
+          }
+        } catch (e) { console.error("Failed to cache keys:", e); }
+
+        // 4. Panggil API Register
         const res = await api<{ 
           user?: User; 
           accessToken?: string; 
