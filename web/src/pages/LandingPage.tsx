@@ -1,10 +1,14 @@
 import { Link } from 'react-router-dom';
-import { FiGithub, FiLock, FiKey, FiSmartphone, FiSun, FiMoon, FiChevronsLeft, FiChevronsRight, FiUserPlus, FiMessageSquare, FiShield, FiArrowRight } from 'react-icons/fi';
+import { 
+  FiGithub, FiLock, FiKey, FiSmartphone, FiSun, FiMoon, 
+  FiChevronsLeft, FiChevronsRight, FiUserPlus, FiMessageSquare, 
+  FiShield, FiArrowRight, FiHash, FiEyeOff, FiCheck, FiX, FiCpu 
+} from 'react-icons/fi';
 import { motion, useMotionValue, useTransform, useInView } from 'framer-motion';
 import { useState, useRef, useEffect, ReactNode } from 'react';
 import { useThemeStore } from '@store/theme';
 
-// Animation Variants
+// --- Animation Variants ---
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: {
@@ -20,6 +24,7 @@ const itemVariants = {
   visible: { opacity: 1, y: 0 },
 };
 
+// --- Reusable Components ---
 const AnimatedSection = ({ children }: { children: ReactNode }) => {
   const ref = useRef(null);
   const isInView = useInView(ref, { once: true, amount: 0.2 });
@@ -36,7 +41,7 @@ const AnimatedSection = ({ children }: { children: ReactNode }) => {
   );
 };
 
-// Chiseled Depth Feature Card with Mass Physics
+// Chiseled Depth Feature Card with Mass Physics (Original Style)
 const FeatureCard = ({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) => (
   <motion.div
     variants={itemVariants}
@@ -67,88 +72,20 @@ const FeatureCard = ({ icon, title, children }: { icon: React.ReactNode; title: 
       transition-all duration-300
       border border-white/50 dark:border-white/5
       text-center cursor-pointer
+      h-full flex flex-col items-center justify-start
     "
   >
-    <div className="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4">
+    <div className="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4 text-accent">
       {icon}
     </div>
     <h3 className="text-xl font-bold text-text-primary mb-2">{title}</h3>
-    <p className="text-text-secondary">{children}</p>
+    <p className="text-text-secondary leading-relaxed">{children}</p>
   </motion.div>
 );
 
-// Chiseled Depth Chat Interface Preview
-const ChatPreview = () => {
-  return (
-    <div className="w-full max-w-4xl mx-auto">
-      <div className="bg-bg-surface rounded-xl shadow-[12px_12px_24px_rgba(0,0,0,0.3),-12px_-12px_24px_rgba(255,255,255,0.1)] p-6 border border-transparent hover:border-accent/30 transition-all duration-300"
-        style={{
-          backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.1) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(0,0,0,0.1) 0%, transparent 40%)',
-          backgroundBlendMode: 'overlay'
-        }}>
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center">
-            <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center mr-3">
-              <div className="w-6 h-6 rounded-full bg-accent"></div>
-            </div>
-            <div>
-              <h3 className="font-bold text-text-primary">Alex Johnson</h3>
-              <p className="text-xs text-text-secondary">Online</p>
-            </div>
-          </div>
-          <div className="flex space-x-2">
-            <button className="w-8 h-8 rounded-full bg-bg-main shadow-[2px_2px_4px_rgba(0,0,0,0.2),-2px_-2px_4px_rgba(255,255,255,0.1)] flex items-center justify-center">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="1"></circle>
-                <circle cx="12" cy="5" r="1"></circle>
-                <circle cx="12" cy="19" r="1"></circle>
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        <div className="space-y-4 max-h-64 overflow-y-auto pr-2">
-          <div className="flex justify-start">
-            <div className="max-w-xs p-3 rounded-br-xl rounded-tr-xl rounded-tl-xl bg-accent/10 text-text-primary shadow-[2px_2px_4px_rgba(0,0,0,0.1)]">
-              Hey there! How's the new project going?
-            </div>
-          </div>
-
-          <div className="flex justify-end">
-            <div className="max-w-xs p-3 rounded-bl-xl rounded-tl-xl rounded-tr-xl bg-accent text-white shadow-[2px_2px_4px_rgba(0,0,0,0.2)]">
-              It's coming along great! Just finished the UI redesign.
-            </div>
-          </div>
-
-          <div className="flex justify-start">
-            <div className="max-w-xs p-3 rounded-br-xl rounded-tr-xl rounded-tl-xl bg-accent/10 text-text-primary shadow-[2px_2px_4px_rgba(0,0,0,0.1)]">
-              That's awesome! Can you share some screenshots?
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-4 flex">
-          <input
-            type="text"
-            placeholder="Type a message..."
-            aria-label="Type a demo message"
-            className="flex-1 bg-bg-main rounded-l-lg px-4 py-2 shadow-[inset_2px_2px_4px_rgba(0,0,0,0.2),inset_-2px_-2px_4px_rgba(255,255,255,0.1)] focus:outline-none focus:ring-1 focus:ring-accent"
-          />
-          <button 
-            aria-label="Send demo message"
-            className="bg-accent text-white px-4 py-2 rounded-r-lg shadow-[2px_2px_4px_rgba(0,0,0,0.2),-2px_-2px_4px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_2px_rgba(0,0,0,0.2)] transition-all"
-          >
-            <FiArrowRight />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const HowItWorksStep = ({ icon, title, children, isLast }: { icon: React.ReactNode; title: string; children: React.ReactNode; isLast?: boolean; }) => (
   <motion.div variants={itemVariants} className="relative flex flex-col items-center text-center">
-    <div className="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4 z-10">
+    <div className="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4 z-10 text-accent">
       {icon}
     </div>
     <h3 className="text-xl font-bold text-text-primary mb-2">{title}</h3>
@@ -203,14 +140,24 @@ const FAQSection = () => (
   </section>
 );
 
+// New Comparison Data
+const comparisonData = [
+  { feature: "Phone No. Required?", wa: "Yes", tg: "Yes", nyx: "NO", isWin: true },
+  { feature: "App Install?", wa: "Required", tg: "Required", nyx: "Optional (PWA)", isWin: true },
+  { feature: "E2E Encryption", wa: "Default", tg: "Secret Chat Only", nyx: "Always On", isWin: true },
+  { feature: "Local Footprint", wa: "SQL Database", tg: "Cloud Cache", nyx: "ZERO (Browser)", isWin: true },
+];
+
 export default function LandingPage() {
-  const { theme } = useThemeStore(); // Get current theme
+  const { theme } = useThemeStore();
   const [grainOpacity, setGrainOpacity] = useState(0.05);
 
   useEffect(() => {
-    // Adjust grain opacity based on theme
     setGrainOpacity(theme === 'dark' ? 0.08 : 0.05);
   }, [theme]);
+
+  // Pilih screenshot berdasarkan tema (opsional) atau fix ke dark
+  const heroScreenshot = theme === 'dark' ? '/screenshots/mobile-dark.png' : '/screenshots/mobile-light.png';
 
   return (
     <div
@@ -239,11 +186,7 @@ export default function LandingPage() {
           className="p-4 flex justify-between items-center max-w-6xl mx-auto"
         >
           <motion.div variants={itemVariants} className="flex items-center">
-            <img
-              src="/pwa-512x512.png"
-              alt="NYX Logo"
-              className="w-8 h-8 mr-2"
-            />
+            <img src="/pwa-512x512.png" alt="NYX Logo" className="w-8 h-8 mr-2" />
             <span className="text-2xl font-bold tracking-tighter">NYX</span>
           </motion.div>
           <motion.div variants={itemVariants}>
@@ -253,62 +196,69 @@ export default function LandingPage() {
           </motion.div>
         </motion.header>
 
-        {/* Hero Section - Asymmetric 90/10 Layout */}
-        <main className="max-w-6xl mx-auto px-4 py-8 md:py-16">
-          <div className="grid grid-cols-1 lg:grid-cols-10 gap-8 items-center">
-            <div className="lg:col-span-9">
+        {/* Hero Section */}
+        <main className="max-w-6xl mx-auto px-4 py-16 md:py-24">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+            <div className="lg:col-span-7">
               <motion.div initial="hidden" animate="visible" variants={containerVariants}>
+                <motion.div variants={itemVariants} className="inline-block mb-4 px-4 py-1 rounded-full bg-bg-main shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.1)] text-accent text-xs md:text-sm font-bold tracking-wider uppercase">
+                  v1.0 • E2EE Encrypted • Anonymous
+                </motion.div>
                 <motion.h1 variants={itemVariants} className="text-5xl md:text-7xl font-black tracking-tighter leading-none mb-6">
                   PRIVATE<br />
                   <span className="text-accent" style={{ textShadow: '2px 2px 4px rgba(255, 107, 53, 0.3)' }}>CONVERSATIONS</span><br />
                   SECURED BY YOU
                 </motion.h1>
-                <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary max-w-2xl mb-8">
-                  End-to-end encrypted messaging with a tactile, industrial design that puts privacy and control in your hands.
+                <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary max-w-xl mb-8 leading-relaxed">
+                  End-to-end encrypted messaging with a tactile, industrial design. 
+                  No phone numbers. No trackers. Just you and your data.
                 </motion.p>
                 <motion.div variants={itemVariants} className="flex flex-col sm:flex-row justify-start items-start gap-4">
                   <Link to="/register" className="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] transition-all flex items-center">
                     GET STARTED <FiArrowRight className="ml-2" />
                   </Link>
-                  <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="px-8 py-4 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all flex items-center">
+                  <a href="https://github.com/h4nzs/chat-lite" target="_blank" rel="noopener noreferrer" className="px-8 py-4 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all flex items-center">
                     <FiGithub className="mr-2" />
-                    VIEW ON GITHUB
+                    SOURCE CODE
                   </a>
                 </motion.div>
               </motion.div>
             </div>
 
-            {/* Embedded Chat Interface - 10% column */}
-            <div className="lg:col-span-1 flex justify-center">
-              <div className="w-24 h-24 rounded-full bg-accent/10 flex items-center justify-center shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]">
-                <img
-                  src="/pwa-512x512.png"
-                  alt="NYX Logo"
-                  className="w-12 h-12"
-                />
-              </div>
+            {/* Visual Mockup (UPDATED: Mobile Aspect Ratio) */}
+            <div className="lg:col-span-5 flex justify-center lg:justify-end">
+               <motion.div 
+                 initial={{ opacity: 0, x: 20 }}
+                 animate={{ opacity: 1, x: 0 }}
+                 transition={{ delay: 0.5, duration: 0.8 }}
+                 // Lebar disesuaikan agar proporsional sebagai HP
+                 className="relative w-full max-w-[280px] md:max-w-[320px]"
+               >
+                  {/* CSS-Only Phone Frame (Corrected for Mobile 9:19 Ratio) */}
+                  <div className="relative mx-auto border-gray-800 dark:border-gray-900 bg-gray-900 border-[10px] rounded-[2.5rem] shadow-[20px_20px_40px_rgba(0,0,0,0.4),-10px_-10px_30px_rgba(255,255,255,0.05)] overflow-hidden">
+                      {/* Buttons */}
+                      <div className="h-[32px] w-[3px] bg-gray-800 absolute -start-[13px] top-[72px] rounded-s-lg"></div>
+                      <div className="h-[46px] w-[3px] bg-gray-800 absolute -start-[13px] top-[124px] rounded-s-lg"></div>
+                      <div className="h-[46px] w-[3px] bg-gray-800 absolute -start-[13px] top-[178px] rounded-s-lg"></div>
+                      <div className="h-[64px] w-[3px] bg-gray-800 absolute -end-[13px] top-[142px] rounded-e-lg"></div>
+                      
+                      {/* Screen Container: Gunakan Aspect Ratio agar tidak gepeng/kepotong */}
+                      <div className="rounded-[2rem] overflow-hidden w-full h-auto aspect-[9/19] bg-bg-main relative">
+                          <img 
+                            src={heroScreenshot} 
+                            alt="App Screenshot" 
+                            className="object-cover object-top w-full h-full opacity-90 hover:scale-105 transition-transform duration-700" 
+                          />
+                          <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-bg-main via-transparent to-transparent opacity-20"></div>
+                      </div>
+                  </div>
+               </motion.div>
             </div>
           </div>
         </main>
 
-        {/* Embedded Chat Preview Section */}
-        <section className="py-16 md:py-24">
-          <AnimatedSection>
-            <div className="max-w-6xl mx-auto px-4">
-              <div className="text-center mb-12">
-                <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-4 tracking-tighter">EXPERIENCE THE TACTILE INTERFACE</motion.h2>
-                <motion.p variants={itemVariants} className="text-lg text-text-secondary max-w-2xl mx-auto">
-                  Our mutated neumorphic design creates a physical presence that feels substantial and interactive.
-                </motion.p>
-              </div>
-
-              <ChatPreview />
-            </div>
-          </AnimatedSection>
-        </section>
-
-        {/* Why Nyx Section */}
-        <section className="py-16 md:py-24">
+        {/* "Why NYX" Section */}
+        <section className="py-16 md:py-24 bg-bg-main/50 backdrop-blur-sm">
           <AnimatedSection>
             <div className="max-w-4xl mx-auto px-4 text-center">
               <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">WHY NYX?</motion.h2>
@@ -316,30 +266,83 @@ export default function LandingPage() {
                 Tired of complicated sign-ups and mandatory app downloads? NYX is your solution. Access it instantly from your favorite browser—no installation needed.
               </motion.p>
               <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary">
-                Worried about your data? We are too. NYX is built on a foundation of privacy, acting only as a secure bridge between you and your contacts. Your data is yours, and yours alone.
+                Worried about your data? We are too. NYX is built on a foundation of privacy, acting only as a secure bridge between you and your contacts.
               </motion.p>
             </div>
           </AnimatedSection>
         </section>
 
-        {/* Features Section */}
+        {/* COMPARISON TABLE (New Section) */}
+        <section className="py-16 md:py-24">
+          <AnimatedSection>
+            <div className="max-w-5xl mx-auto px-4">
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">NYX vs. THE GIANTS</motion.h2>
+              
+              <div className="bg-bg-surface rounded-3xl p-6 md:p-8 shadow-[inset_3px_3px_6px_rgba(0,0,0,0.2),inset_-3px_-3px_6px_rgba(255,255,255,0.05)] overflow-x-auto">
+                <table className="w-full min-w-[600px] border-separate border-spacing-y-4">
+                  <thead>
+                    <tr className="text-text-secondary text-sm uppercase tracking-wider">
+                      <th className="text-left py-4 px-6">Feature</th>
+                      <th className="py-4 px-4 font-normal">WhatsApp</th>
+                      <th className="py-4 px-4 font-normal">Telegram</th>
+                      <th className="py-4 px-6 text-accent font-black text-lg">NYX</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comparisonData.map((row, idx) => (
+                      <motion.tr key={idx} variants={itemVariants} className="group">
+                        <td className="py-4 px-6 font-bold text-text-primary bg-bg-main rounded-l-xl shadow-[2px_2px_5px_rgba(0,0,0,0.1)] border-r border-transparent">
+                          {row.feature}
+                        </td>
+                        <td className="py-4 px-4 text-center text-red-500 bg-bg-main/50">
+                          <div className="flex items-center justify-center gap-2">
+                            {row.wa === "Yes" || row.wa === "Required" ? <FiX/> : null} {row.wa}
+                          </div>
+                        </td>
+                        <td className="py-4 px-4 text-center text-yellow-500 bg-bg-main/50">
+                          {row.tg}
+                        </td>
+                        <td className="py-4 px-6 text-center text-green-500 font-bold bg-bg-main rounded-r-xl shadow-[inset_-2px_2px_5px_rgba(0,0,0,0.1)]">
+                          <div className="flex items-center justify-center gap-2">
+                            <FiCheck className="text-xl" /> {row.nyx}
+                          </div>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </AnimatedSection>
+        </section>
+
+        {/* Features Section (Merged) */}
         <section className="py-16 md:py-24" style={{ backgroundColor: theme === 'dark' ? '#222222' : '#e8e2d5' }}>
           <AnimatedSection>
             <div className="max-w-6xl mx-auto px-4">
               <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">FEATURES BUILT FOR PRIVACY</motion.h2>
               <motion.div variants={containerVariants} className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <FeatureCard icon={<FiLock size={24} className="text-accent" />} title="END-TO-END ENCRYPTION">
-                  Your messages are sealed. Only you and the recipient can read them, powered by the Double Ratchet algorithm.
+                
+                {/* New Feature: No Phone Number */}
+                <FeatureCard icon={<FiHash size={24} />} title="NO PHONE NUMBER">
+                  Sign up with just a Username. Your real identity stays safe. No one can 'save your contact' without permission.
                 </FeatureCard>
-                <FeatureCard icon={<FiKey size={24} className="text-accent" />} title="USER-CONTROLLED KEYS">
-                  You own your keys. Restore your account on any device with your unique 24-word recovery phrase.
+
+                {/* New Feature: Ghost App */}
+                <FeatureCard icon={<FiEyeOff size={24} />} title="GHOST APP (PWA)">
+                  Zero install. Open in browser, chat, close tab, and clear data. Zero forensic footprint left on your device.
                 </FeatureCard>
-                <FeatureCard icon={<FiSmartphone size={24} className="text-accent" />} title="SEAMLESS DEVICE LINKING">
-                  Securely link new devices using a simple QR code, without ever needing to re-enter your password.
+
+                {/* New Feature: Argon2 */}
+                <FeatureCard icon={<FiCpu size={24} />} title="ARGON2 SECURITY">
+                  The only web chat that turns your password into a military-grade encryption key using memory-hardened hashing.
                 </FeatureCard>
-                <FeatureCard icon={<div className="flex gap-2"><FiSun size={24} className="text-accent" /><FiMoon size={24} className="text-accent" /></div>} title="MUTATED NEUMORPHISM">
-                  A tactile, industrial interface with chiseled depth and grain texture for a premium physical feel.
+
+                {/* Old Feature: Neumorphism (Keep this as it's a design selling point) */}
+                <FeatureCard icon={<div className="flex gap-2"><FiSun size={24} /><FiMoon size={24} /></div>} title="TACTILE DESIGN">
+                  A mutated neumorphic interface with chiseled depth and grain texture for a premium physical feel.
                 </FeatureCard>
+
               </motion.div>
             </div>
           </AnimatedSection>
@@ -351,14 +354,14 @@ export default function LandingPage() {
             <div className="max-w-6xl mx-auto px-4">
               <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-16 tracking-tighter">SIMPLE, SECURE, TRANSPARENT.</motion.h2>
               <motion.div variants={containerVariants} className="relative grid md:grid-cols-3 gap-12">
-                <HowItWorksStep icon={<FiUserPlus size={24} className="text-accent" />} title="1. CREATE YOUR ACCOUNT">
-                  Sign up and automatically generate your unique, private encryption keys.
+                <HowItWorksStep icon={<FiUserPlus size={24} />} title="1. CREATE ACCOUNT">
+                  Sign up via username. We automatically generate your 24-word recovery phrase for encryption.
                 </HowItWorksStep>
-                <HowItWorksStep icon={<FiMessageSquare size={24} className="text-accent" />} title="2. START A CONVERSATION">
-                  Your messages are end-to-end encrypted from the very first word.
+                <HowItWorksStep icon={<FiMessageSquare size={24} />} title="2. START CHATTING">
+                  Your messages are end-to-end encrypted from the very first word using the Signal Protocol.
                 </HowItWorksStep>
-                <HowItWorksStep icon={<FiShield size={24} className="text-accent" />} title="3. VERIFY YOUR CONTACTS" isLast>
-                  Use Safety Numbers to ensure you're talking to the right person, free from man-in-the-middle attacks.
+                <HowItWorksStep icon={<FiShield size={24} />} title="3. VANISH">
+                  Done? Close the browser. Encryption keys are wiped from memory. No trace left behind.
                 </HowItWorksStep>
               </motion.div>
             </div>
@@ -389,13 +392,13 @@ export default function LandingPage() {
         <section className="py-16 md:py-24">
           <AnimatedSection>
             <div className="max-w-4xl mx-auto px-4 text-center">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">READY TO TAKE CONTROL OF YOUR PRIVACY?</motion.h2>
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">TAKE BACK YOUR PRIVACY.</motion.h2>
               <motion.p variants={itemVariants} className="text-lg text-text-secondary mb-8 max-w-2xl mx-auto">
-                Join thousands of users who trust NYX with their most sensitive conversations.
+                Don't let your data become a commodity. Switch to NYX today. Free, Open Source, Forever.
               </motion.p>
               <motion.div variants={itemVariants}>
                 <Link to="/register" className="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] transition-all inline-flex items-center">
-                  START SECURE MESSAGING NOW <FiArrowRight className="ml-2" />
+                  CREATE ANONYMOUS ACCOUNT <FiArrowRight className="ml-2" />
                 </Link>
               </motion.div>
             </div>
