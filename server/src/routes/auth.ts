@@ -559,7 +559,8 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
           isEmailVerified: true,
           showEmailToOthers: true,
           description: true,
-          hasCompletedOnboarding: true
+          hasCompletedOnboarding: true,
+          encryptedPrivateKey: true // Include encrypted key blob
         }
       })
 
@@ -570,7 +571,12 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
 
       res.clearCookie('webauthn_challenge')
 
-      res.json({ verified: true, user: safeUser, accessToken: tokens.access })
+      res.json({ 
+        verified: true, 
+        user: safeUser, 
+        accessToken: tokens.access,
+        encryptedPrivateKey: safeUser.encryptedPrivateKey 
+      })
     } else {
       res.status(400).json({ verified: false })
     }
