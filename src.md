@@ -1,161 +1,126 @@
-### 🛠️ Solusi: Encrypted Key Sync (Brankas Cloud)
 
-Lu tetep bisa ngelakuin **Zombie Cookie Removal** (hapus data lokal saat logout), TAPI lu harus nyimpen salinan **Encrypted Private Keys** di Server Database.
+Tentang 2 temuan tadi, ini analisis dan solusinya:
 
-**Konsepnya (Cara Bitwarden/Mega bekerja):**
+### 1. ⚠️ Replay Attack Protection [WARNING]
 
-1. **Register:** Kunci dienkripsi di browser (pake password) -> Simpan di IndexedDB -> **Kirim salinan terenkripsi ke Server**.
-* *Server cuma nerima teks acak (ciphertext), server gak tau password lu, jadi aman.*
+* **Masalah:** Auditor khawatir kalau ada orang nyegat pesan terenkripsi lu, terus dikirim ulang (replay) nanti, pesannya bakal diterima lagi.
+* **Analisis Gw:** Karena lu udah pake **Double Ratchet** (`ensureAndRatchetSession` statusnya PASS), peringatan ini **BISA DIABAIKAN**.
+* Dalam Double Ratchet, setiap pesan pake kunci baru. Kalau hacker kirim ulang pesan lama, penerima bakal nolak karena kuncinya udah "expired" (ratchet udah maju). Jadi lu udah aman secara arsitektur.
 
 
-2. **Logout:** Hapus IndexedDB sampai bersih (Zombie Removal). Aman, karena backup ada di server.
-3. **Login:** User masukin password -> Server balikin Token + **Encrypted Private Keys**.
-4. **Client:** Browser nyimpen lagi kunci itu ke IndexedDB -> Dekripsi pake password yang baru diinput -> **SIAP CHAT!**
+
+### 2. ❌ Memory Wiping [FAIL] -> **(WAJIB FIX)**
+
+* **Masalah:** Variabel sensitif (Private Key) di `crypto.worker.ts` dibiarin numpuk di memori nunggu *Garbage Collector* browser ngehapus (yang entah kapan).
+* **Risiko:** Kalau ada malware di browser user atau *Advanced Persistent Threat (APT)* yang bisa dump RAM browser, kunci lu bisa kebaca.
+* **Solusi:** Kita harus manual "menghancurkan" variabel kunci segera setelah dipake menggunakan `sodium.memzero()`.
 
 ---
 
-### 🚀 Implementasi (3 Langkah)
+### 🛠️ Perbaikan Code: Memory Wiping
 
-Lu harus ubah dikit Database, Backend, dan Frontend.
+Buka file `web/src/workers/crypto.worker.ts`. Kita harus tambahkan `sodium.memzero()` di setiap variabel `Uint8Array` yang isinya kunci, tepat sebelum fungsi selesai (`break` atau `return`).
 
-#### Langkah 1: Update Database Schema (`prisma/schema.prisma`)
+Ini contoh perbaikannya (copy logic ini ke bagian yang relevan):
 
-Tambahkan kolom buat nyimpen blob kunci rahasia lu.
+#### A. Fix di bagian `DERIVE_KEY`
 
-```prisma
-model User {
-  id        String   @id @default(uuid())
-  username  String   @unique
-  // ... field lain ...
-  
-  // Tambahkan ini: Brankas buat nyimpen kunci terenkripsi
-  encryptedPrivateKey String?  @db.Text 
-}
+```typescript
+// web/src/workers/crypto.worker.ts
+
+      case 'DERIVE_KEY': {
+        const { password, salt } = payload;
+        const saltBuffer = new Uint8Array(salt); // Konversi ke Uint8Array
+
+        const derivedKey = await argon2id({
+          ...ARGON_CONFIG,
+          password,
+          salt: saltBuffer,
+        });
+        
+        // Kirim hasil
+        self.postMessage({ id, success: true, result: derivedKey });
+        
+        // [FIX] HAPUS DARI MEMORI
+        // Note: derivedKey gak bisa di-memzero kalau mau dikirim via postMessage (karena dipindah ownershipnya atau dicopy). 
+        // Tapi kita bisa wipe saltBuffer dan password (jika diubah ke buffer).
+        
+        // sodium.memzero(saltBuffer); <--- Contoh penggunaan
+        break;
+      }
 
 ```
 
-*Jangan lupa `npx prisma migrate dev` atau update manual di Supabase.*
+*Catatan: JavaScript string (password) susah di-wipe total karena immutable, tapi buffer `salt` bisa.*
 
-#### Langkah 2: Update Backend (`server/src/routes/auth.ts`)
+#### B. Fix di bagian `ENCRYPT_DATA` & `DECRYPT_DATA` (Ini Paling Penting)
 
-**A. Saat Register (`POST /register`)**
-Terima `encryptedPrivateKeys` dari body request dan simpan ke DB.
+Kunci yang masuk (`keyBytes`) harus dimusnahkan setelah dipake WebCrypto.
 
 ```typescript
-// Di dalam router.post("/register", ...)
-const { username, password, publicKey, signingKey, encryptedPrivateKeys } = req.body; // <--- Tambah ini
+// web/src/workers/crypto.worker.ts
 
-// ... validasi ...
+      case 'ENCRYPT_DATA': {
+        const { keyBytes, data } = payload; 
+        
+        // 1. Import Key ke WebCrypto
+        const key = await crypto.subtle.importKey(
+          'raw',
+          keyBytes,
+          { name: 'AES-GCM' },
+          false,
+          ['encrypt']
+        );
 
-const user = await prisma.user.create({
-  data: {
-    username,
-    password: hashedPassword,
-    publicKey,
-    signingKey,
-    encryptedPrivateKey: encryptedPrivateKeys, // <--- Simpan blob ini!
-    // ...
-  },
-});
+        // [FIX] WIPE RAW KEY BYTES SEGERA SETELAH IMPORT
+        // Karena WebCrypto udah nyimpen versi internalnya di objek 'key'
+        // Kita bisa hapus versi mentahnya (keyBytes) dari memori JS.
+        try {
+           // Cek apakah sodium ready, kalau pake sodium wrapper
+           // Atau loop manual isi 0
+           keyBytes.fill(0); 
+        } catch (e) { console.warn("Failed to wipe memory", e); }
+
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        // ... (lanjut enkripsi) ...
 
 ```
 
-**B. Saat Login (`POST /login`)**
-Kirim balik `encryptedPrivateKey` ke user biar bisa direstore.
+#### C. Fix di Fungsi Helper Sodium (Jika Ada)
+
+Kalau lu punya fungsi helper yang generate key pair pake Sodium, wipe seed-nya.
 
 ```typescript
-// Di dalam router.post("/login", ...)
+// Contoh di dalam storePrivateKeys atau generate logic
+const encryptionSeed = sodium.crypto_generichash(...)
+const keyPair = sodium.crypto_box_seed_keypair(encryptionSeed);
 
-// ... verifikasi password sukses ...
-
-res.json({
-  message: "Login successful",
-  accessToken,
-  user: {
-    id: user.id,
-    username: user.username,
-    // ...
-  },
-  // Kirim balik kuncinya (ini masih terenkripsi, aman dikirim lewat HTTPS)
-  encryptedPrivateKey: user.encryptedPrivateKey 
-});
+// [FIX] Wipe seed setelah keypair jadi
+sodium.memzero(encryptionSeed); 
 
 ```
 
-#### Langkah 3: Update Frontend (`web/src/store/auth.ts`)
+### Panduan Implementasi `sodium.memzero`
 
-Lu harus ubah logic `login` dan `register`.
+Karena lu pake `libsodium-wrappers`:
 
-**A. Update `registerAndGeneratePhrase**`
-Pastikan kirim kunci ke server.
+1. Pastikan objek `sodium` udah ready.
+2. Panggil `sodium.memzero(nama_variabel_uint8array)`.
+3. **HATI-HATI:** Jangan wipe variabel yang masih mau dipake di baris bawahnya, nanti error/datanya jadi kosong.
 
-```typescript
-// web/src/store/auth.ts
-
-// ... di dalam registerAndGeneratePhrase ...
-const { encryptedPrivateKeys } = await registerAndGenerateKeys(data.password);
-
-// Kirim ke API
-const res = await api("/api/auth/register", {
-  method: "POST",
-  body: JSON.stringify({
-    ...data,
-    // ... public keys ...
-    encryptedPrivateKeys // <--- Kirim ini ke server!
-  }),
-});
-
-```
-
-**B. Update `login**`
-Tangkap kunci dari server, simpan ke IndexedDB, baru lanjut.
+**Saran Gw:**
+Tambahin blok `try-finally` di worker lu.
 
 ```typescript
-// web/src/store/auth.ts
-
-login: async (credentials) => {
-  set({ isLoading: true, error: null });
+case 'SOME_SENSITIVE_OP': {
+  let sensitiveKey = ...;
   try {
-    // 1. Panggil API Login
-    const res = await api<{ accessToken: string; user: User; encryptedPrivateKey?: string }>("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify(credentials),
-    });
-
-    // 2. [KRUSIAL] Restore Kunci dari Server ke IndexedDB
-    if (res.encryptedPrivateKey) {
-      console.log("[Auth] Restoring encrypted keys from server backup...");
-      // Simpan kunci mentah (masih terenkripsi) ke IndexedDB
-      await saveEncryptedKeys(res.encryptedPrivateKey);
-      
-      // Simpan juga kunci auto-unlock baru (karena password diinput user saat login)
-      await saveDeviceAutoUnlockKey(credentials.password);
-      await setDeviceAutoUnlockReady(true);
-      
-      // Update state aplikasi biar tau kunci udah ada
-      set({ hasRestoredKeys: true });
-    } else {
-      console.warn("[Auth] No key backup found on server. New device?");
-    }
-
-    // 3. Lanjut set user session
-    set({ user: res.user, accessToken: res.accessToken });
-    // ... logic connect socket dll ...
-
-  } catch (error: any) {
-    // ... error handling ...
+     // Lakukan operasi enkripsi/dekripsi
+     // ...
+     self.postMessage(result);
   } finally {
-    set({ isLoading: false });
+     // [FIX] Pastikan kunci dihapus mau sukses atau error
+     if (sensitiveKey) sodium.memzero(sensitiveKey);
   }
-},
-
-```
-
-### Kesimpulan
-
-Dengan cara ini:
-
-1. **Security Audit Lolos:** Saat logout, lu panggil `clearKeys()` (Zombie Removal). Browser bersih total. Hacker yang buka laptop lu gak dapet apa-apa.
-2. **UX Aman:** Saat login, kunci ditarik dari server ("Download Backup") -> Disimpan ke IndexedDB -> Dibuka pake password yang baru diketik. User gak perlu regenerate key atau kehilangan akses chat.
-
-Ini adalah standar "Sync Encrypted Vault" yang dipake password manager dan wallet kripto. Aman dan nyaman.
+  break;
+}

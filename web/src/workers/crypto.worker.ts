@@ -30,53 +30,73 @@ async function _deriveKey(password: string, salt: Uint8Array): Promise<Uint8Arra
 }
 
 async function _encryptData(keyBytes: Uint8Array, data: any): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new Uint8Array(keyBytes), // Create a new Uint8Array to ensure standard ArrayBuffer
-    { name: 'AES-GCM' },
-    false,
-    ['encrypt']
-  );
+  try {
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(keyBytes),
+      { name: 'AES-GCM' },
+      false,
+      ['encrypt']
+    );
 
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encodedData = new TextEncoder().encode(JSON.stringify(data));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encodedData = new TextEncoder().encode(JSON.stringify(data));
 
-  const encryptedContent = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    encodedData
-  );
+    const encryptedContent = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      encodedData
+    );
 
-  return JSON.stringify({
-    iv: Array.from(iv),
-    data: Array.from(new Uint8Array(encryptedContent))
-  });
+    return JSON.stringify({
+      iv: Array.from(iv),
+      data: Array.from(new Uint8Array(encryptedContent))
+    });
+  } finally {
+    if (keyBytes && keyBytes.length > 0) {
+      try {
+        sodium.memzero(keyBytes);
+      } catch (e) {
+        keyBytes.fill(0);
+      }
+    }
+  }
 }
 
 async function _decryptData(keyBytes: Uint8Array, encryptedString: string): Promise<any> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new Uint8Array(keyBytes), // Create a new Uint8Array to ensure standard ArrayBuffer
-    { name: 'AES-GCM' },
-    false,
-    ['decrypt']
-  );
-
-  const { iv: ivArr, data: dataArr } = JSON.parse(encryptedString);
-  const iv = new Uint8Array(ivArr);
-  const ciphertext = new Uint8Array(dataArr);
-
-  const decryptedContent = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    ciphertext
-  );
-
-  const decryptedString = new TextDecoder().decode(decryptedContent);
   try {
-    return JSON.parse(decryptedString);
-  } catch {
-    return decryptedString;
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(keyBytes),
+      { name: 'AES-GCM' },
+      false,
+      ['decrypt']
+    );
+
+    const { iv: ivArr, data: dataArr } = JSON.parse(encryptedString);
+    const iv = new Uint8Array(ivArr);
+    const ciphertext = new Uint8Array(dataArr);
+
+    const decryptedContent = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      ciphertext
+    );
+
+    const decryptedString = new TextDecoder().decode(decryptedContent);
+    try {
+      return JSON.parse(decryptedString);
+    } catch {
+      return decryptedString;
+    }
+  } finally {
+    if (keyBytes && keyBytes.length > 0) {
+      try {
+        sodium.memzero(keyBytes);
+      } catch (e) {
+        keyBytes.fill(0);
+      }
+    }
   }
 }
 
@@ -101,13 +121,21 @@ async function storePrivateKeys(keys: {
   });
 
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  
-  // Directly call the internal helper functions
-  const kek = await _deriveKey(password, salt);
-  const encryptedData = await _encryptData(kek, privateKeysJson);
+  let kek: Uint8Array | null = null;
 
-  // Combine salt and encrypted data
-  return sodium.to_base64(salt, sodium.base64_variants[B64_VARIANT]) + '.' + encryptedData;
+  try {
+    // Directly call the internal helper functions
+    kek = await _deriveKey(password, salt);
+    const encryptedData = await _encryptData(kek, privateKeysJson);
+
+    // Combine salt and encrypted data
+    return sodium.to_base64(salt, sodium.base64_variants[B64_VARIANT]) + '.' + encryptedData;
+  } finally {
+    if (kek) {
+      try { sodium.memzero(kek); } catch { kek.fill(0); }
+    }
+    try { sodium.memzero(salt); } catch { salt.fill(0); }
+  }
 }
 
 type RetrievedKeys = {
@@ -122,6 +150,7 @@ type RetrieveKeysResult =
   | { success: false; reason: 'incorrect_password' | 'legacy_bundle' | 'keys_not_found' | 'decryption_failed' | 'app_secret_missing' };
 
 async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: string): Promise<RetrieveKeysResult> {
+    let kek: Uint8Array | null = null;
     try {
       if (!encryptedDataWithSaltStr) return { success: false, reason: 'keys_not_found' };
 
@@ -132,7 +161,7 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
       const encryptedString = parts[1];
       
       // Directly call the internal helper functions
-      const kek = await _deriveKey(password, salt);
+      kek = await _deriveKey(password, salt);
       const privateKeysJson = await _decryptData(kek, encryptedString);
 
       const keys = JSON.parse(privateKeysJson);
@@ -151,6 +180,10 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
       // Argon2id or subtle.decrypt can throw. If it's a decrypt error, it's likely a wrong password.
       console.error("Failed to retrieve private keys:", error);
       return { success: false, reason: 'incorrect_password' };
+    } finally {
+      if (kek) {
+        try { sodium.memzero(kek); } catch { kek.fill(0); }
+      }
     }
 }
 
@@ -220,21 +253,31 @@ self.onmessage = async (event: MessageEvent) => {
         const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
         const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
         
-        const encryptedPrivateKeys = await storePrivateKeys({
-          encryption: encryptionKeyPair.privateKey,
-          signing: signingKeyPair.privateKey,
-          signedPreKey: signedPreKeyPair.privateKey,
-          masterSeed: masterSeed
-        }, password);
+        try {
+          const encryptedPrivateKeys = await storePrivateKeys({
+            encryption: encryptionKeyPair.privateKey,
+            signing: signingKeyPair.privateKey,
+            signedPreKey: signedPreKeyPair.privateKey,
+            masterSeed: masterSeed
+          }, password);
 
-        const phrase = await bip39.entropyToMnemonic(Buffer.from(masterSeed) as any);
-        
-        result = {
-            encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
-            signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
-            encryptedPrivateKeys,
-            phrase
-        };
+          const phrase = await bip39.entropyToMnemonic(Buffer.from(masterSeed) as any);
+          
+          result = {
+              encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
+              signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
+              encryptedPrivateKeys,
+              phrase
+          };
+        } finally {
+          sodium.memzero(masterSeed);
+          sodium.memzero(encryptionSeed);
+          sodium.memzero(signingSeed);
+          sodium.memzero(signedPreKeySeed);
+          sodium.memzero(encryptionKeyPair.privateKey);
+          sodium.memzero(signingKeyPair.privateKey);
+          sodium.memzero(signedPreKeyPair.privateKey);
+        }
         break;
       }
       case 'retrievePrivateKeys': {
@@ -275,7 +318,11 @@ self.onmessage = async (event: MessageEvent) => {
         const publicKeyBytes = new Uint8Array(publicKey);
         const privateKeyBytes = new Uint8Array(privateKey);
         
-        result = sodium.crypto_box_seal_open(ciphertextBytes, publicKeyBytes, privateKeyBytes);
+        try {
+          result = sodium.crypto_box_seal_open(ciphertextBytes, publicKeyBytes, privateKeyBytes);
+        } finally {
+          sodium.memzero(privateKeyBytes);
+        }
         break;
       }
       case 'x3dh_initiator': {
@@ -293,17 +340,31 @@ self.onmessage = async (event: MessageEvent) => {
         const theirIdentityKeyBytes = new Uint8Array(theirIdentityKey);
         
         const ephemeralKeyPair = sodium.crypto_box_keypair();
-        const dh1 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirSignedPreKeyBytes);
-        const dh2 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirIdentityKeyBytes);
-        const dh3 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirSignedPreKeyBytes);
+        let sharedSecret: Uint8Array | null = null;
 
-        const sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
-        const sessionKey = sodium.crypto_generichash(32, sharedSecret);
+        try {
+          const dh1 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirSignedPreKeyBytes);
+          const dh2 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirIdentityKeyBytes);
+          const dh3 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirSignedPreKeyBytes);
 
-        result = {
-            sessionKey,
-            ephemeralPublicKey: sodium.to_base64(ephemeralKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-        };
+          sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
+          
+          // Wipe intermediate DH results immediately
+          sodium.memzero(dh1);
+          sodium.memzero(dh2);
+          sodium.memzero(dh3);
+
+          const sessionKey = sodium.crypto_generichash(32, sharedSecret);
+
+          result = {
+              sessionKey,
+              ephemeralPublicKey: sodium.to_base64(ephemeralKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+          };
+        } finally {
+          sodium.memzero(myIdentityKeyPrivateBytes);
+          sodium.memzero(ephemeralKeyPair.privateKey);
+          if (sharedSecret) sodium.memzero(sharedSecret);
+        }
         break;
       }
       case 'x3dh_recipient': {
@@ -314,12 +375,26 @@ self.onmessage = async (event: MessageEvent) => {
         const theirIdentityKeyBytes = new Uint8Array(theirIdentityKey);
         const theirEphemeralKeyBytes = new Uint8Array(theirEphemeralKey);
 
-        const dh1 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirIdentityKeyBytes);
-        const dh2 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirEphemeralKeyBytes);
-        const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirEphemeralKeyBytes);
-      
-        const sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
-        result = sodium.crypto_generichash(32, sharedSecret); // Returns the sessionKey
+        let sharedSecret: Uint8Array | null = null;
+
+        try {
+          const dh1 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirIdentityKeyBytes);
+          const dh2 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirEphemeralKeyBytes);
+          const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirEphemeralKeyBytes);
+        
+          sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
+          
+          // Wipe intermediate DH results immediately
+          sodium.memzero(dh1);
+          sodium.memzero(dh2);
+          sodium.memzero(dh3);
+
+          result = sodium.crypto_generichash(32, sharedSecret); // Returns the sessionKey
+        } finally {
+          sodium.memzero(myIdentityKeyPrivateBytes);
+          sodium.memzero(mySignedPreKeyPrivateBytes);
+          if (sharedSecret) sodium.memzero(sharedSecret);
+        }
         break;
       }
       case 'crypto_box_seal': {
@@ -380,18 +455,28 @@ self.onmessage = async (event: MessageEvent) => {
         const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
         const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
         
-        const encryptedPrivateKeys = await storePrivateKeys({
-          encryption: encryptionKeyPair.privateKey,
-          signing: signingKeyPair.privateKey,
-          signedPreKey: signedPreKeyPair.privateKey,
-          masterSeed: masterSeed
-        }, password);
+        try {
+          const encryptedPrivateKeys = await storePrivateKeys({
+            encryption: encryptionKeyPair.privateKey,
+            signing: signingKeyPair.privateKey,
+            signedPreKey: signedPreKeyPair.privateKey,
+            masterSeed: masterSeed
+          }, password);
 
-        result = {
-          encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
-          signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
-          encryptedPrivateKeys,
-        };
+          result = {
+            encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
+            signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
+            encryptedPrivateKeys,
+          };
+        } finally {
+          sodium.memzero(masterSeed);
+          sodium.memzero(encryptionSeed);
+          sodium.memzero(signingSeed);
+          sodium.memzero(signedPreKeySeed);
+          sodium.memzero(encryptionKeyPair.privateKey);
+          sodium.memzero(signingKeyPair.privateKey);
+          sodium.memzero(signedPreKeyPair.privateKey);
+        }
         break;
       }
       case 'generate_random_key': {
@@ -408,18 +493,30 @@ self.onmessage = async (event: MessageEvent) => {
         const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
         const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
 
-        const encryptedPrivateKeys = await storePrivateKeys({
-          encryption: encryptionKeyPair.privateKey,
-          signing: signingKeyPair.privateKey,
-          signedPreKey: signedPreKeyPair.privateKey,
-          masterSeed: masterKey,
-        }, newPassword);
+        try {
+          const encryptedPrivateKeys = await storePrivateKeys({
+            encryption: encryptionKeyPair.privateKey,
+            signing: signingKeyPair.privateKey,
+            signedPreKey: signedPreKeyPair.privateKey,
+            masterSeed: masterKey,
+          }, newPassword);
 
-        result = {
-          encryptedPrivateKeys,
-          encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
-          signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
-        };
+          result = {
+            encryptedPrivateKeys,
+            encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
+            signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
+          };
+        } finally {
+          // Note: payload.masterKey is likely a reference to the array passed in. 
+          // Wiping it is good practice, but since it came from postMessage it might be a copy.
+          try { sodium.memzero(masterKey); } catch {} 
+          sodium.memzero(encryptionSeed);
+          sodium.memzero(signingSeed);
+          sodium.memzero(signedPreKeySeed);
+          sodium.memzero(encryptionKeyPair.privateKey);
+          sodium.memzero(signingKeyPair.privateKey);
+          sodium.memzero(signedPreKeyPair.privateKey);
+        }
         break;
       }
       default:

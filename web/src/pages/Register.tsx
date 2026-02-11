@@ -189,6 +189,13 @@ export default function Register() {
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-teal-400 mb-2">EMAIL VERIFICATION</h2>
               <p className="text-stone-400">Confirm your email to activate your account</p>
+              
+              <div className="mt-4 p-3 bg-stone-800/80 border border-stone-700 rounded-lg shadow-inner">
+                 <p className="text-stone-400 text-xs flex items-start gap-2">
+                    <FiMail className="text-teal-500 flex-shrink-0 mt-0.5" />
+                    <span>If the code doesn't appear in your inbox, please check your <span className="text-teal-400 font-bold">Spam</span> or <span className="text-teal-400 font-bold">Junk</span> folder.</span>
+                 </p>
+              </div>
             </div>
 
             {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
