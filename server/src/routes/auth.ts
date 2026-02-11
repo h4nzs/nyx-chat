@@ -103,12 +103,13 @@ router.post('/register', authLimiter, zodValidate({
     name: z.string().min(1).max(80),
     publicKey: z.string().optional(),
     signingKey: z.string().optional(),
+    encryptedPrivateKeys: z.string().optional(), // New: Accept encrypted keys blob
     turnstileToken: z.string().optional() // Token dari frontend
   })
 }),
 async (req, res, next) => {
   try {
-    const { email, username, password, name, publicKey, signingKey, turnstileToken } = req.body
+    const { email, username, password, name, publicKey, signingKey, encryptedPrivateKeys, turnstileToken } = req.body
 
     // 1. Verifikasi Captcha
     const isHuman = await verifyTurnstileToken(turnstileToken || '')
@@ -130,6 +131,7 @@ async (req, res, next) => {
         name,
         publicKey,
         signingKey,
+        encryptedPrivateKey: encryptedPrivateKeys, // Store the encrypted blob
         isEmailVerified: false // Default false
       }
     })
@@ -270,7 +272,8 @@ async (req, res, next) => {
         showEmailToOthers: true,
         description: true,
         passwordHash: true, // Tetap diperlukan untuk verifikasi password
-        hasCompletedOnboarding: true
+        hasCompletedOnboarding: true,
+        encryptedPrivateKey: true // Retrieve the encrypted keys blob
       }
     })
 
@@ -295,24 +298,28 @@ async (req, res, next) => {
     }
 
     // Ambil ulang user tanpa passwordHash untuk response
-    const safeUser = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        isEmailVerified: true,
-        hasCompletedOnboarding: true,
-        description: true,
-        showEmailToOthers: true
-      }
-    })
+    // Note: We already selected encryptedPrivateKey above, so we can pass it directly
+    const safeUser = {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+        isEmailVerified: user.isEmailVerified,
+        hasCompletedOnboarding: user.hasCompletedOnboarding,
+        description: user.description,
+        showEmailToOthers: user.showEmailToOthers
+    }
 
     const tokens = await issueTokens(safeUser, req)
     setAuthCookies(res, tokens)
-    res.json({ user: safeUser, accessToken: tokens.access })
+    
+    // Return encryptedPrivateKey separately so client can restore it
+    res.json({ 
+      user: safeUser, 
+      accessToken: tokens.access,
+      encryptedPrivateKey: user.encryptedPrivateKey 
+    })
   } catch (e) {
     next(e)
   }

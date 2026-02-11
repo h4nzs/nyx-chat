@@ -35,6 +35,7 @@ model User {
   createdConversations Conversation[]           @relation("CreatedConversations")
   authenticators       Authenticator[]
   currentChallenge     String?
+  encryptedPrivateKey  String?    @db.Text
 
   // Relation to the simplified pre-key bundle
   preKeyBundle         PreKeyBundle?

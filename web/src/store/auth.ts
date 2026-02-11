@@ -247,10 +247,19 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       set({ isInitializingCrypto: true }); // Show loading for crypto init
 
       try {
-        const res = await api<{ user: User; accessToken: string }>("/api/auth/login", {
+        const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/login", {
           method: "POST",
           body: JSON.stringify({ emailOrUsername, password }),
         });
+
+        // [SYNC] Restore Encrypted Keys from Server if available
+        if (res.encryptedPrivateKey) {
+          console.log("[Auth] Restoring encrypted keys from server backup...");
+          await saveEncryptedKeys(res.encryptedPrivateKey);
+          await saveDeviceAutoUnlockKey(password);
+          await setDeviceAutoUnlockReady(true);
+          set({ hasRestoredKeys: true });
+        }
 
         const hasKeys = await hasStoredKeys();
 
@@ -375,7 +384,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           body: JSON.stringify({
             ...data,
             publicKey: encryptionPublicKeyB64,
-            signingKey: signingPublicKeyB64
+            signingKey: signingPublicKeyB64,
+            encryptedPrivateKeys // Upload kunci terenkripsi ke server
           }),
         });
 
@@ -451,7 +461,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         clearAuthCookies();
         privateKeysCache = null;
         localStorage.removeItem('user');
-        // await clearKeys(); // DO NOT clear keys on logout, user expects them to persist on the device.
+        await clearKeys(); // Restore secure behavior: Clear keys on logout.
 
         set({ user: null, accessToken: null });
 
