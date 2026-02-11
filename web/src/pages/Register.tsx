@@ -42,6 +42,7 @@ export default function Register() {
         if (storedState) {
           setUserId(storedState.userId);
           setEmailForVerify(storedState.email);
+          if (storedState.phrase) setRecoveryPhrase(storedState.phrase);
           setStep('otp');
         }
       });
@@ -93,7 +94,8 @@ export default function Register() {
           saveVerificationState({
             userId: result.userId!,
             email: result.email || email,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            phrase: result.phrase // Save the phrase!
           });
         });
         setStep('otp');
@@ -119,10 +121,7 @@ export default function Register() {
     try {
       await verifyEmail(userId, otpCode);
       toast.success("Email verified!");
-      // Clear the verification state since verification is completed
-      import('@utils/verificationPersistence').then(({ clearVerificationState }) => {
-        clearVerificationState();
-      });
+      // Don't clear verification state yet, we need the phrase for the next step!
       setStep('recovery'); // Pindah ke Recovery Phrase setelah sukses
     } catch (err: any) {
       // Tampilkan pesan kesalahan yang lebih spesifik
@@ -166,7 +165,13 @@ export default function Register() {
 
   // STEP 3: RECOVERY PHRASE
   if (step === 'recovery') {
-    return <RecoveryPhraseModal phrase={recoveryPhrase} onClose={() => navigate('/chat')} />
+    return <RecoveryPhraseModal phrase={recoveryPhrase} onClose={() => {
+      // Clear state only when finished
+      import('@utils/verificationPersistence').then(({ clearVerificationState }) => {
+        clearVerificationState();
+      });
+      navigate('/chat');
+    }} />
   }
 
   // STEP 2: OTP FORM
@@ -190,10 +195,12 @@ export default function Register() {
               <h2 className="text-2xl font-bold text-teal-400 mb-2">EMAIL VERIFICATION</h2>
               <p className="text-stone-400">Confirm your email to activate your account</p>
               
-              <div className="mt-4 p-3 bg-stone-800/80 border border-stone-700 rounded-lg shadow-inner">
-                 <p className="text-stone-400 text-xs flex items-start gap-2">
-                    <FiMail className="text-teal-500 flex-shrink-0 mt-0.5" />
-                    <span>If the code doesn't appear in your inbox, please check your <span className="text-teal-400 font-bold">Spam</span> or <span className="text-teal-400 font-bold">Junk</span> folder.</span>
+              <div className="mt-6 p-4 bg-cyan-900/20 border border-cyan-500/30 rounded-xl shadow-[0_0_15px_rgba(6,182,212,0.1)] backdrop-blur-sm">
+                 <p className="text-cyan-100/80 text-xs flex items-start gap-3">
+                    <FiMail className="text-cyan-400 flex-shrink-0 mt-0.5" size={16} />
+                    <span className="leading-relaxed">
+                      If the code doesn't appear in your inbox within 1 minute, please check your <span className="text-cyan-300 font-bold border-b border-cyan-500/50">Spam</span> or <span className="text-cyan-300 font-bold border-b border-cyan-500/50">Junk</span> folder.
+                    </span>
                  </p>
               </div>
             </div>

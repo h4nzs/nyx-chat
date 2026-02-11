@@ -6,6 +6,7 @@ export interface VerificationState {
   userId: string;
   email: string;
   timestamp: number; // Unix timestamp when state was saved
+  phrase?: string; // Optional recovery phrase
 }
 
 /**
@@ -26,7 +27,8 @@ function isValidVerificationState(obj: any): obj is VerificationState {
          typeof obj.email === 'string' &&
          typeof obj.timestamp === 'number' &&
          !isNaN(obj.timestamp) &&
-         obj.timestamp > 0;
+         obj.timestamp > 0 &&
+         (obj.phrase === undefined || typeof obj.phrase === 'string');
 }
 
 /**

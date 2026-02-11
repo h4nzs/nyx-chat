@@ -421,6 +421,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       if (res.user && res.accessToken) {
         set({ user: res.user, accessToken: res.accessToken });
         localStorage.setItem("user", JSON.stringify(res.user));
+        
+        // [FIX] Ensure app knows keys are present and loaded
+        set({ hasRestoredKeys: true });
+        await get().tryAutoUnlock(); 
+
         // Public keys and encrypted keys are already saved during registerAndGeneratePhrase
         setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
         connectSocket();
