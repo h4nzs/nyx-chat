@@ -414,7 +414,13 @@ export default function LandingPage() {
                 alt="NYX Logo"
                 className="w-6 h-6 mr-2"
               />
-              <p className="text-sm">&copy; {new Date().getFullYear()} NYX. ENGINEERED WITH PRECISION.</p>
+              <p className="text-sm">&copy; {new Date().getFullYear()} NYX Project. Open Source (MIT).</p>
+              {/* TAMBAHAN DISCLAIMER HUKUM */}
+              <p className="text-xs text-text-secondary/50 mt-8 max-w-2xl mx-auto">
+              WhatsApp is a registered trademark of Meta Platforms, Inc. Telegram is a registered trademark of Telegram FZ-LLC. 
+              NYX is an independent open-source project and is not affiliated with, endorsed by, or sponsored by these companies.
+              Comparisons are made for informational purposes based on public technical documentation available as of {new Date().getFullYear()}.
+              </p>
             </div>
           </div>
         </footer>
