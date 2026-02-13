@@ -414,7 +414,7 @@ export default function LandingPage() {
                 alt="NYX Logo"
                 className="w-6 h-6 mr-2"
               />
-              <p className="text-sm">&copy; {new Date().getFullYear()} NYX Project. Open Source (MIT).</p>
+              <p className="text-sm mt-4">&copy; {new Date().getFullYear()} NYX Project. Open Source (MIT).</p>
               {/* TAMBAHAN DISCLAIMER HUKUM */}
               <p className="text-xs text-text-secondary/50 mt-8 max-w-2xl mx-auto">
               WhatsApp is a registered trademark of Meta Platforms, Inc. Telegram is a registered trademark of Telegram FZ-LLC. 
