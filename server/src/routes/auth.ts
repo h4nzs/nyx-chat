@@ -313,7 +313,7 @@ async (req, res, next) => {
 
     const tokens = await issueTokens(safeUser, req)
     setAuthCookies(res, tokens)
-    
+
     // Return encryptedPrivateKey separately so client can restore it
     res.json({ 
       user: safeUser, 
