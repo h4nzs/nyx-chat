@@ -215,6 +215,9 @@ export default function Login() {
               <Link to="/restore" className="text-sm text-orange-500 hover:underline">Restore from phrase</Link>
               <Link to="/link-device" className="text-sm text-orange-500 hover:underline">Link a new device</Link>
             </div>
+            <div className="mt-4 pt-4 border-t border-stone-800">
+              <Link to="/privacy" className="text-xs text-stone-600 hover:text-stone-400 transition-colors">Privacy Policy & Terms</Link>
+            </div>
           </div>
         </div>
       </div>

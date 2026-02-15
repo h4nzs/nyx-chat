@@ -515,6 +515,7 @@ export default function SettingsPage() {
              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <ActionButton label="Help Center" icon={FiHelpCircle} onClick={() => navigate('/help')} />
                 <ActionButton label="Report Bug" icon={FiFlag} onClick={() => setShowReportModal(true)} />
+                <ActionButton label="Legal & Privacy" icon={FiShield} onClick={() => navigate('/privacy')} />
              </div>
           </ControlModule>
         </div>

@@ -357,6 +357,9 @@ export default function Register() {
             <p className="text-stone-500 text-sm">
               Already have an account? <Link to="/login" className="font-semibold text-teal-500 hover:underline">Login</Link>
             </p>
+            <div className="mt-4 pt-4 border-t border-stone-800">
+              <Link to="/privacy" className="text-xs text-stone-600 hover:text-stone-400 transition-colors">Privacy Policy & Terms</Link>
+            </div>
           </div>
         </div>
       </div>

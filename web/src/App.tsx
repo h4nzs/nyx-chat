@@ -17,6 +17,7 @@ const DeviceScannerPage = lazy(() => import('./pages/DeviceScannerPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const HelpPage = lazy(() => import('./pages/HelpPage'));
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -257,6 +258,7 @@ const AppContent = () => {
             <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
             <Route path="/link-device" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
             <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
+            <Route path="/privacy" element={<PageWrapper><PrivacyPage /></PageWrapper>} />
 
             {/* Protected Routes */}
             <Route element={<ProtectedRoute />}>
