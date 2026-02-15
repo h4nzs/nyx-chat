@@ -4,6 +4,9 @@ import { Toaster } from 'react-hot-toast';
 import { FiLogOut, FiSettings } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 
+// --- NEW: Google Analytics 4 Utils ---
+import { initGA, logPageView } from './utils/analytics'; // Pastikan lu udah bikin file ini ya!
+
 // Lazy Loaded Pages
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
@@ -131,6 +134,16 @@ const AppContent = () => {
   }, [addCommands, removeCommands, settingsAction, logoutAction]);
 
   // --- Lifecycle & Effects ---
+
+  // 0. NEW: Initialize GA4 on Mount
+  useEffect(() => {
+    initGA();
+  }, []);
+
+  // 0.5 NEW: Track Page Views on Route Change
+  useEffect(() => {
+    logPageView();
+  }, [location]);
 
   // 1. Bootstrap Auth
   useEffect(() => {
