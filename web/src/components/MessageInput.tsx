@@ -102,8 +102,12 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const isInputDisabled = !isConnected || isOtherParticipantBlocked;
 
   // Smart Reply Logic: Find last message NOT from me
-  const lastOtherMessage = [...messages].reverse().find(m => m.senderId !== user?.id && !m.fileUrl && !m.imageUrl && m.content);
-  const lastDecryptedText = lastOtherMessage?.content || null;
+  // [FIX] Ensure we only reply to the ABSOLUTE last message if it's from the other person
+  const absoluteLastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+  const isLastMessageFromOther = absoluteLastMessage?.senderId !== user?.id;
+  const isValidTextMessage = absoluteLastMessage && !absoluteLastMessage.fileUrl && !absoluteLastMessage.imageUrl && absoluteLastMessage.content;
+  
+  const lastDecryptedText = (isLastMessageFromOther && isValidTextMessage) ? (absoluteLastMessage.content || null) : null;
 
   // Debounced Link Preview
   const debouncedFetchPreview = useCallback(
