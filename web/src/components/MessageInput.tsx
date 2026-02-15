@@ -8,6 +8,8 @@ import { useConnectionStore } from '@store/connection';
 import { useAuthStore } from '@store/auth';
 import { useThemeStore } from '@store/theme';
 import LinkPreviewCard from './LinkPreviewCard';
+import SmartReply from './SmartReply';
+import { useMessageStore } from '@store/message';
 
 // --- Types ---
 interface MessageInputProps {
@@ -79,6 +81,8 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview } = useMessageInputStore();
   const { status: connectionStatus } = useConnectionStore();
   const blockedUserIds = useAuthStore(state => state.blockedUserIds);
+  const user = useAuthStore(state => state.user);
+  const messages = useMessageStore(state => state.messages[conversation.id] || []);
   const theme = useThemeStore(state => state.theme);
 
   // Voice State
@@ -96,6 +100,10 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const isConnected = connectionStatus === 'connected';
   const hasText = text.trim().length > 0;
   const isInputDisabled = !isConnected || isOtherParticipantBlocked;
+
+  // Smart Reply Logic: Find last message NOT from me
+  const lastOtherMessage = [...messages].reverse().find(m => m.senderId !== user?.id && !m.fileUrl && !m.imageUrl && m.content);
+  const lastDecryptedText = lastOtherMessage?.content || null;
 
   // Debounced Link Preview
   const debouncedFetchPreview = useCallback(
@@ -136,6 +144,13 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
     onSend({ content: text });
     setText('');
     clearTypingLinkPreview();
+  };
+
+  const handleSmartReplySelect = (reply: string) => {
+    setText(reply);
+    if (isConnected) {
+        onTyping(); // Trigger typing indicator
+    }
   };
 
   const handleStartRecording = async () => {
@@ -180,17 +195,23 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
 
   return (
     <div className="
-      p-4 bg-bg-main border-t border-white/10
+      bg-bg-main border-t border-white/10
       z-20 relative
     ">
       {/* Previews Stack */}
-      <div className="absolute bottom-full left-0 w-full px-4">
-        <ReplyPreview />
-        {typingLinkPreview && (
-          <div className="mb-2">
-            <LinkPreviewCard preview={typingLinkPreview} />
-          </div>
-        )}
+      <div className="absolute bottom-full left-0 w-full">
+        <SmartReply 
+            lastMessage={lastDecryptedText} 
+            onSelectReply={handleSmartReplySelect} 
+        />
+        <div className="px-4">
+            <ReplyPreview />
+            {typingLinkPreview && (
+            <div className="mb-2">
+                <LinkPreviewCard preview={typingLinkPreview} />
+            </div>
+            )}
+        </div>
       </div>
 
       {/* Emoji Picker Popover */}
@@ -209,7 +230,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
 
       {/* Input Module */}
       {isOtherParticipantBlocked ? (
-        <div className="flex items-center justify-between p-4 bg-red-500/10 rounded-xl border border-red-500/20">
+        <div className="flex items-center justify-between p-4 bg-red-500/10 rounded-xl border border-red-500/20 m-4">
           <div className="flex items-center gap-3 text-red-500">
             <FiAlertTriangle size={20} />
             <span className="font-bold text-sm">TRANSMISSION BLOCKED</span>
@@ -223,7 +244,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
         </div>
       ) : isRecording ? (
         // Voice Recording Mode
-        <div className="flex items-center gap-4 animate-fade-in">
+        <div className="flex items-center gap-4 animate-fade-in p-4">
           <button 
             onClick={handleStopRecording} 
             className="
@@ -246,8 +267,9 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
         // Text Input Mode - TRENCH DESIGN
         <form onSubmit={handleSubmit} className="
           relative flex items-center gap-2 p-2 rounded-2xl
-          bg-bg-main w-full
+          bg-bg-main w-full m-4
           shadow-neu-pressed dark:shadow-neu-pressed-dark
+          max-w-[calc(100%-2rem)]
         ">
           
           {/* Action Buttons (Left) */}
