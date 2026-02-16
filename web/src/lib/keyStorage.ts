@@ -85,8 +85,10 @@ export const getDeviceAutoUnlockReady = async (): Promise<boolean> => {
  */
 export const clearKeys = async () => {
   try {
-    // Clear session keys first
-    await clearSessionKeys();
+    // [CHANGE] Jangan hapus session keys saat logout.
+    // Jika dihapus, user tidak bisa membaca history chat lama saat login kembali.
+    // Keamanan tetap terjaga karena Master Key (yang membuka akses identitas) dihapus.
+    // await clearSessionKeys();
     
     await del(STORAGE_KEYS.ENCRYPTED_KEYS);
     await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
