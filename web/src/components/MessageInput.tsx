@@ -206,6 +206,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
       <div className="absolute bottom-full left-0 w-full">
         <SmartReply 
             lastMessage={lastDecryptedText} 
+            isFromMe={!isLastMessageFromOther}
             onSelectReply={handleSmartReplySelect} 
         />
         <div className="px-4">

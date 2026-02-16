@@ -4,17 +4,18 @@ import { useSettingsStore } from '../store/settings';
 
 interface SmartReplyProps {
   lastMessage: string | null;
+  isFromMe?: boolean;
   onSelectReply: (reply: string) => void;
 }
 
-export default function SmartReply({ lastMessage, onSelectReply }: SmartReplyProps) {
+export default function SmartReply({ lastMessage, isFromMe, onSelectReply }: SmartReplyProps) {
   const { enableSmartReply } = useSettingsStore();
   const [replies, setReplies] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    // Don't call AI if disabled or no text
-    if (!enableSmartReply || !lastMessage) {
+    // Don't call AI if disabled, no text, or if the message is from me
+    if (!enableSmartReply || !lastMessage || isFromMe) {
       setReplies([]);
       return;
     }
@@ -34,11 +35,11 @@ export default function SmartReply({ lastMessage, onSelectReply }: SmartReplyPro
       }
     };
 
-    // Debounce to prevent spamming the API
-    const timer = setTimeout(fetchReplies, 1500);
+    // Debounce to prevent spamming the API (reduced to 500ms)
+    const timer = setTimeout(fetchReplies, 500);
     return () => clearTimeout(timer);
     
-  }, [lastMessage, enableSmartReply]);
+  }, [lastMessage, enableSmartReply, isFromMe]);
 
   if (!enableSmartReply || (replies.length === 0 && !loading)) return null;
 

@@ -465,8 +465,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       } finally {
         clearAuthCookies();
         privateKeysCache = null;
+        
+        // [FIX] Clear keys BEFORE removing user, because getDb() needs the userId from localStorage
+        await clearKeys(); 
+        
         localStorage.removeItem('user');
-        await clearKeys(); // Restore secure behavior: Clear keys on logout.
 
         set({ user: null, accessToken: null });
 

@@ -16,27 +16,26 @@ router.post('/smart-reply', requireAuth, generalLimiter, async (req, res) => {
     }
 
     // Use Flash model for speed
-    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+      }
+    });
     
     // Strict Prompt Engineering for JSON Array output
-    const prompt = `You are an AI that generates short chat replies.
-Based on this incoming message: "${message}"
-
-Create 3 short reply options (max 3 words per reply) in the language detected from the message (casual/professional as appropriate).
-STRICT RULE: The output MUST be a pure JSON Array without markdown formatting (no backticks/code blocks).
-Example output: ["Gas", "idk", "Let's go"]`;
+    const prompt = `You are a chat AI. Based on this message: "${message}"
+Create 3 short casual reply options (max 3 words per reply) in the same language.
+Output must be a JSON array of strings.`;
 
     const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
-
+    
     let replies: string[] = [];
     
     try {
-      // Clean up markdown json if present
-      const cleanText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-      replies = JSON.parse(cleanText);
+      replies = JSON.parse(result.response.text());
     } catch (parseError) {
-      console.error('Failed to parse Gemini JSON:', responseText);
+      console.error('Failed to parse Gemini JSON:', parseError);
       // Manual fallback
       replies = ["Ok", "Got it", "Thanks"]; 
     }

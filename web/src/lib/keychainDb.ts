@@ -1,16 +1,27 @@
 
 import { openDB, IDBPDatabase } from 'idb';
 
-const DB_NAME = 'keychain-db';
 const SESSION_KEYS_STORE_NAME = 'session-keys';
 const GROUP_KEYS_STORE_NAME = 'group-keys';
 const DB_VERSION = 2;
 
-let dbPromise: Promise<IDBPDatabase> | null = null;
+// Cache DB connections by userId to handle switching accounts without reloading
+const dbCache = new Map<string, Promise<IDBPDatabase>>();
 
 function getDb(): Promise<IDBPDatabase> {
-  if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
+  const savedUser = localStorage.getItem("user");
+  const user = savedUser ? JSON.parse(savedUser) : null;
+  const userId = user?.id;
+
+  if (!userId) {
+    // If called during logout after localStorage clear, we might want to fail gracefully
+    // But ideally clearKeys should be called BEFORE clearing localStorage.
+    return Promise.reject(new Error("Database access denied: No active user session found."));
+  }
+
+  if (!dbCache.has(userId)) {
+    const dbName = `keychain-db-${userId}`;
+    const promise = openDB(dbName, DB_VERSION, {
       upgrade(db, oldVersion) {
         if (oldVersion < 1) {
           db.createObjectStore(SESSION_KEYS_STORE_NAME);
@@ -20,8 +31,10 @@ function getDb(): Promise<IDBPDatabase> {
         }
       },
     });
+    dbCache.set(userId, promise);
   }
-  return dbPromise;
+  
+  return dbCache.get(userId)!;
 }
 
 /**
