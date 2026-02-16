@@ -1,5 +1,6 @@
 // web/src/lib/keyStorage.ts
 import { get, set, del } from 'idb-keyval';
+import { clearAllKeys as clearSessionKeys } from './keychainDb';
 
 const STORAGE_KEYS = {
   ENCRYPTED_KEYS: 'nyx_encrypted_keys',
@@ -84,6 +85,9 @@ export const getDeviceAutoUnlockReady = async (): Promise<boolean> => {
  */
 export const clearKeys = async () => {
   try {
+    // Clear session keys first
+    await clearSessionKeys();
+    
     await del(STORAGE_KEYS.ENCRYPTED_KEYS);
     await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
     await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_READY);

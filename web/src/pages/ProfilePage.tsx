@@ -8,6 +8,8 @@ import { toast } from 'react-hot-toast';
 
 type ProfileUser = User & {
   createdAt?: string;
+  isEmailVerified?: boolean;
+  publicKey?: string;
 };
 
 export default function ProfilePage() {
@@ -50,8 +52,8 @@ export default function ProfilePage() {
   }, [userId, me, isMe]);
 
   const stats = [
-    { label: 'Security Clearance', value: 'LEVEL 4', color: 'text-emerald-500', icon: FiShield },
-    { label: 'Encryption Protocol', value: 'AES-256-GCM', color: 'text-accent', icon: FiKey },
+    { label: 'Security Clearance', value: profileUser?.isEmailVerified ? 'VERIFIED' : 'UNVERIFIED', color: profileUser?.isEmailVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
+    { label: 'Encryption Protocol', value: profileUser?.publicKey ? 'ACTIVE' : 'INACTIVE', color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', icon: FiKey },
     { label: 'Home Server', value: 'ap-southeast-1', color: 'text-blue-500', icon: FiGlobe },
     { label: 'Session Status', value: 'ENCRYPTED', color: 'text-emerald-500', icon: FiActivity },
   ];
@@ -217,6 +219,18 @@ export default function ProfilePage() {
                     className="w-full bg-bg-main rounded-xl px-4 py-3 font-medium text-text-primary outline-none border-none shadow-neu-pressed dark:shadow-neu-pressed-dark focus:ring-1 focus:ring-accent/50 disabled:opacity-60 disabled:cursor-not-allowed resize-none transition-all"
                   />
                 </div>
+
+                {profileUser.email && (
+                  <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-text-secondary ml-1">Secure Contact</label>
+                    <input
+                      type="text"
+                      value={profileUser.email}
+                      disabled={true}
+                      className="w-full bg-bg-main/50 rounded-xl px-4 py-3 font-mono text-sm text-text-primary outline-none border-none shadow-neu-pressed dark:shadow-neu-pressed-dark opacity-70 cursor-not-allowed"
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -229,11 +243,7 @@ export default function ProfilePage() {
                 Public Identity Key
               </h3>
               <div className="font-mono text-[10px] leading-relaxed text-text-secondary break-all bg-black/5 dark:bg-black/20 p-4 rounded-lg border border-black/5 dark:border-white/5 shadow-neu-pressed dark:shadow-neu-pressed-dark">
-                {/* Simulated Key Data - In real app, format actual public key */}
-                30 82 01 0a 02 82 01 01 00 c4 23 88 a1 99 b2 77 12 00 22 41 9a 33 ff 12 
-                ab 11 90 23 88 12 33 44 55 66 77 88 99 aa bb cc dd ee ff 00 11 22 33 44 
-                55 66 77 88 99 aa bb cc dd ee ff 00 11 22 33 44 55 66 77 88 99 aa bb cc 
-                dd ee ff 00 11 22 33 44 55 66 77 88 99 aa bb cc dd ee ff ...
+                {profileUser.publicKey || "Key not generated yet."}
               </div>
               {isMe && (
                 <div className="mt-4 flex gap-4">
