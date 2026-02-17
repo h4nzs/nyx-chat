@@ -56,7 +56,12 @@ function setAuthCookies (res: Response, { access, refresh }: { access: string; r
 }
 
 async function issueTokens (user: any, req: any) {
-  const access = signAccessToken({ id: user.id, email: user.email, username: user.username })
+  const access = signAccessToken({ 
+    id: user.id, 
+    email: user.email, 
+    username: user.username,
+    role: user.role 
+  })
   const jti = newJti()
   const refresh = signAccessToken({ sub: user.id, jti }, { expiresIn: '30d' })
 
@@ -273,11 +278,23 @@ async (req, res, next) => {
         description: true,
         passwordHash: true, // Tetap diperlukan untuk verifikasi password
         hasCompletedOnboarding: true,
-        encryptedPrivateKey: true // Retrieve the encrypted keys blob
+        encryptedPrivateKey: true, // Retrieve the encrypted keys blob
+        role: true,
+        bannedAt: true,
+        banReason: true
       }
     })
 
     if (!user) throw new ApiError(401, 'Invalid credentials')
+    
+    // Cek Banned
+    if (user.bannedAt) {
+      return res.status(403).json({ 
+        error: 'ACCESS DENIED: Your account has been suspended.',
+        reason: user.banReason 
+      })
+    }
+
     const ok = await verifyPassword(password, user.passwordHash)
     if (!ok) throw new ApiError(401, 'Invalid credentials')
 
@@ -308,7 +325,8 @@ async (req, res, next) => {
         isEmailVerified: user.isEmailVerified,
         hasCompletedOnboarding: user.hasCompletedOnboarding,
         description: user.description,
-        showEmailToOthers: user.showEmailToOthers
+        showEmailToOthers: user.showEmailToOthers,
+        role: user.role
     }
 
     const tokens = await issueTokens(safeUser, req)
@@ -370,10 +388,18 @@ router.post('/refresh', async (req, res, next) => {
         username: true,
         name: true,
         avatarUrl: true,
-        isEmailVerified: true
+        isEmailVerified: true,
+        role: true,
+        bannedAt: true,
+        banReason: true
       }
     })
     if (!user) throw new ApiError(401, 'User not found')
+    
+    if (user.bannedAt) {
+      throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
+    }
+
     const tokens = await issueTokens(user, req)
     setAuthCookies(res, tokens)
     res.json({ ok: true, accessToken: tokens.access })
@@ -560,11 +586,18 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
           showEmailToOthers: true,
           description: true,
           hasCompletedOnboarding: true,
-          encryptedPrivateKey: true // Include encrypted key blob
+          encryptedPrivateKey: true, // Include encrypted key blob
+          role: true,
+          bannedAt: true,
+          banReason: true
         }
       })
 
       if (!safeUser) throw new ApiError(404, 'User not found')
+
+      if (safeUser.bannedAt) {
+        return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.', reason: safeUser.banReason })
+      }
 
       const tokens = await issueTokens(safeUser, req)
       setAuthCookies(res, tokens)

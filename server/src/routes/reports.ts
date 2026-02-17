@@ -2,8 +2,48 @@ import { Router } from 'express'
 import { requireAuth } from '../middleware/auth.js'
 import { env } from '../config.js'
 import { generalLimiter } from '../middleware/rateLimiter.js'
+import { prisma } from '../lib/prisma.js'
 
 const router: Router = Router()
+
+router.post('/user', generalLimiter, requireAuth, async (req, res) => {
+  try {
+    const { reportedUserId, reason } = req.body
+    const reporter = req.user!
+
+    const reportedUser = await prisma.user.findUnique({ where: { id: reportedUserId } })
+
+    if (!env.discordReportWebhookUrl) {
+        console.warn('⚠️ DISCORD_REPORT_WEBHOOK_URL is not set.')
+        return res.json({ success: true })
+    }
+
+    const discordPayload = {
+      username: 'NYX Watchdog',
+      embeds: [{
+        title: "🚨 USER REPORT",
+        color: 16711680, // Merah Darah
+        fields: [
+          { name: "Reporter", value: `${reporter.username} (\`${reporter.id}\`)`, inline: true },
+          { name: "Reported User", value: `${reportedUser?.username || 'Unknown'} (\`${reportedUserId}\`)`, inline: true },
+          { name: "Reason", value: reason || 'No reason provided' },
+        ],
+        timestamp: new Date().toISOString(),
+      }]
+    }
+
+    await fetch(env.discordReportWebhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(discordPayload)
+    })
+
+    res.json({ success: true })
+  } catch (error) {
+    console.error('Failed to report user:', error)
+    res.status(500).json({ error: 'Failed to send report' })
+  }
+})
 
 router.post('/', generalLimiter, requireAuth, async (req, res, _next) => {
   try {

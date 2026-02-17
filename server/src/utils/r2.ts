@@ -2,7 +2,7 @@ import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '../config.js'
 
-const r2 = new S3Client({
+export const s3Client = new S3Client({
   region: 'auto',
   endpoint: `https://${env.r2AccountId}.r2.cloudflarestorage.com`,
   credentials: {
@@ -19,7 +19,7 @@ export const getPresignedUploadUrl = async (key: string, contentType: string) =>
     ContentType: contentType
   })
 
-  const url = await getSignedUrl(r2, command, { expiresIn: 300 })
+  const url = await getSignedUrl(s3Client, command, { expiresIn: 300 })
 
   return url
 }
@@ -31,7 +31,7 @@ export const deleteR2File = async (key: string) => {
     Key: key
   })
 
-  const result = await r2.send(command)
+  const result = await s3Client.send(command)
 
   return result
 }

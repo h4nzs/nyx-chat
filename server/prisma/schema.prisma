@@ -25,6 +25,9 @@ model User {
   isEmailVerified Boolean  @default(false) // Tambahkan ini
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
+  role               String    @default("USER") // Bisa diisi "ADMIN" buat akun lu doang
+  bannedAt           DateTime? // Kalau ada isinya, berarti dia dibanned
+  banReason          String?   // Catatan buat nampilin pesan ke user pas login gagal
 
   messages             Message[]
   participants         Participant[]

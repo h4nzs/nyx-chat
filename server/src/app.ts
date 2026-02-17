@@ -19,6 +19,7 @@ import previewsRouter from "./routes/previews.js";
 import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
 import aiRoutes from "./routes/ai.js";
+import adminRouter from "./routes/admin.js";
 import webpush from "web-push";
 import { generalLimiter } from "./middleware/rateLimiter.js";
 import { reportRoutes } from "./routes/reports.js";
@@ -271,6 +272,7 @@ app.use("/api/uploads", uploadsRouter);
 app.use("/api/previews", previewsRouter);
 app.use("/api/session-keys", sessionKeysRouter);
 app.use("/api/reports", reportRoutes);
+app.use("/api/admin", adminRouter);
 app.use("/api/sessions", sessionsRouter);
 app.use("/api/ai", aiRoutes);
 

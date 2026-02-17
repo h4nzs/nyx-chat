@@ -18,6 +18,7 @@ const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const HelpPage = lazy(() => import('./pages/HelpPage'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -269,6 +270,7 @@ const AppContent = () => {
               <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
               <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
               <Route path="/settings/link-device" element={<PageWrapper><DeviceScannerPage /></PageWrapper>} />
+              <Route path="/admin-console" element={<PageWrapper><AdminDashboard /></PageWrapper>} />
 
               <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
             </Route>

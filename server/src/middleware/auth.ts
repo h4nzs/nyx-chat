@@ -26,6 +26,17 @@ export function requireAuth (req: Request, res: Response, next: NextFunction) {
   }
 }
 
+export const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user || req.user.role !== 'ADMIN') {
+      return res.status(403).json({ error: 'Access Denied: Admins Only' })
+    }
+    next()
+  } catch (error) {
+    res.status(403).json({ error: 'Forbidden' })
+  }
+}
+
 // === Helper untuk verifikasi token ===
 export function verifySocketAuth (token?: string): AuthPayload | null {
   if (!token) return null

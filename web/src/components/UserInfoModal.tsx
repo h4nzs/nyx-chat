@@ -5,6 +5,7 @@ import { toAbsoluteUrl } from '@utils/url';
 import { authFetch, handleApiError } from '@lib/api';
 import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
+import toast from 'react-hot-toast';
 
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
@@ -95,6 +96,22 @@ export default function UserInfoModal() {
 
     } catch (e: any) {
       setError(e.message || "Failed to generate safety number.");
+    }
+  };
+
+  const handleReportUser = async () => {
+    if (!user) return;
+    const reason = prompt("Enter reason for reporting this user:");
+    if (!reason) return;
+    
+    try {
+      await authFetch('/api/reports/user', {
+        method: 'POST',
+        body: JSON.stringify({ reportedUserId: user.id, reason })
+      });
+      toast.success("Report submitted successfully.");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to submit report.");
     }
   };
 
@@ -227,6 +244,19 @@ export default function UserInfoModal() {
                           Block Signal
                         </button>
                       )}
+                      
+                      <button
+                        onClick={handleReportUser}
+                        className="
+                          w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
+                          bg-bg-main text-text-secondary
+                          shadow-neu-flat dark:shadow-neu-flat-dark 
+                          active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark
+                          hover:text-yellow-500 transition-all
+                        "
+                      >
+                        Report Signal
+                      </button>
                     </>
                   )}
                 </div>
