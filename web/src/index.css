@@ -104,8 +104,10 @@
   }
 
   html, body, #root {
-    @apply h-full text-text-primary;
+    @apply h-dvh min-h-dvh text-text-primary;
     background-color: hsl(var(--bg-main));
+    /* Fallback for older browsers not supporting dvh */
+    min-height: 100vh; 
   }
 
   body {

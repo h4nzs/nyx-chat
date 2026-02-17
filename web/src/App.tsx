@@ -248,7 +248,7 @@ const AppContent = () => {
       <ChatInfoModal />
       <DynamicIsland />
 
-      <div className="w-full h-full max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
+      <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
         <Suspense fallback={<LoadingScreen />}>
           <Routes>
             {/* Public Routes */}
