@@ -281,11 +281,18 @@ router.post(
         tempId,
         fileKey,
         sessionId,
-        repliedToId
+        repliedToId,
+        expiresIn
       } = req.body
 
       if (!fileUrl) throw new ApiError(400, 'Missing fileUrl.')
       if (!fileKey) throw new ApiError(400, 'Missing encrypted key (E2EE required).')
+
+      // Calculate expiration time if provided
+      let expiresAt: Date | undefined
+      if (expiresIn && typeof expiresIn === 'number' && expiresIn > 0) {
+        expiresAt = new Date(Date.now() + expiresIn * 1000)
+      }
 
       // Validasi ukuran file berdasarkan jenisnya
       if (fileSize) {
@@ -336,6 +343,7 @@ router.post(
             fileKey,
             sessionId,
             repliedToId,
+            expiresAt, // Add expiration time
             fileName,
             fileType, // ex: "image/jpeg;encrypted=true"
             fileSize,
