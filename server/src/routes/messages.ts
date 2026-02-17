@@ -6,6 +6,7 @@ import { ApiError } from '../utils/errors.js'
 import { getSecureLinkPreview } from '../utils/secureLinkPreview.js'
 import { sendPushNotification } from '../utils/sendPushNotification.js'
 import { deleteR2File } from '../utils/r2.js' // Pastikan fungsi ini ada di utils/r2.ts
+import { env } from '../config.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -240,10 +241,11 @@ router.delete('/:id', async (req, res, next) => {
     if (message.senderId !== userId) return res.status(403).json({ error: 'You can only delete your own messages' })
 
     // Hapus file dari R2 jika ada
-    if (message.fileKey) {
+    if (message.fileUrl && message.fileUrl.includes(env.r2PublicDomain)) {
+      const key = message.fileUrl.replace(`${env.r2PublicDomain}/`, '')
       // Fire and forget delete R2, biar API cepet
-      deleteR2File(message.fileKey).catch(err =>
-        console.error(`[R2] Failed to delete file ${message.fileKey}:`, err)
+      deleteR2File(key).catch(err =>
+        console.error(`[R2] Failed to delete file ${key}:`, err)
       )
     }
 
