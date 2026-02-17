@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX } from 'react-icons/fi';
+import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import clsx from 'clsx';
 import { useMessageInputStore } from '@store/messageInput';
@@ -28,6 +28,13 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
     timeout = setTimeout(() => func(...args), waitFor);
   };
 }
+
+const DURATIONS = [
+  { label: 'Off', value: null },
+  { label: '1m', value: 60 },
+  { label: '1h', value: 3600 },
+  { label: '24h', value: 86400 },
+];
 
 const ReplyPreview = () => {
   const { replyingTo, setReplyingTo } = useMessageInputStore(state => ({
@@ -75,10 +82,12 @@ const ReplyPreview = () => {
 export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSend, conversation }: MessageInputProps) {
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showTimerMenu, setShowTimerMenu] = useState(false); // Timer Menu State
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const timerMenuRef = useRef<HTMLDivElement>(null);
   
-  const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview } = useMessageInputStore();
+  const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, expiresIn, setExpiresIn } = useMessageInputStore();
   const { status: connectionStatus } = useConnectionStore();
   const blockedUserIds = useAuthStore(state => state.blockedUserIds);
   const user = useAuthStore(state => state.user);
@@ -101,12 +110,10 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const hasText = text.trim().length > 0;
   const isInputDisabled = !isConnected || isOtherParticipantBlocked;
 
-  // Smart Reply Logic: Find last message NOT from me
-  // [FIX] Ensure we only reply to the ABSOLUTE last message if it's from the other person
+  // Smart Reply Logic
   const absoluteLastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
   const isLastMessageFromOther = absoluteLastMessage?.senderId !== user?.id;
   const isValidTextMessage = absoluteLastMessage && !absoluteLastMessage.fileUrl && !absoluteLastMessage.imageUrl && absoluteLastMessage.content;
-  
   const lastDecryptedText = (isLastMessageFromOther && isValidTextMessage) ? (absoluteLastMessage.content || null) : null;
 
   // Debounced Link Preview
@@ -115,11 +122,14 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
     [fetchTypingLinkPreview]
   );
 
-  // Close Emoji Picker on Click Outside
+  // Close Popovers on Click Outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
         setShowEmojiPicker(false);
+      }
+      if (timerMenuRef.current && !timerMenuRef.current.contains(event.target as Node)) {
+        setShowTimerMenu(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -153,7 +163,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const handleSmartReplySelect = (reply: string) => {
     setText(reply);
     if (isConnected) {
-        onTyping(); // Trigger typing indicator
+        onTyping();
     }
   };
 
@@ -233,6 +243,26 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
         </div>
       )}
 
+      {/* Disappearing Messages Menu */}
+      {showTimerMenu && (
+        <div ref={timerMenuRef} className="absolute bottom-20 left-16 z-50 bg-bg-surface border border-white/10 rounded-xl shadow-xl overflow-hidden min-w-[120px]">
+          <div className="p-2 text-[10px] uppercase font-bold text-text-secondary border-b border-white/5">Auto-Delete</div>
+          {DURATIONS.map((opt) => (
+            <button
+              key={opt.label}
+              onClick={() => { setExpiresIn(opt.value); setShowTimerMenu(false); }}
+              className={clsx(
+                "w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors flex items-center justify-between",
+                expiresIn === opt.value ? "text-orange-500 font-bold" : "text-text-primary"
+              )}
+            >
+              {opt.label}
+              {expiresIn === opt.value && <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Input Module */}
       {isOtherParticipantBlocked ? (
         <div className="flex items-center justify-between p-4 bg-red-500/10 rounded-xl border border-red-500/20 m-4">
@@ -294,6 +324,18 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
             </button>
             <button 
               type="button" 
+              onClick={() => setShowTimerMenu(!showTimerMenu)} 
+              disabled={isInputDisabled}
+              aria-label="Set disappearing message timer"
+              className={clsx(
+                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark",
+                expiresIn ? "text-orange-500 bg-orange-500/10" : "text-text-secondary hover:text-orange-500"
+              )}
+            >
+              <FiClock size={18} />
+            </button>
+            <button 
+              type="button" 
               onClick={() => setShowEmojiPicker(!showEmojiPicker)} 
               disabled={isInputDisabled}
               aria-label="Insert emoji"
@@ -317,7 +359,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               onChange={handleTextChange}
               disabled={isInputDisabled}
               aria-label="Message text"
-              placeholder={isConnected ? "Transmit secure message..." : "Connection Lost"}
+              placeholder={isConnected ? (expiresIn ? "Disappearing message..." : "Transmit secure message...") : "Connection Lost"}
               className="
                 w-full bg-transparent border-none outline-none 
                 text-text-primary placeholder:text-text-secondary/50

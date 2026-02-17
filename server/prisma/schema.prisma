@@ -7,6 +7,7 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  extensions = [pg_trgm]
 }
 
 model User {
@@ -119,6 +120,7 @@ model Message {
   statuses            MessageStatus[]
   reactions           MessageReaction[]
   linkPreview         Json?
+  expiresAt           DateTime?
 
   repliedToId         String?         @map("replied_to_id")
   repliedTo           Message?        @relation("Replies", fields: [repliedToId], references: [id], onDelete: SetNull, onUpdate: NoAction)

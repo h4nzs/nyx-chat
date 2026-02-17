@@ -141,6 +141,21 @@ export function getSocket() {
       removeMessage(conversationId, id);
     });
 
+    socket.on("messages:expired", ({ messageIds }: { messageIds: string[] }) => {
+      const { messages, removeMessage } = useMessageStore.getState();
+      // Optimization: create a set for faster lookup
+      const expiredSet = new Set(messageIds);
+      
+      Object.keys(messages).forEach(conversationId => {
+        const conversationMessages = messages[conversationId] || [];
+        conversationMessages.forEach(msg => {
+          if (expiredSet.has(msg.id)) {
+            removeMessage(conversationId, msg.id);
+          }
+        });
+      });
+    });
+
     socket.on("presence:init", (onlineUserIds) => setOnlineUsers(onlineUserIds));
     socket.on("presence:user_joined", (userId) => userJoined(userId));
     socket.on("presence:user_left", (userId) => userLeft(userId));

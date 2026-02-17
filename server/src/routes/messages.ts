@@ -70,9 +70,15 @@ router.post('/', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const senderId = req.user.id
-    const { conversationId, content, fileUrl, fileName, fileType, fileSize, duration, fileKey, sessionId, repliedToId, tempId } = req.body
+    const { conversationId, content, fileUrl, fileName, fileType, fileSize, duration, fileKey, sessionId, repliedToId, tempId, expiresIn } = req.body
 
     if (!conversationId) return res.status(400).json({ error: 'conversationId is required.' })
+
+    // Calculate expiration time if provided
+    let expiresAt: Date | undefined
+    if (expiresIn && typeof expiresIn === 'number' && expiresIn > 0) {
+      expiresAt = new Date(Date.now() + expiresIn * 1000)
+    }
 
     // 1. Ambil Participants
     const participants = await prisma.participant.findMany({
@@ -173,6 +179,7 @@ router.post('/', async (req, res, next) => {
           fileKey,
           sessionId,
           repliedToId,
+          expiresAt, // Store expiration time
           linkPreview: linkPreviewData ?? undefined,
           statuses: {
             createMany: { data: statusData as any } // createMany lebih cepat dari nested create
