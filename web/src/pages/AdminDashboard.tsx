@@ -1,15 +1,32 @@
 import { useEffect, useState } from 'react';
 import { authFetch } from '@lib/api';
 import toast from 'react-hot-toast';
+import BanUserModal from '@components/BanUserModal';
+import { useModalStore } from '@store/modal';
+import { FiRefreshCw, FiUnlock, FiAlertTriangle } from 'react-icons/fi';
+
+interface BannedUser {
+  id: string;
+  username: string;
+  email: string;
+  bannedAt: string;
+  banReason: string;
+}
 
 export default function AdminDashboard() {
   const [metrics, setMetrics] = useState<any>(null);
-  const [searchId, setSearchId] = useState('');
-  const [loadingAction, setLoadingAction] = useState(false);
+  const [bannedUsers, setBannedUsers] = useState<BannedUser[]>([]);
+  const [isBanModalOpen, setIsBanModalOpen] = useState(false);
+  const { showConfirm } = useModalStore();
 
   useEffect(() => {
-    loadMetrics();
+    loadAllData();
   }, []);
+
+  const loadAllData = () => {
+    loadMetrics();
+    loadBannedUsers();
+  };
 
   const loadMetrics = () => {
     authFetch('/api/admin/system-status')
@@ -17,56 +34,51 @@ export default function AdminDashboard() {
       .catch((err: any) => toast.error("Failed to load metrics"));
   };
 
-  const handleBan = async () => {
-    if (!searchId) return toast.error("Enter User ID");
-    const reason = prompt("Enter ban reason:");
-    if (!reason) return;
-
-    setLoadingAction(true);
-    try {
-      await authFetch('/api/admin/ban', {
-        method: 'POST',
-        body: JSON.stringify({ userId: searchId, reason })
-      });
-      toast.success("User Banned & Kicked!");
-      loadMetrics(); // Refresh stats
-    } catch (e: any) {
-      toast.error(e.message || "Failed to ban");
-    } finally {
-      setLoadingAction(false);
-    }
+  const loadBannedUsers = () => {
+    authFetch<BannedUser[]>('/api/admin/banned-users')
+      .then((res) => setBannedUsers(res))
+      .catch((err) => console.error("Failed to load banned users", err));
   };
 
-  const handleUnban = async () => {
-    if (!searchId) return toast.error("Enter User ID");
-    if (!confirm("Unban this user?")) return;
-
-    setLoadingAction(true);
-    try {
-      await authFetch('/api/admin/unban', {
-        method: 'POST',
-        body: JSON.stringify({ userId: searchId })
-      });
-      toast.success("User Unbanned!");
-      loadMetrics();
-    } catch (e: any) {
-      toast.error(e.message || "Failed to unban");
-    } finally {
-      setLoadingAction(false);
-    }
+  const handleUnban = (user: BannedUser) => {
+    showConfirm(
+      "Unban User",
+      `Are you sure you want to lift the ban for @${user.username}?`,
+      async () => {
+        try {
+          await authFetch('/api/admin/unban', {
+            method: 'POST',
+            body: JSON.stringify({ userId: user.id })
+          });
+          toast.success(`User @${user.username} unbanned!`);
+          loadAllData();
+        } catch (e: any) {
+          toast.error(e.message || "Failed to unban user.");
+        }
+      }
+    );
   };
 
   if (!metrics) return (
-    <div className="flex items-center justify-center h-screen bg-bg-main text-text-secondary font-mono">
+    <div className="flex items-center justify-center h-screen bg-bg-main text-text-secondary font-mono animate-pulse">
       INITIALIZING SYSTEM LINK...
     </div>
   );
 
   return (
     <div className="min-h-screen bg-bg-main text-text-primary p-8 font-mono overflow-y-auto">
-      <h1 className="text-2xl text-accent mb-6 tracking-widest border-b border-white/10 pb-4">
-        NYX MISSION CONTROL
-      </h1>
+      <div className="flex items-center justify-between mb-8 border-b border-white/10 pb-4">
+        <h1 className="text-2xl text-accent tracking-widest font-bold">
+          NYX MISSION CONTROL
+        </h1>
+        <button 
+          onClick={loadAllData} 
+          className="p-2 hover:bg-white/5 rounded-full text-text-secondary transition-colors"
+          title="Refresh Data"
+        >
+          <FiRefreshCw size={20} />
+        </button>
+      </div>
       
       {/* Grid Statistik */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -95,40 +107,80 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Control Panel Ban */}
-      <div className="bg-bg-surface p-8 rounded-xl border border-red-500/20 shadow-lg max-w-2xl">
-        <h2 className="text-lg text-red-500 mb-6 font-bold flex items-center gap-2">
-          <span>⚠️</span> ENFORCEMENT PROTOCOL
-        </h2>
-        <div className="flex gap-4 flex-col md:flex-row">
-          <input 
-            type="text" 
-            placeholder="Target User ID..." 
-            className="bg-bg-main p-3 rounded-lg text-text-primary border border-white/10 flex-1 outline-none focus:border-red-500 transition-colors"
-            value={searchId}
-            onChange={(e) => setSearchId(e.target.value)}
-          />
-          <div className="flex gap-2">
+      {/* Enforcement Panel */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Ban Action */}
+        <div className="lg:col-span-1">
+          <div className="bg-bg-surface p-8 rounded-xl border border-red-500/20 shadow-lg">
+            <h2 className="text-lg text-red-500 mb-6 font-bold flex items-center gap-2">
+              <FiAlertTriangle /> ENFORCEMENT
+            </h2>
+            <p className="text-sm text-text-secondary mb-6 leading-relaxed">
+              Suspend user access immediately. This action will forcibly disconnect the user and prevent future logins.
+            </p>
             <button 
-                onClick={handleBan} 
-                disabled={loadingAction}
-                className="bg-red-500 px-6 py-3 rounded-lg text-white font-bold hover:bg-red-600 disabled:opacity-50 transition-all shadow-lg shadow-red-500/20"
+                onClick={() => setIsBanModalOpen(true)} 
+                className="w-full bg-red-500 px-6 py-3 rounded-lg text-white font-bold hover:bg-red-600 transition-all shadow-lg shadow-red-500/20"
             >
-                BAN
-            </button>
-            <button 
-                onClick={handleUnban} 
-                disabled={loadingAction}
-                className="bg-green-600 px-6 py-3 rounded-lg text-white font-bold hover:bg-green-700 disabled:opacity-50 transition-all shadow-lg shadow-green-500/20"
-            >
-                UNBAN
+                OPEN BAN TERMINAL
             </button>
           </div>
         </div>
-        <p className="text-xs text-text-secondary mt-4 opacity-60">
-           Total Banned Users: {metrics.db.bannedUsers}
-        </p>
+
+        {/* Banned Users List */}
+        <div className="lg:col-span-2">
+          <div className="bg-bg-surface rounded-xl border border-white/10 shadow-lg overflow-hidden flex flex-col h-[500px]">
+            <div className="p-4 border-b border-white/10 bg-white/5 flex justify-between items-center">
+              <h3 className="font-bold text-sm tracking-wider">SUSPENDED ACCOUNTS ({bannedUsers.length})</h3>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {bannedUsers.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-text-secondary opacity-50">
+                  <FiUnlock size={32} className="mb-2" />
+                  <p>No active suspensions</p>
+                </div>
+              ) : (
+                bannedUsers.map(user => (
+                  <div key={user.id} className="bg-bg-main p-4 rounded-lg border border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-bold text-red-400">@{user.username}</span>
+                        <span className="text-xs text-text-secondary bg-white/5 px-2 py-0.5 rounded">{user.email}</span>
+                      </div>
+                      <div className="text-xs text-text-secondary font-mono mb-1">ID: {user.id}</div>
+                      <div className="text-xs text-text-secondary">
+                        <span className="opacity-60">Reason:</span> <span className="italic text-white/80">"{user.banReason}"</span>
+                      </div>
+                      <div className="text-[10px] text-text-secondary mt-1 opacity-50">
+                        Banned: {new Date(user.bannedAt).toLocaleString()}
+                      </div>
+                    </div>
+                    
+                    <button 
+                      onClick={() => handleUnban(user)}
+                      className="
+                        flex items-center gap-2 px-4 py-2 rounded-lg 
+                        bg-green-500/10 text-green-500 border border-green-500/20
+                        hover:bg-green-500 hover:text-white transition-all text-xs font-bold uppercase
+                        self-start md:self-center
+                      "
+                    >
+                      <FiUnlock /> Unban
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       </div>
+
+      <BanUserModal 
+        isOpen={isBanModalOpen} 
+        onClose={() => setIsBanModalOpen(false)}
+        onSuccess={loadAllData}
+      />
     </div>
   );
 }

@@ -54,6 +54,26 @@ router.get('/system-status', requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+// 1.5 Get Banned Users List
+router.get('/banned-users', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const bannedUsers = await prisma.user.findMany({
+      where: { bannedAt: { not: null } },
+      select: {
+        id: true,
+        username: true,
+        email: true,
+        bannedAt: true,
+        banReason: true
+      },
+      orderBy: { bannedAt: 'desc' }
+    });
+    res.json(bannedUsers);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch banned users' });
+  }
+});
+
 // 2. Ban User
 router.post('/ban', requireAuth, requireAdmin, async (req, res) => {
   const { userId, reason } = req.body;
