@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock } from 'react-icons/fi';
+import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import clsx from 'clsx';
 import { useMessageInputStore } from '@store/messageInput';
@@ -84,9 +84,11 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showTimerMenu, setShowTimerMenu] = useState(false); // Timer Menu State
+  const [showPlusMenu, setShowPlusMenu] = useState(false); // Mobile Plus Menu State
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const timerMenuRef = useRef<HTMLDivElement>(null);
+  const plusMenuRef = useRef<HTMLDivElement>(null);
   
   const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, expiresIn, setExpiresIn } = useMessageInputStore();
   const { status: connectionStatus } = useConnectionStore();
@@ -132,6 +134,9 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
       if (timerMenuRef.current && !timerMenuRef.current.contains(event.target as Node)) {
         setShowTimerMenu(false);
       }
+      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
+        setShowPlusMenu(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -151,6 +156,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const handleEmojiClick = (emojiData: EmojiClickData) => {
     setText(prev => prev + emojiData.emoji);
     setShowEmojiPicker(false);
+    setShowPlusMenu(false); // Close plus menu if open
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -252,7 +258,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
           {DURATIONS.map((opt) => (
             <button
               key={opt.label}
-              onClick={() => { setExpiresIn(opt.value); setShowTimerMenu(false); }}
+              onClick={() => { setExpiresIn(opt.value); setShowTimerMenu(false); setShowPlusMenu(false); }}
               className={clsx(
                 "w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors flex items-center justify-between",
                 expiresIn === opt.value ? "text-orange-500 font-bold" : "text-text-primary"
@@ -262,6 +268,33 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               {expiresIn === opt.value && <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Mobile Plus Menu */}
+      {showPlusMenu && (
+        <div ref={plusMenuRef} className="absolute bottom-full left-4 mb-2 z-50 bg-bg-surface border border-white/10 rounded-xl shadow-xl overflow-hidden min-w-[160px] flex flex-col p-1">
+          <button
+            onClick={() => { fileInputRef.current?.click(); setShowPlusMenu(false); }}
+            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
+          >
+            <FiPaperclip size={18} />
+            <span>Attachment</span>
+          </button>
+          <button
+            onClick={() => { setShowTimerMenu(true); setShowPlusMenu(false); }}
+            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
+          >
+            <FiClock size={18} className={expiresIn ? "text-orange-500" : ""} />
+            <span>Auto-Delete</span>
+          </button>
+          <button
+            onClick={() => { setShowEmojiPicker(true); setShowPlusMenu(false); }}
+            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
+          >
+            <FiSmile size={18} />
+            <span>Emoji</span>
+          </button>
         </div>
       )}
 
@@ -309,8 +342,8 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
           max-w-[calc(100%-2rem)]
         ">
           
-          {/* Action Buttons (Left) */}
-          <div className="flex items-center gap-1">
+          {/* Action Buttons (Desktop) */}
+          <div className="hidden md:flex items-center gap-1">
             <button 
               type="button" 
               onClick={() => fileInputRef.current?.click()} 
@@ -348,6 +381,24 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               "
             >
               <FiSmile size={18} />
+            </button>
+          </div>
+
+          {/* Action Button (Mobile) - Plus Menu Trigger */}
+          <div className="md:hidden flex items-center">
+            <button 
+              type="button" 
+              onClick={() => setShowPlusMenu(!showPlusMenu)}
+              disabled={isInputDisabled}
+              aria-label="More actions"
+              className={clsx(
+                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark",
+                showPlusMenu ? "text-accent bg-accent/10" : "text-text-secondary"
+              )}
+            >
+              <motion.div animate={{ rotate: showPlusMenu ? 45 : 0 }} transition={{ duration: 0.2 }}>
+                <FiPlus size={20} />
+              </motion.div>
             </button>
           </div>
 
