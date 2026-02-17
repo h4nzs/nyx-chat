@@ -7,9 +7,7 @@ import { FiClock } from "react-icons/fi";
 import FileAttachment from "./FileAttachment";
 import LinkPreviewCard from "./LinkPreviewCard";
 import LazyImage from "./LazyImage";
-import { useModalStore } from "@store/modal";
 import { useMessageStore } from "@store/message";
-import { toAbsoluteUrl } from "@utils/url";
 import { formatTime } from "@utils/date";
 import MarkdownMessage from "./MarkdownMessage";
 import VoiceMessagePlayer from "./VoiceMessagePlayer";
@@ -35,18 +33,15 @@ const ReplyQuote = ({ message }: { message: Message }) => {
 interface Props {
   message: Message;
   isOwn: boolean;
-  isGroup: boolean;
-  showAvatar: boolean;
-  showName: boolean;
+  // Props lain seperti showAvatar, showName, isGroup tidak lagi dipakai di sini
+  // karena Bubble ini hanya merender kontennya saja.
   onImageClick?: (message: Message) => void;
-  // Props ini sebelumnya ada di internal component, ditambahkan agar kompatibel
   isLastInSequence?: boolean;
   participants?: any[];
 }
 
-export default function MessageBubble({ message, isOwn, isGroup, showAvatar, showName, onImageClick, isLastInSequence = true }: Props) {
+export default function MessageBubble({ message, isOwn, onImageClick, isLastInSequence = true, participants = [] }: Props) {
   const { user } = useAuthStore();
-  const openProfileModal = useModalStore(state => state.openProfileModal);
   const [timeLeft, setTimeLeft] = useState<string | null>(null);
 
   useEffect(() => {
@@ -83,21 +78,18 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
     return () => clearInterval(interval);
   }, [message.expiresAt, message.deletedAt, message.id, message.conversationId]);
 
-  const handleAvatarClick = () => {
-    if (message.sender) {
-      openProfileModal(message.sender.id);
-    }
-  };
-
   const getStatusIcon = () => {
     if (!isOwn) return null;
     const statuses = message.statuses || [];
+    
+    // Logic from original code: check if read by ANYONE other than self
     const readCount = statuses.filter((s: MessageStatus) => s.status === 'READ' && s.userId !== user?.id).length;
     const deliveredCount = statuses.filter((s: MessageStatus) => s.status === 'DELIVERED').length;
 
-    if (readCount > 0) return <FaCheckDouble className="text-white/90 text-[10px]" />;
-    if (deliveredCount > 0) return <FaCheckDouble className="text-white/60 text-[10px]" />;
-    return <FaCheck className="text-white/60 text-[10px]" />;
+    // Restore green color for Read status
+    if (readCount > 0) return <FaCheckDouble size={14} className="text-green-400" />;
+    if (deliveredCount > 0) return <FaCheckDouble size={14} className="text-white/70" />;
+    return <FaCheck size={14} className="text-white/70" />;
   };
 
   const content = message.content || '';
@@ -106,7 +98,6 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
   const isVoiceMessage = message.fileType?.startsWith('audio/webm');
   const isDeleted = !!message.deletedAt;
 
-  // Restore Original Styling Logic
   const hasBubbleStyle = !isPlaceholder && !message.fileUrl || message.fileUrl && !isImage && !isVoiceMessage;
 
   const bubbleClasses = clsx(
@@ -123,105 +114,67 @@ export default function MessageBubble({ message, isOwn, isGroup, showAvatar, sho
   );
 
   return (
-    <div className={classNames("flex items-end gap-3 group mb-3", { 
-        "justify-end": isOwn, 
-        "justify-start": !isOwn 
-      })}>
-        
-      {/* Avatar (Left - Peer) - Restored Layout */}
-      {!isOwn && (
-        <div className="w-8 h-8 flex-shrink-0">
-          {showAvatar && message.sender ? (
-            <img
-              src={toAbsoluteUrl(message.sender.avatarUrl)}
-              alt={message.sender.username}
-              onClick={handleAvatarClick}
-              className="
-                w-8 h-8 rounded-full object-cover cursor-pointer 
-                shadow-neumorphic-convex hover:scale-105 transition-transform
-              "
-            />
-          ) : (
-            <div className="w-8"></div> 
+    <div className={bubbleClasses}>
+      {message.repliedTo && <ReplyQuote message={message.repliedTo} />}
+      
+      {isDeleted ? (
+        <span className="flex items-center gap-2 opacity-60">
+          🚫 Message deleted
+        </span>
+      ) : (
+        <>
+          {isVoiceMessage && message.fileUrl && (
+            <div className="p-2 w-[250px]">
+              <VoiceMessagePlayer message={message} />
+            </div>
           )}
-        </div>
+          
+          {message.fileUrl && isImage && (
+            <button onClick={() => onImageClick?.(message)} className="block w-full">
+              <LazyImage 
+                message={message} 
+                alt={message.fileName || 'Image attachment'} 
+                className="rounded-lg max-h-80 w-full object-cover cursor-pointer hover:opacity-95" 
+              />
+            </button>
+          )}
+          
+          {message.fileUrl && !isImage && !isVoiceMessage && (
+            <FileAttachment message={message} isOwn={isOwn} />
+          )}
+          
+          {!message.fileUrl && (
+            isPlaceholder ? (
+              <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
+            ) : (
+              <div className={classNames("text-base whitespace-pre-wrap break-words", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
+                <MarkdownMessage content={content} />
+              </div>
+            )
+          )}
+
+          {message.linkPreview && !message.fileUrl && (
+            <div className="mt-2">
+              <LinkPreviewCard preview={message.linkPreview} />
+            </div>
+          )}
+        </>
       )}
 
-      <div className={classNames("relative max-w-[85%] sm:max-w-[70%]", { "items-end": isOwn, "items-start": !isOwn })}>
-        
-        {/* Sender Name (Group) - Restored */}
-        {!isOwn && isGroup && showName && message.sender && (
-          <span 
-            onClick={handleAvatarClick}
-            className="text-[10px] font-bold text-accent ml-3 mb-1 block cursor-pointer hover:underline uppercase tracking-wide"
-          >
-            {message.sender.name || message.sender.username}
+      {/* Metadata Footer */}
+      <div className={clsx("text-xs mt-1.5 flex items-center gap-1.5 select-none", {
+        "absolute bottom-2 right-2 bg-black/40 backdrop-blur-sm px-1.5 py-0.5 rounded text-white shadow-sm": isImage && !message.content,
+        "justify-end": !isImage || message.content,
+        "text-white/80": isOwn && (!isImage || message.content), // Fix contrast for own messages
+        "text-text-secondary/80": !isOwn && (!isImage || message.content)
+      })}>
+        {timeLeft && (
+          <span className="flex items-center gap-1 text-[9px] font-bold text-red-500 bg-red-500/10 px-1 rounded animate-pulse mr-1">
+            <FiClock size={10} /> {timeLeft}
           </span>
         )}
-
-        <div className={bubbleClasses}>
-          {message.repliedTo && <ReplyQuote message={message.repliedTo} />}
-          
-          {isDeleted ? (
-            <span className="flex items-center gap-2 opacity-60">
-              🚫 Message deleted
-            </span>
-          ) : (
-            <>
-              {isVoiceMessage && message.fileUrl && (
-                <div className="p-2 w-[250px]">
-                  <VoiceMessagePlayer message={message} />
-                </div>
-              )}
-              
-              {message.fileUrl && isImage && (
-                <button onClick={() => onImageClick?.(message)} className="block w-full">
-                  <LazyImage 
-                    message={message} 
-                    alt={message.fileName || 'Image attachment'} 
-                    className="rounded-lg max-h-80 w-full object-cover cursor-pointer hover:opacity-95" 
-                  />
-                </button>
-              )}
-              
-              {message.fileUrl && !isImage && !isVoiceMessage && (
-                <FileAttachment message={message} isOwn={isOwn} />
-              )}
-              
-              {!message.fileUrl && (
-                isPlaceholder ? (
-                  <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
-                ) : (
-                  <div className={classNames("text-base whitespace-pre-wrap break-words", { "text-white/90": isOwn, "text-text-primary": !isOwn })}>
-                    <MarkdownMessage content={content} />
-                  </div>
-                )
-              )}
-
-              {message.linkPreview && !message.fileUrl && (
-                <div className="mt-2">
-                  <LinkPreviewCard preview={message.linkPreview} />
-                </div>
-              )}
-            </>
-          )}
-
-          {/* Metadata Footer with Timer - Integrated */}
-          <div className={clsx("text-xs mt-1.5 flex items-center gap-1.5", {
-            "absolute bottom-2 right-2 bg-black/40 backdrop-blur-sm px-1.5 py-0.5 rounded text-white shadow-sm": isImage && !message.content,
-            "justify-end": !isImage || message.content, // Fix alignment
-            "text-accent-foreground/60": isOwn && (!isImage || message.content),
-            "text-text-secondary/80": !isOwn && (!isImage || message.content)
-          })}>
-            {timeLeft && (
-              <span className="flex items-center gap-1 text-[9px] font-bold text-red-500 bg-red-500/10 px-1 rounded animate-pulse mr-1">
-                <FiClock size={10} /> {timeLeft}
-              </span>
-            )}
-            <span className="text-[9px] font-medium tracking-wide opacity-80">{formatTime(message.createdAt)}</span>
-            {isOwn && !isDeleted && getStatusIcon()}
-          </div>
-        </div>
+        <span className="text-[10px] font-medium tracking-wide opacity-90">{formatTime(message.createdAt)}</span>
+        {isOwn && !isDeleted && getStatusIcon()}
       </div>
     </div>
   );

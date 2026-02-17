@@ -128,23 +128,40 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
 
   return (
     <motion.div ref={ref} id={message.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }} className={clsx('group flex items-end gap-2', isFirstInSequence ? 'mt-3' : 'mt-1', mine ? 'justify-end' : 'justify-start', isHighlighted && 'bg-accent/10 rounded-lg p-1 -mx-1')}>
-      {!mine && <div className="w-8 flex-shrink-0 mb-1 self-end">{isLastInSequence && <img src={toAbsoluteUrl(message.sender?.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${message.sender?.name || 'U'}`} alt="Avatar" className="w-8 h-8 rounded-full bg-secondary object-cover" />}</div>}
-      <div className={`flex items-center gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
-        <div className="flex flex-col">
-          {!mine && isGroup && message.sender?.name && <p className="text-xs font-semibold mb-1 user-color-name" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>{message.sender.name}</p>}
+      {!mine && (
+        <div className="w-8 flex-shrink-0 mb-1 self-end">
+          {isLastInSequence && (
+            <img 
+              src={toAbsoluteUrl(message.sender?.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${message.sender?.name || 'U'}`} 
+              alt="Avatar" 
+              className="w-8 h-8 rounded-full bg-secondary object-cover shadow-sm cursor-pointer hover:scale-105 transition-transform" 
+              // Note: Avatar click handler is usually handled by parent or could be passed down. 
+              // For simplicity, we can leave it visual or add onClick if needed.
+            />
+          )}
+        </div>
+      )}
+      
+      <div className={`flex items-end gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
+        <div className={clsx("flex flex-col max-w-[85%] sm:max-w-[70%]", mine ? "items-end" : "items-start")}>
+          {!mine && isGroup && message.sender?.name && isFirstInSequence && (
+            <p className="text-[10px] font-bold mb-1 ml-1 user-color-name cursor-pointer hover:underline uppercase tracking-wide" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>
+              {message.sender.name}
+            </p>
+          )}
           
           <MessageBubble 
             message={message} 
             isOwn={mine} 
-            isGroup={isGroup}
-            showAvatar={false} // Avatar handled by MessageItem parent
-            showName={false} // Name handled by MessageItem parent
             onImageClick={onImageClick}
+            isLastInSequence={isLastInSequence}
           />
           
           <ReactionsDisplay reactions={message.reactions} />
         </div>
-        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+
+        {/* Dropdown Menu (Three dots / Actions) */}
+        <div className="opacity-0 group-hover:opacity-100 transition-opacity self-center mb-2">
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild><button className="p-1.5 rounded-full hover:bg-secondary"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-text-secondary" viewBox="0 0 20 20" fill="currentColor"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 12a2 2 0 110-4 2 2 0 010 4zm0-6a2 2 0 110-4 2 2 0 010 4z" /></svg></button></DropdownMenu.Trigger>
             <DropdownMenu.Portal>
