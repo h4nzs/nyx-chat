@@ -22,6 +22,7 @@ import { useKeychainStore } from "@store/keychain";
 import { useMessageStore } from '@store/message';
 import toast from 'react-hot-toast';
 import MarkdownMessage from './MarkdownMessage';
+import MessageBubble from "./MessageBubble"; // Import the external component
 
 const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
   const meId = useAuthStore((s) => s.user?.id);
@@ -37,57 +38,6 @@ const MessageStatusIcon = ({ message, participants }: { message: Message; partic
   const isDeliveredAll = otherParticipants.every((p: Participant) => statuses.some((s: MessageStatus) => s.userId === p.id && s.status === 'DELIVERED'));
   if (isDeliveredAll) return <FaCheckDouble size={16} />;
   return <FaCheck size={16} />;
-};
-
-const ReplyQuote = ({ message }: { message: Message }) => {
-  const authorName = message.sender?.name || 'User';
-  let contentPreview: string;
-  if (message.duration) contentPreview = 'Voice Message';
-  else if (message.fileName) contentPreview = message.fileName;
-  else if (message.fileUrl) contentPreview = 'File';
-  else contentPreview = message.content || '...';
-  return (
-    <div className="mb-1.5 p-2 rounded-lg bg-black/20 border-l-4 border-accent/50">
-      <p className="text-xs font-bold text-accent/80">{authorName}</p>
-      <div className="text-text-primary/70 truncate text-sm">
-        <MarkdownMessage content={contentPreview} />
-      </div>
-    </div>
-  );
-};
-
-const MessageBubble = ({ message, mine, isLastInSequence, onImageClick, participants }: { message: Message; mine: boolean; isLastInSequence: boolean; onImageClick: (message: Message) => void; participants: Participant[]; }) => {
-  const content = message.content || '';
-  const isPlaceholder = content === 'waiting_for_key' || content.startsWith('[') || content === 'Decryption failed';
-  const isImage = message.fileType?.startsWith('image/');
-  const isVoiceMessage = message.fileType?.startsWith('audio/webm');
-
-  const hasBubbleStyle = !isPlaceholder && !message.fileUrl || message.fileUrl && !isImage && !isVoiceMessage;
-
-  const bubbleClasses = clsx(
-    'relative max-w-md md:max-w-lg shadow-neumorphic-bubble rounded-2xl',
-    {
-      'px-4 py-3': hasBubbleStyle,
-      'bg-accent text-accent-foreground': mine, 'bg-bg-surface text-text-primary': !mine,
-      'rounded-bl-2xl': mine, 'rounded-br-2xl': !mine,
-      'rounded-br-sm': mine && isLastInSequence, 'rounded-bl-sm': !mine && isLastInSequence,
-    }
-  );
-
-  return (
-    <div className={bubbleClasses}>
-      {message.repliedTo && <ReplyQuote message={message.repliedTo} />}
-      {isVoiceMessage && message.fileUrl && <div className="p-2 w-[250px]"><VoiceMessagePlayer message={message} /></div>}
-      {message.fileUrl && isImage && <button onClick={() => onImageClick(message)} className="block w-full"><LazyImage message={message} alt={message.fileName || 'Image attachment'} className="rounded-lg max-h-80 w-full object-cover cursor-pointer" /></button>}
-      {message.fileUrl && !isImage && !isVoiceMessage && <FileAttachment message={message} />}
-      {!message.fileUrl && (isPlaceholder ? <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p> : <div className="text-base whitespace-pre-wrap break-words"><MarkdownMessage content={content} /></div>)}
-      {message.linkPreview && <LinkPreviewCard preview={message.linkPreview} />}
-      <div className={`text-xs mt-1.5 flex items-center gap-1.5 ${isImage ? 'absolute bottom-2 right-2 bg-black/50 text-white rounded-full px-2 py-1 pointer-events-none' : `justify-end ${mine ? 'text-accent-foreground/60' : 'text-text-secondary/80'}`}`}>
-        <span>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-        <MessageStatusIcon message={message} participants={participants} />
-      </div>
-    </div>
-  );
 };
 
 const ReactionsDisplay = ({ reactions }: { reactions: Message['reactions'] }) => {
@@ -182,7 +132,16 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
       <div className={`flex items-center gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
         <div className="flex flex-col">
           {!mine && isGroup && message.sender?.name && <p className="text-xs font-semibold mb-1 user-color-name" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>{message.sender.name}</p>}
-          <MessageBubble message={message} mine={mine} isLastInSequence={isLastInSequence} onImageClick={onImageClick} participants={participants} />
+          
+          <MessageBubble 
+            message={message} 
+            isOwn={mine} 
+            isGroup={isGroup}
+            showAvatar={false} // Avatar handled by MessageItem parent
+            showName={false} // Name handled by MessageItem parent
+            onImageClick={onImageClick}
+          />
+          
           <ReactionsDisplay reactions={message.reactions} />
         </div>
         <div className="opacity-0 group-hover:opacity-100 transition-opacity">

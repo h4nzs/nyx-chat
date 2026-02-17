@@ -245,7 +245,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
 
       {/* Disappearing Messages Menu */}
       {showTimerMenu && (
-        <div ref={timerMenuRef} className="absolute bottom-20 left-16 z-50 bg-bg-surface border border-white/10 rounded-xl shadow-xl overflow-hidden min-w-[120px]">
+        <div ref={timerMenuRef} className="absolute bottom-full left-10 mb-2 z-50 bg-bg-surface border border-white/10 rounded-xl shadow-xl overflow-hidden min-w-[120px]">
           <div className="p-2 text-[10px] uppercase font-bold text-text-secondary border-b border-white/5">Auto-Delete</div>
           {DURATIONS.map((opt) => (
             <button

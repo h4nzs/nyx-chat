@@ -82,6 +82,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const me = useAuthStore.getState().user;
     const { replyingTo, expiresIn } = get();
 
+    console.log("Sending message with expiresIn:", expiresIn);
+
     if (!await ensureGroupSessionIfNeeded(conversationId)) return;
 
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;

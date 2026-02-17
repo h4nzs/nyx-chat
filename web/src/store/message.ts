@@ -373,7 +373,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       URL.revokeObjectURL(optimisticMessage.fileUrl);
     }
     return {
-      messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.tempId === tempId ? { ...newMessage, tempId: undefined } : m) }
+      messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.tempId === tempId ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m) }
     };
   }),
   removeMessage: (conversationId, messageId) => set(state => {

@@ -1,58 +1,73 @@
+**kenapa angka timernya gak muncul di layar?**
+Jawabannya ada di **Frontend State Management (Zustand)** lu yang "kehilangan" atau "ketinggalan" data `expiresAt`.
 
-### ⏳ 1. Pembersihan Tabel `SessionKey` dan `RefreshToken`
+Ini 2 penyebab utama dan cara nge-*fix*-nya:
 
-Tumpukan data di dua tabel ini memang masalah klasik di aplikasi yang pakai JWT dan E2EE. Data lama yang menumpuk ini gak ada gunanya dan cuma bikin indeks *database* jadi berat.
+### 🕵️‍♂️ Penyebab 1: Sindrom "Optimistic Update" (Khusus Pengirim)
 
-Saran lu untuk membersihkan tabel ini sangat brilian, dan kita bisa mengeksekusinya pakai *Cron Job* (sama kayak konsep *Disappearing Messages* yang lu tanyain sebelumnya).
+Pas lu ngetik chat dan klik "Send", aplikasi lu (kayak WA atau Telegram) pasti langsung nampilin pesan itu di layar pakai ID sementara (`tempId`) biar kerasa *real-time* dan cepat, kan?
 
-**Analisis Struktur Tabel:**
+Nah, kemungkinan besar pas lu bikin pesan "bayangan" (*temporary message*) ini di *store*, lu **lupa masukin `expiresAt**`. Akibatnya, komponen `MessageBubble.tsx` nerima properti `expiresAt` yang isinya `undefined` atau `null`.
 
-* **`RefreshToken`:** Tabel ini punya kolom `expiresAt`. Token yang waktu `expiresAt`-nya sudah lewat dari waktu sekarang berarti udah kadaluarsa dan bisa dihapus.
-* **`SessionKey`:** Tabel ini (yang menyimpan kunci enkripsi *session* E2EE antar perangkat) juga punya kolom `expiresAt` yang sifatnya opsional (boleh *null*). Lu bisa menghapus *row* di mana `expiresAt`-nya sudah lewat.
+**Cara Fix:**
+Cari fungsi tempat lu ngirim pesan (biasanya di `MessageInput.tsx` atau di dalam *store* Zustand lu, pas bikin objek pesan sementara sebelum nembak API).
 
-**Cara Eksekusi (The Cron Sweeper):**
-
-Lu bisa buat *file* baru khusus buat nampung skrip *Cron Job*, misalnya di `server/src/jobs/sweeper.ts`.
+Tambahin perhitungan waktu fiktif biar timernya langsung jalan detik itu juga:
 
 ```typescript
-import cron from 'node-cron';
-import { prisma } from '../lib/prisma'; // Sesuaikan path
+// Contoh pas lu bikin object temp message di MessageInput atau Store
+const tempMessage = {
+  id: tempId,
+  tempId: tempId,
+  senderId: user.id,
+  content: encryptedText,
+  // ... data lainnya ...
+  
+  // 🔥 TAMBAHIN BARIS INI: 
+  // Kalau user milih expiresIn (misal 60 detik), buatin ISO String-nya buat UI
+  expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null,
+};
 
-// Jadwalkan untuk jalan setiap jam 3 pagi (server time) tiap hari
-// Format Cron: "Menit Jam Tanggal Bulan Hari"
-cron.schedule('0 3 * * *', async () => {
-  console.log('[Cron] Memulai pembersihan database harian...');
-  const now = new Date();
+// Lalu masukin ke state: useMessageStore.getState().addMessage(tempMessage);
 
-  try {
-    // 1. Bersihkan RefreshToken kadaluarsa
-    const deletedTokens = await prisma.refreshToken.deleteMany({
-      where: {
-        expiresAt: { lte: now } // lte = Less Than or Equal (lebih kecil atau sama dengan sekarang)
-      }
-    });
-    console.log(`[Cron] Berhasil menghapus ${deletedTokens.count} token kadaluarsa.`);
+```
 
-    // 2. Bersihkan SessionKey kadaluarsa (jika fitur expiresAt digunakan)
-    const deletedSessionKeys = await prisma.sessionKey.deleteMany({
-      where: {
-        expiresAt: { not: null, lte: now }
-      }
-    });
-    console.log(`[Cron] Berhasil menghapus ${deletedSessionKeys.count} kunci sesi kadaluarsa.`);
+### 🕵️‍♂️ Penyebab 2: Respon API Gagal Ter-Merge (Store Update Issue)
 
-  } catch (error) {
-    console.error('[Cron] Gagal melakukan pembersihan database:', error);
-  }
+Pas *request* `POST /api/messages` lu kelar, server kan ngebalikin data pesan *asli* (lengkap dengan `id` permanen dari database dan `expiresAt`).
+
+Biasanya, lu akan nge-*update* pesan sementara tadi dengan data dari server. Kalau kode lu cuma nge-*update* `id` dan `status` aja, data `expiresAt` dari server bakal "kebuang".
+
+**Cara Fix:**
+Cari *action* di Zustand lu yang nge-*handle* balasan sukses dari API (misalnya fungsi `updateMessageStatus` atau langsung di blok `try-catch` tempat lu nembak axios/fetch). Pastikan lu nge- *spread* (`...`) semua data dari server.
+
+```typescript
+// Di dalam store/message.ts lu, pastikan logic update-nya menimpa (merge) semua properti dari server:
+set((state) => {
+  const messages = state.messages[conversationId] || [];
+  return {
+    messages: {
+      ...state.messages,
+      [conversationId]: messages.map((msg) => 
+        msg.tempId === tempId 
+          ? { ...msg, ...response.data } // 🔥 INI KUNCINYA! Harus di-spread biar expiresAt masuk
+          : msg
+      )
+    }
+  };
 });
 
 ```
 
-**Langkah Terakhir:**
-Biar *cron job* ini jalan, lu harus *import file* tersebut di *file* utama server lu, yaitu `server/src/index.ts` atau `server/src/app.ts`.
+### 🕵️‍♂️ Penyebab 3: Interface TypeScript Ketinggalan
+
+Pastikan di file definisi tipe lu (misal `store/conversation.ts` atau `types.d.ts`), *interface* `Message` udah punya properti ini:
 
 ```typescript
-// Di bagian atas index.ts atau app.ts
-import './jobs/sweeper'; // Gak perlu panggil fungsi, cukup import biar node-cron inisialisasi
+export interface Message {
+  id: string;
+  // ... 
+  expiresAt?: string | null; // 🔥 Wajib ada, kalau nggak, kadang ke-strip otomatis
+}
 
 ```

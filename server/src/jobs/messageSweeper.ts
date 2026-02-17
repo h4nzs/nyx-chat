@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { getIo } from '../socket.js';
+import { deleteR2File } from '../utils/r2.js';
 
 // Jalanin fungsi ini setiap 1 menit (* * * * *)
 export const startMessageSweeper = () => {
@@ -18,22 +19,33 @@ export const startMessageSweeper = () => {
             lte: now 
           } 
         },
-        select: { id: true, conversationId: true }
+        select: { id: true, conversationId: true, fileKey: true }
       });
 
       if (expiredMessages.length > 0) {
         const messageIds = expiredMessages.map(m => m.id);
         const conversationIds = Array.from(new Set(expiredMessages.map(m => m.conversationId)));
+        
+        // Kumpulkan fileKey yang tidak null
+        const filesToDelete = expiredMessages
+          .filter(m => m.fileKey)
+          .map(m => m.fileKey as string);
 
-        console.log(`🔥 Sweeping ${messageIds.length} expired messages...`);
+        console.log(`🔥 Sweeping ${messageIds.length} expired messages and ${filesToDelete.length} R2 files...`);
 
-        // 2. HAPUS PERMANEN DARI DATABASE!
+        // 2. HAPUS FILE DARI CLOUDFLARE R2 DULU
+        if (filesToDelete.length > 0) {
+          await Promise.allSettled(
+            filesToDelete.map(key => deleteR2File(key))
+          );
+        }
+
+        // 3. HAPUS PERMANEN DARI DATABASE!
         await prisma.message.deleteMany({
           where: { id: { in: messageIds } }
         });
 
-        // 3. Kasih tau Frontend lewat Socket.IO biar layar mereka update
-        // Kita emit ke setiap conversation room yang terdampak
+        // 4. Kasih tau Frontend lewat Socket.IO
         const io = getIo();
         if (io) {
           conversationIds.forEach((convoId: string) => {
