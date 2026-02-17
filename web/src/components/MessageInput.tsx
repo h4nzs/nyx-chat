@@ -10,6 +10,7 @@ import { useThemeStore } from '@store/theme';
 import LinkPreviewCard from './LinkPreviewCard';
 import SmartReply from './SmartReply';
 import { useMessageStore } from '@store/message';
+import { triggerSendFeedback } from '@utils/feedback';
 
 // --- Types ---
 interface MessageInputProps {
@@ -155,6 +156,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasText || !isConnected) return;
+    triggerSendFeedback();
     onSend({ content: text });
     setText('');
     clearTypingLinkPreview();

@@ -11,6 +11,7 @@ import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGrou
 import { useKeychainStore } from "@store/keychain";
 import type { Message } from "@store/conversation";
 import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
+import { triggerReceiveFeedback } from "@utils/feedback";
 
 // FIX: Gunakan VITE_WS_URL (Koyeb) jika ada, kalau tidak ada (dev) baru pakai API_URL
 const WS_URL = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL;
@@ -114,6 +115,9 @@ export function getSocket() {
         } else {
           addIncomingMessage(decryptedMessage.conversationId, decryptedMessage);
           
+          // Trigger feedback for incoming messages
+          triggerReceiveFeedback();
+
           const activeId = useConversationStore.getState().activeId;
           if (decryptedMessage.conversationId !== activeId && decryptedMessage.sender) {
             const { addNotification } = useNotificationStore.getState();

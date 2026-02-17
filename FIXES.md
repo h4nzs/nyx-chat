@@ -1,73 +1,151 @@
-**kenapa angka timernya gak muncul di layar?**
-Jawabannya ada di **Frontend State Management (Zustand)** lu yang "kehilangan" atau "ketinggalan" data `expiresAt`.
+### ✨ 1. Animasi *Bubble Chat* (Pop-in & Layout Shift)
 
-Ini 2 penyebab utama dan cara nge-*fix*-nya:
+Sekarang, pas chat baru masuk, *bubble*-nya muncul gitu aja (kaku). Kita bakal bikin dia nge- *pop* dari bawah dengan efek *spring* (mantul dikit) ala iMessage.
 
-### 🕵️‍♂️ Penyebab 1: Sindrom "Optimistic Update" (Khusus Pengirim)
+**Buka `web/src/components/MessageBubble.tsx`:**
 
-Pas lu ngetik chat dan klik "Send", aplikasi lu (kayak WA atau Telegram) pasti langsung nampilin pesan itu di layar pakai ID sementara (`tempId`) biar kerasa *real-time* dan cepat, kan?
+1. Tambahkan *import* ini di paling atas:
+```tsx
+import { motion } from 'framer-motion';
 
-Nah, kemungkinan besar pas lu bikin pesan "bayangan" (*temporary message*) ini di *store*, lu **lupa masukin `expiresAt**`. Akibatnya, komponen `MessageBubble.tsx` nerima properti `expiresAt` yang isinya `undefined` atau `null`.
+```
 
-**Cara Fix:**
-Cari fungsi tempat lu ngirim pesan (biasanya di `MessageInput.tsx` atau di dalam *store* Zustand lu, pas bikin objek pesan sementara sebelum nembak API).
 
-Tambahin perhitungan waktu fiktif biar timernya langsung jalan detik itu juga:
+2. Ubah tag `<div>` pembungkus paling luar menjadi `<motion.div>` dan tambahkan properti animasinya.
+
+**Cari baris ini (sekitar baris 63):**
+
+```tsx
+    <div 
+      className={classNames("flex items-end gap-3 group mb-3", { 
+        "justify-end": isOwn, 
+        "justify-start": !isOwn 
+      })}
+    >
+
+```
+
+**Ubah menjadi:**
+
+```tsx
+    <motion.div 
+      layout // Bikin bubble lama otomatis geser mulus pas ada bubble baru
+      initial={{ opacity: 0, y: 20, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ 
+        type: "spring", 
+        stiffness: 250, 
+        damping: 20, 
+        mass: 0.5 
+      }}
+      className={classNames("flex items-end gap-3 group mb-3 origin-bottom", { 
+        "justify-end": isOwn, 
+        "justify-start": !isOwn,
+        "origin-bottom-right": isOwn,
+        "origin-bottom-left": !isOwn
+      })}
+    >
+
+```
+
+*Gak lupa tutup tag paling bawahnya juga diubah dari `</div>` jadi `</motion.div>` ya.*
+
+---
+
+### 📳 2. *Sensory Feedback* (SFX Suara & Getaran)
+
+Aplikasi chat premium selalu ngasih *feedback* ke indera pendengaran dan sentuhan *user*. Pas lu neken tombol *Send*, HP harusnya bergetar halus (*haptic*) dan bunyi "Swoosh".
+
+**A. Bikin file Utility baru (`web/src/utils/feedback.ts`):**
+Buat nanganin bunyi dan getaran tanpa bikin kodingan komponen lu berantakan.
 
 ```typescript
-// Contoh pas lu bikin object temp message di MessageInput atau Store
-const tempMessage = {
-  id: tempId,
-  tempId: tempId,
-  senderId: user.id,
-  content: encryptedText,
-  // ... data lainnya ...
-  
-  // 🔥 TAMBAHIN BARIS INI: 
-  // Kalau user milih expiresIn (misal 60 detik), buatin ISO String-nya buat UI
-  expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null,
+export const playHaptic = (pattern: number | number[] = 50) => {
+  // Cek apakah browser & HP support fitur getar (Haptic Feedback)
+  if (typeof window !== 'undefined' && navigator.vibrate) {
+    navigator.vibrate(pattern);
+  }
 };
 
-// Lalu masukin ke state: useMessageStore.getState().addMessage(tempMessage);
+export const playSound = (type: 'send' | 'receive' | 'delete') => {
+  // Syarat: Lu harus siapin file mp3 pendek di folder public/sounds/
+  const audio = new Audio(`/sounds/${type}.mp3`);
+  audio.volume = 0.3; // Jangan terlalu keras biar elegan
+  
+  // Tangkap error kalau browser ngeblok auto-play audio
+  audio.play().catch(() => {
+    console.log("Audio play di-block oleh browser (butuh interaksi user dulu)");
+  });
+};
+
+export const triggerSendFeedback = () => {
+  playHaptic([20, 30, 20]); // Getar halus ala ketikan
+  playSound('send');
+};
+
+export const triggerReceiveFeedback = () => {
+  playHaptic(50); // Getar tek 1 kali
+  playSound('receive');
+};
 
 ```
 
-### 🕵️‍♂️ Penyebab 2: Respon API Gagal Ter-Merge (Store Update Issue)
+**B. Pasang di `MessageInput.tsx`:**
+Panggil fungsi getarnya pas *user* ngeklik kirim.
 
-Pas *request* `POST /api/messages` lu kelar, server kan ngebalikin data pesan *asli* (lengkap dengan `id` permanen dari database dan `expiresAt`).
+```tsx
+import { triggerSendFeedback } from '../utils/feedback'; // Import ini
 
-Biasanya, lu akan nge-*update* pesan sementara tadi dengan data dari server. Kalau kode lu cuma nge-*update* `id` dan `status` aja, data `expiresAt` dari server bakal "kebuang".
-
-**Cara Fix:**
-Cari *action* di Zustand lu yang nge-*handle* balasan sukses dari API (misalnya fungsi `updateMessageStatus` atau langsung di blok `try-catch` tempat lu nembak axios/fetch). Pastikan lu nge- *spread* (`...`) semua data dari server.
-
-```typescript
-// Di dalam store/message.ts lu, pastikan logic update-nya menimpa (merge) semua properti dari server:
-set((state) => {
-  const messages = state.messages[conversationId] || [];
-  return {
-    messages: {
-      ...state.messages,
-      [conversationId]: messages.map((msg) => 
-        msg.tempId === tempId 
-          ? { ...msg, ...response.data } // 🔥 INI KUNCINYA! Harus di-spread biar expiresAt masuk
-          : msg
-      )
-    }
+// Di dalam fungsi handleSubmit:
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hasText || !isConnected) return;
+    
+    triggerSendFeedback(); // 🔥 Panggil di sini!
+    
+    onSend({ content: text });
+    setText('');
+    clearTypingLinkPreview();
   };
-});
 
 ```
 
-### 🕵️‍♂️ Penyebab 3: Interface TypeScript Ketinggalan
+*(Buat suaranya, lu bisa *download* aset suara *UI chat* pendek (durasi 0.5 detik) gratis dari situs kayak Pixabay, kasih nama `send.mp3` dan `receive.mp3`, terus taruh di folder `web/public/sounds/`)*.
 
-Pastikan di file definisi tipe lu (misal `store/conversation.ts` atau `types.d.ts`), *interface* `Message` udah punya properti ini:
+---
 
-```typescript
-export interface Message {
-  id: string;
-  // ... 
-  expiresAt?: string | null; // 🔥 Wajib ada, kalau nggak, kadang ke-strip otomatis
+### 💀 3. *Skeleton Loading* saat Buka Chat
+
+Saat lu pindah obrolan, kadang ada *delay* beberapa milidetik buat narik *history* chat dari *database* atau memori. Jangan tampilin layar kosong. Kita kasih *Skeleton* (kotak abu-abu berkedip) biar terkesan prosesnya cepet.
+
+Lu bisa bikin komponen `MessageSkeleton.tsx`:
+
+```tsx
+import { motion } from 'framer-motion';
+
+export default function MessageSkeleton() {
+  return (
+    <div className="w-full flex flex-col gap-4 p-4 opacity-60">
+      {/* Skeleton Pesan Masuk */}
+      <div className="flex items-end gap-3 justify-start">
+        <div className="w-8 h-8 rounded-full bg-white/5 animate-pulse"></div>
+        <div className="w-48 h-12 rounded-2xl rounded-tl-none bg-white/5 animate-pulse"></div>
+      </div>
+      
+      {/* Skeleton Pesan Keluar */}
+      <div className="flex items-end gap-3 justify-end">
+        <div className="w-32 h-10 rounded-2xl rounded-tr-none bg-accent/20 animate-pulse"></div>
+      </div>
+
+      {/* Skeleton Pesan Masuk Panjang */}
+      <div className="flex items-end gap-3 justify-start">
+        <div className="w-8 h-8 rounded-full bg-white/5 animate-pulse"></div>
+        <div className="w-64 h-16 rounded-2xl rounded-tl-none bg-white/5 animate-pulse"></div>
+      </div>
+    </div>
+  );
 }
 
 ```
+
+Lalu panggil komponen ini di `ChatWindow.tsx` (atau file tempat lu ngerender kumpulan `MessageBubble`) pas status `isLoading` lagi *true*.

@@ -22,6 +22,7 @@ import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers } from 'react-
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import MessageInput from './MessageInput';
+import MessageSkeleton from './MessageSkeleton';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -263,8 +264,8 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
           if (isLoading || !conversation) {
             return (
-              <div className="flex-1 flex items-center justify-center">
-                <Spinner size="lg" />
+              <div className="flex-1 flex flex-col justify-end pb-20">
+                <MessageSkeleton />
               </div>
             );
           }
