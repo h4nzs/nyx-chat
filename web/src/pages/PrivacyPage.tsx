@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiCpu, FiGlobe } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 
@@ -19,6 +19,7 @@ const Section = ({ title, icon: Icon, children, id }: { title: string; icon: any
 
 export default function PrivacyPage() {
   const [activeSection, setActiveSection] = useState('privacy');
+  const navigate = useNavigate();
 
   const scrollTo = (id: string) => {
     setActiveSection(id);
@@ -30,12 +31,12 @@ export default function PrivacyPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 bg-bg-main/80 backdrop-blur-md border-b border-white/5">
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link 
-            to="/login" 
+          <button 
+            onClick={() => navigate(-1)} 
             className="flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors text-sm font-medium"
           >
             <FiArrowLeft /> Back to App
-          </Link>
+          </button>
           <div className="font-mono text-xs text-text-secondary uppercase tracking-widest">
             Legal & Compliance
           </div>
