@@ -188,7 +188,6 @@ app.use((req, res, next) => {
 
 // Routes publik (Keys & Sessions untuk E2EE)
 app.use("/api/keys", keysRouter);
-app.use("/api/sessions", sessionsRouter);
 
 app.post("/api/admin/cleanup", async (req, res) => {
   const providedKey = req.headers["x-admin-key"];

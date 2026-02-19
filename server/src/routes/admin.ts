@@ -88,7 +88,7 @@ router.post('/ban', requireAuth, requireAdmin, async (req, res) => {
     // KICK USER DARI SOCKET
     const io = getIo();
     if (io) {
-        io.to(`user_${userId}`).emit('auth:banned', { reason }); 
+        io.to(userId).emit('auth:banned', { reason }); 
         // Force disconnect logic if socket tracking by user ID is implemented
         // Note: Standard socket.io doesn't easily map userId -> socketId without an adapter/store.
         // But we can try to broadcast to their room if they join 'user_{id}' room.

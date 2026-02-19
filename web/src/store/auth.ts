@@ -58,6 +58,7 @@ export type User = {
   avatarUrl?: string | null;
   hasCompletedOnboarding?: boolean;
   showEmailToOthers?: boolean;
+  role?: string;
 };
 
 type State = {

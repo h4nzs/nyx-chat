@@ -369,11 +369,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   updateParticipantDetails: (user) => {
+    // Destructure role to exclude it, preventing conflict with Participant role type
+    const { role, ...userDetails } = user;
     set(state => ({
       conversations: state.conversations.map(c => ({
         ...c,
         participants: c.participants.map(p => 
-          p.id === user.id ? { ...p, ...user } : p
+          p.id === user.id ? { ...p, ...userDetails } : p
         ),
       }))
     }));
