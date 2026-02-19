@@ -139,7 +139,30 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     // Helper to wrap the modal prompt in a Promise
     const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
       return new Promise((resolve, reject) => {
+        let unsubscribe: () => void;
+
+        const cleanup = () => {
+          if (unsubscribe) unsubscribe();
+        };
+
+        // Safety fallback: Reject if modal closes without submission
+        unsubscribe = useModalStore.subscribe((state) => {
+          if (!state.isPasswordPromptOpen) {
+            cleanup();
+            // We use a timeout to allow the submit callback to fire first if that was the cause of closing
+            setTimeout(() => {
+               // If we are still pending (though we can't check promise state directly, logic flow handles it)
+               // Ideally, we'd rely on the fact that if successful, resolve/reject was already called.
+               // But since we can't query promise state, we just reject.
+               // If it was already resolved, this reject is ignored.
+               reject(new Error("Password prompt closed without input."));
+            }, 100);
+          }
+        });
+
         useModalStore.getState().showPasswordPrompt(async (password) => {
+          cleanup(); // Clean up listener immediately on submit
+          
           if (!password) {
             reject(new Error("Password not provided."));
             return;
@@ -333,9 +356,15 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           try {
             let userData: User | null = null;
             if (isEmail) {
-              userData = await api<User>(`/api/users/by-email?email=${encodeURIComponent(emailOrUsername)}`);
+              userData = await api<User>("/api/users/by-email", {
+                method: "POST",
+                body: JSON.stringify({ email: emailOrUsername }),
+              });
             } else {
-              userData = await api<User>(`/api/users/by-username?username=${encodeURIComponent(emailOrUsername)}`);
+              userData = await api<User>("/api/users/by-username", {
+                method: "POST",
+                body: JSON.stringify({ username: emailOrUsername }),
+              });
             }
 
             if (userData?.id && userData?.email) {

@@ -23,24 +23,8 @@ export default function AdminDashboard() {
   const [isBanModalOpen, setIsBanModalOpen] = useState(false);
   const { showConfirm } = useModalStore();
 
-  useEffect(() => {
-    if (user?.role !== 'ADMIN') {
-      toast.error("Access Denied");
-      navigate('/');
-    }
-  }, [user, navigate]);
-
-  if (user?.role !== 'ADMIN') return null;
-
-  useEffect(() => {
-    loadAllData();
-  }, []);
-
-  const loadAllData = () => {
-    loadMetrics();
-    loadBannedUsers();
-  };
-
+  // --- Data Loading Functions ---
+  // Defined before useEffect to be available inside it
   const loadMetrics = () => {
     authFetch('/api/admin/system-status')
       .then((res: any) => setMetrics(res))
@@ -52,6 +36,20 @@ export default function AdminDashboard() {
       .then((res) => setBannedUsers(res))
       .catch((err) => console.error("Failed to load banned users", err));
   };
+
+  const loadAllData = () => {
+    loadMetrics();
+    loadBannedUsers();
+  };
+
+  useEffect(() => {
+    if (user?.role !== 'ADMIN') {
+      toast.error("Access Denied");
+      navigate('/');
+    } else {
+      loadAllData();
+    }
+  }, [user, navigate]);
 
   const handleUnban = (user: BannedUser) => {
     showConfirm(
@@ -71,6 +69,8 @@ export default function AdminDashboard() {
       }
     );
   };
+
+  if (user?.role !== 'ADMIN') return null;
 
   if (!metrics) return (
     <div className="flex items-center justify-center h-screen bg-bg-main text-text-secondary font-mono animate-pulse">

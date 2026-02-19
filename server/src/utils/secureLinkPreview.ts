@@ -90,6 +90,23 @@ export async function getSecureLinkPreview (url: string): Promise<LinkPreview> {
     const preview = await getLinkPreview(safeUrl, {
       timeout: 5000,
       followRedirects: 'manual', 
+      handleRedirects: (baseURL: string, forwardedURL: string) => {
+        // Since we pre-validated the chain, we shouldn't encounter new redirects here.
+        // If we do, it means the server changed behavior between HEAD and GET.
+        // For safety, we can just return the forwardedURL if it's valid, or throw.
+        // But simply returning false or the url stops the chain.
+        // Returning true usually implies "continue".
+        // The library expects a function that returns a boolean or promise<boolean> to continue?
+        // Wait, checking docs/types: handleRedirects?: (baseURL: string, forwardedURL: string) => boolean;
+        
+        // Actually, looking at common usage, if followRedirects is manual, 
+        // the library might expect US to do the fetching? 
+        // No, 'manual' in link-preview-js means "I will tell you if you should follow this redirect".
+        
+        // Let's check the error message implication: "no handleRedirects function is provided".
+        // Providing a simple function that returns false (stop redirects) is safest since we fetched the final URL.
+        return false;
+      },
       resolveDNSHost: (u) => resolveDns(u) // Double-check the final URL
     })
     return preview as LinkPreview

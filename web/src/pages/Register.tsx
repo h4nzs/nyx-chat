@@ -162,16 +162,28 @@ export default function Register() {
     }
   };
 
-  // STEP 3: RECOVERY PHRASE
-  if (step === 'recovery') {
-    if (!recoveryPhrase) {
+  useEffect(() => {
+    let timerId: NodeJS.Timeout;
+
+    if (step === 'recovery' && !recoveryPhrase) {
       // If phrase is lost (e.g. refresh), just go to chat. User can view it in settings.
       import('@utils/verificationPersistence').then(({ clearVerificationState }) => {
         clearVerificationState();
       });
       toast.success("Welcome! You can view your recovery phrase in Settings.");
+      
       // Use a timeout to ensure state update doesn't conflict with rendering
-      setTimeout(() => navigate('/chat'), 100); 
+      timerId = setTimeout(() => navigate('/chat'), 100);
+    }
+
+    return () => {
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [step, recoveryPhrase, navigate]);
+
+  // STEP 3: RECOVERY PHRASE
+  if (step === 'recovery') {
+    if (!recoveryPhrase) {
       return null;
     }
 
