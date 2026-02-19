@@ -293,83 +293,87 @@ router.get('/me/blocked', async (req, res, next) => {
 })
 
 // GET User by Email (for verification purposes) - AUTH REQUIRED
-router.get('/by-email/:email', async (req, res, next) => {
-  try {
-    const { email } = req.params
+router.get('/by-email',
+  zodValidate({ query: z.object({ email: z.string().email() }) }),
+  async (req, res, next) => {
+    try {
+      const email = req.query.email as string
 
-    const user = await prisma.user.findUnique({
-      where: { email },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        isEmailVerified: true,
-        showEmailToOthers: true
+      const user = await prisma.user.findUnique({
+        where: { email },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          isEmailVerified: true,
+          showEmailToOthers: true
+        }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
       }
-    })
 
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' })
+      const publicProfile: Partial<typeof user> & { id: string } = {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+        isEmailVerified: user.isEmailVerified
+      }
+
+      if (user.showEmailToOthers) {
+        publicProfile.email = user.email
+      }
+
+      res.json(publicProfile)
+    } catch (error) {
+      next(error)
     }
-
-    const publicProfile: Partial<typeof user> & { id: string } = {
-      id: user.id,
-      username: user.username,
-      name: user.name,
-      avatarUrl: user.avatarUrl,
-      isEmailVerified: user.isEmailVerified
-    }
-
-    if (user.showEmailToOthers) {
-      publicProfile.email = user.email
-    }
-
-    res.json(publicProfile)
-  } catch (error) {
-    next(error)
-  }
-})
+  })
 
 // GET User by Username (for verification purposes) - AUTH REQUIRED
-router.get('/by-username/:username', async (req, res, next) => {
-  try {
-    const { username } = req.params
+router.get('/by-username',
+  zodValidate({ query: z.object({ username: z.string().min(1) }) }),
+  async (req, res, next) => {
+    try {
+      const username = req.query.username as string
 
-    const user = await prisma.user.findUnique({
-      where: { username },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        isEmailVerified: true,
-        showEmailToOthers: true
+      const user = await prisma.user.findUnique({
+        where: { username },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          isEmailVerified: true,
+          showEmailToOthers: true
+        }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
       }
-    })
 
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' })
+      const publicProfile: Partial<typeof user> & { id: string } = {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+        isEmailVerified: user.isEmailVerified
+      }
+
+      if (user.showEmailToOthers) {
+        publicProfile.email = user.email
+      }
+
+      res.json(publicProfile)
+    } catch (error) {
+      next(error)
     }
-
-    const publicProfile: Partial<typeof user> & { id: string } = {
-      id: user.id,
-      username: user.username,
-      name: user.name,
-      avatarUrl: user.avatarUrl,
-      isEmailVerified: user.isEmailVerified
-    }
-
-    if (user.showEmailToOthers) {
-      publicProfile.email = user.email
-    }
-
-    res.json(publicProfile)
-  } catch (error) {
-    next(error)
-  }
-})
+  })
 
 export default router

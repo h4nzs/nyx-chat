@@ -109,51 +109,66 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
   const savedReadReceipts = localStorage.getItem('sendReadReceipts');
 
   const retrieveAndCacheKeys = async (): Promise<RetrievedKeys> => {
-    if (privateKeysCache) return Promise.resolve(privateKeysCache);
+    if (privateKeysCache) return privateKeysCache;
 
     // Dynamic import for retrievePrivateKeys
     const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
 
-    return new Promise(async (resolve, reject) => {
-      const autoUnlockKey = await getDeviceAutoUnlockKey();
-      const encryptedKeys = await getEncryptedKeys();
+    let autoUnlockKey: string | undefined | null = null;
+    let encryptedKeys: string | undefined | null = null;
 
-      if (autoUnlockKey && encryptedKeys) {
-        // Pass autoUnlockKey as password to retrievePrivateKeys
-        retrievePrivateKeys(encryptedKeys, autoUnlockKey)
-          .then((result) => {
-            if (result.success) {
-              privateKeysCache = result.keys;
-              resolve(result.keys);
-            } else {
-              // If auto-unlock key fails, try prompting for password
-              promptForPassword(retrievePrivateKeys);
-            }
-          })
-          .catch(() => promptForPassword(retrievePrivateKeys));
-      } else {
-        promptForPassword(retrievePrivateKeys);
+    try {
+      autoUnlockKey = await getDeviceAutoUnlockKey();
+      encryptedKeys = await getEncryptedKeys();
+    } catch (e) {
+      console.error("Failed to read keys/auto-unlock info:", e);
+    }
+
+    if (autoUnlockKey && encryptedKeys) {
+      try {
+        const result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
+        if (result.success) {
+          privateKeysCache = result.keys;
+          return result.keys;
+        }
+      } catch (e) {
+        // Fall through to password prompt
       }
+    }
 
-      function promptForPassword(retrieveFn: any) {
+    // Helper to wrap the modal prompt in a Promise
+    const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
+      return new Promise((resolve, reject) => {
         useModalStore.getState().showPasswordPrompt(async (password) => {
-          if (!password) return reject(new Error("Password not provided."));
-
-          const encryptedKeysInner = await getEncryptedKeys();
-          if (!encryptedKeysInner) return reject(new Error("Encrypted private keys not found."));
-
-          const result = await retrieveFn(encryptedKeysInner, password);
-
-          if (!result.success) {
-            const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
-            return reject(new Error(reason));
+          if (!password) {
+            reject(new Error("Password not provided."));
+            return;
           }
 
-          privateKeysCache = result.keys;
-          resolve(result.keys);
+          try {
+            const keysInner = await getEncryptedKeys();
+            if (!keysInner) {
+              reject(new Error("Encrypted private keys not found."));
+              return;
+            }
+
+            const result = await retrieveFn(keysInner, password);
+            if (!result.success) {
+              const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
+              reject(new Error(reason));
+              return;
+            }
+
+            privateKeysCache = result.keys;
+            resolve(result.keys);
+          } catch (e) {
+            reject(e);
+          }
         });
-      }
-    });
+      });
+    };
+
+    return promptForPassword(retrievePrivateKeys);
   };
 
   return {
@@ -318,9 +333,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           try {
             let userData: User | null = null;
             if (isEmail) {
-              userData = await api<User>("/api/users/by-email/" + encodeURIComponent(emailOrUsername));
+              userData = await api<User>(`/api/users/by-email?email=${encodeURIComponent(emailOrUsername)}`);
             } else {
-              userData = await api<User>("/api/users/by-username/" + encodeURIComponent(emailOrUsername));
+              userData = await api<User>(`/api/users/by-username?username=${encodeURIComponent(emailOrUsername)}`);
             }
 
             if (userData?.id && userData?.email) {

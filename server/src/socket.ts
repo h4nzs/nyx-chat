@@ -2,7 +2,7 @@ import { Server, Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
 import { env } from "./config.js";
 import { prisma } from "./lib/prisma.js";
-import { verifyJwt, signAccessToken } from "./utils/jwt.js";
+import { verifyJwt, signAccessToken, newJti, refreshExpiryDate } from "./utils/jwt.js";
 import { sendPushNotification } from "./utils/sendPushNotification.js";
 import { redisClient } from "./lib/redis.js"; // Client untuk data aplikasi (Presence, dll)
 import { Message } from "@prisma/client";
@@ -226,19 +226,35 @@ export function registerSocket(httpServer: HttpServer) {
     socket.on("linking:send_payload", async (data: { roomId: string, encryptedMasterKey: string }) => {
       
       try {
+        const user = socket.user!;
+
         // 1. Generate Token Baru untuk device baru
         // Kita pakai fungsi signAccessToken agar token valid & fresh
-        const newAccessToken = signAccessToken({
-            id: socket.user!.id,
-            email: socket.user!.email,
-            username: socket.user!.username
+        const accessToken = signAccessToken({
+            id: user.id,
+            email: user.email,
+            username: user.username
+        });
+
+        const jti = newJti();
+        const refreshToken = signAccessToken({ sub: user.id, jti }, { expiresIn: "30d" });
+
+        await prisma.refreshToken.create({
+          data: { 
+            jti, 
+            userId: user.id, 
+            expiresAt: refreshExpiryDate(), 
+            ipAddress: socket.handshake.address, 
+            userAgent: socket.handshake.headers['user-agent'] as string 
+          },
         });
 
         // 2. Kirim paket lengkap ke Device Baru (Guest di Room)
         io.to(`linking:${data.roomId}`).emit("auth:linking_success", {
-            accessToken: newAccessToken, // Token login buat device baru
-            user: socket.user,           // Info user
-            encryptedMasterKey: data.encryptedMasterKey // Kunci enkripsi
+            accessToken, 
+            refreshToken,
+            user,           
+            encryptedMasterKey: data.encryptedMasterKey 
         });
 
       } catch (e) {

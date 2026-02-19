@@ -115,6 +115,11 @@ app.use(helmet({
 
 app.disable('x-powered-by');
 
+// Helper to escape regex special characters
+function escapeRegExp(string: string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
+}
+
 // Fungsi untuk memvalidasi origins yang diizinkan
 const isAllowedOrigin = (origin: string): boolean => {
   if (!origin) return true;
@@ -135,7 +140,10 @@ const isAllowedOrigin = (origin: string): boolean => {
 
   return allowedOrigins.some(allowedOrigin => {
     if (allowedOrigin.includes('*')) {
-      const regex = new RegExp('^' + allowedOrigin.replace(/\*/g, '.*') + '$');
+      // Securely escape the domain string first, then replace the escaped wildcard
+      const escapedOrigin = escapeRegExp(allowedOrigin);
+      const pattern = escapedOrigin.replace(/\\\*/g, '.*'); 
+      const regex = new RegExp('^' + pattern + '$');
       return regex.test(origin);
     }
     return allowedOrigin === origin;
@@ -158,8 +166,11 @@ const corsMiddleware = cors({
 
 app.use(corsMiddleware);
 
+// Global rate limiter for non-API routes (e.g. static assets, health checks if not under /api)
+// This prevents conflict with the Redis-backed generalLimiter used for /api
 if (isProd) {
   app.use(
+    /^\/(?!api\/).*/, // Apply to everything EXCEPT paths starting with /api/
     rateLimit({
       windowMs: 15 * 60 * 1000, 
       max: 100, 
