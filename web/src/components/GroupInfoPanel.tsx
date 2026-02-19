@@ -65,7 +65,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
            fileToUpload = await compressImage(originalFile);
         }
       } catch (err) {
-        console.warn("Compression failed, using original", err);
+        // Fallback, do nothing, the original file will be used.
       }
 
       // 2. Upload ke Cloudflare R2

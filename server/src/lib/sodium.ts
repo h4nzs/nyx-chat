@@ -1,12 +1,12 @@
-import sodium from "libsodium-wrappers";
+import sodium from 'libsodium-wrappers'
 
-let sodiumInstance: typeof sodium | null = null;
+let sodiumInstance: typeof sodium | null = null
 
-export async function getSodium(): Promise<typeof sodium> {
+export async function getSodium (): Promise<typeof sodium> {
   if (sodiumInstance) {
-    return sodiumInstance;
+    return sodiumInstance
   }
-  await sodium.ready;
-  sodiumInstance = sodium;
-  return sodium;
+  await sodium.ready
+  sodiumInstance = sodium
+  return sodium
 }

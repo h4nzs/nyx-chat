@@ -9,14 +9,16 @@ import { useConversationStore } from "./conversation";
 import type { Message } from "./conversation";
 import { compressImage } from "@lib/fileUtils";
 import useDynamicIslandStore, { UploadActivity } from "./dynamicIsland";
-import { uploadToR2 } from '../lib/r2'; // Pastikan helper ini ada
+import { uploadToR2 } from '../lib/r2';
 
 type State = {
   replyingTo: Message | null;
   typingLinkPreview: any | null;
+  expiresIn: number | null;
 
   // Actions
   setReplyingTo: (message: Message | null) => void;
+  setExpiresIn: (seconds: number | null) => void;
   fetchTypingLinkPreview: (text: string) => void;
   clearTypingLinkPreview: () => void;
   sendMessage: (conversationId: string, data: { content: string }, tempId?: number) => Promise<void>;
@@ -50,8 +52,10 @@ const ensureGroupSessionIfNeeded = async (conversationId: string): Promise<boole
 export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   replyingTo: null,
   typingLinkPreview: null,
+  expiresIn: null,
 
   setReplyingTo: (message) => set({ replyingTo: message }),
+  setExpiresIn: (seconds) => set({ expiresIn: seconds }),
 
   fetchTypingLinkPreview: async (text) => {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -76,14 +80,16 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   sendMessage: async (conversationId, data, tempId?: number) => {
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
-    const { replyingTo } = get();
+    const { replyingTo, expiresIn } = get();
+
+    console.log("Sending message with expiresIn:", expiresIn);
 
     if (!await ensureGroupSessionIfNeeded(conversationId)) return;
 
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
     const isGroup = conversation.isGroup;
 
-    let payload: Partial<Message> = { ...data };
+    const payload: Partial<Message> = { ...data };
 
     try {
       const { ciphertext, sessionId } = await encryptMessage(data.content, conversationId, isGroup);
@@ -95,6 +101,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     }
 
     const actualTempId = tempId !== undefined ? tempId : Date.now();
+    const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
+
     const optimisticMessage: Message = {
       id: `temp-${actualTempId}`,
       tempId: actualTempId,
@@ -103,6 +111,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       sender: me!,
       createdAt: new Date().toISOString(),
       optimistic: true,
+      expiresAt,
       ...data,
       repliedTo: replyingTo || undefined,
     };
@@ -113,6 +122,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       conversationId,
       tempId: actualTempId,
       repliedToId: replyingTo?.id,
+      expiresIn,
       ...payload,
     };
 
@@ -130,12 +140,11 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     set({ replyingTo: null });
   },
   
-  // --- FUNGSI UPLOAD FILE BARU (R2) ---
   uploadFile: async (conversationId, file) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Processing ${file.name}...`, progress: 0 };
     const activityId = addActivity(activity);
-    const { replyingTo } = get();
+    const { replyingTo, expiresIn } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     if (!me) {
@@ -153,6 +162,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const isGroup = conversation.isGroup;
 
     const tempId = Date.now();
+    const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
+
     const optimisticMessage: Message = {
       id: `temp-${tempId}`,
       tempId,
@@ -165,6 +176,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       fileName: file.name,
       fileType: file.type,
       fileSize: file.size,
+      expiresAt,
       repliedTo: replyingTo || undefined,
     };
     addOptimisticMessage(conversationId, optimisticMessage);
@@ -177,9 +189,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         updateActivity(activityId, { progress: 10, fileName: `Compressing ${file.name}...` });
         try {
           fileToProcess = await compressImage(file);
-          console.log(`📉 Image compressed: ${(file.size / 1024).toFixed(2)}KB -> ${(fileToProcess.size / 1024).toFixed(2)}KB`);
         } catch (e) {
-          console.warn("Image compression failed, using original file.", e);
         }
       }
 
@@ -193,32 +203,29 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       // 3. UPLOAD KE CLOUDFLARE R2 (Bypass Server)
       updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
       
-      // Bungkus Blob enkripsi ke File Object agar nama & tipe terjaga (tapi tipe jadi octet-stream untuk upload)
       const encryptedFile = new File([encryptedBlob], file.name, { type: "application/octet-stream" });
       
-      // Helper uploadToR2 (Client -> R2)
       const fileUrl = await uploadToR2(encryptedFile, 'attachments', (percent) => {
-         const totalProgress = 30 + (percent * 0.6); // Skala progress bar (30% - 90%)
+         const totalProgress = 30 + (percent * 0.6);
          updateActivity(activityId, { progress: totalProgress });
       });
 
       // 4. KIRIM METADATA KE SERVER
       updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
       
-      // Perhatikan URL endpoint baru: /messages/ID (Bukan /upload)
-      // Dan Body berupa JSON (Bukan FormData)
       await api(`/api/uploads/messages/${conversationId}`, {
         method: "POST",
         body: JSON.stringify({
-          fileUrl, // URL dari R2
+          fileUrl,
           fileName: file.name,
           fileType: file.type + ';encrypted=true',
           fileSize: file.size,
           duration: null,
           tempId,
-          fileKey: encryptedFileKey, // Kunci dekripsi
+          fileKey: encryptedFileKey,
           sessionId,
-          repliedToId: replyingTo?.id
+          repliedToId: replyingTo?.id,
+          expiresIn
         })
       });
       
@@ -234,12 +241,11 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     }
   },
 
-  // --- FUNGSI VOICE MESSAGE BARU (R2) ---
   handleStopRecording: async (conversationId, blob, duration) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: 'Processing Voice...', progress: 0 };
     const activityId = addActivity(activity);
-    const { replyingTo } = get();
+    const { replyingTo, expiresIn } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     if (!me) {
@@ -257,6 +263,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const isGroup = conversation.isGroup;
     
     const tempId = Date.now();
+    const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
+
     const optimisticMessage: Message = {
       id: `temp-${tempId}`,
       tempId,
@@ -270,21 +278,19 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       fileType: "audio/webm",
       fileSize: blob.size,
       duration,
+      expiresAt,
       repliedTo: replyingTo || undefined,
     };
     addOptimisticMessage(conversationId, optimisticMessage);
     set({ replyingTo: null });
 
     try {
-      // 1. ENKRIPSI VOICE
       updateActivity(activityId, { progress: 20, fileName: 'Encrypting voice...' });
       const { encryptedBlob, key: rawFileKey } = await encryptFile(blob);
       const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(rawFileKey, conversationId, isGroup);
 
-      // 2. UPLOAD KE R2
       updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
       
-      // Upload as octet-stream to avoid browser/R2 MIME type sniffing issues with encrypted data
       const encryptedFile = new File([encryptedBlob], "voice-message.webm", { type: "application/octet-stream" });
 
       const fileUrl = await uploadToR2(encryptedFile, 'attachments', (percent) => {
@@ -292,7 +298,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         updateActivity(activityId, { progress: totalProgress });
       });
 
-      // 3. KIRIM METADATA KE SERVER
       updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
 
       await api(`/api/uploads/messages/${conversationId}`, {
@@ -306,7 +311,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           tempId,
           fileKey: encryptedFileKey,
           sessionId,
-          repliedToId: replyingTo?.id
+          repliedToId: replyingTo?.id,
+          expiresIn
         })
       });
       

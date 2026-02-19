@@ -26,15 +26,15 @@ import { Spinner } from './Spinner';
 
 const UserProfile = memo(() => {
   const { user, logout } = useAuthStore(state => ({ user: state.user, logout: state.logout }));
-  const { showConfirm } = useModalStore();
+  const { showConfirm: confirmLogout } = useModalStore(state => ({ showConfirm: state.showConfirm }));
 
   const handleLogout = useCallback(() => {
-    showConfirm(
+    confirmLogout(
       "Confirm Logout",
       "Are you sure you want to end your session?",
       logout
     );
-  }, [logout, showConfirm]);
+  }, [logout, confirmLogout]);
 
   if (!user) return null;
 
@@ -115,8 +115,7 @@ const ConversationItem = memo(({
   isBlocked, 
   blockUser, 
   unblockUser, 
-  isActive, 
-  isSelected, 
+  isActive,
   onClick, 
   onUserClick, 
   onMenuSelect, 
@@ -129,7 +128,6 @@ const ConversationItem = memo(({
   blockUser: (userId: string) => Promise<void>;
   unblockUser: (userId: string) => Promise<void>;
   isActive: boolean;
-  isSelected: boolean;
   onClick: () => void;
   onUserClick: (userId: string) => void;
   onMenuSelect: (action: 'deleteGroup' | 'deleteChat') => void;
@@ -310,7 +308,6 @@ const ConversationItem = memo(({
   return (
     prev.conversation === next.conversation &&
     prev.isActive === next.isActive &&
-    prev.isSelected === next.isSelected &&
     prev.isOnline === next.isOnline &&
     prev.isBlocked === next.isBlocked &&
     prev.meId === next.meId
@@ -386,7 +383,6 @@ export default function ChatList() {
         blockUser={blockUser}
         unblockUser={unblockUser}
         isActive={c.id === activeId}
-        isSelected={index === selectedIndex}
         onClick={() => handleConversationClick(c.id)}
         onUserClick={openProfileModal}
         onMenuSelect={(action) => {

@@ -50,7 +50,6 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
     } else if (result.status === 'pending') {
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
-      console.warn(`[Decrypt] Failed for msg ${message.id}:`, result.error);
       decryptedMsg.content = 'Decryption failed';
     }
 
@@ -153,7 +152,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       try {
         const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
         if (distributionKeys && distributionKeys.length > 0) {
-          console.log(`[message.ts] sendMessage: New group key generated, distributing ${distributionKeys.length} keys.`);
           emitGroupKeyDistribution(conversationId, distributionKeys);
         }
       } catch (e) {
@@ -315,8 +313,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       } catch (sessionError) {
         console.error("Failed to establish session, decryption may fail:", sessionError);
       }
-    } else {
-      console.log("Skipping session setup: No keys restored.");
     }
     
     try {
@@ -363,7 +359,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   addOptimisticMessage: (conversationId, message) => {
-    console.log("Adding optimistic message:", message);
     set(state => ({ messages: { ...state.messages, [conversationId]: [...(state.messages[conversationId] || []), message] } }))
   },
   addIncomingMessage: (conversationId, message) => set(state => {
@@ -378,7 +373,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       URL.revokeObjectURL(optimisticMessage.fileUrl);
     }
     return {
-      messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.tempId === tempId ? { ...newMessage, tempId: undefined } : m) }
+      messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.tempId === tempId ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m) }
     };
   }),
   removeMessage: (conversationId, messageId) => set(state => {
@@ -484,7 +479,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   reDecryptPendingMessages: async (conversationId: string) => {
-    console.log(`[re-decrypt] Triggered for conversation ${conversationId}`);
     const state = get();
     const conversationMessages = state.messages[conversationId];
     if (!conversationMessages) return;
@@ -494,11 +488,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     );
 
     if (pendingMessages.length === 0) {
-      console.log(`[re-decrypt] No pending messages found for ${conversationId}.`);
       return;
     }
-
-    console.log(`[re-decrypt] Found ${pendingMessages.length} pending messages to re-decrypt.`);
 
     const reDecryptedMessages = await Promise.all(
       pendingMessages.map(msg => decryptMessageObject({ ...msg, content: msg.ciphertext }))
@@ -515,7 +506,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         [conversationId]: newMessagesForConvo,
       },
     });
-    console.log(`[re-decrypt] Re-decryption complete for ${conversationId}.`);
   },
 
   failPendingMessages: (conversationId: string, reason: string) => {

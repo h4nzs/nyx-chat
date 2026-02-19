@@ -11,6 +11,7 @@ import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGrou
 import { useKeychainStore } from "@store/keychain";
 import type { Message } from "@store/conversation";
 import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
+import { triggerReceiveFeedback } from "@utils/feedback";
 
 // FIX: Gunakan VITE_WS_URL (Koyeb) jika ada, kalau tidak ada (dev) baru pakai API_URL
 const WS_URL = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL;
@@ -24,7 +25,6 @@ const handleKeyRotation = async (conversationId: string) => {
     try {
       await rotateGroupKey(conversationId);
       useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: false });
-      console.log(`[socket] Key rotation for ${conversationId} successful.`);
       return; 
     } catch (err: any) {
       attempt++;
@@ -73,8 +73,6 @@ export function getSocket() {
 
         try {
           // === THE SYNC PROTOCOL: Sync data on connect/reconnect ===
-          console.log("🔄 Syncing data after connection...");
-
           // 1. Refetch Conversation List (Biar urutan chat bener & snippet update)
           await useConversationStore.getState().loadConversations();
 
@@ -87,14 +85,12 @@ export function getSocket() {
           console.error("socket connect sync failed", error);
         }
       }
-      console.log("✅ Socket connected:", socket?.id);
     });
 
     socket.on("disconnect", (reason) => {
       setStatus('disconnected');
       // Jangan toast jika disconnect manual/navigasi
       if (reason !== "io client disconnect") toast.error("Disconnected. Reconnecting...");
-      console.log("⚠️ Socket disconnected:", reason);
     });
 
     socket.on("connect_error", (err) => {
@@ -104,11 +100,8 @@ export function getSocket() {
 
     // --- Application-specific Listeners ---
     socket.on("message:new", async (newMessage) => {
-      console.log("🔥 [SOCKET] Received message:new", newMessage.id);
-
       const convExists = useConversationStore.getState().conversations.some(c => c.id === newMessage.conversationId);
       if (!convExists) {
-        console.warn(`[socket] Ignored message for unknown conversation ${newMessage.conversationId}`);
         return;
       }
 
@@ -122,6 +115,9 @@ export function getSocket() {
         } else {
           addIncomingMessage(decryptedMessage.conversationId, decryptedMessage);
           
+          // Trigger feedback for incoming messages
+          triggerReceiveFeedback();
+
           const activeId = useConversationStore.getState().activeId;
           if (decryptedMessage.conversationId !== activeId && decryptedMessage.sender) {
             const { addNotification } = useNotificationStore.getState();
@@ -147,6 +143,21 @@ export function getSocket() {
     socket.on("message:deleted", ({ conversationId, id }) => {
       const { removeMessage } = useMessageStore.getState();
       removeMessage(conversationId, id);
+    });
+
+    socket.on("messages:expired", ({ messageIds }: { messageIds: string[] }) => {
+      const { messages, removeMessage } = useMessageStore.getState();
+      // Optimization: create a set for faster lookup
+      const expiredSet = new Set(messageIds);
+      
+      Object.keys(messages).forEach(conversationId => {
+        const conversationMessages = messages[conversationId] || [];
+        conversationMessages.forEach(msg => {
+          if (expiredSet.has(msg.id)) {
+            removeMessage(conversationId, msg.id);
+          }
+        });
+      });
     });
 
     socket.on("presence:init", (onlineUserIds) => setOnlineUsers(onlineUserIds));
@@ -256,7 +267,6 @@ export function connectSocket() {
 
     // 4. Connect hanya jika belum connect
     if (!socket.connected) {
-      console.log("🔌 Connecting socket with token:", token ? "Token Present" : "No Token");
       socket.connect();
     }
   }

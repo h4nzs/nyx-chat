@@ -3,7 +3,7 @@ name: Deploy NYX to VPS (PNPM Monorepo)
 on:
   push:
     branches:
-      - main # Pastikan ini sesuai branch lu
+      - main # ⚠️ Pastikan ini sesuai nama branch kamu! (misal: 'main' atau 'setup-deploy')
 
 jobs:
   build-and-deploy:
@@ -39,14 +39,14 @@ jobs:
           VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
         run: pnpm --filter ./web run build
 
-      # --- PHASE 3: BUILD SERVER (YANG DIPERBAIKI) ---
+      # --- PHASE 3: BUILD SERVER ---
       - name: ⚙️ Build Server (Backend)
         working-directory: ./server
         run: |
-          # WAJIB: Generate Prisma Client dulu biar TypeScript kenal tipe datanya
-          npx prisma generate
+          # Generate Prisma Client (Versi 5) untuk proses build
+          npx prisma@5.22.0 generate
           
-          # Baru di-build
+          # Build TypeScript
           pnpm run build
 
       # --- PHASE 4: PACKAGING ---
@@ -79,7 +79,7 @@ jobs:
           source: "nyx-deploy.zip"
           target: "/root/"
 
-      # --- PHASE 6: EXECUTE ON VPS ---
+      # --- PHASE 6: EXECUTE ON VPS (FIXED HERE) ---
       - name: 🔧 Unzip & Restart on VPS
         uses: appleboy/ssh-action@master
         with:
@@ -108,12 +108,32 @@ jobs:
             # Install prod dependencies
             pnpm install --prod
             
-            # Generate Prisma (Di VPS juga perlu biar runtime-nya jalan)
-            npx prisma generate
+            # --- FIX KHUSUS PRISMA DI SINI ---
+            # Kita install prisma CLI versi 5.22.0 secara lokal agar tidak bentrok dengan v7
+            echo "🔧 Installing specific Prisma version..."
+            pnpm add -D prisma@5.22.0
+            
+            # Jalankan generate pakai binary lokal yang baru diinstall
+            echo "🔧 Generating Prisma Client..."
+            pnpm prisma generate
+
+            # --- DEPLOY FRONTEND TO NGINX ---
+            echo "🎨 Deploying Frontend to Nginx..."
+            # 1. Pastikan folder tujuan ada
+            sudo mkdir -p /var/www/nyx-web
+            # 2. Bersihkan file lama
+            sudo rm -rf /var/www/nyx-web/*
+            # 3. Copy hasil build baru dari /root/ ke /var/www/
+            sudo cp -r /root/nyx-app/web/dist/* /var/www/nyx-web/
+            # 4. Reload Nginx biar refresh cache
+            sudo systemctl reload nginx
+            # ---------------------------------
             
             # Restart Apps
             echo "🔄 Restarting Apps..."
-            pm2 restart nyx-api || pm2 start dist/index.js --name "nyx-api"
-            pm2 restart nyx-web || pm2 start "pnpm dlx serve -s ../web/dist -l 3000" --name "nyx-web"
+            pm2 delete nyx-api || true
+            pm2 start dist/index.js --name "nyx-api" -i max --node-args="--max-old-space-size=768"
+            pm2 delete nyx-web || true
+            pm2 save
             
             echo "✅ Deployment Success!"

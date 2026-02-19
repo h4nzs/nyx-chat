@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This project is a full-stack, real-time messaging application called Chat Lite. It prioritizes security with end-to-end encryption (E2EE) and features a modern, responsive user interface.
+This project is a full-stack, real-time messaging application called NYX. It prioritizes security with end-to-end encryption (E2EE) and features a modern, responsive user interface.
 
 *   **Frontend:** The frontend is a single-page application built with **React** and **Vite**. It uses **TypeScript** for static typing, **Zustand** for state management, and **Tailwind CSS** for styling. The UI is a custom Neumorphic design with light and dark modes.
 *   **Backend:** The backend is a **Node.js** server using the **Express.js** framework. It uses **Prisma** as a database ORM to interact with a **PostgreSQL** database. Real-time communication is handled with **Socket.IO**.

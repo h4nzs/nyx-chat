@@ -132,7 +132,6 @@ export async function ensureGroupSession(conversationId: string, participants: P
       const distributionKeys = await Promise.all(
         otherParticipants.map(async (p) => {
           if (!p.publicKey) {
-            console.warn(`Participant ${p.username} has no public key. Cannot send group key.`);
             missingKeys.push(p.username);
             return null;
           }

@@ -22,6 +22,7 @@ import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers } from 'react-
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import MessageInput from './MessageInput';
+import MessageSkeleton from './MessageSkeleton';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -30,6 +31,21 @@ const KeyRotationBanner = () => (
       <div className="font-mono text-xs">
         <p className="font-bold uppercase tracking-wider">Security Alert: Key Rotation Required</p>
         <p className="opacity-80">Encryption keys desynchronized. Transmit message to re-establish secure handshake.</p>
+      </div>
+    </div>
+  </div>
+);
+
+const NewConversationBanner = () => (
+  <div className="bg-blue-500/10 border-y border-blue-500/20 px-4 py-3 text-blue-600 dark:text-blue-400">
+    <div className="flex items-start gap-3">
+      <FiInfo className="flex-shrink-0 mt-0.5" size={18} />
+      <div className="font-mono text-xs">
+        <p className="font-bold uppercase tracking-wider mb-1">Encryption Protocol Recommendation</p>
+        <p className="opacity-90 leading-relaxed">
+          For the initial handshake, ensure both parties are <strong>ONLINE</strong>. 
+          Sending messages to offline users in a new conversation may require a key refresh if they come online later.
+        </p>
       </div>
     </div>
   </div>
@@ -248,8 +264,8 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
           if (isLoading || !conversation) {
             return (
-              <div className="flex-1 flex items-center justify-center">
-                <Spinner size="lg" />
+              <div className="flex-1 flex flex-col justify-end pb-20">
+                <MessageSkeleton />
               </div>
             );
           }
@@ -263,6 +279,8 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                 onMenuClick={onMenuClick} 
               />
               
+              {messages.length === 0 && <NewConversationBanner />}
+
               {/* Main Display Screen */}
               <div className="flex-1 min-h-0 relative z-0 shadow-neu-pressed dark:shadow-neu-pressed-dark mx-2 md:mx-4 my-2 rounded-2xl bg-bg-main overflow-hidden">
                 <div className="h-full px-4 md:px-6 pt-6 pb-2">

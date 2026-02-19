@@ -22,7 +22,6 @@ export async function initializeSodium(): Promise<void> {
   sodiumInitPromise = sodium.ready
     .then(() => {
       isSodiumInitialized = true;
-      console.log('Libsodium initialized successfully');
     })
     .catch((error: any) => {
       console.error('Failed to initialize libsodium:', error);

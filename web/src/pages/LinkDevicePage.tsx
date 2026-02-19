@@ -6,6 +6,7 @@ import { Spinner } from '@components/Spinner';
 import { getSocket, connectSocket } from '@lib/socket';
 import { getSodium } from '@lib/sodiumInitializer';
 import { reEncryptBundleFromMasterKey } from '@lib/crypto-worker-proxy';
+import { saveEncryptedKeys, setDeviceAutoUnlockReady } from '@lib/keyStorage';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@store/auth';
 
@@ -17,7 +18,7 @@ export default function LinkDevicePage() {
   const ephemeralKeyPair = useRef<{ publicKey: Uint8Array; privateKey: Uint8Array } | null>(null);
 
   useEffect(() => {
-    let isMounted = true;
+    const isMounted = true;
     const socket = getSocket();
 
     const initializeSession = async () => {
@@ -60,7 +61,6 @@ export default function LinkDevicePage() {
   }, []);
 
   const handleLinkingSuccess = useCallback(async (data: any) => {
-    console.log("📦 Payload received!");
     setStatus('processing');
     toast.loading("Processing keys...", { id: 'link-process' });
 
@@ -83,16 +83,12 @@ export default function LinkDevicePage() {
 
       const result = await reEncryptBundleFromMasterKey(masterSeed, devicePassword);
 
-      localStorage.removeItem('encryptedPrivateKeys');
-      localStorage.setItem('encryptedPrivateKeys', result.encryptedPrivateKeys);
+      // Save the new encrypted bundle
+      await saveEncryptedKeys(result.encryptedPrivateKeys);
       
-      if (result.encryptionPublicKeyB64) localStorage.setItem('publicKey', result.encryptionPublicKeyB64);
-      if (result.signingPublicKeyB64) localStorage.setItem('signingPublicKey', result.signingPublicKeyB64);
+      // Set auto-unlock ready status
+      await setDeviceAutoUnlockReady(true);
 
-      localStorage.setItem('device_auto_unlock_ready', 'true');
-
-      console.log("✅ Keys re-encrypted by worker and saved.");
-      
       setStatus('success');
       toast.success("Paired! Redirecting to Login...", { id: 'link-process' });
 

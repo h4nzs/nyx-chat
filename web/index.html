@@ -1,60 +1,51 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     
-    <meta http-equiv="Content-Security-Policy" content="
-      default-src 'self'; 
-      script-src 'self' 'wasm-unsafe-eval' https://*.vercel-scripts.com https://challenges.cloudflare.com https://static.cloudflareinsights.com https://cloudflareinsights.com; 
-      worker-src 'self' blob:; 
-      style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; 
-      img-src 'self' data: blob: https://api.dicebear.com https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev https://cdn.jsdelivr.net; 
-      media-src 'self' blob: https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev https://chat-uploads.671c89ebedc700a07fdade45a9b3867f.r2.cloudflarestorage.com; 
-      font-src 'self' https://fonts.gstatic.com; 
-      connect-src 'self' http://localhost:4000 ws://localhost:4000 https://chat-lite-weld.vercel.app wss://chat-lite-weld.vercel.app https://static.cloudflareinsights.com https://cloudflareinsights.com https://*.koyeb.app wss://*.koyeb.app https://*.vercel-insights.com https://pub-5c244bcc0e854b01b0ffe1723df7bf3f.r2.dev https://chat-uploads.671c89ebedc700a07fdade45a9b3867f.r2.cloudflarestorage.com https://api.nyx-app.my.id wss://api.nyx-app.my.id; 
-      frame-src 'self' https://challenges.cloudflare.com;">
-    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://api.nyx-app.my.id">
+
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <link rel="alternate icon" href="/favicon.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/favicon.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/favicon.png" />
-    
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <link rel="apple-touch-icon" sizes="180x180" href="/pwa-192x192.png" />
     <meta name="theme-color" content="#f0f2f5" media="(prefers-color-scheme: light)">
     <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
-    
-    <title>NYX — Secure, Private & Neumorphic Messaging</title>
-    <meta name="title" content="NYX — Secure, Private & Neumorphic Messaging" />
-    <meta name="description" content="NYX is a secure, end-to-end encrypted messaging app featuring a stunning Neumorphic design. Chat privately with friends without tracking, ads, or compromise." />
-    <meta name="keywords" content="chat app, secure messaging, end-to-end encryption, E2EE, neumorphism, private chat, pwa, react chat, webauthn, dehan amada" />
-    <meta name="author" content="Dehan Amada" />
-    
-    <link rel="canonical" href="https://nyx-app.my.id/" />
-    
-    <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://nyx-app.my.id/" /> 
-    <meta property="og:title" content="NYX — The Future of Private Messaging" />
-    <meta property="og:description" content="Experience secure E2EE chat with a beautiful soft-ui design. No ads. No tracking. Just you and your friends." />
-    <meta property="og:image" content="/normal-desktop-dark.png" /> 
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
 
-    <meta property="twitter:card" content="summary_large_image" />
-    <meta property="twitter:url" content="https://nyx-app.my.id/" />
-    <meta property="twitter:title" content="NYX — Secure & Private Messaging" />
-    <meta property="twitter:description" content="Secure E2EE chat with Neumorphic design. Privacy focused." />
-    <meta property="twitter:image" content="/normal-desktop-dark.png" />
+    <title>NYX</title>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-0WB1ZJYZPX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-0WB1ZJYZPX');
+    </script>
+    <link rel="canonical" href="https://nyx-app.my.id/" />
+    <meta name="description" content="NYX is a secure, end-to-end encrypted messaging app featuring a stunning Neumorphic design. Chat privately without tracking.">
+    <meta name="keywords" content="nyx, Nyx, NYX, aplikasi chat, anonymous app, chat app, secure messaging, E2EE, neumorphism, private chat, pwa, react chat, dehan amada">
+    <meta name="author" content="Dehan Amada">
+    
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://nyx-app.my.id/">
+    <meta property="og:title" content="NYX — The Future of Private Messaging">
+    <meta property="og:description" content="Secure E2EE chat with a beautiful soft-ui design. No ads. No tracking.">
+    <meta property="og:image" content="/normal-desktop-dark.png">
+
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:title" content="NYX — Secure & Private Messaging">
+    <meta property="twitter:description" content="Secure E2EE chat with Neumorphic design. Privacy focused.">
+    <meta property="twitter:image" content="/normal-desktop-dark.png">
 
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="NYX">
-    <link rel="apple-touch-icon" href="/pwa-192x192.png">
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
     <script type="application/ld+json">
     [
       {
@@ -121,11 +112,66 @@
       }
     ]
     </script>
+
+    <style>
+      /* Dark mode default background to prevent white flash */
+      body { background-color: #f0f2f5; margin: 0; padding: 0; }
+      @media (prefers-color-scheme: dark) {
+        body { background-color: #0f172a; }
+      }
+      
+      /* Loader Styles */
+      #initial-loader {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+        transition: opacity 0.3s ease-out;
+      }
+      .spinner {
+        width: 48px;
+        height: 48px;
+        border: 4px solid rgba(134, 59, 246, 0.2); /* Blue-500 equivalent */
+        border-top-color: #a23bf6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      .loading-text {
+        margin-top: 16px;
+        font-family: 'Nunito', sans-serif;
+        font-size: 14px;
+        color: #64748b; /* Slate-500 */
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        animation: pulse 2s infinite;
+      }
+      @media (prefers-color-scheme: dark) {
+        .loading-text { color: #94a3b8; } /* Slate-400 */
+      }
+      @keyframes spin { 100% { transform: rotate(360deg); } }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    </style>
   </head>
-  <body class="min-h-screen bg-[#f0f2f5] dark:bg-gray-900 font-sans selection:bg-blue-500 selection:text-white">
-    <div id="root"></div>
+  <body>
+    <div id="root">
+      <div id="initial-loader">
+        <div class="spinner"></div>
+        <div class="loading-text">INITIALIZING NYX SECURE ENCLAVE...</div>
+      </div>
+    </div>
+    
     <script type="module" src="/src/main.tsx"></script>
     
-    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <noscript>
+      <div style="padding: 2rem; text-align: center; color: #3b82f6;">
+        NYX requires JavaScript to provide end-to-end encryption. Please enable it to continue. 🙏
+      </div>
+    </noscript>
   </body>
 </html>

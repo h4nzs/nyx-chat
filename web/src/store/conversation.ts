@@ -45,6 +45,7 @@ export type Message = {
   duration?: number;
   statuses?: MessageStatus[];
   deletedAt?: string | Date | null;
+  expiresAt?: string | null; // New: Disappearing messages
 };
 
 export type Participant = {

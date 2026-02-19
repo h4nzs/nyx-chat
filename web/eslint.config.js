@@ -18,6 +18,6 @@ export default [
     },
   },
   {
-    ignores: ["dist/", ".eslintrc.cjs", "vite.config.ts", "postcss.config.js", "tailwind.config.ts"],
+    ignores: ["dist/", "dev-dist/", "public/", "node_modules/", ".eslintrc.cjs", "vite.config.ts", "postcss.config.js", "tailwind.config.ts"],
   },
 ];

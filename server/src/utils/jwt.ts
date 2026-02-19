@@ -13,10 +13,10 @@ export function signAccessToken (payload: any, opts: any = {}) {
 }
 
 export function verifyJwt (token: string): JwtPayload | string | null {
-  try { 
-    return jwt.verify(token, env.jwtSecret) 
-  } catch { 
-    return null 
+  try {
+    return jwt.verify(token, env.jwtSecret)
+  } catch {
+    return null
   }
 }
 

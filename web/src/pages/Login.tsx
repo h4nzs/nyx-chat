@@ -8,6 +8,8 @@ import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewe
 import { api } from "@lib/api";
 import { retrievePrivateKeys } from "@lib/crypto-worker-proxy";
 import { connectSocket } from "@lib/socket";
+import { getEncryptedKeys } from "@lib/keyStorage";
+import toast from "react-hot-toast";
 
 export default function Login() {
   const [error, setError] = useState("");
@@ -63,71 +65,77 @@ export default function Login() {
       const authResp = await startAuthentication(options);
 
       // C. Verifikasi ke Server
-      const result = await api<{ verified: boolean; user: User; accessToken: string }>("/api/auth/webauthn/login/verify", {
+      const result = await api<{ verified: boolean; user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/webauthn/login/verify", {
         method: "POST",
         body: JSON.stringify(authResp)
       });
 
       if (result.verified && result.accessToken) {
-        // D. Login Sukses -> Set Store -> Redirect
+        // D. Login Sukses -> Set Store
         useAuthStore.getState().setAccessToken(result.accessToken);
         useAuthStore.getState().setUser(result.user);
 
-        // For biometric login, we need to handle key decryption
-        // Try auto-unlock first (this works if device_auto_unlock_key is available)
-        const autoUnlockSuccess = await useAuthStore.getState().tryAutoUnlock();
-
-        // If auto-unlock failed and we have encrypted keys, we need to prompt for password now
-        // This provides better UX than prompting later when user tries to send a message
-        const hasEncryptedKeys = !!localStorage.getItem('encryptedPrivateKeys');
-        if (!autoUnlockSuccess && hasEncryptedKeys) {
-          // Prompt for password to decrypt keys now
-          useModalStore.getState().showPasswordPrompt(async (password) => {
-            if (!password) {
-              // If user cancels, they can still use the app but won't be able to send messages
-              // until they provide the password
-              console.log("User cancelled password prompt. Keys remain locked.");
-              return;
-            }
-
-            try {
-              const encryptedKeys = localStorage.getItem('encryptedPrivateKeys');
-              if (!encryptedKeys) {
-                console.error("No encrypted keys found in storage");
-                return;
-              }
-
-              const result = await retrievePrivateKeys(encryptedKeys, password);
-              if (result.success) {
-                // Set the decrypted keys directly in the store
-                useAuthStore.getState().setDecryptedKeys(result.keys);
-                console.log("✅ Keys decrypted and cached successfully via biometric login.");
-
-                // Initialize post-login functionality after setting decrypted keys
-                await useAuthStore.getState().loadBlockedUsers();
-                connectSocket();
-              } else {
-                console.error("Failed to decrypt keys:", result.reason);
-                // Optionally show an error to the user
-              }
-            } catch (e) {
-              console.error("Error during key decryption:", e);
-            }
-          });
-        } else if (autoUnlockSuccess || !hasEncryptedKeys) {
-          // If auto-unlock succeeded or there are no encrypted keys,
-          // initialize post-login functionality immediately
-          await useAuthStore.getState().loadBlockedUsers();
-          connectSocket();
+        // [SYNC] Restore Encrypted Keys from Server if available
+        if (result.encryptedPrivateKey) {
+          const { saveEncryptedKeys } = await import("@lib/keyStorage");
+          await saveEncryptedKeys(result.encryptedPrivateKey);
+          useAuthStore.getState().setHasRestoredKeys(true);
         }
 
-        // Check if user has pending email verification
+        // Try auto-unlock first
+        const autoUnlockSuccess = await useAuthStore.getState().tryAutoUnlock();
+        const hasEncryptedKeys = await getEncryptedKeys();
+
+        if (!autoUnlockSuccess && hasEncryptedKeys) {
+          // Kunci ada (baru diunduh), tapi tidak bisa dibuka otomatis (karena biometric gak bawa password).
+          // Minta user input password SEKALI untuk membuka brankas.
+          useModalStore.getState().showPasswordPrompt(async (password) => {
+            if (!password) return; // User cancel
+
+            try {
+              const encryptedKeys = await getEncryptedKeys();
+              const result = await retrievePrivateKeys(encryptedKeys!, password);
+              
+              if (result.success) {
+                // Sukses! Simpan password biar besok2 auto-unlock jalan
+                const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } = await import("@lib/keyStorage");
+                await saveDeviceAutoUnlockKey(password);
+                await setDeviceAutoUnlockReady(true);
+
+                useAuthStore.getState().setDecryptedKeys(result.keys);
+                await useAuthStore.getState().loadBlockedUsers();
+                connectSocket();
+                
+                // Redirect logic
+                const verificationState = await import('@utils/verificationPersistence').then(m => m.getVerificationState());
+                if (verificationState) {
+                  navigate("/register", { state: { showVerification: true, ...verificationState } });
+                } else {
+                  navigate("/chat");
+                }
+              } else {
+                toast.error("Password salah. Gagal mendekripsi kunci.");
+              }
+            } catch (e) {
+              console.error("Decryption error:", e);
+              toast.error("Terjadi kesalahan saat dekripsi.");
+            }
+          });
+          
+          // Jangan redirect dulu, tunggu user isi password di modal
+          return; 
+        } 
+        
+        // Kalau auto-unlock sukses (jarang terjadi di flow baru ini) atau tidak ada kunci
+        await useAuthStore.getState().loadBlockedUsers();
+        connectSocket();
+
+        // Check verification state
         const verificationState = await import('@utils/verificationPersistence').then(
           ({ getVerificationState }) => getVerificationState()
         );
 
         if (verificationState) {
-          // User has pending verification, redirect to verification page
           navigate("/register", { state: { showVerification: true, ...verificationState } });
         } else {
           navigate("/chat");
@@ -206,6 +214,9 @@ export default function Login() {
             <div className="flex flex-col sm:flex-row justify-center gap-4">
               <Link to="/restore" className="text-sm text-orange-500 hover:underline">Restore from phrase</Link>
               <Link to="/link-device" className="text-sm text-orange-500 hover:underline">Link a new device</Link>
+            </div>
+            <div className="mt-4 pt-4 border-t border-stone-800">
+              <Link to="/privacy" className="text-xs text-stone-600 hover:text-stone-400 transition-colors">Privacy Policy & Terms</Link>
             </div>
           </div>
         </div>

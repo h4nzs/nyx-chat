@@ -1,3 +1,6 @@
 packages:
-  - 'web'
-  - 'server'
+  - web
+  - server
+
+onlyBuiltDependencies:
+  - supabase

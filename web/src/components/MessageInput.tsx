@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX } from 'react-icons/fi';
+import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import clsx from 'clsx';
 import { useMessageInputStore } from '@store/messageInput';
@@ -8,6 +8,9 @@ import { useConnectionStore } from '@store/connection';
 import { useAuthStore } from '@store/auth';
 import { useThemeStore } from '@store/theme';
 import LinkPreviewCard from './LinkPreviewCard';
+import SmartReply from './SmartReply';
+import { useMessageStore } from '@store/message';
+import { triggerSendFeedback } from '@utils/feedback';
 
 // --- Types ---
 interface MessageInputProps {
@@ -26,6 +29,13 @@ function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
     timeout = setTimeout(() => func(...args), waitFor);
   };
 }
+
+const DURATIONS = [
+  { label: 'Off', value: null },
+  { label: '1m', value: 60 },
+  { label: '1h', value: 3600 },
+  { label: '24h', value: 86400 },
+];
 
 const ReplyPreview = () => {
   const { replyingTo, setReplyingTo } = useMessageInputStore(state => ({
@@ -73,12 +83,18 @@ const ReplyPreview = () => {
 export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSend, conversation }: MessageInputProps) {
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showTimerMenu, setShowTimerMenu] = useState(false); // Timer Menu State
+  const [showPlusMenu, setShowPlusMenu] = useState(false); // Mobile Plus Menu State
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const timerMenuRef = useRef<HTMLDivElement>(null);
+  const plusMenuRef = useRef<HTMLDivElement>(null);
   
-  const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview } = useMessageInputStore();
+  const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, expiresIn, setExpiresIn } = useMessageInputStore();
   const { status: connectionStatus } = useConnectionStore();
   const blockedUserIds = useAuthStore(state => state.blockedUserIds);
+  const user = useAuthStore(state => state.user);
+  const messages = useMessageStore(state => state.messages[conversation.id] || []);
   const theme = useThemeStore(state => state.theme);
 
   // Voice State
@@ -97,17 +113,29 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const hasText = text.trim().length > 0;
   const isInputDisabled = !isConnected || isOtherParticipantBlocked;
 
+  // Smart Reply Logic
+  const absoluteLastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+  const isLastMessageFromOther = absoluteLastMessage?.senderId !== user?.id;
+  const isValidTextMessage = absoluteLastMessage && !absoluteLastMessage.fileUrl && !absoluteLastMessage.imageUrl && absoluteLastMessage.content;
+  const lastDecryptedText = (isLastMessageFromOther && isValidTextMessage) ? (absoluteLastMessage.content || null) : null;
+
   // Debounced Link Preview
   const debouncedFetchPreview = useCallback(
     debounce((inputText: string) => fetchTypingLinkPreview(inputText), 500),
     [fetchTypingLinkPreview]
   );
 
-  // Close Emoji Picker on Click Outside
+  // Close Popovers on Click Outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
         setShowEmojiPicker(false);
+      }
+      if (timerMenuRef.current && !timerMenuRef.current.contains(event.target as Node)) {
+        setShowTimerMenu(false);
+      }
+      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
+        setShowPlusMenu(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -128,14 +156,23 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const handleEmojiClick = (emojiData: EmojiClickData) => {
     setText(prev => prev + emojiData.emoji);
     setShowEmojiPicker(false);
+    setShowPlusMenu(false); // Close plus menu if open
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasText || !isConnected) return;
+    triggerSendFeedback();
     onSend({ content: text });
     setText('');
     clearTypingLinkPreview();
+  };
+
+  const handleSmartReplySelect = (reply: string) => {
+    setText(reply);
+    if (isConnected) {
+        onTyping();
+    }
   };
 
   const handleStartRecording = async () => {
@@ -180,17 +217,24 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
 
   return (
     <div className="
-      p-4 bg-bg-main border-t border-white/10
+      bg-bg-main border-t border-white/10
       z-20 relative
     ">
       {/* Previews Stack */}
-      <div className="absolute bottom-full left-0 w-full px-4">
-        <ReplyPreview />
-        {typingLinkPreview && (
-          <div className="mb-2">
-            <LinkPreviewCard preview={typingLinkPreview} />
-          </div>
-        )}
+      <div className="absolute bottom-full left-0 w-full">
+        <SmartReply 
+            lastMessage={lastDecryptedText} 
+            isFromMe={!isLastMessageFromOther}
+            onSelectReply={handleSmartReplySelect} 
+        />
+        <div className="px-4">
+            <ReplyPreview />
+            {typingLinkPreview && (
+            <div className="mb-2">
+                <LinkPreviewCard preview={typingLinkPreview} />
+            </div>
+            )}
+        </div>
       </div>
 
       {/* Emoji Picker Popover */}
@@ -207,9 +251,56 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
         </div>
       )}
 
+      {/* Disappearing Messages Menu */}
+      {showTimerMenu && (
+        <div ref={timerMenuRef} className="absolute bottom-full left-10 mb-2 z-50 bg-bg-surface border border-white/10 rounded-xl shadow-xl overflow-hidden min-w-[120px]">
+          <div className="p-2 text-[10px] uppercase font-bold text-text-secondary border-b border-white/5">Auto-Delete</div>
+          {DURATIONS.map((opt) => (
+            <button
+              key={opt.label}
+              onClick={() => { setExpiresIn(opt.value); setShowTimerMenu(false); setShowPlusMenu(false); }}
+              className={clsx(
+                "w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors flex items-center justify-between",
+                expiresIn === opt.value ? "text-orange-500 font-bold" : "text-text-primary"
+              )}
+            >
+              {opt.label}
+              {expiresIn === opt.value && <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Mobile Plus Menu */}
+      {showPlusMenu && (
+        <div ref={plusMenuRef} className="absolute bottom-full left-4 mb-2 z-50 bg-bg-surface border border-white/10 rounded-xl shadow-xl overflow-hidden min-w-[160px] flex flex-col p-1">
+          <button
+            onClick={() => { fileInputRef.current?.click(); setShowPlusMenu(false); }}
+            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
+          >
+            <FiPaperclip size={18} />
+            <span>Attachment</span>
+          </button>
+          <button
+            onClick={() => { setShowTimerMenu(true); setShowPlusMenu(false); }}
+            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
+          >
+            <FiClock size={18} className={expiresIn ? "text-orange-500" : ""} />
+            <span>Auto-Delete</span>
+          </button>
+          <button
+            onClick={() => { setShowEmojiPicker(true); setShowPlusMenu(false); }}
+            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
+          >
+            <FiSmile size={18} />
+            <span>Emoji</span>
+          </button>
+        </div>
+      )}
+
       {/* Input Module */}
       {isOtherParticipantBlocked ? (
-        <div className="flex items-center justify-between p-4 bg-red-500/10 rounded-xl border border-red-500/20">
+        <div className="flex items-center justify-between p-4 bg-red-500/10 rounded-xl border border-red-500/20 m-4">
           <div className="flex items-center gap-3 text-red-500">
             <FiAlertTriangle size={20} />
             <span className="font-bold text-sm">TRANSMISSION BLOCKED</span>
@@ -223,7 +314,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
         </div>
       ) : isRecording ? (
         // Voice Recording Mode
-        <div className="flex items-center gap-4 animate-fade-in">
+        <div className="flex items-center gap-4 animate-fade-in p-4">
           <button 
             onClick={handleStopRecording} 
             className="
@@ -246,12 +337,13 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
         // Text Input Mode - TRENCH DESIGN
         <form onSubmit={handleSubmit} className="
           relative flex items-center gap-2 p-2 rounded-2xl
-          bg-bg-main w-full
+          bg-bg-main w-full m-4
           shadow-neu-pressed dark:shadow-neu-pressed-dark
+          max-w-[calc(100%-2rem)]
         ">
           
-          {/* Action Buttons (Left) */}
-          <div className="flex items-center gap-1">
+          {/* Action Buttons (Desktop) */}
+          <div className="hidden md:flex items-center gap-1">
             <button 
               type="button" 
               onClick={() => fileInputRef.current?.click()} 
@@ -264,6 +356,18 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               "
             >
               <FiPaperclip size={18} />
+            </button>
+            <button 
+              type="button" 
+              onClick={() => setShowTimerMenu(!showTimerMenu)} 
+              disabled={isInputDisabled}
+              aria-label="Set disappearing message timer"
+              className={clsx(
+                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark",
+                expiresIn ? "text-orange-500 bg-orange-500/10" : "text-text-secondary hover:text-orange-500"
+              )}
+            >
+              <FiClock size={18} />
             </button>
             <button 
               type="button" 
@@ -280,6 +384,24 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
             </button>
           </div>
 
+          {/* Action Button (Mobile) - Plus Menu Trigger */}
+          <div className="md:hidden flex items-center">
+            <button 
+              type="button" 
+              onClick={() => setShowPlusMenu(!showPlusMenu)}
+              disabled={isInputDisabled}
+              aria-label="More actions"
+              className={clsx(
+                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark",
+                showPlusMenu ? "text-accent bg-accent/10" : "text-text-secondary"
+              )}
+            >
+              <motion.div animate={{ rotate: showPlusMenu ? 45 : 0 }} transition={{ duration: 0.2 }}>
+                <FiPlus size={20} />
+              </motion.div>
+            </button>
+          </div>
+
           <input type="file" ref={fileInputRef} className="hidden" onChange={onFileChange} disabled={isInputDisabled} />
 
           {/* Main Transmission Slot */}
@@ -290,7 +412,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               onChange={handleTextChange}
               disabled={isInputDisabled}
               aria-label="Message text"
-              placeholder={isConnected ? "Transmit secure message..." : "Connection Lost"}
+              placeholder={isConnected ? (expiresIn ? "Disappearing message..." : "Transmit secure message...") : "Connection Lost"}
               className="
                 w-full bg-transparent border-none outline-none 
                 text-text-primary placeholder:text-text-secondary/50

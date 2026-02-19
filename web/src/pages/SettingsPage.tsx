@@ -96,6 +96,8 @@ const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?
   </button>
 );
 
+import { useSettingsStore } from '@store/settings';
+
 /* --- PAGE COMPONENT --- */
 
 export default function SettingsPage() {
@@ -103,6 +105,7 @@ export default function SettingsPage() {
   const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout } = useAuthStore();
   const { theme, toggleTheme, accent, setAccent } = useThemeStore();
   const { showConfirm } = useModalStore();
+  const { enableSmartReply, setEnableSmartReply } = useSettingsStore();
 
   const { 
     isSubscribed, 
@@ -126,6 +129,7 @@ export default function SettingsPage() {
     green: 'hsl(142 76% 42%)',
     purple: 'hsl(262 80% 64%)',
     orange: 'hsl(25 95% 53%)',
+    red: 'hsl(0 92% 29%)',
   };
 
   useEffect(() => {
@@ -472,7 +476,33 @@ export default function SettingsPage() {
           </ControlModule>
         </div>
 
-        {/* 6. SUPPORT MODULE */}
+        {/* 6. SMART ASSISTANCE */}
+        <div className="col-span-1 md:col-span-6 lg:col-span-4">
+          <ControlModule title="Smart Assistance" icon={FiActivity}>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-text-primary">AI Smart Reply</h3>
+                  <p className="text-[10px] text-text-secondary mt-0.5">Auto-generate response suggestions.</p>
+                </div>
+                <RockerSwitch 
+                  checked={enableSmartReply} 
+                  onChange={() => setEnableSmartReply(!enableSmartReply)} 
+                />
+              </div>
+              
+              {enableSmartReply && (
+                <div className="p-3 bg-accent/5 border border-accent/10 rounded-lg">
+                  <p className="text-[10px] text-text-secondary leading-relaxed">
+                    <strong className="text-accent">Privacy Note:</strong> Incoming messages are decrypted on-device and sent securely to Google Gemini for analysis. Messages are <strong className="text-text-primary">not stored</strong> by our servers.
+                  </p>
+                </div>
+              )}
+            </div>
+          </ControlModule>
+        </div>
+
+        {/* 7. SUPPORT MODULE */}
         <div className="col-span-1 md:col-span-12 lg:col-span-12">
           <ControlModule title="Support & Feedback" className="flex flex-col md:flex-row gap-6">
              <div className="flex-1 space-y-4">
@@ -486,6 +516,7 @@ export default function SettingsPage() {
              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <ActionButton label="Help Center" icon={FiHelpCircle} onClick={() => navigate('/help')} />
                 <ActionButton label="Report Bug" icon={FiFlag} onClick={() => setShowReportModal(true)} />
+                <ActionButton label="Legal & Privacy" icon={FiShield} onClick={() => navigate('/privacy')} />
              </div>
           </ControlModule>
         </div>

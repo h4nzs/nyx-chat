@@ -13,3 +13,4 @@ web/dist
 *.log
 
 /generated/prisma
+*.sql

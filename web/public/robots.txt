@@ -1,14 +1,27 @@
 User-agent: *
 Allow: /
+# Blokir akses crawler ke area privat dan API backend
+Disallow: /chat
+Disallow: /settings
+Disallow: /profile
+Disallow: /key-management
+Disallow: /sessions
+Disallow: /api/
 
 # AI Crawlers (Explicitly Allowed for GEO)
 User-agent: GPTBot
 Allow: /
+Disallow: /chat
+Disallow: /api/
 
 User-agent: CCBot
 Allow: /
+Disallow: /chat
+Disallow: /api/
 
 User-agent: Google-Extended
 Allow: /
+Disallow: /chat
+Disallow: /api/
 
-Sitemap: https://chat-lite-weld.vercel.app/sitemap.xml
+Sitemap: https://nyx-app.my.id/sitemap.xml

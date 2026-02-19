@@ -22,3 +22,4 @@ server/uploads/
 vspostgre.session.sql
 # Exclude TypeScript build info files
 *.tsbuildinfo
+*.sql

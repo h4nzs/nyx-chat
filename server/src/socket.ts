@@ -2,13 +2,17 @@ import { Server, Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
 import { env } from "./config.js";
 import { prisma } from "./lib/prisma.js";
-import { verifyJwt, signAccessToken } from "./utils/jwt.js"; // Pastikan signAccessToken diimport
+import { verifyJwt, signAccessToken } from "./utils/jwt.js";
 import { sendPushNotification } from "./utils/sendPushNotification.js";
-import { redisClient } from "./lib/redis.js";
+import { redisClient } from "./lib/redis.js"; // Client untuk data aplikasi (Presence, dll)
 import { Message } from "@prisma/client";
 import { AuthPayload } from "./types/auth.js";
 import cookie from "cookie"; 
 import crypto from "crypto";
+
+// --- REDIS ADAPTER IMPORTS ---
+import { createClient } from "redis";
+import { createAdapter } from "@socket.io/redis-adapter";
 
 // --- Type Definitions for Socket Payloads ---
 interface TypingPayload {
@@ -78,20 +82,24 @@ export function registerSocket(httpServer: HttpServer) {
         const allowedOrigins = [
           env.corsOrigin, 
           "http://localhost:5173", 
-          "http://localhost:4173"
+          "http://localhost:4173",
+          // Tambahkan domain HTTP untuk support Cloudflare Tunnel
+          "http://nyx-app.my.id",
+          "https://nyx-app.my.id",
+          "http://*.nyx-app.my.id",
+          "https://*.nyx-app.my.id"
         ];
         if (
           allowedOrigins.includes(origin) || 
           origin.endsWith('.vercel.app') || 
           origin.endsWith('.koyeb.app') ||
           origin.endsWith('.onrender.com') ||
+          origin.endsWith('.nyx-app.my.id') ||
           origin.endsWith('.ngrok-free.app')
         ) {
           callback(null, true);
         } else {
-          console.warn(`[Socket] Blocked CORS origin: ${origin}`);
-          callback(new Error('Not allowed by CORS'));
-        }
+                callback(new Error('Not allowed by CORS'));        }
       },
       credentials: true,
       methods: ["GET", "POST"]
@@ -103,9 +111,33 @@ export function registerSocket(httpServer: HttpServer) {
       skipMiddlewares: true,
     },
     allowEIO3: true,
-    pingTimeout: 30000, // Diubah dari 20000 ke 30000 untuk konsistensi
-    pingInterval: 35000  // Diubah dari 25000 ke 35000 untuk konsistensi
+    pingTimeout: 30000,
+    pingInterval: 35000 
   });
+
+  // === REDIS ADAPTER SETUP (CLUSTER MODE SUPPORT) ===
+  const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+  
+  // Opsi socket yang sama dengan main client agar konsisten
+  const redisOptions = {
+    url: redisUrl,
+    socket: {
+      keepAlive: true,
+      reconnectStrategy: (retries: number) => Math.min(retries * 50, 2000),
+    }
+  };
+
+  const pubClient = createClient(redisOptions);
+  const subClient = pubClient.duplicate();
+
+  Promise.all([pubClient.connect(), subClient.connect()])
+    .then(() => {
+      io.adapter(createAdapter(pubClient, subClient));
+    })
+    .catch((err) => {
+      console.error("❌ Socket.IO Redis Adapter Connection Failed:", err);
+    });
+  // ==================================================
 
   // === MIDDLEWARE AUTH ===
   io.use(async (socket: AuthenticatedSocket, next) => {
@@ -122,14 +154,12 @@ export function registerSocket(httpServer: HttpServer) {
 
       if (!token) {
         // ALLOW GUEST for Device Linking
-        console.log(`[Socket] Guest connection allowed: ${socket.id}`);
         socket.user = undefined;
         return next(); 
       }
 
       const payload = verifyJwt(token);
       if (!payload || typeof payload === 'string') {
-        console.warn(`[Socket] Invalid token, treating as guest: ${socket.id}`);
         socket.user = undefined;
         return next();
       }
@@ -161,20 +191,16 @@ export function registerSocket(httpServer: HttpServer) {
     if (!userId) {
       // Event 1: Request QR Token (Dipanggil oleh LinkDevicePage)
       socket.on("auth:request_linking_qr", async (payload: { publicKey: string }, callback) => {
-         console.log(`[Socket] Generating QR token for guest ${socket.id}`);
          
          const linkingToken = crypto.randomBytes(32).toString('hex');
          await socket.join(`linking:${linkingToken}`);
          
-         console.log(`[Socket] Guest joined room: linking:${linkingToken}`);
-
          if (typeof callback === 'function') {
             callback({ token: linkingToken });
          }
       });
 
       socket.on("disconnect", () => {
-        console.log(`[Socket] Guest disconnected: ${socket.id}`);
       });
 
       // STOP! Guest tidak boleh lanjut ke logika user
@@ -198,7 +224,6 @@ export function registerSocket(httpServer: HttpServer) {
 
     // --- FITUR LINKING DEVICE (Sisi Scanner/HP Lama) ---
     socket.on("linking:send_payload", async (data: { roomId: string, encryptedMasterKey: string }) => {
-      console.log(`[Linking] User ${userId} authorizing login for room ${data.roomId}`);
       
       try {
         // 1. Generate Token Baru untuk device baru
@@ -216,7 +241,6 @@ export function registerSocket(httpServer: HttpServer) {
             encryptedMasterKey: data.encryptedMasterKey // Kunci enkripsi
         });
 
-        console.log(`[Linking] Success sending auth data to room ${data.roomId}`);
       } catch (e) {
         console.error("[Linking] Failed to sign token or send payload:", e);
       }
@@ -402,7 +426,6 @@ export function registerSocket(httpServer: HttpServer) {
           sessionId
         });
 
-        console.log(`[Socket] User ${userId} requested missing key for session ${sessionId}`);
       } catch (error) {
         console.error("Error handling session request:", error);
       }

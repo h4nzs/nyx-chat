@@ -108,7 +108,7 @@ ps -ef | grep node
 # Show Node process cmdline
 cat /proc/<node-pid>/cmdline
 # Check the process's working directory and the file it loaded
-lsof -p <node-pid> | grep '/home/kenz/chat-lite/server'
+lsof -p <node-pid> | grep '/home/kenz/nyx/server'
 # Check compiled .js files are up to date in the path used by Node.
 # e.g., if using a build directory:
 ls -l server/dist && grep -R "DEBUG initialSession" server/dist

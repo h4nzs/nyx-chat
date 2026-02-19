@@ -86,7 +86,6 @@ export default function LazyImage({
                 // Minta Kunci ke Server via Socket (Active Fetch)
                 const socket = getSocket();
                 if (socket && socket.connected && message.sessionId) {
-                    console.log(`[LazyImage] Requesting missing key for session ${message.sessionId}`);
                     socket.emit('session:request_key', {
                         conversationId: message.conversationId,
                         sessionId: message.sessionId

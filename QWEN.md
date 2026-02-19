@@ -1,8 +1,8 @@
-# Chat Lite - Project Context
+# NYX - Project Context
 
 ## Project Overview
 
-Chat Lite is a secure, modern, and customizable real-time messaging application built with a focus on user experience and end-to-end encryption. It's a full-stack application designed for users who prioritize privacy and a clean, modern user interface. At its core, it provides a robust end-to-end encryption (E2EE) system, ensuring that conversations remain private and secure.
+NYX is a secure, modern, and customizable real-time messaging application built with a focus on user experience and end-to-end encryption. It's a full-stack application designed for users who prioritize privacy and a clean, modern user interface. At its core, it provides a robust end-to-end encryption (E2EE) system, ensuring that conversations remain private and secure.
 
 ### Key Features
 - **End-to-End Encryption**: All messages and files are secured using the audited `libsodium` cryptographic library
@@ -22,7 +22,7 @@ Chat Lite is a secure, modern, and customizable real-time messaging application 
 ## Project Structure
 
 ```
-chat-lite/
+nyx/
 ├── server/           # Backend (Node.js, Express, Prisma)
 │   ├── src/          # Source code
 │   ├── prisma/       # Database schema and migrations

@@ -3,8 +3,6 @@ import { useEffect, useCallback, Suspense, lazy } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { FiLogOut, FiSettings } from 'react-icons/fi';
 import { motion } from 'framer-motion';
-import { Analytics } from '@vercel/analytics/react';
-import { SpeedInsights } from '@vercel/speed-insights/react';
 
 // Lazy Loaded Pages
 const Login = lazy(() => import('./pages/Login'));
@@ -19,6 +17,8 @@ const DeviceScannerPage = lazy(() => import('./pages/DeviceScannerPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const HelpPage = lazy(() => import('./pages/HelpPage'));
+const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -142,14 +142,11 @@ const AppContent = () => {
   // 2. Manage Socket Connection
   useEffect(() => {
     if (location.pathname.startsWith('/link-device')) {
-      console.log("🔗 On Linking Page: Global socket management is paused.");
       return;
     }
     if (user) {
-      console.log("👤 User authenticated, connecting socket...");
       connectSocket();
     } else {
-      console.log("👤 User not authenticated, disconnecting socket...");
       disconnectSocket();
     }
   }, [user, location.pathname]);
@@ -160,10 +157,8 @@ const AppContent = () => {
       if (user && !location.pathname.startsWith('/link-device') && sessionStorage.getItem('keys_synced') !== 'true' && !isSyncing) {
         try {
           isSyncing = true;
-          console.log("🔑 Starting session key synchronization...");
           await syncSessionKeys();
           sessionStorage.setItem('keys_synced', 'true');
-          console.log("✅ Keys synced successfully.");
         } catch (error) {
           console.error("❌ Key synchronization failed:", error);
         } finally {
@@ -187,12 +182,10 @@ const AppContent = () => {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (location.pathname.startsWith('/link-device')) {
-        console.log("🔗 On Linking Page: Skipping visibility change handler.");
         return;
       }
 
       if (document.visibilityState === 'visible') {
-        console.log("👀 App in focus, checking connection & syncing...");
 
         const socket = getSocket();
         if (!socket?.connected) {
@@ -256,7 +249,7 @@ const AppContent = () => {
       <ChatInfoModal />
       <DynamicIsland />
 
-      <div className="w-full h-full max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
+      <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
         <Suspense fallback={<LoadingScreen />}>
           <Routes>
             {/* Public Routes */}
@@ -266,6 +259,7 @@ const AppContent = () => {
             <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
             <Route path="/link-device" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
             <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
+            <Route path="/privacy" element={<PageWrapper><PrivacyPage /></PageWrapper>} />
 
             {/* Protected Routes */}
             <Route element={<ProtectedRoute />}>
@@ -276,6 +270,7 @@ const AppContent = () => {
               <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
               <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
               <Route path="/settings/link-device" element={<PageWrapper><DeviceScannerPage /></PageWrapper>} />
+              <Route path="/admin-console" element={<PageWrapper><AdminDashboard /></PageWrapper>} />
 
               <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
             </Route>
@@ -293,8 +288,6 @@ export default function App() {
   return (
     <BrowserRouter>
       <AppContent />
-      <Analytics />
-      <SpeedInsights />
     </BrowserRouter>
   );
 }

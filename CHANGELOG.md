@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.0.0] - 2026-02-10
+
+This landmark release transforms NYX into a "Fortress of Privacy" with a completely re-architected security model, introduces AI-powered features, and achieves full compliance transparency. It represents the biggest leap in security and capability since the project's inception.
+
+### Security Architecture Overhaul (The "Cloud Vault" Upgrade)
+
+-   **IndexedDB Key Storage:** Migrated all cryptographic key storage from vulnerable `localStorage` to an isolated **IndexedDB** instance (`keychain-db-${userId}`). This mitigates XSS risks and allows for secure multi-user login on the same device.
+-   **Encrypted Key Sync (Cloud Vault):** Implemented a "Zero-Knowledge" synchronization system. Encrypted private keys are now securely backed up to the server during registration and automatically restored upon login. This allows users to access their encrypted chats on new devices simply by logging in with their password, eliminating the need for manual manual restores while maintaining full E2EE.
+-   **Argon2 Hashing:** Upgraded the backend password hashing algorithm from `bcrypt` to **Argon2id** for superior resistance against GPU-based brute-force attacks. Includes a seamless "lazy migration" system for existing users.
+-   **Memory Wiping:** Implemented rigorous memory hygiene in the `crypto.worker.ts`. Sensitive variables (seeds, private keys) are now explicitly wiped using `sodium.memzero()` immediately after use to protect against RAM scraping attacks.
+-   **Secure Logout:** The logout process now aggressively sanitizes the browser environment, wiping all local cryptographic material (Master Keys) while preserving the encrypted session database for future access.
+
+### Added (New Features)
+
+-   **AI Smart Reply (Powered by Gemini):**
+    -   Integrated Google Gemini 1.5 Flash to provide privacy-first, on-device smart reply suggestions.
+    -   **Privacy-First Design:** Messages are decrypted locally, sent ephemerally to the AI for analysis, and never stored.
+    -   **Context-Aware:** The AI intelligently detects if the last message was from the other party to prevent self-reply suggestions.
+    -   **Opt-In:** This feature is disabled by default and must be explicitly enabled in Settings.
+-   **Legal & Privacy Center:**
+    -   Added a comprehensive `/privacy` page detailing the Data Policy, Terms of Service, and Security Architecture.
+    -   Accessible from the Login/Register footer and the Settings menu.
+-   **System Notifications:** Implemented persistent in-chat system banners to warn users about optimal security practices (e.g., ensuring both parties are online for the initial handshake).
+
+### Changed
+
+-   **Mobile Viewport Optimization:** Replaced `100vh` with `100dvh` (Dynamic Viewport Height) across the application (`App.tsx`, `index.css`). This finally resolves the notorious "floating address bar" issue on mobile browsers, ensuring the chat input is always visible.
+-   **Profile Experience:**
+    -   The Profile Page and User Info Modal now display **real-time** data, including the user's actual Public Identity Key (fingerprint) and online status.
+    -   Email addresses are now visible on profiles if the user has opted to share them.
+
+### Fixed
+
+-   **CRITICAL: Key Rotation Signature Failure:** Fixed a major bug where rotating keys would break future conversations. The server now correctly updates the user's public `signingKey` during rotation, ensuring valid signature verification for new sessions.
+-   **CRITICAL: Registration Race Condition:** Resolved a race condition where the application would attempt to bootstrap a session before the registration process completed, causing the newly generated keys to be wiped. Added safeguards to the `bootstrap` and `verifyEmail` flows.
+-   **CRITICAL: Crypto Worker Type Errors:** Fixed deserialization issues in `crypto.worker.ts` that caused "unsupported input type" errors for `x3dh_initiator`, `crypto_box_seal_open`, and file encryption operations.
+-   **Session Key Persistence:** Fixed a regression where logging out would delete session keys, making old chats unreadable upon re-login. The system now correctly preserves encrypted session keys locally.
+-   **Verification UI:** Added a prominent notice to the Email Verification modal advising users to check their Spam/Junk folders.
+
 ## [1.9.0] - 2026-02-02
 
 This major release focuses on "Performance & Polish". It introduces a complete visual overhaul to "Industrial Neumorphism", implements a rigorous "Crypto Quarantine" for faster initial load times, and resolves critical bugs in voice messaging and security.

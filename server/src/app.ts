@@ -1,5 +1,4 @@
 import express, { Express, Request, Response, NextFunction } from "express";
-
 import cookieParser from "cookie-parser";
 import logger from "morgan";
 import cors from "cors";
@@ -19,8 +18,10 @@ import keysRouter from "./routes/keys.js";
 import previewsRouter from "./routes/previews.js";
 import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
+import aiRoutes from "./routes/ai.js";
+import adminRouter from "./routes/admin.js";
 import webpush from "web-push";
-import { generalLimiter } from "./middleware/rateLimiter.js"; // Import ini
+import { generalLimiter } from "./middleware/rateLimiter.js";
 import { reportRoutes } from "./routes/reports.js";
 
 // Set VAPID keys for web-push notifications
@@ -36,16 +37,14 @@ if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAP
 
 const app: Express = express();
 
-// PERBAIKAN: Set trust proxy ke true/angka tinggi.
-// Karena via Vercel Rewrites, request melewati banyak hop (Vercel -> Render LB -> Nginx -> App).
-// Jika diset 1, Express mungkin mengira request dari Vercel adalah client asli (HTTP), padahal aslinya HTTPS.
+// Trust Proxy: Wajib true karena di belakang Cloudflare & Nginx
 app.set('trust proxy', true);
 
 // === SECURITY / CORS ===
 const isProd = env.nodeEnv === 'production';
 
 // Ambil origin untuk WebSocket secara dinamis
-let wsOrigin = 'ws://localhost:4000';
+let wsOrigin = 'ws://127.0.0.1:4000';
 if (env.appUrl) {
   try {
     const url = new URL(env.appUrl);
@@ -62,44 +61,55 @@ app.use(helmet({
       defaultSrc: ["'self'"],
       scriptSrc: [
         "'self'",
-        isProd ? "'strict-dynamic'" : "'unsafe-eval'",
-        isProd ? "" : "https://*.ngrok-free.app",
+        "'unsafe-inline'", // Diperlukan karena index.html pakai inline script
+        "'wasm-unsafe-eval'", // Diperlukan untuk modul crypto WASM
         "https://challenges.cloudflare.com",
-        "https://cdn.jsdelivr.net"
+        "https://static.cloudflareinsights.com",
+        "https://cloudflareinsights.com",
+        "https://*.cloudflare.com",
+        isProd ? "" : "'unsafe-eval'" // Dev mode kadang butuh eval
       ].filter(Boolean),
       styleSrc: [
         "'self'",
-        "'unsafe-inline'", // Diperlukan untuk Tailwind CSS
+        "'unsafe-inline'",
+        "https://fonts.googleapis.com"
       ],
       imgSrc: [
         "'self'",
         "data:",
         "blob:",
-        "https://*.vercel.app",
-        "https://*.koyeb.app",
-        "https://*.upstash.io",
-        "https://*.supabase.co"
+        "https://api.dicebear.com",
+        "https://*.r2.dev",
+        "https://cdn.jsdelivr.net",
+        "https://*.cloudflarestorage.com",
+        "https://nyx-app.my.id",
+        "https://*.nyx-app.my.id"
       ],
       connectSrc: [
         "'self'",
         wsOrigin,
-        "https://*.vercel.app",
-        "wss://*.vercel.app",
-        "https://*.koyeb.app",
-        "wss://*.koyeb.app",
-        "https://*.upstash.io", // Untuk Redis
-        "https://*.supabase.co" // Untuk Supabase
+        "https://api.nyx-app.my.id",
+        "wss://api.nyx-app.my.id",
+        "https://nyx-app.my.id",
+        "wss://nyx-app.my.id",
+        "https://*.nyx-app.my.id",
+        "https://*.cloudflareinsights.com",
+        "https://cloudflareinsights.com",
+        "https://*.r2.dev",
+        "https://*.cloudflarestorage.com"
       ],
       fontSrc: [
         "'self'",
-        "https://fonts.gstatic.com" // Jika menggunakan Google Fonts
+        "https://fonts.gstatic.com"
       ],
       objectSrc: ["'none'"],
       frameSrc: ["'self'", "https://challenges.cloudflare.com"],
       frameAncestors: ["'none'"],
-      ...(isProd && { upgradeInsecureRequests: [] }),
+      // Matikan upgradeInsecureRequests jika di local/http agar tidak force HTTPS
+      ...(isProd ? { upgradeInsecureRequests: [] } : {}),
     },
   },
+  // Izinkan resource diload cross-origin (misal gambar avatar)
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 
@@ -107,30 +117,24 @@ app.disable('x-powered-by');
 
 // Fungsi untuk memvalidasi origins yang diizinkan
 const isAllowedOrigin = (origin: string): boolean => {
-  if (!origin) return true; // Untuk request tanpa origin (misalnya dari curl)
+  if (!origin) return true;
 
-  // Daftar origins yang diizinkan
   const allowedOrigins = [
     env.corsOrigin,
     "http://localhost:5173",
     "http://localhost:4173",
-    // Domain Vercel
-    "https://chat-lite-git-main-h4nzs.vercel.app",
-    "https://chat-lite-h4nzs.vercel.app",
-    "https://*.vercel.app",
-    // Domain Koyeb
-    "https://vast-aigneis-h4nzs-9319f44e.koyeb.app",
-    "https://*.koyeb.app",
-    // Domain Upstash
-    "https://*.upstash.io",
-    // Domain Supabase
     "https://*.supabase.co",
+    // IZINKAN HTTP & HTTPS UNTUK CLOUDFLARE TUNNEL
+    "https://nyx-app.my.id",
+    "https://www.nyx-app.my.id",
+    "https://*.nyx-app.my.id",
+    "http://nyx-app.my.id",
+    "http://www.nyx-app.my.id",
+    "http://*.nyx-app.my.id",
   ];
 
-  // Cek apakah origin cocok dengan salah satu dari daftar yang diizinkan
   return allowedOrigins.some(allowedOrigin => {
     if (allowedOrigin.includes('*')) {
-      // Jika ada wildcard, cocokkan dengan regex
       const regex = new RegExp('^' + allowedOrigin.replace(/\*/g, '.*') + '$');
       return regex.test(origin);
     }
@@ -149,7 +153,7 @@ const corsMiddleware = cors({
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "CSRF-Token"],
+  allowedHeaders: ["Content-Type", "Authorization", "CSRF-Token", "x-csrf-token"], // Tambahkan x-csrf-token
 });
 
 app.use(corsMiddleware);
@@ -169,34 +173,22 @@ if (isProd) {
 // === MIDDLEWARE ===
 app.use(logger("dev"));
 app.use(cookieParser());
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "15mb" })); // Naikkan limit upload sedikit
+app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
-// Public routes that don't need CSRF protection
 // === SECURITY & STABILITY ===
-
-// 1. Rate Limiter Global (Pasang SEBELUM routes)
-// Ini melindungi server dari DDoS sederhana / spam bot
 app.use("/api", generalLimiter);
 
-// 2. Request Timeout (Manual Implementation)
-// Koyeb punya timeout sendiri, tapi Node.js sebaiknya memutus lebih cepat
-// untuk membebaskan Event Loop.
 app.use((req, res, next) => {
-  res.setTimeout(30000, () => { // 30 Detik timeout untuk konsistensi
+  res.setTimeout(30000, () => {
     res.status(408).send({ error: "Request Timeout" });
   });
   next();
 });
 
-// 3. Body Parser Limits (Sudah ada, tapi kita review)
-// Batasi JSON body max 10MB (cukup buat base64 keys, tapi cegah payload bom)
-app.use(express.json({ limit: "10mb" })); 
-app.use(express.urlencoded({ extended: true, limit: "10mb" })); // Tambahkan limit juga disini
+// Routes publik (Keys & Sessions untuk E2EE)
 app.use("/api/keys", keysRouter);
 app.use("/api/sessions", sessionsRouter);
-
-// ... imports
 
 app.post("/api/admin/cleanup", async (req, res) => {
   const providedKey = req.headers["x-admin-key"];
@@ -212,19 +204,23 @@ app.post("/api/admin/cleanup", async (req, res) => {
   if (providedBuffer.length !== secretBuffer.length || !crypto.timingSafeEqual(providedBuffer, secretBuffer)) {
     return res.status(403).json({ error: "Forbidden" });
   }
+  // TODO: Add actual cleanup logic here
+  res.json({ message: "Cleanup triggered" });
 });
 
 // === CSRF Protection ===
-// 'lax' cocok untuk arsitektur Proxy/Rewrite (First-Party simulation)
 const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
   getSecret: () => env.jwtSecret,
-  getSessionIdentifier: (req) => "api", // Stateless: relying on signed cookie matching header
+  getSessionIdentifier: (req) => "api",
   cookieName: "x-csrf-token",
   cookieOptions: {
     httpOnly: true,
-    sameSite: "lax",
-    secure: isProd,
+    // PENTING: Gunakan 'none' agar cookie dikirim cross-site/subdomain
+    sameSite: "none", 
+    secure: true, // Wajib true jika sameSite=none
     path: "/",
+    // Domain cookie agar bisa dibaca oleh frontend dan backend
+    domain: isProd ? ".nyx-app.my.id" : undefined, 
   },
   size: 64,
   ignoredMethods: ["GET", "HEAD", "OPTIONS"],
@@ -275,8 +271,10 @@ app.use("/api/messages", messagesRouter);
 app.use("/api/uploads", uploadsRouter);
 app.use("/api/previews", previewsRouter);
 app.use("/api/session-keys", sessionKeysRouter);
-app.use("/api/sessions", sessionsRouter);
 app.use("/api/reports", reportRoutes);
+app.use("/api/admin", adminRouter);
+app.use("/api/sessions", sessionsRouter);
+app.use("/api/ai", aiRoutes);
 
 // === HEALTH CHECK ===
 app.get("/health", (_req: Request, res: Response) => {

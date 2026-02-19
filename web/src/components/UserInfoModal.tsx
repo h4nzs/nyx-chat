@@ -5,11 +5,13 @@ import { toAbsoluteUrl } from '@utils/url';
 import { authFetch, handleApiError } from '@lib/api';
 import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
+import toast from 'react-hot-toast';
 
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
 import { useVerificationStore } from '@store/verification';
 import { useAuthStore } from '@store/auth';
+import { usePresenceStore } from '@store/presence';
 import ModalBase from './ui/ModalBase';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
@@ -20,6 +22,7 @@ export default function UserInfoModal() {
   const { isProfileModalOpen, profileUserId, closeProfileModal } = useModalStore();
   const { activeId } = useConversationStore();
   const { verifiedStatus, setVerified } = useVerificationStore();
+  const onlineUsers = usePresenceStore(s => s.onlineUsers);
   const navigate = useNavigate();
   const [user, setUser] = useState<ProfileUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -76,14 +79,15 @@ export default function UserInfoModal() {
     try {
       const { generateSafetyNumber } = await import('@lib/crypto-worker-proxy');
       const { getSodium } = await import('@lib/sodiumInitializer');
+      const { getEncryptionKeyPair } = useAuthStore.getState();
 
-      const myPublicKeyB64 = localStorage.getItem('publicKey');
-      if (!myPublicKeyB64) {
+      const keyPair = await getEncryptionKeyPair();
+      if (!keyPair || !keyPair.publicKey) {
         throw new Error("Your public key is not found. Please set up your keys first.");
       }
 
       const sodium = await getSodium();
-      const myPublicKey = sodium.from_base64(myPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const myPublicKey = keyPair.publicKey;
       const theirPublicKey = sodium.from_base64(user.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       const sn = await generateSafetyNumber(myPublicKey, theirPublicKey);
@@ -95,10 +99,27 @@ export default function UserInfoModal() {
     }
   };
 
+  const handleReportUser = async () => {
+    if (!user) return;
+    const reason = prompt("Enter reason for reporting this user:");
+    if (!reason) return;
+    
+    try {
+      await authFetch('/api/reports/user', {
+        method: 'POST',
+        body: JSON.stringify({ reportedUserId: user.id, reason })
+      });
+      toast.success("Report submitted successfully.");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to submit report.");
+    }
+  };
+
   const renderContent = () => {
     if (loading) return <div className="flex justify-center items-center min-h-[200px]"><Spinner /></div>;
     if (error) return <p className="text-center text-red-500 font-mono text-sm">{error}</p>;
     if (user) {
+      const isOnline = onlineUsers.has(user.id);
       return (
         <div className="flex flex-col gap-6">
           <div className="flex items-start gap-6">
@@ -113,16 +134,21 @@ export default function UserInfoModal() {
                    target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
                  }}
                />
-               <div className="absolute bottom-1 right-1 w-4 h-4 bg-green-500 border-2 border-bg-main rounded-full shadow-neu-flat dark:shadow-neu-flat-dark" />
+               <div className={`absolute bottom-1 right-1 w-4 h-4 border-2 border-bg-main rounded-full shadow-neu-flat dark:shadow-neu-flat-dark ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
             </div>
 
             {/* Info: Left Aligned */}
             <div className="flex-1 pt-2">
               <h3 className="text-2xl font-bold tracking-tight text-text-primary">{user.name}</h3>
               {/* ID Badge: Extruded pill */}
-              <div className="inline-flex items-center gap-2 mt-2 px-3 py-1 rounded-full shadow-neu-flat dark:shadow-neu-flat-dark bg-bg-main">
-                 <span className="text-xs font-mono text-text-secondary uppercase">ID</span>
-                 <span className="text-sm font-mono text-accent">@{user.username}</span>
+              <div className="flex flex-col items-start gap-2 mt-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full shadow-neu-flat dark:shadow-neu-flat-dark bg-bg-main">
+                   <span className="text-xs font-mono text-text-secondary uppercase">ID</span>
+                   <span className="text-sm font-mono text-accent">@{user.username}</span>
+                </div>
+                {user.email && (
+                  <span className="text-xs font-mono text-text-secondary ml-1">{user.email}</span>
+                )}
               </div>
             </div>
           </div>
@@ -218,6 +244,19 @@ export default function UserInfoModal() {
                           Block Signal
                         </button>
                       )}
+                      
+                      <button
+                        onClick={handleReportUser}
+                        className="
+                          w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
+                          bg-bg-main text-text-secondary
+                          shadow-neu-flat dark:shadow-neu-flat-dark 
+                          active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark
+                          hover:text-yellow-500 transition-all
+                        "
+                      >
+                        Report Signal
+                      </button>
                     </>
                   )}
                 </div>

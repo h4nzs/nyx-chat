@@ -1,4 +1,4 @@
-# Chat Lite - Comprehensive Application Summary
+# NYX - Comprehensive Application Summary
 
 ## Table of Contents
 1. [Overview](#overview)
@@ -16,7 +16,7 @@
 
 ## Overview
 
-Chat Lite is a full-stack, real-time messaging application built with a strong focus on privacy and security. The application implements end-to-end encryption (E2EE) using the audited `libsodium` cryptographic library, ensuring that only the communicating parties can read messages. It features a modern, responsive Neumorphic UI with light and dark modes, and supports rich messaging capabilities including group chats, file sharing, and real-time presence indicators.
+NYX is a full-stack, real-time messaging application built with a strong focus on privacy and security. The application implements end-to-end encryption (E2EE) using the audited `libsodium` cryptographic library, ensuring that only the communicating parties can read messages. It features a modern, responsive Neumorphic UI with light and dark modes, and supports rich messaging capabilities including group chats, file sharing, and real-time presence indicators.
 
 ### Core Features
 - **End-to-End Encryption**: All messages and files are secured using libsodium
@@ -29,7 +29,7 @@ Chat Lite is a full-stack, real-time messaging application built with a strong f
 
 ## Architecture
 
-Chat Lite follows a microservice-like architecture with a clear separation between frontend and backend:
+NYX follows a microservice-like architecture with a clear separation between frontend and backend:
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -93,7 +93,7 @@ Chat Lite follows a microservice-like architecture with a clear separation betwe
 ## Security Features
 
 ### End-to-End Encryption Model
-Chat Lite implements a security model inspired by the Signal Protocol (X3DH):
+NYX implements a security model inspired by the Signal Protocol (X3DH):
 
 1. **Key Generation**: Each device generates a Master Seed upon registration
 2. **Key Derivation**: Three key pairs are deterministically created:
@@ -123,7 +123,7 @@ Chat Lite implements a security model inspired by the Signal Protocol (X3DH):
 ## Project Structure
 
 ```
-chat-lite/
+nyx/
 ├── server/                    # Backend application
 │   ├── src/
 │   │   ├── app.ts            # Main Express app configuration
@@ -205,7 +205,7 @@ pnpm run dev
 #### Backend (.env)
 ```env
 # Database
-DATABASE_URL="postgresql://user:pass@localhost:5432/chatlite"
+DATABASE_URL="postgresql://user:pass@localhost:5432/nyxdb"
 
 # Redis
 REDIS_URL="redis://localhost:6379"

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-export const ACCENT_COLORS = ['blue', 'green', 'purple', 'orange'] as const;
+export const ACCENT_COLORS = ['blue', 'green', 'purple', 'orange', 'red'] as const;
 
 export type AccentColor = typeof ACCENT_COLORS[number];
 

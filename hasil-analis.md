@@ -1,8 +1,8 @@
-# Analisis Mendalam Aplikasi Chat Lite
+# Analisis Mendalam Aplikasi NYX
 
 ## Ringkasan Proyek
 
-Chat Lite adalah aplikasi perpesanan real-time yang aman dan modern dengan fokus pada pengalaman pengguna dan enkripsi end-to-end. Ini adalah aplikasi full-stack yang dirancang untuk pengguna yang mengutamakan privasi dan antarmuka pengguna yang bersih dan modern.
+NYX adalah aplikasi perpesanan real-time yang aman dan modern dengan fokus pada pengalaman pengguna dan enkripsi end-to-end. Ini adalah aplikasi full-stack yang dirancang untuk pengguna yang mengutamakan privasi dan antarmuka pengguna yang bersih dan modern.
 
 ## Arsitektur dan Teknologi
 
@@ -157,4 +157,4 @@ Chat Lite adalah aplikasi perpesanan real-time yang aman dan modern dengan fokus
 
 ## Kesimpulan
 
-Chat Lite adalah contoh aplikasi perpesanan modern yang menggabungkan keamanan tingkat tinggi dengan pengalaman pengguna yang luar biasa. Arsitektur monorepo dengan teknologi canggih seperti WebAuthn, enkripsi end-to-end berbasis Signal Protocol, dan desain UI Neumorphic menciptakan solusi komunikasi yang aman, fungsional, dan estetis menarik. Proyek ini menunjukkan implementasi praktis dari prinsip-prinsip keamanan dan desain UI/UX terbaru dalam aplikasi perpesanan.
+NYX adalah contoh aplikasi perpesanan modern yang menggabungkan keamanan tingkat tinggi dengan pengalaman pengguna yang luar biasa. Arsitektur monorepo dengan teknologi canggih seperti WebAuthn, enkripsi end-to-end berbasis Signal Protocol, dan desain UI Neumorphic menciptakan solusi komunikasi yang aman, fungsional, dan estetis menarik. Proyek ini menunjukkan implementasi praktis dari prinsip-prinsip keamanan dan desain UI/UX terbaru dalam aplikasi perpesanan.

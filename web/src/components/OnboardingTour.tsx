@@ -46,7 +46,7 @@ export default function OnboardingTour({ isOpen, onClose }: OnboardingTourProps)
   const steps = [
     {
       icon: <FiSmile size={32} className="text-accent" />,
-      title: "Welcome to Chat Lite!",
+      title: "Welcome to Nyx!",
       content: <p>Let's quickly go over a few key security features to keep your conversations private.</p>
     },
     {
@@ -70,7 +70,7 @@ export default function OnboardingTour({ isOpen, onClose }: OnboardingTourProps)
       title: "Community & Performance",
       content: (
         <>
-          <p>Chat Lite runs on <strong>free-tier infrastructure</strong>, so you might experience occasional delays or reconnection moments.</p>
+          <p>Nyx runs on <strong>free-tier infrastructure</strong>, so you might experience occasional delays or reconnection moments.</p>
           <p className="mt-2">If you enjoy the app, you can help us upgrade to faster servers anytime! Just go to <strong>Settings</strong> and scroll to the bottom to support the project.</p>
           <p className="font-bold mt-2 text-accent">Enjoy your secure chats!</p>
         </>

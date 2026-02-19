@@ -13,7 +13,14 @@ import { useAuthStore } from '@store/auth';
 // --- Dependency Injection for Auth Failure ---
 // This injects the logout function into the api layer, breaking the circular dependency.
 // Now, if authFetch encounters a final token refresh failure, it can trigger a full logout.
-setAuthFailureHandler(() => useAuthStore.getState().logout());
+setAuthFailureHandler(async () => {
+  const { isBootstrapping, logout } = useAuthStore.getState();
+  // [FIX] If we are bootstrapping (e.g. initial load or verify email page reload),
+  // do NOT trigger a global logout. The bootstrap process handles its own cleanup WITHOUT wiping keys.
+  if (!isBootstrapping) {
+    await logout();
+  }
+});
 // -----------------------------------------
 
 
@@ -26,7 +33,6 @@ if (!import.meta.env.VITE_APP_SECRET) {
     throw new Error(errorMessage);
   } else {
     // In development, show a prominent warning
-    console.warn(`%c${errorMessage}`, 'color: red; font-size: 1.5em; font-weight: bold;');
     alert(errorMessage);
   }
 }

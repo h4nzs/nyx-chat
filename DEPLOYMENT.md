@@ -1,6 +1,6 @@
-# Chat-Lite Deployment Guide (Updated)
+# NYX Deployment Guide (Updated)
 
-Panduan ini berisi instruksi untuk men-deploy aplikasi Chat-Lite ke lingkungan produksi.
+Panduan ini berisi instruksi untuk men-deploy aplikasi NYX ke lingkungan produksi.
 
 ## 📋 Prerequisites
 
@@ -33,9 +33,9 @@ sudo systemctl start postgresql redis-server
 sudo -u postgres psql
 
 # Buat database dan user
-CREATE DATABASE chatlite;
-CREATE USER chatlite_user WITH PASSWORD 'your_secure_password';
-GRANT ALL PRIVILEGES ON DATABASE chatlite TO chatlite_user;
+CREATE DATABASE nyxdb;
+CREATE USER nyx_user WITH PASSWORD 'your_secure_password';
+GRANT ALL PRIVILEGES ON DATABASE nyxdb TO nyx_user;
 
 # Keluar dari psql
 \q
@@ -51,7 +51,7 @@ Buat file `.env` di direktori `server/`.
 NODE_ENV=production
 
 # URL untuk koneksi ke database PostgreSQL Anda
-DATABASE_URL="postgresql://chatlite_user:your_secure_password@localhost:5432/chatlite?schema=public"
+DATABASE_URL="postgresql://nyx_user:your_secure_password@localhost:5432/nyxdb?schema=public"
 
 # URL untuk koneksi ke server Redis Anda
 REDIS_URL="redis://localhost:6379"
@@ -103,7 +103,7 @@ pnpm prisma generate
 pnpm build
 
 # Mulai server menggunakan process manager seperti PM2
-pm2 start dist/index.js --name chat-lite-backend
+pm2 start dist/index.js --name nyx-backend
 ```
 
 ## 🌐 Frontend Deployment
@@ -151,7 +151,7 @@ server {
     
     # Lokasi root untuk file frontend
     location / {
-        root /path/to/chat-lite/web/dist;
+        root /path/to/nyx/web/dist;
         index index.html;
         try_files $uri $uri/ /index.html;
     }
@@ -262,8 +262,8 @@ services:
   db:
     image: postgres:14
     environment:
-      POSTGRES_DB: chatlite
-      POSTGRES_USER: chatlite_user
+      POSTGRES_DB: nyxdb
+      POSTGRES_USER: nyx_user
       POSTGRES_PASSWORD: your_secure_password
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -277,7 +277,7 @@ services:
     build: ./server
     environment:
       NODE_ENV: production
-      DATABASE_URL: "postgresql://chatlite_user:your_secure_password@db:5432/chatlite?schema=public"
+      DATABASE_URL: "postgresql://nyx_user:your_secure_password@db:5432/nyxdb?schema=public"
       REDIS_URL: "redis://redis:6379"
       JWT_SECRET: "your_jwt_secret_here"
       JWT_REFRESH_SECRET: "your_jwt_refresh_secret_here"

@@ -1,218 +1,289 @@
-import { Router } from "express";
-import { prisma } from "../lib/prisma.js";
-import { requireAuth } from "../middleware/auth.js";
-import { getIo } from "../socket.js";
-import { ApiError } from "../utils/errors.js";
-import { getSecureLinkPreview } from "../utils/secureLinkPreview.js";
-import { sendPushNotification } from "../utils/sendPushNotification.js";
-import fs from 'fs/promises';
-import path from 'path';
+import { Router } from 'express'
+import { prisma } from '../lib/prisma.js'
+import { requireAuth } from '../middleware/auth.js'
+import { getIo } from '../socket.js'
+import { ApiError } from '../utils/errors.js'
+import { getSecureLinkPreview } from '../utils/secureLinkPreview.js'
+import { sendPushNotification } from '../utils/sendPushNotification.js'
+import { deleteR2File } from '../utils/r2.js' // Pastikan fungsi ini ada di utils/r2.ts
+import { env } from '../config.js'
 
-const router: Router = Router();
-router.use(requireAuth);
+const router: Router = Router()
+router.use(requireAuth)
 
-router.get("/:conversationId", async (req, res, next) => {
+// GET Messages
+router.get('/:conversationId', async (req, res, next) => {
   try {
-    if (!req.user) throw new ApiError(401, "Authentication required.");
-    const { conversationId } = req.params;
-    const userId = req.user.id;
-    const cursor = req.query.cursor as string | undefined;
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const { conversationId } = req.params
+    const userId = req.user.id
+    const cursor = req.query.cursor as string | undefined
 
-    const participant = await prisma.participant.findFirst({
-      where: { userId, conversationId },
-    });
-    if (!participant) return res.status(403).json({ error: "You are not a member of this conversation." });
+    // Cek participant
+    const participant = await prisma.participant.findUnique({
+      where: {
+        userId_conversationId: {
+          userId,
+          conversationId
+        }
+      }
+    })
+
+    if (!participant) return res.status(403).json({ error: 'You are not a member of this conversation.' })
 
     const messages = await prisma.message.findMany({
-      where: { 
+      where: {
         conversationId,
+        // Hanya ambil pesan setelah user join (opsional, tergantung kebutuhan bisnis)
         createdAt: { gte: participant.joinedAt }
       },
-      take: -50,
-      ...(cursor && { skip: 1, cursor: { id: cursor } }),
-      include: { 
-        sender: true,
-        reactions: true,
+      take: 50, // Ubah jadi positive jika pakai cursor ID yang benar, atau negative untuk "latest"
+      skip: cursor ? 1 : 0,
+      cursor: cursor ? { id: cursor } : undefined,
+      orderBy: { createdAt: 'desc' }, // Ambil dari yang terbaru dulu
+      include: {
+        sender: {
+          select: { id: true, name: true, username: true, avatarUrl: true }
+        },
+        reactions: {
+          include: {
+            user: { select: { id: true, name: true, username: true } }
+          }
+        },
         statuses: true,
         repliedTo: {
           include: {
             sender: { select: { id: true, name: true, username: true } }
           }
         }
-      },
-      orderBy: { createdAt: 'asc' },
-    });
-    res.json({ items: messages });
+      }
+    })
+
+    // Reverse biar di frontend urutannya bener (Oldest -> Newest)
+    res.json({ items: messages.reverse() })
   } catch (error) {
-    next(error);
+    next(error)
   }
-});
+})
 
-router.post("/", async (req, res, next) => {
+// SEND Message
+router.post('/', async (req, res, next) => {
   try {
-    if (!req.user) throw new ApiError(401, "Authentication required.");
-    const senderId = req.user.id;
-    const { conversationId, content, fileUrl, fileName, fileType, fileSize, duration, fileKey, sessionId, repliedToId, tempId } = req.body;
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const senderId = req.user.id
+    const { conversationId, content, fileUrl, fileName, fileType, fileSize, duration, fileKey, sessionId, repliedToId, tempId, expiresIn } = req.body
 
-    if (!conversationId) return res.status(400).json({ error: "conversationId is required." });
+    if (!conversationId) return res.status(400).json({ error: 'conversationId is required.' })
 
+    // Calculate expiration time if provided
+    let expiresAt: Date | undefined
+    if (expiresIn && typeof expiresIn === 'number' && expiresIn > 0) {
+      expiresAt = new Date(Date.now() + expiresIn * 1000)
+    }
+
+    // 1. Ambil Participants
     const participants = await prisma.participant.findMany({
       where: { conversationId },
-      include: { user: true }, // Include user info untuk cek blocking
-    });
-    if (!participants.some(p => p.userId === senderId)) return res.status(403).json({ error: "You are not a participant." });
+      select: { userId: true } // Select seperlunya aja biar ringan
+    })
 
-    // CEK BLOCKING: Jika ini percakapan 1-1, cek apakah ada blocking dalam dua arah
-    if (participants.length === 2) { // Percakapan 1-1
-      const otherParticipant = participants.find(p => p.userId !== senderId);
-      if (otherParticipant) {
-        // Cek apakah pengirim memblokir penerima
-        const isBlockedBySender = await prisma.blockedUser.findFirst({
-          where: {
-            blockerId: senderId,                // Pengirim sebagai pemblokir
-            blockedId: otherParticipant.userId // Penerima sebagai yang diblokir
-          }
-        });
+    if (!participants.some(p => p.userId === senderId)) {
+      return res.status(403).json({ error: 'You are not a participant.' })
+    }
 
-        // Cek apakah penerima memblokir pengirim
-        const isBlockedByReceiver = await prisma.blockedUser.findFirst({
-          where: {
-            blockerId: otherParticipant.userId, // Penerima sebagai pemblokir
-            blockedId: senderId                 // Pengirim sebagai yang diblokir
-          }
-        });
+    // 2. BLOCKING CHECK & REPLY DEPTH (Parallel)
+    // Jalankan pengecekan berat secara paralel
+    const checks = []
 
-        // Jika ada blocking dalam dua arah, tolak pengiriman pesan
-        if (isBlockedBySender || isBlockedByReceiver) {
-          throw new ApiError(403, "Messaging unavailable due to blocking.");
-        }
+    // Cek Blocking (Khusus 1-on-1)
+    if (participants.length === 2) {
+      const otherUserId = participants.find(p => p.userId !== senderId)?.userId
+      if (otherUserId) {
+        checks.push(
+          prisma.blockedUser.findFirst({
+            where: {
+              OR: [
+                { blockerId: senderId, blockedId: otherUserId }, // Sender ngeblok Receiver
+                { blockerId: otherUserId, blockedId: senderId } // Receiver ngeblok Sender
+              ]
+            }
+          }).then(block => {
+            if (block) throw new ApiError(403, 'Messaging unavailable due to blocking.')
+          })
+        )
       }
     }
 
+    // Cek Reply Depth
     if (repliedToId) {
-      let currentId: string | null = repliedToId;
-      let depth = 0;
-      const MAX_DEPTH = 10;
-      while (currentId && depth < MAX_DEPTH) {
-        const parentMessage = await prisma.message.findUnique({
-          where: { id: currentId },
-          select: { repliedToId: true },
-        });
-        if (!parentMessage) break;
-        currentId = parentMessage.repliedToId;
-        depth++;
-      }
-      if (depth >= MAX_DEPTH) throw new ApiError(400, "Reply chain is too deep.");
+      checks.push((async () => {
+        let currentId: string | null = repliedToId
+        let depth = 0
+        const MAX_DEPTH = 10
+        while (currentId && depth < MAX_DEPTH) {
+          const parentMessage = await prisma.message.findUnique({
+            where: { id: currentId },
+            select: { repliedToId: true }
+          })
+          if (!parentMessage) break
+          currentId = parentMessage.repliedToId
+          depth++
+        }
+        if (depth >= MAX_DEPTH) throw new ApiError(400, 'Reply chain is too deep.')
+      })())
     }
 
-    let linkPreviewData: any = null;
+    // Tunggu validasi selesai
+    await Promise.all(checks)
+
+    // 3. Link Preview (Opsional & Tidak boleh bikin error)
+    let linkPreviewData: any = null
     if (content && !fileUrl) {
-      const urlRegex = /(https?:\/\/[^\s]+)/g;
-      const urls = content.match(urlRegex);
-      if (urls?.[0]) {
-        try {
-          const preview = await getSecureLinkPreview(urls[0]);
-          if ('title' in preview && 'description' in preview && 'images' in preview) {
+      try {
+        const urlRegex = /(https?:\/\/[^\s]+)/g
+        const urls = content.match(urlRegex)
+        if (urls?.[0]) {
+          const preview = await getSecureLinkPreview(urls[0])
+          if (preview && 'title' in preview) {
             linkPreviewData = {
               url: preview.url,
               title: preview.title,
               description: preview.description,
-              image: preview.images[0],
-              siteName: 'siteName' in preview ? preview.siteName : '',
-            };
+              image: preview.images?.[0],
+              siteName: preview.siteName
+            }
           }
-        } catch (e) {
-          console.error("Failed to get link preview:", e);
         }
+      } catch (e) {
+        // Silent error: Gagal preview jangan gagalkan pesan
       }
     }
 
-    const newMessage = await prisma.$transaction(async (tx) => {
-      const msg = await tx.message.create({
+    // 4. DATABASE TRANSACTION (Critical Path)
+    // Buat array status insert
+    const statusData = participants.map(p => ({
+      userId: p.userId,
+      status: p.userId === senderId ? 'READ' : 'SENT' // Pakai string literal enum
+    }))
+
+    const [newMessage] = await prisma.$transaction([
+      prisma.message.create({
         data: {
-          conversationId, senderId, content, fileUrl, fileName, fileType, fileSize, duration, fileKey, sessionId, repliedToId,
-          linkPreview: linkPreviewData,
-          statuses: { create: participants.map(p => ({ userId: p.userId, status: p.userId === senderId ? 'READ' : 'SENT' })) },
+          conversationId,
+          senderId,
+          content,
+          fileUrl,
+          fileName,
+          fileType,
+          fileSize,
+          duration,
+          fileKey,
+          sessionId,
+          repliedToId,
+          expiresAt, // Store expiration time
+          linkPreview: linkPreviewData ?? undefined,
+          statuses: {
+            createMany: { data: statusData as any } // createMany lebih cepat dari nested create
+          }
         },
-        include: { sender: true, reactions: true, statuses: true, repliedTo: { include: { sender: true } } },
-      });
-      await tx.conversation.update({
-        where: { id: conversationId },
-        data: { lastMessageAt: msg.createdAt },
-      });
-      return msg;
-    });
-
-    const messageToBroadcast = { ...newMessage, tempId };
-    getIo().to(conversationId).emit("message:new", messageToBroadcast);
-
-    const pushRecipients = participants.filter(p => p.userId !== senderId);
-    const pushBody = fileUrl ? 'You received a file.' : (content || '');
-    const payload = { title: `New message from ${req.user.username}`, body: pushBody.substring(0, 200) };
-    pushRecipients.forEach(p => sendPushNotification(p.userId, payload));
-
-    res.status(201).json(messageToBroadcast);
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.delete("/:id", async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, "Authentication required.");
-    const { id } = req.params;
-    const userId = req.user.id;
-    const message = await prisma.message.findUnique({ where: { id } });
-    if (!message) return res.status(404).json({ error: "Message not found" });
-    if (message.senderId !== userId) return res.status(403).json({ error: "You can only delete your own messages" });
-
-    if (message.fileUrl && message.fileUrl.startsWith('/uploads/')) {
-      try {
-        const uploadsDir = path.resolve(process.cwd(), 'uploads');
-        const relativePath = path.normalize(decodeURIComponent(message.fileUrl.substring('/uploads/'.length)));
-        if (relativePath.includes('..')) throw new Error("Invalid path (directory traversal).");
-        const candidatePath = path.join(uploadsDir, relativePath);
-        if (relativePath && relativePath !== '.' && candidatePath.startsWith(uploadsDir + path.sep)) {
-          await fs.unlink(candidatePath);
-        } else {
-          throw new Error(`Invalid path: ${candidatePath}`);
+        include: {
+          sender: { select: { id: true, name: true, username: true, avatarUrl: true } },
+          reactions: true,
+          statuses: true,
+          repliedTo: { include: { sender: { select: { id: true, name: true } } } }
         }
-      } catch (fileError) {
-        console.error(`Failed to delete physical file for message ${id}:`, fileError);
+      }),
+      prisma.conversation.update({
+        where: { id: conversationId },
+        data: { lastMessageAt: new Date() } // Pakai new Date() langsung
+      })
+    ])
+
+    // 5. REALTIME RESPONSE (Prioritas Tinggi)
+    const messageToBroadcast = { ...newMessage, tempId }
+
+    // Kirim response HTTP dulu biar UI user sender update
+    res.status(201).json(messageToBroadcast)
+
+    // 6. SOCKET & PUSH (Background / Fire & Forget)
+    // Socket emit
+    getIo().to(conversationId).emit('message:new', messageToBroadcast)
+
+    // Push Notification (JANGAN DI-AWAIT)
+    const pushRecipients = participants.filter(p => p.userId !== senderId)
+    if (pushRecipients.length > 0) {
+      const pushBody = fileUrl ? '📎 Sent a file' : (content || 'New message')
+      const payload = {
+        title: req.user.username || 'New Message',
+        body: pushBody.substring(0, 150),
+        data: { conversationId, messageId: newMessage.id }
       }
+
+      // Jalankan loop push secara paralel tanpa nunggu
+      Promise.all(
+        pushRecipients.map(p => sendPushNotification(p.userId, payload))
+      ).catch(err => console.error('[Push] Failed:', err))
+    }
+  } catch (error) {
+    next(error)
+  }
+})
+
+// DELETE Message
+router.delete('/:id', async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const { id } = req.params
+    const userId = req.user.id
+
+    const message = await prisma.message.findUnique({ where: { id } })
+    if (!message) return res.status(404).json({ error: 'Message not found' })
+    if (message.senderId !== userId) return res.status(403).json({ error: 'You can only delete your own messages' })
+
+    // Hapus file dari R2 jika ada
+    if (message.fileUrl && message.fileUrl.includes(env.r2PublicDomain)) {
+      const key = message.fileUrl.replace(`${env.r2PublicDomain}/`, '')
+      // Fire and forget delete R2, biar API cepet
+      deleteR2File(key).catch(err =>
+        console.error(`[R2] Failed to delete file ${key}:`, err)
+      )
     }
 
-    await prisma.message.delete({ where: { id } });
-    getIo().to(message.conversationId).emit("message:deleted", { conversationId: message.conversationId, id: message.id });
-    res.status(204).send();
+    await prisma.message.delete({ where: { id } })
+
+    // Emit event
+    getIo().to(message.conversationId).emit('message:deleted', {
+      conversationId: message.conversationId,
+      id: message.id
+    })
+
+    res.status(204).send()
   } catch (error) {
-    next(error);
+    next(error)
   }
-});
+})
 
-router.post("/:messageId/reactions", async (req, res, next) => {
+// ADD Reaction
+router.post('/:messageId/reactions', async (req, res, next) => {
   try {
-    if (!req.user) throw new ApiError(401, "Authentication required.");
-    const { messageId } = req.params;
-    const { emoji, tempId } = req.body;
-    const userId = req.user.id;
-    if (!emoji) return res.status(400).json({ error: "Emoji is required." });
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const { messageId } = req.params
+    const { emoji, tempId } = req.body
+    const userId = req.user.id
+    if (!emoji) return res.status(400).json({ error: 'Emoji is required.' })
 
-    const message = await prisma.message.findUnique({ 
-      where: { id: messageId }, 
-      select: { conversationId: true, senderId: true } 
-    });
-    if (!message) return res.status(404).json({ error: "Message not found." });
+    const message = await prisma.message.findUnique({
+      where: { id: messageId },
+      select: { conversationId: true, senderId: true }
+    })
+    if (!message) return res.status(404).json({ error: 'Message not found.' })
 
+    // Cek Blocking cuma kalau bukan group
     const conversation = await prisma.conversation.findUnique({
       where: { id: message.conversationId },
       select: { isGroup: true }
-    });
+    })
 
-    const participant = await prisma.participant.findFirst({ where: { userId, conversationId: message.conversationId } });
-    if (!participant) return res.status(403).json({ error: "You are not a participant of this conversation." });
-
-    // BLOCKING CHECK
     if (conversation && !conversation.isGroup && message.senderId !== userId) {
       const isBlocked = await prisma.blockedUser.findFirst({
         where: {
@@ -221,49 +292,56 @@ router.post("/:messageId/reactions", async (req, res, next) => {
             { blockerId: message.senderId, blockedId: userId }
           ]
         }
-      });
+      })
       if (isBlocked) {
-        return res.status(403).json({ error: "Interaction restricted due to blocking." });
+        return res.status(403).json({ error: 'Interaction restricted.' })
       }
     }
 
     const newReaction = await prisma.messageReaction.create({
       data: { messageId, emoji, userId },
       include: { user: { select: { id: true, name: true, username: true } } }
-    });
-    getIo().to(message.conversationId).emit("reaction:new", {
-      conversationId: message.conversationId,
-      messageId: messageId,
-      reaction: { ...newReaction, tempId },
-    });
-    res.status(201).json(newReaction);
-  } catch (error) {
-    next(error);
-  }
-});
+    })
 
-router.delete("/reactions/:reactionId", async (req, res, next) => {
+    getIo().to(message.conversationId).emit('reaction:new', {
+      conversationId: message.conversationId,
+      messageId,
+      reaction: { ...newReaction, tempId }
+    })
+
+    res.status(201).json(newReaction)
+  } catch (error) {
+    next(error)
+  }
+})
+
+// DELETE Reaction
+router.delete('/reactions/:reactionId', async (req, res, next) => {
   try {
-    if (!req.user) throw new ApiError(401, "Authentication required.");
-    const { reactionId } = req.params;
-    const userId = req.user.id;
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const { reactionId } = req.params
+    const userId = req.user.id
+
     const reaction = await prisma.messageReaction.findUnique({
       where: { id: reactionId },
       select: { userId: true, message: { select: { id: true, conversationId: true } } }
-    });
-    if (!reaction) return res.status(404).json({ error: "Reaction not found." });
-    if (reaction.userId !== userId) return res.status(403).json({ error: "You can only delete your own reactions." });
+    })
 
-    await prisma.messageReaction.delete({ where: { id: reactionId } });
-    getIo().to(reaction.message.conversationId).emit("reaction:deleted", {
+    if (!reaction) return res.status(404).json({ error: 'Reaction not found.' })
+    if (reaction.userId !== userId) return res.status(403).json({ error: 'You can only delete your own reactions.' })
+
+    await prisma.messageReaction.delete({ where: { id: reactionId } })
+
+    getIo().to(reaction.message.conversationId).emit('reaction:deleted', {
       conversationId: reaction.message.conversationId,
       messageId: reaction.message.id,
-      reactionId: reactionId,
-    });
-    res.status(204).send();
-  } catch (error) {
-    next(error);
-  }
-});
+      reactionId
+    })
 
-export default router;
+    res.status(204).send()
+  } catch (error) {
+    next(error)
+  }
+})
+
+export default router
