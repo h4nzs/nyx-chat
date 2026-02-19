@@ -42,7 +42,6 @@ export default function Register() {
         if (storedState) {
           setUserId(storedState.userId);
           setEmailForVerify(storedState.email);
-          if (storedState.phrase) setRecoveryPhrase(storedState.phrase);
           setStep('otp');
         }
       });
@@ -94,8 +93,8 @@ export default function Register() {
           saveVerificationState({
             userId: result.userId!,
             email: result.email || email,
-            timestamp: Date.now(),
-            phrase: result.phrase // Save the phrase!
+            timestamp: Date.now()
+            // Phrase is NOT saved for security reasons
           });
         });
         setStep('otp');
@@ -165,6 +164,17 @@ export default function Register() {
 
   // STEP 3: RECOVERY PHRASE
   if (step === 'recovery') {
+    if (!recoveryPhrase) {
+      // If phrase is lost (e.g. refresh), just go to chat. User can view it in settings.
+      import('@utils/verificationPersistence').then(({ clearVerificationState }) => {
+        clearVerificationState();
+      });
+      toast.success("Welcome! You can view your recovery phrase in Settings.");
+      // Use a timeout to ensure state update doesn't conflict with rendering
+      setTimeout(() => navigate('/chat'), 100); 
+      return null;
+    }
+
     return <RecoveryPhraseModal phrase={recoveryPhrase} onClose={() => {
       // Clear state only when finished
       import('@utils/verificationPersistence').then(({ clearVerificationState }) => {
