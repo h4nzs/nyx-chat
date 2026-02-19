@@ -400,6 +400,11 @@ router.post('/refresh', async (req, res, next) => {
       throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
     }
 
+    // Refresh Token Rotation: Hapus token lama agar tidak menumpuk & mencegah Replay Attack
+    await prisma.refreshToken.delete({
+      where: { jti: payload.jti }
+    });
+
     const tokens = await issueTokens(user, req)
     setAuthCookies(res, tokens)
     res.json({ ok: true, accessToken: tokens.access })

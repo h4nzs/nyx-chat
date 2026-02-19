@@ -10,10 +10,13 @@ export const startSystemSweeper = () => {
     const now = new Date();
 
     try {
-      // 1. Bersihkan RefreshToken kadaluarsa
+      // 1. Bersihkan RefreshToken kadaluarsa & yang sudah di-revoke (logout)
       const deletedTokens = await prisma.refreshToken.deleteMany({
         where: {
-          expiresAt: { lte: now }
+          OR: [
+            { expiresAt: { lte: now } },      // Yang udah lewat 30 hari
+            { revokedAt: { not: null } }      // Yang udah di-logout sama user
+          ]
         }
       });
       if (deletedTokens.count > 0) {
