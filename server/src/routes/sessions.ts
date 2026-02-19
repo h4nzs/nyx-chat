@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
 import { ApiError } from '../utils/errors.js'
+import { UAParser } from 'ua-parser-js'
 
 const router: Router = Router()
 
@@ -21,12 +22,27 @@ router.get('/', requireAuth, async (req, res, next) => {
       }
     })
 
-    res.json({
-      sessions: sessions.map(s => ({
+    const parsedSessions = sessions.map(s => {
+      const parser = new UAParser(s.userAgent || "")
+      const browser = parser.getBrowser()
+      const os = parser.getOS()
+      const device = parser.getDevice()
+      
+      const deviceInfo = [
+        device.vendor,
+        device.model,
+        os.name,
+        browser.name
+      ].filter(Boolean).join(' ') || 'Unknown Device'
+
+      return {
         ...s,
-        isCurrent: s.jti === currentJti
-      }))
+        isCurrent: s.jti === currentJti,
+        deviceInfo
+      }
     })
+
+    res.json({ sessions: parsedSessions })
   } catch (e) {
     next(e)
   }
