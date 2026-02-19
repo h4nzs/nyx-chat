@@ -129,6 +129,7 @@ export default function SettingsPage() {
     green: 'hsl(142 76% 42%)',
     purple: 'hsl(262 80% 64%)',
     orange: 'hsl(25 95% 53%)',
+    red: 'hsl(0 92% 29%)',
   };
 
   useEffect(() => {

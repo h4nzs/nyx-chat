@@ -103,6 +103,16 @@
     --accent-foreground: 222 47% 11%; /* Dark text for light mode orange */
   }
 
+  /* Red */
+  :root[data-accent='red'] {
+    --accent: 0 92% 29%;
+    --accent-foreground: 210 40% 98%;
+  }
+  .light[data-accent='red'] {
+    --accent: 0 92% 35%;
+    --accent-foreground: 210 40% 98%;
+  }
+
   html, body, #root {
     @apply h-dvh min-h-dvh text-text-primary;
     background-color: hsl(var(--bg-main));
