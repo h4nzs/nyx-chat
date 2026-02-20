@@ -43,7 +43,8 @@ export type Message = {
   repliedToId?: string;
   linkPreview?: any;
   duration?: number;
-  statuses?: MessageStatus[];
+  statuses?: MessageStatus[]; // Server delivery statuses (for other users)
+  status?: 'SENDING' | 'SENT' | 'FAILED'; // Local status for UI
   deletedAt?: string | Date | null;
   expiresAt?: string | null; // New: Disappearing messages
 };

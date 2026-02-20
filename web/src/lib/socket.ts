@@ -76,10 +76,13 @@ export function getSocket() {
           // 1. Refetch Conversation List (Biar urutan chat bener & snippet update)
           await useConversationStore.getState().loadConversations();
 
-          // 2. Resend pending messages that might have failed during disconnection
+          // 2. Process Offline Queue (Kirim pesan yg pending saat offline)
+          await useMessageStore.getState().processOfflineQueue();
+
+          // 3. Resend pending messages that might have failed during disconnection (InMemory Fallback)
           useMessageStore.getState().resendPendingMessages();
 
-          // 3. Update Status Online User Lain
+          // 4. Update Status Online User Lain
           // (Handled by presence:init event that's already implemented)
         } catch (error) {
           console.error("socket connect sync failed", error);

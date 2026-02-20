@@ -7,6 +7,8 @@ import { useAuthStore, type User } from "./auth";
 import type { Message } from "./conversation";
 import useDynamicIslandStore, { UploadActivity } from './dynamicIsland';
 import { useConversationStore } from "./conversation";
+import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
+import { useConnectionStore } from "./connection";
 
 /**
  * Logika Dekripsi Terpusat (Single Source of Truth)
@@ -85,7 +87,7 @@ type Actions = {
   loadPreviousMessages: (conversationId: string) => Promise<void>;
   addOptimisticMessage: (conversationId: string, message: Message) => void;
   addIncomingMessage: (conversationId: string, message: Message) => void;
-  replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Message) => void;
+  replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => void;
   removeMessage: (conversationId: string, messageId: string) => void;
   updateMessage: (conversationId: string, messageId: string, updates: Partial<Message>) => void;
   addReaction: (conversationId: string, messageId: string, reaction: any) => void;
@@ -98,6 +100,7 @@ type Actions = {
   addSystemMessage: (conversationId: string, content: string) => void;
   reDecryptPendingMessages: (conversationId: string) => Promise<void>;
   failPendingMessages: (conversationId: string, reason: string) => void;
+  processOfflineQueue: () => Promise<void>;
   reset: () => void;
   resendPendingMessages: () => void;
 };
@@ -148,7 +151,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const isGroup = conversation.isGroup;
 
     // Ensure group session and distribute keys if necessary BEFORE sending the message
-    if (isGroup) {
+    // Only attempt if online, otherwise skip (the receiver will request keys later)
+    if (isGroup && useConnectionStore.getState().status === 'connected') {
       try {
         const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
         if (distributionKeys && distributionKeys.length > 0) {
@@ -156,27 +160,29 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         }
       } catch (e) {
         console.error("Failed to ensure group session, message will likely fail for others.", e);
-        toast.error("Failed to establish group session.");
-        // Optional: We could abort sending here, but for now we'll let it proceed to not block the user.
+        // Don't block sending, just log
       }
     }
 
     const actualTempId = tempId !== undefined ? tempId : Date.now();
-    try {
-      const optimisticMessage: Message = {
-        ...data,
-        id: `temp_${actualTempId}`,
-        tempId: actualTempId,
-        optimistic: true,
-        sender: user,
-        senderId: user.id,
-        createdAt: new Date().toISOString(),
-        conversationId,
-        reactions: [],
-        statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${actualTempId}`, id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
-      };
+    
+    // Create optimistic message
+    const optimisticMessage: Message = {
+      ...data,
+      id: `temp_${actualTempId}`,
+      tempId: actualTempId,
+      optimistic: true,
+      sender: user,
+      senderId: user.id,
+      createdAt: new Date().toISOString(),
+      conversationId,
+      reactions: [],
+      statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${actualTempId}`, id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
+      status: 'SENDING', // Initial status
+    };
 
-      // Store original content for potential retry before encrypting
+    try {
+      // Store original content for potential retry/queue before encrypting
       if (data.content) {
         optimisticMessage.preview = data.content;
         const { ciphertext, sessionId } = await encryptMessage(data.content, conversationId, isGroup);
@@ -190,30 +196,75 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
 
       get().addOptimisticMessage(conversationId, optimisticMessage);
-      // Use original content for the last message preview
       useConversationStore.getState().updateConversationLastMessage(conversationId, { ...optimisticMessage, content: data.content, fileType: data.fileType, fileName: data.fileName });
       set({ replyingTo: null, typingLinkPreview: null });
       
-      getSocket()?.emit("message:send", optimisticMessage, (res: { ok: boolean, msg?: Message, error?: string }) => {
+      const socket = getSocket();
+      const isConnected = socket?.connected;
+
+      if (!isConnected) {
+        // Offline? Queue it!
+        await addToQueue(conversationId, optimisticMessage, actualTempId);
+        // UI stays "SENDING" (clock icon)
+        return;
+      }
+
+      socket?.emit("message:send", optimisticMessage, async (res: { ok: boolean, msg?: Message, error?: string }) => {
         if (res.ok && res.msg && tempId !== undefined) {
-          get().replaceOptimisticMessage(conversationId, tempId, res.msg);
+          get().replaceOptimisticMessage(conversationId, actualTempId, { ...res.msg, status: 'SENT' });
         } else if (!res.ok) {
           console.error("Failed to send message:", res.error);
+          // If server rejects (e.g. auth error), mark as FAILED
+          // If it was a network glitch, maybe queue? For now, simple fail.
+          get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
           toast.error(`Failed to send message: ${res.error}`);
-          if (tempId !== undefined) {
-            set(state => ({
-              messages: {
-                ...state.messages,
-                [conversationId]: state.messages[conversationId]?.map(m => m.tempId === tempId ? { ...m, error: true } : m) || [],
-              },
-            }));
-          }
         }
       });
 
     } catch (error) {
       console.error("Failed to encrypt and send message:", error);
       toast.error("Could not send secure message.");
+      get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
+    }
+  },
+
+  processOfflineQueue: async () => {
+    const queue = await getQueueItems();
+    if (queue.length === 0) return;
+
+    const socket = getSocket();
+    if (!socket?.connected) return;
+
+    console.log(`[Queue] Processing ${queue.length} offline messages...`);
+
+    for (const item of queue) {
+      const { tempId, conversationId, data, attempt } = item;
+      
+      if (attempt > 5) {
+        // Give up after 5 retries
+        console.warn(`[Queue] Dropping message ${tempId} after too many retries.`);
+        await removeFromQueue(tempId);
+        get().updateMessage(conversationId, `temp_${tempId}`, { error: true, status: 'FAILED' });
+        continue;
+      }
+
+      // Update UI to show we are trying again
+      get().updateMessage(conversationId, `temp_${tempId}`, { status: 'SENDING', error: false });
+
+      socket.emit("message:send", data, async (res: { ok: boolean, msg?: Message, error?: string }) => {
+        if (res.ok && res.msg) {
+          await removeFromQueue(tempId);
+          get().replaceOptimisticMessage(conversationId, tempId, { ...res.msg, status: 'SENT' });
+        } else {
+          console.error(`[Queue] Failed to send queued message ${tempId}:`, res.error);
+          await updateQueueAttempt(tempId, attempt + 1);
+          // Keep it in queue, but maybe mark visual error if needed?
+          // For now, let it stay 'SENDING' or maybe 'FAILED' until next retry
+        }
+      });
+
+      // Small delay to prevent flooding
+      await new Promise(r => setTimeout(r, 200)); 
     }
   },
 

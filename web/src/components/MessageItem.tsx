@@ -13,7 +13,7 @@ import { useModalStore } from '@store/modal';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import LinkPreviewCard from './LinkPreviewCard';
-import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft } from 'react-icons/fi';
+import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock } from 'react-icons/fi';
 import { getUserColor } from '@utils/color';
 import { FaCheck, FaCheckDouble } from 'react-icons/fa';
 import VoiceMessagePlayer from './VoiceMessagePlayer';
@@ -27,17 +27,33 @@ import MessageBubble from "./MessageBubble"; // Import the external component
 const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
   const meId = useAuthStore((s) => s.user?.id);
   const retrySendMessage = useMessageInputStore(s => s.retrySendMessage);
+  
   if (message.senderId !== meId) return null;
-  if (message.error) return <button onClick={() => retrySendMessage(message)} title="Failed to send. Click to retry."><FiRefreshCw className="text-destructive cursor-pointer" size={16} /></button>;
-  if (message.optimistic) return <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><title>Sending...</title><circle cx="12" cy="12" r="10"/></svg>;
+  
+  // Prioritize explicit status field
+  if (message.status === 'FAILED' || message.error) {
+    return (
+      <button onClick={() => retrySendMessage(message)} title="Failed to send. Click to retry.">
+        <FiRefreshCw className="text-destructive cursor-pointer" size={14} />
+      </button>
+    );
+  }
+
+  if (message.status === 'SENDING' || message.optimistic) {
+     return <FiClock size={14} className="text-text-secondary opacity-70" />;
+  }
+
   const otherParticipants = participants.filter((p: Participant) => p.id !== meId) || [];
-  if (otherParticipants.length === 0) return <FaCheck size={16} />;
+  if (otherParticipants.length === 0) return <FaCheck size={14} className="text-text-secondary" />;
+  
   const statuses = message.statuses || [];
   const isReadAll = otherParticipants.every((p: Participant) => statuses.some((s: MessageStatus) => s.userId === p.id && s.status === 'READ'));
-  if (isReadAll) return <FaCheckDouble size={16} className="text-green-500" />;
+  if (isReadAll) return <FaCheckDouble size={14} className="text-blue-500" />;
+  
   const isDeliveredAll = otherParticipants.every((p: Participant) => statuses.some((s: MessageStatus) => s.userId === p.id && s.status === 'DELIVERED'));
-  if (isDeliveredAll) return <FaCheckDouble size={16} />;
-  return <FaCheck size={16} />;
+  if (isDeliveredAll) return <FaCheckDouble size={14} className="text-text-secondary" />;
+  
+  return <FaCheck size={14} className="text-text-secondary" />;
 };
 
 const ReactionsDisplay = ({ reactions }: { reactions: Message['reactions'] }) => {

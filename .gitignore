@@ -23,3 +23,6 @@ vspostgre.session.sql
 # Exclude TypeScript build info files
 *.tsbuildinfo
 *.sql
+
+.gemini/
+gha-creds-*.json
