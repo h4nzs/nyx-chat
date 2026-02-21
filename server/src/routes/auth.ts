@@ -65,7 +65,9 @@ async function issueTokens (user: any, req: any) {
   const jti = newJti()
   const refresh = signAccessToken({ sub: user.id, jti }, { expiresIn: '30d' })
 
-  const ipAddress = req.ip
+  // Privacy: Hash IP address to prevent long-term logging of raw IPs
+  const rawIp = req.ip || '';
+  const ipAddress = crypto.createHash('sha256').update(rawIp).digest('hex').substring(0, 16);
   const userAgent = req.headers['user-agent']
 
   await prisma.refreshToken.create({

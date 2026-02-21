@@ -5,8 +5,10 @@ import { getIo } from '../socket.js'
 import { ApiError } from '../utils/errors.js'
 import { getSecureLinkPreview } from '../utils/secureLinkPreview.js'
 import { sendPushNotification } from '../utils/sendPushNotification.js'
-import { deleteR2File } from '../utils/r2.js' // Pastikan fungsi ini ada di utils/r2.ts
+import { deleteR2File } from '../utils/r2.js'
 import { env } from '../config.js'
+import { z } from 'zod'
+import { zodValidate } from '../utils/validate.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -67,25 +69,40 @@ router.get('/:conversationId', async (req, res, next) => {
 })
 
 // SEND Message
-router.post('/', async (req, res, next) => {
+router.post('/', zodValidate({
+  body: z.object({
+    conversationId: z.string().min(1),
+    content: z.string().max(20000).optional().nullable(),
+    fileUrl: z.string().url().optional().nullable(),
+    fileName: z.string().optional().nullable(),
+    fileType: z.string().optional().nullable(),
+    fileSize: z.number().optional().nullable(),
+    duration: z.number().optional().nullable(),
+    fileKey: z.string().optional().nullable(),
+    sessionId: z.string().optional().nullable(),
+    repliedToId: z.string().optional().nullable(),
+    tempId: z.union([z.string(), z.number()]).optional(),
+    expiresIn: z.number().optional().nullable()
+  }).refine(data => data.content || data.fileUrl || data.fileKey, {
+    message: "Message must contain content, a file, or an encrypted file key"
+  })
+}), async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const senderId = req.user.id
     const { conversationId, content, fileUrl, fileName, fileType, fileSize, duration, fileKey, sessionId, repliedToId, tempId, expiresIn } = req.body
-
-    if (!conversationId) return res.status(400).json({ error: 'conversationId is required.' })
-
-    // Calculate expiration time if provided
-    let expiresAt: Date | undefined
-    if (expiresIn && typeof expiresIn === 'number' && expiresIn > 0) {
-      expiresAt = new Date(Date.now() + expiresIn * 1000)
-    }
 
     // 1. Ambil Participants
     const participants = await prisma.participant.findMany({
       where: { conversationId },
       select: { userId: true } // Select seperlunya aja biar ringan
     })
+
+    // Calculate expiration time if provided
+    let expiresAt: Date | undefined
+    if (expiresIn && typeof expiresIn === 'number' && expiresIn > 0) {
+      expiresAt = new Date(Date.now() + expiresIn * 1000)
+    }
 
     if (!participants.some(p => p.userId === senderId)) {
       return res.status(403).json({ error: 'You are not a participant.' })
@@ -264,13 +281,20 @@ router.delete('/:id', async (req, res, next) => {
 })
 
 // ADD Reaction
-router.post('/:messageId/reactions', async (req, res, next) => {
+router.post('/:messageId/reactions', zodValidate({
+  params: z.object({
+    messageId: z.string()
+  }),
+  body: z.object({
+    emoji: z.string().min(1),
+    tempId: z.union([z.string(), z.number()]).optional()
+  })
+}), async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { messageId } = req.params
     const { emoji, tempId } = req.body
     const userId = req.user.id
-    if (!emoji) return res.status(400).json({ error: 'Emoji is required.' })
 
     const message = await prisma.message.findUnique({
       where: { id: messageId },

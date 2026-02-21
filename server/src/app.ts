@@ -184,8 +184,13 @@ if (isProd) {
 // === MIDDLEWARE ===
 app.use(logger("dev"));
 app.use(cookieParser());
-app.use(express.json({ limit: "15mb" })); // Naikkan limit upload sedikit
-app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+
+// Body Parser Split: Uploads butuh limit besar, lainnya kecil (Security)
+app.use("/api/uploads", express.json({ limit: "15mb" }));
+app.use("/api/uploads", express.urlencoded({ extended: true, limit: "15mb" }));
+
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: true, limit: "100kb" }));
 
 // === SECURITY & STABILITY ===
 app.use("/api", generalLimiter);

@@ -262,25 +262,69 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
+    // --- RATE LIMITER HELPER ---
+    const checkRateLimit = async (userId: string, event: string, limit: number, windowSeconds: number): Promise<boolean> => {
+      const key = `rate_limit:socket:${event}:${userId}`;
+      const current = await redisClient.incr(key);
+      if (current === 1) {
+        await redisClient.expire(key, windowSeconds);
+      }
+      return current <= limit;
+    };
+
     // --- CHAT FEATURES ---
 
-    socket.on("conversation:join", (conversationId: string) => {
-      socket.join(conversationId);
+    socket.on("conversation:join", async (conversationId: string) => {
+      // 1. Rate Limit
+      if (!await checkRateLimit(userId, 'join', 10, 60)) { // 10 joins / minute
+        return socket.emit("error", { message: "Rate limit exceeded" });
+      }
+
+      // 2. Validate Membership
+      try {
+        const participant = await prisma.participant.findUnique({
+          where: {
+            userId_conversationId: {
+              userId,
+              conversationId
+            }
+          }
+        });
+
+        if (participant) {
+          socket.join(conversationId);
+        } else {
+          // Silent fail or emit error? Silent is better for security (anti-guessing)
+          // But for UX, maybe a generic error.
+          // socket.emit("error", { message: "Unauthorized" });
+        }
+      } catch (e) {
+        console.error("Error joining conversation:", e);
+      }
     });
 
-    socket.on("typing:start", ({ conversationId }: TypingPayload) => {
+    socket.on("typing:start", async ({ conversationId }: TypingPayload) => {
+      if (!await checkRateLimit(userId, 'typing', 20, 10)) return; // 20 typing events / 10s (prevent spam)
+
       if (conversationId && socket.user) {
+        // Optional: Check membership if you want to be super paranoid, 
+        // but since typing only goes to the room (which is secured above), it's less critical.
+        // However, if they bypass join, they can't emit to the room unless they are IN it.
+        // Socket.IO rooms require the socket to be joined.
         socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: true });
       }
     });
 
     socket.on("typing:stop", ({ conversationId }: TypingPayload) => {
-      if (conversationId && socket.user) {
+       // Rate limit not strictly needed for stop, but good practice.
+       if (conversationId && socket.user) {
         socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: false });
       }
     });
 
     socket.on('messages:distribute_keys', async ({ conversationId, keys }: DistributeKeysPayload) => {
+      if (!await checkRateLimit(userId, 'keys', 50, 60)) return; // 50 key distributions / minute
+      
       if (!keys || !Array.isArray(keys) || !conversationId) return;
       
       try {
@@ -305,6 +349,11 @@ export function registerSocket(httpServer: HttpServer) {
     });
 
     socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: Message, error?: string }) => void) => {
+      // 1. Rate Limit
+      if (!await checkRateLimit(userId, 'message', 15, 60)) { // 15 messages / minute
+         return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
+      }
+
       const { conversationId, content, sessionId, tempId } = message;
 
       if (!content || typeof content !== 'string' || content.length > 10000) {
