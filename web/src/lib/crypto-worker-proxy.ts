@@ -188,3 +188,17 @@ export function worker_file_encrypt(fileBuffer: ArrayBuffer): Promise<{ encrypte
 export function worker_file_decrypt(combinedData: ArrayBuffer, keyBytes: Uint8Array): Promise<ArrayBuffer> {
     return sendToWorker('file_decrypt', { combinedData, keyBytes: Array.from(keyBytes) });
 }
+
+export function worker_encrypt_session_key(sessionKey: Uint8Array, masterSeed: Uint8Array): Promise<Uint8Array> {
+    return sendToWorker('encrypt_session_key', { 
+        sessionKey: Array.from(sessionKey), 
+        masterSeed: Array.from(masterSeed) 
+    });
+}
+
+export function worker_decrypt_session_key(encryptedKey: Uint8Array, masterSeed: Uint8Array): Promise<Uint8Array> {
+    return sendToWorker('decrypt_session_key', { 
+        encryptedKey: Array.from(encryptedKey), 
+        masterSeed: Array.from(masterSeed) 
+    });
+}

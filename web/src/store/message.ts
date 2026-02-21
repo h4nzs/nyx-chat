@@ -52,7 +52,10 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
     } else if (result.status === 'pending') {
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
-      decryptedMsg.content = 'Decryption failed';
+      console.warn(`Decryption failed for msg ${decryptedMsg.id}:`, result.error);
+      // Friendly message for legacy/broken migration
+      decryptedMsg.content = '🔒 Legacy Message (Unreadable)';
+      decryptedMsg.type = 'SYSTEM'; // Treat as system message to styling
     }
 
     // 5. Dekripsi Replied Message (Nested & Guarded)
@@ -64,7 +67,7 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
 
   } catch (e) {
     console.error("Critical error in decryptMessageObject:", e);
-    return { ...message, content: "Error processing message" };
+    return { ...message, content: "🔒 Decryption Error", type: 'SYSTEM' };
   }
 }
 

@@ -109,11 +109,17 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     return () => observer.disconnect();
   }, [message.id, message.conversationId, mine, meId, message.statuses]);
 
-  if (message.type === 'SYSTEM') {
+  if (message.type === 'SYSTEM' || message.content?.startsWith('🔒')) {
+    const isError = message.content?.includes('Error') || message.content?.includes('Unreadable');
     return (
-      <div className="flex justify-center items-center my-2">
-        <div className="text-xs text-text-secondary bg-bg-surface rounded-full px-3 py-1 flex items-center gap-2 shadow-sm">
-          <FiShield className="text-yellow-500" />
+      <div className="flex justify-center items-center my-3 opacity-80">
+        <div className={clsx(
+          "text-xs px-3 py-1.5 rounded-full flex items-center gap-2 shadow-sm border",
+          isError 
+            ? "bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400" 
+            : "bg-bg-surface text-text-secondary border-white/5"
+        )}>
+          <FiShield size={12} className={isError ? "text-red-500" : "text-yellow-500"} />
           <span>{message.content}</span>
         </div>
       </div>

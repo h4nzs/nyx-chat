@@ -14,6 +14,73 @@ import {
 import { emitSessionKeyFulfillment, emitSessionKeyRequest, emitGroupKeyDistribution, emitGroupKeyRequest, emitGroupKeyFulfillment } from '@lib/socket';
 import type { Participant } from '@store/conversation';
 
+// --- Secure Storage Helpers ---
+
+async function getMasterSeedOrThrow(): Promise<Uint8Array> {
+  const masterSeed = await useAuthStore.getState().getMasterSeed();
+  if (!masterSeed) {
+    throw new Error("Master key locked or unavailable. Please unlock your session.");
+  }
+  return masterSeed;
+}
+
+export async function storeSessionKeySecurely(conversationId: string, sessionId: string, key: Uint8Array) {
+  const masterSeed = await getMasterSeedOrThrow();
+  const { worker_encrypt_session_key } = await getWorkerProxy();
+  const encryptedKey = await worker_encrypt_session_key(key, masterSeed);
+  await addSessionKey(conversationId, sessionId, encryptedKey);
+}
+
+export async function retrieveSessionKeySecurely(conversationId: string, sessionId: string): Promise<Uint8Array | null> {
+  const encryptedKey = await getKeyFromDb(conversationId, sessionId);
+  if (!encryptedKey) return null;
+
+  try {
+    const masterSeed = await getMasterSeedOrThrow();
+    const { worker_decrypt_session_key } = await getWorkerProxy();
+    return await worker_decrypt_session_key(encryptedKey, masterSeed);
+  } catch (error) {
+    console.error(`Failed to decrypt session key for ${sessionId}:`, error);
+    return null;
+  }
+}
+
+export async function storeGroupKeySecurely(conversationId: string, key: Uint8Array) {
+  const masterSeed = await getMasterSeedOrThrow();
+  const { worker_encrypt_session_key } = await getWorkerProxy();
+  const encryptedKey = await worker_encrypt_session_key(key, masterSeed);
+  await storeGroupKey(conversationId, encryptedKey);
+}
+
+export async function retrieveGroupKeySecurely(conversationId: string): Promise<Uint8Array | null> {
+  const encryptedKey = await getGroupKey(conversationId);
+  if (!encryptedKey) return null;
+
+  try {
+    const masterSeed = await getMasterSeedOrThrow();
+    const { worker_decrypt_session_key } = await getWorkerProxy();
+    return await worker_decrypt_session_key(encryptedKey, masterSeed);
+  } catch (error) {
+    console.error(`Failed to decrypt group key for ${conversationId}:`, error);
+    return null;
+  }
+}
+
+export async function retrieveLatestSessionKeySecurely(conversationId: string): Promise<{ sessionId: string; key: Uint8Array } | null> {
+  const latest = await getLatestSessionKey(conversationId);
+  if (!latest) return null;
+
+  try {
+    const masterSeed = await getMasterSeedOrThrow();
+    const { worker_decrypt_session_key } = await getWorkerProxy();
+    const key = await worker_decrypt_session_key(latest.key, masterSeed);
+    return { sessionId: latest.sessionId, key };
+  } catch (error) {
+    console.error(`Failed to decrypt latest session key for ${conversationId}:`, error);
+    return null;
+  }
+}
+
 // --- Types ---
 export type DecryptResult =
   | { status: 'success'; value: string }
@@ -88,7 +155,7 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
     const { publicKey, privateKey } = await getMyEncryptionKeyPair();
     const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
 
-    await addSessionKey(conversationId, sessionId, newSessionKey);
+    await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
   } catch (error) {
     console.error(`Failed to ratchet session for ${conversationId}:`, error);
     throw new Error('Could not establish a secure session.');
@@ -116,14 +183,14 @@ export async function ensureGroupSession(conversationId: string, participants: P
 
   const promise = (async () => {
     try {
-      const existingKey = await getGroupKey(conversationId);
+      const existingKey = await retrieveGroupKeySecurely(conversationId);
       if (existingKey) return null;
 
       const sodium = await getSodiumLib();
       const { worker_generate_random_key, worker_crypto_box_seal } = await getWorkerProxy();
 
       const groupKey = await worker_generate_random_key();
-      await storeGroupKey(conversationId, groupKey);
+      await storeGroupKeySecurely(conversationId, groupKey);
 
       const myId = useAuthStore.getState().user?.id;
       const otherParticipants = participants.filter(p => p.id !== myId);
@@ -162,7 +229,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
 export async function handleGroupKeyDistribution(conversationId: string, encryptedKey: string): Promise<void> {
   const { publicKey, privateKey } = await getMyEncryptionKeyPair();
   const groupKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
-  await receiveGroupKey(conversationId, groupKey);
+  await storeGroupKeySecurely(conversationId, groupKey);
 }
 
 export async function rotateGroupKey(conversationId: string, reason: 'membership_change' | 'periodic_rotation' = 'membership_change'): Promise<void> {
@@ -226,12 +293,12 @@ export async function encryptMessage(
   let sessionId: string | undefined;
 
   if (isGroup) {
-    const groupKey = await getGroupKey(conversationId);
+    const groupKey = await retrieveGroupKeySecurely(conversationId);
     if (!groupKey) throw new Error(`No group key available for conversation ${conversationId}.`);
     key = groupKey;
     sessionId = undefined;
   } else {
-    const latestKey = await getLatestSessionKey(conversationId);
+    const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
     if (!latestKey) throw new Error('No session key available for encryption.');
     key = latestKey.key;
     sessionId = latestKey.sessionId;
@@ -260,14 +327,14 @@ export async function decryptMessage(
   const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await getWorkerProxy();
 
   if (isGroup) {
-    key = await getGroupKey(conversationId);
+    key = await retrieveGroupKeySecurely(conversationId);
     if (!key) {
       requestGroupKeyWithTimeout(conversationId);
       return { status: 'pending', reason: 'waiting_for_key' };
     }
   } else {
     if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt message: Missing session ID.') };
-    key = await getKeyFromDb(conversationId, sessionId);
+    key = await retrieveSessionKeySecurely(conversationId, sessionId);
 
     if (!key) {
       emitSessionKeyRequest(conversationId, sessionId);
@@ -358,7 +425,7 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (!conversation || !conversation.participants.some(p => p.id === requesterId)) return;
 
-  const key = await getGroupKey(conversationId);
+  const key = await retrieveGroupKeySecurely(conversationId);
   if (!key) return;
 
   const sodium = await getSodiumLib();
@@ -376,7 +443,7 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
 
 export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise<void> {
   const { conversationId, sessionId, requesterId, requesterPublicKey: requesterPublicKeyB64 } = payload;
-  const key = await getKeyFromDb(conversationId, sessionId);
+  const key = await retrieveSessionKeySecurely(conversationId, sessionId);
   if (!key) return;
 
   const sodium = await getSodiumLib();
@@ -407,7 +474,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
   } else if (sessionId) {
     const { publicKey, privateKey } = await getMyEncryptionKeyPair();
     const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
-    await addSessionKey(conversationId, sessionId, newSessionKey);
+    await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
   }
 }
 

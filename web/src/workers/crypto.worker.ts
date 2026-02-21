@@ -532,6 +532,56 @@ self.onmessage = async (event: MessageEvent) => {
         }
         break;
       }
+      case 'encrypt_session_key': {
+        const { sessionKey, masterSeed } = payload;
+        const sessionKeyBytes = new Uint8Array(sessionKey);
+        const masterSeedBytes = new Uint8Array(masterSeed);
+
+        // Derive a specific key for storage encryption to protect the master seed
+        const storageKey = sodium.crypto_generichash(32, masterSeedBytes, new Uint8Array(new TextEncoder().encode("session-storage")));
+        
+        const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+        
+        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+          sessionKeyBytes,
+          null,
+          null,
+          nonce,
+          storageKey
+        );
+
+        const combined = new Uint8Array(nonce.length + ciphertext.length);
+        combined.set(nonce);
+        combined.set(ciphertext, nonce.length);
+
+        result = combined;
+        
+        // Clean up
+        sodium.memzero(storageKey);
+        break;
+      }
+      case 'decrypt_session_key': {
+        const { encryptedKey, masterSeed } = payload;
+        const encryptedKeyBytes = new Uint8Array(encryptedKey);
+        const masterSeedBytes = new Uint8Array(masterSeed);
+
+        const storageKey = sodium.crypto_generichash(32, masterSeedBytes, new Uint8Array(new TextEncoder().encode("session-storage")));
+        
+        const nonce = encryptedKeyBytes.slice(0, sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+        const ciphertext = encryptedKeyBytes.slice(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+
+        result = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+          null,
+          ciphertext,
+          null,
+          nonce,
+          storageKey
+        );
+
+        // Clean up
+        sodium.memzero(storageKey);
+        break;
+      }
       default:
         self.postMessage({ type: 'error', id, error: `Unknown worker command: ${type}` });
         return;
