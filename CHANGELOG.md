@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-02-21
+
+This release establishes NYX as a "Paranoia-Level" secure messaging platform. It introduces a Hardened Encryption protocol (XChaCha20), eliminates all forms of user tracking, and secures the application infrastructure against advanced attacks.
+
+### Security Hardening (Paranoia Level)
+
+-   **XChaCha20-Poly1305 Migration:**
+    -   **Hard Migration:** Replaced the legacy XSalsa20-Poly1305 cipher with the modern, high-performance **XChaCha20-Poly1305** stream cipher for all new message encryption.
+    -   **Mobile Optimization:** Leverages XChaCha20's superior performance on ARM-based mobile devices.
+    -   **Clean Break:** Old messages encrypted with XSalsa20 are intentionally rendered unreadable to ensure a clean cryptographic state moving forward.
+-   **Privacy-First Architecture:**
+    -   **Zero Analytics:** Removed all tracking scripts (`Google Analytics`, `Vercel Analytics`, `Hotjar`) and dependencies.
+    -   **Metadata Protection:** Disabled Service Worker API caching to prevent metadata leakage in browser storage.
+    -   **IP Anonymization:** Server now **hashes IP addresses** (SHA-256) before storing them in the refresh token table, preventing long-term tracking of user locations.
+-   **Frontend Defense:**
+    -   **XSS Proofing:** Replaced the custom markdown parser with `react-markdown` and `rehype-sanitize`, strictly sanitizing all HTML output to prevent Cross-Site Scripting (XSS).
+    -   **Strict CSP:** Implemented a rigorous Content Security Policy (CSP) that blocks all unauthorized scripts, analytics, and unsafe evaluations (except necessary WASM).
+-   **Backend Defense:**
+    -   **DoS Protection:** Implemented a **Split Body Parser** strategy. General API endpoints are now strictly limited to `100kb` payloads, while file uploads are isolated with a `15mb` limit.
+    -   **Rate Limiting:** Added Redis-backed rate limiting to critical WebSocket events (`join`, `message`, `typing`) to prevent socket flooding.
+    -   **Input Validation:** Enforced strict `Zod` schema validation on all critical message and reaction endpoints.
+
+### Changed
+
+-   **Nginx Configuration:**
+    -   Updated `nginx.conf` for VPS deployment (Port 3000, Proxy to Localhost).
+    -   Hardened security headers: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, and `Permissions-Policy`.
+    -   Disabled Gzip compression for `application/json` to mitigate BREACH attacks on encrypted API responses.
+-   **Supply Chain:**
+    -   Audited and fixed all critical NPM vulnerabilities via `pnpm.overrides`.
+    -   Removed unused and bloated dependencies: `multer`, `crypto-js`, `@types/helmet`, `bcrypt`.
+
 ## [2.0.0] - 2026-02-10
 
 This landmark release transforms NYX into a "Fortress of Privacy" with a completely re-architected security model, introduces AI-powered features, and achieves full compliance transparency. It represents the biggest leap in security and capability since the project's inception.
@@ -179,7 +211,7 @@ This is a quality-of-life and robustness release focused on polishing the user i
   - The play button now uses the main theme background color for better contrast against the message bubble.
   - A "thumb" indicator has been added to the progress bar, providing clearer visual feedback of the current playback position.
   - The overall layout and styling have been tweaked for a more refined and professional appearance.
-- **Improved Error Handling for Missing Files:** All media components (`VoiceMessagePlayer`, `FileAttachment`, `LazyImage`) now provide a clear, user-friendly error message ("File not found on server.") when they fail to load a file due to a 404 error. This improves the user experience if files are cleaned up from the server.
+- **Improved Error Handling for Missing Files:** All media components (`VoiceMessagePlayer`, `FileAttachment`, `LazyImage`, `Lightbox`) now provide a clear, user-friendly error message ("File not found on server.") when they fail to load a file due to a 404 error. This improves the user experience if files are cleaned up from the server.
 - **Consistent Modal Language:** All text within the "Security Info" modal (`ChatInfoModal`) has been standardized to English to ensure consistency.
 
 ### Fixed
