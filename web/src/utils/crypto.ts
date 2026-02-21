@@ -219,9 +219,9 @@ export async function encryptMessage(
   isGroup: boolean = false,
 ): Promise<{ ciphertext: string; sessionId?: string }> {
   const sodium = await getSodiumLib();
-  const { worker_crypto_secretbox_easy } = await getWorkerProxy();
+  const { worker_crypto_secretbox_xchacha20poly1305_easy } = await getWorkerProxy();
 
-  const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES);
+  const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_xchacha20poly1305_NONCEBYTES);
   let key: Uint8Array;
   let sessionId: string | undefined;
 
@@ -238,7 +238,7 @@ export async function encryptMessage(
   }
   
   const messageBytes = sodium.from_string(text);
-  const encrypted = await worker_crypto_secretbox_easy(messageBytes, nonce, key);
+  const encrypted = await worker_crypto_secretbox_xchacha20poly1305_easy(messageBytes, nonce, key);
 
   const combined = new Uint8Array(nonce.length + encrypted.length);
   combined.set(nonce);
@@ -257,7 +257,7 @@ export async function decryptMessage(
 
   let key: Uint8Array | null = null;
   const sodium = await getSodiumLib();
-  const { worker_crypto_secretbox_open_easy } = await getWorkerProxy();
+  const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await getWorkerProxy();
 
   if (isGroup) {
     key = await getGroupKey(conversationId);
@@ -277,10 +277,10 @@ export async function decryptMessage(
   
   try {
     const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
-    const nonce = combined.slice(0, sodium.crypto_secretbox_NONCEBYTES);
-    const encrypted = combined.slice(sodium.crypto_secretbox_NONCEBYTES);
+    const nonce = combined.slice(0, sodium.crypto_secretbox_xchacha20poly1305_NONCEBYTES);
+    const encrypted = combined.slice(sodium.crypto_secretbox_xchacha20poly1305_NONCEBYTES);
     
-    const decrypted = await worker_crypto_secretbox_open_easy(encrypted, nonce, key);
+    const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
     return { status: 'success', value: sodium.to_string(decrypted) };
   } catch (e: any) {
     console.error(`Decryption failed for convo ${conversationId}, session ${sessionId}:`, e);

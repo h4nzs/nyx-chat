@@ -293,23 +293,23 @@ self.onmessage = async (event: MessageEvent) => {
         result = generateSafetyNumber(myPublicKeyBytes, theirPublicKeyBytes);
         break;
       }
-      case 'crypto_secretbox_easy': {
+      case 'crypto_secretbox_xchacha20poly1305_easy': {
         const { message, nonce, key } = payload;
         // Handle message as string or array
         const messageBytes = typeof message === 'string' ? new TextEncoder().encode(message) : new Uint8Array(message);
         const nonceBytes = new Uint8Array(nonce);
         const keyBytes = new Uint8Array(key);
         
-        result = sodium.crypto_secretbox_easy(messageBytes, nonceBytes, keyBytes);
+        result = sodium.crypto_secretbox_xchacha20poly1305_easy(messageBytes, nonceBytes, keyBytes);
         break;
       }
-      case 'crypto_secretbox_open_easy': {
+      case 'crypto_secretbox_xchacha20poly1305_open_easy': {
         const { ciphertext, nonce, key } = payload;
         const ciphertextBytes = new Uint8Array(ciphertext);
         const nonceBytes = new Uint8Array(nonce);
         const keyBytes = new Uint8Array(key);
 
-        result = sodium.crypto_secretbox_open_easy(ciphertextBytes, nonceBytes, keyBytes);
+        result = sodium.crypto_secretbox_xchacha20poly1305_open_easy(ciphertextBytes, nonceBytes, keyBytes);
         break;
       }
       case 'crypto_box_seal_open': {

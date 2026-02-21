@@ -135,12 +135,12 @@ export function worker_generate_random_key(): Promise<Uint8Array> {
 
 // --- Internal Crypto Primitives Proxy Functions ---
 
-export function worker_crypto_secretbox_easy(message: string | Uint8Array, nonce: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
-    return sendToWorker('crypto_secretbox_easy', { message: typeof message === 'string' ? message : Array.from(message), nonce: Array.from(nonce), key: Array.from(key) });
+export function worker_crypto_secretbox_xchacha20poly1305_easy(message: string | Uint8Array, nonce: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
+    return sendToWorker('crypto_secretbox_xchacha20poly1305_easy', { message: typeof message === 'string' ? message : Array.from(message), nonce: Array.from(nonce), key: Array.from(key) });
 }
 
-export function worker_crypto_secretbox_open_easy(ciphertext: Uint8Array, nonce: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
-    return sendToWorker('crypto_secretbox_open_easy', { ciphertext: Array.from(ciphertext), nonce: Array.from(nonce), key: Array.from(key) });
+export function worker_crypto_secretbox_xchacha20poly1305_open_easy(ciphertext: Uint8Array, nonce: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
+    return sendToWorker('crypto_secretbox_xchacha20poly1305_open_easy', { ciphertext: Array.from(ciphertext), nonce: Array.from(nonce), key: Array.from(key) });
 }
 
 export function worker_crypto_box_seal(message: Uint8Array, publicKey: Uint8Array): Promise<Uint8Array> {
