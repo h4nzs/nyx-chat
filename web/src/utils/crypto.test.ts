@@ -85,7 +85,7 @@ describe('crypto.ts', () => {
         vi.spyOn(sodium, 'getSodium').mockResolvedValue({
             from_base64: () => new Uint8Array(64), // Dummy value
             to_string: (val: Uint8Array) => new TextDecoder().decode(val), // Real implementation
-            crypto_secretbox_xchacha20poly1305_NONCEBYTES: 24, // Mock constant
+            crypto_aead_xchacha20poly1305_ietf_NPUBBYTES: 24, // Mock constant
         } as any);
 
         // 2. Action

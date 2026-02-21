@@ -295,12 +295,18 @@ self.onmessage = async (event: MessageEvent) => {
       }
       case 'crypto_secretbox_xchacha20poly1305_easy': {
         const { message, nonce, key } = payload;
-        // Handle message as string or array
         const messageBytes = typeof message === 'string' ? new TextEncoder().encode(message) : new Uint8Array(message);
         const nonceBytes = new Uint8Array(nonce);
         const keyBytes = new Uint8Array(key);
         
-        result = sodium.crypto_secretbox_xchacha20poly1305_easy(messageBytes, nonceBytes, keyBytes);
+        // Use AEAD IETF version: message, ad, secret_nonce, public_nonce, key
+        result = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+          messageBytes, 
+          null, 
+          null, 
+          nonceBytes, 
+          keyBytes
+        );
         break;
       }
       case 'crypto_secretbox_xchacha20poly1305_open_easy': {
@@ -309,7 +315,14 @@ self.onmessage = async (event: MessageEvent) => {
         const nonceBytes = new Uint8Array(nonce);
         const keyBytes = new Uint8Array(key);
 
-        result = sodium.crypto_secretbox_xchacha20poly1305_open_easy(ciphertextBytes, nonceBytes, keyBytes);
+        // Use AEAD IETF version: secret_nonce, ciphertext, ad, public_nonce, key
+        result = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+          null,
+          ciphertextBytes,
+          null,
+          nonceBytes,
+          keyBytes
+        );
         break;
       }
       case 'crypto_box_seal_open': {

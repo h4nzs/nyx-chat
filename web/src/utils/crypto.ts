@@ -221,7 +221,7 @@ export async function encryptMessage(
   const sodium = await getSodiumLib();
   const { worker_crypto_secretbox_xchacha20poly1305_easy } = await getWorkerProxy();
 
-  const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_xchacha20poly1305_NONCEBYTES);
+  const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
   let key: Uint8Array;
   let sessionId: string | undefined;
 
@@ -277,8 +277,8 @@ export async function decryptMessage(
   
   try {
     const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
-    const nonce = combined.slice(0, sodium.crypto_secretbox_xchacha20poly1305_NONCEBYTES);
-    const encrypted = combined.slice(sodium.crypto_secretbox_xchacha20poly1305_NONCEBYTES);
+    const nonce = combined.slice(0, sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    const encrypted = combined.slice(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
     
     const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
     return { status: 'success', value: sodium.to_string(decrypted) };
