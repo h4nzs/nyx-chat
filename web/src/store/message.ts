@@ -73,9 +73,10 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
       console.warn(`Decryption failed for msg ${decryptedMsg.id}:`, result.error);
-      // Friendly message for legacy/broken migration
-      decryptedMsg.content = '🔒 Legacy Message (Unreadable)';
-      decryptedMsg.type = 'SYSTEM'; // Treat as system message to styling
+      // Change fallback to 'waiting_for_key' to allow re-decryption attempts
+      // when session keys arrive via socket.
+      decryptedMsg.content = 'waiting_for_key';
+      decryptedMsg.type = 'SYSTEM'; 
     }
 
     // 5. Dekripsi Replied Message (Nested & Guarded)
