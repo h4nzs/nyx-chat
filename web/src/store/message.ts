@@ -31,14 +31,29 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
     const isGroup = !decryptedMsg.sessionId;
 
     // 2. Tentukan Payload yang Akan Didekripsi
-    const contentToDecrypt = decryptedMsg.fileKey || decryptedMsg.content;
+    // Prioritaskan ciphertext yang sudah tersimpan (jika ada) untuk menghindari penggunaan 'content' yang sudah tertimpa status error.
+    let contentToDecrypt = decryptedMsg.ciphertext;
+
+    if (!contentToDecrypt) {
+        // Fallback ke content atau fileKey (untuk pesan baru dari socket/DB)
+        contentToDecrypt = decryptedMsg.fileKey || decryptedMsg.content;
+    }
+
+    // Guard: Jangan mencoba mendekripsi jika konten adalah pesan error internal
+    if (contentToDecrypt === 'waiting_for_key' || contentToDecrypt === '[Requesting key to decrypt...]') {
+        // Ciphertext hilang atau rusak. Tidak bisa dekripsi.
+        // Kembalikan pesan apa adanya untuk menghindari polusi lebih lanjut.
+        return decryptedMsg;
+    }
 
     if (!contentToDecrypt) {
       return decryptedMsg;
     }
 
-    // 3. Eksekusi Dekripsi
+    // 3. Simpan ciphertext asli agar tidak hilang saat content ditimpa status error
     decryptedMsg.ciphertext = contentToDecrypt;
+
+    // 4. Eksekusi Dekripsi
     const result = await decryptMessage(
       contentToDecrypt,
       decryptedMsg.conversationId,
@@ -46,7 +61,7 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
       decryptedMsg.sessionId
     );
 
-    // 4. Proses Hasil
+    // 5. Proses Hasil
     if (result.status === 'success') {
       const plainText = result.value;
       decryptedMsg.content = plainText;
@@ -66,20 +81,15 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
         } catch (e) { }
       }
       
-      // REACTION PARSING (Flag it for post-processing)
-      // Note: We leave content as is, but helpers will detect it.
-
     } else if (result.status === 'pending') {
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
       console.warn(`Decryption failed for msg ${decryptedMsg.id}:`, result.error);
-      // Change fallback to 'waiting_for_key' to allow re-decryption attempts
-      // when session keys arrive via socket.
-      decryptedMsg.content = 'waiting_for_key';
+      decryptedMsg.content = 'waiting_for_key'; // Retryable state
       decryptedMsg.type = 'SYSTEM'; 
     }
 
-    // 5. Dekripsi Replied Message (Nested & Guarded)
+    // 6. Dekripsi Replied Message (Nested & Guarded)
     if (decryptedMsg.repliedTo) {
         decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1);
     }
@@ -772,9 +782,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const reDecryptedMessages = await Promise.all(
       pendingMessages.map(async (msg) => {
-          console.log(`[ReDecrypt] Attempting to decrypt msg ${msg.id} (Session: ${msg.sessionId})`);
-          console.log(`[ReDecrypt] Ciphertext len: ${msg.ciphertext?.length}, Sample: ${msg.ciphertext?.substring(0, 20)}...`);
-          const res = await decryptMessageObject({ ...msg, content: msg.ciphertext });
+          console.log(`[ReDecrypt] Attempting to decrypt msg ${msg.id}`);
+          // Pass the message object directly. decryptMessageObject will handle ciphertext priority.
+          const res = await decryptMessageObject(msg);
           console.log(`[ReDecrypt] Result for ${msg.id}:`, res.content?.substring(0, 20));
           return res;
       })
