@@ -654,15 +654,31 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     };
   }),
   removeMessage: (conversationId, messageId) => set(state => {
-    // Find the message to revoke its blob URL if it exists
-    const messageToRemove = state.messages[conversationId]?.find(m => m.id === messageId);
+    const messages = state.messages[conversationId] || [];
+    
+    // 1. Remove from main list (if it's a regular message)
+    const messageToRemove = messages.find(m => m.id === messageId);
     if (messageToRemove?.fileUrl?.startsWith('blob:')) {
       URL.revokeObjectURL(messageToRemove.fileUrl);
     }
+    const filteredMessages = messages.filter(m => m.id !== messageId);
+
+    // 2. Remove from nested reactions (if it's a reaction message)
+    // This handles the "Reaction as Message" deletion sync
+    const updatedMessages = filteredMessages.map(m => {
+        if (m.reactions && m.reactions.some(r => r.id === messageId)) {
+            return {
+                ...m,
+                reactions: m.reactions.filter(r => r.id !== messageId)
+            };
+        }
+        return m;
+    });
+
     return {
       messages: {
           ...state.messages,
-          [conversationId]: (state.messages[conversationId] || []).filter(m => m.id !== messageId),
+          [conversationId]: updatedMessages,
       }
     };
   }),
