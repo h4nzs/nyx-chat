@@ -6,7 +6,7 @@ import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
 import { getSodium } from '@lib/sodiumInitializer';
 import { establishSessionFromPreKeyBundle } from '@utils/crypto';
-import { addSessionKey } from '@lib/keychainDb';
+import { addSessionKey, storePendingHeader } from '@lib/keychainDb';
 import toast from 'react-hot-toast';
 
 // --- Type Definitions ---
@@ -291,23 +291,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const sodium = await getSodium();
       const myPublicKey = myKeyPair.publicKey;
       
-      // Encrypt for self (backup) - always legacy seal
+      // Encrypt for self (backup)
       const encryptedKeyForSelf = sodium.crypto_box_seal(sessionKey, myPublicKey);
       
-      let encryptedKeyForPeer: Uint8Array;
-
-      // X3DH HANDSHAKE LOGIC
-      if (otpkId !== undefined) {
-          // If we used an OTPK, we don't send the key to Bob.
-          // We send a marker telling Bob to calculate it himself.
-          // We encode this marker as the "encryptedKey" string.
-          const marker = JSON.stringify({ x3dh: true, otpkId });
-          encryptedKeyForPeer = new TextEncoder().encode(marker);
-      } else {
-          // Fallback to Simplified X3DH (Legacy) if no OTPK available
-          const theirPublicKey = sodium.from_base64(theirBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-          encryptedKeyForPeer = sodium.crypto_box_seal(sessionKey, theirPublicKey);
-      }
+      // Peer key is distributed via Embedded Header in the first message.
+      // We send a placeholder here to satisfy API requirements.
+      const encryptedKeyForPeer = new Uint8Array(0); 
 
       const sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
 
@@ -321,16 +310,23 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             ephemeralPublicKey,
             initialKeys: [
               { userId: user.id, key: sodium.to_base64(encryptedKeyForSelf, sodium.base64_variants.URLSAFE_NO_PADDING) },
-              { userId: peerId, key: otpkId !== undefined 
-                  ? new TextDecoder().decode(encryptedKeyForPeer) // Send JSON string directly
-                  : sodium.to_base64(encryptedKeyForPeer, sodium.base64_variants.URLSAFE_NO_PADDING) 
-              },
+              { userId: peerId, key: "" }, // Placeholder
             ],
           },
         }),
       });
       
       await addSessionKey(conv.id, sessionId, sessionKey);
+
+      // Now we have conv.id, store the pending header
+      if (otpkId !== undefined) {
+          const x3dhHeader = {
+              ik: sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+              ek: ephemeralPublicKey,
+              otpkId: otpkId
+          };
+          await storePendingHeader(conv.id, x3dhHeader);
+      }
 
       getSocket().emit("conversation:join", conv.id);
       get().addOrUpdateConversation(conv);

@@ -4,7 +4,8 @@ import { openDB, IDBPDatabase } from 'idb';
 const SESSION_KEYS_STORE_NAME = 'session-keys';
 const GROUP_KEYS_STORE_NAME = 'group-keys';
 const OTPK_STORE_NAME = 'one-time-pre-keys';
-const DB_VERSION = 3;
+const PENDING_HEADERS_STORE_NAME = 'pending-headers';
+const DB_VERSION = 4;
 
 // Cache DB connections by userId to handle switching accounts without reloading
 const dbCache = new Map<string, Promise<IDBPDatabase>>();
@@ -34,12 +35,40 @@ function getDb(): Promise<IDBPDatabase> {
           // Store OTPKs by keyId (integer)
           db.createObjectStore(OTPK_STORE_NAME);
         }
+        if (oldVersion < 4) {
+          db.createObjectStore(PENDING_HEADERS_STORE_NAME);
+        }
       },
     });
     dbCache.set(userId, promise);
   }
   
   return dbCache.get(userId)!;
+}
+
+/**
+ * Stores a pending X3DH header for a conversation.
+ * Used when a session is created but no message has been sent yet.
+ */
+export async function storePendingHeader(conversationId: string, header: any): Promise<void> {
+  const db = await getDb();
+  await db.put(PENDING_HEADERS_STORE_NAME, header, conversationId);
+}
+
+/**
+ * Retrieves a pending X3DH header.
+ */
+export async function getPendingHeader(conversationId: string): Promise<any | null> {
+  const db = await getDb();
+  return (await db.get(PENDING_HEADERS_STORE_NAME, conversationId)) || null;
+}
+
+/**
+ * Deletes a pending X3DH header.
+ */
+export async function deletePendingHeader(conversationId: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(PENDING_HEADERS_STORE_NAME, conversationId);
 }
 
 /**
@@ -166,9 +195,10 @@ export async function deleteGroupKey(conversationId: string): Promise<void> {
  */
 export async function clearAllKeys(): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME], 'readwrite');
+  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, PENDING_HEADERS_STORE_NAME], 'readwrite');
   await tx.objectStore(SESSION_KEYS_STORE_NAME).clear();
   await tx.objectStore(GROUP_KEYS_STORE_NAME).clear();
   await tx.objectStore(OTPK_STORE_NAME).clear();
+  await tx.objectStore(PENDING_HEADERS_STORE_NAME).clear();
   await tx.done;
 }

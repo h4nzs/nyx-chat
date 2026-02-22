@@ -22,6 +22,7 @@ import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
 import { useConnectionStore } from "./connection";
 import { getSodium } from "@lib/sodiumInitializer";
+import { getPendingHeader, deletePendingHeader } from "@lib/keychainDb";
 
 /**
  * Logika Dekripsi Terpusat (Single Source of Truth)
@@ -169,7 +170,6 @@ function parseReaction(content: string | null | undefined): { targetMessageId: s
   if (!content) return null;
   try {
     const trimmed = content.trim();
-    // Quick check before parsing
     if (!trimmed.startsWith('{') || !trimmed.includes('"type":"reaction"')) return null;
     
     const payload = JSON.parse(trimmed);
@@ -189,12 +189,12 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     const reactionPayload = parseReaction(msg.content);
     if (reactionPayload) {
         reactions.push({
-          id: msg.id, // Use message ID as reaction ID
+          id: msg.id,
           messageId: reactionPayload.targetMessageId,
           emoji: reactionPayload.emoji,
           userId: msg.senderId,
           createdAt: msg.createdAt,
-          user: msg.sender, // Include sender info
+          user: msg.sender,
           isMessage: true
         });
     } else {
@@ -208,7 +208,6 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     const target = messageMap.get(reaction.messageId);
     if (target) {
       const existingReactions = target.reactions || [];
-      // Avoid duplicates
       if (!existingReactions.some(r => r.id === reaction.id)) {
         target.reactions = [...existingReactions, reaction];
       }
@@ -384,9 +383,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       let ciphertext = '', sessionId: string | undefined;
       let x3dhHeader: any = null;
 
-      // LAZY SESSION INITIALIZATION (X3DH)
+      // Check for Pending Header (from startConversation)
+      if (!isGroup) {
+          const pendingHeader = await getPendingHeader(conversationId);
+          if (pendingHeader) {
+              console.log(`[X3DH] Found pending header for ${conversationId}. Attaching to message.`);
+              x3dhHeader = pendingHeader;
+              await deletePendingHeader(conversationId);
+          }
+      }
+
+      // LAZY SESSION INITIALIZATION (X3DH) - Fallback if no pending header
       // Only for 1-on-1 chats that contain content
-      if (!isGroup && data.content) {
+      if (!isGroup && data.content && !x3dhHeader) {
           const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
           
           if (!latestKey) {
@@ -413,7 +422,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                      otpkId: otpkId
                  };
                  
-                 console.log(`[X3DH] Handshake prepared. Header attached to message.`);
+                 console.log(`[X3DH] Handshake prepared (Lazy). Header attached to message.`);
              }
           }
       }
