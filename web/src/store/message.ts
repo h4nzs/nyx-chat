@@ -83,9 +83,10 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
       }
       
     } else if (result.status === 'pending') {
+      console.log(`[Decrypt] Message ${message.id} pending: ${result.reason}`);
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
-      console.warn(`Decryption failed for msg ${decryptedMsg.id}:`, result.error);
+      console.warn(`[Decrypt] Failed for msg ${decryptedMsg.id}:`, result.error);
       decryptedMsg.content = 'waiting_for_key'; // Retryable state
       decryptedMsg.type = 'SYSTEM'; 
     }
@@ -614,12 +615,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
   
   addIncomingMessage: async (conversationId, message) => {
+      console.log(`[AddIncoming] Raw ID: ${message.id}, TempID: ${message.tempId}, Content: ${message.content?.substring(0, 20)}...`);
+      
       // Decrypt first
       const decrypted = await decryptMessageObject(message);
       
+      console.log(`[AddIncoming] Decrypted: ${decrypted.content?.substring(0, 50)}...`);
+
       // Check if reaction
       const reactionPayload = parseReaction(decrypted.content);
+      
       if (reactionPayload) {
+          console.log(`[AddIncoming] Detected Reaction: ${reactionPayload.emoji} on msg ${reactionPayload.targetMessageId}`);
+          
           const reaction = {
               id: decrypted.id,
               messageId: reactionPayload.targetMessageId,
@@ -630,17 +638,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               isMessage: true
           };
           
-          // CRITICAL FIX: Replace optimistic reaction if tempId matches
-          // sendReaction uses Date.now() as timestamp for both tempReactionId and message.tempId
-          // ID pattern: `temp_react_${timestamp}`
-          if (message.tempId && message.senderId === reaction.userId) {
+          const currentUser = useAuthStore.getState().user;
+
+          // CRITICAL FIX: Only replace optimistic reaction if WE are the sender
+          if (message.tempId && currentUser && message.senderId === currentUser.id) {
               const optimisticId = `temp_react_${message.tempId}`;
-              console.log(`[AddIncoming] Replacing optimistic reaction: ${optimisticId} -> ${reaction.id}`);
+              console.log(`[AddIncoming] Attempting replace optimistic: ${optimisticId} -> ${reaction.id}`);
               get().replaceOptimisticReaction(conversationId, reaction.messageId, optimisticId, reaction);
           } else {
+              console.log(`[AddIncoming] Adding new local reaction`);
               get().addLocalReaction(conversationId, reaction.messageId, reaction);
           }
       } else {
+          console.log(`[AddIncoming] Not a reaction. Adding as message.`);
           set(state => {
             const currentMessages = state.messages[conversationId] || [];
             if (currentMessages.some(m => m.id === message.id)) return state;
@@ -773,8 +783,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const state = get();
     Object.entries(state.messages).forEach(([conversationId, messages]) => {
       messages
-        .filter(m => m.optimistic && !m.error)
+        .filter(m => m.optimistic && !m.error) // Only optimistic messages that haven't failed yet
         .forEach(m => {
+          // Retry sending the message
           get().retrySendMessage(m);
         });
     });
