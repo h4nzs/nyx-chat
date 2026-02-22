@@ -749,6 +749,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   reDecryptPendingMessages: async (conversationId: string) => {
+    // Add a small delay to ensure IndexedDB consistency after key storage
+    await new Promise(r => setTimeout(r, 500));
+
     const state = get();
     const conversationMessages = state.messages[conversationId];
     if (!conversationMessages) return;
@@ -766,7 +769,31 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     );
 
     const messageMap = new Map(conversationMessages.map(m => [m.id, m]));
-    reDecryptedMessages.forEach(m => messageMap.set(m.id, m));
+    reDecryptedMessages.forEach(m => {
+        // Only update if we actually managed to decrypt it or status changed
+        if (m.content !== 'waiting_for_key' && m.content !== '[Requesting key to decrypt...]') {
+             // Process potential reactions that were stuck in pending state
+             const payload = parseReaction(m.content);
+             if (payload) {
+                 get().addLocalReaction(conversationId, payload.targetMessageId, {
+                     id: m.id,
+                     messageId: payload.targetMessageId,
+                     emoji: payload.emoji,
+                     userId: m.senderId,
+                     createdAt: m.createdAt,
+                     user: m.sender,
+                     isMessage: true
+                 });
+                 // Don't add reaction message to the list (filter it out)
+                 messageMap.delete(m.id);
+                 return;
+             }
+             messageMap.set(m.id, m);
+        } else {
+             // Still pending, keep it in map
+             messageMap.set(m.id, m);
+        }
+    });
     
     const newMessagesForConvo = Array.from(messageMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
