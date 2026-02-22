@@ -77,6 +77,7 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
             decryptedMsg.fileSize = metadata.size;
             decryptedMsg.fileType = metadata.mimeType;
             decryptedMsg.content = null; 
+            decryptedMsg.isBlindAttachment = true; // Flag as raw key
           }
         } catch (e) { }
       }

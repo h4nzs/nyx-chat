@@ -130,8 +130,23 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     showConfirm('Delete Message', 'Are you sure you want to permanently delete this message?', () => {
       // Optimistically remove the message from the UI
       removeMessage(message.conversationId, message.id);
+      
+      // Prepare Query Params for Blind Attachment Deletion
+      let query = '';
+      if (message.fileUrl) {
+          try {
+              // Extract key from URL (e.g. https://pub.r2.../attachments/key.ext -> attachments/key.ext)
+              // We assume standard R2 public URL structure.
+              const url = new URL(message.fileUrl);
+              const key = url.pathname.substring(1); // Remove leading slash
+              if (key) query = `?r2Key=${encodeURIComponent(key)}`;
+          } catch (e) {
+              console.error("Failed to parse file URL for deletion:", e);
+          }
+      }
+
       // Call the API to delete the message from the server
-      api(`/api/messages/${message.id}`, { method: 'DELETE' }).catch((error) => {
+      api(`/api/messages/${message.id}${query}`, { method: 'DELETE' }).catch((error) => {
         // If the API call fails, revert the change by re-adding the message
         console.error("Failed to delete message:", error);
         toast.error("Failed to delete message.");

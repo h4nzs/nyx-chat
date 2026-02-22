@@ -47,6 +47,7 @@ export type Message = {
   status?: 'SENDING' | 'SENT' | 'FAILED'; // Local status for UI
   deletedAt?: string | Date | null;
   expiresAt?: string | null; // New: Disappearing messages
+  isBlindAttachment?: boolean; // New: Flag for Blind Attachments (raw key in fileKey)
 };
 
 export type Participant = {

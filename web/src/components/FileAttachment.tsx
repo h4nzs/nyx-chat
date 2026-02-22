@@ -71,36 +71,41 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
       }
 
       try {
-        const conversation = conversations.find(c => c.id === message.conversationId);
-        const isGroup = conversation?.isGroup || false;
+        let rawFileKey: string;
 
-        const keyResult = await decryptMessage(
-          message.fileKey,
-          message.conversationId,
-          isGroup,
-          message.sessionId
-        );
+        if (message.isBlindAttachment) {
+             rawFileKey = message.fileKey;
+        } else {
+            const conversation = conversations.find(c => c.id === message.conversationId);
+            const isGroup = conversation?.isGroup || false;
 
-        if (keyResult.status === 'pending') {
-            if (isMounted) {
-                setStatus('waiting');
-                // Request Key via Socket
-                const socket = getSocket();
-                if (socket?.connected && message.sessionId) {
-                    socket.emit('session:request_key', {
-                        conversationId: message.conversationId,
-                        sessionId: message.sessionId
-                    });
+            const keyResult = await decryptMessage(
+              message.fileKey,
+              message.conversationId,
+              isGroup,
+              message.sessionId
+            );
+
+            if (keyResult.status === 'pending') {
+                if (isMounted) {
+                    setStatus('waiting');
+                    const socket = getSocket();
+                    if (socket?.connected && message.sessionId) {
+                        socket.emit('session:request_key', {
+                            conversationId: message.conversationId,
+                            sessionId: message.sessionId
+                        });
+                    }
+                    retryTimeout = setTimeout(() => {
+                        if (isMounted) setRetryCount(c => c + 1);
+                    }, 3000);
                 }
-                // Auto Retry
-                retryTimeout = setTimeout(() => {
-                    if (isMounted) setRetryCount(c => c + 1);
-                }, 3000);
+                return;
             }
-            return;
-        }
 
-        if (keyResult.status === 'error') throw keyResult.error;
+            if (keyResult.status === 'error') throw keyResult.error;
+            rawFileKey = keyResult.value;
+        }
 
         // Decrypt File Blob
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
@@ -111,7 +116,8 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         const encryptedBlob = await response.blob();
 
         const originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
-        const decryptedBlob = await decryptFile(encryptedBlob, keyResult.value, originalType);
+        // Use rawFileKey which is now populated correctly
+        const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
 
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);

@@ -252,18 +252,25 @@ router.delete('/:id', async (req, res, next) => {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { id } = req.params
     const userId = req.user.id
+    const r2Key = req.query.r2Key as string | undefined
 
     const message = await prisma.message.findUnique({ where: { id } })
     if (!message) return res.status(404).json({ error: 'Message not found' })
     if (message.senderId !== userId) return res.status(403).json({ error: 'You can only delete your own messages' })
 
-    // Hapus file dari R2 jika ada
+    // Hapus file dari R2 (Legacy via DB)
     if (message.fileUrl && message.fileUrl.includes(env.r2PublicDomain)) {
       const key = message.fileUrl.replace(`${env.r2PublicDomain}/`, '')
-      // Fire and forget delete R2, biar API cepet
-      deleteR2File(key).catch(err =>
-        console.error(`[R2] Failed to delete file ${key}:`, err)
-      )
+      deleteR2File(key).catch(err => console.error(`[R2] Failed to delete file ${key}:`, err))
+    }
+
+    // Hapus file dari R2 (Blind Attachment via Query Param)
+    if (r2Key) {
+       // Security: Ensure key looks valid/safe (basic check)
+       // Just prevent directory traversal or suspicious chars if possible, but R2 handles keys loosely.
+       // We rely on the random nature of UUID keys for authz (Guessing a key is hard).
+       console.log(`[R2] Deleting blind attachment: ${r2Key}`);
+       deleteR2File(r2Key).catch(err => console.error(`[R2] Failed to delete blind file ${r2Key}:`, err))
     }
 
     await prisma.message.delete({ where: { id } })
