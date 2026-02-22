@@ -3,7 +3,8 @@ import { openDB, IDBPDatabase } from 'idb';
 
 const SESSION_KEYS_STORE_NAME = 'session-keys';
 const GROUP_KEYS_STORE_NAME = 'group-keys';
-const DB_VERSION = 2;
+const OTPK_STORE_NAME = 'one-time-pre-keys';
+const DB_VERSION = 3;
 
 // Cache DB connections by userId to handle switching accounts without reloading
 const dbCache = new Map<string, Promise<IDBPDatabase>>();
@@ -29,12 +30,52 @@ function getDb(): Promise<IDBPDatabase> {
         if (oldVersion < 2) {
           db.createObjectStore(GROUP_KEYS_STORE_NAME);
         }
+        if (oldVersion < 3) {
+          // Store OTPKs by keyId (integer)
+          db.createObjectStore(OTPK_STORE_NAME);
+        }
       },
     });
     dbCache.set(userId, promise);
   }
   
   return dbCache.get(userId)!;
+}
+
+/**
+ * Stores a One-Time Pre-Key (private part) securely.
+ */
+export async function storeOneTimePreKey(keyId: number, encryptedPrivateKey: Uint8Array): Promise<void> {
+  const db = await getDb();
+  await db.put(OTPK_STORE_NAME, encryptedPrivateKey, keyId);
+}
+
+/**
+ * Retrieves a One-Time Pre-Key (private part) by ID.
+ */
+export async function getOneTimePreKey(keyId: number): Promise<Uint8Array | null> {
+  const db = await getDb();
+  return (await db.get(OTPK_STORE_NAME, keyId)) || null;
+}
+
+/**
+ * Deletes a One-Time Pre-Key after use (for Forward Secrecy).
+ */
+export async function deleteOneTimePreKey(keyId: number): Promise<void> {
+  const db = await getDb();
+  await db.delete(OTPK_STORE_NAME, keyId);
+}
+
+/**
+ * Gets the highest keyId currently in the store.
+ * Useful for generating the next batch of keys.
+ */
+export async function getLastOtpkId(): Promise<number> {
+  const db = await getDb();
+  const tx = db.transaction(OTPK_STORE_NAME, 'readonly');
+  const store = tx.objectStore(OTPK_STORE_NAME);
+  const cursor = await store.openKeyCursor(null, 'prev'); // 'prev' gets the last key first
+  return (cursor?.key as number) || 0;
 }
 
 /**
@@ -125,8 +166,9 @@ export async function deleteGroupKey(conversationId: string): Promise<void> {
  */
 export async function clearAllKeys(): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME], 'readwrite');
+  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME], 'readwrite');
   await tx.objectStore(SESSION_KEYS_STORE_NAME).clear();
   await tx.objectStore(GROUP_KEYS_STORE_NAME).clear();
+  await tx.objectStore(OTPK_STORE_NAME).clear();
   await tx.done;
 }

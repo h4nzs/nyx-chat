@@ -286,14 +286,29 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       if (!theirBundle) throw new Error("User does not have a pre-key bundle available.");
 
       const myKeyPair = await getEncryptionKeyPair();
-      const { sessionKey, ephemeralPublicKey } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
+      const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
 
       const sodium = await getSodium();
       const myPublicKey = myKeyPair.publicKey;
-      const theirPublicKey = sodium.from_base64(theirBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-
+      
+      // Encrypt for self (backup) - always legacy seal
       const encryptedKeyForSelf = sodium.crypto_box_seal(sessionKey, myPublicKey);
-      const encryptedKeyForPeer = sodium.crypto_box_seal(sessionKey, theirPublicKey);
+      
+      let encryptedKeyForPeer: Uint8Array;
+
+      // X3DH HANDSHAKE LOGIC
+      if (otpkId !== undefined) {
+          // If we used an OTPK, we don't send the key to Bob.
+          // We send a marker telling Bob to calculate it himself.
+          // We encode this marker as the "encryptedKey" string.
+          const marker = JSON.stringify({ x3dh: true, otpkId });
+          encryptedKeyForPeer = new TextEncoder().encode(marker);
+      } else {
+          // Fallback to Simplified X3DH (Legacy) if no OTPK available
+          const theirPublicKey = sodium.from_base64(theirBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+          encryptedKeyForPeer = sodium.crypto_box_seal(sessionKey, theirPublicKey);
+      }
+
       const sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
 
       const conv = await authFetch<Conversation>("/api/conversations", {
@@ -306,7 +321,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             ephemeralPublicKey,
             initialKeys: [
               { userId: user.id, key: sodium.to_base64(encryptedKeyForSelf, sodium.base64_variants.URLSAFE_NO_PADDING) },
-              { userId: peerId, key: sodium.to_base64(encryptedKeyForPeer, sodium.base64_variants.URLSAFE_NO_PADDING) },
+              { userId: peerId, key: otpkId !== undefined 
+                  ? new TextDecoder().decode(encryptedKeyForPeer) // Send JSON string directly
+                  : sodium.to_base64(encryptedKeyForPeer, sodium.base64_variants.URLSAFE_NO_PADDING) 
+              },
             ],
           },
         }),
@@ -320,7 +338,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       return conv.id;
     } catch (error: any) {
       console.error("Failed to start conversation using pre-keys:", error);
-      // Differentiate between user cancelling password prompt and other errors
       if (error?.message?.includes("Password not provided")) {
         throw new Error("Password is required to decrypt your keys and start a secure conversation.");
       }

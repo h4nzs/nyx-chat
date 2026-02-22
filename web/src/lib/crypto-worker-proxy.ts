@@ -156,14 +156,16 @@ export function worker_x3dh_initiator(payload: {
     theirIdentityKey: Uint8Array,
     theirSignedPreKey: Uint8Array,
     theirSigningKey: Uint8Array,
-    signature: Uint8Array
+    signature: Uint8Array,
+    theirOneTimePreKey?: Uint8Array // New: Optional OTPK from Bob
 }): Promise<{ sessionKey: Uint8Array, ephemeralPublicKey: string }> {
     return sendToWorker('x3dh_initiator', {
       myIdentityKey: { privateKey: Array.from(payload.myIdentityKey.privateKey) },
       theirIdentityKey: Array.from(payload.theirIdentityKey),
       theirSignedPreKey: Array.from(payload.theirSignedPreKey),
       theirSigningKey: Array.from(payload.theirSigningKey),
-      signature: Array.from(payload.signature)
+      signature: Array.from(payload.signature),
+      theirOneTimePreKey: payload.theirOneTimePreKey ? Array.from(payload.theirOneTimePreKey) : undefined
     });
 }
 
@@ -171,13 +173,15 @@ export function worker_x3dh_recipient(payload: {
     myIdentityKey: { privateKey: Uint8Array },
     mySignedPreKey: { privateKey: Uint8Array },
     theirIdentityKey: Uint8Array,
-    theirEphemeralKey: Uint8Array
+    theirEphemeralKey: Uint8Array,
+    myOneTimePreKey?: { privateKey: Uint8Array } // New: Optional OTPK Private Key
 }): Promise<Uint8Array> {
     return sendToWorker('x3dh_recipient', {
       myIdentityKey: { privateKey: Array.from(payload.myIdentityKey.privateKey) },
       mySignedPreKey: { privateKey: Array.from(payload.mySignedPreKey.privateKey) },
       theirIdentityKey: Array.from(payload.theirIdentityKey),
-      theirEphemeralKey: Array.from(payload.theirEphemeralKey)
+      theirEphemeralKey: Array.from(payload.theirEphemeralKey),
+      myOneTimePreKey: payload.myOneTimePreKey ? Array.from(payload.myOneTimePreKey.privateKey) : undefined
     });
 }
 
@@ -201,4 +205,8 @@ export function worker_decrypt_session_key(encryptedKey: Uint8Array, masterSeed:
         encryptedKey: Array.from(encryptedKey), 
         masterSeed: Array.from(masterSeed) 
     });
+}
+
+export function worker_generate_otpk_batch(count: number, startId: number, masterSeed: Uint8Array): Promise<Array<{ keyId: number, publicKey: string, encryptedPrivateKey: Uint8Array }>> {
+    return sendToWorker('generate_otpk_batch', { count, startId, masterSeed: Array.from(masterSeed) });
 }

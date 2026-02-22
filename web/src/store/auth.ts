@@ -9,10 +9,12 @@ import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
 import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; // Only import TYPE
+import { checkAndRefillOneTimePreKeys } from "@utils/crypto"; // Import helper
 
 /**
  * Retrieves the persisted signed pre-key, signs it with the identity signing key,
  * and uploads the bundle to the server.
+ * Also checks and refills One-Time Pre-Keys (OTPK).
  */
 export async function setupAndUploadPreKeyBundle() {
   try {
@@ -44,6 +46,10 @@ export async function setupAndUploadPreKeyBundle() {
       method: "POST",
       body: JSON.stringify(bundle),
     });
+
+    // Check and refill OTPKs after bundle upload
+    await checkAndRefillOneTimePreKeys();
+
   } catch (e) {
     console.error("Failed to set up and upload pre-key bundle:", e);
   }

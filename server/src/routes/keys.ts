@@ -62,6 +62,56 @@ router.post(
   }
 )
 
+// === POST: Upload One-Time Pre-Keys (OTPK) ===
+router.post(
+  '/upload-otpk',
+  requireAuth,
+  zodValidate({
+    body: z.object({
+      keys: z.array(z.object({
+        keyId: z.number(),
+        publicKey: z.string()
+      })).min(1).max(100)
+    })
+  }),
+  async (req, res, next) => {
+    try {
+      if (!req.user) throw new ApiError(401, 'Authentication required.')
+      const userId = req.user.id
+      const { keys } = req.body
+
+      // Use createMany for efficiency
+      // Note: If keyId conflict exists (unique constraint), this might fail.
+      // We assume client manages keyIds correctly (e.g. rolling counter).
+      await prisma.oneTimePreKey.createMany({
+        data: keys.map(k => ({
+          userId,
+          keyId: k.keyId,
+          publicKey: k.publicKey
+        })),
+        skipDuplicates: true // Ignore duplicates if client retries
+      })
+
+      res.status(201).json({ message: `Uploaded ${keys.length} One-Time Pre-Keys.` })
+    } catch (e) {
+      next(e)
+    }
+  }
+)
+
+// === GET: Count One-Time Pre-Keys ===
+router.get('/count-otpk', requireAuth, async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const count = await prisma.oneTimePreKey.count({
+      where: { userId: req.user.id }
+    })
+    res.json({ count })
+  } catch (e) {
+    next(e)
+  }
+})
+
 // === GET: Get a pre-key bundle for another user ===
 router.get(
   '/prekey-bundle/:userId',
@@ -71,10 +121,11 @@ router.get(
     try {
       const { userId } = req.params
 
+      // 1. Fetch User and Bundle
       const userWithBundle = await prisma.user.findUnique({
         where: { id: userId },
         select: {
-          signingKey: true, // Needed by the recipient to verify the signature
+          signingKey: true,
           preKeyBundle: true
         }
       })
@@ -83,16 +134,41 @@ router.get(
         throw new Error('User does not have a valid pre-key bundle available.')
       }
 
+      // 2. Atomic Pop: Fetch ONE OTPK and Delete it
+      // Prisma doesn't support "DELETE RETURNING" directly in standard API easily for this logic without raw query or transaction.
+      // We use a transaction: Find First -> Delete ID.
+      
+      const otpk = await prisma.$transaction(async (tx) => {
+        const key = await tx.oneTimePreKey.findFirst({
+          where: { userId },
+          orderBy: { createdAt: 'asc' }, // Use oldest first
+          select: { id: true, keyId: true, publicKey: true }
+        })
+
+        if (key) {
+          await tx.oneTimePreKey.delete({ where: { id: key.id } })
+        }
+        return key
+      })
+
       const { preKeyBundle, signingKey } = userWithBundle
 
       // Assemble the response bundle
-      const responseBundle = {
+      const responseBundle: any = {
         identityKey: preKeyBundle.identityKey,
         signedPreKey: {
           key: preKeyBundle.key,
           signature: preKeyBundle.signature
         },
         signingKey // Include the public signing key for verification
+      }
+
+      // 3. Attach One-Time Pre-Key if available
+      if (otpk) {
+        responseBundle.oneTimePreKey = {
+          keyId: otpk.keyId,
+          key: otpk.publicKey
+        }
       }
 
       res.json(responseBundle)

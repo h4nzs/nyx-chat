@@ -10,8 +10,18 @@ import {
   getGroupKey,
   deleteGroupKey,
   receiveGroupKey,
+  storeOneTimePreKey,
+  getOneTimePreKey,
+  deleteOneTimePreKey,
+  getLastOtpkId
 } from '@lib/keychainDb';
-import { emitSessionKeyFulfillment, emitSessionKeyRequest, emitGroupKeyDistribution, emitGroupKeyRequest, emitGroupKeyFulfillment } from '@lib/socket';
+import { 
+  emitSessionKeyFulfillment, 
+  emitSessionKeyRequest, 
+  emitGroupKeyDistribution, 
+  emitGroupKeyRequest, 
+  emitGroupKeyFulfillment 
+} from '@lib/socket';
 import type { Participant } from '@store/conversation';
 
 // --- Secure Storage Helpers ---
@@ -22,6 +32,43 @@ async function getMasterSeedOrThrow(): Promise<Uint8Array> {
     throw new Error("Master key locked or unavailable. Please unlock your session.");
   }
   return masterSeed;
+}
+
+export async function checkAndRefillOneTimePreKeys(): Promise<void> {
+  try {
+    const { count } = await authFetch<{ count: number }>('/api/keys/count-otpk');
+    const OTPK_THRESHOLD = 50;
+    const OTPK_BATCH_SIZE = 100;
+
+    if (count >= OTPK_THRESHOLD) return;
+
+    const masterSeed = await getMasterSeedOrThrow();
+    const startId = (await getLastOtpkId()) + 1;
+    
+    // Dynamic import for worker proxy
+    const { worker_generate_otpk_batch } = await import('@lib/crypto-worker-proxy');
+    
+    console.log(`[Crypto] Generating ${OTPK_BATCH_SIZE} One-Time Pre-Keys (startId: ${startId})...`);
+    
+    const batch = await worker_generate_otpk_batch(OTPK_BATCH_SIZE, startId, masterSeed);
+    
+    // Store private keys locally
+    for (const key of batch) {
+      await storeOneTimePreKey(key.keyId, key.encryptedPrivateKey);
+    }
+
+    // Upload public keys
+    const publicKeys = batch.map(k => ({ keyId: k.keyId, publicKey: k.publicKey }));
+    await authFetch('/api/keys/upload-otpk', {
+      method: 'POST',
+      body: JSON.stringify({ keys: publicKeys })
+    });
+
+    console.log(`[Crypto] Successfully uploaded ${publicKeys.length} One-Time Pre-Keys.`);
+
+  } catch (error) {
+    console.error("[Crypto] Failed to refill One-Time Pre-Keys:", error);
+  }
 }
 
 export async function storeSessionKeySecurely(conversationId: string, sessionId: string, key: Uint8Array) {
@@ -94,6 +141,10 @@ export type PreKeyBundle = {
     key: string;
     signature: string;
   };
+  oneTimePreKey?: {
+    keyId: number;
+    key: string;
+  };
 };
 
 // --- Module-level state for managing key requests ---
@@ -152,6 +203,9 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
     const { sessionId, encryptedKey } = await authFetch<{ sessionId: string; encryptedKey: string }>(
       `/api/session-keys/${conversationId}/ratchet`, { method: 'POST' }
     );
+    // Legacy support: Ratchet usually implies new key from server or other peer? 
+    // In this app, ratchet just means getting a new pre-generated key?
+    // We assume encryptedKey is for US.
     const { publicKey, privateKey } = await getMyEncryptionKeyPair();
     const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
 
@@ -355,12 +409,12 @@ export async function decryptMessage(
   }
 }
 
-// --- Pre-Key Handshake (Simplified X3DH) ---
+// --- Pre-Key Handshake (Full X3DH with OTPK) ---
 
 export async function establishSessionFromPreKeyBundle(
   myIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   preKeyBundle: PreKeyBundle
-): Promise<{ sessionKey: Uint8Array, ephemeralPublicKey: string }> {
+): Promise<{ sessionKey: Uint8Array, ephemeralPublicKey: string, otpkId?: number }> {
   const sodium = await getSodiumLib();
   const { worker_x3dh_initiator } = await getWorkerProxy();
 
@@ -369,33 +423,78 @@ export async function establishSessionFromPreKeyBundle(
   const theirSigningKey = sodium.from_base64(preKeyBundle.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const signature = sodium.from_base64(preKeyBundle.signedPreKey.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-  return worker_x3dh_initiator({
+  let theirOneTimePreKey: Uint8Array | undefined;
+  if (preKeyBundle.oneTimePreKey) {
+    theirOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
+  }
+
+  const result = await worker_x3dh_initiator({
     myIdentityKey: myIdentityKeyPair,
     theirIdentityKey,
     theirSignedPreKey,
     theirSigningKey,
     signature,
+    theirOneTimePreKey // Pass OTPK if available
   });
+
+  return {
+    ...result,
+    otpkId: preKeyBundle.oneTimePreKey?.keyId
+  };
 }
 
 export async function deriveSessionKeyAsRecipient(
   myIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   mySignedPreKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   initiatorIdentityKeyStr: string,
-  initiatorEphemeralKeyStr: string
+  initiatorEphemeralKeyStr: string,
+  otpkId?: number
 ): Promise<Uint8Array> {
   const sodium = await getSodiumLib();
-  const { worker_x3dh_recipient } = await getWorkerProxy();
+  const { worker_x3dh_recipient, worker_decrypt_session_key } = await getWorkerProxy();
 
   const theirIdentityKey = sodium.from_base64(initiatorIdentityKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirEphemeralKey = sodium.from_base64(initiatorEphemeralKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
   
-  return worker_x3dh_recipient({
-    myIdentityKey: myIdentityKeyPair,
-    mySignedPreKey: mySignedPreKeyPair,
-    theirIdentityKey,
-    theirEphemeralKey,
-  });
+  let myOneTimePreKey: { privateKey: Uint8Array } | undefined;
+
+  if (otpkId !== undefined) {
+    // 1. Retrieve Encrypted OTPK Private Key
+    const encryptedOtpk = await getOneTimePreKey(otpkId);
+    if (encryptedOtpk) {
+      // 2. Decrypt it using Master Seed
+      const masterSeed = await getMasterSeedOrThrow();
+      try {
+        // We reuse worker_decrypt_session_key since the mechanism (seal) is likely same or we used specific encryption
+        // In checkAndRefillOneTimePreKeys we used: sodium.crypto_aead_xchacha20poly1305_ietf_encrypt
+        // with a key derived from masterSeed.
+        // worker_decrypt_session_key does exactly the reverse of that.
+        const otpkPrivateKey = await worker_decrypt_session_key(encryptedOtpk, masterSeed);
+        myOneTimePreKey = { privateKey: otpkPrivateKey };
+      } catch (e) {
+        console.error("Failed to decrypt OTPK:", e);
+      }
+    }
+  }
+
+  try {
+    const sessionKey = await worker_x3dh_recipient({
+      myIdentityKey: myIdentityKeyPair,
+      mySignedPreKey: mySignedPreKeyPair,
+      theirIdentityKey,
+      theirEphemeralKey,
+      myOneTimePreKey
+    });
+
+    // 3. Perfect Forward Secrecy: Delete the OTPK after use
+    if (otpkId !== undefined) {
+      await deleteOneTimePreKey(otpkId);
+    }
+
+    return sessionKey;
+  } finally {
+    // Cleanup if needed (worker handles most)
+  }
 }
 
 // --- Key Recovery & Fulfillment ---
@@ -418,6 +517,8 @@ interface ReceiveKeyPayload {
   sessionId?: string;
   encryptedKey: string;
   type?: 'GROUP_KEY' | 'SESSION_KEY';
+  initiatorEphemeralKey?: string; // Need this for X3DH calc
+  initiatorIdentityKey?: string; // Need this for X3DH calc
 }
 
 export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload): Promise<void> {
@@ -462,7 +563,7 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
 
 export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promise<void> {
   if (!payload || typeof payload !== 'object') return;
-  const { conversationId, sessionId, encryptedKey, type } = payload;
+  const { conversationId, sessionId, encryptedKey, type, initiatorEphemeralKey, initiatorIdentityKey } = payload;
 
   if (type === 'GROUP_KEY') {
     const pendingRequest = pendingGroupKeyRequests.get(conversationId);
@@ -472,8 +573,39 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     }
     await handleGroupKeyDistribution(conversationId, encryptedKey);
   } else if (sessionId) {
-    const { publicKey, privateKey } = await getMyEncryptionKeyPair();
-    const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+    let newSessionKey: Uint8Array;
+
+    // Check if this is an X3DH initialization payload (JSON marker)
+    if (encryptedKey.startsWith('{') && encryptedKey.includes('"x3dh":true')) {
+        try {
+            const metadata = JSON.parse(encryptedKey);
+            if (metadata.x3dh && initiatorEphemeralKey && initiatorIdentityKey) {
+                // Perform X3DH Calculation on Recipient Side
+                const { getEncryptionKeyPair, getSignedPreKeyPair } = useAuthStore.getState();
+                const myIdentityKeyPair = await getEncryptionKeyPair();
+                const mySignedPreKeyPair = await getSignedPreKeyPair();
+
+                newSessionKey = await deriveSessionKeyAsRecipient(
+                    myIdentityKeyPair,
+                    mySignedPreKeyPair,
+                    initiatorIdentityKey,
+                    initiatorEphemeralKey,
+                    metadata.otpkId
+                );
+            } else {
+                throw new Error("Invalid X3DH payload");
+            }
+        } catch (e) {
+            console.error("X3DH derivation failed, falling back to legacy decrypt:", e);
+            const { publicKey, privateKey } = await getMyEncryptionKeyPair();
+            newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+        }
+    } else {
+        // Legacy: Encrypted with Identity Key
+        const { publicKey, privateKey } = await getMyEncryptionKeyPair();
+        newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+    }
+
     await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
   }
 }

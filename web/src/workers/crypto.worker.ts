@@ -339,7 +339,7 @@ self.onmessage = async (event: MessageEvent) => {
         break;
       }
       case 'x3dh_initiator': {
-        const { myIdentityKey, theirIdentityKey, theirSignedPreKey, theirSigningKey, signature } = payload;
+        const { myIdentityKey, theirIdentityKey, theirSignedPreKey, theirSigningKey, signature, theirOneTimePreKey } = payload;
 
         const signatureBytes = new Uint8Array(signature);
         const theirSignedPreKeyBytes = new Uint8Array(theirSignedPreKey);
@@ -354,19 +354,32 @@ self.onmessage = async (event: MessageEvent) => {
         
         const ephemeralKeyPair = sodium.crypto_box_keypair();
         let sharedSecret: Uint8Array | null = null;
+        let dh4: Uint8Array | null = null;
 
         try {
           const dh1 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirSignedPreKeyBytes);
           const dh2 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirIdentityKeyBytes);
           const dh3 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirSignedPreKeyBytes);
 
-          sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
-          
-          // Wipe intermediate DH results immediately
-          sodium.memzero(dh1);
-          sodium.memzero(dh2);
-          sodium.memzero(dh3);
+          const secrets = [dh1, dh2, dh3];
 
+          // DH4: Ephemeral (Alice) * One-Time Pre-Key (Bob)
+          if (theirOneTimePreKey) {
+             const theirOneTimePreKeyBytes = new Uint8Array(theirOneTimePreKey);
+             dh4 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirOneTimePreKeyBytes);
+             secrets.push(dh4);
+          }
+
+          // Concatenate all shared secrets
+          const totalLength = secrets.reduce((sum, s) => sum + s.length, 0);
+          sharedSecret = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const s of secrets) {
+              sharedSecret.set(s, offset);
+              offset += s.length;
+              sodium.memzero(s); // Wipe intermediate
+          }
+          
           const sessionKey = sodium.crypto_generichash(32, sharedSecret);
 
           result = {
@@ -381,7 +394,7 @@ self.onmessage = async (event: MessageEvent) => {
         break;
       }
       case 'x3dh_recipient': {
-        const { myIdentityKey, mySignedPreKey, theirIdentityKey, theirEphemeralKey } = payload;
+        const { myIdentityKey, mySignedPreKey, theirIdentityKey, theirEphemeralKey, myOneTimePreKey } = payload;
         
         const myIdentityKeyPrivateBytes = new Uint8Array(myIdentityKey.privateKey);
         const mySignedPreKeyPrivateBytes = new Uint8Array(mySignedPreKey.privateKey);
@@ -389,23 +402,36 @@ self.onmessage = async (event: MessageEvent) => {
         const theirEphemeralKeyBytes = new Uint8Array(theirEphemeralKey);
 
         let sharedSecret: Uint8Array | null = null;
+        let dh4: Uint8Array | null = null;
 
         try {
           const dh1 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirIdentityKeyBytes);
           const dh2 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirEphemeralKeyBytes);
           const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirEphemeralKeyBytes);
         
-          sharedSecret = new Uint8Array([...dh1, ...dh2, ...dh3]);
-          
-          // Wipe intermediate DH results immediately
-          sodium.memzero(dh1);
-          sodium.memzero(dh2);
-          sodium.memzero(dh3);
+          const secrets = [dh1, dh2, dh3];
+
+          // DH4: One-Time Pre-Key (Bob) * Ephemeral (Alice)
+          if (myOneTimePreKey) {
+             const myOneTimePreKeyBytes = new Uint8Array(myOneTimePreKey);
+             dh4 = sodium.crypto_scalarmult(myOneTimePreKeyBytes, theirEphemeralKeyBytes);
+             secrets.push(dh4);
+          }
+
+          const totalLength = secrets.reduce((sum, s) => sum + s.length, 0);
+          sharedSecret = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const s of secrets) {
+              sharedSecret.set(s, offset);
+              offset += s.length;
+              sodium.memzero(s);
+          }
 
           result = sodium.crypto_generichash(32, sharedSecret); // Returns the sessionKey
         } finally {
           sodium.memzero(myIdentityKeyPrivateBytes);
           sodium.memzero(mySignedPreKeyPrivateBytes);
+          if (myOneTimePreKey) sodium.memzero(new Uint8Array(myOneTimePreKey)); // Wipe passed key if array
           if (sharedSecret) sodium.memzero(sharedSecret);
         }
         break;
@@ -580,6 +606,43 @@ self.onmessage = async (event: MessageEvent) => {
 
         // Clean up
         sodium.memzero(storageKey);
+        break;
+      }
+      case 'generate_otpk_batch': {
+        const { count, startId, masterSeed } = payload;
+        const masterSeedBytes = new Uint8Array(masterSeed);
+        const storageKey = sodium.crypto_generichash(32, masterSeedBytes, new Uint8Array(new TextEncoder().encode("otpk-storage")));
+        
+        const batch = [];
+        for (let i = 0; i < count; i++) {
+          const keyId = startId + i;
+          const keyPair = sodium.crypto_box_keypair();
+          
+          // Encrypt private key
+          const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+          const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+            keyPair.privateKey,
+            null,
+            null,
+            nonce,
+            storageKey
+          );
+          
+          const combined = new Uint8Array(nonce.length + ciphertext.length);
+          combined.set(nonce);
+          combined.set(ciphertext, nonce.length);
+          
+          batch.push({
+            keyId,
+            publicKey: sodium.to_base64(keyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+            encryptedPrivateKey: combined
+          });
+          
+          sodium.memzero(keyPair.privateKey);
+        }
+        
+        sodium.memzero(storageKey);
+        result = batch;
         break;
       }
       default:

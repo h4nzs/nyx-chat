@@ -43,6 +43,7 @@ model User {
 
   // Relation to the simplified pre-key bundle
   preKeyBundle         PreKeyBundle?
+  oneTimePreKeys       OneTimePreKey[]
   sessionKeys          SessionKey[]
 
   // Relasi Blocking
@@ -50,6 +51,19 @@ model User {
   blockedBy    BlockedUser[] @relation("Blocked") // User ini diblokir sama siapa aja
 
   @@index([createdAt])
+}
+
+model OneTimePreKey {
+  id        String   @id @default(cuid())
+  keyId     Int
+  userId    String
+  publicKey String   @db.Text
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@unique([userId, keyId])
 }
 
 // Simplified PreKeyBundle model
