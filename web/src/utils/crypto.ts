@@ -451,7 +451,7 @@ export async function deriveSessionKeyAsRecipient(
   otpkId?: number
 ): Promise<Uint8Array> {
   const sodium = await getSodiumLib();
-  const { worker_x3dh_recipient, worker_decrypt_session_key } = await getWorkerProxy();
+  const { worker_x3dh_recipient, worker_decrypt_session_key, worker_regenerate_single_otpk } = await getWorkerProxy();
 
   const theirIdentityKey = sodium.from_base64(initiatorIdentityKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirEphemeralKey = sodium.from_base64(initiatorEphemeralKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -459,21 +459,29 @@ export async function deriveSessionKeyAsRecipient(
   let myOneTimePreKey: { privateKey: Uint8Array } | undefined;
 
   if (otpkId !== undefined) {
-    // 1. Retrieve Encrypted OTPK Private Key
+    const masterSeed = await getMasterSeedOrThrow();
+    
+    // 1. Try Retrieve Encrypted OTPK Private Key from Local Storage
     const encryptedOtpk = await getOneTimePreKey(otpkId);
+    
     if (encryptedOtpk) {
-      // 2. Decrypt it using Master Seed
-      const masterSeed = await getMasterSeedOrThrow();
       try {
-        // We reuse worker_decrypt_session_key since the mechanism (seal) is likely same or we used specific encryption
-        // In checkAndRefillOneTimePreKeys we used: sodium.crypto_aead_xchacha20poly1305_ietf_encrypt
-        // with a key derived from masterSeed.
-        // worker_decrypt_session_key does exactly the reverse of that.
         const otpkPrivateKey = await worker_decrypt_session_key(encryptedOtpk, masterSeed);
         myOneTimePreKey = { privateKey: otpkPrivateKey };
       } catch (e) {
-        console.error("Failed to decrypt OTPK:", e);
+        console.error("Failed to decrypt stored OTPK:", e);
       }
+    } 
+    
+    // 2. RECOVERY: If not found (e.g. after logout/restore), Regenerate Deterministically
+    if (!myOneTimePreKey) {
+        console.log(`[X3DH] OTPK ${otpkId} not found in storage. Regenerating deterministically...`);
+        try {
+            const regeneratedKey = await worker_regenerate_single_otpk(otpkId, masterSeed);
+            myOneTimePreKey = { privateKey: regeneratedKey };
+        } catch (e) {
+            console.error(`[X3DH] Failed to regenerate OTPK ${otpkId}:`, e);
+        }
     }
   }
 
@@ -487,6 +495,7 @@ export async function deriveSessionKeyAsRecipient(
     });
 
     // 3. Perfect Forward Secrecy: Delete the OTPK after use
+    // Even if we regenerated it, we don't store it back, just use and forget.
     if (otpkId !== undefined) {
       await deleteOneTimePreKey(otpkId);
     }

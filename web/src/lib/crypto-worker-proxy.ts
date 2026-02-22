@@ -210,3 +210,7 @@ export function worker_decrypt_session_key(encryptedKey: Uint8Array, masterSeed:
 export function worker_generate_otpk_batch(count: number, startId: number, masterSeed: Uint8Array): Promise<Array<{ keyId: number, publicKey: string, encryptedPrivateKey: Uint8Array }>> {
     return sendToWorker('generate_otpk_batch', { count, startId, masterSeed: Array.from(masterSeed) });
 }
+
+export function worker_regenerate_single_otpk(keyId: number, masterSeed: Uint8Array): Promise<Uint8Array> {
+    return sendToWorker('regenerate_single_otpk', { keyId, masterSeed: Array.from(masterSeed) });
+}

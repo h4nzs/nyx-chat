@@ -170,6 +170,7 @@ function parseReaction(content: string | null | undefined): { targetMessageId: s
   if (!content) return null;
   try {
     const trimmed = content.trim();
+    // Quick check before parsing
     if (!trimmed.startsWith('{') || !trimmed.includes('"type":"reaction"')) return null;
     
     const payload = JSON.parse(trimmed);
@@ -189,12 +190,12 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     const reactionPayload = parseReaction(msg.content);
     if (reactionPayload) {
         reactions.push({
-          id: msg.id,
+          id: msg.id, // Use message ID as reaction ID
           messageId: reactionPayload.targetMessageId,
           emoji: reactionPayload.emoji,
           userId: msg.senderId,
           createdAt: msg.createdAt,
-          user: msg.sender,
+          user: msg.sender, // Include sender info
           isMessage: true
         });
     } else {
@@ -208,6 +209,7 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     const target = messageMap.get(reaction.messageId);
     if (target) {
       const existingReactions = target.reactions || [];
+      // Avoid duplicates
       if (!existingReactions.some(r => r.id === reaction.id)) {
         target.reactions = [...existingReactions, reaction];
       }
@@ -400,6 +402,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           
           if (!latestKey) {
              console.log(`[X3DH] No session key found for ${conversationId}. Initiating handshake...`);
+             // Fix: Use p.id instead of p.userId
              const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
              
              if (peerId) {

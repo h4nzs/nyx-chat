@@ -616,9 +616,20 @@ self.onmessage = async (event: MessageEvent) => {
         const batch = [];
         for (let i = 0; i < count; i++) {
           const keyId = startId + i;
-          const keyPair = sodium.crypto_box_keypair();
           
-          // Encrypt private key
+          // DETERMINISTIC GENERATION
+          // seed = Hash(MasterSeed || "OTPK" || KeyID)
+          const seedInput = new Uint8Array(masterSeedBytes.length + 4 + 4); // 4 bytes for "OTPK", 4 bytes for ID
+          seedInput.set(masterSeedBytes);
+          seedInput.set(new TextEncoder().encode("OTPK"), masterSeedBytes.length);
+          // Simple Little Endian encoding for ID
+          const idBytes = new Uint8Array(new Uint32Array([keyId]).buffer); 
+          seedInput.set(idBytes, masterSeedBytes.length + 4);
+
+          const keySeed = sodium.crypto_generichash(32, seedInput);
+          const keyPair = sodium.crypto_box_seed_keypair(keySeed);
+          
+          // Encrypt private key for storage
           const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
           const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
             keyPair.privateKey,
@@ -638,11 +649,32 @@ self.onmessage = async (event: MessageEvent) => {
             encryptedPrivateKey: combined
           });
           
+          sodium.memzero(keySeed);
           sodium.memzero(keyPair.privateKey);
         }
         
         sodium.memzero(storageKey);
         result = batch;
+        break;
+      }
+      case 'regenerate_single_otpk': {
+        const { keyId, masterSeed } = payload;
+        const masterSeedBytes = new Uint8Array(masterSeed);
+
+        // RE-DERIVE SAME SEED
+        const seedInput = new Uint8Array(masterSeedBytes.length + 4 + 4);
+        seedInput.set(masterSeedBytes);
+        seedInput.set(new TextEncoder().encode("OTPK"), masterSeedBytes.length);
+        const idBytes = new Uint8Array(new Uint32Array([keyId]).buffer);
+        seedInput.set(idBytes, masterSeedBytes.length + 4);
+
+        const keySeed = sodium.crypto_generichash(32, seedInput);
+        const keyPair = sodium.crypto_box_seed_keypair(keySeed);
+
+        result = keyPair.privateKey; // Return raw private key
+
+        sodium.memzero(keySeed);
+        // Note: result is passed to main thread, will be wiped by GC or caller eventually.
         break;
       }
       default:
