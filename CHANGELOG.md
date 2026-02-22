@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.1] - 2026-02-22
+
+### Privacy & Security
+- **Reactions as Messages:** Replaced the legacy `MessageReaction` table with E2E encrypted messages. Reactions are now transmitted as secure messages and processed client-side, eliminating metadata leakage about user interactions.
+- **Blind Attachments:** Implemented blind attachment protocol. File metadata (name, type, size, key) is now encrypted within the message payload. The server no longer stores `fileUrl` or file metadata in plaintext columns.
+- **Backend Cleanup:** Removed `imageUrl`, `fileUrl`, `fileName`, `fileType`, `fileSize`, `duration`, and `fileKey` columns from the `Message` model in `schema.prisma`. Removed `MessageReaction` model.
+- **Endpoint Hardening:** Removed legacy upload endpoints that saved file metadata. Updated `POST /api/messages` to reject file fields, accepting only encrypted content.
+
+### Fixes
+- **Reaction Deletion:** Fixed 404 errors when deleting reactions by ensuring the correct server-side Message ID is used instead of the local optimistic ID.
+- **Decryption Reliability:** Fixed race conditions where messages appeared as "Legacy Message Unreadable" or "Waiting for key" by implementing robust re-decryption logic with a slight delay to allow key storage.
+- **Chat List Preview:** Fixed issue where reactions appeared as raw JSON in the chat list preview. Now displays "Reacted [Emoji]" or the last actual message.
+- **Frontend Refactor:** Unified upload logic in `messageInput.ts` to support blind attachments for both file uploads and voice notes.
+
+### Infrastructure
+- **Database:** Schema simplified by removing file-related columns and the reaction table. (Requires migration: `npx prisma migrate dev`).
+
 ## [2.1.0] - 2026-02-21
 
 This release establishes NYX as a "Paranoia-Level" secure messaging platform. It introduces a Hardened Encryption protocol (XChaCha20), eliminates all forms of user tracking, and secures the application infrastructure against advanced attacks.

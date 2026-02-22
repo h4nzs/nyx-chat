@@ -33,7 +33,7 @@ model User {
   participants         Participant[]
   messageStatuses      MessageStatus[]
   refreshTokens        RefreshToken[]
-  reactions            MessageReaction[]
+  // reactions removed
   pushSubscriptions    PushSubscription[]
   hiddenConversations  UserHiddenConversation[]
   createdConversations Conversation[]           @relation("CreatedConversations")
@@ -110,18 +110,13 @@ model Message {
   sender              User            @relation(fields: [senderId], references: [id], onDelete: Cascade)
   senderId            String
   content             String?      @db.Text
-  imageUrl            String?
-  fileUrl             String?
-  fileName            String?
-  fileType            String?
-  fileSize            Int?
-  duration            Int?
-  fileKey             String?   @db.Text
+  // File metadata removed (Blind Attachments)
+  // Reactions removed (Reactions as Messages)
+  
   sessionId           String?
   encryptedSessionKey String?
   createdAt           DateTime        @default(now())
   statuses            MessageStatus[]
-  reactions           MessageReaction[]
   linkPreview         Json?
   expiresAt           DateTime?
 
@@ -161,23 +156,7 @@ model MessageStatus {
   @@index([updatedAt])
 }
 
-
-model MessageReaction {
-  id        String    @id @default(cuid())
-  message   Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  messageId String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId    String
-  emoji     String
-  createdAt DateTime  @default(now())
-
-  @@unique([messageId, userId, emoji])
-  @@index([messageId])
-  @@index([userId])
-  @@index([emoji])
-  @@index([createdAt])
-}
-
+// MessageReaction model removed
 
 model RefreshToken {
   id           String   @id @default(cuid())
