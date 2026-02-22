@@ -773,6 +773,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const reDecryptedMessages = await Promise.all(
       pendingMessages.map(async (msg) => {
           console.log(`[ReDecrypt] Attempting to decrypt msg ${msg.id} (Session: ${msg.sessionId})`);
+          console.log(`[ReDecrypt] Ciphertext len: ${msg.ciphertext?.length}, Sample: ${msg.ciphertext?.substring(0, 20)}...`);
           const res = await decryptMessageObject({ ...msg, content: msg.ciphertext });
           console.log(`[ReDecrypt] Result for ${msg.id}:`, res.content?.substring(0, 20));
           return res;
