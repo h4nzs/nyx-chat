@@ -564,6 +564,8 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
 export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promise<void> {
   if (!payload || typeof payload !== 'object') return;
   const { conversationId, sessionId, encryptedKey, type, initiatorEphemeralKey, initiatorIdentityKey } = payload;
+  
+  console.log(`[Crypto] Received key type=${type} for convo=${conversationId}`);
 
   if (type === 'GROUP_KEY') {
     const pendingRequest = pendingGroupKeyRequests.get(conversationId);
@@ -573,7 +575,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     }
     await handleGroupKeyDistribution(conversationId, encryptedKey);
   } else if (sessionId) {
-    let newSessionKey: Uint8Array;
+    let newSessionKey: Uint8Array | undefined;
 
     // Check if this is an X3DH initialization payload (JSON marker)
     if (encryptedKey.startsWith('{') && encryptedKey.includes('"x3dh":true')) {
@@ -581,6 +583,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
             const metadata = JSON.parse(encryptedKey);
             if (metadata.x3dh && initiatorEphemeralKey && initiatorIdentityKey) {
                 // Perform X3DH Calculation on Recipient Side
+                console.log(`[Crypto] Processing X3DH key derivation...`);
                 const { getEncryptionKeyPair, getSignedPreKeyPair } = useAuthStore.getState();
                 const myIdentityKeyPair = await getEncryptionKeyPair();
                 const mySignedPreKeyPair = await getSignedPreKeyPair();
@@ -597,16 +600,31 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
             }
         } catch (e) {
             console.error("X3DH derivation failed, falling back to legacy decrypt:", e);
-            const { publicKey, privateKey } = await getMyEncryptionKeyPair();
-            newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+            // Fallback only if key looks valid
+            if (encryptedKey.length > 20) {
+                const { publicKey, privateKey } = await getMyEncryptionKeyPair();
+                newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+            } else {
+                console.warn("[Crypto] Skipping decryption for invalid/placeholder key.");
+                return;
+            }
         }
     } else {
         // Legacy: Encrypted with Identity Key
+        // GUARD: Ignore placeholders/empty keys
+        if (!encryptedKey || encryptedKey.length < 20) {
+             console.warn("[Crypto] Received empty or short session key. Ignoring placeholder.");
+             return;
+        }
+
         const { publicKey, privateKey } = await getMyEncryptionKeyPair();
         newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
     }
 
-    await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
+    if (newSessionKey) {
+        await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
+        console.log(`[Crypto] Stored session key for ${sessionId}`);
+    }
   }
 }
 

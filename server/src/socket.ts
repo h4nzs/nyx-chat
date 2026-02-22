@@ -62,7 +62,7 @@ interface KeyFulfillmentPayload {
 
 // Extend the Socket type from Socket.IO to include our custom user property
 interface AuthenticatedSocket extends Socket {
-  user?: AuthPayload;
+  user?: AuthPayload & { publicKey: string | null };
 }
 
 export let io: Server;
@@ -166,14 +166,23 @@ export function registerSocket(httpServer: HttpServer) {
 
       // @ts-ignore
       const userId = payload.id || payload.sub;
-      const user = await prisma.user.findUnique({ where: { id: userId } });
+      // OPTIMIZATION: Select publicKey here
+      const user = await prisma.user.findUnique({ 
+        where: { id: userId },
+        select: { id: true, email: true, username: true, publicKey: true }
+      });
 
       if (!user) {
         socket.user = undefined;
         return next();
       }
 
-      socket.user = { id: user.id, email: user.email, username: user.username };
+      socket.user = { 
+        id: user.id, 
+        email: user.email, 
+        username: user.username,
+        publicKey: user.publicKey 
+      };
       next();
     } catch (err) {
       console.error("[Socket] Auth Middleware Error:", err);
@@ -447,16 +456,14 @@ export function registerSocket(httpServer: HttpServer) {
         
         if (onlineParticipants.length > 0) {
           const fulfillerId = onlineParticipants[0].userId;
-          const requester = await prisma.user.findUnique({
-            where: { id: userId },
-            select: { publicKey: true },
-          });
+          // OPTIMIZATION: Use socket.user.publicKey instead of DB query
+          const requesterPublicKey = socket.user?.publicKey;
           
-          if (requester?.publicKey) {
+          if (requesterPublicKey) {
             io.to(fulfillerId).emit('group:fulfill_key_request', {
               conversationId,
               requesterId: userId,
-              requesterPublicKey: requester.publicKey,
+              requesterPublicKey: requesterPublicKey,
             });
           }
         }
@@ -508,17 +515,15 @@ export function registerSocket(httpServer: HttpServer) {
         
         if (onlineParticipants.length > 0) {
           const fulfillerId = onlineParticipants[0].userId;
-          const requester = await prisma.user.findUnique({
-            where: { id: userId },
-            select: { publicKey: true },
-          });
+          // OPTIMIZATION: Use socket.user.publicKey instead of DB query
+          const requesterPublicKey = socket.user?.publicKey;
           
-          if (requester?.publicKey) {
+          if (requesterPublicKey) {
             io.to(fulfillerId).emit('session:fulfill_request', {
               conversationId,
               sessionId,
               requesterId: userId,
-              requesterPublicKey: requester.publicKey,
+              requesterPublicKey: requesterPublicKey,
             });
           }
         }

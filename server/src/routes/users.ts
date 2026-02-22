@@ -160,7 +160,7 @@ router.get('/search',
             }
           ]
         },
-        take: 10,
+        take: 5, // Reduced from 10 to 5 for performance
         select: { id: true, username: true, name: true, avatarUrl: true }
       })
       res.json(users)
