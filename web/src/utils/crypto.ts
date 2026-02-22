@@ -544,8 +544,13 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
 
 export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise<void> {
   const { conversationId, sessionId, requesterId, requesterPublicKey: requesterPublicKeyB64 } = payload;
+  console.log(`[Crypto] Fulfilling key request for session ${sessionId} from ${requesterId}`);
+  
   const key = await retrieveSessionKeySecurely(conversationId, sessionId);
-  if (!key) return;
+  if (!key) {
+      console.warn(`[Crypto] Cannot fulfill request: Key not found for session ${sessionId}`);
+      return;
+  }
 
   const sodium = await getSodiumLib();
   const { worker_crypto_box_seal } = await getWorkerProxy();
@@ -564,6 +569,8 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
 export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promise<void> {
   if (!payload || typeof payload !== 'object') return;
   const { conversationId, sessionId, encryptedKey, type, initiatorEphemeralKey, initiatorIdentityKey } = payload;
+  
+  console.log(`[Crypto] Received key type=${type} for convo=${conversationId}`);
 
   if (type === 'GROUP_KEY') {
     const pendingRequest = pendingGroupKeyRequests.get(conversationId);
@@ -581,6 +588,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
             const metadata = JSON.parse(encryptedKey);
             if (metadata.x3dh && initiatorEphemeralKey && initiatorIdentityKey) {
                 // Perform X3DH Calculation on Recipient Side
+                console.log(`[Crypto] Processing X3DH key derivation...`);
                 const { getEncryptionKeyPair, getSignedPreKeyPair } = useAuthStore.getState();
                 const myIdentityKeyPair = await getEncryptionKeyPair();
                 const mySignedPreKeyPair = await getSignedPreKeyPair();
@@ -607,6 +615,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     }
 
     await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
+    console.log(`[Crypto] Stored session key for ${sessionId}`);
   }
 }
 
