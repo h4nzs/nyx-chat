@@ -232,10 +232,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const { user } = useAuthStore.getState();
       if (!user) return;
 
-      // Optimistic Update with shared timestamp for ID correlation
+      // Optimistic Update
       const timestamp = Date.now();
       const tempReactionId = `temp_react_${timestamp}`;
-      
       const optimisticReaction = {
           id: tempReactionId,
           messageId,
@@ -254,7 +253,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           emoji
       };
       
-      // Pass timestamp as tempId so we can correlate the socket response
+      // Use timestamp as tempId to correlate socket response
       await get().sendMessage(conversationId, {
           content: JSON.stringify(metadata)
       }, timestamp);
@@ -336,6 +335,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           ...data,
           content: ciphertext,
           sessionId,
+          // Remove plain metadata before sending
           fileKey: undefined, fileName: undefined, fileType: undefined, fileSize: undefined
       };
 
@@ -343,6 +343,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const isConnected = socket?.connected;
 
       if (!isConnected && !isReactionPayload) {
+        // Offline? Queue it!
+        // We recreate the optimistic message for the queue
         const queueMsg = { ...data, id: `temp_${actualTempId}`, tempId: actualTempId, conversationId, senderId: user.id, createdAt: new Date().toISOString() } as Message;
         await addToQueue(conversationId, queueMsg, actualTempId);
         return;
@@ -379,12 +381,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const { tempId, conversationId, data, attempt } = item;
       
       if (attempt > 5) {
+        // Give up after 5 retries
         console.warn(`[Queue] Dropping message ${tempId} after too many retries.`);
         await removeFromQueue(tempId);
         get().updateMessage(conversationId, `temp_${tempId}`, { error: true, status: 'FAILED' });
         continue;
       }
 
+      // Update UI to show we are trying again
       get().updateMessage(conversationId, `temp_${tempId}`, { status: 'SENDING', error: false });
 
       socket.emit("message:send", data, async (res: { ok: boolean, msg?: Message, error?: string }) => {
@@ -394,9 +398,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         } else {
           console.error(`[Queue] Failed to send queued message ${tempId}:`, res.error);
           await updateQueueAttempt(tempId, attempt + 1);
+          // Keep it in queue, but maybe mark visual error if needed?
+          // For now, let it stay 'SENDING' or maybe 'FAILED' until next retry
         }
       });
 
+      // Small delay to prevent flooding
       await new Promise(r => setTimeout(r, 200)); 
     }
   },
@@ -421,6 +428,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const uploadId = addActivity(activity);
     const tempId = Date.now();
     
+    // 1. Create optimistic message
     const optimisticMessage: Message = {
       id: `temp_${tempId}`,
       tempId: tempId,
@@ -442,30 +450,51 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     try {
       updateActivity(uploadId, { progress: 5 });
 
+      // 2. Encrypt file content and get the key
       const { encryptedBlob, key: fileKey } = await encryptFile(file);
+      
+      // 3. Encrypt the file key (using conversation session)
+      // Note: We don't send this separately anymore, but we need it for the JSON payload
+      // Wait, we can't use `encryptMessage` here because it returns { ciphertext, sessionId }
+      // AND we want to put this ciphertext INSIDE the JSON payload which is THEN encrypted again?
+      // NO.
+      // The JSON payload should contain the KEY that decrypts the file.
+      // If we put the PLAIN key in the JSON, and then ENCRYPT the JSON with the session key, is it safe?
+      // YES. The session key protects the JSON. The JSON protects the file key. The file key protects the file.
+      // Double encryption is fine.
+      // BUT, if we want to be super standard:
+      // We can just put the `fileKey` (base64) into the JSON.
+      // Then `sendMessage` encrypts the WHOLE JSON string.
+      // So the `fileKey` is never exposed.
       
       updateActivity(uploadId, { progress: 20 });
 
+      // 4. Get Presigned URL
       const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
           method: 'POST',
           body: JSON.stringify({
               fileName: file.name,
-              fileType: file.type || 'application/octet-stream', 
+              fileType: file.type || 'application/octet-stream', // Use octet-stream for encrypted? Or keep original mime for validation?
+              // Ideally we upload encrypted blob, so mime might be application/octet-stream
+              // But R2 validation checks extension.
+              // Let's keep original fileType for presigned request so server validation passes,
+              // but upload the encrypted blob.
               folder: 'attachments',
-              fileSize: file.size 
+              fileSize: file.size // Approximate
           })
       });
 
       updateActivity(uploadId, { progress: 30 });
 
+      // 5. Upload to R2 (PUT)
       await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', presignedRes.uploadUrl, true);
-          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream'); 
+          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream'); // R2 requires matching content-type
           
           xhr.upload.onprogress = (e) => {
               if (e.lengthComputable) {
-                  const percentComplete = (e.loaded / e.total) * 60; 
+                  const percentComplete = (e.loaded / e.total) * 60; // Max 60% of total progress bar (30+60=90)
                   updateActivity(uploadId, { progress: 30 + percentComplete });
               }
           };
@@ -481,17 +510,20 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       updateActivity(uploadId, { progress: 95 });
 
+      // 6. Create Metadata Payload
       const metadata = {
           type: 'file',
           url: presignedRes.publicUrl,
-          key: fileKey,
+          key: fileKey, // Plain key, will be encrypted by sendMessage
           name: file.name,
           size: file.size,
           mimeType: file.type
       };
 
+      // 7. Send as Message
       await get().sendMessage(conversationId, {
           content: JSON.stringify(metadata),
+          // Store these for optimistic local use (but sendMessage will override content with ciphertext)
           fileName: file.name,
           fileType: file.type
       }, tempId);
@@ -503,6 +535,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       removeActivity(uploadId);
       console.error("File upload failed:", error);
       toast.error(`Failed to upload ${file.name}.`);
+      // Mark optimistic message as failed
       set(state => ({
         messages: {
           ...state.messages,
@@ -518,7 +551,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     if (hasRestoredKeys) {
       try {
+        // Find the conversation first to determine its type
         const conversation = useConversationStore.getState().conversations.find(c => c.id === id);
+        // Key distribution logic is now handled by sendMessage, but we still need to handle the 1-on-1 case.
         if (conversation && !conversation.isGroup) {
           await ensureAndRatchetSession(id);
         }
@@ -579,8 +614,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
   
   addIncomingMessage: async (conversationId, message) => {
+      // Decrypt first
       const decrypted = await decryptMessageObject(message);
       
+      // Check if reaction
       const reactionPayload = parseReaction(decrypted.content);
       if (reactionPayload) {
           const reaction = {
@@ -598,6 +635,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           // ID pattern: `temp_react_${timestamp}`
           if (message.tempId && message.senderId === reaction.userId) {
               const optimisticId = `temp_react_${message.tempId}`;
+              console.log(`[AddIncoming] Replacing optimistic reaction: ${optimisticId} -> ${reaction.id}`);
               get().replaceOptimisticReaction(conversationId, reaction.messageId, optimisticId, reaction);
           } else {
               get().addLocalReaction(conversationId, reaction.messageId, reaction);
@@ -612,6 +650,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   replaceOptimisticMessage: (conversationId, tempId, newMessage) => set(state => {
+    // Find the optimistic message to revoke its blob URL if it exists
     const optimisticMessage = state.messages[conversationId]?.find(m => m.tempId === tempId);
     if (optimisticMessage?.fileUrl?.startsWith('blob:')) {
       URL.revokeObjectURL(optimisticMessage.fileUrl);
@@ -631,6 +670,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const filteredMessages = messages.filter(m => m.id !== messageId);
 
     // 2. Remove from nested reactions (if it's a reaction message)
+    // This handles the "Reaction as Message" deletion sync
     const updatedMessages = filteredMessages.map(m => {
         if (m.reactions && m.reactions.some(r => r.id === messageId)) {
             return {
@@ -656,6 +696,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       [conversationId]: (state.messages[conversationId] || []).map(m => {
         if (m.id === messageId) {
           const newReactions = [...(m.reactions || [])];
+          // Prevent duplicates
           if (!newReactions.some(r => r.id === reaction.id)) {
             newReactions.push(reaction);
           }
@@ -668,20 +709,27 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   
   removeLocalReaction: (conversationId, messageId, reactionId) => set(state => ({ messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, reactions: (m.reactions || []).filter(r => r.id !== reactionId) } : m) } })),
   
-  replaceOptimisticReaction: (conversationId, messageId, tempId, finalReaction) => set(state => ({
-    messages: {
-      ...state.messages,
-      [conversationId]: (state.messages[conversationId] || []).map(m => {
-        if (m.id === messageId) {
-          return {
-            ...m,
-            reactions: (m.reactions || []).map(r => r.id === tempId ? finalReaction : r),
-          };
-        }
-        return m;
-      })
-    }
-  })),
+  replaceOptimisticReaction: (conversationId, messageId, tempId, finalReaction) => set(state => {
+    console.log(`[ReplaceReaction] Searching for msg ${messageId} to replace react ${tempId}`);
+    return {
+      messages: {
+        ...state.messages,
+        [conversationId]: (state.messages[conversationId] || []).map(m => {
+          if (m.id === messageId) {
+            const found = m.reactions?.find(r => r.id === tempId);
+            if (found) console.log(`[ReplaceReaction] Found temp reaction! Replacing.`);
+            else console.log(`[ReplaceReaction] Temp reaction NOT found in msg ${messageId}. Reactions:`, m.reactions);
+            
+            return {
+              ...m,
+              reactions: (m.reactions || []).map(r => r.id === tempId ? finalReaction : r),
+            };
+          }
+          return m;
+        })
+      }
+    };
+  }),
   updateSenderDetails: (user) => set(state => {
     const newMessages = { ...state.messages };
     for (const convoId in newMessages) {
@@ -716,9 +764,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     set(state => ({
       messages: { ...state.messages, [conversationId]: state.messages[conversationId]?.filter(m => m.tempId !== tempId) || [] },
     }));
+    // Use the original content from the 'preview' field for the retry and preserve the original tempId
     get().sendMessage(conversationId, { content: preview, fileUrl, fileName, fileType, fileSize, repliedToId }, tempId);
   },
 
+  // Resend all pending messages (for sync after reconnect)
   resendPendingMessages: () => {
     const state = get();
     Object.entries(state.messages).forEach(([conversationId, messages]) => {
@@ -737,6 +787,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   reDecryptPendingMessages: async (conversationId: string) => {
+    // Add a small delay to ensure IndexedDB consistency after key storage
     await new Promise(r => setTimeout(r, 1000));
 
     const state = get();
@@ -753,17 +804,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const reDecryptedMessages = await Promise.all(
       pendingMessages.map(async (msg) => {
+          // Pass the message object directly. decryptMessageObject will handle ciphertext priority.
           return await decryptMessageObject(msg);
       })
     );
 
     const messageMap = new Map(conversationMessages.map(m => [m.id, m]));
     reDecryptedMessages.forEach(m => {
+        // Only update if we actually managed to decrypt it or status changed
         if (m.content !== 'waiting_for_key' && m.content !== '[Requesting key to decrypt...]') {
+             // Process potential reactions that were stuck in pending state
              const payload = parseReaction(m.content);
              if (payload) {
-                 // REACTION RECOVERY LOGIC
-                 const reaction = {
+                 get().addLocalReaction(conversationId, payload.targetMessageId, {
                      id: m.id,
                      messageId: payload.targetMessageId,
                      emoji: payload.emoji,
@@ -771,15 +824,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                      createdAt: m.createdAt,
                      user: m.sender,
                      isMessage: true
-                 };
-                 // Add the reaction (or replace if it was pending/temp, but here we assume add because reDecrypt happens later)
-                 get().addLocalReaction(conversationId, payload.targetMessageId, reaction);
-                 
+                 });
+                 // Don't add reaction message to the list (filter it out)
                  messageMap.delete(m.id);
                  return;
              }
              messageMap.set(m.id, m);
         } else {
+             // Still pending, keep it in map
              messageMap.set(m.id, m);
         }
     });
