@@ -66,7 +66,6 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
         if (result.status === 'pending') {
             attempts++;
             if (attempts < MAX_ATTEMPTS) {
-                console.log(`[Decrypt] Message ${message.id} pending. Retrying (${attempts}/${MAX_ATTEMPTS})...`);
                 await new Promise(r => setTimeout(r, 800)); // Tunggu 800ms
             }
         }
@@ -94,7 +93,6 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
       }
       
     } else if (result?.status === 'pending') {
-      console.log(`[Decrypt] Message ${message.id} pending after retries: ${result.reason}`);
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
       console.warn(`[Decrypt] Failed for msg ${decryptedMsg.id}:`, result?.error);
@@ -120,7 +118,6 @@ function parseReaction(content: string | null | undefined): { targetMessageId: s
   if (!content) return null;
   try {
     const trimmed = content.trim();
-    // Quick check before parsing
     if (!trimmed.startsWith('{') || !trimmed.includes('"type":"reaction"')) return null;
     
     const payload = JSON.parse(trimmed);
@@ -136,17 +133,16 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
   const chatMessages: Message[] = [];
   const reactions: any[] = [];
 
-  // 1. Separate content
   for (const msg of decryptedItems) {
     const reactionPayload = parseReaction(msg.content);
     if (reactionPayload) {
         reactions.push({
-          id: msg.id, // Use message ID as reaction ID
+          id: msg.id,
           messageId: reactionPayload.targetMessageId,
           emoji: reactionPayload.emoji,
           userId: msg.senderId,
           createdAt: msg.createdAt,
-          user: msg.sender, // Include sender info
+          user: msg.sender,
           isMessage: true
         });
     } else {
@@ -154,15 +150,12 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     }
   }
 
-  // 2. Apply reactions to messages (both new and existing)
-  // We create a map for O(1) lookup
   const messageMap = new Map([...existingMessages, ...chatMessages].map(m => [m.id, m]));
   
   for (const reaction of reactions) {
     const target = messageMap.get(reaction.messageId);
     if (target) {
       const existingReactions = target.reactions || [];
-      // Avoid duplicates
       if (!existingReactions.some(r => r.id === reaction.id)) {
         target.reactions = [...existingReactions, reaction];
       }
@@ -194,7 +187,6 @@ type Actions = {
   replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => void;
   removeMessage: (conversationId: string, messageId: string) => void;
   updateMessage: (conversationId: string, messageId: string, updates: Partial<Message>) => void;
-  // Old addReaction/removeReaction kept for internal optimistic updates
   addLocalReaction: (conversationId: string, messageId: string, reaction: any) => void;
   removeLocalReaction: (conversationId: string, messageId: string, reactionId: string) => void;
   replaceOptimisticReaction: (conversationId: string, messageId: string, tempId: string, finalReaction: any) => void;
@@ -386,8 +378,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const socket = getSocket();
     if (!socket?.connected) return;
-
-    console.log(`[Queue] Processing ${queue.length} offline messages...`);
 
     for (const item of queue) {
       const { tempId, conversationId, data, attempt } = item;
@@ -626,19 +616,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
   
   addIncomingMessage: async (conversationId, message) => {
-      console.log(`[AddIncoming] Raw ID: ${message.id}, TempID: ${message.tempId}, Content: ${message.content?.substring(0, 20)}...`);
-      
       // Decrypt first
       const decrypted = await decryptMessageObject(message);
       
-      console.log(`[AddIncoming] Decrypted: ${decrypted.content?.substring(0, 50)}...`);
-
       // Check if reaction
       const reactionPayload = parseReaction(decrypted.content);
       
       if (reactionPayload) {
-          console.log(`[AddIncoming] Detected Reaction: ${reactionPayload.emoji} on msg ${reactionPayload.targetMessageId}`);
-          
           const reaction = {
               id: decrypted.id,
               messageId: reactionPayload.targetMessageId,
@@ -654,19 +638,22 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           // CRITICAL FIX: Only replace optimistic reaction if WE are the sender
           if (message.tempId && currentUser && message.senderId === currentUser.id) {
               const optimisticId = `temp_react_${message.tempId}`;
-              console.log(`[AddIncoming] Attempting replace optimistic: ${optimisticId} -> ${reaction.id}`);
               get().replaceOptimisticReaction(conversationId, reaction.messageId, optimisticId, reaction);
           } else {
-              console.log(`[AddIncoming] Adding new local reaction`);
               get().addLocalReaction(conversationId, reaction.messageId, reaction);
           }
       } else {
-          console.log(`[AddIncoming] Not a reaction. Adding as message.`);
-          set(state => {
-            const currentMessages = state.messages[conversationId] || [];
-            if (currentMessages.some(m => m.id === message.id)) return state;
-            return { messages: { ...state.messages, [conversationId]: [...currentMessages, decrypted] } };
-          });
+          const currentUser = useAuthStore.getState().user;
+          // FIX: If this is our own message with a tempId, replace the optimistic one
+          if (message.tempId && currentUser && message.senderId === currentUser.id) {
+              get().replaceOptimisticMessage(conversationId, message.tempId, decrypted);
+          } else {
+              set(state => {
+                const currentMessages = state.messages[conversationId] || [];
+                if (currentMessages.some(m => m.id === message.id)) return state;
+                return { messages: { ...state.messages, [conversationId]: [...currentMessages, decrypted] } };
+              });
+          }
       }
   },
 
@@ -730,27 +717,20 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   
   removeLocalReaction: (conversationId, messageId, reactionId) => set(state => ({ messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, reactions: (m.reactions || []).filter(r => r.id !== reactionId) } : m) } })),
   
-  replaceOptimisticReaction: (conversationId, messageId, tempId, finalReaction) => set(state => {
-    console.log(`[ReplaceReaction] Searching for msg ${messageId} to replace react ${tempId}`);
-    return {
-      messages: {
-        ...state.messages,
-        [conversationId]: (state.messages[conversationId] || []).map(m => {
-          if (m.id === messageId) {
-            const found = m.reactions?.find(r => r.id === tempId);
-            if (found) console.log(`[ReplaceReaction] Found temp reaction! Replacing.`);
-            else console.log(`[ReplaceReaction] Temp reaction NOT found in msg ${messageId}. Reactions:`, m.reactions);
-            
-            return {
-              ...m,
-              reactions: (m.reactions || []).map(r => r.id === tempId ? finalReaction : r),
-            };
-          }
-          return m;
-        })
-      }
-    };
-  }),
+  replaceOptimisticReaction: (conversationId, messageId, tempId, finalReaction) => set(state => ({
+    messages: {
+      ...state.messages,
+      [conversationId]: (state.messages[conversationId] || []).map(m => {
+        if (m.id === messageId) {
+          return {
+            ...m,
+            reactions: (m.reactions || []).map(r => r.id === tempId ? finalReaction : r),
+          };
+        }
+        return m;
+      })
+    }
+  })),
   updateSenderDetails: (user) => set(state => {
     const newMessages = { ...state.messages };
     for (const convoId in newMessages) {
