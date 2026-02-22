@@ -1,7 +1,19 @@
 import { createWithEqualityFn } from "zustand/traditional";
-import { api, apiUpload } from "@lib/api";
+import { api, apiUpload, authFetch } from "@lib/api"; // Added authFetch
 import { getSocket, emitSessionKeyRequest, emitGroupKeyDistribution } from "@lib/socket";
-import { encryptMessage, decryptMessage, ensureAndRatchetSession, encryptFile, ensureGroupSession } from "@utils/crypto";
+import { 
+  encryptMessage, 
+  decryptMessage, 
+  ensureAndRatchetSession, 
+  encryptFile, 
+  ensureGroupSession,
+  retrieveLatestSessionKeySecurely, 
+  establishSessionFromPreKeyBundle, 
+  getMyEncryptionKeyPair, 
+  storeSessionKeySecurely, 
+  deriveSessionKeyAsRecipient,
+  PreKeyBundle 
+} from "@utils/crypto";
 import toast from "react-hot-toast";
 import { useAuthStore, type User } from "./auth";
 import type { Message } from "./conversation";
@@ -9,6 +21,7 @@ import useDynamicIslandStore, { UploadActivity } from './dynamicIsland';
 import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
 import { useConnectionStore } from "./connection";
+import { getSodium } from "@lib/sodiumInitializer";
 
 /**
  * Logika Dekripsi Terpusat (Single Source of Truth)
@@ -42,6 +55,44 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
       return decryptedMsg;
     }
 
+    // -------------------------------------------------------------------------
+    // FLOW BARU: X3DH HEADER DETECTION (RECEIVING)
+    // -------------------------------------------------------------------------
+    if (!isGroup && contentToDecrypt.startsWith('{') && contentToDecrypt.includes('"x3dh":')) {
+       try {
+           const payload = JSON.parse(contentToDecrypt);
+           if (payload.x3dh && payload.ciphertext) {
+               console.log(`[X3DH] Detected embedded header in msg ${message.id}`);
+               
+               // Extract Header
+               const { ik, ek, otpkId } = payload.x3dh;
+               const ciphertext = payload.ciphertext;
+
+               // Derive Key
+               const myIdentityKeyPair = await getMyEncryptionKeyPair();
+               const { getSignedPreKeyPair } = useAuthStore.getState();
+               const mySignedPreKeyPair = await getSignedPreKeyPair();
+
+               const sessionKey = await deriveSessionKeyAsRecipient(
+                   myIdentityKeyPair,
+                   mySignedPreKeyPair,
+                   ik,
+                   ek,
+                   otpkId
+               );
+
+               // Store Key & Use it
+               if (message.sessionId) {
+                   await storeSessionKeySecurely(message.conversationId, message.sessionId, sessionKey);
+                   contentToDecrypt = ciphertext; // Update target content
+               }
+           }
+       } catch (e) {
+           console.error("[X3DH] Failed to parse/derive from header:", e);
+           // Fallback to treat as normal ciphertext if parsing fails
+       }
+    }
+
     // 3. Simpan ciphertext asli
     decryptedMsg.ciphertext = contentToDecrypt;
 
@@ -52,7 +103,7 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
 
     while (attempts < MAX_ATTEMPTS) {
         result = await decryptMessage(
-          contentToDecrypt,
+          contentToDecrypt!, // Non-null assertion guarded by check above
           decryptedMsg.conversationId,
           isGroup,
           decryptedMsg.sessionId
@@ -118,6 +169,7 @@ function parseReaction(content: string | null | undefined): { targetMessageId: s
   if (!content) return null;
   try {
     const trimmed = content.trim();
+    // Quick check before parsing
     if (!trimmed.startsWith('{') || !trimmed.includes('"type":"reaction"')) return null;
     
     const payload = JSON.parse(trimmed);
@@ -137,12 +189,12 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     const reactionPayload = parseReaction(msg.content);
     if (reactionPayload) {
         reactions.push({
-          id: msg.id,
+          id: msg.id, // Use message ID as reaction ID
           messageId: reactionPayload.targetMessageId,
           emoji: reactionPayload.emoji,
           userId: msg.senderId,
           createdAt: msg.createdAt,
-          user: msg.sender,
+          user: msg.sender, // Include sender info
           isMessage: true
         });
     } else {
@@ -156,6 +208,7 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     const target = messageMap.get(reaction.messageId);
     if (target) {
       const existingReactions = target.reactions || [];
+      // Avoid duplicates
       if (!existingReactions.some(r => r.id === reaction.id)) {
         target.reactions = [...existingReactions, reaction];
       }
@@ -329,17 +382,63 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     try {
       let ciphertext = '', sessionId: string | undefined;
+      let x3dhHeader: any = null;
+
+      // LAZY SESSION INITIALIZATION (X3DH)
+      // Only for 1-on-1 chats that contain content
+      if (!isGroup && data.content) {
+          const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
+          
+          if (!latestKey) {
+             console.log(`[X3DH] No session key found for ${conversationId}. Initiating handshake...`);
+             const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
+             
+             if (peerId) {
+                 // 1. Fetch Bundle
+                 const theirBundle = await authFetch<any>(`/api/keys/prekey-bundle/${peerId}`);
+                 
+                 // 2. Establish Session
+                 const myKeyPair = await getMyEncryptionKeyPair();
+                 const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
+                 
+                 // 3. Generate Session ID & Store Self-Key
+                 const sodium = await getSodium();
+                 sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
+                 await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
+
+                 // 4. Prepare Header for Peer
+                 x3dhHeader = {
+                     ik: sodium.to_base64(myKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+                     ek: ephemeralPublicKey,
+                     otpkId: otpkId
+                 };
+                 
+                 console.log(`[X3DH] Handshake prepared. Header attached to message.`);
+             }
+          }
+      }
+
       if (data.content) {
+        // Encrypt content (will use the key we just stored if it was new)
         const result = await encryptMessage(data.content, conversationId, isGroup);
         ciphertext = result.ciphertext;
-        sessionId = result.sessionId;
+        // If we just created a session, use that ID. Otherwise use the one from encryption result.
+        if (!sessionId) sessionId = result.sessionId; 
+      }
+      
+      // EMBED HEADER IF NEW SESSION
+      if (x3dhHeader) {
+          const payloadJson = JSON.stringify({
+              x3dh: x3dhHeader,
+              ciphertext: ciphertext
+          });
+          ciphertext = payloadJson;
       }
       
       const payload = {
           ...data,
           content: ciphertext,
           sessionId,
-          // Remove plain metadata before sending
           fileKey: undefined, fileName: undefined, fileType: undefined, fileSize: undefined
       };
 
