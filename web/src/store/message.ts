@@ -22,7 +22,6 @@ import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
 import { useConnectionStore } from "./connection";
 import { getSodium } from "@lib/sodiumInitializer";
-import { getPendingHeader, deletePendingHeader } from "@lib/keychainDb";
 
 /**
  * Logika Dekripsi Terpusat (Single Source of Truth)
@@ -170,7 +169,6 @@ function parseReaction(content: string | null | undefined): { targetMessageId: s
   if (!content) return null;
   try {
     const trimmed = content.trim();
-    // Quick check before parsing
     if (!trimmed.startsWith('{') || !trimmed.includes('"type":"reaction"')) return null;
     
     const payload = JSON.parse(trimmed);
@@ -190,12 +188,12 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     const reactionPayload = parseReaction(msg.content);
     if (reactionPayload) {
         reactions.push({
-          id: msg.id, // Use message ID as reaction ID
+          id: msg.id,
           messageId: reactionPayload.targetMessageId,
           emoji: reactionPayload.emoji,
           userId: msg.senderId,
           createdAt: msg.createdAt,
-          user: msg.sender, // Include sender info
+          user: msg.sender,
           isMessage: true
         });
     } else {
@@ -209,7 +207,6 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     const target = messageMap.get(reaction.messageId);
     if (target) {
       const existingReactions = target.reactions || [];
-      // Avoid duplicates
       if (!existingReactions.some(r => r.id === reaction.id)) {
         target.reactions = [...existingReactions, reaction];
       }
@@ -385,23 +382,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       let ciphertext = '', sessionId: string | undefined;
       let x3dhHeader: any = null;
 
-      // Check for Pending Header (from startConversation)
-      if (!isGroup) {
-          const pendingHeader = await getPendingHeader(conversationId);
-          if (pendingHeader) {
-              console.log(`[X3DH] Found pending header for ${conversationId}. Attaching to message.`);
-              x3dhHeader = pendingHeader;
-              await deletePendingHeader(conversationId);
-          }
-      }
-
-      // LAZY SESSION INITIALIZATION (X3DH) - Fallback if no pending header
+      // LAZY SESSION INITIALIZATION (Pure Stateless)
       // Only for 1-on-1 chats that contain content
-      if (!isGroup && data.content && !x3dhHeader) {
+      // We check if we have a key. If not, we perform handshake HERE AND NOW.
+      if (!isGroup && data.content) {
           const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
           
           if (!latestKey) {
-             console.log(`[X3DH] No session key found for ${conversationId}. Initiating handshake...`);
+             console.log(`[X3DH] No session key found for ${conversationId}. Initiating handshake (Stateless)...`);
              // Fix: Use p.id instead of p.userId
              const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
              
@@ -425,7 +413,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                      otpkId: otpkId
                  };
                  
-                 console.log(`[X3DH] Handshake prepared (Lazy). Header attached to message.`);
+                 console.log(`[X3DH] Handshake prepared. Header attached to message.`);
              }
           }
       }
@@ -458,9 +446,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const isConnected = socket?.connected;
 
       if (!isConnected && !isReactionPayload) {
-        // Offline? Queue it!
-        // We recreate the optimistic message for the queue
-        const queueMsg = { ...data, id: `temp_${actualTempId}`, tempId: actualTempId, conversationId, senderId: user.id, createdAt: new Date().toISOString() } as Message;
+        // [CRITICAL FIX] Use PAYLOAD (Encrypted), NOT data (Plaintext)
+        const queueMsg = { ...payload, id: `temp_${actualTempId}`, tempId: actualTempId, conversationId, senderId: user.id, createdAt: new Date().toISOString() } as Message;
         await addToQueue(conversationId, queueMsg, actualTempId);
         return;
       }

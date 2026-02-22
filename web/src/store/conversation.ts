@@ -5,8 +5,7 @@ import { getSocket, emitSessionKeyRequest } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
 import { getSodium } from '@lib/sodiumInitializer';
-import { establishSessionFromPreKeyBundle } from '@utils/crypto';
-import { addSessionKey, storePendingHeader } from '@lib/keychainDb';
+import { addSessionKey } from '@lib/keychainDb';
 import toast from 'react-hot-toast';
 
 // --- Type Definitions ---
@@ -276,29 +275,17 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   toggleSidebar: () => set(s => ({ isSidebarOpen: !s.isSidebarOpen })),
 
   startConversation: async (peerId: string): Promise<string> => {
-    const { user, getEncryptionKeyPair } = useAuthStore.getState();
+    const { user } = useAuthStore.getState();
     if (!user) {
       throw new Error("Cannot start a conversation: user is not authenticated.");
     }
 
     try {
-      const theirBundle = await authFetch<any>(`/api/keys/prekey-bundle/${peerId}`);
-      if (!theirBundle) throw new Error("User does not have a pre-key bundle available.");
-
-      const myKeyPair = await getEncryptionKeyPair();
-      const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
-
+      // STATELESS INITIALIZATION (Pure Lazy Init)
+      // No crypto here. Just create room container.
+      
       const sodium = await getSodium();
-      const myPublicKey = myKeyPair.publicKey;
-      
-      // Encrypt for self (backup)
-      const encryptedKeyForSelf = sodium.crypto_box_seal(sessionKey, myPublicKey);
-      
-      // Peer key is distributed via Embedded Header in the first message.
-      // We send a placeholder here to satisfy API requirements.
-      const encryptedKeyForPeer = new Uint8Array(0); 
-
-      const sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
+      const sessionId = `dummy_${sodium.to_hex(sodium.randombytes_buf(16))}`;
 
       const conv = await authFetch<Conversation>("/api/conversations", {
         method: "POST",
@@ -307,37 +294,25 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           isGroup: false,
           initialSession: {
             sessionId,
-            ephemeralPublicKey,
+            ephemeralPublicKey: "dummy",
             initialKeys: [
-              { userId: user.id, key: sodium.to_base64(encryptedKeyForSelf, sodium.base64_variants.URLSAFE_NO_PADDING) },
-              { userId: peerId, key: "" }, // Placeholder
+              { userId: user.id, key: "dummy" },
+              { userId: peerId, key: "dummy" },
             ],
           },
         }),
       });
       
-      await addSessionKey(conv.id, sessionId, sessionKey);
-
-      // Now we have conv.id, store the pending header
-      if (otpkId !== undefined) {
-          const x3dhHeader = {
-              ik: sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-              ek: ephemeralPublicKey,
-              otpkId: otpkId
-          };
-          await storePendingHeader(conv.id, x3dhHeader);
-      }
+      // Removed addSessionKey and storePendingHeader logic
+      // Session establishment is deferred to sendMessage()
 
       getSocket().emit("conversation:join", conv.id);
       get().addOrUpdateConversation(conv);
       set({ activeId: conv.id, isSidebarOpen: false });
       return conv.id;
     } catch (error: any) {
-      console.error("Failed to start conversation using pre-keys:", error);
-      if (error?.message?.includes("Password not provided")) {
-        throw new Error("Password is required to decrypt your keys and start a secure conversation.");
-      }
-      throw new Error(`Failed to establish secure conversation. ${error.message || ''}`);
+      console.error("Failed to start conversation:", error);
+      throw new Error(`Failed to establish conversation. ${error.message || ''}`);
     }
   },
 
