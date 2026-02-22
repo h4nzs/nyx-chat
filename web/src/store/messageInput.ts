@@ -82,19 +82,18 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const me = useAuthStore.getState().user;
     const { replyingTo, expiresIn } = get();
 
-    console.log("Sending message with expiresIn:", expiresIn);
-
     if (!await ensureGroupSessionIfNeeded(conversationId)) return;
 
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
     const isGroup = conversation.isGroup;
 
-    const payload: Partial<Message> = { ...data };
-
+    // Encrypt Content (Text or JSON Metadata)
+    let ciphertext = '';
+    let sessionId: string | undefined;
     try {
-      const { ciphertext, sessionId } = await encryptMessage(data.content, conversationId, isGroup);
-      payload.content = ciphertext;
-      payload.sessionId = sessionId;
+      const result = await encryptMessage(data.content, conversationId, isGroup);
+      ciphertext = result.ciphertext;
+      sessionId = result.sessionId;
     } catch (e: any) {
       toast.error(`Encryption failed: ${e.message}`);
       return;
@@ -103,27 +102,37 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const actualTempId = tempId !== undefined ? tempId : Date.now();
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
-    const optimisticMessage: Message = {
-      id: `temp-${actualTempId}`,
-      tempId: actualTempId,
-      conversationId,
-      senderId: me!.id,
-      sender: me!,
-      createdAt: new Date().toISOString(),
-      optimistic: true,
-      expiresAt,
-      ...data,
-      repliedTo: replyingTo || undefined,
-    };
-
-    addOptimisticMessage(conversationId, optimisticMessage);
+    const isFilePayload = data.content.startsWith('{') && data.content.includes('"type":"file"');
+    
+    if (!isFilePayload) {
+        const optimisticMessage: Message = {
+          id: `temp-${actualTempId}`,
+          tempId: actualTempId,
+          conversationId,
+          senderId: me!.id,
+          sender: me!,
+          createdAt: new Date().toISOString(),
+          optimistic: true,
+          expiresAt,
+          ...data,
+          repliedTo: replyingTo || undefined,
+        };
+        addOptimisticMessage(conversationId, optimisticMessage);
+    }
 
     const finalPayload = {
       conversationId,
       tempId: actualTempId,
       repliedToId: replyingTo?.id,
       expiresIn,
-      ...payload,
+      content: ciphertext,
+      sessionId,
+      // Explicitly nullify file fields to ensure "Blind Attachment"
+      fileUrl: null,
+      fileName: null,
+      fileType: null,
+      fileSize: null,
+      duration: null
     };
 
     try {
@@ -133,11 +142,11 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       });
     } catch (error) {
       const errorMessage = handleApiError(error);
-      toast.error(`Failed to send message: ${errorMessage}`);
+      if (!isFilePayload) toast.error(`Failed to send message: ${errorMessage}`);
       updateMessage(conversationId, `temp-${actualTempId}`, { error: true, optimistic: false });
     }
 
-    set({ replyingTo: null });
+    if (!isFilePayload) set({ replyingTo: null });
   },
   
   uploadFile: async (conversationId, file) => {
@@ -164,6 +173,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const tempId = Date.now();
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
+    // Optimistic UI (We keep this here to have access to File blob for preview)
     const optimisticMessage: Message = {
       id: `temp-${tempId}`,
       tempId,
@@ -172,7 +182,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       sender: me,
       createdAt: new Date().toISOString(),
       optimistic: true,
-      fileUrl: URL.createObjectURL(file), // Preview lokal
+      fileUrl: URL.createObjectURL(file), 
       fileName: file.name,
       fileType: file.type,
       fileSize: file.size,
@@ -183,51 +193,63 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     set({ replyingTo: null });
 
     try {
-      // 1. KOMPRESI (Hanya untuk Gambar)
       let fileToProcess = file;
       if (file.type.startsWith('image/')) {
         updateActivity(activityId, { progress: 10, fileName: `Compressing ${file.name}...` });
-        try {
-          fileToProcess = await compressImage(file);
-        } catch (e) {
-        }
+        try { fileToProcess = await compressImage(file); } catch (e) {}
       }
 
-      // 2. ENKRIPSI FILE
       updateActivity(activityId, { progress: 25, fileName: `Encrypting ${file.name}...` });
       const { encryptedBlob, key: rawFileKey } = await encryptFile(fileToProcess);
       
-      // Enkripsi Kunci File (E2EE)
-      const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(rawFileKey, conversationId, isGroup);
-
-      // 3. UPLOAD KE CLOUDFLARE R2 (Bypass Server)
       updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
       
       const encryptedFile = new File([encryptedBlob], file.name, { type: "application/octet-stream" });
       
-      const fileUrl = await uploadToR2(encryptedFile, 'attachments', (percent) => {
-         const totalProgress = 30 + (percent * 0.6);
-         updateActivity(activityId, { progress: totalProgress });
+      // 1. Get Presigned URL
+      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
+          method: 'POST',
+          body: JSON.stringify({
+              fileName: file.name,
+              fileType: file.type || 'application/octet-stream', 
+              folder: 'attachments',
+              fileSize: file.size 
+          })
       });
 
-      // 4. KIRIM METADATA KE SERVER
-      updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
-      
-      await api(`/api/uploads/messages/${conversationId}`, {
-        method: "POST",
-        body: JSON.stringify({
-          fileUrl,
-          fileName: file.name,
-          fileType: file.type + ';encrypted=true',
-          fileSize: file.size,
-          duration: null,
-          tempId,
-          fileKey: encryptedFileKey,
-          sessionId,
-          repliedToId: replyingTo?.id,
-          expiresIn
-        })
+      // 2. Upload to R2 via XHR for progress
+      await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('PUT', presignedRes.uploadUrl, true);
+          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+          
+          xhr.upload.onprogress = (e) => {
+              if (e.lengthComputable) {
+                  const percentComplete = (e.loaded / e.total) * 60; // 30 -> 90
+                  updateActivity(activityId, { progress: 30 + percentComplete });
+              }
+          };
+          
+          xhr.onload = () => xhr.status === 200 ? resolve() : reject(new Error('Upload failed'));
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.send(encryptedBlob);
       });
+
+      updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
+
+      // 3. Send Metadata via Message (Blind Attachment)
+      const metadata = {
+          type: 'file',
+          url: presignedRes.publicUrl,
+          key: rawFileKey, // Will be encrypted by sendMessage
+          name: file.name,
+          size: file.size,
+          mimeType: file.type
+      };
+
+      await get().sendMessage(conversationId, {
+          content: JSON.stringify(metadata)
+      }, tempId); // Reuse tempId to link optimistic message
       
       updateActivity(activityId, { progress: 100, fileName: 'Done!' });
       setTimeout(() => removeActivity(activityId), 1000); 
@@ -250,7 +272,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const me = useAuthStore.getState().user;
     if (!me) {
       removeActivity(activityId);
-      toast.error("User not authenticated.");
       return;
     }
     
@@ -287,34 +308,52 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     try {
       updateActivity(activityId, { progress: 20, fileName: 'Encrypting voice...' });
       const { encryptedBlob, key: rawFileKey } = await encryptFile(blob);
-      const { ciphertext: encryptedFileKey, sessionId } = await encryptMessage(rawFileKey, conversationId, isGroup);
 
       updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
       
-      const encryptedFile = new File([encryptedBlob], "voice-message.webm", { type: "application/octet-stream" });
+      // Get Presigned
+      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
+          method: 'POST',
+          body: JSON.stringify({
+              fileName: "voice-message.webm",
+              fileType: "audio/webm",
+              folder: 'attachments',
+              fileSize: blob.size
+          })
+      });
 
-      const fileUrl = await uploadToR2(encryptedFile, 'attachments', (percent) => {
-        const totalProgress = 40 + (percent * 0.5);
-        updateActivity(activityId, { progress: totalProgress });
+      // Upload
+      await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('PUT', presignedRes.uploadUrl, true);
+          xhr.setRequestHeader('Content-Type', "audio/webm");
+          xhr.upload.onprogress = (e) => {
+              if (e.lengthComputable) {
+                  const percentComplete = (e.loaded / e.total) * 50; 
+                  updateActivity(activityId, { progress: 40 + percentComplete });
+              }
+          };
+          xhr.onload = () => xhr.status === 200 ? resolve() : reject(new Error('Upload failed'));
+          xhr.onerror = () => reject(new Error('Network error'));
+          xhr.send(encryptedBlob);
       });
 
       updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
 
-      await api(`/api/uploads/messages/${conversationId}`, {
-        method: "POST",
-        body: JSON.stringify({
-          fileUrl,
-          fileName: "voice-message.webm",
-          fileType: "audio/webm;encrypted=true",
-          fileSize: blob.size,
-          duration,
-          tempId,
-          fileKey: encryptedFileKey,
-          sessionId,
-          repliedToId: replyingTo?.id,
-          expiresIn
-        })
-      });
+      // Send Metadata
+      const metadata = {
+          type: 'file',
+          url: presignedRes.publicUrl,
+          key: rawFileKey,
+          name: "voice-message.webm",
+          size: blob.size,
+          mimeType: "audio/webm",
+          duration
+      };
+
+      await get().sendMessage(conversationId, {
+          content: JSON.stringify(metadata)
+      }, tempId);
       
       updateActivity(activityId, { progress: 100, fileName: 'Sent!' });
       setTimeout(() => removeActivity(activityId), 1000); 
