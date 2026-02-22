@@ -6,72 +6,62 @@ import { api } from '@lib/api';
 
 interface ReactionPopoverProps {
   message: Message;
-  children: React.ReactNode; // Tombol pemicu
+  children: React.ReactNode;
 }
 
 const COMMON_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
 
 export default function ReactionPopover({ message, children }: ReactionPopoverProps) {
   const me = useAuthStore((s) => s.user);
-  const { addReaction, removeReaction } = useMessageStore(s => ({ addReaction: s.addReaction, removeReaction: s.removeReaction }));
+  const { sendReaction, removeLocalReaction } = useMessageStore(s => ({ 
+    sendReaction: s.sendReaction, 
+    removeLocalReaction: s.removeLocalReaction 
+  }));
 
   const handleSelectReaction = async (emoji: string) => {
     if (!me) return;
     
+    // Check if I already reacted
     const userReaction = message.reactions?.find(r => r.userId === me.id);
 
-    // If user clicks the same emoji, they are toggling it off.
+    // 1. TOGGLE OFF (If clicking same emoji)
     if (userReaction?.emoji === emoji) {
-      removeReaction(message.conversationId, message.id, userReaction.id);
-      await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' }).catch(() => {
-        // Revert on failure
-        addReaction(message.conversationId, message.id, userReaction);
-      });
+      // Optimistic remove
+      removeLocalReaction(message.conversationId, message.id, userReaction.id);
+      
+      // Server remove
+      try {
+        if (userReaction.isMessage) {
+            // New "Reactions as Messages"
+            await api(`/api/messages/${userReaction.id}`, { method: 'DELETE' });
+        } else {
+            // Legacy "MessageReaction" table
+            await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
+        }
+      } catch (e) {
+        console.error("Failed to remove reaction:", e);
+      }
       return;
     }
 
-    // If user clicks a new emoji, handle adding/replacing
-    const tempId = `temp-reaction-${Date.now()}`;
-    const optimisticReaction = {
-      id: tempId,
-      emoji,
-      userId: me.id,
-      user: { id: me.id, name: me.name, username: me.username },
-      tempId: tempId,
-    };
-
-    // Optimistically remove the old reaction if it exists
+    // 2. REPLACE (If clicking different emoji)
     if (userReaction) {
-      removeReaction(message.conversationId, message.id, userReaction.id);
+        // Remove old one first
+        removeLocalReaction(message.conversationId, message.id, userReaction.id);
+        
+        const deletePromise = userReaction.isMessage
+            ? api(`/api/messages/${userReaction.id}`, { method: 'DELETE' })
+            : api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
+            
+        deletePromise.catch(console.error);
     }
-    // Optimistically add the new one
-    addReaction(message.conversationId, message.id, optimisticReaction);
 
+    // 3. ADD NEW (Send as message)
+    // Optimistic update is handled inside sendReaction store action
     try {
-      // Add the new reaction on the server first
-      await api(`/api/messages/${message.id}/reactions`, {
-        method: 'POST',
-        body: JSON.stringify({ emoji, tempId }),
-      });
-
-      // If that succeeds, try to delete the old one, but don't revert the new one if this fails.
-      if (userReaction) {
-        try {
-          await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
-        } catch (deleteError) {
-          console.error("Failed to delete old reaction, but new reaction was successful:", deleteError);
-          // The UI is already showing the new state, which is fine.
-          // The old reaction might reappear on refresh, which is an acceptable inconsistency for now.
-        }
-      }
-    } catch (error) {
-      // This outer catch only handles the failure of the POST request.
-      console.error("Failed to add new reaction:", error);
-      // Revert all optimistic changes on failure
-      removeReaction(message.conversationId, message.id, tempId);
-      if (userReaction) {
-        addReaction(message.conversationId, message.id, userReaction);
-      }
+        await sendReaction(message.conversationId, message.id, emoji);
+    } catch (e) {
+        console.error("Failed to send reaction:", e);
     }
   };
 

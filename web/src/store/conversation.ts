@@ -37,7 +37,7 @@ export type Message = {
   createdAt: string;
   error?: boolean;
   preview?: string;
-  reactions?: { id: string; emoji: string; userId: string }[];
+  reactions?: { id: string; emoji: string; userId: string; isMessage?: boolean }[];
   optimistic?: boolean;
   repliedTo?: Message;
   repliedToId?: string;

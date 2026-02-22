@@ -61,7 +61,7 @@ export function getSocket() {
 
     const { setStatus } = useConnectionStore.getState();
     const { addOrUpdate, setOnlineUsers, userJoined, userLeft } = usePresenceStore.getState();
-    const { updateMessage, addReaction, removeReaction, updateMessageStatus } = useMessageStore.getState();
+    const { updateMessage, addLocalReaction, removeLocalReaction, updateMessageStatus } = useMessageStore.getState();
     const conversationStore = useConversationStore.getState();
 
     // --- System Listeners ---
@@ -169,15 +169,15 @@ export function getSocket() {
     socket.on("typing:update", ({ userId, conversationId, isTyping }) => addOrUpdate({ id: userId, conversationId, isTyping }));
     socket.on("reaction:new", ({ conversationId, messageId, reaction }) => {
       const { user: me } = useAuthStore.getState();
-      const { replaceOptimisticReaction, addReaction } = useMessageStore.getState();
+      const { replaceOptimisticReaction, addLocalReaction } = useMessageStore.getState();
 
       if (reaction.tempId && me && reaction.userId === me.id) {
         replaceOptimisticReaction(conversationId, messageId, reaction.tempId, reaction);
       } else {
-        addReaction(conversationId, messageId, reaction);
+        addLocalReaction(conversationId, messageId, reaction);
       }
     });
-    socket.on("reaction:deleted", ({ conversationId, messageId, reactionId }) => removeReaction(conversationId, messageId, reactionId));
+    socket.on("reaction:deleted", ({ conversationId, messageId, reactionId }) => removeLocalReaction(conversationId, messageId, reactionId));
     
     socket.on("conversation:new", (newConversation) => {
       conversationStore.addOrUpdateConversation(newConversation);
