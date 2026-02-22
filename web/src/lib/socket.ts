@@ -124,15 +124,25 @@ export function getSocket() {
           const activeId = useConversationStore.getState().activeId;
           if (decryptedMessage.conversationId !== activeId && decryptedMessage.sender) {
             const { addNotification } = useNotificationStore.getState();
-            addNotification({
-              sender: decryptedMessage.sender,
-              message: decryptedMessage.content || 'Sent a file',
-              link: decryptedMessage.conversationId,
-            });
+            // Don't notify for reactions (optional, but good UX)
+            const isReaction = decryptedMessage.content?.includes('"type":"reaction"');
+            if (!isReaction) {
+                addNotification({
+                  sender: decryptedMessage.sender,
+                  message: decryptedMessage.content || 'Sent a file',
+                  link: decryptedMessage.conversationId,
+                });
+            }
           }
         }
 
-        conversationStore.updateConversationLastMessage(decryptedMessage.conversationId, decryptedMessage);
+        // Only update last message preview if it's NOT a reaction
+        // This keeps the chat list showing the last actual conversation text/media
+        const isReactionPayload = decryptedMessage.content?.trim().startsWith('{') && decryptedMessage.content.includes('"type":"reaction"');
+        if (!isReactionPayload) {
+            conversationStore.updateConversationLastMessage(decryptedMessage.conversationId, decryptedMessage);
+        }
+        
         socket?.emit('message:ack_delivered', { messageId: decryptedMessage.id, conversationId: decryptedMessage.conversationId });
       } catch (e: any) {
         console.error("Failed to process incoming message", e);
@@ -228,14 +238,12 @@ export function getSocket() {
     socket.on('session:fulfill_request', (data) => fulfillKeyRequest(data).catch(console.error));
     socket.on('group:fulfill_key_request', (data) => fulfillGroupKeyRequest(data).catch(console.error));
     socket.on('session:new_key', (data) => {
-      console.log(`[Socket] Received session:new_key for ${data.conversationId}`, data);
       storeReceivedSessionKey(data)
         .then(() => {
-          console.log(`[Socket] Key stored successfully. Triggering reDecrypt.`);
           useKeychainStore.getState().keysUpdated();
           useMessageStore.getState().reDecryptPendingMessages(data.conversationId);
         })
-        .catch(err => console.error('[Socket] Failed to store received key:', err));
+        .catch(console.error);
     });
     socket.on('force_logout', () => {
       toast.error("This session has been logged out remotely.");

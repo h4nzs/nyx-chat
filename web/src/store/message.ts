@@ -759,22 +759,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   reDecryptPendingMessages: async (conversationId: string) => {
-    console.log(`[ReDecrypt] Starting for conversation ${conversationId} after 1s delay...`);
-    // Add a delay to ensure IndexedDB consistency after key storage
+    // Add a small delay to ensure IndexedDB consistency after key storage
     await new Promise(r => setTimeout(r, 1000));
 
     const state = get();
     const conversationMessages = state.messages[conversationId];
-    if (!conversationMessages) {
-        console.log(`[ReDecrypt] No messages found in store for ${conversationId}`);
-        return;
-    }
+    if (!conversationMessages) return;
 
     const pendingMessages = conversationMessages.filter(
       m => m.content === 'waiting_for_key' || m.content === '[Requesting key to decrypt...]'
     );
-
-    console.log(`[ReDecrypt] Found ${pendingMessages.length} pending messages.`);
 
     if (pendingMessages.length === 0) {
       return;
@@ -782,11 +776,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const reDecryptedMessages = await Promise.all(
       pendingMessages.map(async (msg) => {
-          console.log(`[ReDecrypt] Attempting to decrypt msg ${msg.id}`);
           // Pass the message object directly. decryptMessageObject will handle ciphertext priority.
-          const res = await decryptMessageObject(msg);
-          console.log(`[ReDecrypt] Result for ${msg.id}:`, res.content?.substring(0, 20));
-          return res;
+          return await decryptMessageObject(msg);
       })
     );
 
@@ -797,7 +788,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
              // Process potential reactions that were stuck in pending state
              const payload = parseReaction(m.content);
              if (payload) {
-                 console.log(`[ReDecrypt] Message ${m.id} is a reaction! applying locally.`);
                  get().addLocalReaction(conversationId, payload.targetMessageId, {
                      id: m.id,
                      messageId: payload.targetMessageId,
@@ -814,7 +804,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
              messageMap.set(m.id, m);
         } else {
              // Still pending, keep it in map
-             console.log(`[ReDecrypt] Message ${m.id} still pending after retry.`);
              messageMap.set(m.id, m);
         }
     });

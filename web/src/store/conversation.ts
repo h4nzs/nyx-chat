@@ -92,6 +92,15 @@ const sortConversations = (list: Conversation[], currentUserId: string | undefin
 
 const withPreview = (msg: Message): Message => {
   if (msg.content) {
+    // Check for Reaction Payload
+    if (msg.content.trim().startsWith('{') && msg.content.includes('"type":"reaction"')) {
+       try {
+         const payload = JSON.parse(msg.content);
+         if (payload.type === 'reaction') {
+            return { ...msg, preview: `Reacted ${payload.emoji || ''}` };
+         }
+       } catch {}
+    }
     return { ...msg, preview: msg.content };
   }
   if (msg.fileUrl) {
