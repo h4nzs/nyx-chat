@@ -1,0 +1,1433 @@
+diff --git a/server/src/routes/sessionKeys.ts b/server/src/routes/sessionKeys.ts
+index 4afa11a0..3836611a 100644
+--- a/server/src/routes/sessionKeys.ts
++++ b/server/src/routes/sessionKeys.ts
+@@ -9,54 +9,6 @@ import { zodValidate } from '../utils/validate.js'
+ const router: Router = Router()
+ router.use(requireAuth)
+ 
+-// GET all encrypted session keys for a user across ALL conversations
+-router.get('/sync', async (req, res, next) => {
+-  try {
+-    if (!req.user) throw new ApiError(401, 'Authentication required.')
+-    const userId = req.user.id
+-
+-    // 1. Find all conversations the user is a participant in
+-    const conversations = await prisma.conversation.findMany({
+-      where: {
+-        participants: { some: { userId } }
+-      },
+-      select: { id: true }
+-    })
+-
+-    const conversationIds = conversations.map(c => c.id)
+-
+-    // 2. Fetch all session keys for this user in those conversations
+-    const allKeys = await prisma.sessionKey.findMany({
+-      where: {
+-        userId,
+-        conversationId: { in: conversationIds }
+-      },
+-      select: {
+-        conversationId: true,
+-        sessionId: true,
+-        encryptedKey: true
+-      },
+-      orderBy: { createdAt: 'asc' }
+-    })
+-
+-    // 3. Group keys by conversationId
+-    const groupedKeys = allKeys.reduce((acc, key) => {
+-      if (!acc[key.conversationId]) {
+-        acc[key.conversationId] = []
+-      }
+-      acc[key.conversationId].push({
+-        sessionId: key.sessionId,
+-        encryptedKey: key.encryptedKey
+-      })
+-      return acc
+-    }, {} as Record<string, { sessionId: string; encryptedKey: string }[]>)
+-
+-    res.json(groupedKeys)
+-  } catch (error) {
+-    next(error)
+-  }
+-})
+-
+ // GET all encrypted session keys for a user in a conversation
+ router.get('/:conversationId', async (req, res, next) => {
+   try {
+@@ -118,56 +70,4 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
+   }
+ })
+ 
+-// POST: Backup session keys from client to server (encrypted)
+-router.post(
+-  '/backup',
+-  zodValidate({
+-    body: z.object({
+-      conversationId: z.string(),
+-      sessionId: z.string(),
+-      encryptedKey: z.string()
+-    })
+-  }),
+-  async (req, res, next) => {
+-    try {
+-      if (!req.user) throw new ApiError(401, 'Authentication required.')
+-      const userId = req.user.id
+-      const { conversationId, sessionId, encryptedKey } = req.body
+-
+-      // [SECURITY] Verify participation
+-      const participant = await prisma.participant.findUnique({
+-        where: {
+-          userId_conversationId: {
+-            userId,
+-            conversationId
+-          }
+-        }
+-      })
+-
+-      if (!participant) {
+-        throw new ApiError(403, 'Not a participant of this conversation.')
+-      }
+-
+-      // [FIX] Atomic upsert to prevent race conditions
+-      await prisma.sessionKey.upsert({
+-        where: {
+-          userId_sessionId: { userId, sessionId }
+-        },
+-        update: {}, // Immutable: Do nothing if exists
+-        create: {
+-          userId,
+-          conversationId,
+-          sessionId,
+-          encryptedKey,
+-          isInitiator: true
+-        }
+-      })
+-
+-      res.status(200).json({ success: true })
+-    } catch (error) {
+-      next(error)
+-    }
+-  }
+-)
+-
+ export default router
+diff --git a/src.md b/src.md
+index c24ccdf7..9a1d2eeb 100644
+--- a/src.md
++++ b/src.md
+@@ -121,79 +121,193 @@ Kalau lu masih gatel pengen ngoding fitur berat.
+    * Dampak UI: Client harus decrypt dulu baru tahu ini pesan dari
+      siapa (kiri/kanan).
+ 
+-Ini detail implementasi buat *upgrade* X3DH nyx ke standar Signal:
++Double Ratchet Algorithm (Rotasi Kunci Dinamis): Saat ini aplikasi menggunakan Static Session Key dari hasil awal X3DH. Untuk ke depannya, setiap kali User A mengirim pesan ke B, kuncinya harus berputar (ratchet). Ini memberikan Forward Secrecy sempurna per-pesan.
+ 
+-### 1. Update Database Server (`schema.prisma`)
++Key Compromise Indicator: Tambahkan fitur peringatan UI (warna merah) jika Safety Number / Identity Key lawan bicara tiba-tiba berubah secara drastis (pertanda akun mereka di-restore ulang atau ada potensi intervensi pihak ketiga).
+ 
+-Server butuh "lemari" buat nyimpen ratusan kunci publik sekali pakai dari setiap *user*.
++📑 Laporan Rencana Implementasi: Double Ratchet Algorithm
+ 
+-```prisma
+-// Tambahin model ini di schema.prisma
+-model OneTimePreKey {
+-  id        String   @id // Pakai ID unik yang di-generate dari client (misal: integer ID 1, 2, 3...)
+-  userId    String
+-  publicKey String   // Public key (Base64/Hex) dari Curve25519
+-  createdAt DateTime @default(now())
++  1. Analisis Kesiapan Arsitektur Saat Ini
+ 
+-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+ 
+-  @@index([userId])
+-}
++  ✅ Apa yang Sudah Kita Punya (Kuat):
++   1. X3DH Handshake: Kita sudah memiliki inisialisasi X3DH yang matang. Output dari X3DH (Shared Secret 32-byte) adalah titik awal (Root Key) yang
++      sempurna untuk memulai Double Ratchet.
++   2. Worker Isolation (`crypto.worker.ts`): Arsitektur kita sudah memisahkan operasi kriptografi ke Web Worker. Ini sangat ideal untuk Double
++      Ratchet karena kalkulasi matematika (DH step & KDF) akan semakin berat.
++   3. IndexedDB Storage (`keychainDb.ts`): Kita sudah memiliki mekanisme penyimpanan data lokal yang terenkripsi menggunakan Master Seed
++      (Argon2id).
++   4. JSON Payload Structure: sendMessage sudah bisa membungkus ciphertext ke dalam payload JSON (seperti yang kita lakukan untuk header X3DH).
+ 
+-```
+ 
+-*Catatan:* Di model `User`, lu juga harus nambahin relasi `oneTimePreKeys OneTimePreKey[]`.
++  ❌ Apa yang Kurang (Harus Dibangun):
++   1. KDF (Key Derivation Function): Double Ratchet sangat bergantung pada HKDF (HMAC-based Extract-and-Expand KDF). Saat ini kita hanya pakai
++      sodium.crypto_generichash (BLAKE2b). Kita perlu implementasi HKDF standar (bisa pakai Web Crypto API di dalam worker).
++   2. State Management (Ratchet State): Saat ini kita hanya menyimpan satu sessionKey per percakapan. Nanti, kita harus menyimpan State Object yang
++      kompleks.
++   3. Skipped Message Keys Store: Jika pesan datang tidak berurutan (misal pesan 3 datang sebelum pesan 2 karena delay jaringan), kita harus
++      memutar ratchet dua kali dan menyimpan kunci pesan ke-2 di penyimpanan sementara (Skipped Keys) sampai pesan ke-2 itu benar-benar tiba.
+ 
+-### 2. Client-Side: Generate & Upload Batch
+ 
+-Pas *user* register atau pas *stock* kunci di server udah mau abis, *client* (Web Worker) harus nge- *generate* banyak kunci sekaligus (Signal biasanya bikin 100 kunci).
++  ---
+ 
+-* **Generate:** Bikin 100 pasang *keypair* Curve25519 (`crypto_box_keypair`).
+-* **Store Local:** Simpen 100 *Private Key*-nya di `keychainDb.ts` (IndexedDB) pake enkripsi *master seed* lu. Jangan lupa catat `keyId`-nya.
+-* **Upload:** Kirim 100 *Public Key*-nya beserta `keyId` ke server lewat API.
++  2. Desain Arsitektur Double Ratchet untuk NYX
+ 
+-### 3. Server-Side: Sistem "Pop" (Dispense Key)
+ 
+-Ini bagian penting dari konsep *One-Time*. Saat Alice mau ngechat Bob, Alice bakal minta *Pre-Key Bundle* Bob ke server.
++  A. Struktur State (Ratchet State)
++  Kita harus mengubah skema penyimpanan di IndexedDB. Alih-alih menyimpan sessionKey: Uint8Array, kita akan menyimpan state terenkripsi yang
++  berisi:
++   * RootKey (32 bytes): Kunci utama untuk menurunkan Chain Keys baru.
++   * SenderChainKey (32 bytes): Untuk mengirim pesan.
++   * ReceiverChainKey (32 bytes): Untuk menerima pesan.
++   * MessageNumber (Int): Nomor pesan terkirim di chain saat ini.
++   * PreviousChainLength (Int): Jumlah pesan di chain penerima sebelum rotasi DH terakhir.
++   * MyRatchetKeyPair (Private/Public): Kunci Curve25519 (ECDH) milik kita yang akan terus diganti.
++   * TheirRatchetPublicKey (Public): Kunci ECDH terakhir milik lawan bicara.
+ 
+-Server harus mengembalikan:
+ 
+-1. Identity Key Bob ()
+-2. Signed Pre-Key Bob () beserta *signature*-nya.
+-3. **Satu** One-Time Pre-Key Bob ().
++  B. Struktur Header Pesan (Double Ratchet Header)
++  Setiap ciphertext yang dikirim harus dilengkapi header yang tidak dienkripsi (tapi bisa di-autentikasi / AAD). Di NYX, kita akan memodifikasi
++  payload JSON dari:
++   1 { "ciphertext": "..." }
++  Menjadi:
+ 
+-**Krusial:** Begitu server ngirim  ke Alice, server **HARUS LANGSUNG MENGHAPUS**  tersebut dari *database*. Jadi kalau orang lain mau ngechat Bob sedetik kemudian, dia bakal dapet  yang berbeda.
+ 
+-### 4. Upgrade Kalkulasi X3DH (Di Web Worker Alice)
++   1 {
++   2   "dr": {
++   3     "epk": "Base64(My_Current_Ratchet_Public_Key)",
++   4     "n": 5, // Message Number
++   5     "pn": 2 // Previous Chain Length
++   6   },
++   7   "ciphertext": "..."
++   8 }
+ 
+-Nah, di sinilah *math* kriptografinya berubah. Sekarang kita punya 4 tahap kalkulasi *Diffie-Hellman* (`crypto_scalarmult`), bukan 3 lagi.
++  ---
+ 
+-Di `crypto.worker.ts`, lu harus ngitung 4 *shared secrets* ini:
++  3. Rencana Alur Kerja (Implementation Workflow)
+ 
+-*
+-*
+-*
+-* *(Ini yang baru!)*
+ 
+-Setelah dapet keempatnya, gabungin semua (di- *concatenate*) dan masukin ke *Key Derivation Function* (KDF), biasanya pake HKDF (HMAC-based Extract-and-Expand KDF) buat dapet *Shared Secret* ():
++  Implementasi ini cukup masif dan harus dilakukan dalam 4 fase (PR) yang terpisah agar tidak merusak sistem yang ada.
+ 
+-*Note:*  = Identity Key,  = Ephemeral Key (kunci sementara yang Alice bikin pas mau ngechat),  = Signed Pre-Key.
+ 
+-### 5. Inisialisasi Pesan & Eksekusi di Sisi Bob
++  Fase 1: Fondasi Kriptografi (Worker Update)
++   1. Implementasi HKDF: Menambahkan fungsi HKDF-SHA256 ke dalam crypto.worker.ts menggunakan crypto.subtle.
++   2. Fungsi Ratchet Step:
++       * KdfRoot(RootKey, DH_Output) -> [NewRootKey, ChainKey]
++       * KdfChain(ChainKey) -> [NewChainKey, MessageKey]
++   3. Double Ratchet Init: Memodifikasi worker_x3dh_initiator dan worker_x3dh_recipient agar alih-alih mengembalikan satu sessionKey, mereka
++      mengembalikan struktur RatchetState awal.
+ 
+-Pas Alice ngirim pesan pertama ke Bob, pesan itu harus nyertain:
+ 
+-*  (Identity Key Alice)
+-*  (Ephemeral Key Alice)
+-* **ID dari  yang dipakai Alice.**
++  Fase 2: Penyimpanan Lokal (State & Skipped Keys)
++   1. Refactor `keychainDb.ts`:
++       * Ubah SESSION_KEYS_STORE_NAME agar bisa menyimpan objek RatchetState yang dienkripsi dengan Master Seed.
++       * Tambahkan Object Store baru: skipped-message-keys (menyimpan kunci pesan yang datang out-of-order agar bisa didekripsi nanti).
+ 
+-**Apa yang Bob lakuin pas nerima pesan ini?**
+ 
+-1. Bob ngeliat *payload* pesannya: *"Oh, Alice pake OTPK ID nomor 42"*.
+-2. Bob nyari *Private Key* nomor 42 di `keychainDb.ts` (IndexedDB).
+-3. Bob ngelakuin kalkulasi X3DH yang sama buat dapetin .
+-4. **Paranoia Step:** Bob **MENGHAPUS SECARA PERMANEN** *Private Key* nomor 42 dari IndexedDB-nya. Ini menjamin *Forward Secrecy*. Kalau HP/Browser Bob dibajak besok, *hacker* gak bisa baca pesan Alice yang ini karena kuncinya bener-bener udah musnah.
++  Fase 3: Modifikasi Alur Pengiriman (sendMessage)
++   1. Setiap memanggil sendMessage, panggil worker untuk:
++       * Lakukan Symmetric-key Ratchet (putar SenderChainKey menjadi kunci pesan baru).
++       * Gunakan MessageKey tersebut untuk enkripsi pesan.
++       * Naikkan MessageNumber (+1).
++       * Simpan RatchetState terbaru ke IndexedDB.
++   2. Sisipkan properti dr: { epk, n, pn } ke dalam payload JSON.
+ 
+----
+ 
+-Dengan *flow* ini, bahkan seandainya *server* lu di- *hack* dan *Signed Pre-Key* Bob dipalsuin, *hacker* tetep gak bisa ngedekripsi pesan, karena dia gak punya *Private Key* dari  yang disimpen di *browser* Bob.
++  Fase 4: Modifikasi Alur Penerimaan (addIncomingMessage)
++   1. Saat menerima pesan, baca header dr.
++   2. Cek apakah pesan ini sudah ada di skipped-message-keys. Jika ada, langsung dekripsi.
++   3. DH Ratchet (Jika Ephemeral Key Berubah): Jika dr.epk berbeda dari TheirRatchetPublicKey di state kita, artinya lawan bicara sudah mengganti
++      kuncinya.
++       * Kita hitung DH baru (Kunci Privat kita * Kunci Publik dia yang baru).
++       * Jalankan KdfRoot untuk mendapatkan ReceiverChainKey baru.
++       * Ganti Kunci Privat kita dengan yang baru (generate keypair baru), hitung DH lagi untuk mendapatkan SenderChainKey baru.
++   4. Symmetric Ratchet: Lakukan iterasi KdfChain pada ReceiverChainKey sampai nomor pesannya cocok dengan dr.n. (Jika ada pesan yang terlewat,
++      simpan kunci-kuncinya di skipped-message-keys).
++   5. Gunakan kunci pesan terakhir untuk mendekripsi ciphertext.
++   6. Simpan RatchetState terbaru ke IndexedDB.
++
++  ---
++
++
++  4. Tantangan & Mitigasi Keamanan
++
++
++   1. Sinkronisasi Backup Server (`/sync`):
++       * Tantangan: Saat ini kita me-backup sessionKey statis ke server. Dengan Double Ratchet, State terus berubah setiap ada pesan. Mem-backup
++         state terus-menerus akan membebani server dan rentan race condition jika user login di dua device bersamaan.
++       * Mitigasi: Standar Signal Protocol tidak menyarankan sinkronisasi state antar device. Device baru (Linked Device) biasanya memulai sesi
++         (Session/Ratchet) yang benar-benar baru dengan lawan bicara (Multi-device architecture).
++       * Keputusan Arsitektur: Kita harus mengubah strategi. Untuk saat ini, kita bisa memilih untuk mem-backup state hanya secara berkala (misal
++         tiap 10 pesan) ATAU tidak mem-backupnya sama sekali (device baru = chat history kosong, mulai baru, layaknya Signal asli). Ini butuh
++         keputusan bisnismu.
++
++
++   2. Out-of-Order Delivery (Pesan Tersendat):
++       * Jika jaringan buruk, algoritma ini menuntut penyimpanan sementara (Max Skip Limits, misal 1000 pesan). Jika lebih dari 1000 pesan
++         terlewat, sesi dianggap rusak dan butuh X3DH ulang.
++
++  ---
++
++  Kesimpulan
++
++
++  Sistem NYX saat ini sudah sangat kokoh sebagai pijakan. Menuju Double Ratchet adalah evolusi alami. Namun, perubahan ini akan merombak total
++  bagaimana state sesi disimpan dan dikelola.
++
++
++  Apakah kamu ingin kita mulai mengeksekusi Fase 1 (Membangun Fondasi Kriptografi HKDF & KdfChain di Worker)? Atau kamu ingin mendiskusikan bagian
++  arsitektur (seperti nasib Backup Server) terlebih dahulu?
++
++  🔄 Arsitektur "Periodic Epoch Ratcheting" (Rotasi Sesi Berkala)
++
++
++  Daripada memutar kunci di setiap pesan (Double Ratchet), kita memutar keseluruhan sesi X3DH secara transparan setelah jangka waktu atau jumlah
++  pesan tertentu.
++
++  Bagaimana Cara Kerjanya?
++
++
++   1. Epoch 1 (Pesan 1 - 100):
++      User A dan User B melakukan X3DH Handshake. Tercipta session_123. Kunci ini di-backup ke server. Mereka bertukar 100 pesan menggunakan kunci
++  ini.
++   2. Trigger Rotasi:
++      Saat User A ingin mengirim pesan ke-101, sistem (secara background) mendeteksi batas rotasi tercapai.
++   3. Epoch 2 (Pesan 101 - 200):
++      Sistem User A diam-diam mengambil OTPK baru milik User B dari server, melakukan X3DH Handshake BARU, dan menciptakan session_456.
++   4. Transisi Halus:
++      Pesan ke-101 dikirim menggunakan session_456. Kunci baru ini di-backup ke server.
++   5. Penerima (User B):
++      Saat menerima pesan ke-101, User B mendeteksi header X3DH baru, memprosesnya, dan menyimpan session_456 ke lokal & server backup.
++
++  Mengapa Ini Sangat Cocok untuk NYX?
++
++
++   * 100% Menggunakan Kode yang Ada: Kita tidak perlu menulis algoritma KDF yang rumit. Kita hanya memicu ulang logika "Lazy Init X3DH" yang sudah
++     kita buat dengan susah payah kemarin! Database kita (SessionKey) juga sudah mendukung penyimpanan banyak sessionId untuk satu percakapan.
++   * Forward Secrecy yang Praktis: Jika kunci session_456 bocor, hacker HANYA bisa membaca pesan 101-200. Pesan 1-100 tetap aman karena kuncinya
++     (session_123) berbeda dan terenkripsi kuat di server.
++   * UX Tidak Dikorbankan: Saat user login di browser baru, fitur /api/session-keys/sync (Restore) yang baru saja kita perbaiki akan men-download
++     SEMUA kunci epoch (session_123, session_456, dll) dan user tetap bisa membaca seluruh riwayat chat-nya secara instan.
++   * Performa Ringan: Melakukan asimetris X3DH setiap 100 pesan (atau setiap 3 hari) sangat ringan di CPU dan baterai dibandingkan melakukannya di
++     setiap ketikan pesan.
++
++  Rencana Implementasi (Jika kamu setuju)
++
++  Kita hanya perlu menambahkan sedikit logika di web/src/store/message.ts (di dalam sendMessage):
++
++
++    1 // Konsep Kasar
++    2 const LATEST_KEY = await retrieveLatestSessionKeySecurely(conversationId);
++    3 const MESSAGE_COUNT = countMessagesInSession(conversationId, LATEST_KEY.sessionId);
++    4
++    5 if (MESSAGE_COUNT >= 50) { 
++    6    // Waktunya Rotasi!
++    7    // Buang LATEST_KEY, paksa sistem melakukan X3DH baru seperti saat pesan pertama kali dikirim.
++    8 } else {
++    9    // Pakai LATEST_KEY
++   10 }
++
++
++  Ini adalah jalan tengah emas (Golden Compromise) antara kemudahan sinkronisasi cloud ala WhatsApp/Telegram dan keamanan kriptografi tingkat
++  tinggi ala Signal.
+\ No newline at end of file
+diff --git a/web/dev-dist/registerSW.js b/web/dev-dist/registerSW.js
+deleted file mode 100644
+index fdeaac12..00000000
+--- a/web/dev-dist/registerSW.js
++++ /dev/null
+@@ -1 +0,0 @@
+-if('serviceWorker' in navigator) navigator.serviceWorker.register('/dev-sw.js?dev-sw', { scope: '/', type: 'module' })
+\ No newline at end of file
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index e560fb58..23c7d658 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -39,10 +39,6 @@ import { useGlobalShortcut } from './hooks/useGlobalShortcut';
+ 
+ // Libs & Utils
+ import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
+-import { syncSessionKeys } from './utils/sessionSync';
+-
+-// Variabel global untuk mencegah double-sync saat render cepat
+-let isSyncing = false;
+ 
+ // Initialize socket instance once
+ getSocket();
+@@ -151,23 +147,7 @@ const AppContent = () => {
+     }
+   }, [user, location.pathname]);
+ 
+-  // 3. Sync Encryption Keys
+-  useEffect(() => {
+-    const sync = async () => {
+-      if (user && !location.pathname.startsWith('/link-device') && sessionStorage.getItem('keys_synced') !== 'true' && !isSyncing) {
+-        try {
+-          isSyncing = true;
+-          await syncSessionKeys();
+-          sessionStorage.setItem('keys_synced', 'true');
+-        } catch (error) {
+-          console.error("❌ Key synchronization failed:", error);
+-        } finally {
+-          isSyncing = false;
+-        }
+-      }
+-    };
+-    sync();
+-  }, [user, location.pathname]);
++  // 3. (Reserved for future use)
+ 
+   // 4. Apply Theme
+   useEffect(() => {
+diff --git a/web/src/lib/crypto-worker-proxy.ts b/web/src/lib/crypto-worker-proxy.ts
+index d7ecd410..669bf72c 100644
+--- a/web/src/lib/crypto-worker-proxy.ts
++++ b/web/src/lib/crypto-worker-proxy.ts
+@@ -227,4 +227,68 @@ export function worker_x3dh_recipient_regenerate(payload: {
+         theirIdentityKey: Array.from(payload.theirIdentityKey),
+         theirEphemeralKey: Array.from(payload.theirEphemeralKey)
+     });
++}
++
++// --- DOUBLE RATCHET PROXY FUNCTIONS ---
++
++export interface SerializedRatchetState {
++    RK: string;
++    CKs: string | null;
++    CKr: string | null;
++    DHs: { publicKey: string, privateKey: string };
++    DHr: string | null;
++    Ns: number;
++    Nr: number;
++    PN: number;
++}
++
++export function worker_dr_init_alice(payload: {
++    sk: Uint8Array,
++    theirSignedPreKeyPublic: Uint8Array
++}): Promise<SerializedRatchetState> {
++    return sendToWorker('dr_init_alice', { 
++        sk: Array.from(payload.sk), 
++        theirSignedPreKeyPublic: Array.from(payload.theirSignedPreKeyPublic) 
++    });
++}
++
++export function worker_dr_init_bob(payload: {
++    sk: Uint8Array,
++    mySignedPreKey: { publicKey: Uint8Array, privateKey: Uint8Array }
++}): Promise<SerializedRatchetState> {
++    return sendToWorker('dr_init_bob', {
++        sk: Array.from(payload.sk),
++        mySignedPreKey: {
++            publicKey: Array.from(payload.mySignedPreKey.publicKey),
++            privateKey: Array.from(payload.mySignedPreKey.privateKey)
++        }
++    });
++}
++
++export function worker_dr_ratchet_encrypt(payload: {
++    serializedState: SerializedRatchetState,
++    plaintext: Uint8Array | string
++}): Promise<{ state: SerializedRatchetState, header: any, ciphertext: Uint8Array }> {
++    return sendToWorker<{ state: SerializedRatchetState, header: any, ciphertext: any }>('dr_ratchet_encrypt', {
++        serializedState: payload.serializedState,
++        plaintext: typeof payload.plaintext === 'string' ? payload.plaintext : Array.from(payload.plaintext)
++    }).then(res => ({
++        ...res,
++        ciphertext: new Uint8Array(res.ciphertext)
++    }));
++}
++
++export function worker_dr_ratchet_decrypt(payload: {
++    serializedState: SerializedRatchetState,
++    header: any,
++    ciphertext: Uint8Array
++}): Promise<{ state: SerializedRatchetState, plaintext: Uint8Array, skippedKeys: { dh: string, n: number, mk: string }[] }> {
++    return sendToWorker<{ state: SerializedRatchetState, plaintext: any, skippedKeys: any[] }>('dr_ratchet_decrypt', {
++        serializedState: payload.serializedState,
++        header: payload.header,
++        ciphertext: Array.from(payload.ciphertext)
++    }).then(res => ({
++        ...res,
++        plaintext: new Uint8Array(res.plaintext)
++    }));
+ }
+\ No newline at end of file
+diff --git a/web/src/lib/keychainDb.ts b/web/src/lib/keychainDb.ts
+index e2032833..125ce8e8 100644
+--- a/web/src/lib/keychainDb.ts
++++ b/web/src/lib/keychainDb.ts
+@@ -5,7 +5,9 @@ const SESSION_KEYS_STORE_NAME = 'session-keys';
+ const GROUP_KEYS_STORE_NAME = 'group-keys';
+ const OTPK_STORE_NAME = 'one-time-pre-keys';
+ const PENDING_HEADERS_STORE_NAME = 'pending-headers';
+-const DB_VERSION = 4;
++const RATCHET_SESSIONS_STORE_NAME = 'ratchet-sessions';
++const SKIPPED_KEYS_STORE_NAME = 'skipped-keys';
++const DB_VERSION = 5;
+ 
+ // Cache DB connections by userId to handle switching accounts without reloading
+ const dbCache = new Map<string, Promise<IDBPDatabase>>();
+@@ -38,7 +40,14 @@ function getDb(): Promise<IDBPDatabase> {
+         if (oldVersion < 4) {
+           db.createObjectStore(PENDING_HEADERS_STORE_NAME);
+         }
++        if (oldVersion < 5) {
++          db.createObjectStore(RATCHET_SESSIONS_STORE_NAME);
++          db.createObjectStore(SKIPPED_KEYS_STORE_NAME);
++        }
+       },
++    }).catch(err => {
++      dbCache.delete(userId);
++      throw err;
+     });
+     dbCache.set(userId, promise);
+   }
+@@ -190,15 +199,57 @@ export async function deleteGroupKey(conversationId: string): Promise<void> {
+   await db.delete(GROUP_KEYS_STORE_NAME, conversationId);
+ }
+ 
++/**
++ * Stores the encrypted RatchetState for a conversation.
++ */
++export async function storeRatchetSession(conversationId: string, encryptedState: Uint8Array): Promise<void> {
++  const db = await getDb();
++  await db.put(RATCHET_SESSIONS_STORE_NAME, encryptedState, conversationId);
++}
++
++/**
++ * Retrieves the encrypted RatchetState for a conversation.
++ */
++export async function getRatchetSession(conversationId: string): Promise<Uint8Array | null> {
++  const db = await getDb();
++  return (await db.get(RATCHET_SESSIONS_STORE_NAME, conversationId)) || null;
++}
++
++/**
++ * Stores an encrypted skipped message key.
++ */
++export async function storeSkippedKey(headerKey: string, encryptedKey: Uint8Array): Promise<void> {
++  const db = await getDb();
++  await db.put(SKIPPED_KEYS_STORE_NAME, encryptedKey, headerKey);
++}
++
++/**
++ * Retrieves an encrypted skipped message key.
++ */
++export async function getSkippedKey(headerKey: string): Promise<Uint8Array | null> {
++  const db = await getDb();
++  return (await db.get(SKIPPED_KEYS_STORE_NAME, headerKey)) || null;
++}
++
++/**
++ * Deletes a skipped message key.
++ */
++export async function deleteSkippedKey(headerKey: string): Promise<void> {
++  const db = await getDb();
++  await db.delete(SKIPPED_KEYS_STORE_NAME, headerKey);
++}
++
+ /**
+  * Clears all keys from the database. Used on logout.
+  */
+ export async function clearAllKeys(): Promise<void> {
+   const db = await getDb();
+-  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, PENDING_HEADERS_STORE_NAME], 'readwrite');
++  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, SKIPPED_KEYS_STORE_NAME], 'readwrite');
+   await tx.objectStore(SESSION_KEYS_STORE_NAME).clear();
+   await tx.objectStore(GROUP_KEYS_STORE_NAME).clear();
+   await tx.objectStore(OTPK_STORE_NAME).clear();
+   await tx.objectStore(PENDING_HEADERS_STORE_NAME).clear();
++  await tx.objectStore(RATCHET_SESSIONS_STORE_NAME).clear();
++  await tx.objectStore(SKIPPED_KEYS_STORE_NAME).clear();
+   await tx.done;
+ }
+diff --git a/web/src/main.tsx b/web/src/main.tsx
+index 8a1aadfb..9a472acd 100644
+--- a/web/src/main.tsx
++++ b/web/src/main.tsx
+@@ -37,6 +37,17 @@ if (!import.meta.env.VITE_APP_SECRET) {
+   }
+ }
+ 
++// Request Persistent Storage for Local Keystore
++if (navigator.storage && navigator.storage.persist) {
++  navigator.storage.persist().then(persistent => {
++    if (persistent) {
++      console.log("Storage will not be cleared except by explicit user action.");
++    } else {
++      console.warn("Storage may be cleared by the UA under storage pressure.");
++    }
++  });
++}
++
+ createRoot(document.getElementById('root')!).render(
+   <React.StrictMode>
+     <App />
+diff --git a/web/src/store/auth.ts b/web/src/store/auth.ts
+index 363c9906..f32683f4 100644
+--- a/web/src/store/auth.ts
++++ b/web/src/store/auth.ts
+@@ -10,7 +10,6 @@ import toast from "react-hot-toast";
+ import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady } from "@lib/keyStorage";
+ import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; // Only import TYPE
+ import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; // Import helper
+-import { syncSessionKeys } from "@utils/sessionSync";
+ 
+ /**
+  * Retrieves the persisted signed pre-key, signs it with the identity signing key,
+@@ -289,12 +288,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+     },
+ 
+     login: async (emailOrUsername, password, restoredNotSynced = false) => {
+-      // [FIX] Ensure clean slate. Wipe old keys from IDB before starting new session.
+-      try {
+-        const { clearAllKeys } = await import('@lib/keychainDb');
+-        await clearAllKeys();
+-      } catch (e) { console.error("Failed to clear old keys:", e); }
+-
+       privateKeysCache = null;
+       set({ isInitializingCrypto: true }); // Show loading for crypto init
+ 
+@@ -356,11 +349,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+           toast("To enable secure messaging, restore your account from your recovery phrase in Settings.", { duration: 7000 });
+         }
+ 
+-        // [SYNC] Restore historical session keys from server backup
+-        try {
+-          await syncSessionKeys();
+-        } catch (e) { console.error("Auto-sync keys failed:", e); }
+-
+         // [RESET] Force rotate OTPK on new login to prevent stale key decryption errors
+         try {
+           await resetOneTimePreKeys();
+@@ -408,12 +396,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+     registerAndGeneratePhrase: async (data) => {
+       set({ isInitializingCrypto: true });
+       try {
+-        // [FIX] Ensure clean slate. Wipe old keys from IDB before generating new ones.
+-        try {
+-            const { clearAllKeys } = await import('@lib/keychainDb');
+-            await clearAllKeys();
+-        } catch (e) { console.error("Failed to clear old keys:", e); }
+-
+         // Dynamic Import
+         const { registerAndGenerateKeys, retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+ 
+@@ -472,10 +454,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+           localStorage.setItem("user", JSON.stringify(res.user));
+           setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
+           
+-          try {
+-            await syncSessionKeys();
+-          } catch (e) { console.error("Auto-sync keys failed:", e); }
+-
+           connectSocket();
+           return { phrase, needVerification: false };
+         }
+@@ -540,12 +518,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+         clearAuthCookies();
+         privateKeysCache = null;
+         
+-        // [FIX] Clear ALL persistent keys (IndexedDB) and Master Key (LocalStorage)
+-        try {
+-            const { clearAllKeys } = await import('@lib/keychainDb');
+-            await clearAllKeys();
+-        } catch (e) { console.error("Failed to wipe IndexedDB:", e); }
+-        
+         await clearKeys(); 
+         
+         localStorage.removeItem('user');
+diff --git a/web/src/store/message.ts b/web/src/store/message.ts
+index 9422d6ef..cd149e6e 100644
+--- a/web/src/store/message.ts
++++ b/web/src/store/message.ts
+@@ -12,6 +12,8 @@ import {
+   getMyEncryptionKeyPair, 
+   storeSessionKeySecurely, 
+   deriveSessionKeyAsRecipient,
++  storeRatchetStateSecurely,
++  retrieveRatchetStateSecurely,
+   PreKeyBundle 
+ } from "@utils/crypto";
+ import toast from "react-hot-toast";
+@@ -80,11 +82,15 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
+                    otpkId
+                );
+ 
+-               // Store Key & Use it
+-               if (message.sessionId) {
+-                   await storeSessionKeySecurely(message.conversationId, message.sessionId, sessionKey);
+-                   contentToDecrypt = ciphertext; // Update target content
+-               }
++               // [DOUBLE RATCHET INIT BOB]
++               const { worker_dr_init_bob } = await import('@lib/crypto-worker-proxy');
++               const newState = await worker_dr_init_bob({
++                   sk: sessionKey,
++                   mySignedPreKey: mySignedPreKeyPair
++               });
++
++               await storeRatchetStateSecurely(message.conversationId, newState);
++               contentToDecrypt = ciphertext; // Update target content
+            }
+        } catch (e) {
+            console.error("[X3DH] Failed to parse/derive from header:", e);
+@@ -382,16 +388,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+     }
+ 
+     try {
+-      let ciphertext = '', sessionId: string | undefined;
++      let ciphertext = '';
+       let x3dhHeader: any = null;
+-      let encryptionSession: { sessionId: string; key: Uint8Array } | undefined;
+ 
+       // LAZY SESSION INITIALIZATION (X3DH) - SINGLE SOURCE OF TRUTH
+       // No more getPendingHeader check here.
+       if (!isGroup && data.content) {
+-          const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
++          const state = await retrieveRatchetStateSecurely(conversationId);
+           
+-          if (!latestKey) {
++          if (!state) {
+              // Fix: Use p.id instead of p.userId
+              const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
+              
+@@ -403,12 +408,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+                  const myKeyPair = await getMyEncryptionKeyPair();
+                  const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
+                  
+-                 // 3. Generate Session ID & Store Self-Key
+                  const sodium = await getSodium();
+-                 sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
+-                 await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
+-
+-                 encryptionSession = { sessionId, key: sessionKey };
++                 
++                 // [DOUBLE RATCHET INIT ALICE]
++                 const { worker_dr_init_alice } = await import('@lib/crypto-worker-proxy');
++                 const newState = await worker_dr_init_alice({
++                     sk: sessionKey,
++                     theirSignedPreKeyPublic: sodium.from_base64(theirBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING)
++                 });
++                 
++                 await storeRatchetStateSecurely(conversationId, newState);
+ 
+                  // 4. Prepare Header for Peer
+                  x3dhHeader = {
+@@ -421,30 +430,28 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+                  toast.error("Encryption failed: Cannot identify recipient.");
+                  return; // STOP HERE
+              }
+-          } else {
+-             // Reuse existing session
+-             sessionId = latestKey.sessionId;
+-             encryptionSession = latestKey;
+           }
+       }
+ 
+       if (data.content) {
+-        if (!isGroup && !encryptionSession) {
+-            console.error("[Crypto] Attempted to encrypt without session:", { conversationId, isGroup });
+-            throw new Error("Encryption setup failed. Please try reloading the chat.");
+-        }
+-
+-        // Encrypt content
+-        const result = await encryptMessage(data.content, conversationId, isGroup, encryptionSession);
++        // Encrypt content (encryptMessage now handles Ratchet state internally for 1-on-1)
++        const result = await encryptMessage(data.content, conversationId, isGroup);
+         ciphertext = result.ciphertext;
+-        if (!sessionId) sessionId = result.sessionId; 
++        
++        // Combine DR Header with Ciphertext (JSON payload) for private chats
++        if (!isGroup && result.drHeader) {
++            ciphertext = JSON.stringify({
++                dr: result.drHeader,
++                ciphertext: ciphertext
++            });
++        }
+       }
+       
+       // EMBED HEADER IF NEW SESSION
+       if (x3dhHeader) {
+           const payloadJson = JSON.stringify({
+               x3dh: x3dhHeader,
+-              ciphertext: ciphertext
++              ciphertext: ciphertext // This is already the {dr, ciphertext} JSON string if !isGroup
+           });
+           ciphertext = payloadJson;
+       }
+@@ -452,7 +459,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+       const payload = {
+           ...data,
+           content: ciphertext,
+-          sessionId,
++          sessionId: isGroup ? 'group_session' : undefined, // Placeholder for legacy compatibility if needed
+           fileKey: undefined, fileName: undefined, fileType: undefined, fileSize: undefined
+       };
+ 
+diff --git a/web/src/utils/crypto.ts b/web/src/utils/crypto.ts
+index 35984dc4..e9af7a32 100644
+--- a/web/src/utils/crypto.ts
++++ b/web/src/utils/crypto.ts
+@@ -13,7 +13,12 @@ import {
+   storeOneTimePreKey,
+   getOneTimePreKey,
+   deleteOneTimePreKey,
+-  getLastOtpkId
++  getLastOtpkId,
++  storeRatchetSession,
++  getRatchetSession,
++  storeSkippedKey,
++  getSkippedKey,
++  deleteSkippedKey
+ } from '@lib/keychainDb';
+ import { 
+   emitSessionKeyFulfillment, 
+@@ -23,6 +28,7 @@ import {
+   emitGroupKeyFulfillment 
+ } from '@lib/socket';
+ import type { Participant } from '@store/conversation';
++import type { SerializedRatchetState } from '@lib/crypto-worker-proxy';
+ 
+ // --- Secure Storage Helpers ---
+ 
+@@ -34,6 +40,52 @@ async function getMasterSeedOrThrow(): Promise<Uint8Array> {
+   return masterSeed;
+ }
+ 
++export async function storeRatchetStateSecurely(conversationId: string, state: SerializedRatchetState) {
++  const masterSeed = await getMasterSeedOrThrow();
++  const { worker_encrypt_session_key } = await getWorkerProxy();
++  const stateBytes = new TextEncoder().encode(JSON.stringify(state));
++  const encryptedState = await worker_encrypt_session_key(stateBytes, masterSeed);
++  await storeRatchetSession(conversationId, encryptedState);
++}
++
++export async function retrieveRatchetStateSecurely(conversationId: string): Promise<SerializedRatchetState | null> {
++  const encryptedState = await getRatchetSession(conversationId);
++  if (!encryptedState) return null;
++
++  try {
++    const masterSeed = await getMasterSeedOrThrow();
++    const { worker_decrypt_session_key } = await getWorkerProxy();
++    const stateBytes = await worker_decrypt_session_key(encryptedState, masterSeed);
++    return JSON.parse(new TextDecoder().decode(stateBytes));
++  } catch (error) {
++    console.error(`Failed to decrypt ratchet state for ${conversationId}:`, error);
++    return null;
++  }
++}
++
++export async function storeSkippedMessageKeySecurely(headerKey: string, mkString: string) {
++  const masterSeed = await getMasterSeedOrThrow();
++  const { worker_encrypt_session_key } = await getWorkerProxy();
++  const mkBytes = new TextEncoder().encode(mkString);
++  const encryptedMk = await worker_encrypt_session_key(mkBytes, masterSeed);
++  await storeSkippedKey(headerKey, encryptedMk);
++}
++
++export async function retrieveSkippedMessageKeySecurely(headerKey: string): Promise<string | null> {
++  const encryptedMk = await getSkippedKey(headerKey);
++  if (!encryptedMk) return null;
++
++  try {
++    const masterSeed = await getMasterSeedOrThrow();
++    const { worker_decrypt_session_key } = await getWorkerProxy();
++    const mkBytes = await worker_decrypt_session_key(encryptedMk, masterSeed);
++    return new TextDecoder().decode(mkBytes);
++  } catch (error) {
++    console.error(`Failed to decrypt skipped key ${headerKey}:`, error);
++    return null;
++  }
++}
++
+ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
+   try {
+     const { count } = await authFetch<{ count: number }>('/api/keys/count-otpk');
+@@ -80,15 +132,6 @@ export async function storeSessionKeySecurely(conversationId: string, sessionId:
+   const { worker_encrypt_session_key } = await getWorkerProxy();
+   const encryptedKey = await worker_encrypt_session_key(key, masterSeed);
+   await addSessionKey(conversationId, sessionId, encryptedKey);
+-
+-  // [BACKUP] Sync new key to server immediately (Fire & Forget)
+-  const sodium = await getSodiumLib();
+-  const encryptedKeyB64 = sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+-
+-  authFetch('/api/session-keys/backup', {
+-    method: 'POST',
+-    body: JSON.stringify({ conversationId, sessionId, encryptedKey: encryptedKeyB64 })
+-  }).catch(err => console.error("[Crypto] Failed to backup session key:", err));
+ }
+ 
+ export async function retrieveSessionKeySecurely(conversationId: string, sessionId: string): Promise<Uint8Array | null> {
+@@ -371,39 +414,40 @@ export async function encryptMessage(
+   conversationId: string,
+   isGroup: boolean = false,
+   existingSession?: { sessionId: string; key: Uint8Array }
+-): Promise<{ ciphertext: string; sessionId?: string }> {
++): Promise<{ ciphertext: string; sessionId?: string; drHeader?: any }> {
+   const sodium = await getSodiumLib();
+-  const { worker_crypto_secretbox_xchacha20poly1305_easy } = await getWorkerProxy();
+-
+-  const nonce = sodium.randombytes_buf(XCHACHA20_NONCE_BYTES);
+-  let key: Uint8Array;
+-  let sessionId: string | undefined;
++  const { worker_crypto_secretbox_xchacha20poly1305_easy, worker_dr_ratchet_encrypt } = await getWorkerProxy();
+ 
+   if (isGroup) {
+     const groupKey = await retrieveGroupKeySecurely(conversationId);
+     if (!groupKey) throw new Error(`No group key available for conversation ${conversationId}.`);
+-    key = groupKey;
+-    sessionId = undefined;
++    
++    const nonce = sodium.randombytes_buf(XCHACHA20_NONCE_BYTES);
++    const messageBytes = sodium.from_string(text);
++    const encrypted = await worker_crypto_secretbox_xchacha20poly1305_easy(messageBytes, nonce, groupKey);
++
++    const combined = new Uint8Array(nonce.length + encrypted.length);
++    combined.set(nonce);
++    combined.set(encrypted, nonce.length);
++
++    return { ciphertext: sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING) };
+   } else {
+-    if (existingSession) {
+-      key = existingSession.key;
+-      sessionId = existingSession.sessionId;
+-    } else {
+-      const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
+-      if (!latestKey) throw new Error('No session key available for encryption.');
+-      key = latestKey.key;
+-      sessionId = latestKey.sessionId;
+-    }
+-  }
+-  
+-  const messageBytes = sodium.from_string(text);
+-  const encrypted = await worker_crypto_secretbox_xchacha20poly1305_easy(messageBytes, nonce, key);
++    // DOUBLE RATCHET
++    const state = await retrieveRatchetStateSecurely(conversationId);
++    if (!state) throw new Error('Ratchet state not initialized for encryption.');
++
++    const result = await worker_dr_ratchet_encrypt({
++        serializedState: state,
++        plaintext: text
++    });
+ 
+-  const combined = new Uint8Array(nonce.length + encrypted.length);
+-  combined.set(nonce);
+-  combined.set(encrypted, nonce.length);
++    await storeRatchetStateSecurely(conversationId, result.state);
+ 
+-  return { ciphertext: sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING), sessionId };
++    return { 
++        ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
++        drHeader: result.header
++    };
++  }
+ }
+ 
+ export async function decryptMessage(
+@@ -414,37 +458,111 @@ export async function decryptMessage(
+ ): Promise<DecryptResult> {
+   if (!cipher) return { status: 'success', value: '' };
+ 
+-  let key: Uint8Array | null = null;
+   const sodium = await getSodiumLib();
+   const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await getWorkerProxy();
+ 
+   if (isGroup) {
+-    key = await retrieveGroupKeySecurely(conversationId);
++    const key = await retrieveGroupKeySecurely(conversationId);
+     if (!key) {
+       requestGroupKeyWithTimeout(conversationId);
+       return { status: 'pending', reason: 'waiting_for_key' };
+     }
++    
++    try {
++      const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
++      const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
++      const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
++      
++      const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
++      return { status: 'success', value: sodium.to_string(decrypted) };
++    } catch (e: any) {
++      console.error(`Decryption failed for group convo ${conversationId}:`, e);
++      return { status: 'error', error: new Error('Failed to decrypt group message') };
++    }
+   } else {
+-    if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt message: Missing session ID.') };
+-    key = await retrieveSessionKeySecurely(conversationId, sessionId);
++    // DOUBLE RATCHET & LEGACY FALLBACK
++    try {
++      let payload;
++      try {
++        payload = JSON.parse(cipher);
++      } catch {
++        // Legacy string ciphertext (not JSON)
++        if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt legacy message: Missing session ID.') };
++        const key = await retrieveSessionKeySecurely(conversationId, sessionId);
++        if (!key) {
++            emitSessionKeyRequest(conversationId, sessionId);
++            return { status: 'pending', reason: '[Requesting key to decrypt...]' };
++        }
++        const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
++        const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
++        const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
++        const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
++        return { status: 'success', value: sodium.to_string(decrypted) };
++      }
+ 
+-    if (!key) {
+-      emitSessionKeyRequest(conversationId, sessionId);
+-      return { status: 'pending', reason: '[Requesting key to decrypt...]' };
++      if (!payload.dr || !payload.ciphertext) {
++        // Not a DR envelope. Try legacy fallback.
++        if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt legacy message: Missing session ID.') };
++        const key = await retrieveSessionKeySecurely(conversationId, sessionId);
++        if (!key) {
++            emitSessionKeyRequest(conversationId, sessionId);
++            return { status: 'pending', reason: '[Requesting key to decrypt...]' };
++        }
++        const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
++        const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
++        const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
++        const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
++        return { status: 'success', value: sodium.to_string(decrypted) };
++      }
++
++      const drHeader = payload.dr;
++      const actualCipher = payload.ciphertext;
++      const headerKey = `${conversationId}_${drHeader.dh}_${drHeader.n}`;
++
++      // 1. Try Skipped Message Keys
++      const skippedMkStr = await retrieveSkippedMessageKeySecurely(headerKey);
++      if (skippedMkStr) {
++          const mk = sodium.from_base64(skippedMkStr, sodium.base64_variants.URLSAFE_NO_PADDING);
++          const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
++          const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
++          const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
++          const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
++          
++          await deleteSkippedKey(headerKey);
++          return { status: 'success', value: sodium.to_string(decrypted) };
++      }
++
++      // 2. Main Ratchet State
++      const state = await retrieveRatchetStateSecurely(conversationId);
++      if (!state) {
++          return { status: 'pending', reason: 'waiting_for_ratchet_state' };
++      }
++
++      const { worker_dr_ratchet_decrypt } = await getWorkerProxy();
++      const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
++      
++      const result = await worker_dr_ratchet_decrypt({
++          serializedState: state,
++          header: drHeader,
++          ciphertext: combined
++      });
++
++      // Save new state
++      await storeRatchetStateSecurely(conversationId, result.state);
++
++      // Store any skipped keys
++      for (const sk of result.skippedKeys) {
++          const hKey = `${conversationId}_${sk.dh}_${sk.n}`;
++          await storeSkippedMessageKeySecurely(hKey, sk.mk);
++      }
++
++      return { status: 'success', value: sodium.to_string(result.plaintext) };
++
++    } catch (e: any) {
++      console.error(`DR Decryption failed for convo ${conversationId}:`, e);
++      return { status: 'error', error: new Error('Failed to decrypt message') };
+     }
+   }
+-  
+-  try {
+-    const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
+-    const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
+-    const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
+-    
+-    const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
+-    return { status: 'success', value: sodium.to_string(decrypted) };
+-  } catch (e: any) {
+-    console.error(`Decryption failed for convo ${conversationId}, session ${sessionId}:`, e);
+-    return { status: 'error', error: new Error('Failed to decrypt message') };
+-  }
+ }
+ 
+ // --- Pre-Key Handshake (Full X3DH with OTPK) ---
+diff --git a/web/src/utils/sessionSync.ts b/web/src/utils/sessionSync.ts
+deleted file mode 100644
+index dabee305..00000000
+--- a/web/src/utils/sessionSync.ts
++++ /dev/null
+@@ -1,50 +0,0 @@
+-import { authFetch } from "@lib/api";
+-import { getSodium } from "@lib/sodiumInitializer";
+-import { addSessionKey } from "@lib/keychainDb";
+-import toast from "react-hot-toast";
+-
+-type SyncResponse = Record<string, { sessionId: string; encryptedKey: string }[]>;
+-
+-export async function syncSessionKeys() {
+-  await toast.promise(
+-    (async () => {
+-      try {
+-        const allEncryptedKeys = await authFetch<SyncResponse>("/api/session-keys/sync");
+-        if (!allEncryptedKeys || Object.keys(allEncryptedKeys).length === 0) {
+-          return;
+-        }
+-
+-        const sodium = await getSodium();
+-        let syncedKeyCount = 0;
+-
+-        for (const conversationId in allEncryptedKeys) {
+-          const keysForConvo = allEncryptedKeys[conversationId];
+-          for (const keyInfo of keysForConvo) {
+-            try {
+-              // [FIX] Store encrypted blob directly.
+-              // Server stores keys encrypted with Master Seed (symmetric).
+-              // IndexedDB expects the same format. No re-encryption needed.
+-              const encryptedKeyBytes = sodium.from_base64(
+-                keyInfo.encryptedKey, 
+-                sodium.base64_variants.URLSAFE_NO_PADDING
+-              );
+-              
+-              await addSessionKey(conversationId, keyInfo.sessionId, encryptedKeyBytes);
+-              syncedKeyCount++;
+-            } catch (e) {
+-              console.error("Failed to save synced key:", e);
+-            }
+-          }
+-        }
+-      } catch (error: any) {
+-        console.error("Session key synchronization failed:", error);
+-        throw new Error("Failed to sync message keys from server.");
+-      }
+-    })(),
+-    {
+-      loading: "Syncing message keys...",
+-      success: "Message keys synced successfully!",
+-      error: (err) => err.message || "Key synchronization failed.",
+-    }
+-  );
+-}
+\ No newline at end of file
+diff --git a/web/src/workers/crypto.worker.ts b/web/src/workers/crypto.worker.ts
+index 9f516738..c0bcd9e7 100644
+--- a/web/src/workers/crypto.worker.ts
++++ b/web/src/workers/crypto.worker.ts
+@@ -21,6 +21,55 @@ const ARGON_CONFIG = {
+ 
+ // --- INTERNAL HELPER FUNCTIONS FOR CORE CRYPTO LOGIC ---
+ 
++async function _hkdf(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length: number): Promise<Uint8Array> {
++  const keyMaterial = await crypto.subtle.importKey(
++    "raw",
++    ikm as any,
++    { name: "HKDF" },
++    false,
++    ["deriveBits"]
++  );
++
++  const derivedBits = await crypto.subtle.deriveBits(
++    {
++      name: "HKDF",
++      hash: "SHA-256",
++      salt: salt as any,
++      info: info as any
++    },
++    keyMaterial,
++    length * 8
++  );
++
++  return new Uint8Array(derivedBits);
++}
++
++export async function kdfRoot(rootKey: Uint8Array, dhOutput: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
++  const info = new TextEncoder().encode("NYX_Double_Ratchet_Root");
++  const derived = await _hkdf(dhOutput, rootKey, info, 64);
++  const newRootKey = derived.slice(0, 32);
++  const chainKey = derived.slice(32, 64);
++  return [newRootKey, chainKey];
++}
++
++export async function kdfChain(chainKey: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
++  const key = await crypto.subtle.importKey(
++    "raw",
++    chainKey as any,
++    { name: "HMAC", hash: "SHA-256" },
++    false,
++    ["sign"]
++  );
++
++  const messageKeyInput = new Uint8Array([0x01]);
++  const newChainKeyInput = new Uint8Array([0x02]);
++
++  const messageKey = new Uint8Array(await crypto.subtle.sign("HMAC", key, messageKeyInput));
++  const newChainKey = new Uint8Array(await crypto.subtle.sign("HMAC", key, newChainKeyInput));
++
++  return [newChainKey, messageKey];
++}
++
+ async function _deriveKey(password: string, salt: Uint8Array): Promise<Uint8Array> {
+   return argon2id({
+     ...ARGON_CONFIG,
+@@ -208,6 +257,54 @@ function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicKey: Uint8Arra
+     return digitGroups.join(' ');
+ }
+ 
++// --- DOUBLE RATCHET STATE HELPERS ---
++
++function b64ToBytes(str: string | null | undefined): Uint8Array | null {
++  return str ? sodium.from_base64(str, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
++}
++
++function bytesToB64(bytes: Uint8Array | null | undefined): string | null {
++  return bytes ? sodium.to_base64(bytes, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
++}
++
++function deserializeState(state: any) {
++  return {
++    RK: b64ToBytes(state.RK),
++    CKs: b64ToBytes(state.CKs),
++    CKr: b64ToBytes(state.CKr),
++    DHs: state.DHs ? {
++      publicKey: b64ToBytes(state.DHs.publicKey),
++      privateKey: b64ToBytes(state.DHs.privateKey)
++    } : null,
++    DHr: b64ToBytes(state.DHr),
++    Ns: state.Ns,
++    Nr: state.Nr,
++    PN: state.PN
++  };
++}
++
++function serializeState(state: any) {
++  return {
++    RK: bytesToB64(state.RK),
++    CKs: bytesToB64(state.CKs),
++    CKr: bytesToB64(state.CKr),
++    DHs: state.DHs ? {
++      publicKey: bytesToB64(state.DHs.publicKey),
++      privateKey: bytesToB64(state.DHs.privateKey)
++    } : null,
++    DHr: bytesToB64(state.DHr),
++    Ns: state.Ns,
++    Nr: state.Nr,
++    PN: state.PN
++  };
++}
++
++function wipeState(state: any) {
++  if (state.RK) sodium.memzero(state.RK);
++  if (state.CKs) sodium.memzero(state.CKs);
++  if (state.CKr) sodium.memzero(state.CKr);
++  if (state.DHs && state.DHs.privateKey) sodium.memzero(state.DHs.privateKey);
++}
+ 
+ // --- MAIN MESSAGE HANDLER ---
+ const ALGO = 'AES-GCM';
+@@ -732,6 +829,171 @@ self.onmessage = async (event: MessageEvent) => {
+         }
+         break;
+       }
++      case 'dr_init_alice': {
++        const { sk, theirSignedPreKeyPublic } = payload;
++        const skBytes = new Uint8Array(sk);
++        const theirSpkBytes = new Uint8Array(theirSignedPreKeyPublic);
++        
++        const DHs = sodium.crypto_box_keypair();
++        const dh_out = sodium.crypto_scalarmult(DHs.privateKey, theirSpkBytes);
++        
++        const [RK, CKs] = await kdfRoot(skBytes, dh_out);
++        
++        const state = {
++           RK, CKs, CKr: null,
++           DHs, DHr: theirSpkBytes,
++           Ns: 0, Nr: 0, PN: 0
++        };
++        
++        result = serializeState(state);
++        
++        wipeState(state);
++        sodium.memzero(skBytes);
++        sodium.memzero(dh_out);
++        break;
++      }
++      case 'dr_init_bob': {
++        const { sk, mySignedPreKey } = payload;
++        const skBytes = new Uint8Array(sk);
++        
++        const state = {
++           RK: new Uint8Array(skBytes),
++           CKs: null, CKr: null,
++           DHs: {
++             publicKey: new Uint8Array(mySignedPreKey.publicKey),
++             privateKey: new Uint8Array(mySignedPreKey.privateKey)
++           },
++           DHr: null,
++           Ns: 0, Nr: 0, PN: 0
++        };
++        
++        result = serializeState(state);
++        
++        wipeState(state);
++        sodium.memzero(skBytes);
++        break;
++      }
++      case 'dr_ratchet_encrypt': {
++        const { serializedState, plaintext } = payload;
++        const state = deserializeState(serializedState);
++        const plaintextBytes = typeof plaintext === 'string' ? new TextEncoder().encode(plaintext) : new Uint8Array(plaintext);
++        
++        if (!state.CKs) throw new Error("Sender chain key not initialized");
++        if (!state.DHs) throw new Error("Sender DH keypair not initialized");
++
++        const [newCKs, mk] = await kdfChain(state.CKs);
++        if (state.CKs) sodium.memzero(state.CKs);
++        state.CKs = newCKs;
++        
++        const header = {
++           dh: bytesToB64(state.DHs.publicKey),
++           n: state.Ns,
++           pn: state.PN
++        };
++        state.Ns += 1;
++        
++        const nonce = sodium.randombytes_buf(24);
++        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(plaintextBytes, null, null, nonce, mk);
++        
++        const combined = new Uint8Array(nonce.length + ciphertext.length);
++        combined.set(nonce);
++        combined.set(ciphertext, nonce.length);
++        
++        result = {
++           state: serializeState(state),
++           header,
++           ciphertext: combined
++        };
++        
++        wipeState(state);
++        sodium.memzero(mk);
++        sodium.memzero(plaintextBytes);
++        break;
++      }
++      case 'dr_ratchet_decrypt': {
++        const { serializedState, header, ciphertext } = payload;
++        const state = deserializeState(serializedState);
++        const ciphertextBytes = new Uint8Array(ciphertext);
++        const headerDhBytes = b64ToBytes(header.dh);
++        
++        if (!headerDhBytes) throw new Error("Invalid header DH key");
++
++        let skippedKeys: any[] = [];
++        
++        try {
++            if (!state.DHr || sodium.compare(headerDhBytes, state.DHr) !== 0) {
++                if (state.CKr) {
++                   while (state.Nr < header.pn) {
++                      const [newCKr, mk] = await kdfChain(state.CKr);
++                      sodium.memzero(state.CKr);
++                      state.CKr = newCKr;
++                      skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
++                      state.Nr += 1;
++                   }
++                }
++                
++                state.PN = state.Ns;
++                state.Ns = 0;
++                state.Nr = 0;
++                if (state.DHr) sodium.memzero(state.DHr);
++                state.DHr = new Uint8Array(headerDhBytes);
++                
++                if (!state.DHs || !state.RK) throw new Error("Invalid state: missing DHs or RK");
++                
++                let dh_out = sodium.crypto_scalarmult(state.DHs.privateKey, state.DHr);
++                const [RK1, CKr] = await kdfRoot(state.RK, dh_out);
++                sodium.memzero(dh_out);
++                sodium.memzero(state.RK);
++                if (state.CKr) sodium.memzero(state.CKr);
++                state.RK = RK1;
++                state.CKr = CKr;
++                
++                if (state.DHs && state.DHs.privateKey) sodium.memzero(state.DHs.privateKey);
++                state.DHs = sodium.crypto_box_keypair();
++                
++                if (!state.DHs) throw new Error("DH generation failed");
++
++                dh_out = sodium.crypto_scalarmult(state.DHs.privateKey, state.DHr);
++                const [RK2, CKs] = await kdfRoot(state.RK, dh_out);
++                sodium.memzero(dh_out);
++                sodium.memzero(state.RK);
++                if (state.CKs) sodium.memzero(state.CKs);
++                state.RK = RK2;
++                state.CKs = CKs;
++            }
++            
++            if (!state.CKr) throw new Error("Receiver chain key not initialized");
++
++            while (state.Nr < header.n) {
++                const [newCKr, mk] = await kdfChain(state.CKr);
++                sodium.memzero(state.CKr);
++                state.CKr = newCKr;
++                skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
++                state.Nr += 1;
++            }
++            
++            const [newCKr, mk] = await kdfChain(state.CKr);
++            sodium.memzero(state.CKr);
++            state.CKr = newCKr;
++            state.Nr += 1;
++            
++            const nonce = ciphertextBytes.slice(0, 24);
++            const ctext = ciphertextBytes.slice(24);
++            const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
++            
++            result = {
++               state: serializeState(state),
++               plaintext,
++               skippedKeys
++            };
++            
++            sodium.memzero(mk);
++        } finally {
++            wipeState(state);
++            sodium.memzero(headerDhBytes);
++        }
++        break;
++      }
+       default:
+         self.postMessage({ type: 'error', id, error: `Unknown worker command: ${type}` });
+         return;

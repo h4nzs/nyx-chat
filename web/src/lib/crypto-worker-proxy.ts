@@ -268,13 +268,14 @@ export function worker_dr_init_bob(payload: {
 export function worker_dr_ratchet_encrypt(payload: {
     serializedState: SerializedRatchetState,
     plaintext: Uint8Array | string
-}): Promise<{ state: SerializedRatchetState, header: any, ciphertext: Uint8Array }> {
-    return sendToWorker<{ state: SerializedRatchetState, header: any, ciphertext: any }>('dr_ratchet_encrypt', {
+}): Promise<{ state: SerializedRatchetState, header: any, ciphertext: Uint8Array, mk: Uint8Array }> {
+    return sendToWorker<{ state: SerializedRatchetState, header: any, ciphertext: any, mk: any }>('dr_ratchet_encrypt', {
         serializedState: payload.serializedState,
         plaintext: typeof payload.plaintext === 'string' ? payload.plaintext : Array.from(payload.plaintext)
     }).then(res => ({
         ...res,
-        ciphertext: new Uint8Array(res.ciphertext)
+        ciphertext: new Uint8Array(res.ciphertext),
+        mk: new Uint8Array(res.mk)
     }));
 }
 
@@ -282,13 +283,14 @@ export function worker_dr_ratchet_decrypt(payload: {
     serializedState: SerializedRatchetState,
     header: any,
     ciphertext: Uint8Array
-}): Promise<{ state: SerializedRatchetState, plaintext: Uint8Array, skippedKeys: { dh: string, n: number, mk: string }[] }> {
-    return sendToWorker<{ state: SerializedRatchetState, plaintext: any, skippedKeys: any[] }>('dr_ratchet_decrypt', {
+}): Promise<{ state: SerializedRatchetState, plaintext: Uint8Array, skippedKeys: { dh: string, n: number, mk: string }[], mk: Uint8Array }> {
+    return sendToWorker<{ state: SerializedRatchetState, plaintext: any, skippedKeys: any[], mk: any }>('dr_ratchet_decrypt', {
         serializedState: payload.serializedState,
         header: payload.header,
         ciphertext: Array.from(payload.ciphertext)
     }).then(res => ({
         ...res,
-        plaintext: new Uint8Array(res.plaintext)
+        plaintext: new Uint8Array(res.plaintext),
+        mk: new Uint8Array(res.mk)
     }));
 }

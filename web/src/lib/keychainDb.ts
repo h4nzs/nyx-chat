@@ -7,7 +7,8 @@ const OTPK_STORE_NAME = 'one-time-pre-keys';
 const PENDING_HEADERS_STORE_NAME = 'pending-headers';
 const RATCHET_SESSIONS_STORE_NAME = 'ratchet-sessions';
 const SKIPPED_KEYS_STORE_NAME = 'skipped-keys';
-const DB_VERSION = 5;
+const MESSAGE_KEYS_STORE_NAME = 'message-keys';
+const DB_VERSION = 6;
 
 // Cache DB connections by userId to handle switching accounts without reloading
 const dbCache = new Map<string, Promise<IDBPDatabase>>();
@@ -43,6 +44,9 @@ function getDb(): Promise<IDBPDatabase> {
         if (oldVersion < 5) {
           db.createObjectStore(RATCHET_SESSIONS_STORE_NAME);
           db.createObjectStore(SKIPPED_KEYS_STORE_NAME);
+        }
+        if (oldVersion < 6) {
+          db.createObjectStore(MESSAGE_KEYS_STORE_NAME);
         }
       },
     }).catch(err => {
@@ -240,16 +244,33 @@ export async function deleteSkippedKey(headerKey: string): Promise<void> {
 }
 
 /**
+ * Stores an encrypted Message Key locally for history decryption.
+ */
+export async function storeMessageKey(messageId: string, encryptedMk: Uint8Array): Promise<void> {
+  const db = await getDb();
+  await db.put(MESSAGE_KEYS_STORE_NAME, encryptedMk, messageId);
+}
+
+/**
+ * Retrieves an encrypted Message Key.
+ */
+export async function getMessageKey(messageId: string): Promise<Uint8Array | null> {
+  const db = await getDb();
+  return (await db.get(MESSAGE_KEYS_STORE_NAME, messageId)) || null;
+}
+
+/**
  * Clears all keys from the database. Used on logout.
  */
 export async function clearAllKeys(): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, SKIPPED_KEYS_STORE_NAME], 'readwrite');
+  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME], 'readwrite');
   await tx.objectStore(SESSION_KEYS_STORE_NAME).clear();
   await tx.objectStore(GROUP_KEYS_STORE_NAME).clear();
   await tx.objectStore(OTPK_STORE_NAME).clear();
   await tx.objectStore(PENDING_HEADERS_STORE_NAME).clear();
   await tx.objectStore(RATCHET_SESSIONS_STORE_NAME).clear();
   await tx.objectStore(SKIPPED_KEYS_STORE_NAME).clear();
+  await tx.objectStore(MESSAGE_KEYS_STORE_NAME).clear();
   await tx.done;
 }

@@ -902,7 +902,8 @@ self.onmessage = async (event: MessageEvent) => {
         result = {
            state: serializeState(state),
            header,
-           ciphertext: combined
+           ciphertext: combined,
+           mk: Array.from(mk)
         };
         
         wipeState(state);
@@ -984,7 +985,8 @@ self.onmessage = async (event: MessageEvent) => {
             result = {
                state: serializeState(state),
                plaintext,
-               skippedKeys
+               skippedKeys,
+               mk: Array.from(mk)
             };
             
             sodium.memzero(mk);

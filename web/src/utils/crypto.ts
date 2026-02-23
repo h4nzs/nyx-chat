@@ -18,7 +18,9 @@ import {
   getRatchetSession,
   storeSkippedKey,
   getSkippedKey,
-  deleteSkippedKey
+  deleteSkippedKey,
+  storeMessageKey,
+  getMessageKey
 } from '@lib/keychainDb';
 import { 
   emitSessionKeyFulfillment, 
@@ -82,6 +84,27 @@ export async function retrieveSkippedMessageKeySecurely(headerKey: string): Prom
     return new TextDecoder().decode(mkBytes);
   } catch (error) {
     console.error(`Failed to decrypt skipped key ${headerKey}:`, error);
+    return null;
+  }
+}
+
+export async function storeMessageKeySecurely(messageId: string, mk: Uint8Array) {
+  const masterSeed = await getMasterSeedOrThrow();
+  const { worker_encrypt_session_key } = await getWorkerProxy();
+  const encryptedMk = await worker_encrypt_session_key(mk, masterSeed);
+  await storeMessageKey(messageId, encryptedMk);
+}
+
+export async function retrieveMessageKeySecurely(messageId: string): Promise<Uint8Array | null> {
+  const encryptedMk = await getMessageKey(messageId);
+  if (!encryptedMk) return null;
+
+  try {
+    const masterSeed = await getMasterSeedOrThrow();
+    const { worker_decrypt_session_key } = await getWorkerProxy();
+    return await worker_decrypt_session_key(encryptedMk, masterSeed);
+  } catch (error) {
+    console.error(`Failed to decrypt message key for ${messageId}:`, error);
     return null;
   }
 }
@@ -413,7 +436,8 @@ export async function encryptMessage(
   text: string,
   conversationId: string,
   isGroup: boolean = false,
-  existingSession?: { sessionId: string; key: Uint8Array }
+  existingSession?: { sessionId: string; key: Uint8Array },
+  messageId?: string
 ): Promise<{ ciphertext: string; sessionId?: string; drHeader?: any }> {
   const sodium = await getSodiumLib();
   const { worker_crypto_secretbox_xchacha20poly1305_easy, worker_dr_ratchet_encrypt } = await getWorkerProxy();
@@ -443,6 +467,10 @@ export async function encryptMessage(
 
     await storeRatchetStateSecurely(conversationId, result.state);
 
+    if (messageId) {
+       await storeMessageKeySecurely(messageId, result.mk);
+    }
+
     return { 
         ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
         drHeader: result.header
@@ -455,6 +483,7 @@ export async function decryptMessage(
   conversationId: string,
   isGroup: boolean,
   sessionId: string | null | undefined,
+  messageId?: string
 ): Promise<DecryptResult> {
   if (!cipher) return { status: 'success', value: '' };
 
@@ -482,6 +511,23 @@ export async function decryptMessage(
   } else {
     // DOUBLE RATCHET & LEGACY FALLBACK
     try {
+      // 0. Check Message Key Vault First
+      if (messageId) {
+          const mk = await retrieveMessageKeySecurely(messageId);
+          if (mk) {
+              let actualCipher = cipher;
+              try {
+                  const payload = JSON.parse(cipher);
+                  if (payload.ciphertext) actualCipher = payload.ciphertext;
+              } catch {}
+              const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
+              const nonce = combined.slice(0, 24);
+              const encrypted = combined.slice(24);
+              const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
+              return { status: 'success', value: sodium.to_string(decrypted) };
+          }
+      }
+
       let payload;
       try {
         payload = JSON.parse(cipher);
@@ -549,6 +595,11 @@ export async function decryptMessage(
 
       // Save new state
       await storeRatchetStateSecurely(conversationId, result.state);
+
+      // Save Message Key for Reloads
+      if (messageId) {
+          await storeMessageKeySecurely(messageId, result.mk);
+      }
 
       // Store any skipped keys
       for (const sk of result.skippedKeys) {

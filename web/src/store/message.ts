@@ -64,8 +64,14 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
     if (!isGroup && contentToDecrypt.startsWith('{') && contentToDecrypt.includes('"x3dh":')) {
        try {
            const payload = JSON.parse(contentToDecrypt);
-           if (payload.x3dh && payload.ciphertext) {
-               // Extract Header
+           const { retrieveMessageKeySecurely } = await import('@utils/crypto');
+           const mk = await retrieveMessageKeySecurely(message.id);
+           
+           if (mk) {
+               // We already processed this message in the past! Skip X3DH derivation entirely.
+               contentToDecrypt = payload.ciphertext;
+           } else if (payload.x3dh && payload.ciphertext) {
+               // Normal X3DH derivation
                const { ik, ek, otpkId } = payload.x3dh;
                const ciphertext = payload.ciphertext;
 
@@ -111,7 +117,8 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
           contentToDecrypt!, // Non-null assertion guarded by check above
           decryptedMsg.conversationId,
           isGroup,
-          decryptedMsg.sessionId
+          decryptedMsg.sessionId,
+          decryptedMsg.id
         );
 
         if (result.status === 'success' || result.status === 'error') {
@@ -435,7 +442,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       if (data.content) {
         // Encrypt content (encryptMessage now handles Ratchet state internally for 1-on-1)
-        const result = await encryptMessage(data.content, conversationId, isGroup);
+        const result = await encryptMessage(data.content, conversationId, isGroup, undefined, `temp_${actualTempId}`);
         ciphertext = result.ciphertext;
         
         // Combine DR Header with Ciphertext (JSON payload) for private chats
@@ -477,6 +484,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         if (!isReactionPayload) {
             if (res.ok && res.msg && tempId !== undefined) {
               get().replaceOptimisticMessage(conversationId, actualTempId, { ...res.msg, status: 'SENT' });
+              
+              // LINK MESSAGE KEY FROM TEMP ID TO PERMANENT ID
+              const msgId = res.msg.id;
+              import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely }) => {
+                 const mk = await retrieveMessageKeySecurely(`temp_${actualTempId}`);
+                 if (mk) await storeMessageKeySecurely(msgId, mk);
+              }).catch(console.error);
+              
             } else if (!res.ok) {
               get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
             }
