@@ -419,7 +419,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                  
                  console.log(`[X3DH] Handshake prepared (Lazy). Header attached to message.`);
              } else {
-                 console.warn(`[X3DH] Peer not found in participants for ${conversationId}`);
+                 console.error(`[X3DH] Peer not found in participants for ${conversationId}. Participants:`, conversation.participants);
+                 toast.error("Encryption failed: Cannot identify recipient.");
+                 return; // STOP HERE
              }
           } else {
              // Reuse existing session
@@ -430,6 +432,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
 
       if (data.content) {
+        if (!isGroup && !encryptionSession) {
+            console.error("[Crypto] Attempted to encrypt without session:", { conversationId, isGroup });
+            throw new Error("Encryption setup failed. Please try reloading the chat.");
+        }
+
         // Encrypt content
         const result = await encryptMessage(data.content, conversationId, isGroup, encryptionSession);
         ciphertext = result.ciphertext;
