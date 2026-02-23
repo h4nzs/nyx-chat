@@ -30,18 +30,23 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
     let isMounted = true;
 
     const handleDecryption = async () => {
-      // Prefer message.fileKey, fallback to message.content
-      const encryptedFileKey = message.fileKey || message.content;
+      // [FIX] key is already decrypted by store
+      const rawFileKey = message.fileKey;
 
-      if (!message.fileUrl || !encryptedFileKey) {
-        if (isMounted) setError("Incomplete message data for decryption.");
+      if (!message.fileUrl) {
+        if (isMounted) setError("Missing file URL.");
         return;
       }
       
-      // Handle pending/error states
-      if (encryptedFileKey === 'waiting_for_key' || encryptedFileKey.startsWith('[')) {
-        if (isMounted) setError(encryptedFileKey);
-        return;
+      // If we don't have the key yet, check if message is still pending decryption
+      if (!rawFileKey) {
+         if (message.content === 'waiting_for_key' || message.content?.startsWith('[')) {
+             if (isMounted) setError(message.content);
+         } else {
+             // Store hasn't finished processing JSON metadata yet?
+             if (isMounted) setIsLoading(true); 
+         }
+         return;
       }
 
       if (isMounted) {
@@ -65,36 +70,11 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
         }
         const encryptedBlob = await response.blob();
 
-        // 2. Decrypt the FILE KEY first
-        const conversation = useConversationStore.getState().conversations.find(c => c.id === message.conversationId);
-        const isGroup = conversation?.isGroup || false;
-
-        const keyResult = await decryptMessage(
-          encryptedFileKey,
-          message.conversationId,
-          isGroup,
-          message.sessionId
-        );
-
-        if (keyResult.status === 'pending') {
-          if (isMounted) {
-            setError(keyResult.reason || "Waiting for key...");
-            setIsLoading(false);
-          }
-          return;
-        }
-
-        if (keyResult.status === 'error') {
-          throw keyResult.error || new Error("Failed to decrypt file key.");
-        }
-
-        const rawFileKey = keyResult.value;
-
-        // 3. Decrypt the file blob using the raw key
+        // 2. Decrypt the file blob using the raw key
         const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, 'audio/webm');
         
         if (isMounted) {
-          // 4. Create a playable URL
+          // 3. Create a playable URL
           objectUrl = URL.createObjectURL(decryptedBlob);
           setAudioSrc(objectUrl);
         }

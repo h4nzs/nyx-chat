@@ -749,7 +749,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       // DON'T decrypt (I don't have the private key for my own X3DH header).
       // Use the local content instead.
       if (currentUser && message.senderId === currentUser.id && message.tempId) {
-          const optimistic = get().messages[conversationId]?.find(m => m.tempId === message.tempId);
+          // [FIX] Loose comparison for tempId (String vs Number issue)
+          const optimistic = get().messages[conversationId]?.find(m => m.tempId && String(m.tempId) === String(message.tempId));
           if (optimistic) {
               // Copy content/file data from optimistic message
               decrypted = {
@@ -811,12 +812,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
   replaceOptimisticMessage: (conversationId, tempId, newMessage) => set(state => {
     // Find the optimistic message to revoke its blob URL if it exists
-    const optimisticMessage = state.messages[conversationId]?.find(m => m.tempId === tempId);
+    // [FIX] Loose comparison
+    const optimisticMessage = state.messages[conversationId]?.find(m => m.tempId && String(m.tempId) === String(tempId));
     if (optimisticMessage?.fileUrl?.startsWith('blob:')) {
       URL.revokeObjectURL(optimisticMessage.fileUrl);
     }
     return {
-      messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.tempId === tempId ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m) }
+      messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => (m.tempId && String(m.tempId) === String(tempId)) ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m) }
     };
   }),
   removeMessage: (conversationId, messageId) => set(state => {
