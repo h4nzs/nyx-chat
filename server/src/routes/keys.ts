@@ -35,6 +35,11 @@ router.post(
 
       // Use a transaction to ensure both operations succeed or fail together
       await prisma.$transaction([
+        // [FIX] Purge old OTPKs on bundle update (New Identity/Session)
+        // This prevents "Identity Crisis" where new identity is mixed with old OTPKs.
+        prisma.oneTimePreKey.deleteMany({
+          where: { userId }
+        }),
         prisma.preKeyBundle.upsert({
           where: { userId },
           update: {
