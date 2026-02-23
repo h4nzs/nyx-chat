@@ -737,7 +737,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   addOptimisticMessage: (conversationId, message) => {
-    set(state => ({ messages: { ...state.messages, [conversationId]: [...(state.messages[conversationId] || []), message] } }))
+    set(state => {
+      const currentMessages = state.messages[conversationId] || [];
+      // Prevent duplicates based on ID or tempId
+      if (currentMessages.some(m => m.id === message.id || (m.tempId && message.tempId && m.tempId === message.tempId))) {
+        return state;
+      }
+      return { messages: { ...state.messages, [conversationId]: [...currentMessages, message] } };
+    })
   },
   
   addIncomingMessage: async (conversationId, message) => {
@@ -811,12 +818,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   replaceOptimisticMessage: (conversationId, tempId, newMessage) => set(state => {
-    // Find the optimistic message to revoke its blob URL if it exists
-    // [FIX] Loose comparison
-    const optimisticMessage = state.messages[conversationId]?.find(m => m.tempId && String(m.tempId) === String(tempId));
-    if (optimisticMessage?.fileUrl?.startsWith('blob:')) {
-      URL.revokeObjectURL(optimisticMessage.fileUrl);
-    }
+    // [FIX] Don't revoke Blob URL yet, as we might copy it to the new message for smooth transition.
+    // Let browser GC handle it on navigation/refresh.
+    
     return {
       messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => (m.tempId && String(m.tempId) === String(tempId)) ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m) }
     };

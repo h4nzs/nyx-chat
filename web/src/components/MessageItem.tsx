@@ -133,11 +133,20 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
       
       // Prepare Query Params for Blind Attachment Deletion
       let query = '';
-      if (message.fileUrl) {
+      
+      // Try to get real R2 URL from JSON content first (because fileUrl might be a Blob)
+      let targetUrl = message.fileUrl;
+      try {
+          if (message.content && message.content.startsWith('{')) {
+              const metadata = JSON.parse(message.content);
+              if (metadata.url) targetUrl = metadata.url;
+          }
+      } catch (e) {}
+
+      if (targetUrl && !targetUrl.startsWith('blob:')) {
           try {
               // Extract key from URL (e.g. https://pub.r2.../attachments/key.ext -> attachments/key.ext)
-              // We assume standard R2 public URL structure.
-              const url = new URL(message.fileUrl);
+              const url = new URL(targetUrl);
               const key = url.pathname.substring(1); // Remove leading slash
               if (key) query = `?r2Key=${encodeURIComponent(key)}`;
           } catch (e) {
