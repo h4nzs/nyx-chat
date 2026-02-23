@@ -340,6 +340,7 @@ export async function encryptMessage(
   text: string,
   conversationId: string,
   isGroup: boolean = false,
+  existingSession?: { sessionId: string; key: Uint8Array }
 ): Promise<{ ciphertext: string; sessionId?: string }> {
   const sodium = await getSodiumLib();
   const { worker_crypto_secretbox_xchacha20poly1305_easy } = await getWorkerProxy();
@@ -354,10 +355,15 @@ export async function encryptMessage(
     key = groupKey;
     sessionId = undefined;
   } else {
-    const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
-    if (!latestKey) throw new Error('No session key available for encryption.');
-    key = latestKey.key;
-    sessionId = latestKey.sessionId;
+    if (existingSession) {
+      key = existingSession.key;
+      sessionId = existingSession.sessionId;
+    } else {
+      const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
+      if (!latestKey) throw new Error('No session key available for encryption.');
+      key = latestKey.key;
+      sessionId = latestKey.sessionId;
+    }
   }
   
   const messageBytes = sodium.from_string(text);
