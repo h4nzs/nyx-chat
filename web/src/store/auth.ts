@@ -540,7 +540,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         clearAuthCookies();
         privateKeysCache = null;
         
-        // [FIX] Clear keys BEFORE removing user, because getDb() needs the userId from localStorage
+        // [FIX] Clear ALL persistent keys (IndexedDB) and Master Key (LocalStorage)
+        try {
+            const { clearAllKeys } = await import('@lib/keychainDb');
+            await clearAllKeys();
+        } catch (e) { console.error("Failed to wipe IndexedDB:", e); }
+        
         await clearKeys(); 
         
         localStorage.removeItem('user');

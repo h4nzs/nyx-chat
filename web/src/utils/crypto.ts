@@ -76,6 +76,12 @@ export async function storeSessionKeySecurely(conversationId: string, sessionId:
   const { worker_encrypt_session_key } = await getWorkerProxy();
   const encryptedKey = await worker_encrypt_session_key(key, masterSeed);
   await addSessionKey(conversationId, sessionId, encryptedKey);
+
+  // [BACKUP] Sync new key to server immediately (Fire & Forget)
+  authFetch('/api/session-keys/backup', {
+    method: 'POST',
+    body: JSON.stringify({ conversationId, sessionId, encryptedKey })
+  }).catch(err => console.error("[Crypto] Failed to backup session key:", err));
 }
 
 export async function retrieveSessionKeySecurely(conversationId: string, sessionId: string): Promise<Uint8Array | null> {
