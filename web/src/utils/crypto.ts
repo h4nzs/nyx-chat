@@ -13,7 +13,12 @@ import {
   storeOneTimePreKey,
   getOneTimePreKey,
   deleteOneTimePreKey,
-  getLastOtpkId
+  getLastOtpkId,
+  storeRatchetSession,
+  getRatchetSession,
+  storeSkippedKey,
+  getSkippedKey,
+  deleteSkippedKey
 } from '@lib/keychainDb';
 import { 
   emitSessionKeyFulfillment, 
@@ -23,6 +28,7 @@ import {
   emitGroupKeyFulfillment 
 } from '@lib/socket';
 import type { Participant } from '@store/conversation';
+import type { SerializedRatchetState } from '@lib/crypto-worker-proxy';
 
 // --- Secure Storage Helpers ---
 
@@ -32,6 +38,52 @@ async function getMasterSeedOrThrow(): Promise<Uint8Array> {
     throw new Error("Master key locked or unavailable. Please unlock your session.");
   }
   return masterSeed;
+}
+
+export async function storeRatchetStateSecurely(conversationId: string, state: SerializedRatchetState) {
+  const masterSeed = await getMasterSeedOrThrow();
+  const { worker_encrypt_session_key } = await getWorkerProxy();
+  const stateBytes = new TextEncoder().encode(JSON.stringify(state));
+  const encryptedState = await worker_encrypt_session_key(stateBytes, masterSeed);
+  await storeRatchetSession(conversationId, encryptedState);
+}
+
+export async function retrieveRatchetStateSecurely(conversationId: string): Promise<SerializedRatchetState | null> {
+  const encryptedState = await getRatchetSession(conversationId);
+  if (!encryptedState) return null;
+
+  try {
+    const masterSeed = await getMasterSeedOrThrow();
+    const { worker_decrypt_session_key } = await getWorkerProxy();
+    const stateBytes = await worker_decrypt_session_key(encryptedState, masterSeed);
+    return JSON.parse(new TextDecoder().decode(stateBytes));
+  } catch (error) {
+    console.error(`Failed to decrypt ratchet state for ${conversationId}:`, error);
+    return null;
+  }
+}
+
+export async function storeSkippedMessageKeySecurely(headerKey: string, mkString: string) {
+  const masterSeed = await getMasterSeedOrThrow();
+  const { worker_encrypt_session_key } = await getWorkerProxy();
+  const mkBytes = new TextEncoder().encode(mkString);
+  const encryptedMk = await worker_encrypt_session_key(mkBytes, masterSeed);
+  await storeSkippedKey(headerKey, encryptedMk);
+}
+
+export async function retrieveSkippedMessageKeySecurely(headerKey: string): Promise<string | null> {
+  const encryptedMk = await getSkippedKey(headerKey);
+  if (!encryptedMk) return null;
+
+  try {
+    const masterSeed = await getMasterSeedOrThrow();
+    const { worker_decrypt_session_key } = await getWorkerProxy();
+    const mkBytes = await worker_decrypt_session_key(encryptedMk, masterSeed);
+    return new TextDecoder().decode(mkBytes);
+  } catch (error) {
+    console.error(`Failed to decrypt skipped key ${headerKey}:`, error);
+    return null;
+  }
 }
 
 export async function checkAndRefillOneTimePreKeys(): Promise<void> {
@@ -80,15 +132,6 @@ export async function storeSessionKeySecurely(conversationId: string, sessionId:
   const { worker_encrypt_session_key } = await getWorkerProxy();
   const encryptedKey = await worker_encrypt_session_key(key, masterSeed);
   await addSessionKey(conversationId, sessionId, encryptedKey);
-
-  // [BACKUP] Sync new key to server immediately (Fire & Forget)
-  const sodium = await getSodiumLib();
-  const encryptedKeyB64 = sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-
-  authFetch('/api/session-keys/backup', {
-    method: 'POST',
-    body: JSON.stringify({ conversationId, sessionId, encryptedKey: encryptedKeyB64 })
-  }).catch(err => console.error("[Crypto] Failed to backup session key:", err));
 }
 
 export async function retrieveSessionKeySecurely(conversationId: string, sessionId: string): Promise<Uint8Array | null> {
@@ -371,39 +414,40 @@ export async function encryptMessage(
   conversationId: string,
   isGroup: boolean = false,
   existingSession?: { sessionId: string; key: Uint8Array }
-): Promise<{ ciphertext: string; sessionId?: string }> {
+): Promise<{ ciphertext: string; sessionId?: string; drHeader?: any }> {
   const sodium = await getSodiumLib();
-  const { worker_crypto_secretbox_xchacha20poly1305_easy } = await getWorkerProxy();
-
-  const nonce = sodium.randombytes_buf(XCHACHA20_NONCE_BYTES);
-  let key: Uint8Array;
-  let sessionId: string | undefined;
+  const { worker_crypto_secretbox_xchacha20poly1305_easy, worker_dr_ratchet_encrypt } = await getWorkerProxy();
 
   if (isGroup) {
     const groupKey = await retrieveGroupKeySecurely(conversationId);
     if (!groupKey) throw new Error(`No group key available for conversation ${conversationId}.`);
-    key = groupKey;
-    sessionId = undefined;
+    
+    const nonce = sodium.randombytes_buf(XCHACHA20_NONCE_BYTES);
+    const messageBytes = sodium.from_string(text);
+    const encrypted = await worker_crypto_secretbox_xchacha20poly1305_easy(messageBytes, nonce, groupKey);
+
+    const combined = new Uint8Array(nonce.length + encrypted.length);
+    combined.set(nonce);
+    combined.set(encrypted, nonce.length);
+
+    return { ciphertext: sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING) };
   } else {
-    if (existingSession) {
-      key = existingSession.key;
-      sessionId = existingSession.sessionId;
-    } else {
-      const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
-      if (!latestKey) throw new Error('No session key available for encryption.');
-      key = latestKey.key;
-      sessionId = latestKey.sessionId;
-    }
+    // DOUBLE RATCHET
+    const state = await retrieveRatchetStateSecurely(conversationId);
+    if (!state) throw new Error('Ratchet state not initialized for encryption.');
+
+    const result = await worker_dr_ratchet_encrypt({
+        serializedState: state,
+        plaintext: text
+    });
+
+    await storeRatchetStateSecurely(conversationId, result.state);
+
+    return { 
+        ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
+        drHeader: result.header
+    };
   }
-  
-  const messageBytes = sodium.from_string(text);
-  const encrypted = await worker_crypto_secretbox_xchacha20poly1305_easy(messageBytes, nonce, key);
-
-  const combined = new Uint8Array(nonce.length + encrypted.length);
-  combined.set(nonce);
-  combined.set(encrypted, nonce.length);
-
-  return { ciphertext: sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING), sessionId };
 }
 
 export async function decryptMessage(
@@ -414,36 +458,110 @@ export async function decryptMessage(
 ): Promise<DecryptResult> {
   if (!cipher) return { status: 'success', value: '' };
 
-  let key: Uint8Array | null = null;
   const sodium = await getSodiumLib();
   const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await getWorkerProxy();
 
   if (isGroup) {
-    key = await retrieveGroupKeySecurely(conversationId);
+    const key = await retrieveGroupKeySecurely(conversationId);
     if (!key) {
       requestGroupKeyWithTimeout(conversationId);
       return { status: 'pending', reason: 'waiting_for_key' };
     }
-  } else {
-    if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt message: Missing session ID.') };
-    key = await retrieveSessionKeySecurely(conversationId, sessionId);
-
-    if (!key) {
-      emitSessionKeyRequest(conversationId, sessionId);
-      return { status: 'pending', reason: '[Requesting key to decrypt...]' };
-    }
-  }
-  
-  try {
-    const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
-    const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
-    const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
     
-    const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
-    return { status: 'success', value: sodium.to_string(decrypted) };
-  } catch (e: any) {
-    console.error(`Decryption failed for convo ${conversationId}, session ${sessionId}:`, e);
-    return { status: 'error', error: new Error('Failed to decrypt message') };
+    try {
+      const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
+      const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
+      
+      const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
+      return { status: 'success', value: sodium.to_string(decrypted) };
+    } catch (e: any) {
+      console.error(`Decryption failed for group convo ${conversationId}:`, e);
+      return { status: 'error', error: new Error('Failed to decrypt group message') };
+    }
+  } else {
+    // DOUBLE RATCHET & LEGACY FALLBACK
+    try {
+      let payload;
+      try {
+        payload = JSON.parse(cipher);
+      } catch {
+        // Legacy string ciphertext (not JSON)
+        if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt legacy message: Missing session ID.') };
+        const key = await retrieveSessionKeySecurely(conversationId, sessionId);
+        if (!key) {
+            emitSessionKeyRequest(conversationId, sessionId);
+            return { status: 'pending', reason: '[Requesting key to decrypt...]' };
+        }
+        const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
+        const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
+        const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
+        return { status: 'success', value: sodium.to_string(decrypted) };
+      }
+
+      if (!payload.dr || !payload.ciphertext) {
+        // Not a DR envelope. Try legacy fallback.
+        if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt legacy message: Missing session ID.') };
+        const key = await retrieveSessionKeySecurely(conversationId, sessionId);
+        if (!key) {
+            emitSessionKeyRequest(conversationId, sessionId);
+            return { status: 'pending', reason: '[Requesting key to decrypt...]' };
+        }
+        const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
+        const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
+        const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
+        return { status: 'success', value: sodium.to_string(decrypted) };
+      }
+
+      const drHeader = payload.dr;
+      const actualCipher = payload.ciphertext;
+      const headerKey = `${conversationId}_${drHeader.dh}_${drHeader.n}`;
+
+      // 1. Try Skipped Message Keys
+      const skippedMkStr = await retrieveSkippedMessageKeySecurely(headerKey);
+      if (skippedMkStr) {
+          const mk = sodium.from_base64(skippedMkStr, sodium.base64_variants.URLSAFE_NO_PADDING);
+          const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
+          const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
+          const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
+          const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
+          
+          await deleteSkippedKey(headerKey);
+          return { status: 'success', value: sodium.to_string(decrypted) };
+      }
+
+      // 2. Main Ratchet State
+      const state = await retrieveRatchetStateSecurely(conversationId);
+      if (!state) {
+          return { status: 'pending', reason: 'waiting_for_ratchet_state' };
+      }
+
+      const { worker_dr_ratchet_decrypt } = await getWorkerProxy();
+      const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
+      
+      const result = await worker_dr_ratchet_decrypt({
+          serializedState: state,
+          header: drHeader,
+          ciphertext: combined
+      });
+
+      // Save new state
+      await storeRatchetStateSecurely(conversationId, result.state);
+
+      // Store any skipped keys
+      for (const sk of result.skippedKeys) {
+          const hKey = `${conversationId}_${sk.dh}_${sk.n}`;
+          await storeSkippedMessageKeySecurely(hKey, sk.mk);
+      }
+
+      return { status: 'success', value: sodium.to_string(result.plaintext) };
+
+    } catch (e: any) {
+      console.error(`DR Decryption failed for convo ${conversationId}:`, e);
+      return { status: 'error', error: new Error('Failed to decrypt message') };
+    }
   }
 }
 

@@ -37,6 +37,17 @@ if (!import.meta.env.VITE_APP_SECRET) {
   }
 }
 
+// Request Persistent Storage for Local Keystore
+if (navigator.storage && navigator.storage.persist) {
+  navigator.storage.persist().then(persistent => {
+    if (persistent) {
+      console.log("Storage will not be cleared except by explicit user action.");
+    } else {
+      console.warn("Storage may be cleared by the UA under storage pressure.");
+    }
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />

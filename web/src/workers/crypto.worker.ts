@@ -21,6 +21,55 @@ const ARGON_CONFIG = {
 
 // --- INTERNAL HELPER FUNCTIONS FOR CORE CRYPTO LOGIC ---
 
+async function _hkdf(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length: number): Promise<Uint8Array> {
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    ikm as any,
+    { name: "HKDF" },
+    false,
+    ["deriveBits"]
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: salt as any,
+      info: info as any
+    },
+    keyMaterial,
+    length * 8
+  );
+
+  return new Uint8Array(derivedBits);
+}
+
+export async function kdfRoot(rootKey: Uint8Array, dhOutput: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
+  const info = new TextEncoder().encode("NYX_Double_Ratchet_Root");
+  const derived = await _hkdf(dhOutput, rootKey, info, 64);
+  const newRootKey = derived.slice(0, 32);
+  const chainKey = derived.slice(32, 64);
+  return [newRootKey, chainKey];
+}
+
+export async function kdfChain(chainKey: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    chainKey as any,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const messageKeyInput = new Uint8Array([0x01]);
+  const newChainKeyInput = new Uint8Array([0x02]);
+
+  const messageKey = new Uint8Array(await crypto.subtle.sign("HMAC", key, messageKeyInput));
+  const newChainKey = new Uint8Array(await crypto.subtle.sign("HMAC", key, newChainKeyInput));
+
+  return [newChainKey, messageKey];
+}
+
 async function _deriveKey(password: string, salt: Uint8Array): Promise<Uint8Array> {
   return argon2id({
     ...ARGON_CONFIG,
@@ -208,6 +257,54 @@ function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicKey: Uint8Arra
     return digitGroups.join(' ');
 }
 
+// --- DOUBLE RATCHET STATE HELPERS ---
+
+function b64ToBytes(str: string | null | undefined): Uint8Array | null {
+  return str ? sodium.from_base64(str, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
+}
+
+function bytesToB64(bytes: Uint8Array | null | undefined): string | null {
+  return bytes ? sodium.to_base64(bytes, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
+}
+
+function deserializeState(state: any) {
+  return {
+    RK: b64ToBytes(state.RK),
+    CKs: b64ToBytes(state.CKs),
+    CKr: b64ToBytes(state.CKr),
+    DHs: state.DHs ? {
+      publicKey: b64ToBytes(state.DHs.publicKey),
+      privateKey: b64ToBytes(state.DHs.privateKey)
+    } : null,
+    DHr: b64ToBytes(state.DHr),
+    Ns: state.Ns,
+    Nr: state.Nr,
+    PN: state.PN
+  };
+}
+
+function serializeState(state: any) {
+  return {
+    RK: bytesToB64(state.RK),
+    CKs: bytesToB64(state.CKs),
+    CKr: bytesToB64(state.CKr),
+    DHs: state.DHs ? {
+      publicKey: bytesToB64(state.DHs.publicKey),
+      privateKey: bytesToB64(state.DHs.privateKey)
+    } : null,
+    DHr: bytesToB64(state.DHr),
+    Ns: state.Ns,
+    Nr: state.Nr,
+    PN: state.PN
+  };
+}
+
+function wipeState(state: any) {
+  if (state.RK) sodium.memzero(state.RK);
+  if (state.CKs) sodium.memzero(state.CKs);
+  if (state.CKr) sodium.memzero(state.CKr);
+  if (state.DHs && state.DHs.privateKey) sodium.memzero(state.DHs.privateKey);
+}
 
 // --- MAIN MESSAGE HANDLER ---
 const ALGO = 'AES-GCM';
@@ -729,6 +826,171 @@ self.onmessage = async (event: MessageEvent) => {
           sodium.memzero(myIdentityKeyPrivateBytes);
           sodium.memzero(mySignedPreKeyPrivateBytes);
           if (sharedSecret) sodium.memzero(sharedSecret);
+        }
+        break;
+      }
+      case 'dr_init_alice': {
+        const { sk, theirSignedPreKeyPublic } = payload;
+        const skBytes = new Uint8Array(sk);
+        const theirSpkBytes = new Uint8Array(theirSignedPreKeyPublic);
+        
+        const DHs = sodium.crypto_box_keypair();
+        const dh_out = sodium.crypto_scalarmult(DHs.privateKey, theirSpkBytes);
+        
+        const [RK, CKs] = await kdfRoot(skBytes, dh_out);
+        
+        const state = {
+           RK, CKs, CKr: null,
+           DHs, DHr: theirSpkBytes,
+           Ns: 0, Nr: 0, PN: 0
+        };
+        
+        result = serializeState(state);
+        
+        wipeState(state);
+        sodium.memzero(skBytes);
+        sodium.memzero(dh_out);
+        break;
+      }
+      case 'dr_init_bob': {
+        const { sk, mySignedPreKey } = payload;
+        const skBytes = new Uint8Array(sk);
+        
+        const state = {
+           RK: new Uint8Array(skBytes),
+           CKs: null, CKr: null,
+           DHs: {
+             publicKey: new Uint8Array(mySignedPreKey.publicKey),
+             privateKey: new Uint8Array(mySignedPreKey.privateKey)
+           },
+           DHr: null,
+           Ns: 0, Nr: 0, PN: 0
+        };
+        
+        result = serializeState(state);
+        
+        wipeState(state);
+        sodium.memzero(skBytes);
+        break;
+      }
+      case 'dr_ratchet_encrypt': {
+        const { serializedState, plaintext } = payload;
+        const state = deserializeState(serializedState);
+        const plaintextBytes = typeof plaintext === 'string' ? new TextEncoder().encode(plaintext) : new Uint8Array(plaintext);
+        
+        if (!state.CKs) throw new Error("Sender chain key not initialized");
+        if (!state.DHs) throw new Error("Sender DH keypair not initialized");
+
+        const [newCKs, mk] = await kdfChain(state.CKs);
+        if (state.CKs) sodium.memzero(state.CKs);
+        state.CKs = newCKs;
+        
+        const header = {
+           dh: bytesToB64(state.DHs.publicKey),
+           n: state.Ns,
+           pn: state.PN
+        };
+        state.Ns += 1;
+        
+        const nonce = sodium.randombytes_buf(24);
+        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(plaintextBytes, null, null, nonce, mk);
+        
+        const combined = new Uint8Array(nonce.length + ciphertext.length);
+        combined.set(nonce);
+        combined.set(ciphertext, nonce.length);
+        
+        result = {
+           state: serializeState(state),
+           header,
+           ciphertext: combined
+        };
+        
+        wipeState(state);
+        sodium.memzero(mk);
+        sodium.memzero(plaintextBytes);
+        break;
+      }
+      case 'dr_ratchet_decrypt': {
+        const { serializedState, header, ciphertext } = payload;
+        const state = deserializeState(serializedState);
+        const ciphertextBytes = new Uint8Array(ciphertext);
+        const headerDhBytes = b64ToBytes(header.dh);
+        
+        if (!headerDhBytes) throw new Error("Invalid header DH key");
+
+        let skippedKeys: any[] = [];
+        
+        try {
+            if (!state.DHr || sodium.compare(headerDhBytes, state.DHr) !== 0) {
+                if (state.CKr) {
+                   while (state.Nr < header.pn) {
+                      const [newCKr, mk] = await kdfChain(state.CKr);
+                      sodium.memzero(state.CKr);
+                      state.CKr = newCKr;
+                      skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
+                      state.Nr += 1;
+                   }
+                }
+                
+                state.PN = state.Ns;
+                state.Ns = 0;
+                state.Nr = 0;
+                if (state.DHr) sodium.memzero(state.DHr);
+                state.DHr = new Uint8Array(headerDhBytes);
+                
+                if (!state.DHs || !state.RK) throw new Error("Invalid state: missing DHs or RK");
+                
+                let dh_out = sodium.crypto_scalarmult(state.DHs.privateKey, state.DHr);
+                const [RK1, CKr] = await kdfRoot(state.RK, dh_out);
+                sodium.memzero(dh_out);
+                sodium.memzero(state.RK);
+                if (state.CKr) sodium.memzero(state.CKr);
+                state.RK = RK1;
+                state.CKr = CKr;
+                
+                if (state.DHs && state.DHs.privateKey) sodium.memzero(state.DHs.privateKey);
+                state.DHs = sodium.crypto_box_keypair();
+                
+                if (!state.DHs) throw new Error("DH generation failed");
+
+                dh_out = sodium.crypto_scalarmult(state.DHs.privateKey, state.DHr);
+                const [RK2, CKs] = await kdfRoot(state.RK, dh_out);
+                sodium.memzero(dh_out);
+                sodium.memzero(state.RK);
+                if (state.CKs) sodium.memzero(state.CKs);
+                state.RK = RK2;
+                state.CKs = CKs;
+            }
+            
+            if (!state.CKr) throw new Error("Receiver chain key not initialized");
+
+            while (state.Nr < header.n) {
+                const [newCKr, mk] = await kdfChain(state.CKr);
+                sodium.memzero(state.CKr);
+                state.CKr = newCKr;
+                skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
+                state.Nr += 1;
+            }
+            
+            const [newCKr, mk] = await kdfChain(state.CKr);
+            sodium.memzero(state.CKr);
+            state.CKr = newCKr;
+            state.Nr += 1;
+            
+            const nonce = ciphertextBytes.slice(0, 24);
+            const ctext = ciphertextBytes.slice(24);
+            const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
+            
+            result = {
+               state: serializeState(state),
+               plaintext,
+               skippedKeys
+            };
+            
+            sodium.memzero(mk);
+        } finally {
+            wipeState(state);
+            sodium.memzero(headerDhBytes);
         }
         break;
       }

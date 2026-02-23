@@ -228,3 +228,67 @@ export function worker_x3dh_recipient_regenerate(payload: {
         theirEphemeralKey: Array.from(payload.theirEphemeralKey)
     });
 }
+
+// --- DOUBLE RATCHET PROXY FUNCTIONS ---
+
+export interface SerializedRatchetState {
+    RK: string;
+    CKs: string | null;
+    CKr: string | null;
+    DHs: { publicKey: string, privateKey: string };
+    DHr: string | null;
+    Ns: number;
+    Nr: number;
+    PN: number;
+}
+
+export function worker_dr_init_alice(payload: {
+    sk: Uint8Array,
+    theirSignedPreKeyPublic: Uint8Array
+}): Promise<SerializedRatchetState> {
+    return sendToWorker('dr_init_alice', { 
+        sk: Array.from(payload.sk), 
+        theirSignedPreKeyPublic: Array.from(payload.theirSignedPreKeyPublic) 
+    });
+}
+
+export function worker_dr_init_bob(payload: {
+    sk: Uint8Array,
+    mySignedPreKey: { publicKey: Uint8Array, privateKey: Uint8Array }
+}): Promise<SerializedRatchetState> {
+    return sendToWorker('dr_init_bob', {
+        sk: Array.from(payload.sk),
+        mySignedPreKey: {
+            publicKey: Array.from(payload.mySignedPreKey.publicKey),
+            privateKey: Array.from(payload.mySignedPreKey.privateKey)
+        }
+    });
+}
+
+export function worker_dr_ratchet_encrypt(payload: {
+    serializedState: SerializedRatchetState,
+    plaintext: Uint8Array | string
+}): Promise<{ state: SerializedRatchetState, header: any, ciphertext: Uint8Array }> {
+    return sendToWorker<{ state: SerializedRatchetState, header: any, ciphertext: any }>('dr_ratchet_encrypt', {
+        serializedState: payload.serializedState,
+        plaintext: typeof payload.plaintext === 'string' ? payload.plaintext : Array.from(payload.plaintext)
+    }).then(res => ({
+        ...res,
+        ciphertext: new Uint8Array(res.ciphertext)
+    }));
+}
+
+export function worker_dr_ratchet_decrypt(payload: {
+    serializedState: SerializedRatchetState,
+    header: any,
+    ciphertext: Uint8Array
+}): Promise<{ state: SerializedRatchetState, plaintext: Uint8Array, skippedKeys: { dh: string, n: number, mk: string }[] }> {
+    return sendToWorker<{ state: SerializedRatchetState, plaintext: any, skippedKeys: any[] }>('dr_ratchet_decrypt', {
+        serializedState: payload.serializedState,
+        header: payload.header,
+        ciphertext: Array.from(payload.ciphertext)
+    }).then(res => ({
+        ...res,
+        plaintext: new Uint8Array(res.plaintext)
+    }));
+}

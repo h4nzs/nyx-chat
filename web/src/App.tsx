@@ -39,10 +39,6 @@ import { useGlobalShortcut } from './hooks/useGlobalShortcut';
 
 // Libs & Utils
 import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
-import { syncSessionKeys } from './utils/sessionSync';
-
-// Variabel global untuk mencegah double-sync saat render cepat
-let isSyncing = false;
 
 // Initialize socket instance once
 getSocket();
@@ -151,23 +147,7 @@ const AppContent = () => {
     }
   }, [user, location.pathname]);
 
-  // 3. Sync Encryption Keys
-  useEffect(() => {
-    const sync = async () => {
-      if (user && !location.pathname.startsWith('/link-device') && sessionStorage.getItem('keys_synced') !== 'true' && !isSyncing) {
-        try {
-          isSyncing = true;
-          await syncSessionKeys();
-          sessionStorage.setItem('keys_synced', 'true');
-        } catch (error) {
-          console.error("❌ Key synchronization failed:", error);
-        } finally {
-          isSyncing = false;
-        }
-      }
-    };
-    sync();
-  }, [user, location.pathname]);
+  // 3. (Reserved for future use)
 
   // 4. Apply Theme
   useEffect(() => {

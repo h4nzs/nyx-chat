@@ -12,6 +12,8 @@ import {
   getMyEncryptionKeyPair, 
   storeSessionKeySecurely, 
   deriveSessionKeyAsRecipient,
+  storeRatchetStateSecurely,
+  retrieveRatchetStateSecurely,
   PreKeyBundle 
 } from "@utils/crypto";
 import toast from "react-hot-toast";
@@ -80,11 +82,15 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
                    otpkId
                );
 
-               // Store Key & Use it
-               if (message.sessionId) {
-                   await storeSessionKeySecurely(message.conversationId, message.sessionId, sessionKey);
-                   contentToDecrypt = ciphertext; // Update target content
-               }
+               // [DOUBLE RATCHET INIT BOB]
+               const { worker_dr_init_bob } = await import('@lib/crypto-worker-proxy');
+               const newState = await worker_dr_init_bob({
+                   sk: sessionKey,
+                   mySignedPreKey: mySignedPreKeyPair
+               });
+
+               await storeRatchetStateSecurely(message.conversationId, newState);
+               contentToDecrypt = ciphertext; // Update target content
            }
        } catch (e) {
            console.error("[X3DH] Failed to parse/derive from header:", e);
@@ -382,16 +388,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     }
 
     try {
-      let ciphertext = '', sessionId: string | undefined;
+      let ciphertext = '';
       let x3dhHeader: any = null;
-      let encryptionSession: { sessionId: string; key: Uint8Array } | undefined;
 
       // LAZY SESSION INITIALIZATION (X3DH) - SINGLE SOURCE OF TRUTH
       // No more getPendingHeader check here.
       if (!isGroup && data.content) {
-          const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
+          const state = await retrieveRatchetStateSecurely(conversationId);
           
-          if (!latestKey) {
+          if (!state) {
              // Fix: Use p.id instead of p.userId
              const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
              
@@ -403,12 +408,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                  const myKeyPair = await getMyEncryptionKeyPair();
                  const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
                  
-                 // 3. Generate Session ID & Store Self-Key
                  const sodium = await getSodium();
-                 sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
-                 await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
-
-                 encryptionSession = { sessionId, key: sessionKey };
+                 
+                 // [DOUBLE RATCHET INIT ALICE]
+                 const { worker_dr_init_alice } = await import('@lib/crypto-worker-proxy');
+                 const newState = await worker_dr_init_alice({
+                     sk: sessionKey,
+                     theirSignedPreKeyPublic: sodium.from_base64(theirBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING)
+                 });
+                 
+                 await storeRatchetStateSecurely(conversationId, newState);
 
                  // 4. Prepare Header for Peer
                  x3dhHeader = {
@@ -421,30 +430,28 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                  toast.error("Encryption failed: Cannot identify recipient.");
                  return; // STOP HERE
              }
-          } else {
-             // Reuse existing session
-             sessionId = latestKey.sessionId;
-             encryptionSession = latestKey;
           }
       }
 
       if (data.content) {
-        if (!isGroup && !encryptionSession) {
-            console.error("[Crypto] Attempted to encrypt without session:", { conversationId, isGroup });
-            throw new Error("Encryption setup failed. Please try reloading the chat.");
-        }
-
-        // Encrypt content
-        const result = await encryptMessage(data.content, conversationId, isGroup, encryptionSession);
+        // Encrypt content (encryptMessage now handles Ratchet state internally for 1-on-1)
+        const result = await encryptMessage(data.content, conversationId, isGroup);
         ciphertext = result.ciphertext;
-        if (!sessionId) sessionId = result.sessionId; 
+        
+        // Combine DR Header with Ciphertext (JSON payload) for private chats
+        if (!isGroup && result.drHeader) {
+            ciphertext = JSON.stringify({
+                dr: result.drHeader,
+                ciphertext: ciphertext
+            });
+        }
       }
       
       // EMBED HEADER IF NEW SESSION
       if (x3dhHeader) {
           const payloadJson = JSON.stringify({
               x3dh: x3dhHeader,
-              ciphertext: ciphertext
+              ciphertext: ciphertext // This is already the {dr, ciphertext} JSON string if !isGroup
           });
           ciphertext = payloadJson;
       }
@@ -452,7 +459,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const payload = {
           ...data,
           content: ciphertext,
-          sessionId,
+          sessionId: isGroup ? 'group_session' : undefined, // Placeholder for legacy compatibility if needed
           fileKey: undefined, fileName: undefined, fileType: undefined, fileSize: undefined
       };
 

@@ -5,7 +5,9 @@ const SESSION_KEYS_STORE_NAME = 'session-keys';
 const GROUP_KEYS_STORE_NAME = 'group-keys';
 const OTPK_STORE_NAME = 'one-time-pre-keys';
 const PENDING_HEADERS_STORE_NAME = 'pending-headers';
-const DB_VERSION = 4;
+const RATCHET_SESSIONS_STORE_NAME = 'ratchet-sessions';
+const SKIPPED_KEYS_STORE_NAME = 'skipped-keys';
+const DB_VERSION = 5;
 
 // Cache DB connections by userId to handle switching accounts without reloading
 const dbCache = new Map<string, Promise<IDBPDatabase>>();
@@ -38,7 +40,14 @@ function getDb(): Promise<IDBPDatabase> {
         if (oldVersion < 4) {
           db.createObjectStore(PENDING_HEADERS_STORE_NAME);
         }
+        if (oldVersion < 5) {
+          db.createObjectStore(RATCHET_SESSIONS_STORE_NAME);
+          db.createObjectStore(SKIPPED_KEYS_STORE_NAME);
+        }
       },
+    }).catch(err => {
+      dbCache.delete(userId);
+      throw err;
     });
     dbCache.set(userId, promise);
   }
@@ -191,14 +200,56 @@ export async function deleteGroupKey(conversationId: string): Promise<void> {
 }
 
 /**
+ * Stores the encrypted RatchetState for a conversation.
+ */
+export async function storeRatchetSession(conversationId: string, encryptedState: Uint8Array): Promise<void> {
+  const db = await getDb();
+  await db.put(RATCHET_SESSIONS_STORE_NAME, encryptedState, conversationId);
+}
+
+/**
+ * Retrieves the encrypted RatchetState for a conversation.
+ */
+export async function getRatchetSession(conversationId: string): Promise<Uint8Array | null> {
+  const db = await getDb();
+  return (await db.get(RATCHET_SESSIONS_STORE_NAME, conversationId)) || null;
+}
+
+/**
+ * Stores an encrypted skipped message key.
+ */
+export async function storeSkippedKey(headerKey: string, encryptedKey: Uint8Array): Promise<void> {
+  const db = await getDb();
+  await db.put(SKIPPED_KEYS_STORE_NAME, encryptedKey, headerKey);
+}
+
+/**
+ * Retrieves an encrypted skipped message key.
+ */
+export async function getSkippedKey(headerKey: string): Promise<Uint8Array | null> {
+  const db = await getDb();
+  return (await db.get(SKIPPED_KEYS_STORE_NAME, headerKey)) || null;
+}
+
+/**
+ * Deletes a skipped message key.
+ */
+export async function deleteSkippedKey(headerKey: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(SKIPPED_KEYS_STORE_NAME, headerKey);
+}
+
+/**
  * Clears all keys from the database. Used on logout.
  */
 export async function clearAllKeys(): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, PENDING_HEADERS_STORE_NAME], 'readwrite');
+  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, SKIPPED_KEYS_STORE_NAME], 'readwrite');
   await tx.objectStore(SESSION_KEYS_STORE_NAME).clear();
   await tx.objectStore(GROUP_KEYS_STORE_NAME).clear();
   await tx.objectStore(OTPK_STORE_NAME).clear();
   await tx.objectStore(PENDING_HEADERS_STORE_NAME).clear();
+  await tx.objectStore(RATCHET_SESSIONS_STORE_NAME).clear();
+  await tx.objectStore(SKIPPED_KEYS_STORE_NAME).clear();
   await tx.done;
 }

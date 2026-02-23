@@ -10,7 +10,6 @@ import toast from "react-hot-toast";
 import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; // Only import TYPE
 import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; // Import helper
-import { syncSessionKeys } from "@utils/sessionSync";
 
 /**
  * Retrieves the persisted signed pre-key, signs it with the identity signing key,
@@ -289,12 +288,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     login: async (emailOrUsername, password, restoredNotSynced = false) => {
-      // [FIX] Ensure clean slate. Wipe old keys from IDB before starting new session.
-      try {
-        const { clearAllKeys } = await import('@lib/keychainDb');
-        await clearAllKeys();
-      } catch (e) { console.error("Failed to clear old keys:", e); }
-
       privateKeysCache = null;
       set({ isInitializingCrypto: true }); // Show loading for crypto init
 
@@ -356,11 +349,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           toast("To enable secure messaging, restore your account from your recovery phrase in Settings.", { duration: 7000 });
         }
 
-        // [SYNC] Restore historical session keys from server backup
-        try {
-          await syncSessionKeys();
-        } catch (e) { console.error("Auto-sync keys failed:", e); }
-
         // [RESET] Force rotate OTPK on new login to prevent stale key decryption errors
         try {
           await resetOneTimePreKeys();
@@ -408,12 +396,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     registerAndGeneratePhrase: async (data) => {
       set({ isInitializingCrypto: true });
       try {
-        // [FIX] Ensure clean slate. Wipe old keys from IDB before generating new ones.
-        try {
-            const { clearAllKeys } = await import('@lib/keychainDb');
-            await clearAllKeys();
-        } catch (e) { console.error("Failed to clear old keys:", e); }
-
         // Dynamic Import
         const { registerAndGenerateKeys, retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
 
@@ -472,10 +454,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           localStorage.setItem("user", JSON.stringify(res.user));
           setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
           
-          try {
-            await syncSessionKeys();
-          } catch (e) { console.error("Auto-sync keys failed:", e); }
-
           connectSocket();
           return { phrase, needVerification: false };
         }
@@ -539,12 +517,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       } finally {
         clearAuthCookies();
         privateKeysCache = null;
-        
-        // [FIX] Clear ALL persistent keys (IndexedDB) and Master Key (LocalStorage)
-        try {
-            const { clearAllKeys } = await import('@lib/keychainDb');
-            await clearAllKeys();
-        } catch (e) { console.error("Failed to wipe IndexedDB:", e); }
         
         await clearKeys(); 
         
