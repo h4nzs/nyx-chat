@@ -45,7 +45,7 @@ const MediaGallery = ({ conversationId }: { conversationId: string }) => {
             id: m.id,
             content: m.fileUrl || m.imageUrl || '',
             type,
-            fileName: m.fileName
+            fileName: m.fileName || undefined // Handle null
         };
     }).reverse(); // Newest first
 
