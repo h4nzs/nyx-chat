@@ -1,25 +1,114 @@
-Tolong eksekusi perbaikan arsitektur kriptografi dan perbaiki bug kritis pada antrean offline. Berdasarkan analisis terbaru, kegagalan dekripsi pesan offline disebabkan oleh dua hal: 1) Pesan offline dimasukkan ke queue sebagai plaintext, bukan ciphertext. 2) Masih ada sisa race condition karena kalkulasi X3DH dilakukan di startConversation dan diteruskan via IndexedDB (PendingHeader). Kita harus merombaknya menjadi "Pure Lazy Initialization" (Stateless).
+1. Perbaikan store/conversation.ts (Sapu Bersih)
 
-Lakukan dua tugas berikut secara berurutan:
+Ganti fungsi startConversation menjadi murni "Stateless" tanpa import dan logika X3DH apapun.
+TypeScript
 
-Tugas 1: Rombak web/src/store/conversation.ts (Jadikan Stateless)
+  // Di store/conversation.ts
+  startConversation: async (peerId: string): Promise<string> => {
+    const { user } = useAuthStore.getState();
+    if (!user) {
+      throw new Error("Cannot start a conversation: user is not authenticated.");
+    }
 
-Modifikasi fungsi startConversation:
+    try {
+      // PENTING: Jangan fetch bundle di sini. Jangan hitung X3DH di sini.
+      // Jangan pakai getSodium. Jangan simpan key atau header ke IndexedDB.
 
-Hapus semua logika dan import kriptografi dari fungsi ini (hapus establishSessionFromPreKeyBundle, penghitungan sodium, addSessionKey, dan storePendingHeader).
+      const conv = await authFetch<Conversation>("/api/conversations", {
+        method: "POST",
+        body: JSON.stringify({
+          userIds: [peerId],
+          isGroup: false,
+          // Kirim dummy initialSession untuk lolos validasi backend
+          initialSession: {
+            sessionId: `dummy_${Date.now()}`,
+            ephemeralPublicKey: "dummy",
+            initialKeys: [
+              { userId: user.id, key: "dummy" },
+              { userId: peerId, key: "dummy" }, 
+            ],
+          },
+        }),
+      });
 
-Fungsi ini HANYA bertugas membuat room obrolan. Ubah payload POST /api/conversations agar mengirimkan initialSession berupa data "dummy" saja untuk memuaskan validasi backend (karena distribusi kunci asli akan dilakukan di pesan pertama).
+      getSocket().emit("conversation:join", conv.id);
+      get().addOrUpdateConversation(conv);
+      set({ activeId: conv.id, isSidebarOpen: false });
+      return conv.id;
+    } catch (error: any) {
+      console.error("Failed to start conversation:", error);
+      throw new Error(`Failed to establish conversation. ${error.message || ''}`);
+    }
+  },
 
-Gunakan payload ini di initialSession:{ sessionId: "dummy_" + Date.now(), ephemeralPublicKey: "dummy", initialKeys: [{ userId: user.id, key: "dummy" }, { userId: peerId, key: "dummy" }] }
+2. Perbaikan store/message.ts (Jadikan Single Source of Truth)
 
-Tugas 2: Rombak web/src/store/message.ts (Sempurnakan Lazy Init & Fix Bug Offline Queue)
+Cari fungsi sendMessage, lalu hapus blok pengecekan getPendingHeader (karena titipan itu sudah kita musnahkan di conversation.ts). Biarkan Lazy Init bekerja sendiri.
+TypeScript
 
-Modifikasi fungsi sendMessage:
+  // Di store/message.ts -> sendMessage (Ganti bagian di dalam blok try)
+    try {
+      let ciphertext = '', sessionId: string | undefined;
+      let x3dhHeader: any = null;
 
-Hapus blok kode yang mencoba mengambil header dari IndexedDB (getPendingHeader / deletePendingHeader).
+      // HAPUS BLOK getPendingHeader. JANGAN ADA LAGI TITIPAN.
 
-Jadikan blok "LAZY SESSION INITIALIZATION (X3DH)" yang sudah ada sebagai satu-satunya jalur utama untuk membuat sesi baru jika retrieveLatestSessionKeySecurely(conversationId) mengembalikan null. Pastikan di dalam blok ini aplikasi mengambil bundle lawan, mengeksekusi X3DH dengan OTPK, menyimpan sesi lokal, dan membungkus x3dhHeader.
+      // LAZY SESSION INITIALIZATION (X3DH) - JALUR TUNGGAL PEMBUATAN KUNCI
+      if (!isGroup && data.content) {
+          const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
+          
+          if (!latestKey) {
+             console.log(`[X3DH] No session key found for ${conversationId}. Initiating handshake...`);
+             const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
+             
+             if (peerId) {
+                 // 1. Fetch Bundle
+                 const theirBundle = await authFetch<any>(`/api/keys/prekey-bundle/${peerId}`);
+                 
+                 // 2. Establish Session
+                 const myKeyPair = await getMyEncryptionKeyPair();
+                 const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
+                 
+                 // 3. Generate Session ID & Store Self-Key
+                 const sodium = await getSodium();
+                 sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
+                 await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
 
-[CRITICAL BUG FIX] Cari blok if (!isConnected && !isReactionPayload) { ... }. Perbaiki objek yang dimasukkan ke addToQueue. Saat ini kode menggunakan const queueMsg = { ...data, ... } yang menyebabkan pesan terkirim sebagai plaintext. Ubah menjadi const queueMsg = { ...payload, ... } agar ciphertext dan amplop JSON X3DH tersimpan di dalam antrean offline.
+                 // 4. Prepare Header for Peer (AMPLOP WAJIB)
+                 x3dhHeader = {
+                     ik: sodium.to_base64(myKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+                     ek: ephemeralPublicKey,
+                     otpkId: otpkId
+                 };
+                 
+                 console.log(`[X3DH] Handshake prepared (Lazy). Header attached to message.`);
+             }
+          } else {
+             // Jika key udah ada, pakai yang lama
+             sessionId = latestKey.sessionId;
+          }
+      }
 
-Pastikan tidak ada deklarasi fungsi yang hilang atau struktur state Zustand yang rusak. Tolong eksekusi.
+      if (data.content) {
+        const result = await encryptMessage(data.content, conversationId, isGroup);
+        ciphertext = result.ciphertext;
+        if (!sessionId) sessionId = result.sessionId; 
+      }
+      
+      // EMBED HEADER IF NEW SESSION
+      if (x3dhHeader) {
+          const payloadJson = JSON.stringify({
+              x3dh: x3dhHeader,
+              ciphertext: ciphertext
+          });
+          ciphertext = payloadJson;
+      }
+      
+      const payload = {
+          ...data,
+          content: ciphertext,
+          sessionId,
+          fileKey: undefined, fileName: undefined, fileType: undefined, fileSize: undefined
+      };
+
+      // ... (sisa kode socket offline queue dan emit biarkan sama seperti sebelumnya) ...

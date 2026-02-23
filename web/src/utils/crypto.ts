@@ -320,11 +320,13 @@ async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0) {
 
   emitGroupKeyRequest(conversationId);
 
-  const timerId = window.setTimeout(() => {
+  const timerId = window.setTimeout(async () => {
     pendingGroupKeyRequests.delete(conversationId);
     if (attempt < MAX_KEY_REQUEST_RETRIES) {
       requestGroupKeyWithTimeout(conversationId, attempt + 1);
     } else {
+      // Dynamic import to break cycle
+      const { useMessageStore } = await import('@store/message');
       useMessageStore.getState().failPendingMessages(conversationId, '[Key request timed out]');
     }
   }, KEY_REQUEST_TIMEOUT_MS);
@@ -633,6 +635,11 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     if (newSessionKey) {
         await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
         console.log(`[Crypto] Stored session key for ${sessionId}`);
+        
+        // Dynamic import to break cycle
+        import('@store/message').then(({ useMessageStore }) => {
+            useMessageStore.getState().reDecryptPendingMessages(conversationId);
+        });
     }
   }
 }

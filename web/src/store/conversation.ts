@@ -4,8 +4,7 @@ import { useMessageStore, decryptMessageObject } from "./message";
 import { getSocket, emitSessionKeyRequest } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
-import { getSodium } from '@lib/sodiumInitializer';
-import { addSessionKey } from '@lib/keychainDb';
+// Removed all crypto imports
 import toast from 'react-hot-toast';
 
 // --- Type Definitions ---
@@ -284,8 +283,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       // STATELESS INITIALIZATION (Pure Lazy Init)
       // No crypto here. Just create room container.
       
-      const sodium = await getSodium();
-      const sessionId = `dummy_${sodium.to_hex(sodium.randombytes_buf(16))}`;
+      const sessionId = `dummy_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
       const conv = await authFetch<Conversation>("/api/conversations", {
         method: "POST",
@@ -303,9 +301,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         }),
       });
       
-      // Removed addSessionKey and storePendingHeader logic
-      // Session establishment is deferred to sendMessage()
-
       getSocket().emit("conversation:join", conv.id);
       get().addOrUpdateConversation(conv);
       set({ activeId: conv.id, isSidebarOpen: false });

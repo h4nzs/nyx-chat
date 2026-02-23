@@ -22,6 +22,7 @@ import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
 import { useConnectionStore } from "./connection";
 import { getSodium } from "@lib/sodiumInitializer";
+// getPendingHeader removed as requested
 
 /**
  * Logika Dekripsi Terpusat (Single Source of Truth)
@@ -382,14 +383,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       let ciphertext = '', sessionId: string | undefined;
       let x3dhHeader: any = null;
 
-      // LAZY SESSION INITIALIZATION (Pure Stateless)
-      // Only for 1-on-1 chats that contain content
-      // We check if we have a key. If not, we perform handshake HERE AND NOW.
+      // LAZY SESSION INITIALIZATION (X3DH) - SINGLE SOURCE OF TRUTH
+      // No more getPendingHeader check here.
       if (!isGroup && data.content) {
           const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
           
           if (!latestKey) {
-             console.log(`[X3DH] No session key found for ${conversationId}. Initiating handshake (Stateless)...`);
+             console.log(`[X3DH] No session key found for ${conversationId}. Initiating handshake...`);
              // Fix: Use p.id instead of p.userId
              const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
              
@@ -413,16 +413,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                      otpkId: otpkId
                  };
                  
-                 console.log(`[X3DH] Handshake prepared. Header attached to message.`);
+                 console.log(`[X3DH] Handshake prepared (Lazy). Header attached to message.`);
              }
+          } else {
+             // Reuse existing session
+             sessionId = latestKey.sessionId;
           }
       }
 
       if (data.content) {
-        // Encrypt content (will use the key we just stored if it was new)
+        // Encrypt content
         const result = await encryptMessage(data.content, conversationId, isGroup);
         ciphertext = result.ciphertext;
-        // If we just created a session, use that ID. Otherwise use the one from encryption result.
         if (!sessionId) sessionId = result.sessionId; 
       }
       
