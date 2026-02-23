@@ -365,6 +365,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             reactions: [],
             statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${actualTempId}`, id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
             status: 'SENDING', 
+            // [FIX] Include full repliedTo object for optimistic UI
+            repliedTo: data.repliedTo,
         };
 
         if (data.content) {

@@ -85,6 +85,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     await coreSendMessage(conversationId, {
       ...data,
       repliedToId: replyingTo?.id,
+      // [FIX] Pass full object for optimistic UI
+      repliedTo: replyingTo || undefined,
       expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
       // Pass original content. message.ts handles encryption.
     }, tempId);
