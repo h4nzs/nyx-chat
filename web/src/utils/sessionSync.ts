@@ -1,6 +1,5 @@
 import { authFetch } from "@lib/api";
-import { getMyEncryptionKeyPair, decryptSessionKeyForUser } from "@utils/crypto";
-import { addSessionKey } from "@lib/keychainDb";
+import { getMyEncryptionKeyPair, decryptSessionKeyForUser, storeSessionKeySecurely } from "@utils/crypto";
 import toast from "react-hot-toast";
 
 type SyncResponse = Record<string, { sessionId: string; encryptedKey: string }[]>;
@@ -26,7 +25,8 @@ export async function syncSessionKeys() {
                 publicKey,
                 privateKey
               );
-              await addSessionKey(conversationId, keyInfo.sessionId, sessionKey);
+              // [FIX] Use secure store to re-encrypt with Master Seed locally
+              await storeSessionKeySecurely(conversationId, keyInfo.sessionId, sessionKey);
               syncedKeyCount++;
             } catch (decryptionError) {
               // Failed to decrypt, skip.

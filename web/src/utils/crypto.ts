@@ -78,9 +78,12 @@ export async function storeSessionKeySecurely(conversationId: string, sessionId:
   await addSessionKey(conversationId, sessionId, encryptedKey);
 
   // [BACKUP] Sync new key to server immediately (Fire & Forget)
+  const sodium = await getSodiumLib();
+  const encryptedKeyB64 = sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
   authFetch('/api/session-keys/backup', {
     method: 'POST',
-    body: JSON.stringify({ conversationId, sessionId, encryptedKey })
+    body: JSON.stringify({ conversationId, sessionId, encryptedKey: encryptedKeyB64 })
   }).catch(err => console.error("[Crypto] Failed to backup session key:", err));
 }
 
