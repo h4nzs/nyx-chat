@@ -133,7 +133,7 @@ export default defineConfig({
         manualChunks: {
           'react-vendor': ['react', 'react-dom', 'react-router-dom'],
           'ui-vendor': ['framer-motion', 'react-icons', 'clsx', 'classnames'],
-          'crypto-vendor': ['libsodium-wrappers', 'crypto-js', 'bip39', '@simplewebauthn/browser'],
+          'crypto-vendor': ['libsodium-wrappers', 'bip39', '@simplewebauthn/browser'],
           'utils-vendor': ['lodash', 'uuid', 'axios', 'zustand'],
         }
       }

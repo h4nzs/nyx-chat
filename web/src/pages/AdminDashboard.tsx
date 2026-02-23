@@ -4,6 +4,8 @@ import toast from 'react-hot-toast';
 import BanUserModal from '@components/BanUserModal';
 import { useModalStore } from '@store/modal';
 import { FiRefreshCw, FiUnlock, FiAlertTriangle } from 'react-icons/fi';
+import { useAuthStore } from '@store/auth';
+import { useNavigate } from 'react-router-dom';
 
 interface BannedUser {
   id: string;
@@ -14,20 +16,15 @@ interface BannedUser {
 }
 
 export default function AdminDashboard() {
+  const { user } = useAuthStore();
+  const navigate = useNavigate();
   const [metrics, setMetrics] = useState<any>(null);
   const [bannedUsers, setBannedUsers] = useState<BannedUser[]>([]);
   const [isBanModalOpen, setIsBanModalOpen] = useState(false);
   const { showConfirm } = useModalStore();
 
-  useEffect(() => {
-    loadAllData();
-  }, []);
-
-  const loadAllData = () => {
-    loadMetrics();
-    loadBannedUsers();
-  };
-
+  // --- Data Loading Functions ---
+  // Defined before useEffect to be available inside it
   const loadMetrics = () => {
     authFetch('/api/admin/system-status')
       .then((res: any) => setMetrics(res))
@@ -39,6 +36,20 @@ export default function AdminDashboard() {
       .then((res) => setBannedUsers(res))
       .catch((err) => console.error("Failed to load banned users", err));
   };
+
+  const loadAllData = () => {
+    loadMetrics();
+    loadBannedUsers();
+  };
+
+  useEffect(() => {
+    if (user?.role !== 'ADMIN') {
+      toast.error("Access Denied");
+      navigate('/');
+    } else {
+      loadAllData();
+    }
+  }, [user, navigate]);
 
   const handleUnban = (user: BannedUser) => {
     showConfirm(
@@ -58,6 +69,8 @@ export default function AdminDashboard() {
       }
     );
   };
+
+  if (user?.role !== 'ADMIN') return null;
 
   if (!metrics) return (
     <div className="flex items-center justify-center h-screen bg-bg-main text-text-secondary font-mono animate-pulse">

@@ -66,46 +66,48 @@ export default function LazyImage({
       }
 
       try {
-        // A. DEKRIPSI KUNCI (DENGAN AUTO-RETRY LOGIC)
-        const conversation = conversations.find(c => c.id === message.conversationId);
-        const isGroup = conversation ? conversation.isGroup : false;
+        let rawFileKey: string;
 
-        const keyResult = await decryptMessage(
-            encryptedFileKey,
-            message.conversationId,
-            isGroup,
-            message.sessionId
-        );
+        // CHECK BLIND ATTACHMENT (Raw Key)
+        if (message.isBlindAttachment) {
+             rawFileKey = encryptedFileKey;
+        } else {
+            // LEGACY: DEKRIPSI KUNCI (DENGAN AUTO-RETRY LOGIC)
+            const conversation = conversations.find(c => c.id === message.conversationId);
+            const isGroup = conversation ? conversation.isGroup : false;
 
-        // --- FIX UTAMA: HANDLING PENDING STATE ---
-        if (keyResult.status === 'pending') {
-            if (isMounted) {
-                setDecryptionStatus('waiting_for_key');
-                setError(keyResult.reason || "Key not found yet");
-                
-                // Minta Kunci ke Server via Socket (Active Fetch)
-                const socket = getSocket();
-                if (socket && socket.connected && message.sessionId) {
-                    socket.emit('session:request_key', {
-                        conversationId: message.conversationId,
-                        sessionId: message.sessionId
-                    });
+            const keyResult = await decryptMessage(
+                encryptedFileKey,
+                message.conversationId,
+                isGroup,
+                message.sessionId
+            );
+
+            if (keyResult.status === 'pending') {
+                if (isMounted) {
+                    setDecryptionStatus('waiting_for_key');
+                    setError(keyResult.reason || "Key not found yet");
+                    
+                    const socket = getSocket();
+                    if (socket && socket.connected && message.sessionId) {
+                        socket.emit('session:request_key', {
+                            conversationId: message.conversationId,
+                            sessionId: message.sessionId
+                        });
+                    }
+
+                    retryTimeout = setTimeout(() => {
+                        if (isMounted) setRetryCount(c => c + 1);
+                    }, 3000);
                 }
-
-                // Coba lagi dalam 3 detik (Polling)
-                retryTimeout = setTimeout(() => {
-                    if (isMounted) setRetryCount(c => c + 1);
-                }, 3000);
+                return;
             }
-            return;
-        }
-        // ------------------------------------------
 
-        if (keyResult.status === 'error') {
-            throw keyResult.error || new Error("Failed to decrypt file key");
+            if (keyResult.status === 'error') {
+                throw keyResult.error || new Error("Failed to decrypt file key");
+            }
+            rawFileKey = keyResult.value;
         }
-
-        const rawFileKey = keyResult.value;
 
         // B. DEKRIPSI FILE BLOB
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);

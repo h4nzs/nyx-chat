@@ -160,7 +160,7 @@ router.get('/search',
             }
           ]
         },
-        take: 10,
+        take: 5, // Reduced from 10 to 5 for performance
         select: { id: true, username: true, name: true, avatarUrl: true }
       })
       res.json(users)
@@ -169,6 +169,90 @@ router.get('/search',
     }
   }
 )
+
+// GET User by Email (for verification purposes) - AUTH REQUIRED
+router.post('/by-email',
+  zodValidate({ body: z.object({ email: z.string().email() }) }),
+  async (req, res, next) => {
+    try {
+      const { email } = req.body
+
+      const user = await prisma.user.findUnique({
+        where: { email },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          isEmailVerified: true,
+          showEmailToOthers: true
+        }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      const publicProfile: Partial<typeof user> & { id: string } = {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+        isEmailVerified: user.isEmailVerified
+      }
+
+      if (user.showEmailToOthers) {
+        publicProfile.email = user.email
+      }
+
+      res.json(publicProfile)
+    } catch (error) {
+      next(error)
+    }
+  })
+
+// GET User by Username (for verification purposes) - AUTH REQUIRED
+router.post('/by-username',
+  zodValidate({ body: z.object({ username: z.string().min(1) }) }),
+  async (req, res, next) => {
+    try {
+      const { username } = req.body
+
+      const user = await prisma.user.findUnique({
+        where: { username },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          name: true,
+          avatarUrl: true,
+          isEmailVerified: true,
+          showEmailToOthers: true
+        }
+      })
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' })
+      }
+
+      const publicProfile: Partial<typeof user> & { id: string } = {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        avatarUrl: user.avatarUrl,
+        isEmailVerified: user.isEmailVerified
+      }
+
+      if (user.showEmailToOthers) {
+        publicProfile.email = user.email
+      }
+
+      res.json(publicProfile)
+    } catch (error) {
+      next(error)
+    }
+  })
 
 // GET Other User Profile by ID
 router.get('/:userId', async (req, res, next) => {
@@ -287,86 +371,6 @@ router.get('/me/blocked', async (req, res, next) => {
       }
     })
     res.json(blocked.map(b => b.blocked))
-  } catch (error) {
-    next(error)
-  }
-})
-
-// GET User by Email (for verification purposes) - AUTH REQUIRED
-router.get('/by-email/:email', async (req, res, next) => {
-  try {
-    const { email } = req.params
-
-    const user = await prisma.user.findUnique({
-      where: { email },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        isEmailVerified: true,
-        showEmailToOthers: true
-      }
-    })
-
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' })
-    }
-
-    const publicProfile: Partial<typeof user> & { id: string } = {
-      id: user.id,
-      username: user.username,
-      name: user.name,
-      avatarUrl: user.avatarUrl,
-      isEmailVerified: user.isEmailVerified
-    }
-
-    if (user.showEmailToOthers) {
-      publicProfile.email = user.email
-    }
-
-    res.json(publicProfile)
-  } catch (error) {
-    next(error)
-  }
-})
-
-// GET User by Username (for verification purposes) - AUTH REQUIRED
-router.get('/by-username/:username', async (req, res, next) => {
-  try {
-    const { username } = req.params
-
-    const user = await prisma.user.findUnique({
-      where: { username },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        isEmailVerified: true,
-        showEmailToOthers: true
-      }
-    })
-
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' })
-    }
-
-    const publicProfile: Partial<typeof user> & { id: string } = {
-      id: user.id,
-      username: user.username,
-      name: user.name,
-      avatarUrl: user.avatarUrl,
-      isEmailVerified: user.isEmailVerified
-    }
-
-    if (user.showEmailToOthers) {
-      publicProfile.email = user.email
-    }
-
-    res.json(publicProfile)
   } catch (error) {
     next(error)
   }

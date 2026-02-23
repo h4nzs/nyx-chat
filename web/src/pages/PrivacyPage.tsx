@@ -181,7 +181,7 @@ export default function PrivacyPage() {
             </p>
             <ul className="list-disc pl-5 space-y-2 mt-2">
               <li><strong>Keys:</strong> Curve25519 for Identity and Pre-keys.</li>
-              <li><strong>Cipher:</strong> XSalsa20-Poly1305 for message encryption.</li>
+              <li><strong>Cipher:</strong> XChaCha20-Poly1305 for message encryption.</li>
               <li><strong>Hash:</strong> Argon2id for password hashing and key derivation.</li>
             </ul>
 

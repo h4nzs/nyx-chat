@@ -1,36 +1,266 @@
-Ini adalah isu legendaris yang berhubungan dengan CSS Viewport di *browser* HP (terutama Chrome Android dan Safari iOS).
+# 🔥 0️⃣ Infrastructure Layer (Server + Network)
 
-### 🕵️‍♂️ Kenapa Ini Terjadi?
+## 🧱 OS & Server Hardening
 
-1. **Pas di Browser HP (Biasa):** Lu kemungkinan besar pakai *class* Tailwind `h-screen` atau CSS `height: 100vh` untuk *wrapper* utama aplikasi lu. Masalahnya, `100vh` itu mengukur **tinggi layar fisik keseluruhan**, tapi dia "tutup mata" alias **tidak menganggap adanya Address Bar (tempat ngetik URL) dan Navigation Bar di bawah**. Akibatnya, UI aplikasi lu (terutama bagian bawah tempat *input chat*) kedorong ke bawah dan tertutup oleh bar bawaan *browser*.
-2. **Pas Di-install (PWA/Layar Utama):** Ketika lu *install* aplikasinya ke layar utama, aplikasi lu berjalan di mode *Standalone*. Address Bar dan Navigation Bar *browser* menghilang total. Karena layarnya beneran kosong, `100vh` akhirnya pas dan bekerja dengan normal tanpa ada yang kepotong.
+* [ ] OS up to date
+* [ ] Unused packages dihapus
+* [ ] UFW/iptables default deny
+* [ ] SSH:
+
+  * [ ] Password login disabled
+  * [ ] Root login disabled
+  * [ ] Key-based only
+  * [ ] Non-default port (optional)
+* [ ] Fail2ban aktif
+* [ ] Automatic security update aktif
 
 ---
 
-### 🛠️ Solusi Jitu: Pindah ke "Dynamic Viewport" (`dvh`)
+## 🌐 Cloudflare Tunnel Layer
 
-*Browser* modern dan Tailwind udah ngeluarin solusi pamungkas buat masalah ini: **Dynamic Viewport Height (`dvh`)**.
+* [ ] Origin port tidak expose publik
+* [ ] Firewall hanya allow SSH
+* [ ] Cloudflare Access aktif? (optional)
+* [ ] No direct IP access
+* [ ] Bot protection aktif
+* [ ] Rate limiting rule di Cloudflare
 
-Unit `dvh` ini super pintar karena dia akan **menyesuaikan tinggi secara dinamis**. Kalau Address Bar *browser* lagi muncul, dia akan menyusut. Kalau Address Bar ngumpet (pas di-*scroll*), dia akan memanjang.
+---
 
-**Cara Fix di Kodingan Lu:**
-Cari *file* layout utama lu (biasanya di `App.tsx`, `main.tsx`, `Chat.tsx`, atau `index.html`).
+# 🛡️ 1️⃣ NGINX Layer
 
-Ubah *class* Tailwind lu dari yang tadinya `h-screen` (atau `min-h-screen`), menjadi **`h-dvh`** (atau **`min-h-dvh`**).
+## 🔐 TLS (kalau handle sendiri)
 
-**Contoh di Wrapper Utama:**
+* [ ] TLS 1.2+ only
+* [ ] Strong cipher suite
+* [ ] OCSP stapling
 
-```tsx
-// ❌ SEBELUMNYA (Bikin kepotong di browser HP)
-<div className="flex flex-col h-screen bg-black">
-   <main className="flex-1 overflow-y-auto">...</main>
-   <MessageInput />
-</div>
+(karena kita pakai tunnel, ini skip)
 
-// ✅ FIX TERBARU (Aman di browser & PWA)
-<div className="flex flex-col h-dvh bg-black">
-   <main className="flex-1 overflow-y-auto">...</main>
-   <MessageInput />
-</div>
+---
 
-```
+## 📦 Compression
+
+* [ ] Gzip enabled
+* [ ] No compression for sensitive dynamic responses
+
+---
+
+## 🧠 Caching
+
+* [ ] Immutable hash assets only
+* [ ] No caching for:
+
+  * [ ] sw.js
+  * [ ] HTML
+  * [ ] API responses
+
+---
+
+## 🚨 Security Headers (WAJIB)
+
+* [ ] `X-Frame-Options`
+* [ ] `X-Content-Type-Options`
+* [ ] `Referrer-Policy`
+* [ ] `Permissions-Policy`
+* [ ] `HSTS`
+* [ ] `Content-Security-Policy`
+
+  * [ ] NO unsafe-inline
+  * [ ] NO unsafe-eval
+  * [ ] No wildcard domain
+  * [ ] No third-party JS (ideal)
+
+---
+
+# 🧠 2️⃣ Frontend (React + Vite)
+
+## 🔐 XSS Defense
+
+* [ ] No dangerouslySetInnerHTML
+* [ ] Markdown sanitized
+* [ ] DOMPurify strict config
+* [ ] No dynamic script injection
+
+---
+
+## 🔑 Crypto Layer
+
+* [ ] Key never stored in localStorage
+* [ ] Key only in memory
+* [ ] Key derived via PBKDF2/Argon2
+* [ ] Salt per user
+* [ ] Message encrypted client-side
+* [ ] Server never sees plaintext
+
+---
+
+## 🧨 WASM Handling
+
+* [ ] Libsodium properly loaded
+* [ ] No eval fallback
+* [ ] CSP compatible
+
+---
+
+## 📡 Service Worker
+
+* [ ] No caching sensitive API
+* [ ] No stale crypto logic
+* [ ] Update properly handled
+
+---
+
+# 🔥 3️⃣ Backend (Node / Express)
+
+## 🧱 Core Security
+
+* [ ] Helmet enabled
+* [ ] CORS strict origin
+* [ ] Rate limit per IP
+* [ ] Body size limit
+* [ ] JSON parsing safe
+* [ ] Trust proxy set (Cloudflare)
+
+---
+
+## 🧪 Validation
+
+* [ ] Zod validation
+* [ ] No raw req.body usage
+* [ ] No unsanitized DB query
+
+---
+
+## 🔐 Auth
+
+* [ ] JWT signed strong secret
+* [ ] JWT expiration short
+* [ ] Refresh token rotation
+* [ ] HttpOnly cookie (if used)
+* [ ] No token in localStorage
+
+---
+
+## 🧨 Error Handling
+
+* [ ] No stack trace in production
+* [ ] Central error handler last middleware
+* [ ] No detailed DB error leak
+
+---
+
+# 🌊 4️⃣ WebSocket Layer
+
+* [ ] Auth before connection accepted
+* [ ] Rate limit messages
+* [ ] Max payload size
+* [ ] Disconnect on invalid JSON
+* [ ] No broadcast leak
+* [ ] No room ID guessing
+
+---
+
+# 🗄️ 5️⃣ Database
+
+* [ ] Encrypted at rest
+* [ ] No plaintext password
+* [ ] Hash = argon2
+* [ ] No SQL injection
+* [ ] DB user minimal privilege
+* [ ] Backup encrypted
+* [ ] No public DB port
+
+---
+
+# 🔎 6️⃣ Logging & Monitoring
+
+* [ ] No sensitive data in logs
+* [ ] No decrypted content logged
+* [ ] Structured logs
+* [ ] Log rotation enabled
+* [ ] Alert on:
+
+  * [ ] Failed login spikes
+  * [ ] 500 errors spike
+  * [ ] WS flood
+
+---
+
+# 🧬 7️⃣ Supply Chain
+
+* [ ] `pnpm audit` clean
+* [ ] No deprecated packages
+* [ ] Lockfile committed
+* [ ] No random crypto library
+* [ ] Dependencies pinned version
+
+---
+
+# 💀 8️⃣ Worst Case Scenario Planning
+
+* [ ] Server compromised → attacker cannot decrypt message
+* [ ] DB leaked → ciphertext only
+* [ ] XSS attempt → blocked by CSP
+* [ ] Tunnel hijack → still encrypted
+* [ ] Analytics compromised → no key exposure
+
+---
+
+# 🧨 9️⃣ Attack Simulation Checklist
+
+Simulate:
+
+* [ ] XSS payload injection
+* [ ] CSRF attempt
+* [ ] WebSocket spam
+* [ ] Large payload flood
+* [ ] JWT tampering
+* [ ] Expired token reuse
+* [ ] Replay attack
+
+---
+
+# 🧠 10️⃣ Privacy Audit
+
+* [ ] No analytics? (ideal)
+* [ ] No tracking pixel
+* [ ] No fingerprinting
+* [ ] No IP logging long term
+* [ ] GDPR notice (if needed)
+
+---
+
+# 📊 SECURITY MATURITY LEVEL
+
+Kalau:
+
+* Crypto strong
+* CSP strict
+* No third-party script
+* Strict CORS
+* Proper rate limit
+
+→ lo masuk kategori **privacy-first secure app**
+
+Kalau masih ada:
+
+* unsafe-inline
+* wildcard connect-src
+* GA script
+
+→ itu downgrade 2 level.
+
+---
+
+# 🚀 Mau Lebih Gila?
+
+Kalau lo mau audit sampai paranoid-tier, next step:
+
+* Threat modeling STRIDE
+* CSP nonce-based
+* Subresource Integrity
+* Integrity check build output
+* Automatic dependency scanning CI
+* Runtime anomaly detection
+

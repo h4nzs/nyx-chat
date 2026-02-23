@@ -3,6 +3,8 @@ import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
 import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
 import { ApiError } from '../utils/errors.js'
+import { z } from 'zod'
+import { zodValidate } from '../utils/validate.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -115,5 +117,45 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
     next(error)
   }
 })
+
+// POST: Backup session keys from client to server (encrypted)
+router.post(
+  '/backup',
+  zodValidate({
+    body: z.object({
+      conversationId: z.string(),
+      sessionId: z.string(),
+      encryptedKey: z.string()
+    })
+  }),
+  async (req, res, next) => {
+    try {
+      if (!req.user) throw new ApiError(401, 'Authentication required.')
+      const userId = req.user.id
+      const { conversationId, sessionId, encryptedKey } = req.body
+
+      // Idempotent backup: Only create if not exists.
+      const existing = await prisma.sessionKey.findFirst({
+        where: { userId, sessionId }
+      })
+
+      if (!existing) {
+        await prisma.sessionKey.create({
+          data: {
+            userId,
+            conversationId,
+            sessionId,
+            encryptedKey,
+            isInitiator: true // Client-side generated keys are owned by the creator
+          }
+        })
+      }
+
+      res.status(200).json({ success: true })
+    } catch (error) {
+      next(error)
+    }
+  }
+)
 
 export default router

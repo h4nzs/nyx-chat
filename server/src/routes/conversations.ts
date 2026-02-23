@@ -143,7 +143,9 @@ router.post('/', async (req, res, next) => {
           isInitiator: ik.userId === creatorId
         }))
         await tx.sessionKey.createMany({ data: keyRecords })
-      } else {
+      } else if (isGroup) {
+        // Only generate server-side keys for groups if no initial session provided.
+        // For 1-on-1, we want Lazy X3DH, so we skip this.
         await rotateAndDistributeSessionKeys(conversation.id, creatorId, tx)
       }
 

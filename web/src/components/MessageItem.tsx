@@ -13,7 +13,7 @@ import { useModalStore } from '@store/modal';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
 import LinkPreviewCard from './LinkPreviewCard';
-import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft } from 'react-icons/fi';
+import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock } from 'react-icons/fi';
 import { getUserColor } from '@utils/color';
 import { FaCheck, FaCheckDouble } from 'react-icons/fa';
 import VoiceMessagePlayer from './VoiceMessagePlayer';
@@ -27,17 +27,33 @@ import MessageBubble from "./MessageBubble"; // Import the external component
 const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
   const meId = useAuthStore((s) => s.user?.id);
   const retrySendMessage = useMessageInputStore(s => s.retrySendMessage);
+  
   if (message.senderId !== meId) return null;
-  if (message.error) return <button onClick={() => retrySendMessage(message)} title="Failed to send. Click to retry."><FiRefreshCw className="text-destructive cursor-pointer" size={16} /></button>;
-  if (message.optimistic) return <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><title>Sending...</title><circle cx="12" cy="12" r="10"/></svg>;
+  
+  // Prioritize explicit status field
+  if (message.status === 'FAILED' || message.error) {
+    return (
+      <button onClick={() => retrySendMessage(message)} title="Failed to send. Click to retry.">
+        <FiRefreshCw className="text-destructive cursor-pointer" size={14} />
+      </button>
+    );
+  }
+
+  if (message.status === 'SENDING' || message.optimistic) {
+     return <FiClock size={14} className="text-text-secondary opacity-70" />;
+  }
+
   const otherParticipants = participants.filter((p: Participant) => p.id !== meId) || [];
-  if (otherParticipants.length === 0) return <FaCheck size={16} />;
+  if (otherParticipants.length === 0) return <FaCheck size={14} className="text-text-secondary" />;
+  
   const statuses = message.statuses || [];
   const isReadAll = otherParticipants.every((p: Participant) => statuses.some((s: MessageStatus) => s.userId === p.id && s.status === 'READ'));
-  if (isReadAll) return <FaCheckDouble size={16} className="text-green-500" />;
+  if (isReadAll) return <FaCheckDouble size={14} className="text-blue-500" />;
+  
   const isDeliveredAll = otherParticipants.every((p: Participant) => statuses.some((s: MessageStatus) => s.userId === p.id && s.status === 'DELIVERED'));
-  if (isDeliveredAll) return <FaCheckDouble size={16} />;
-  return <FaCheck size={16} />;
+  if (isDeliveredAll) return <FaCheckDouble size={14} className="text-text-secondary" />;
+  
+  return <FaCheck size={14} className="text-text-secondary" />;
 };
 
 const ReactionsDisplay = ({ reactions }: { reactions: Message['reactions'] }) => {
@@ -93,11 +109,17 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     return () => observer.disconnect();
   }, [message.id, message.conversationId, mine, meId, message.statuses]);
 
-  if (message.type === 'SYSTEM') {
+  if (message.type === 'SYSTEM' || message.content?.startsWith('🔒')) {
+    const isError = message.content?.includes('Error') || message.content?.includes('Unreadable');
     return (
-      <div className="flex justify-center items-center my-2">
-        <div className="text-xs text-text-secondary bg-bg-surface rounded-full px-3 py-1 flex items-center gap-2 shadow-sm">
-          <FiShield className="text-yellow-500" />
+      <div className="flex justify-center items-center my-3 opacity-80">
+        <div className={clsx(
+          "text-xs px-3 py-1.5 rounded-full flex items-center gap-2 shadow-sm border",
+          isError 
+            ? "bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400" 
+            : "bg-bg-surface text-text-secondary border-white/5"
+        )}>
+          <FiShield size={12} className={isError ? "text-red-500" : "text-yellow-500"} />
           <span>{message.content}</span>
         </div>
       </div>
@@ -108,8 +130,32 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     showConfirm('Delete Message', 'Are you sure you want to permanently delete this message?', () => {
       // Optimistically remove the message from the UI
       removeMessage(message.conversationId, message.id);
+      
+      // Prepare Query Params for Blind Attachment Deletion
+      let query = '';
+      
+      // Try to get real R2 URL from JSON content first (because fileUrl might be a Blob)
+      let targetUrl = message.fileUrl;
+      try {
+          if (message.content && message.content.startsWith('{')) {
+              const metadata = JSON.parse(message.content);
+              if (metadata.url) targetUrl = metadata.url;
+          }
+      } catch (e) {}
+
+      if (targetUrl && !targetUrl.startsWith('blob:')) {
+          try {
+              // Extract key from URL (e.g. https://pub.r2.../attachments/key.ext -> attachments/key.ext)
+              const url = new URL(targetUrl);
+              const key = url.pathname.substring(1); // Remove leading slash
+              if (key) query = `?r2Key=${encodeURIComponent(key)}`;
+          } catch (e) {
+              console.error("Failed to parse file URL for deletion:", e);
+          }
+      }
+
       // Call the API to delete the message from the server
-      api(`/api/messages/${message.id}`, { method: 'DELETE' }).catch((error) => {
+      api(`/api/messages/${message.id}${query}`, { method: 'DELETE' }).catch((error) => {
         // If the API call fails, revert the change by re-adding the message
         console.error("Failed to delete message:", error);
         toast.error("Failed to delete message.");

@@ -14,7 +14,7 @@ vi.mock('@store/auth');
 
 // Mock the crypto worker proxy
 vi.mock('@lib/crypto-worker-proxy', () => ({
-  worker_crypto_secretbox_open_easy: vi.fn(),
+  worker_crypto_secretbox_xchacha20poly1305_open_easy: vi.fn(),
   // Add other functions if they are needed for tests
 }));
 
@@ -78,13 +78,14 @@ describe('crypto.ts', () => {
         
         // Mock the worker function to successfully decrypt
         const cryptoProxy = await import('@lib/crypto-worker-proxy');
-        vi.spyOn(cryptoProxy, 'worker_crypto_secretbox_open_easy').mockResolvedValue(new TextEncoder().encode(mockDecryptedText));
+        vi.spyOn(cryptoProxy, 'worker_crypto_secretbox_xchacha20poly1305_open_easy').mockResolvedValue(new TextEncoder().encode(mockDecryptedText));
         
         // Mock sodium for the final `to_string` conversion
         const sodium = await import('@lib/sodiumInitializer');
         vi.spyOn(sodium, 'getSodium').mockResolvedValue({
             from_base64: () => new Uint8Array(64), // Dummy value
             to_string: (val: Uint8Array) => new TextDecoder().decode(val), // Real implementation
+            crypto_aead_xchacha20poly1305_ietf_NPUBBYTES: 24, // Mock constant
         } as any);
 
         // 2. Action
@@ -93,7 +94,7 @@ describe('crypto.ts', () => {
   
         // 3. Assertions
         expect(keychainDb.getSessionKey).toHaveBeenCalledWith('conv-1', 'session-exists');
-        expect(cryptoProxy.worker_crypto_secretbox_open_easy).toHaveBeenCalled();
+        expect(cryptoProxy.worker_crypto_secretbox_xchacha20poly1305_open_easy).toHaveBeenCalled();
         expect(result.status).toBe('success');
         if (result.status === 'success') {
             expect(result.value).toBe(mockDecryptedText);

@@ -5,8 +5,10 @@ import { getIo } from '../socket.js'
 import { ApiError } from '../utils/errors.js'
 import { getSecureLinkPreview } from '../utils/secureLinkPreview.js'
 import { sendPushNotification } from '../utils/sendPushNotification.js'
-import { deleteR2File } from '../utils/r2.js' // Pastikan fungsi ini ada di utils/r2.ts
+import { deleteR2File } from '../utils/r2.js'
 import { env } from '../config.js'
+import { z } from 'zod'
+import { zodValidate } from '../utils/validate.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -45,11 +47,6 @@ router.get('/:conversationId', async (req, res, next) => {
         sender: {
           select: { id: true, name: true, username: true, avatarUrl: true }
         },
-        reactions: {
-          include: {
-            user: { select: { id: true, name: true, username: true } }
-          }
-        },
         statuses: true,
         repliedTo: {
           include: {
@@ -67,25 +64,35 @@ router.get('/:conversationId', async (req, res, next) => {
 })
 
 // SEND Message
-router.post('/', async (req, res, next) => {
+router.post('/', zodValidate({
+  body: z.object({
+    conversationId: z.string().min(1),
+    content: z.string().max(20000).optional().nullable(),
+    // File fields removed (Blind Attachments)
+    sessionId: z.string().optional().nullable(),
+    repliedToId: z.string().optional().nullable(),
+    tempId: z.union([z.string(), z.number()]).optional(),
+    expiresIn: z.number().optional().nullable()
+  }).refine(data => data.content, {
+    message: "Message must contain content"
+  })
+}), async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const senderId = req.user.id
-    const { conversationId, content, fileUrl, fileName, fileType, fileSize, duration, fileKey, sessionId, repliedToId, tempId, expiresIn } = req.body
-
-    if (!conversationId) return res.status(400).json({ error: 'conversationId is required.' })
-
-    // Calculate expiration time if provided
-    let expiresAt: Date | undefined
-    if (expiresIn && typeof expiresIn === 'number' && expiresIn > 0) {
-      expiresAt = new Date(Date.now() + expiresIn * 1000)
-    }
+    const { conversationId, content, sessionId, repliedToId, tempId, expiresIn } = req.body
 
     // 1. Ambil Participants
     const participants = await prisma.participant.findMany({
       where: { conversationId },
       select: { userId: true } // Select seperlunya aja biar ringan
     })
+
+    // Calculate expiration time if provided
+    let expiresAt: Date | undefined
+    if (expiresIn && typeof expiresIn === 'number' && expiresIn > 0) {
+      expiresAt = new Date(Date.now() + expiresIn * 1000)
+    }
 
     if (!participants.some(p => p.userId === senderId)) {
       return res.status(403).json({ error: 'You are not a participant.' })
@@ -137,8 +144,9 @@ router.post('/', async (req, res, next) => {
     await Promise.all(checks)
 
     // 3. Link Preview (Opsional & Tidak boleh bikin error)
+    // Note: With E2EE, server cannot read content to generate preview.
     let linkPreviewData: any = null
-    if (content && !fileUrl) {
+    if (content) {
       try {
         const urlRegex = /(https?:\/\/[^\s]+)/g
         const urls = content.match(urlRegex)
@@ -172,12 +180,6 @@ router.post('/', async (req, res, next) => {
           conversationId,
           senderId,
           content,
-          fileUrl,
-          fileName,
-          fileType,
-          fileSize,
-          duration,
-          fileKey,
           sessionId,
           repliedToId,
           expiresAt, // Store expiration time
@@ -188,7 +190,6 @@ router.post('/', async (req, res, next) => {
         },
         include: {
           sender: { select: { id: true, name: true, username: true, avatarUrl: true } },
-          reactions: true,
           statuses: true,
           repliedTo: { include: { sender: { select: { id: true, name: true } } } }
         }
@@ -212,10 +213,10 @@ router.post('/', async (req, res, next) => {
     // Push Notification (JANGAN DI-AWAIT)
     const pushRecipients = participants.filter(p => p.userId !== senderId)
     if (pushRecipients.length > 0) {
-      const pushBody = fileUrl ? '📎 Sent a file' : (content || 'New message')
+      const pushBody = 'New message' // Generic for privacy
       const payload = {
         title: req.user.username || 'New Message',
-        body: pushBody.substring(0, 150),
+        body: pushBody,
         data: { conversationId, messageId: newMessage.id }
       }
 
@@ -235,18 +236,16 @@ router.delete('/:id', async (req, res, next) => {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { id } = req.params
     const userId = req.user.id
+    const r2Key = req.query.r2Key as string | undefined
 
     const message = await prisma.message.findUnique({ where: { id } })
     if (!message) return res.status(404).json({ error: 'Message not found' })
     if (message.senderId !== userId) return res.status(403).json({ error: 'You can only delete your own messages' })
 
-    // Hapus file dari R2 jika ada
-    if (message.fileUrl && message.fileUrl.includes(env.r2PublicDomain)) {
-      const key = message.fileUrl.replace(`${env.r2PublicDomain}/`, '')
-      // Fire and forget delete R2, biar API cepet
-      deleteR2File(key).catch(err =>
-        console.error(`[R2] Failed to delete file ${key}:`, err)
-      )
+    // Hapus file dari R2 (Blind Attachment via Query Param)
+    if (r2Key) {
+       console.log(`[R2] Deleting blind attachment: ${r2Key}`);
+       deleteR2File(r2Key).catch(err => console.error(`[R2] Failed to delete blind file ${r2Key}:`, err))
     }
 
     await prisma.message.delete({ where: { id } })
@@ -255,87 +254,6 @@ router.delete('/:id', async (req, res, next) => {
     getIo().to(message.conversationId).emit('message:deleted', {
       conversationId: message.conversationId,
       id: message.id
-    })
-
-    res.status(204).send()
-  } catch (error) {
-    next(error)
-  }
-})
-
-// ADD Reaction
-router.post('/:messageId/reactions', async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const { messageId } = req.params
-    const { emoji, tempId } = req.body
-    const userId = req.user.id
-    if (!emoji) return res.status(400).json({ error: 'Emoji is required.' })
-
-    const message = await prisma.message.findUnique({
-      where: { id: messageId },
-      select: { conversationId: true, senderId: true }
-    })
-    if (!message) return res.status(404).json({ error: 'Message not found.' })
-
-    // Cek Blocking cuma kalau bukan group
-    const conversation = await prisma.conversation.findUnique({
-      where: { id: message.conversationId },
-      select: { isGroup: true }
-    })
-
-    if (conversation && !conversation.isGroup && message.senderId !== userId) {
-      const isBlocked = await prisma.blockedUser.findFirst({
-        where: {
-          OR: [
-            { blockerId: userId, blockedId: message.senderId },
-            { blockerId: message.senderId, blockedId: userId }
-          ]
-        }
-      })
-      if (isBlocked) {
-        return res.status(403).json({ error: 'Interaction restricted.' })
-      }
-    }
-
-    const newReaction = await prisma.messageReaction.create({
-      data: { messageId, emoji, userId },
-      include: { user: { select: { id: true, name: true, username: true } } }
-    })
-
-    getIo().to(message.conversationId).emit('reaction:new', {
-      conversationId: message.conversationId,
-      messageId,
-      reaction: { ...newReaction, tempId }
-    })
-
-    res.status(201).json(newReaction)
-  } catch (error) {
-    next(error)
-  }
-})
-
-// DELETE Reaction
-router.delete('/reactions/:reactionId', async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const { reactionId } = req.params
-    const userId = req.user.id
-
-    const reaction = await prisma.messageReaction.findUnique({
-      where: { id: reactionId },
-      select: { userId: true, message: { select: { id: true, conversationId: true } } }
-    })
-
-    if (!reaction) return res.status(404).json({ error: 'Reaction not found.' })
-    if (reaction.userId !== userId) return res.status(403).json({ error: 'You can only delete your own reactions.' })
-
-    await prisma.messageReaction.delete({ where: { id: reactionId } })
-
-    getIo().to(reaction.message.conversationId).emit('reaction:deleted', {
-      conversationId: reaction.message.conversationId,
-      messageId: reaction.message.id,
-      reactionId
     })
 
     res.status(204).send()

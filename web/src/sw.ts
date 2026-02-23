@@ -17,18 +17,18 @@ cleanupOutdatedCaches();
 // 3. Precache Resources
 precacheAndRoute(self.__WB_MANIFEST);
 
-// 4. API Caching Strategy
-registerRoute(
-  ({ url }) => url.pathname.startsWith('/api/conversations'),
-  new StaleWhileRevalidate({
-    cacheName: 'api-conversations-cache',
-    plugins: [
-      new CacheableResponsePlugin({
-        statuses: [0, 200],
-      }),
-    ],
-  })
-);
+// 4. API Caching Strategy - REMOVED FOR PRIVACY (No caching of sensitive data)
+// registerRoute(
+//   ({ url }) => url.pathname.startsWith('/api/conversations'),
+//   new StaleWhileRevalidate({
+//     cacheName: 'api-conversations-cache',
+//     plugins: [
+//       new CacheableResponsePlugin({
+//         statuses: [0, 200],
+//       }),
+//     ],
+//   })
+// );
 
 // --- 5. Push Notification Logic ---
 

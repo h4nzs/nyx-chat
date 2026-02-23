@@ -1,10 +1,27 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useModalStore } from '@store/modal';
 
 export default function PasswordPromptModal() {
   const { isPasswordPromptOpen, onPasswordSubmit, hidePasswordPrompt } = useModalStore();
   const [password, setPassword] = useState('');
+
+  const handleCancel = () => {
+    onPasswordSubmit(null);
+    setPassword('');
+    hidePasswordPrompt();
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isPasswordPromptOpen) {
+        handleCancel();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPasswordPromptOpen]);
 
   if (!isPasswordPromptOpen) {
     return null;
@@ -17,15 +34,15 @@ export default function PasswordPromptModal() {
     hidePasswordPrompt();
   };
 
-  const handleCancel = () => {
-    onPasswordSubmit(null);
-    setPassword('');
-    hidePasswordPrompt();
-  };
-
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-[#1f2937] border-2 border-gray-700 rounded-lg p-8 w-full max-w-md mx-4 shadow-2xl">
+    <div 
+      className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50"
+      onClick={handleCancel}
+    >
+      <div 
+        className="bg-[#1f2937] border-2 border-gray-700 rounded-lg p-8 w-full max-w-md mx-4 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex flex-col items-center text-center mb-8">
           <div className="w-16 h-16 rounded-full bg-gray-800 border-2 border-orange-500 flex items-center justify-center mb-4">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-orange-500" viewBox="0 0 20 20" fill="currentColor">

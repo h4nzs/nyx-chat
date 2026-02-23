@@ -135,12 +135,12 @@ export function worker_generate_random_key(): Promise<Uint8Array> {
 
 // --- Internal Crypto Primitives Proxy Functions ---
 
-export function worker_crypto_secretbox_easy(message: string | Uint8Array, nonce: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
-    return sendToWorker('crypto_secretbox_easy', { message: typeof message === 'string' ? message : Array.from(message), nonce: Array.from(nonce), key: Array.from(key) });
+export function worker_crypto_secretbox_xchacha20poly1305_easy(message: string | Uint8Array, nonce: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
+    return sendToWorker('crypto_secretbox_xchacha20poly1305_easy', { message: typeof message === 'string' ? message : Array.from(message), nonce: Array.from(nonce), key: Array.from(key) });
 }
 
-export function worker_crypto_secretbox_open_easy(ciphertext: Uint8Array, nonce: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
-    return sendToWorker('crypto_secretbox_open_easy', { ciphertext: Array.from(ciphertext), nonce: Array.from(nonce), key: Array.from(key) });
+export function worker_crypto_secretbox_xchacha20poly1305_open_easy(ciphertext: Uint8Array, nonce: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
+    return sendToWorker('crypto_secretbox_xchacha20poly1305_open_easy', { ciphertext: Array.from(ciphertext), nonce: Array.from(nonce), key: Array.from(key) });
 }
 
 export function worker_crypto_box_seal(message: Uint8Array, publicKey: Uint8Array): Promise<Uint8Array> {
@@ -156,14 +156,16 @@ export function worker_x3dh_initiator(payload: {
     theirIdentityKey: Uint8Array,
     theirSignedPreKey: Uint8Array,
     theirSigningKey: Uint8Array,
-    signature: Uint8Array
+    signature: Uint8Array,
+    theirOneTimePreKey?: Uint8Array // New: Optional OTPK from Bob
 }): Promise<{ sessionKey: Uint8Array, ephemeralPublicKey: string }> {
     return sendToWorker('x3dh_initiator', {
       myIdentityKey: { privateKey: Array.from(payload.myIdentityKey.privateKey) },
       theirIdentityKey: Array.from(payload.theirIdentityKey),
       theirSignedPreKey: Array.from(payload.theirSignedPreKey),
       theirSigningKey: Array.from(payload.theirSigningKey),
-      signature: Array.from(payload.signature)
+      signature: Array.from(payload.signature),
+      theirOneTimePreKey: payload.theirOneTimePreKey ? Array.from(payload.theirOneTimePreKey) : undefined
     });
 }
 
@@ -171,13 +173,15 @@ export function worker_x3dh_recipient(payload: {
     myIdentityKey: { privateKey: Uint8Array },
     mySignedPreKey: { privateKey: Uint8Array },
     theirIdentityKey: Uint8Array,
-    theirEphemeralKey: Uint8Array
+    theirEphemeralKey: Uint8Array,
+    myOneTimePreKey?: { privateKey: Uint8Array } // New: Optional OTPK Private Key
 }): Promise<Uint8Array> {
     return sendToWorker('x3dh_recipient', {
       myIdentityKey: { privateKey: Array.from(payload.myIdentityKey.privateKey) },
       mySignedPreKey: { privateKey: Array.from(payload.mySignedPreKey.privateKey) },
       theirIdentityKey: Array.from(payload.theirIdentityKey),
-      theirEphemeralKey: Array.from(payload.theirEphemeralKey)
+      theirEphemeralKey: Array.from(payload.theirEphemeralKey),
+      myOneTimePreKey: payload.myOneTimePreKey ? Array.from(payload.myOneTimePreKey.privateKey) : undefined
     });
 }
 
@@ -187,4 +191,40 @@ export function worker_file_encrypt(fileBuffer: ArrayBuffer): Promise<{ encrypte
 
 export function worker_file_decrypt(combinedData: ArrayBuffer, keyBytes: Uint8Array): Promise<ArrayBuffer> {
     return sendToWorker('file_decrypt', { combinedData, keyBytes: Array.from(keyBytes) });
+}
+
+export function worker_encrypt_session_key(sessionKey: Uint8Array, masterSeed: Uint8Array): Promise<Uint8Array> {
+    return sendToWorker('encrypt_session_key', { 
+        sessionKey: Array.from(sessionKey), 
+        masterSeed: Array.from(masterSeed) 
+    });
+}
+
+export function worker_decrypt_session_key(encryptedKey: Uint8Array, masterSeed: Uint8Array): Promise<Uint8Array> {
+    return sendToWorker('decrypt_session_key', { 
+        encryptedKey: Array.from(encryptedKey), 
+        masterSeed: Array.from(masterSeed) 
+    });
+}
+
+export function worker_generate_otpk_batch(count: number, startId: number, masterSeed: Uint8Array): Promise<Array<{ keyId: number, publicKey: string, encryptedPrivateKey: Uint8Array }>> {
+    return sendToWorker('generate_otpk_batch', { count, startId, masterSeed: Array.from(masterSeed) });
+}
+
+export function worker_x3dh_recipient_regenerate(payload: {
+    keyId: number,
+    masterSeed: Uint8Array,
+    myIdentityKey: { privateKey: Uint8Array },
+    mySignedPreKey: { privateKey: Uint8Array },
+    theirIdentityKey: Uint8Array,
+    theirEphemeralKey: Uint8Array
+}): Promise<Uint8Array> {
+    return sendToWorker('x3dh_recipient_regenerate', { 
+        keyId: payload.keyId, 
+        masterSeed: Array.from(payload.masterSeed),
+        myIdentityKey: { privateKey: Array.from(payload.myIdentityKey.privateKey) },
+        mySignedPreKey: { privateKey: Array.from(payload.mySignedPreKey.privateKey) },
+        theirIdentityKey: Array.from(payload.theirIdentityKey),
+        theirEphemeralKey: Array.from(payload.theirEphemeralKey)
+    });
 }

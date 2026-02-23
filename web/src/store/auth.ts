@@ -9,10 +9,13 @@ import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
 import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; // Only import TYPE
+import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; // Import helper
+import { syncSessionKeys } from "@utils/sessionSync";
 
 /**
  * Retrieves the persisted signed pre-key, signs it with the identity signing key,
  * and uploads the bundle to the server.
+ * Also checks and refills One-Time Pre-Keys (OTPK).
  */
 export async function setupAndUploadPreKeyBundle() {
   try {
@@ -44,6 +47,10 @@ export async function setupAndUploadPreKeyBundle() {
       method: "POST",
       body: JSON.stringify(bundle),
     });
+
+    // Check and refill OTPKs after bundle upload
+    await checkAndRefillOneTimePreKeys();
+
   } catch (e) {
     console.error("Failed to set up and upload pre-key bundle:", e);
   }
@@ -58,6 +65,7 @@ export type User = {
   avatarUrl?: string | null;
   hasCompletedOnboarding?: boolean;
   showEmailToOthers?: boolean;
+  role?: string;
 };
 
 type State = {
@@ -108,51 +116,89 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
   const savedReadReceipts = localStorage.getItem('sendReadReceipts');
 
   const retrieveAndCacheKeys = async (): Promise<RetrievedKeys> => {
-    if (privateKeysCache) return Promise.resolve(privateKeysCache);
+    if (privateKeysCache) return privateKeysCache;
 
     // Dynamic import for retrievePrivateKeys
     const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
 
-    return new Promise(async (resolve, reject) => {
-      const autoUnlockKey = await getDeviceAutoUnlockKey();
-      const encryptedKeys = await getEncryptedKeys();
+    let autoUnlockKey: string | undefined | null = null;
+    let encryptedKeys: string | undefined | null = null;
 
-      if (autoUnlockKey && encryptedKeys) {
-        // Pass autoUnlockKey as password to retrievePrivateKeys
-        retrievePrivateKeys(encryptedKeys, autoUnlockKey)
-          .then((result) => {
-            if (result.success) {
-              privateKeysCache = result.keys;
-              resolve(result.keys);
-            } else {
-              // If auto-unlock key fails, try prompting for password
-              promptForPassword(retrievePrivateKeys);
-            }
-          })
-          .catch(() => promptForPassword(retrievePrivateKeys));
-      } else {
-        promptForPassword(retrievePrivateKeys);
+    try {
+      autoUnlockKey = await getDeviceAutoUnlockKey();
+      encryptedKeys = await getEncryptedKeys();
+    } catch (e) {
+      console.error("Failed to read keys/auto-unlock info:", e);
+    }
+
+    if (autoUnlockKey && encryptedKeys) {
+      try {
+        const result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
+        if (result.success) {
+          privateKeysCache = result.keys;
+          return result.keys;
+        }
+      } catch (e) {
+        // Fall through to password prompt
       }
+    }
 
-      function promptForPassword(retrieveFn: any) {
+    // Helper to wrap the modal prompt in a Promise
+    const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
+      return new Promise((resolve, reject) => {
+        let unsubscribe: () => void;
+
+        const cleanup = () => {
+          if (unsubscribe) unsubscribe();
+        };
+
+        // Safety fallback: Reject if modal closes without submission
+        unsubscribe = useModalStore.subscribe((state) => {
+          if (!state.isPasswordPromptOpen) {
+            cleanup();
+            // We use a timeout to allow the submit callback to fire first if that was the cause of closing
+            setTimeout(() => {
+               // If we are still pending (though we can't check promise state directly, logic flow handles it)
+               // Ideally, we'd rely on the fact that if successful, resolve/reject was already called.
+               // But since we can't query promise state, we just reject.
+               // If it was already resolved, this reject is ignored.
+               reject(new Error("Password prompt closed without input."));
+            }, 100);
+          }
+        });
+
         useModalStore.getState().showPasswordPrompt(async (password) => {
-          if (!password) return reject(new Error("Password not provided."));
-
-          const encryptedKeysInner = await getEncryptedKeys();
-          if (!encryptedKeysInner) return reject(new Error("Encrypted private keys not found."));
-
-          const result = await retrieveFn(encryptedKeysInner, password);
-
-          if (!result.success) {
-            const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
-            return reject(new Error(reason));
+          cleanup(); // Clean up listener immediately on submit
+          
+          if (!password) {
+            reject(new Error("Password not provided."));
+            return;
           }
 
-          privateKeysCache = result.keys;
-          resolve(result.keys);
+          try {
+            const keysInner = await getEncryptedKeys();
+            if (!keysInner) {
+              reject(new Error("Encrypted private keys not found."));
+              return;
+            }
+
+            const result = await retrieveFn(keysInner, password);
+            if (!result.success) {
+              const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
+              reject(new Error(reason));
+              return;
+            }
+
+            privateKeysCache = result.keys;
+            resolve(result.keys);
+          } catch (e) {
+            reject(e);
+          }
         });
-      }
-    });
+      });
+    };
+
+    return promptForPassword(retrievePrivateKeys);
   };
 
   return {
@@ -243,6 +289,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     login: async (emailOrUsername, password, restoredNotSynced = false) => {
+      // [FIX] Ensure clean slate. Wipe old keys from IDB before starting new session.
+      try {
+        const { clearAllKeys } = await import('@lib/keychainDb');
+        await clearAllKeys();
+      } catch (e) { console.error("Failed to clear old keys:", e); }
+
       privateKeysCache = null;
       set({ isInitializingCrypto: true }); // Show loading for crypto init
 
@@ -309,6 +361,16 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           toast("To enable secure messaging, restore your account from your recovery phrase in Settings.", { duration: 7000 });
         }
 
+        // [SYNC] Restore historical session keys from server backup
+        try {
+          await syncSessionKeys();
+        } catch (e) { console.error("Auto-sync keys failed:", e); }
+
+        // [RESET] Force rotate OTPK on new login to prevent stale key decryption errors
+        try {
+          await resetOneTimePreKeys();
+        } catch (e) { console.error("Reset OTPK failed:", e); }
+
         connectSocket();
       } catch (error: any) {
         console.error("Login error:", error);
@@ -317,9 +379,15 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           try {
             let userData: User | null = null;
             if (isEmail) {
-              userData = await api<User>("/api/users/by-email/" + encodeURIComponent(emailOrUsername));
+              userData = await api<User>("/api/users/by-email", {
+                method: "POST",
+                body: JSON.stringify({ email: emailOrUsername }),
+              });
             } else {
-              userData = await api<User>("/api/users/by-username/" + encodeURIComponent(emailOrUsername));
+              userData = await api<User>("/api/users/by-username", {
+                method: "POST",
+                body: JSON.stringify({ username: emailOrUsername }),
+              });
             }
 
             if (userData?.id && userData?.email) {
@@ -345,6 +413,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     registerAndGeneratePhrase: async (data) => {
       set({ isInitializingCrypto: true });
       try {
+        // [FIX] Ensure clean slate. Wipe old keys from IDB before generating new ones.
+        try {
+            const { clearAllKeys } = await import('@lib/keychainDb');
+            await clearAllKeys();
+        } catch (e) { console.error("Failed to clear old keys:", e); }
+
         // Dynamic Import
         const { registerAndGenerateKeys, retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
 
@@ -402,6 +476,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           set({ user: res.user, accessToken: res.accessToken });
           localStorage.setItem("user", JSON.stringify(res.user));
           setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
+          
+          try {
+            await syncSessionKeys();
+          } catch (e) { console.error("Auto-sync keys failed:", e); }
+
           connectSocket();
           return { phrase, needVerification: false };
         }
@@ -466,7 +545,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         clearAuthCookies();
         privateKeysCache = null;
         
-        // [FIX] Clear keys BEFORE removing user, because getDb() needs the userId from localStorage
+        // [FIX] Clear ALL persistent keys (IndexedDB) and Master Key (LocalStorage)
+        try {
+            const { clearAllKeys } = await import('@lib/keychainDb');
+            await clearAllKeys();
+        } catch (e) { console.error("Failed to wipe IndexedDB:", e); }
+        
         await clearKeys(); 
         
         localStorage.removeItem('user');

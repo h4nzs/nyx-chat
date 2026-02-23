@@ -4,9 +4,7 @@ import { useMessageStore, decryptMessageObject } from "./message";
 import { getSocket, emitSessionKeyRequest } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
-import { getSodium } from '@lib/sodiumInitializer';
-import { establishSessionFromPreKeyBundle } from '@utils/crypto';
-import { addSessionKey } from '@lib/keychainDb';
+// Removed all crypto imports
 import toast from 'react-hot-toast';
 
 // --- Type Definitions ---
@@ -37,15 +35,17 @@ export type Message = {
   createdAt: string;
   error?: boolean;
   preview?: string;
-  reactions?: { id: string; emoji: string; userId: string }[];
+  reactions?: { id: string; emoji: string; userId: string; isMessage?: boolean }[];
   optimistic?: boolean;
   repliedTo?: Message;
   repliedToId?: string;
   linkPreview?: any;
   duration?: number;
-  statuses?: MessageStatus[];
+  statuses?: MessageStatus[]; // Server delivery statuses (for other users)
+  status?: 'SENDING' | 'SENT' | 'FAILED'; // Local status for UI
   deletedAt?: string | Date | null;
   expiresAt?: string | null; // New: Disappearing messages
+  isBlindAttachment?: boolean; // New: Flag for Blind Attachments (raw key in fileKey)
 };
 
 export type Participant = {
@@ -91,6 +91,15 @@ const sortConversations = (list: Conversation[], currentUserId: string | undefin
 
 const withPreview = (msg: Message): Message => {
   if (msg.content) {
+    // Check for Reaction Payload
+    if (msg.content.trim().startsWith('{') && msg.content.includes('"type":"reaction"')) {
+       try {
+         const payload = JSON.parse(msg.content);
+         if (payload.type === 'reaction') {
+            return { ...msg, preview: `Reacted ${payload.emoji || ''}` };
+         }
+       } catch {}
+    }
     return { ...msg, preview: msg.content };
   }
   if (msg.fileUrl) {
@@ -265,55 +274,32 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   toggleSidebar: () => set(s => ({ isSidebarOpen: !s.isSidebarOpen })),
 
   startConversation: async (peerId: string): Promise<string> => {
-    const { user, getEncryptionKeyPair } = useAuthStore.getState();
+    const { user } = useAuthStore.getState();
     if (!user) {
       throw new Error("Cannot start a conversation: user is not authenticated.");
     }
 
     try {
-      const theirBundle = await authFetch<any>(`/api/keys/prekey-bundle/${peerId}`);
-      if (!theirBundle) throw new Error("User does not have a pre-key bundle available.");
-
-      const myKeyPair = await getEncryptionKeyPair();
-      const { sessionKey, ephemeralPublicKey } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
-
-      const sodium = await getSodium();
-      const myPublicKey = myKeyPair.publicKey;
-      const theirPublicKey = sodium.from_base64(theirBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-
-      const encryptedKeyForSelf = sodium.crypto_box_seal(sessionKey, myPublicKey);
-      const encryptedKeyForPeer = sodium.crypto_box_seal(sessionKey, theirPublicKey);
-      const sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
-
+      // STATELESS INITIALIZATION (Pure Lazy Init)
+      // No crypto here. Just create room container.
+      
       const conv = await authFetch<Conversation>("/api/conversations", {
         method: "POST",
         body: JSON.stringify({
           userIds: [peerId],
           isGroup: false,
-          initialSession: {
-            sessionId,
-            ephemeralPublicKey,
-            initialKeys: [
-              { userId: user.id, key: sodium.to_base64(encryptedKeyForSelf, sodium.base64_variants.URLSAFE_NO_PADDING) },
-              { userId: peerId, key: sodium.to_base64(encryptedKeyForPeer, sodium.base64_variants.URLSAFE_NO_PADDING) },
-            ],
-          },
+          // [FIX] Don't send dummy session. Let sendMessage create real X3DH session later.
+          initialSession: null, 
         }),
       });
       
-      await addSessionKey(conv.id, sessionId, sessionKey);
-
       getSocket().emit("conversation:join", conv.id);
       get().addOrUpdateConversation(conv);
       set({ activeId: conv.id, isSidebarOpen: false });
       return conv.id;
     } catch (error: any) {
-      console.error("Failed to start conversation using pre-keys:", error);
-      // Differentiate between user cancelling password prompt and other errors
-      if (error?.message?.includes("Password not provided")) {
-        throw new Error("Password is required to decrypt your keys and start a secure conversation.");
-      }
-      throw new Error(`Failed to establish secure conversation. ${error.message || ''}`);
+      console.error("Failed to start conversation:", error);
+      throw new Error(`Failed to establish conversation. ${error.message || ''}`);
     }
   },
 
@@ -369,11 +355,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   updateParticipantDetails: (user) => {
+    // Destructure role to exclude it, preventing conflict with Participant role type
+    const { role, ...userDetails } = user;
     set(state => ({
       conversations: state.conversations.map(c => ({
         ...c,
         participants: c.participants.map(p => 
-          p.id === user.id ? { ...p, ...user } : p
+          p.id === user.id ? { ...p, ...userDetails } : p
         ),
       }))
     }));

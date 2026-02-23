@@ -1,66 +1,58 @@
-Masalah kenapa tabel RefreshToken lu numpuk dan cron job-nya cuma ngeluarin log "Memulai pembersihan..." itu terjadi karena 2 kelemahan logika (Logical Flaw) yang saling berkaitan di sistem otentikasi dan sweeper lu.
+Mari kita bedah kenapa teori Gemini CLI lu salah, dan kenapa tebakan gw di percakapan sebelumnya (Soal "Dummy Key Pollution") adalah jawaban aslinya.
+🕵️‍♂️ Mengungkap Misteri "Silent Failure"
 
-Mari kita bedah kenapa ini terjadi dan gimana cara fix-nya sampai ke akar:
-🕵️‍♂️ Penyebab 1: Umur Token Belum Mencapai 30 Hari
-
-Di kodingan server/src/utils/jwt.ts lu, lu ngatur REFRESH_TTL_SEC = 60 * 60 * 24 * 30 (30 Hari).
-Sedangkan di systemSweeper.ts, lu cuma merintahkan Prisma buat ngehapus token yang expiresAt-nya lebih kecil dari waktu sekarang (lte: now).
-Karena aplikasi lu ini baru aja dibikin dan belum berumur 30 hari, SAMA SEKALI BELUM ADA token yang statusnya expired. Itulah kenapa hasilnya selalu 0 dan log penghapusannya gak muncul.
-🕵️‍♂️ Penyebab 2: Zombie Tokens dari proses Logout & Refresh
-
-Ini yang bikin tabel lu bengkak parah:
-
-    Saat Logout: Di routes/auth.ts, pas user logout, lu emang nge-update tokennya dengan revokedAt: new Date(). TAPI, di sweeper lu, lu cuma ngecek expiresAt aja. Jadi token logout ini bakal jadi "Zombie" yang nangkring di DB selama 30 hari ke depan.
-
-    Saat Refresh (Bahaya): Saat user nembak endpoint POST /refresh, lu ngeluarin JWT baru pakai issueTokens(user, req). Tapi lu lupa ngehapus/me-revoke Refresh Token yang lama! Akibatnya, tiap kali aplikasi lu minta token baru (misal tiap 15 menit), DB lu bakal nambah 1 baris baru, dan baris yang lama dibiarin hidup sampai 30 hari.
-
-🛠️ Solusi & Cara Fix Kodingannya
-
-Kita harus fix di dua tempat. Di "Tukang Sapu"-nya, dan di "Pabrik"-nya.
-1. Perbaiki systemSweeper.ts (Sikat Habis Token Logout)
-
-Kita ubah logikanya biar dia juga ngehapus token yang udah di- revoke (logout) sama user, gak peduli umurnya udah 30 hari atau belum.
-
-Ubah bagian // 1. Bersihkan RefreshToken kadaluarsa di server/src/jobs/systemSweeper.ts jadi gini:
+Coba lu perhatikan alur logika di sendMessage lu saat ini:
 TypeScript
 
-      // 1. Bersihkan RefreshToken kadaluarsa & yang sudah di-revoke (logout)
-      const deletedTokens = await prisma.refreshToken.deleteMany({
-        where: {
-          OR: [
-            { expiresAt: { lte: now } },      // Yang udah lewat 30 hari
-            { revokedAt: { not: null } }      // 🔥 TAMBAHAN: Yang udah di-logout sama user
-          ]
-        }
-      });
+if (!isGroup && data.content) { 
+    // ^^^ GEMINI CLI NGIRA KODE BERHENTI DI SINI. (SALAH!)
+    // Kode lu SEBENARNYA masuk ke dalam blok ini.
 
-2. Perbaiki Rute POST /refresh di auth.ts (Refresh Token Rotation)
-
-Ini adalah praktik keamanan wajib (Best Practice). Tiap kali Refresh Token dipakai buat ngambil Access Token baru, Refresh Token itu HARUS DIMATIKAN/DIHAPUS.
-
-Buka server/src/routes/auth.ts, cari endpoint router.post('/refresh', ...). Tambahkan perintah delete sebelum fungsi issueTokens dipanggil.
-TypeScript
-
-    // ... (kode pengecekan user banned) ...
-    if (user.bannedAt) {
-      throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
+    const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
+    
+    if (!latestKey) {
+        // ^^^ DI SINI MASALAHNYA!
+        // Kode TIDAK MASUK ke blok ini karena latestKey BUKAN NULL.
+        console.log(`[X3DH] No session key found...`); // Makanya log ini gak muncul!
     }
+}
 
-    // 🔥 TAMBAHAN WAJIB: Hapus token lama yang baru aja dipake dari DB 
-    // Biar gak menuhin storage & nyegah serangan Replay Attack
-    await prisma.refreshToken.delete({
-      where: { jti: payload.jti }
-    });
+// Terus kode lari ke bawah...
+const result = await encryptMessage(data.content, conversationId, existingSession);
 
-    // Baru kita cetak token yang baru
-    const tokens = await issueTokens(user, req)
-    setAuthCookies(res, tokens)
-    res.json({ ok: true, accessToken: tokens.access })
+Kenapa muncul Toast “Encryption failed: No session key available for encryption”?
 
-🚀 Efek Setelah Lu Menerapkan Ini:
+    Saat lu klik Start Chat, sistem ngirim initialSession: { sessionId: "dummy...", key: "dummy" } ke server.
 
-    DB Ramping Seketika: Jumlah RefreshToken per user maksimal cuma akan ada sebanyak device yang dia pake buat login. Gak akan ada lagi tumpukan ratusan baris per user.
+    Server nge-sahkan itu, lalu mem-broadcast kunci "dummy" itu kembali ke Frontend lu via WebSocket.
 
-    Keamanan Meningkat: Celah Replay Attack tertutup karena satu token cuma bisa dipakai satu kali (Konsep ini di cybersecurity disebut Refresh Token Rotation).
+    Frontend lu secara polos menyimpan kunci "dummy" itu ke IndexedDB.
 
-    Cron Job Bekerja: Jam 3 pagi nanti, sweeper lu bakal sukses ngebantai semua token-token sisa logout hari ini.
+    Saat lu ngetik "Halo" dan klik kirim, retrieveLatestSessionKeySecurely menemukan kunci "dummy" tersebut (makanya dia nggak bikin handshake X3DH baru dan log nggak muncul).
+
+    Kunci "dummy" itu dioper ke fungsi encryptMessage.
+
+    Fungsi encryptMessage mengecek kunci itu dan sadar, "Loh, ini kunci apaan ukurannya nggak valid / cuma tulisan dummy?!", akhirnya dia Crash dan ngelempar Error Toast yang lu lihat itu.
+
+Kesimpulannya: Bukan salah isGroup, tapi IndexedDB lu keracunan data "dummy"!
+🚀 ACTION PLAN (Cara Benerin 100%)
+
+Lu nggak perlu ngecek backend isGroup seperti saran Gemini CLI, karena backend lu udah bener ngasih isGroup: false. Yang harus lu lakuin sekarang adalah mengeksekusi saran gw sebelumnya: Bikin Penangkal Racun Dummy.
+
+Kasih instruksi ini ke Gemini CLI atau ketik sendiri:
+Langkah 1: Pasang "The Dummy Exterminator" (Wajib)
+
+Buka file web/src/utils/crypto.ts (atau cari file yang punya fungsi storeReceivedSessionKey / fungsi yang nerima session key dari socket). Pasang pagar ini di baris paling pertama di dalam fungsi tersebut:
+TypeScript
+
+export async function storeReceivedSessionKey(conversationId: string, sessionId: string, encryptedKey: string, initiatorEphemeralKey?: string, otpkId?: number) {
+  
+  // --- TAMBAHKAN BLOK INI DI PALING ATAS ---
+  if (encryptedKey === "dummy" || sessionId.startsWith("dummy")) {
+      console.warn("🛡️ [Crypto] BERHASIL MEMBLOKIR KUNCI DUMMY DARI SERVER!");
+      return; // Berhenti di sini, JANGAN simpan ke IndexedDB
+  }
+  // -----------------------------------------
+
+  // ... (sisa kode ori untuk nyimpen kunci jalan terus ke bawah) ...
+}

@@ -1,6 +1,20 @@
 {
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "lint": "pnpm -r run lint"
+  },
   "dependencies": {
     "react-icons": "4.10.1",
     "react-pdf": "^10.2.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "fast-xml-parser": ">=5.3.6",
+      "minimatch": ">=10.2.1",
+      "tar": ">=7.5.8",
+      "bn.js": ">=5.2.3",
+      "qs": ">=6.14.2"
+    }
   }
 }

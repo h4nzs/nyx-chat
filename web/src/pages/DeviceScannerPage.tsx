@@ -65,23 +65,27 @@ export default function DeviceScannerPage() {
         throw new Error("Your keys are locked. Please log in again to unlock them.");
       }
 
-      const encryptedPayload = sodium.crypto_box_seal(masterSeed, linkingPubKeyBytes);
-      const encryptedPayloadB64 = sodium.to_base64(encryptedPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
+      try {
+        const encryptedPayload = sodium.crypto_box_seal(masterSeed, linkingPubKeyBytes);
+        const encryptedPayloadB64 = sodium.to_base64(encryptedPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-      const socket = getSocket();
-      socket.emit('linking:send_payload', {
-        roomId,
-        encryptedMasterKey: encryptedPayloadB64
-      });
+        const socket = getSocket();
+        socket.emit('linking:send_payload', {
+          roomId,
+          encryptedMasterKey: encryptedPayloadB64
+        });
 
-      setStatus('success');
-      toast.success('Device successfully linked!', { id: 'linking-toast' });
+        setStatus('success');
+        toast.success('Device successfully linked!', { id: 'linking-toast' });
 
-      if (scannerRef.current?.isScanning) {
-        await scannerRef.current.stop();
+        if (scannerRef.current?.isScanning) {
+          await scannerRef.current.stop();
+        }
+
+        setTimeout(() => navigate('/settings/sessions'), 2000);
+      } finally {
+        sodium.memzero(masterSeed);
       }
-
-      setTimeout(() => navigate('/settings/sessions'), 2000);
 
     } catch (err: any) {
       console.error("Linking error:", err);

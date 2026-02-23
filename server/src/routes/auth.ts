@@ -1,6 +1,6 @@
 import { Router, Response, CookieOptions } from 'express'
 import { prisma } from '../lib/prisma.js'
-import { hashPassword, verifyPassword, needsRehash } from '../utils/password.js'
+import { hashPassword, verifyPassword } from '../utils/password.js'
 import { ApiError } from '../utils/errors.js'
 import { newJti, refreshExpiryDate, signAccessToken, verifyJwt } from '../utils/jwt.js'
 import { z } from 'zod'
@@ -65,7 +65,9 @@ async function issueTokens (user: any, req: any) {
   const jti = newJti()
   const refresh = signAccessToken({ sub: user.id, jti }, { expiresIn: '30d' })
 
-  const ipAddress = req.ip
+  // Privacy: Hash IP address to prevent long-term logging of raw IPs
+  const rawIp = req.ip || '';
+  const ipAddress = crypto.createHash('sha256').update(rawIp).digest('hex').substring(0, 16);
   const userAgent = req.headers['user-agent']
 
   await prisma.refreshToken.create({
@@ -297,17 +299,6 @@ async (req, res, next) => {
 
     const ok = await verifyPassword(password, user.passwordHash)
     if (!ok) throw new ApiError(401, 'Invalid credentials')
-
-    // [LAZY MIGRATION] Cek apakah user ini masih pake Bcrypt?
-    if (needsRehash(user.passwordHash)) {
-      // Kalau iya, update hash-nya ke Argon2 di background (gak perlu await biar user gak nunggu)
-      hashPassword(password).then((newHash) => {
-        prisma.user.update({
-          where: { id: user.id },
-          data: { passwordHash: newHash }
-        }).catch(err => console.error('Failed to migrate password hash:', err))
-      })
-    }
 
     // Cek Status Verifikasi
     if (!user.isEmailVerified) {
