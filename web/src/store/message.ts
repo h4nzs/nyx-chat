@@ -741,8 +741,38 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
   
   addIncomingMessage: async (conversationId, message) => {
-      // Decrypt first
-      const decrypted = await decryptMessageObject(message);
+      const currentUser = useAuthStore.getState().user;
+      let decrypted = message;
+
+      // [FIX] Self-Echo Handling:
+      // If message is from ME, and I have an optimistic version, 
+      // DON'T decrypt (I don't have the private key for my own X3DH header).
+      // Use the local content instead.
+      if (currentUser && message.senderId === currentUser.id && message.tempId) {
+          const optimistic = get().messages[conversationId]?.find(m => m.tempId === message.tempId);
+          if (optimistic) {
+              // Copy content/file data from optimistic message
+              decrypted = {
+                  ...message,
+                  content: optimistic.content,
+                  fileUrl: optimistic.fileUrl,
+                  fileKey: optimistic.fileKey,
+                  fileName: optimistic.fileName,
+                  fileSize: optimistic.fileSize,
+                  fileType: optimistic.fileType,
+                  // Keep server metadata
+                  id: message.id,
+                  createdAt: message.createdAt,
+                  statuses: message.statuses
+              };
+          } else {
+              // Fallback: Try decrypt (might fail if X3DH)
+              decrypted = await decryptMessageObject(message);
+          }
+      } else {
+          // Normal inbound message
+          decrypted = await decryptMessageObject(message);
+      }
       
       // Check if reaction
       const reactionPayload = parseReaction(decrypted.content);
@@ -758,8 +788,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               isMessage: true
           };
           
-          const currentUser = useAuthStore.getState().user;
-
           // CRITICAL FIX: Only replace optimistic reaction if WE are the sender
           if (message.tempId && currentUser && message.senderId === currentUser.id) {
               const optimisticId = `temp_react_${message.tempId}`;
@@ -768,7 +796,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               get().addLocalReaction(conversationId, reaction.messageId, reaction);
           }
       } else {
-          const currentUser = useAuthStore.getState().user;
           // FIX: If this is our own message with a tempId, replace the optimistic one
           if (message.tempId && currentUser && message.senderId === currentUser.id) {
               get().replaceOptimisticMessage(conversationId, message.tempId, decrypted);
