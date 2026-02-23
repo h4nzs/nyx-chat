@@ -582,6 +582,12 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
   if (!payload || typeof payload !== 'object') return;
   const { conversationId, sessionId, encryptedKey, type, initiatorEphemeralKey, initiatorIdentityKey } = payload;
   
+  // [SECURITY FIX] Block dummy keys from polluting the store
+  if (encryptedKey === 'dummy' || (sessionId && sessionId.startsWith('dummy'))) {
+      console.warn("🛡️ [Crypto] BERHASIL MEMBLOKIR KUNCI DUMMY DARI SERVER!", { conversationId, sessionId });
+      return; 
+  }
+
   console.log(`[Crypto] Received key type=${type} for convo=${conversationId}`);
 
   if (type === 'GROUP_KEY') {

@@ -283,21 +283,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       // STATELESS INITIALIZATION (Pure Lazy Init)
       // No crypto here. Just create room container.
       
-      const sessionId = `dummy_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
       const conv = await authFetch<Conversation>("/api/conversations", {
         method: "POST",
         body: JSON.stringify({
           userIds: [peerId],
           isGroup: false,
-          initialSession: {
-            sessionId,
-            ephemeralPublicKey: "dummy",
-            initialKeys: [
-              { userId: user.id, key: "dummy" },
-              { userId: peerId, key: "dummy" },
-            ],
-          },
+          // [FIX] Don't send dummy session. Let sendMessage create real X3DH session later.
+          initialSession: null, 
         }),
       });
       
