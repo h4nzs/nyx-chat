@@ -477,7 +477,7 @@ export async function deriveSessionKeyAsRecipient(
   otpkId?: number
 ): Promise<Uint8Array> {
   const sodium = await getSodiumLib();
-  const { worker_x3dh_recipient, worker_decrypt_session_key, worker_regenerate_single_otpk } = await getWorkerProxy();
+  const { worker_x3dh_recipient, worker_decrypt_session_key } = await getWorkerProxy();
 
   const theirIdentityKey = sodium.from_base64(initiatorIdentityKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirEphemeralKey = sodium.from_base64(initiatorEphemeralKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -503,8 +503,16 @@ export async function deriveSessionKeyAsRecipient(
     if (!myOneTimePreKey) {
         console.log(`[X3DH] OTPK ${otpkId} not found in storage. Regenerating deterministically...`);
         try {
-            const regeneratedKey = await worker_regenerate_single_otpk(otpkId, masterSeed);
-            myOneTimePreKey = { privateKey: regeneratedKey };
+            const { worker_x3dh_recipient_regenerate } = await getWorkerProxy();
+            const sessionKey = await worker_x3dh_recipient_regenerate({
+                keyId: otpkId,
+                masterSeed,
+                myIdentityKey: myIdentityKeyPair,
+                mySignedPreKey: mySignedPreKeyPair,
+                theirIdentityKey: sodium.from_base64(initiatorIdentityKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING),
+                theirEphemeralKey: sodium.from_base64(initiatorEphemeralKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING)
+            });
+            return sessionKey;
         } catch (e) {
             console.error(`[X3DH] Failed to regenerate OTPK ${otpkId}:`, e);
         }

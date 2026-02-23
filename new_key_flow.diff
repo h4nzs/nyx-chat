@@ -1,0 +1,961 @@
+diff --git a/server/prisma/schema.prisma b/server/prisma/schema.prisma
+index 2d024b1d..eddc1c6e 100644
+--- a/server/prisma/schema.prisma
++++ b/server/prisma/schema.prisma
+@@ -7,7 +7,6 @@ generator client {
+ datasource db {
+   provider = "postgresql"
+   url      = env("DATABASE_URL")
+-  extensions = [pg_trgm]
+ }
+ 
+ model User {
+diff --git a/server/src/routes/conversations.ts b/server/src/routes/conversations.ts
+index 8225c638..112672a7 100644
+--- a/server/src/routes/conversations.ts
++++ b/server/src/routes/conversations.ts
+@@ -143,7 +143,9 @@ router.post('/', async (req, res, next) => {
+           isInitiator: ik.userId === creatorId
+         }))
+         await tx.sessionKey.createMany({ data: keyRecords })
+-      } else {
++      } else if (isGroup) {
++        // Only generate server-side keys for groups if no initial session provided.
++        // For 1-on-1, we want Lazy X3DH, so we skip this.
+         await rotateAndDistributeSessionKeys(conversation.id, creatorId, tx)
+       }
+ 
+diff --git a/server/src/routes/keys.ts b/server/src/routes/keys.ts
+index 5d664fe4..fecca5e2 100644
+--- a/server/src/routes/keys.ts
++++ b/server/src/routes/keys.ts
+@@ -35,6 +35,11 @@ router.post(
+ 
+       // Use a transaction to ensure both operations succeed or fail together
+       await prisma.$transaction([
++        // [FIX] Purge old OTPKs on bundle update (New Identity/Session)
++        // This prevents "Identity Crisis" where new identity is mixed with old OTPKs.
++        prisma.oneTimePreKey.deleteMany({
++          where: { userId }
++        }),
+         prisma.preKeyBundle.upsert({
+           where: { userId },
+           update: {
+@@ -112,6 +117,18 @@ router.get('/count-otpk', requireAuth, async (req, res, next) => {
+   }
+ })
+ 
++// === DELETE: Clear all One-Time Pre-Keys ===
++router.delete('/otpk', requireAuth, async (req, res, next) => {
++  try {
++    await prisma.oneTimePreKey.deleteMany({
++      where: { userId: req.user!.id }
++    })
++    res.status(204).send()
++  } catch (e) {
++    next(e)
++  }
++})
++
+ // === GET: Get a pre-key bundle for another user ===
+ router.get(
+   '/prekey-bundle/:userId',
+diff --git a/server/src/routes/sessionKeys.ts b/server/src/routes/sessionKeys.ts
+index 902ab20b..819215d9 100644
+--- a/server/src/routes/sessionKeys.ts
++++ b/server/src/routes/sessionKeys.ts
+@@ -3,6 +3,8 @@ import { prisma } from '../lib/prisma.js'
+ import { requireAuth } from '../middleware/auth.js'
+ import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
+ import { ApiError } from '../utils/errors.js'
++import { z } from 'zod'
++import { zodValidate } from '../utils/validate.js'
+ 
+ const router: Router = Router()
+ router.use(requireAuth)
+@@ -116,4 +118,44 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
+   }
+ })
+ 
++// POST: Backup session keys from client to server (encrypted)
++router.post(
++  '/backup',
++  zodValidate({
++    body: z.object({
++      conversationId: z.string(),
++      sessionId: z.string(),
++      encryptedKey: z.string()
++    })
++  }),
++  async (req, res, next) => {
++    try {
++      if (!req.user) throw new ApiError(401, 'Authentication required.')
++      const userId = req.user.id
++      const { conversationId, sessionId, encryptedKey } = req.body
++
++      // Idempotent backup: Only create if not exists.
++      const existing = await prisma.sessionKey.findFirst({
++        where: { userId, sessionId }
++      })
++
++      if (!existing) {
++        await prisma.sessionKey.create({
++          data: {
++            userId,
++            conversationId,
++            sessionId,
++            encryptedKey,
++            isInitiator: true // Client-side generated keys are owned by the creator
++          }
++        })
++      }
++
++      res.status(200).json({ success: true })
++    } catch (error) {
++      next(error)
++    }
++  }
++)
++
+ export default router
+diff --git a/server/src/routes/users.ts b/server/src/routes/users.ts
+index c5995d86..cf82bc71 100644
+--- a/server/src/routes/users.ts
++++ b/server/src/routes/users.ts
+@@ -160,7 +160,7 @@ router.get('/search',
+             }
+           ]
+         },
+-        take: 10,
++        take: 5, // Reduced from 10 to 5 for performance
+         select: { id: true, username: true, name: true, avatarUrl: true }
+       })
+       res.json(users)
+diff --git a/server/src/socket.ts b/server/src/socket.ts
+index b1dfcf69..998263b6 100644
+--- a/server/src/socket.ts
++++ b/server/src/socket.ts
+@@ -62,7 +62,7 @@ interface KeyFulfillmentPayload {
+ 
+ // Extend the Socket type from Socket.IO to include our custom user property
+ interface AuthenticatedSocket extends Socket {
+-  user?: AuthPayload;
++  user?: AuthPayload & { publicKey: string | null };
+ }
+ 
+ export let io: Server;
+@@ -166,14 +166,23 @@ export function registerSocket(httpServer: HttpServer) {
+ 
+       // @ts-ignore
+       const userId = payload.id || payload.sub;
+-      const user = await prisma.user.findUnique({ where: { id: userId } });
++      // OPTIMIZATION: Select publicKey here
++      const user = await prisma.user.findUnique({ 
++        where: { id: userId },
++        select: { id: true, email: true, username: true, publicKey: true }
++      });
+ 
+       if (!user) {
+         socket.user = undefined;
+         return next();
+       }
+ 
+-      socket.user = { id: user.id, email: user.email, username: user.username };
++      socket.user = { 
++        id: user.id, 
++        email: user.email, 
++        username: user.username,
++        publicKey: user.publicKey 
++      };
+       next();
+     } catch (err) {
+       console.error("[Socket] Auth Middleware Error:", err);
+@@ -447,16 +456,14 @@ export function registerSocket(httpServer: HttpServer) {
+         
+         if (onlineParticipants.length > 0) {
+           const fulfillerId = onlineParticipants[0].userId;
+-          const requester = await prisma.user.findUnique({
+-            where: { id: userId },
+-            select: { publicKey: true },
+-          });
++          // OPTIMIZATION: Use socket.user.publicKey instead of DB query
++          const requesterPublicKey = socket.user?.publicKey;
+           
+-          if (requester?.publicKey) {
++          if (requesterPublicKey) {
+             io.to(fulfillerId).emit('group:fulfill_key_request', {
+               conversationId,
+               requesterId: userId,
+-              requesterPublicKey: requester.publicKey,
++              requesterPublicKey: requesterPublicKey,
+             });
+           }
+         }
+@@ -508,17 +515,15 @@ export function registerSocket(httpServer: HttpServer) {
+         
+         if (onlineParticipants.length > 0) {
+           const fulfillerId = onlineParticipants[0].userId;
+-          const requester = await prisma.user.findUnique({
+-            where: { id: userId },
+-            select: { publicKey: true },
+-          });
++          // OPTIMIZATION: Use socket.user.publicKey instead of DB query
++          const requesterPublicKey = socket.user?.publicKey;
+           
+-          if (requester?.publicKey) {
++          if (requesterPublicKey) {
+             io.to(fulfillerId).emit('session:fulfill_request', {
+               conversationId,
+               sessionId,
+               requesterId: userId,
+-              requesterPublicKey: requester.publicKey,
++              requesterPublicKey: requesterPublicKey,
+             });
+           }
+         }
+diff --git a/web/src/lib/crypto-worker-proxy.ts b/web/src/lib/crypto-worker-proxy.ts
+index 1fede53f..159a7921 100644
+--- a/web/src/lib/crypto-worker-proxy.ts
++++ b/web/src/lib/crypto-worker-proxy.ts
+@@ -209,4 +209,8 @@ export function worker_decrypt_session_key(encryptedKey: Uint8Array, masterSeed:
+ 
+ export function worker_generate_otpk_batch(count: number, startId: number, masterSeed: Uint8Array): Promise<Array<{ keyId: number, publicKey: string, encryptedPrivateKey: Uint8Array }>> {
+     return sendToWorker('generate_otpk_batch', { count, startId, masterSeed: Array.from(masterSeed) });
++}
++
++export function worker_regenerate_single_otpk(keyId: number, masterSeed: Uint8Array): Promise<Uint8Array> {
++    return sendToWorker('regenerate_single_otpk', { keyId, masterSeed: Array.from(masterSeed) });
+ }
+\ No newline at end of file
+diff --git a/web/src/store/auth.ts b/web/src/store/auth.ts
+index 4a35b599..397f5ae4 100644
+--- a/web/src/store/auth.ts
++++ b/web/src/store/auth.ts
+@@ -9,7 +9,8 @@ import { useMessageStore } from "./message";
+ import toast from "react-hot-toast";
+ import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady } from "@lib/keyStorage";
+ import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; // Only import TYPE
+-import { checkAndRefillOneTimePreKeys } from "@utils/crypto"; // Import helper
++import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; // Import helper
++import { syncSessionKeys } from "@utils/sessionSync";
+ 
+ /**
+  * Retrieves the persisted signed pre-key, signs it with the identity signing key,
+@@ -288,6 +289,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+     },
+ 
+     login: async (emailOrUsername, password, restoredNotSynced = false) => {
++      // [FIX] Ensure clean slate. Wipe old keys from IDB before starting new session.
++      try {
++        const { clearAllKeys } = await import('@lib/keychainDb');
++        await clearAllKeys();
++      } catch (e) { console.error("Failed to clear old keys:", e); }
++
+       privateKeysCache = null;
+       set({ isInitializingCrypto: true }); // Show loading for crypto init
+ 
+@@ -354,6 +361,16 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+           toast("To enable secure messaging, restore your account from your recovery phrase in Settings.", { duration: 7000 });
+         }
+ 
++        // [SYNC] Restore historical session keys from server backup
++        try {
++          await syncSessionKeys();
++        } catch (e) { console.error("Auto-sync keys failed:", e); }
++
++        // [RESET] Force rotate OTPK on new login to prevent stale key decryption errors
++        try {
++          await resetOneTimePreKeys();
++        } catch (e) { console.error("Reset OTPK failed:", e); }
++
+         connectSocket();
+       } catch (error: any) {
+         console.error("Login error:", error);
+@@ -396,6 +413,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+     registerAndGeneratePhrase: async (data) => {
+       set({ isInitializingCrypto: true });
+       try {
++        // [FIX] Ensure clean slate. Wipe old keys from IDB before generating new ones.
++        try {
++            const { clearAllKeys } = await import('@lib/keychainDb');
++            await clearAllKeys();
++        } catch (e) { console.error("Failed to clear old keys:", e); }
++
+         // Dynamic Import
+         const { registerAndGenerateKeys, retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+ 
+@@ -453,6 +476,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+           set({ user: res.user, accessToken: res.accessToken });
+           localStorage.setItem("user", JSON.stringify(res.user));
+           setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
++          
++          try {
++            await syncSessionKeys();
++          } catch (e) { console.error("Auto-sync keys failed:", e); }
++
+           connectSocket();
+           return { phrase, needVerification: false };
+         }
+@@ -517,7 +545,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+         clearAuthCookies();
+         privateKeysCache = null;
+         
+-        // [FIX] Clear keys BEFORE removing user, because getDb() needs the userId from localStorage
++        // [FIX] Clear ALL persistent keys (IndexedDB) and Master Key (LocalStorage)
++        try {
++            const { clearAllKeys } = await import('@lib/keychainDb');
++            await clearAllKeys();
++        } catch (e) { console.error("Failed to wipe IndexedDB:", e); }
++        
+         await clearKeys(); 
+         
+         localStorage.removeItem('user');
+diff --git a/web/src/store/conversation.ts b/web/src/store/conversation.ts
+index e0e78016..da101901 100644
+--- a/web/src/store/conversation.ts
++++ b/web/src/store/conversation.ts
+@@ -4,9 +4,7 @@ import { useMessageStore, decryptMessageObject } from "./message";
+ import { getSocket, emitSessionKeyRequest } from "@lib/socket";
+ import { useVerificationStore } from './verification';
+ import { useAuthStore, User } from './auth';
+-import { getSodium } from '@lib/sodiumInitializer';
+-import { establishSessionFromPreKeyBundle } from '@utils/crypto';
+-import { addSessionKey, storePendingHeader } from '@lib/keychainDb';
++// Removed all crypto imports
+ import toast from 'react-hot-toast';
+ 
+ // --- Type Definitions ---
+@@ -276,68 +274,32 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
+   toggleSidebar: () => set(s => ({ isSidebarOpen: !s.isSidebarOpen })),
+ 
+   startConversation: async (peerId: string): Promise<string> => {
+-    const { user, getEncryptionKeyPair } = useAuthStore.getState();
++    const { user } = useAuthStore.getState();
+     if (!user) {
+       throw new Error("Cannot start a conversation: user is not authenticated.");
+     }
+ 
+     try {
+-      const theirBundle = await authFetch<any>(`/api/keys/prekey-bundle/${peerId}`);
+-      if (!theirBundle) throw new Error("User does not have a pre-key bundle available.");
+-
+-      const myKeyPair = await getEncryptionKeyPair();
+-      const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
+-
+-      const sodium = await getSodium();
+-      const myPublicKey = myKeyPair.publicKey;
+-      
+-      // Encrypt for self (backup)
+-      const encryptedKeyForSelf = sodium.crypto_box_seal(sessionKey, myPublicKey);
++      // STATELESS INITIALIZATION (Pure Lazy Init)
++      // No crypto here. Just create room container.
+       
+-      // Peer key is distributed via Embedded Header in the first message.
+-      // We send a placeholder here to satisfy API requirements.
+-      const encryptedKeyForPeer = new Uint8Array(0); 
+-
+-      const sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
+-
+       const conv = await authFetch<Conversation>("/api/conversations", {
+         method: "POST",
+         body: JSON.stringify({
+           userIds: [peerId],
+           isGroup: false,
+-          initialSession: {
+-            sessionId,
+-            ephemeralPublicKey,
+-            initialKeys: [
+-              { userId: user.id, key: sodium.to_base64(encryptedKeyForSelf, sodium.base64_variants.URLSAFE_NO_PADDING) },
+-              { userId: peerId, key: "" }, // Placeholder
+-            ],
+-          },
++          // [FIX] Don't send dummy session. Let sendMessage create real X3DH session later.
++          initialSession: null, 
+         }),
+       });
+       
+-      await addSessionKey(conv.id, sessionId, sessionKey);
+-
+-      // Now we have conv.id, store the pending header
+-      if (otpkId !== undefined) {
+-          const x3dhHeader = {
+-              ik: sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+-              ek: ephemeralPublicKey,
+-              otpkId: otpkId
+-          };
+-          await storePendingHeader(conv.id, x3dhHeader);
+-      }
+-
+       getSocket().emit("conversation:join", conv.id);
+       get().addOrUpdateConversation(conv);
+       set({ activeId: conv.id, isSidebarOpen: false });
+       return conv.id;
+     } catch (error: any) {
+-      console.error("Failed to start conversation using pre-keys:", error);
+-      if (error?.message?.includes("Password not provided")) {
+-        throw new Error("Password is required to decrypt your keys and start a secure conversation.");
+-      }
+-      throw new Error(`Failed to establish secure conversation. ${error.message || ''}`);
++      console.error("Failed to start conversation:", error);
++      throw new Error(`Failed to establish conversation. ${error.message || ''}`);
+     }
+   },
+ 
+@@ -524,4 +486,4 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
+       });
+     }
+   },
+-}));
++}));
+\ No newline at end of file
+diff --git a/web/src/store/message.ts b/web/src/store/message.ts
+index ccf4a5bc..3f536357 100644
+--- a/web/src/store/message.ts
++++ b/web/src/store/message.ts
+@@ -22,7 +22,7 @@ import { useConversationStore } from "./conversation";
+ import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
+ import { useConnectionStore } from "./connection";
+ import { getSodium } from "@lib/sodiumInitializer";
+-import { getPendingHeader, deletePendingHeader } from "@lib/keychainDb";
++// getPendingHeader removed as requested
+ 
+ /**
+  * Logika Dekripsi Terpusat (Single Source of Truth)
+@@ -319,6 +319,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+     const { user, hasRestoredKeys } = useAuthStore.getState();
+     if (!user) return;
+ 
++    console.log(`[SendMessage] START: conversationId=${conversationId}, tempId=${tempId}`);
++
+     if (!hasRestoredKeys) {
+       toast.error("You must restore your keys from your recovery phrase before you can send messages.");
+       return;
+@@ -326,10 +328,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+ 
+     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+     if (!conversation) {
++      console.error(`[SendMessage] Conversation NOT FOUND: ${conversationId}`);
+       toast.error("Conversation not found.");
+       return;
+     }
+     const isGroup = conversation.isGroup;
++    console.log(`[SendMessage] Conversation FOUND. isGroup=${isGroup}`);
+ 
+     if (isGroup && useConnectionStore.getState().status === 'connected') {
+       try {
+@@ -382,29 +386,25 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+     try {
+       let ciphertext = '', sessionId: string | undefined;
+       let x3dhHeader: any = null;
++      let encryptionSession: { sessionId: string; key: Uint8Array } | undefined;
+ 
+-      // Check for Pending Header (from startConversation)
+-      if (!isGroup) {
+-          const pendingHeader = await getPendingHeader(conversationId);
+-          if (pendingHeader) {
+-              console.log(`[X3DH] Found pending header for ${conversationId}. Attaching to message.`);
+-              x3dhHeader = pendingHeader;
+-              await deletePendingHeader(conversationId);
+-          }
+-      }
+-
+-      // LAZY SESSION INITIALIZATION (X3DH) - Fallback if no pending header
+-      // Only for 1-on-1 chats that contain content
+-      if (!isGroup && data.content && !x3dhHeader) {
++      // LAZY SESSION INITIALIZATION (X3DH) - SINGLE SOURCE OF TRUTH
++      // No more getPendingHeader check here.
++      if (!isGroup && data.content) {
++          console.log(`[SendMessage] Checking session key for private chat...`);
+           const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
++          console.log(`[SendMessage] Latest Key:`, latestKey ? 'FOUND' : 'NULL');
+           
+           if (!latestKey) {
+              console.log(`[X3DH] No session key found for ${conversationId}. Initiating handshake...`);
++             // Fix: Use p.id instead of p.userId
+              const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
++             console.log(`[X3DH] Found peerId: ${peerId} (My ID: ${user.id})`);
+              
+              if (peerId) {
+                  // 1. Fetch Bundle
+                  const theirBundle = await authFetch<any>(`/api/keys/prekey-bundle/${peerId}`);
++                 console.log(`[X3DH] Bundle fetched for ${peerId}`);
+                  
+                  // 2. Establish Session
+                  const myKeyPair = await getMyEncryptionKeyPair();
+@@ -414,6 +414,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+                  const sodium = await getSodium();
+                  sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
+                  await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
++                 console.log(`[X3DH] Session stored: ${sessionId}`);
++
++                 encryptionSession = { sessionId, key: sessionKey };
+ 
+                  // 4. Prepare Header for Peer
+                  x3dhHeader = {
+@@ -423,15 +426,28 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+                  };
+                  
+                  console.log(`[X3DH] Handshake prepared (Lazy). Header attached to message.`);
++             } else {
++                 console.error(`[X3DH] Peer not found in participants for ${conversationId}. Participants:`, conversation.participants);
++                 toast.error("Encryption failed: Cannot identify recipient.");
++                 return; // STOP HERE
+              }
++          } else {
++             // Reuse existing session
++             console.log(`[X3DH] Reusing existing session ${latestKey.sessionId}`);
++             sessionId = latestKey.sessionId;
++             encryptionSession = latestKey;
+           }
+       }
+ 
+       if (data.content) {
+-        // Encrypt content (will use the key we just stored if it was new)
+-        const result = await encryptMessage(data.content, conversationId, isGroup);
++        if (!isGroup && !encryptionSession) {
++            console.error("[Crypto] Attempted to encrypt without session:", { conversationId, isGroup });
++            throw new Error("Encryption setup failed. Please try reloading the chat.");
++        }
++
++        // Encrypt content
++        const result = await encryptMessage(data.content, conversationId, isGroup, encryptionSession);
+         ciphertext = result.ciphertext;
+-        // If we just created a session, use that ID. Otherwise use the one from encryption result.
+         if (!sessionId) sessionId = result.sessionId; 
+       }
+       
+@@ -455,9 +471,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+       const isConnected = socket?.connected;
+ 
+       if (!isConnected && !isReactionPayload) {
+-        // Offline? Queue it!
+-        // We recreate the optimistic message for the queue
+-        const queueMsg = { ...data, id: `temp_${actualTempId}`, tempId: actualTempId, conversationId, senderId: user.id, createdAt: new Date().toISOString() } as Message;
++        // [CRITICAL FIX] Use PAYLOAD (Encrypted), NOT data (Plaintext)
++        const queueMsg = { ...payload, id: `temp_${actualTempId}`, tempId: actualTempId, conversationId, senderId: user.id, createdAt: new Date().toISOString() } as Message;
+         await addToQueue(conversationId, queueMsg, actualTempId);
+         return;
+       }
+@@ -664,9 +679,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+         // Find the conversation first to determine its type
+         const conversation = useConversationStore.getState().conversations.find(c => c.id === id);
+         // Key distribution logic is now handled by sendMessage, but we still need to handle the 1-on-1 case.
+-        if (conversation && !conversation.isGroup) {
+-          await ensureAndRatchetSession(id);
+-        }
++        // [PRIVACY FIX] Disable server-side ratchet on load. 
++        // We want to force Client-Side X3DH (Lazy Init) in sendMessage for the first message.
++        // if (conversation && !conversation.isGroup) {
++        //   await ensureAndRatchetSession(id);
++        // }
+       } catch (sessionError) {
+         console.error("Failed to establish session, decryption may fail:", sessionError);
+       }
+diff --git a/web/src/store/messageInput.ts b/web/src/store/messageInput.ts
+index 5f76fbec..6b609526 100644
+--- a/web/src/store/messageInput.ts
++++ b/web/src/store/messageInput.ts
+@@ -78,75 +78,19 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
+   clearTypingLinkPreview: () => set({ typingLinkPreview: null }),
+ 
+   sendMessage: async (conversationId, data, tempId?: number) => {
+-    const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
+-    const me = useAuthStore.getState().user;
++    const { sendMessage: coreSendMessage } = useMessageStore.getState();
+     const { replyingTo, expiresIn } = get();
+ 
+-    if (!await ensureGroupSessionIfNeeded(conversationId)) return;
+-
+-    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
+-    const isGroup = conversation.isGroup;
+-
+-    // Encrypt Content (Text or JSON Metadata)
+-    let ciphertext = '';
+-    let sessionId: string | undefined;
+-    try {
+-      const result = await encryptMessage(data.content, conversationId, isGroup);
+-      ciphertext = result.ciphertext;
+-      sessionId = result.sessionId;
+-    } catch (e: any) {
+-      toast.error(`Encryption failed: ${e.message}`);
+-      return;
+-    }
+-
+-    const actualTempId = tempId !== undefined ? tempId : Date.now();
+-    const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
+-
+-    const isFilePayload = data.content.startsWith('{') && data.content.includes('"type":"file"');
+-    
+-    if (!isFilePayload) {
+-        const optimisticMessage: Message = {
+-          id: `temp-${actualTempId}`,
+-          tempId: actualTempId,
+-          conversationId,
+-          senderId: me!.id,
+-          sender: me!,
+-          createdAt: new Date().toISOString(),
+-          optimistic: true,
+-          expiresAt,
+-          ...data,
+-          repliedTo: replyingTo || undefined,
+-        };
+-        addOptimisticMessage(conversationId, optimisticMessage);
+-    }
+-
+-    const finalPayload = {
+-      conversationId,
+-      tempId: actualTempId,
++    // Delegate to Core Logic in message.ts (Centralized X3DH & Queue handling)
++    await coreSendMessage(conversationId, {
++      ...data,
+       repliedToId: replyingTo?.id,
+-      expiresIn,
+-      content: ciphertext,
+-      sessionId,
+-      // Explicitly nullify file fields to ensure "Blind Attachment"
+-      fileUrl: null,
+-      fileName: null,
+-      fileType: null,
+-      fileSize: null,
+-      duration: null
+-    };
++      expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
++      // Pass original content. message.ts handles encryption.
++    }, tempId);
+ 
+-    try {
+-      await authFetch<Message>("/api/messages", {
+-        method: "POST",
+-        body: JSON.stringify(finalPayload),
+-      });
+-    } catch (error) {
+-      const errorMessage = handleApiError(error);
+-      if (!isFilePayload) toast.error(`Failed to send message: ${errorMessage}`);
+-      updateMessage(conversationId, `temp-${actualTempId}`, { error: true, optimistic: false });
+-    }
+-
+-    if (!isFilePayload) set({ replyingTo: null });
++    // Clear Input State
++    set({ replyingTo: null });
+   },
+   
+   uploadFile: async (conversationId, file) => {
+diff --git a/web/src/utils/crypto.ts b/web/src/utils/crypto.ts
+index 73cfbed7..4f36799d 100644
+--- a/web/src/utils/crypto.ts
++++ b/web/src/utils/crypto.ts
+@@ -71,11 +71,29 @@ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
+   }
+ }
+ 
++export async function resetOneTimePreKeys(): Promise<void> {
++  try {
++    await authFetch('/api/keys/otpk', { method: 'DELETE' });
++    await checkAndRefillOneTimePreKeys();
++  } catch (error) {
++    console.error("[Crypto] Failed to reset OTPKs:", error);
++  }
++}
++
+ export async function storeSessionKeySecurely(conversationId: string, sessionId: string, key: Uint8Array) {
+   const masterSeed = await getMasterSeedOrThrow();
+   const { worker_encrypt_session_key } = await getWorkerProxy();
+   const encryptedKey = await worker_encrypt_session_key(key, masterSeed);
+   await addSessionKey(conversationId, sessionId, encryptedKey);
++
++  // [BACKUP] Sync new key to server immediately (Fire & Forget)
++  const sodium = await getSodiumLib();
++  const encryptedKeyB64 = sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
++
++  authFetch('/api/session-keys/backup', {
++    method: 'POST',
++    body: JSON.stringify({ conversationId, sessionId, encryptedKey: encryptedKeyB64 })
++  }).catch(err => console.error("[Crypto] Failed to backup session key:", err));
+ }
+ 
+ export async function retrieveSessionKeySecurely(conversationId: string, sessionId: string): Promise<Uint8Array | null> {
+@@ -320,11 +338,13 @@ async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0) {
+ 
+   emitGroupKeyRequest(conversationId);
+ 
+-  const timerId = window.setTimeout(() => {
++  const timerId = window.setTimeout(async () => {
+     pendingGroupKeyRequests.delete(conversationId);
+     if (attempt < MAX_KEY_REQUEST_RETRIES) {
+       requestGroupKeyWithTimeout(conversationId, attempt + 1);
+     } else {
++      // Dynamic import to break cycle
++      const { useMessageStore } = await import('@store/message');
+       useMessageStore.getState().failPendingMessages(conversationId, '[Key request timed out]');
+     }
+   }, KEY_REQUEST_TIMEOUT_MS);
+@@ -338,6 +358,7 @@ export async function encryptMessage(
+   text: string,
+   conversationId: string,
+   isGroup: boolean = false,
++  existingSession?: { sessionId: string; key: Uint8Array }
+ ): Promise<{ ciphertext: string; sessionId?: string }> {
+   const sodium = await getSodiumLib();
+   const { worker_crypto_secretbox_xchacha20poly1305_easy } = await getWorkerProxy();
+@@ -352,10 +373,15 @@ export async function encryptMessage(
+     key = groupKey;
+     sessionId = undefined;
+   } else {
+-    const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
+-    if (!latestKey) throw new Error('No session key available for encryption.');
+-    key = latestKey.key;
+-    sessionId = latestKey.sessionId;
++    if (existingSession) {
++      key = existingSession.key;
++      sessionId = existingSession.sessionId;
++    } else {
++      const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
++      if (!latestKey) throw new Error('No session key available for encryption.');
++      key = latestKey.key;
++      sessionId = latestKey.sessionId;
++    }
+   }
+   
+   const messageBytes = sodium.from_string(text);
+@@ -451,7 +477,7 @@ export async function deriveSessionKeyAsRecipient(
+   otpkId?: number
+ ): Promise<Uint8Array> {
+   const sodium = await getSodiumLib();
+-  const { worker_x3dh_recipient, worker_decrypt_session_key } = await getWorkerProxy();
++  const { worker_x3dh_recipient, worker_decrypt_session_key, worker_regenerate_single_otpk } = await getWorkerProxy();
+ 
+   const theirIdentityKey = sodium.from_base64(initiatorIdentityKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
+   const theirEphemeralKey = sodium.from_base64(initiatorEphemeralKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
+@@ -459,21 +485,29 @@ export async function deriveSessionKeyAsRecipient(
+   let myOneTimePreKey: { privateKey: Uint8Array } | undefined;
+ 
+   if (otpkId !== undefined) {
+-    // 1. Retrieve Encrypted OTPK Private Key
++    const masterSeed = await getMasterSeedOrThrow();
++    
++    // 1. Try Retrieve Encrypted OTPK Private Key from Local Storage
+     const encryptedOtpk = await getOneTimePreKey(otpkId);
++    
+     if (encryptedOtpk) {
+-      // 2. Decrypt it using Master Seed
+-      const masterSeed = await getMasterSeedOrThrow();
+       try {
+-        // We reuse worker_decrypt_session_key since the mechanism (seal) is likely same or we used specific encryption
+-        // In checkAndRefillOneTimePreKeys we used: sodium.crypto_aead_xchacha20poly1305_ietf_encrypt
+-        // with a key derived from masterSeed.
+-        // worker_decrypt_session_key does exactly the reverse of that.
+         const otpkPrivateKey = await worker_decrypt_session_key(encryptedOtpk, masterSeed);
+         myOneTimePreKey = { privateKey: otpkPrivateKey };
+       } catch (e) {
+-        console.error("Failed to decrypt OTPK:", e);
++        console.error("Failed to decrypt stored OTPK:", e);
+       }
++    } 
++    
++    // 2. RECOVERY: If not found (e.g. after logout/restore), Regenerate Deterministically
++    if (!myOneTimePreKey) {
++        console.log(`[X3DH] OTPK ${otpkId} not found in storage. Regenerating deterministically...`);
++        try {
++            const regeneratedKey = await worker_regenerate_single_otpk(otpkId, masterSeed);
++            myOneTimePreKey = { privateKey: regeneratedKey };
++        } catch (e) {
++            console.error(`[X3DH] Failed to regenerate OTPK ${otpkId}:`, e);
++        }
+     }
+   }
+ 
+@@ -487,6 +521,7 @@ export async function deriveSessionKeyAsRecipient(
+     });
+ 
+     // 3. Perfect Forward Secrecy: Delete the OTPK after use
++    // Even if we regenerated it, we don't store it back, just use and forget.
+     if (otpkId !== undefined) {
+       await deleteOneTimePreKey(otpkId);
+     }
+@@ -564,6 +599,14 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
+ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promise<void> {
+   if (!payload || typeof payload !== 'object') return;
+   const { conversationId, sessionId, encryptedKey, type, initiatorEphemeralKey, initiatorIdentityKey } = payload;
++  
++  // [SECURITY FIX] Block dummy keys from polluting the store
++  if (encryptedKey === 'dummy' || (sessionId && sessionId.startsWith('dummy'))) {
++      console.warn("🛡️ [Crypto] BERHASIL MEMBLOKIR KUNCI DUMMY DARI SERVER!", { conversationId, sessionId });
++      return; 
++  }
++
++  console.log(`[Crypto] Received key type=${type} for convo=${conversationId}`);
+ 
+   if (type === 'GROUP_KEY') {
+     const pendingRequest = pendingGroupKeyRequests.get(conversationId);
+@@ -573,7 +616,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
+     }
+     await handleGroupKeyDistribution(conversationId, encryptedKey);
+   } else if (sessionId) {
+-    let newSessionKey: Uint8Array;
++    let newSessionKey: Uint8Array | undefined;
+ 
+     // Check if this is an X3DH initialization payload (JSON marker)
+     if (encryptedKey.startsWith('{') && encryptedKey.includes('"x3dh":true')) {
+@@ -581,6 +624,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
+             const metadata = JSON.parse(encryptedKey);
+             if (metadata.x3dh && initiatorEphemeralKey && initiatorIdentityKey) {
+                 // Perform X3DH Calculation on Recipient Side
++                console.log(`[Crypto] Processing X3DH key derivation...`);
+                 const { getEncryptionKeyPair, getSignedPreKeyPair } = useAuthStore.getState();
+                 const myIdentityKeyPair = await getEncryptionKeyPair();
+                 const mySignedPreKeyPair = await getSignedPreKeyPair();
+@@ -597,16 +641,36 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
+             }
+         } catch (e) {
+             console.error("X3DH derivation failed, falling back to legacy decrypt:", e);
+-            const { publicKey, privateKey } = await getMyEncryptionKeyPair();
+-            newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
++            // Fallback only if key looks valid
++            if (encryptedKey.length > 20) {
++                const { publicKey, privateKey } = await getMyEncryptionKeyPair();
++                newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
++            } else {
++                console.warn("[Crypto] Skipping decryption for invalid/placeholder key.");
++                return;
++            }
+         }
+     } else {
+         // Legacy: Encrypted with Identity Key
++        // GUARD: Ignore placeholders/empty keys
++        if (!encryptedKey || encryptedKey.length < 20) {
++             console.warn("[Crypto] Received empty or short session key. Ignoring placeholder.");
++             return;
++        }
++
+         const { publicKey, privateKey } = await getMyEncryptionKeyPair();
+         newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+     }
+ 
+-    await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
++    if (newSessionKey) {
++        await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
++        console.log(`[Crypto] Stored session key for ${sessionId}`);
++        
++        // Dynamic import to break cycle
++        import('@store/message').then(({ useMessageStore }) => {
++            useMessageStore.getState().reDecryptPendingMessages(conversationId);
++        });
++    }
+   }
+ }
+ 
+diff --git a/web/src/utils/sessionSync.ts b/web/src/utils/sessionSync.ts
+index 2c7eba98..dabee305 100644
+--- a/web/src/utils/sessionSync.ts
++++ b/web/src/utils/sessionSync.ts
+@@ -1,5 +1,5 @@
+ import { authFetch } from "@lib/api";
+-import { getMyEncryptionKeyPair, decryptSessionKeyForUser } from "@utils/crypto";
++import { getSodium } from "@lib/sodiumInitializer";
+ import { addSessionKey } from "@lib/keychainDb";
+ import toast from "react-hot-toast";
+ 
+@@ -14,30 +14,30 @@ export async function syncSessionKeys() {
+           return;
+         }
+ 
+-        const { publicKey, privateKey } = await getMyEncryptionKeyPair();
++        const sodium = await getSodium();
+         let syncedKeyCount = 0;
+ 
+         for (const conversationId in allEncryptedKeys) {
+           const keysForConvo = allEncryptedKeys[conversationId];
+           for (const keyInfo of keysForConvo) {
+             try {
+-              const sessionKey = await decryptSessionKeyForUser(
+-                keyInfo.encryptedKey,
+-                publicKey,
+-                privateKey
++              // [FIX] Store encrypted blob directly.
++              // Server stores keys encrypted with Master Seed (symmetric).
++              // IndexedDB expects the same format. No re-encryption needed.
++              const encryptedKeyBytes = sodium.from_base64(
++                keyInfo.encryptedKey, 
++                sodium.base64_variants.URLSAFE_NO_PADDING
+               );
+-              await addSessionKey(conversationId, keyInfo.sessionId, sessionKey);
++              
++              await addSessionKey(conversationId, keyInfo.sessionId, encryptedKeyBytes);
+               syncedKeyCount++;
+-            } catch (decryptionError) {
+-              // Failed to decrypt, skip.
++            } catch (e) {
++              console.error("Failed to save synced key:", e);
+             }
+           }
+         }
+       } catch (error: any) {
+         console.error("Session key synchronization failed:", error);
+-        if (error.message.includes("Incorrect password")) {
+-          throw new Error("Incorrect password provided for key sync.");
+-        }
+         throw new Error("Failed to sync message keys from server.");
+       }
+     })(),
+diff --git a/web/src/workers/crypto.worker.ts b/web/src/workers/crypto.worker.ts
+index 37fe9f97..c033fd90 100644
+--- a/web/src/workers/crypto.worker.ts
++++ b/web/src/workers/crypto.worker.ts
+@@ -616,9 +616,20 @@ self.onmessage = async (event: MessageEvent) => {
+         const batch = [];
+         for (let i = 0; i < count; i++) {
+           const keyId = startId + i;
+-          const keyPair = sodium.crypto_box_keypair();
+           
+-          // Encrypt private key
++          // DETERMINISTIC GENERATION
++          // seed = Hash(MasterSeed || "OTPK" || KeyID)
++          const seedInput = new Uint8Array(masterSeedBytes.length + 4 + 4); // 4 bytes for "OTPK", 4 bytes for ID
++          seedInput.set(masterSeedBytes);
++          seedInput.set(new TextEncoder().encode("OTPK"), masterSeedBytes.length);
++          // Simple Little Endian encoding for ID
++          const idBytes = new Uint8Array(new Uint32Array([keyId]).buffer); 
++          seedInput.set(idBytes, masterSeedBytes.length + 4);
++
++          const keySeed = sodium.crypto_generichash(32, seedInput);
++          const keyPair = sodium.crypto_box_seed_keypair(keySeed);
++          
++          // Encrypt private key for storage
+           const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+           const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+             keyPair.privateKey,
+@@ -638,6 +649,7 @@ self.onmessage = async (event: MessageEvent) => {
+             encryptedPrivateKey: combined
+           });
+           
++          sodium.memzero(keySeed);
+           sodium.memzero(keyPair.privateKey);
+         }
+         
+@@ -645,6 +657,26 @@ self.onmessage = async (event: MessageEvent) => {
+         result = batch;
+         break;
+       }
++      case 'regenerate_single_otpk': {
++        const { keyId, masterSeed } = payload;
++        const masterSeedBytes = new Uint8Array(masterSeed);
++
++        // RE-DERIVE SAME SEED
++        const seedInput = new Uint8Array(masterSeedBytes.length + 4 + 4);
++        seedInput.set(masterSeedBytes);
++        seedInput.set(new TextEncoder().encode("OTPK"), masterSeedBytes.length);
++        const idBytes = new Uint8Array(new Uint32Array([keyId]).buffer);
++        seedInput.set(idBytes, masterSeedBytes.length + 4);
++
++        const keySeed = sodium.crypto_generichash(32, seedInput);
++        const keyPair = sodium.crypto_box_seed_keypair(keySeed);
++
++        result = keyPair.privateKey; // Return raw private key
++
++        sodium.memzero(keySeed);
++        // Note: result is passed to main thread, will be wiped by GC or caller eventually.
++        break;
++      }
+       default:
+         self.postMessage({ type: 'error', id, error: `Unknown worker command: ${type}` });
+         return;

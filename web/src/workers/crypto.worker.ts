@@ -657,11 +657,19 @@ self.onmessage = async (event: MessageEvent) => {
         result = batch;
         break;
       }
-      case 'regenerate_single_otpk': {
-        const { keyId, masterSeed } = payload;
-        const masterSeedBytes = new Uint8Array(masterSeed);
+      case 'x3dh_recipient_regenerate': {
+        const { 
+            keyId, 
+            masterSeed,
+            myIdentityKey, 
+            mySignedPreKey, 
+            theirIdentityKey, 
+            theirEphemeralKey 
+        } = payload;
 
-        // RE-DERIVE SAME SEED
+        const masterSeedBytes = new Uint8Array(masterSeed);
+        
+        // 1. RE-DERIVE OTPK PRIVATE KEY
         const seedInput = new Uint8Array(masterSeedBytes.length + 4 + 4);
         seedInput.set(masterSeedBytes);
         seedInput.set(new TextEncoder().encode("OTPK"), masterSeedBytes.length);
@@ -669,12 +677,46 @@ self.onmessage = async (event: MessageEvent) => {
         seedInput.set(idBytes, masterSeedBytes.length + 4);
 
         const keySeed = sodium.crypto_generichash(32, seedInput);
-        const keyPair = sodium.crypto_box_seed_keypair(keySeed);
+        const otpkKeyPair = sodium.crypto_box_seed_keypair(keySeed);
+        
+        // 2. PREPARE KEYS FOR X3DH
+        const myIdentityKeyPrivateBytes = new Uint8Array(myIdentityKey.privateKey);
+        const mySignedPreKeyPrivateBytes = new Uint8Array(mySignedPreKey.privateKey);
+        const theirIdentityKeyBytes = new Uint8Array(theirIdentityKey);
+        const theirEphemeralKeyBytes = new Uint8Array(theirEphemeralKey);
 
-        result = keyPair.privateKey; // Return raw private key
+        let sharedSecret: Uint8Array | null = null;
 
-        sodium.memzero(keySeed);
-        // Note: result is passed to main thread, will be wiped by GC or caller eventually.
+        try {
+          // 3. PERFORM X3DH CALCULATION
+          const dh1 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirIdentityKeyBytes);
+          const dh2 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirEphemeralKeyBytes);
+          const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirEphemeralKeyBytes);
+          const dh4 = sodium.crypto_scalarmult(otpkKeyPair.privateKey, theirEphemeralKeyBytes); // DH4 using regenerated key
+        
+          const secrets = [dh1, dh2, dh3, dh4];
+
+          const totalLength = secrets.reduce((sum, s) => sum + s.length, 0);
+          sharedSecret = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const s of secrets) {
+              sharedSecret.set(s, offset);
+              offset += s.length;
+              sodium.memzero(s);
+          }
+
+          result = sodium.crypto_generichash(32, sharedSecret); // Returns the sessionKey
+        } finally {
+          // 4. SECURE CLEANUP
+          sodium.memzero(masterSeedBytes);
+          sodium.memzero(seedInput);
+          sodium.memzero(keySeed);
+          sodium.memzero(otpkKeyPair.privateKey);
+          
+          sodium.memzero(myIdentityKeyPrivateBytes);
+          sodium.memzero(mySignedPreKeyPrivateBytes);
+          if (sharedSecret) sodium.memzero(sharedSecret);
+        }
         break;
       }
       default:

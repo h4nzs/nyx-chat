@@ -211,6 +211,20 @@ export function worker_generate_otpk_batch(count: number, startId: number, maste
     return sendToWorker('generate_otpk_batch', { count, startId, masterSeed: Array.from(masterSeed) });
 }
 
-export function worker_regenerate_single_otpk(keyId: number, masterSeed: Uint8Array): Promise<Uint8Array> {
-    return sendToWorker('regenerate_single_otpk', { keyId, masterSeed: Array.from(masterSeed) });
+export function worker_x3dh_recipient_regenerate(payload: {
+    keyId: number,
+    masterSeed: Uint8Array,
+    myIdentityKey: { privateKey: Uint8Array },
+    mySignedPreKey: { privateKey: Uint8Array },
+    theirIdentityKey: Uint8Array,
+    theirEphemeralKey: Uint8Array
+}): Promise<Uint8Array> {
+    return sendToWorker('x3dh_recipient_regenerate', { 
+        keyId: payload.keyId, 
+        masterSeed: Array.from(payload.masterSeed),
+        myIdentityKey: { privateKey: Array.from(payload.myIdentityKey.privateKey) },
+        mySignedPreKey: { privateKey: Array.from(payload.mySignedPreKey.privateKey) },
+        theirIdentityKey: Array.from(payload.theirIdentityKey),
+        theirEphemeralKey: Array.from(payload.theirEphemeralKey)
+    });
 }
