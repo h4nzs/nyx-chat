@@ -306,7 +306,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
         // [SYNC] Restore Encrypted Keys from Server if available
         if (res.encryptedPrivateKey) {
-          console.log("[Auth] Restoring encrypted keys from server backup...");
           await saveEncryptedKeys(res.encryptedPrivateKey);
           await saveDeviceAutoUnlockKey(password);
           await setDeviceAutoUnlockReady(true);
@@ -327,11 +326,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             const isAutoUnlockReady = await getDeviceAutoUnlockReady();
             let result;
 
-            if (isAutoUnlockReady) {
-               result = await retrievePrivateKeys(encryptedKeys!, password);
-            } else {
-               result = await retrievePrivateKeys(encryptedKeys!, password);
-            }
+            result = await retrievePrivateKeys(encryptedKeys!, password);
 
             if (result.success) {
               privateKeysCache = result.keys;

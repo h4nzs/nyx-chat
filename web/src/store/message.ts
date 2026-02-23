@@ -28,7 +28,7 @@ import { getSodium } from "@lib/sodiumInitializer";
  * Logika Dekripsi Terpusat (Single Source of Truth)
  * Menangani dekripsi teks biasa DAN kunci file.
  */
-export async function decryptMessageObject(message: Message, seenIds = new Set<string>(), depth = 0): Promise<Message> {
+export async function decryptMessageObject(message: Message, seenIds = new Set<string>(), depth = 0, options: { skipRetries?: boolean } = {}): Promise<Message> {
   // 1. Clone pesan dan tambahkan recursion guard
   const decryptedMsg = { ...message };
   
@@ -63,8 +63,6 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
        try {
            const payload = JSON.parse(contentToDecrypt);
            if (payload.x3dh && payload.ciphertext) {
-               console.log(`[X3DH] Detected embedded header in msg ${message.id}`);
-               
                // Extract Header
                const { ik, ek, otpkId } = payload.x3dh;
                const ciphertext = payload.ciphertext;
@@ -100,7 +98,7 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
     // 4. Eksekusi Dekripsi dengan Retry Loop
     let result;
     let attempts = 0;
-    const MAX_ATTEMPTS = 3;
+    const MAX_ATTEMPTS = options.skipRetries ? 1 : 3;
 
     while (attempts < MAX_ATTEMPTS) {
         result = await decryptMessage(
@@ -154,7 +152,8 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
 
     // 6. Dekripsi Replied Message
     if (decryptedMsg.repliedTo) {
-        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1);
+        // Recursively decrypt replied message, but don't skip retries necessarily or propagate depth
+        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1, options);
     }
 
     return decryptedMsg;
@@ -235,7 +234,7 @@ type Actions = {
   loadMessagesForConversation: (id: string) => Promise<void>;
   loadPreviousMessages: (conversationId: string) => Promise<void>;
   addOptimisticMessage: (conversationId: string, message: Message) => void;
-  addIncomingMessage: (conversationId: string, message: Message) => void;
+  addIncomingMessage: (conversationId: string, message: Message) => Promise<Message>;
   replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => void;
   removeMessage: (conversationId: string, messageId: string) => void;
   updateMessage: (conversationId: string, messageId: string, updates: Partial<Message>) => void;
@@ -319,8 +318,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const { user, hasRestoredKeys } = useAuthStore.getState();
     if (!user) return;
 
-    console.log(`[SendMessage] START: conversationId=${conversationId}, tempId=${tempId}`);
-
     if (!hasRestoredKeys) {
       toast.error("You must restore your keys from your recovery phrase before you can send messages.");
       return;
@@ -333,7 +330,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       return;
     }
     const isGroup = conversation.isGroup;
-    console.log(`[SendMessage] Conversation FOUND. isGroup=${isGroup}`);
 
     if (isGroup && useConnectionStore.getState().status === 'connected') {
       try {
@@ -393,20 +389,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       // LAZY SESSION INITIALIZATION (X3DH) - SINGLE SOURCE OF TRUTH
       // No more getPendingHeader check here.
       if (!isGroup && data.content) {
-          console.log(`[SendMessage] Checking session key for private chat...`);
           const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
-          console.log(`[SendMessage] Latest Key:`, latestKey ? 'FOUND' : 'NULL');
           
           if (!latestKey) {
-             console.log(`[X3DH] No session key found for ${conversationId}. Initiating handshake...`);
              // Fix: Use p.id instead of p.userId
              const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
-             console.log(`[X3DH] Found peerId: ${peerId} (My ID: ${user.id})`);
              
              if (peerId) {
                  // 1. Fetch Bundle
                  const theirBundle = await authFetch<any>(`/api/keys/prekey-bundle/${peerId}`);
-                 console.log(`[X3DH] Bundle fetched for ${peerId}`);
                  
                  // 2. Establish Session
                  const myKeyPair = await getMyEncryptionKeyPair();
@@ -416,7 +407,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                  const sodium = await getSodium();
                  sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
                  await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
-                 console.log(`[X3DH] Session stored: ${sessionId}`);
 
                  encryptionSession = { sessionId, key: sessionKey };
 
@@ -426,8 +416,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                      ek: ephemeralPublicKey,
                      otpkId: otpkId
                  };
-                 
-                 console.log(`[X3DH] Handshake prepared (Lazy). Header attached to message.`);
              } else {
                  console.error(`[X3DH] Peer not found in participants for ${conversationId}. Participants:`, conversation.participants);
                  toast.error("Encryption failed: Cannot identify recipient.");
@@ -435,7 +423,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
              }
           } else {
              // Reuse existing session
-             console.log(`[X3DH] Reusing existing session ${latestKey.sessionId}`);
              sessionId = latestKey.sessionId;
              encryptionSession = latestKey;
           }
@@ -581,18 +568,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const { encryptedBlob, key: fileKey } = await encryptFile(file);
       
       // 3. Encrypt the file key (using conversation session)
-      // Note: We don't send this separately anymore, but we need it for the JSON payload
-      // Wait, we can't use `encryptMessage` here because it returns { ciphertext, sessionId }
-      // AND we want to put this ciphertext INSIDE the JSON payload which is THEN encrypted again?
-      // NO.
-      // The JSON payload should contain the KEY that decrypts the file.
-      // If we put the PLAIN key in the JSON, and then ENCRYPT the JSON with the session key, is it safe?
-      // YES. The session key protects the JSON. The JSON protects the file key. The file key protects the file.
-      // Double encryption is fine.
-      // BUT, if we want to be super standard:
-      // We can just put the `fileKey` (base64) into the JSON.
-      // Then `sendMessage` encrypts the WHOLE JSON string.
-      // So the `fileKey` is never exposed.
+      // ...
       
       updateActivity(uploadId, { progress: 20 });
 
@@ -600,14 +576,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
           method: 'POST',
           body: JSON.stringify({
-              fileName: file.name,
-              fileType: file.type || 'application/octet-stream', // Use octet-stream for encrypted? Or keep original mime for validation?
+              fileName: file.name, // Keep original name for extension/key generation
+              fileType: 'application/octet-stream', // [FIX] Use generic binary type for encrypted content
               // Ideally we upload encrypted blob, so mime might be application/octet-stream
               // But R2 validation checks extension.
               // Let's keep original fileType for presigned request so server validation passes,
               // but upload the encrypted blob.
               folder: 'attachments',
-              fileSize: file.size // Approximate
+              fileSize: encryptedBlob.size // [FIX] Use actual encrypted size (includes IV/Tag overhead)
           })
       });
 
@@ -617,7 +593,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', presignedRes.uploadUrl, true);
-          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream'); // R2 requires matching content-type
+          xhr.setRequestHeader('Content-Type', 'application/octet-stream'); // [FIX] Match presigned request
           
           xhr.upload.onprogress = (e) => {
               if (e.lengthComputable) {
@@ -697,7 +673,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const fetchedMessages = res.items || [];
       const processedMessages: Message[] = [];
       for (const message of fetchedMessages) {
-        processedMessages.push(await decryptMessageObject(message));
+        processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
       }
       set(state => {
         const existingMessages = state.messages[id] || [];
@@ -722,14 +698,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: true } }));
     try {
       const res = await api<{ items: Message[] }>(`/api/messages/${conversationId}?cursor=${oldestMessage.id}`);
-      const decryptedItems = await Promise.all((res.items || []).map(m => decryptMessageObject(m)));
+      const decryptedItems = await Promise.all((res.items || []).map(m => decryptMessageObject(m, undefined, 0, { skipRetries: true })));
       
       set(state => {
         const existingMessages = state.messages[conversationId] || [];
         const allMessages = processMessagesAndReactions(decryptedItems, existingMessages);
 
-        if (decryptedItems.length < 50) set(state => ({ hasMore: { ...state.hasMore, [conversationId]: false } }));
-        return { messages: { ...state.messages, [conversationId]: allMessages } };
+        const newState: any = { messages: { ...state.messages, [conversationId]: allMessages } };
+
+        if (decryptedItems.length < 50) {
+            newState.hasMore = { ...state.hasMore, [conversationId]: false };
+        }
+        
+        return newState;
       });
     } catch (error) {
       console.error("Failed to load previous messages", error);
@@ -817,6 +798,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               });
           }
       }
+      
+      return decrypted;
   },
 
   replaceOptimisticMessage: (conversationId, tempId, newMessage) => set(state => {

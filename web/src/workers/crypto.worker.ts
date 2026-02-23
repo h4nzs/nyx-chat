@@ -566,24 +566,34 @@ self.onmessage = async (event: MessageEvent) => {
         // Derive a specific key for storage encryption to protect the master seed
         const storageKey = sodium.crypto_generichash(32, masterSeedBytes, new Uint8Array(new TextEncoder().encode("session-storage")));
         
-        const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-        
-        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-          sessionKeyBytes,
-          null,
-          null,
-          nonce,
-          storageKey
-        );
+        let nonce: Uint8Array | null = null;
+        let ciphertext: Uint8Array | null = null;
 
-        const combined = new Uint8Array(nonce.length + ciphertext.length);
-        combined.set(nonce);
-        combined.set(ciphertext, nonce.length);
+        try {
+          nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+          
+          ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+            sessionKeyBytes,
+            null,
+            null,
+            nonce,
+            storageKey
+          );
 
-        result = combined;
-        
-        // Clean up
-        sodium.memzero(storageKey);
+          if (!nonce || !ciphertext) throw new Error("Encryption failed");
+
+          const combined = new Uint8Array(nonce.length + ciphertext.length);
+          combined.set(nonce);
+          combined.set(ciphertext, nonce.length);
+
+          result = combined;
+        } finally {
+          sodium.memzero(storageKey);
+          sodium.memzero(masterSeedBytes);
+          sodium.memzero(sessionKeyBytes);
+          if (nonce) sodium.memzero(nonce);
+          if (ciphertext) sodium.memzero(ciphertext);
+        }
         break;
       }
       case 'decrypt_session_key': {
@@ -596,16 +606,18 @@ self.onmessage = async (event: MessageEvent) => {
         const nonce = encryptedKeyBytes.slice(0, sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
         const ciphertext = encryptedKeyBytes.slice(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
 
-        result = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-          null,
-          ciphertext,
-          null,
-          nonce,
-          storageKey
-        );
-
-        // Clean up
-        sodium.memzero(storageKey);
+        try {
+          result = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+            null,
+            ciphertext,
+            null,
+            nonce,
+            storageKey
+          );
+        } finally {
+          sodium.memzero(storageKey);
+          sodium.memzero(masterSeedBytes);
+        }
         break;
       }
       case 'generate_otpk_batch': {
@@ -653,6 +665,7 @@ self.onmessage = async (event: MessageEvent) => {
           sodium.memzero(keyPair.privateKey);
         }
         
+        sodium.memzero(masterSeedBytes);
         sodium.memzero(storageKey);
         result = batch;
         break;

@@ -48,8 +48,6 @@ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
     // Dynamic import for worker proxy
     const { worker_generate_otpk_batch } = await import('@lib/crypto-worker-proxy');
     
-    console.log(`[Crypto] Generating ${OTPK_BATCH_SIZE} One-Time Pre-Keys (startId: ${startId})...`);
-    
     const batch = await worker_generate_otpk_batch(OTPK_BATCH_SIZE, startId, masterSeed);
     
     // Store private keys locally
@@ -63,9 +61,6 @@ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
       method: 'POST',
       body: JSON.stringify({ keys: publicKeys })
     });
-
-    console.log(`[Crypto] Successfully uploaded ${publicKeys.length} One-Time Pre-Keys.`);
-
   } catch (error) {
     console.error("[Crypto] Failed to refill One-Time Pre-Keys:", error);
   }
@@ -326,11 +321,25 @@ export async function rotateGroupKey(conversationId: string, reason: 'membership
   }
 }
 
+const periodicGroupKeyRotationTimers = new Map<string, NodeJS.Timeout>();
+
 export async function schedulePeriodicGroupKeyRotation(conversationId: string): Promise<void> {
+  stopPeriodicGroupKeyRotation(conversationId);
+
   const rotationInterval = 24 * 60 * 60 * 1000;
-  setInterval(async () => {
+  const timerId = setInterval(async () => {
     await rotateGroupKey(conversationId, 'periodic_rotation');
   }, rotationInterval);
+
+  periodicGroupKeyRotationTimers.set(conversationId, timerId);
+}
+
+export function stopPeriodicGroupKeyRotation(conversationId: string): void {
+  const timerId = periodicGroupKeyRotationTimers.get(conversationId);
+  if (timerId) {
+    clearInterval(timerId);
+    periodicGroupKeyRotationTimers.delete(conversationId);
+  }
 }
 
 async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0) {
@@ -354,6 +363,9 @@ async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0) {
 
 // --- Message Encryption/Decryption ---
 
+// Explicit constant for XChaCha20 nonce size to improve readability and decoupling
+const XCHACHA20_NONCE_BYTES = 24;
+
 export async function encryptMessage(
   text: string,
   conversationId: string,
@@ -363,7 +375,7 @@ export async function encryptMessage(
   const sodium = await getSodiumLib();
   const { worker_crypto_secretbox_xchacha20poly1305_easy } = await getWorkerProxy();
 
-  const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+  const nonce = sodium.randombytes_buf(XCHACHA20_NONCE_BYTES);
   let key: Uint8Array;
   let sessionId: string | undefined;
 
@@ -424,8 +436,8 @@ export async function decryptMessage(
   
   try {
     const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
-    const nonce = combined.slice(0, sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    const encrypted = combined.slice(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
+    const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
     
     const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
     return { status: 'success', value: sodium.to_string(decrypted) };
@@ -501,7 +513,6 @@ export async function deriveSessionKeyAsRecipient(
     
     // 2. RECOVERY: If not found (e.g. after logout/restore), Regenerate Deterministically
     if (!myOneTimePreKey) {
-        console.log(`[X3DH] OTPK ${otpkId} not found in storage. Regenerating deterministically...`);
         try {
             const { worker_x3dh_recipient_regenerate } = await getWorkerProxy();
             const sessionKey = await worker_x3dh_recipient_regenerate({
@@ -614,8 +625,6 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
       return; 
   }
 
-  console.log(`[Crypto] Received key type=${type} for convo=${conversationId}`);
-
   if (type === 'GROUP_KEY') {
     const pendingRequest = pendingGroupKeyRequests.get(conversationId);
     if (pendingRequest) {
@@ -632,7 +641,6 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
             const metadata = JSON.parse(encryptedKey);
             if (metadata.x3dh && initiatorEphemeralKey && initiatorIdentityKey) {
                 // Perform X3DH Calculation on Recipient Side
-                console.log(`[Crypto] Processing X3DH key derivation...`);
                 const { getEncryptionKeyPair, getSignedPreKeyPair } = useAuthStore.getState();
                 const myIdentityKeyPair = await getEncryptionKeyPair();
                 const mySignedPreKeyPair = await getSignedPreKeyPair();
@@ -672,7 +680,6 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
 
     if (newSessionKey) {
         await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
-        console.log(`[Crypto] Stored session key for ${sessionId}`);
         
         // Dynamic import to break cycle
         import('@store/message').then(({ useMessageStore }) => {

@@ -3,7 +3,6 @@ import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
 import { ApiError } from '../utils/errors.js'
-import { getSecureLinkPreview } from '../utils/secureLinkPreview.js'
 import { sendPushNotification } from '../utils/sendPushNotification.js'
 import { deleteR2File } from '../utils/r2.js'
 import { env } from '../config.js'
@@ -143,30 +142,6 @@ router.post('/', zodValidate({
     // Tunggu validasi selesai
     await Promise.all(checks)
 
-    // 3. Link Preview (Opsional & Tidak boleh bikin error)
-    // Note: With E2EE, server cannot read content to generate preview.
-    let linkPreviewData: any = null
-    if (content) {
-      try {
-        const urlRegex = /(https?:\/\/[^\s]+)/g
-        const urls = content.match(urlRegex)
-        if (urls?.[0]) {
-          const preview = await getSecureLinkPreview(urls[0])
-          if (preview && 'title' in preview) {
-            linkPreviewData = {
-              url: preview.url,
-              title: preview.title,
-              description: preview.description,
-              image: preview.images?.[0],
-              siteName: preview.siteName
-            }
-          }
-        }
-      } catch (e) {
-        // Silent error: Gagal preview jangan gagalkan pesan
-      }
-    }
-
     // 4. DATABASE TRANSACTION (Critical Path)
     // Buat array status insert
     const statusData = participants.map(p => ({
@@ -183,7 +158,6 @@ router.post('/', zodValidate({
           sessionId,
           repliedToId,
           expiresAt, // Store expiration time
-          linkPreview: linkPreviewData ?? undefined,
           statuses: {
             createMany: { data: statusData as any } // createMany lebih cepat dari nested create
           }
@@ -244,8 +218,17 @@ router.delete('/:id', async (req, res, next) => {
 
     // Hapus file dari R2 (Blind Attachment via Query Param)
     if (r2Key) {
-       console.log(`[R2] Deleting blind attachment: ${r2Key}`);
-       deleteR2File(r2Key).catch(err => console.error(`[R2] Failed to delete blind file ${r2Key}:`, err))
+       // [SECURITY] Validate ownership via filename convention
+       // Format: folder/userId-uuid.ext
+       const parts = r2Key.split('/');
+       const filename = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+       
+       if (!filename.startsWith(`${userId}-`)) {
+          console.warn(`[Security] User ${userId} attempted to delete unauthorized file: ${r2Key}`);
+       } else {
+          console.log(`[R2] Deleting blind attachment: ${r2Key}`);
+          deleteR2File(r2Key).catch(err => console.error(`[R2] Failed to delete blind file ${r2Key}:`, err))
+       }
     }
 
     await prisma.message.delete({ where: { id } })

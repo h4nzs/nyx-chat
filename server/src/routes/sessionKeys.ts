@@ -134,22 +134,34 @@ router.post(
       const userId = req.user.id
       const { conversationId, sessionId, encryptedKey } = req.body
 
-      // Idempotent backup: Only create if not exists.
-      const existing = await prisma.sessionKey.findFirst({
-        where: { userId, sessionId }
+      // [SECURITY] Verify participation
+      const participant = await prisma.participant.findUnique({
+        where: {
+          userId_conversationId: {
+            userId,
+            conversationId
+          }
+        }
       })
 
-      if (!existing) {
-        await prisma.sessionKey.create({
-          data: {
-            userId,
-            conversationId,
-            sessionId,
-            encryptedKey,
-            isInitiator: true // Client-side generated keys are owned by the creator
-          }
-        })
+      if (!participant) {
+        throw new ApiError(403, 'Not a participant of this conversation.')
       }
+
+      // [FIX] Atomic upsert to prevent race conditions
+      await prisma.sessionKey.upsert({
+        where: {
+          userId_sessionId: { userId, sessionId }
+        },
+        update: {}, // Immutable: Do nothing if exists
+        create: {
+          userId,
+          conversationId,
+          sessionId,
+          encryptedKey,
+          isInitiator: true
+        }
+      })
 
       res.status(200).json({ success: true })
     } catch (error) {

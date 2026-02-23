@@ -24,6 +24,9 @@ function getDb() {
           store.createIndex('timestamp', 'timestamp');
         }
       },
+    }).catch(err => {
+      dbPromise = null;
+      throw err;
     });
   }
   return dbPromise;

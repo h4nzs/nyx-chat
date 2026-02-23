@@ -9,40 +9,57 @@ export const startMessageSweeper = () => {
   cron.schedule('* * * * *', async () => {
     try {
       const now = new Date();
+      const BATCH_SIZE = 1000;
+      let processedCount = 0;
 
-      // 1. Cari pesan yang waktunya udah kelewat
-      const expiredMessages = await prisma.message.findMany({
-        where: { 
-          expiresAt: { 
-            not: null,
-            lte: now 
-          } 
-        },
-        select: { id: true, conversationId: true } // Removed fileUrl
-      });
+      while (true) {
+        // 1. Cari pesan yang waktunya udah kelewat (Batching)
+        const expiredMessages = await prisma.message.findMany({
+          where: { 
+            expiresAt: { 
+              not: null,
+              lte: now 
+            } 
+          },
+          select: { id: true, conversationId: true },
+          take: BATCH_SIZE
+        });
 
-      if (expiredMessages.length > 0) {
+        if (expiredMessages.length === 0) break; // Selesai
+
         const messageIds = expiredMessages.map(m => m.id);
-        const conversationIds = Array.from(new Set(expiredMessages.map(m => m.conversationId)));
         
-        console.log(`🔥 Sweeping ${messageIds.length} expired messages...`);
-
-        // Note: Files in R2 become orphaned because server doesn't know the keys (Blind Attachment).
-        // This is a trade-off for privacy.
+        console.log(`🔥 Sweeping batch of ${messageIds.length} expired messages...`);
 
         // 3. HAPUS PERMANEN DARI DATABASE!
         await prisma.message.deleteMany({
           where: { id: { in: messageIds } }
         });
 
-        // 4. Kasih tau Frontend lewat Socket.IO
+        // 4. Kasih tau Frontend lewat Socket.IO (Group by Conversation)
         const io = getIo();
         if (io) {
-          conversationIds.forEach((convoId: string) => {
-            io.to(convoId).emit('messages:expired', { messageIds });
+          const messagesByConvo: Record<string, string[]> = {};
+          
+          expiredMessages.forEach(m => {
+            if (!messagesByConvo[m.conversationId]) {
+              messagesByConvo[m.conversationId] = [];
+            }
+            messagesByConvo[m.conversationId].push(m.id);
+          });
+
+          Object.entries(messagesByConvo).forEach(([convoId, ids]) => {
+            io.to(convoId).emit('messages:expired', { messageIds: ids });
           });
         }
+        
+        processedCount += expiredMessages.length;
+        // Optional: Small delay to let event loop breathe if heavily loaded
+        await new Promise(r => setTimeout(r, 50));
       }
+      
+      if (processedCount > 0) console.log(`✅ Total swept: ${processedCount}`);
+
     } catch (error) {
       console.error('❌ Message Sweeper Error:', error);
     }

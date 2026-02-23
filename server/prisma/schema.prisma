@@ -204,6 +204,7 @@ model SessionKey {
   expiresAt             DateTime?
 
   @@index([conversationId, userId, sessionId])
+  @@unique([userId, sessionId])
 }
 
 model PushSubscription {

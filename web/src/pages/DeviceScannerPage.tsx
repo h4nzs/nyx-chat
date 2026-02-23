@@ -65,8 +65,11 @@ export default function DeviceScannerPage() {
         throw new Error("Your keys are locked. Please log in again to unlock them.");
       }
 
+      // [SECURITY] Create a defensive copy to avoid wiping the global cache
+      const masterSeedCopy = new Uint8Array(masterSeed);
+
       try {
-        const encryptedPayload = sodium.crypto_box_seal(masterSeed, linkingPubKeyBytes);
+        const encryptedPayload = sodium.crypto_box_seal(masterSeedCopy, linkingPubKeyBytes);
         const encryptedPayloadB64 = sodium.to_base64(encryptedPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
 
         const socket = getSocket();
@@ -84,7 +87,7 @@ export default function DeviceScannerPage() {
 
         setTimeout(() => navigate('/settings/sessions'), 2000);
       } finally {
-        sodium.memzero(masterSeed);
+        sodium.memzero(masterSeedCopy);
       }
 
     } catch (err: any) {
