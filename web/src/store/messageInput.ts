@@ -78,75 +78,19 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   clearTypingLinkPreview: () => set({ typingLinkPreview: null }),
 
   sendMessage: async (conversationId, data, tempId?: number) => {
-    const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
-    const me = useAuthStore.getState().user;
+    const { sendMessage: coreSendMessage } = useMessageStore.getState();
     const { replyingTo, expiresIn } = get();
 
-    if (!await ensureGroupSessionIfNeeded(conversationId)) return;
-
-    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
-    const isGroup = conversation.isGroup;
-
-    // Encrypt Content (Text or JSON Metadata)
-    let ciphertext = '';
-    let sessionId: string | undefined;
-    try {
-      const result = await encryptMessage(data.content, conversationId, isGroup);
-      ciphertext = result.ciphertext;
-      sessionId = result.sessionId;
-    } catch (e: any) {
-      toast.error(`Encryption failed: ${e.message}`);
-      return;
-    }
-
-    const actualTempId = tempId !== undefined ? tempId : Date.now();
-    const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
-
-    const isFilePayload = data.content.startsWith('{') && data.content.includes('"type":"file"');
-    
-    if (!isFilePayload) {
-        const optimisticMessage: Message = {
-          id: `temp-${actualTempId}`,
-          tempId: actualTempId,
-          conversationId,
-          senderId: me!.id,
-          sender: me!,
-          createdAt: new Date().toISOString(),
-          optimistic: true,
-          expiresAt,
-          ...data,
-          repliedTo: replyingTo || undefined,
-        };
-        addOptimisticMessage(conversationId, optimisticMessage);
-    }
-
-    const finalPayload = {
-      conversationId,
-      tempId: actualTempId,
+    // Delegate to Core Logic in message.ts (Centralized X3DH & Queue handling)
+    await coreSendMessage(conversationId, {
+      ...data,
       repliedToId: replyingTo?.id,
-      expiresIn,
-      content: ciphertext,
-      sessionId,
-      // Explicitly nullify file fields to ensure "Blind Attachment"
-      fileUrl: null,
-      fileName: null,
-      fileType: null,
-      fileSize: null,
-      duration: null
-    };
+      expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
+      // Pass original content. message.ts handles encryption.
+    }, tempId);
 
-    try {
-      await authFetch<Message>("/api/messages", {
-        method: "POST",
-        body: JSON.stringify(finalPayload),
-      });
-    } catch (error) {
-      const errorMessage = handleApiError(error);
-      if (!isFilePayload) toast.error(`Failed to send message: ${errorMessage}`);
-      updateMessage(conversationId, `temp-${actualTempId}`, { error: true, optimistic: false });
-    }
-
-    if (!isFilePayload) set({ replyingTo: null });
+    // Clear Input State
+    set({ replyingTo: null });
   },
   
   uploadFile: async (conversationId, file) => {
