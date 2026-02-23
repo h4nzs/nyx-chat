@@ -117,6 +117,18 @@ router.get('/count-otpk', requireAuth, async (req, res, next) => {
   }
 })
 
+// === DELETE: Clear all One-Time Pre-Keys ===
+router.delete('/otpk', requireAuth, async (req, res, next) => {
+  try {
+    await prisma.oneTimePreKey.deleteMany({
+      where: { userId: req.user!.id }
+    })
+    res.status(204).send()
+  } catch (e) {
+    next(e)
+  }
+})
+
 // === GET: Get a pre-key bundle for another user ===
 router.get(
   '/prekey-bundle/:userId',

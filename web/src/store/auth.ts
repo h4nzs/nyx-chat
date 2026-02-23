@@ -9,7 +9,7 @@ import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
 import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; // Only import TYPE
-import { checkAndRefillOneTimePreKeys } from "@utils/crypto"; // Import helper
+import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; // Import helper
 import { syncSessionKeys } from "@utils/sessionSync";
 
 /**
@@ -365,6 +365,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         try {
           await syncSessionKeys();
         } catch (e) { console.error("Auto-sync keys failed:", e); }
+
+        // [RESET] Force rotate OTPK on new login to prevent stale key decryption errors
+        try {
+          await resetOneTimePreKeys();
+        } catch (e) { console.error("Reset OTPK failed:", e); }
 
         connectSocket();
       } catch (error: any) {

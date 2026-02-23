@@ -71,6 +71,15 @@ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
   }
 }
 
+export async function resetOneTimePreKeys(): Promise<void> {
+  try {
+    await authFetch('/api/keys/otpk', { method: 'DELETE' });
+    await checkAndRefillOneTimePreKeys();
+  } catch (error) {
+    console.error("[Crypto] Failed to reset OTPKs:", error);
+  }
+}
+
 export async function storeSessionKeySecurely(conversationId: string, sessionId: string, key: Uint8Array) {
   const masterSeed = await getMasterSeedOrThrow();
   const { worker_encrypt_session_key } = await getWorkerProxy();
