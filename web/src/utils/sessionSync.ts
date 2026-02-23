@@ -1,5 +1,6 @@
 import { authFetch } from "@lib/api";
-import { getMyEncryptionKeyPair, decryptSessionKeyForUser, storeSessionKeySecurely } from "@utils/crypto";
+import { getSodium } from "@lib/sodiumInitializer";
+import { addSessionKey } from "@lib/keychainDb";
 import toast from "react-hot-toast";
 
 type SyncResponse = Record<string, { sessionId: string; encryptedKey: string }[]>;
@@ -13,31 +14,30 @@ export async function syncSessionKeys() {
           return;
         }
 
-        const { publicKey, privateKey } = await getMyEncryptionKeyPair();
+        const sodium = await getSodium();
         let syncedKeyCount = 0;
 
         for (const conversationId in allEncryptedKeys) {
           const keysForConvo = allEncryptedKeys[conversationId];
           for (const keyInfo of keysForConvo) {
             try {
-              const sessionKey = await decryptSessionKeyForUser(
-                keyInfo.encryptedKey,
-                publicKey,
-                privateKey
+              // [FIX] Store encrypted blob directly.
+              // Server stores keys encrypted with Master Seed (symmetric).
+              // IndexedDB expects the same format. No re-encryption needed.
+              const encryptedKeyBytes = sodium.from_base64(
+                keyInfo.encryptedKey, 
+                sodium.base64_variants.URLSAFE_NO_PADDING
               );
-              // [FIX] Use secure store to re-encrypt with Master Seed locally
-              await storeSessionKeySecurely(conversationId, keyInfo.sessionId, sessionKey);
+              
+              await addSessionKey(conversationId, keyInfo.sessionId, encryptedKeyBytes);
               syncedKeyCount++;
-            } catch (decryptionError) {
-              // Failed to decrypt, skip.
+            } catch (e) {
+              console.error("Failed to save synced key:", e);
             }
           }
         }
       } catch (error: any) {
         console.error("Session key synchronization failed:", error);
-        if (error.message.includes("Incorrect password")) {
-          throw new Error("Incorrect password provided for key sync.");
-        }
         throw new Error("Failed to sync message keys from server.");
       }
     })(),
