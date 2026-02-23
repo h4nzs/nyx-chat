@@ -656,9 +656,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         // Find the conversation first to determine its type
         const conversation = useConversationStore.getState().conversations.find(c => c.id === id);
         // Key distribution logic is now handled by sendMessage, but we still need to handle the 1-on-1 case.
-        if (conversation && !conversation.isGroup) {
-          await ensureAndRatchetSession(id);
-        }
+        // [PRIVACY FIX] Disable server-side ratchet on load. 
+        // We want to force Client-Side X3DH (Lazy Init) in sendMessage for the first message.
+        // if (conversation && !conversation.isGroup) {
+        //   await ensureAndRatchetSession(id);
+        // }
       } catch (sessionError) {
         console.error("Failed to establish session, decryption may fail:", sessionError);
       }
