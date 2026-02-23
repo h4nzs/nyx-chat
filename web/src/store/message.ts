@@ -319,6 +319,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const { user, hasRestoredKeys } = useAuthStore.getState();
     if (!user) return;
 
+    console.log(`[SendMessage] START: conversationId=${conversationId}, tempId=${tempId}`);
+
     if (!hasRestoredKeys) {
       toast.error("You must restore your keys from your recovery phrase before you can send messages.");
       return;
@@ -326,10 +328,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
     if (!conversation) {
+      console.error(`[SendMessage] Conversation NOT FOUND: ${conversationId}`);
       toast.error("Conversation not found.");
       return;
     }
     const isGroup = conversation.isGroup;
+    console.log(`[SendMessage] Conversation FOUND. isGroup=${isGroup}`);
 
     if (isGroup && useConnectionStore.getState().status === 'connected') {
       try {
@@ -387,7 +391,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       // LAZY SESSION INITIALIZATION (X3DH) - SINGLE SOURCE OF TRUTH
       // No more getPendingHeader check here.
       if (!isGroup && data.content) {
+          console.log(`[SendMessage] Checking session key for private chat...`);
           const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
+          console.log(`[SendMessage] Latest Key:`, latestKey ? 'FOUND' : 'NULL');
           
           if (!latestKey) {
              console.log(`[X3DH] No session key found for ${conversationId}. Initiating handshake...`);
@@ -398,6 +404,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
              if (peerId) {
                  // 1. Fetch Bundle
                  const theirBundle = await authFetch<any>(`/api/keys/prekey-bundle/${peerId}`);
+                 console.log(`[X3DH] Bundle fetched for ${peerId}`);
                  
                  // 2. Establish Session
                  const myKeyPair = await getMyEncryptionKeyPair();
@@ -407,6 +414,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                  const sodium = await getSodium();
                  sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
                  await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
+                 console.log(`[X3DH] Session stored: ${sessionId}`);
 
                  encryptionSession = { sessionId, key: sessionKey };
 
