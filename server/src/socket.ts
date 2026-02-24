@@ -543,6 +543,19 @@ export function registerSocket(httpServer: HttpServer) {
       });
     });
 
+    // === DEVICE MIGRATION TUNNEL ===
+    socket.on('migration:join', (roomId: string) => {
+      socket.join(roomId);
+    });
+
+    socket.on('migration:start', (data: { roomId: string, totalChunks: number, sealedKey: string, iv: string }) => {
+      socket.to(data.roomId).emit('migration:start', data);
+    });
+
+    socket.on('migration:chunk', (data: { roomId: string, chunkIndex: number, chunk: any }) => {
+      socket.to(data.roomId).emit('migration:chunk', data);
+    });
+
     // Disconnect Handler (Untuk User)
     socket.on("disconnect", async () => {
        setTimeout(async () => {

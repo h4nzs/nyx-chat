@@ -10,7 +10,7 @@ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
   FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
-  FiDownload, FiUpload, FiDatabase
+  FiDownload, FiUpload, FiDatabase, FiSend
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
@@ -542,6 +542,19 @@ export default function SettingsPage() {
                  >
                    <FiUpload size={18} />
                    Import Vault
+                 </button>
+                 <button 
+                   onClick={() => navigate('/settings/migrate-send')}
+                   className="
+                     col-span-2 flex items-center justify-center gap-2 p-3 rounded-xl
+                     bg-bg-main text-accent font-bold text-xs uppercase tracking-wider
+                     shadow-neu-flat-light dark:shadow-neu-flat-dark
+                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                     hover:brightness-110 transition-all
+                   "
+                 >
+                   <FiSend size={18} />
+                   Transfer to New Device (QR)
                  </button>
                  <input 
                     type="file" 

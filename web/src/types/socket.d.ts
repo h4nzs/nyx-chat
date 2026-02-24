@@ -47,12 +47,9 @@ export interface ServerToClientEvents {
     force_logout: () => void;
     'user:identity_changed': (data: { userId: string; name: string }) => void;
 
-    // --- TAMBAHAN UNTUK LINKING DEVICE (SERVER -> CLIENT) ---
-    "auth:linking_success": (payload: {
-        accessToken: string;
-        user: User;
-        encryptedMasterKey: string;
-    }) => void;
+    // --- DEVICE MIGRATION TUNNEL (SERVER -> CLIENT) ---
+    "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
+    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: any }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -86,16 +83,8 @@ export interface ClientToServerEvents {
     }) => void;
     "push:unsubscribe": () => void;
     
-    // --- TAMBAHAN UNTUK LINKING DEVICE (CLIENT -> SERVER) ---
-    "auth:request_linking_qr": (
-        payload: { publicKey: string }, 
-        callback: (response: { token?: string; error?: string }) => void
-    ) => void;
-
-    "linking:join_room": (roomId: string) => void;
-    
-    "linking:send_payload": (payload: {
-        roomId: string;
-        encryptedMasterKey: string;
-    }) => void;
+    // --- DEVICE MIGRATION TUNNEL (CLIENT -> SERVER) ---
+    "migration:join": (roomId: string) => void;
+    "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
+    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: any }) => void;
 }

@@ -17,6 +17,8 @@ const LandingPage = lazy(() => import('./pages/LandingPage'));
 const HelpPage = lazy(() => import('./pages/HelpPage'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const MigrationReceivePage = lazy(() => import('./pages/MigrationReceivePage'));
+const MigrationSendPage = lazy(() => import('./pages/MigrationSendPage'));
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -235,6 +237,7 @@ const AppContent = () => {
             <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
             <Route path="/register" element={<PageWrapper><Register /></PageWrapper>} />
             <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
+            <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
             <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
             <Route path="/privacy" element={<PageWrapper><PrivacyPage /></PageWrapper>} />
 
@@ -246,6 +249,7 @@ const AppContent = () => {
               <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />
               <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
               <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
+              <Route path="/settings/migrate-send" element={<PageWrapper><MigrationSendPage /></PageWrapper>} />
               <Route path="/admin-console" element={<PageWrapper><AdminDashboard /></PageWrapper>} />
 
               <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
