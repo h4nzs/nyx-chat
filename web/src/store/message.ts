@@ -98,7 +98,8 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
         }
     }
 
-    const isGroup = !decryptedMsg.sessionId;
+    const conversation = useConversationStore.getState().conversations.find(c => c.id === decryptedMsg.conversationId);
+    const isGroup = conversation?.isGroup || false;
 
     // 2. Tentukan Payload yang Akan Didekripsi
     let contentToDecrypt = decryptedMsg.ciphertext;
