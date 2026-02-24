@@ -20,7 +20,8 @@ import {
   getSkippedKey,
   deleteSkippedKey,
   storeMessageKey,
-  getMessageKey
+  getMessageKey,
+  deleteMessageKey
 } from '@lib/keychainDb';
 import { 
   emitSessionKeyFulfillment, 
@@ -107,6 +108,11 @@ export async function retrieveMessageKeySecurely(messageId: string): Promise<Uin
     console.error(`Failed to decrypt message key for ${messageId}:`, error);
     return null;
   }
+}
+
+export async function deleteMessageKeySecurely(messageId: string): Promise<void> {
+  const { deleteMessageKey } = await import('@lib/keychainDb');
+  await deleteMessageKey(messageId);
 }
 
 export async function checkAndRefillOneTimePreKeys(): Promise<void> {
@@ -438,7 +444,7 @@ export async function encryptMessage(
   isGroup: boolean = false,
   existingSession?: { sessionId: string; key: Uint8Array },
   messageId?: string
-): Promise<{ ciphertext: string; sessionId?: string; drHeader?: any }> {
+): Promise<{ ciphertext: string; sessionId?: string; drHeader?: any; mk?: Uint8Array }> {
   const sodium = await getSodiumLib();
   const { worker_crypto_secretbox_xchacha20poly1305_easy, worker_dr_ratchet_encrypt } = await getWorkerProxy();
 
@@ -467,13 +473,16 @@ export async function encryptMessage(
 
     await storeRatchetStateSecurely(conversationId, result.state);
 
+    const mkUint8 = new Uint8Array(result.mk);
+
     if (messageId) {
-       await storeMessageKeySecurely(messageId, result.mk);
+       await storeMessageKeySecurely(messageId, mkUint8);
     }
 
     return { 
         ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
-        drHeader: result.header
+        drHeader: result.header,
+        mk: mkUint8 // Return Uint8Array
     };
   }
 }
@@ -516,10 +525,21 @@ export async function decryptMessage(
           const mk = await retrieveMessageKeySecurely(messageId);
           if (mk) {
               let actualCipher = cipher;
-              try {
-                  const payload = JSON.parse(cipher);
-                  if (payload.ciphertext) actualCipher = payload.ciphertext;
-              } catch {}
+              
+              // Peel nested JSON layers (Matryoshka loop)
+              while (actualCipher && typeof actualCipher === 'string' && actualCipher.trim().startsWith('{')) {
+                  try {
+                      const payload = JSON.parse(actualCipher);
+                      if (payload.ciphertext) {
+                          actualCipher = payload.ciphertext;
+                      } else {
+                          break;
+                      }
+                  } catch {
+                      break;
+                  }
+              }
+
               const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
               const nonce = combined.slice(0, 24);
               const encrypted = combined.slice(24);

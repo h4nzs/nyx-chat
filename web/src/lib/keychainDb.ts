@@ -260,6 +260,14 @@ export async function getMessageKey(messageId: string): Promise<Uint8Array | nul
 }
 
 /**
+ * Deletes an encrypted Message Key locally.
+ */
+export async function deleteMessageKey(messageId: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(MESSAGE_KEYS_STORE_NAME, messageId);
+}
+
+/**
  * Clears all keys from the database. Used on logout.
  */
 export async function clearAllKeys(): Promise<void> {

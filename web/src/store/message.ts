@@ -33,6 +33,7 @@ import { getSodium } from "@lib/sodiumInitializer";
 export async function decryptMessageObject(message: Message, seenIds = new Set<string>(), depth = 0, options: { skipRetries?: boolean } = {}): Promise<Message> {
   // 1. Clone pesan dan tambahkan recursion guard
   const decryptedMsg = { ...message };
+  const currentUser = useAuthStore.getState().user;
   
   if (seenIds.has(decryptedMsg.id) || depth > 10) {
     decryptedMsg.repliedTo = undefined; // Putus rantai rekursif
@@ -41,6 +42,62 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
   seenIds.add(decryptedMsg.id);
 
   try {
+    // [FIX #1] SELF-MESSAGE DECRYPTION (Pesan Sendiri)
+    // Jika ini pesan saya sendiri, jangan pakai Ratchet! Ambil kunci dari brankas lokal.
+    if (currentUser && decryptedMsg.senderId === currentUser.id) {
+        const { retrieveMessageKeySecurely } = await import('@utils/crypto');
+        const mk = await retrieveMessageKeySecurely(decryptedMsg.id);
+        
+        if (mk) {
+            // Kita punya kuncinya! Dekripsi langsung secara statis.
+            const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
+            const sodium = await getSodium();
+            
+            // [FIX] Matryoshka Parsing Loop: Peel all JSON layers (X3DH, DR) until raw ciphertext
+            let cipherTextToUse = decryptedMsg.ciphertext || decryptedMsg.content;
+            
+            while (cipherTextToUse && typeof cipherTextToUse === 'string' && cipherTextToUse.trim().startsWith('{')) {
+                try {
+                    const parsed = JSON.parse(cipherTextToUse);
+                    if (parsed.ciphertext) {
+                        cipherTextToUse = parsed.ciphertext;
+                    } else {
+                        // Found a JSON object but no 'ciphertext' property? Stop peeling.
+                        break;
+                    }
+                } catch {
+                    // Not valid JSON, stop peeling.
+                    break;
+                }
+            }
+
+            if (cipherTextToUse) {
+                const combined = sodium.from_base64(cipherTextToUse, sodium.base64_variants.URLSAFE_NO_PADDING);
+                const nonce = combined.slice(0, 24);
+                const encrypted = combined.slice(24);
+                const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
+                
+                decryptedMsg.content = sodium.to_string(decryptedBytes);
+                // Handle blind attachment if needed
+                if (decryptedMsg.content && decryptedMsg.content.startsWith('{') && decryptedMsg.content.includes('"type":"file"')) {
+                    try {
+                        const metadata = JSON.parse(decryptedMsg.content);
+                        if (metadata.type === 'file') {
+                            decryptedMsg.fileUrl = metadata.url;
+                            decryptedMsg.fileKey = metadata.key;
+                            decryptedMsg.fileName = metadata.name;
+                            decryptedMsg.fileSize = metadata.size;
+                            decryptedMsg.fileType = metadata.mimeType;
+                            decryptedMsg.content = null;
+                            decryptedMsg.isBlindAttachment = true;
+                        }
+                    } catch {}
+                }
+                return decryptedMsg;
+            }
+        }
+    }
+
     const isGroup = !decryptedMsg.sessionId;
 
     // 2. Tentukan Payload yang Akan Didekripsi
@@ -89,10 +146,29 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
                );
 
                // [DOUBLE RATCHET INIT BOB]
+               // We MUST extract Alice's Ratchet Public Key (dr.dh / epk) from the inner payload first!
+               let theirRatchetPublicKey: Uint8Array | undefined;
+               
+               try {
+                   const innerPayload = JSON.parse(ciphertext);
+                   if (innerPayload.dr) {
+                        const epk = innerPayload.dr.dh || innerPayload.dr.epk;
+                        if (epk) {
+                            const sodium = await getSodium();
+                            theirRatchetPublicKey = sodium.from_base64(epk, sodium.base64_variants.URLSAFE_NO_PADDING);
+                        }
+                   }
+               } catch (e) { console.error("Failed to parse inner DR header for init:", e); }
+
+               if (!theirRatchetPublicKey) {
+                   throw new Error("Cannot initialize Bob: Missing sender's ratchet key in first message.");
+               }
+
                const { worker_dr_init_bob } = await import('@lib/crypto-worker-proxy');
                const newState = await worker_dr_init_bob({
                    sk: sessionKey,
-                   mySignedPreKey: mySignedPreKeyPair
+                   mySignedPreKey: mySignedPreKeyPair,
+                   theirRatchetPublicKey: theirRatchetPublicKey
                });
 
                await storeRatchetStateSecurely(message.conversationId, newState);
@@ -440,10 +516,21 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           }
       }
 
+      let mkToStore: Uint8Array | undefined;
+
       if (data.content) {
         // Encrypt content (encryptMessage now handles Ratchet state internally for 1-on-1)
         const result = await encryptMessage(data.content, conversationId, isGroup, undefined, `temp_${actualTempId}`);
         ciphertext = result.ciphertext;
+        
+        // [FIX] Capture MK immediately before it's gone
+        if (!isGroup && result.mk) {
+             mkToStore = result.mk;
+             // Store temporarily with tempId
+             await import('@utils/crypto').then(({ storeMessageKeySecurely }) => 
+                 storeMessageKeySecurely(`temp_${actualTempId}`, mkToStore!)
+             );
+        }
         
         // Combine DR Header with Ciphertext (JSON payload) for private chats
         if (!isGroup && result.drHeader) {
@@ -487,9 +574,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               
               // LINK MESSAGE KEY FROM TEMP ID TO PERMANENT ID
               const msgId = res.msg.id;
-              import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely }) => {
+              // We don't need to pass the raw key again, just tell store to copy/move if needed.
+              // But since we can't move keys easily in IDB without reading, we read from temp and write to real.
+              import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
                  const mk = await retrieveMessageKeySecurely(`temp_${actualTempId}`);
-                 if (mk) await storeMessageKeySecurely(msgId, mk);
+                 if (mk) {
+                     await storeMessageKeySecurely(msgId, mk);
+                     await deleteMessageKeySecurely(`temp_${actualTempId}`); // Clean up temp key
+                 }
               }).catch(console.error);
               
             } else if (!res.ok) {

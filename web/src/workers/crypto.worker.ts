@@ -863,7 +863,7 @@ self.onmessage = async (event: MessageEvent) => {
              publicKey: new Uint8Array(mySignedPreKey.publicKey),
              privateKey: new Uint8Array(mySignedPreKey.privateKey)
            },
-           DHr: null,
+           DHr: null, // Initialized to null to trigger DH ratchet on first receive
            Ns: 0, Nr: 0, PN: 0
         };
         
