@@ -79,7 +79,7 @@ export default function PrivacyPage() {
             </p>
             <div className="mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-green-500/10 text-green-500 text-xs font-bold border border-green-500/20">
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-              Last Updated: February 10, 2026
+              Last Updated: February 24, 2026
             </div>
           </div>
 
@@ -99,7 +99,6 @@ export default function PrivacyPage() {
             <p>We use trusted third-party services for specific infrastructure needs:</p>
             <ul className="list-disc pl-5 space-y-2 mt-2">
               <li><strong>Cloudflare:</strong> For DDoS protection, CDN, and Turnstile (CAPTCHA) verification.</li>
-              <li><strong>Google Analytics (GA4):</strong> For anonymous usage statistics to improve the app experience.</li>
               <li><strong>DiceBear:</strong> For generating default user avatars.</li>
               <li><strong>Google Gemini:</strong> For the optional "Smart Reply" feature (see AI section).</li>
             </ul>
@@ -185,12 +184,22 @@ export default function PrivacyPage() {
               <li><strong>Hash:</strong> Argon2id for password hashing and key derivation.</li>
             </ul>
 
-            <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">Key Storage</h3>
+            <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">Key Storage & Backups</h3>
             <p>
               Your private keys are encrypted with your password and stored in <strong>IndexedDB</strong> within your browser. 
-              A backup copy (also encrypted with your password) is stored on our server to allow you to login from multiple devices. 
-              <strong>We never possess the key to decrypt this backup.</strong>
+              A backup copy of your <strong>Identity Keys</strong> (also encrypted) is stored on our server to facilitate login across devices.
             </p>
+            <p className="mt-2">
+              However, your <strong>Chat History</strong> and <strong>Message Keys</strong> are stored <strong>exclusively on your device</strong>. 
+              We provide a <strong>"NYX Vault"</strong> feature that allows you to export your entire cryptographic state into a single encrypted file (`.nyxvault`) for safekeeping. 
+              You are the sole custodian of your data.
+            </p>
+
+            <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">Zero-Knowledge Architecture</h3>
+            <ul className="list-disc pl-5 space-y-2 mt-2">
+              <li><strong>Account Recovery:</strong> If you forget your password, you can reset it using your 24-word Recovery Phrase. This process uses a <strong>Cryptographic Signature</strong> to prove your identity to our server without ever revealing the phrase itself.</li>
+              <li><strong>Device Migration:</strong> Transferring data to a new device is done via a direct <strong>Encrypted Tunnel</strong> (relay). The data is encrypted on your old device and decrypted on the new one. Our server blindly relays the chunks and cannot see the content.</li>
+            </ul>
           </Section>
 
         </div>

@@ -53,14 +53,17 @@ export default function ChatInfoModal() {
 
         <InfoSection icon={<FiAlertTriangle size={20} />} title="Accessing Your Account on a New Device">
           <p>
-            You have two ways to access your account on a new device:
+            You have three ways to move your account to a new device:
           </p>
-          <ul className="list-disc list-inside space-y-1">
+          <ul className="list-disc list-inside space-y-2 mt-2">
             <li>
-              <span className="font-semibold text-text-primary">Link Device:</span> The easiest method. From a logged-in device, scan the QR code displayed on the new device. This process securely transfers your account keys, and you will be **logged in automatically** on the new device without needing to type a password.
+              <span className="font-semibold text-text-primary">Device Migration (Recommended):</span> Use the "Transfer to New Device" feature in Settings. Scan the QR code on your new device to securely tunnel your entire chat history and keys directly.
             </li>
             <li>
-              <span className="font-semibold text-text-primary">Restore:</span> If you don't have access to a logged-in device, use the "Restore" feature and enter your 24-word Recovery Phrase. You will be asked to create a **new password** for that specific device.
+              <span className="font-semibold text-text-primary">Vault Backup:</span> Export your "NYX Vault" file (.nyxvault) from Settings. You can import this file on any new device to restore your account and history instantly.
+            </li>
+            <li>
+              <span className="font-semibold text-text-primary">Emergency Recovery:</span> If you lost your device and backups, use the "Restore" feature with your 24-word Recovery Phrase. This will reset your password and restore your Identity Keys, but <strong className="text-destructive">chat history will be lost</strong> without a Vault backup.
             </li>
           </ul>
         </InfoSection>
