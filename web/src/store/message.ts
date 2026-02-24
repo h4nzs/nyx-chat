@@ -569,7 +569,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       socket?.emit("message:send", { ...payload, conversationId, tempId: actualTempId }, async (res: { ok: boolean, msg?: Message, error?: string }) => {
         if (!isReactionPayload) {
-            if (res.ok && res.msg && tempId !== undefined) {
+            if (res.ok && res.msg) {
               get().replaceOptimisticMessage(conversationId, actualTempId, { ...res.msg, status: 'SENT' });
               
               // LINK MESSAGE KEY FROM TEMP ID TO PERMANENT ID
