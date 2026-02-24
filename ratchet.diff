@@ -1,0 +1,749 @@
+diff --git a/server/src/routes/auth.ts b/server/src/routes/auth.ts
+index 14f8a57a..dc38cf96 100644
+--- a/server/src/routes/auth.ts
++++ b/server/src/routes/auth.ts
+@@ -676,36 +676,6 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
+ })
+ 
+ // === DEVICE LINKING ===
+-router.post(
+-  '/finalize-linking',
+-  zodValidate({ body: z.object({ linkingToken: z.string() }) }),
+-  async (req, res, next) => {
+-    try {
+-      const { linkingToken } = req.body
+-      const userId = await redisClient.get(linkingToken)
+-      if (!userId) throw new ApiError(401, 'Invalid or expired linking token.')
+-
+-      await redisClient.del(linkingToken)
+-      const user = await prisma.user.findUnique({
+-        where: { id: userId },
+-        select: {
+-          id: true,
+-          email: true,
+-          username: true,
+-          name: true,
+-          avatarUrl: true,
+-          isEmailVerified: true
+-        }
+-      })
+-      if (!user) throw new ApiError(404, 'User not found.')
+-
+-      const tokens = await issueTokens(user, req)
+-      setAuthCookies(res, tokens)
+-      res.json({ user, accessToken: tokens.access })
+-    } catch (e) {
+-      next(e)
+-    }
+-  }
+-)
++// (Removed: Device Linking is deprecated in favor of Local Vault Backup)
+ 
+ export default router
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index 23c7d658..7fd4d412 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -12,8 +12,6 @@ const Chat = lazy(() => import('./pages/Chat'));
+ const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+ const KeyManagementPage = lazy(() => import('./pages/KeyManagementPage'));
+ const SessionManagerPage = lazy(() => import('./pages/SessionManagerPage'));
+-const LinkDevicePage = lazy(() => import('./pages/LinkDevicePage'));
+-const DeviceScannerPage = lazy(() => import('./pages/DeviceScannerPage'));
+ const ProfilePage = lazy(() => import('./pages/ProfilePage'));
+ const LandingPage = lazy(() => import('./pages/LandingPage'));
+ const HelpPage = lazy(() => import('./pages/HelpPage'));
+@@ -237,7 +235,6 @@ const AppContent = () => {
+             <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
+             <Route path="/register" element={<PageWrapper><Register /></PageWrapper>} />
+             <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
+-            <Route path="/link-device" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
+             <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
+             <Route path="/privacy" element={<PageWrapper><PrivacyPage /></PageWrapper>} />
+ 
+@@ -249,7 +246,6 @@ const AppContent = () => {
+               <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />
+               <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
+               <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
+-              <Route path="/settings/link-device" element={<PageWrapper><DeviceScannerPage /></PageWrapper>} />
+               <Route path="/admin-console" element={<PageWrapper><AdminDashboard /></PageWrapper>} />
+ 
+               <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
+diff --git a/web/src/lib/keychainDb.ts b/web/src/lib/keychainDb.ts
+index b0e1de49..e24fae90 100644
+--- a/web/src/lib/keychainDb.ts
++++ b/web/src/lib/keychainDb.ts
+@@ -272,13 +272,75 @@ export async function deleteMessageKey(messageId: string): Promise<void> {
+  */
+ export async function clearAllKeys(): Promise<void> {
+   const db = await getDb();
+-  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME], 'readwrite');
+-  await tx.objectStore(SESSION_KEYS_STORE_NAME).clear();
+-  await tx.objectStore(GROUP_KEYS_STORE_NAME).clear();
+-  await tx.objectStore(OTPK_STORE_NAME).clear();
+-  await tx.objectStore(PENDING_HEADERS_STORE_NAME).clear();
+-  await tx.objectStore(RATCHET_SESSIONS_STORE_NAME).clear();
+-  await tx.objectStore(SKIPPED_KEYS_STORE_NAME).clear();
+-  await tx.objectStore(MESSAGE_KEYS_STORE_NAME).clear();
++  const storeNames = db.objectStoreNames;
++  const tx = db.transaction(storeNames, 'readwrite');
++  
++  for (const storeName of storeNames) {
++      await tx.objectStore(storeName).clear();
++  }
++  await tx.done;
++}
++
++/**
++ * Mengekspor seluruh isi brankas kunci menjadi string JSON.
++ * Aman karena setiap nilainya sudah terenkripsi oleh Master Seed.
++ */
++export async function exportDatabaseToJson(): Promise<string> {
++  const db = await getDb();
++  const stores = [
++    SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
++    PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
++    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME
++  ];
++  
++  const exportData: Record<string, any[]> = {};
++
++  for (const storeName of stores) {
++    if (!db.objectStoreNames.contains(storeName)) continue;
++    
++    const tx = db.transaction(storeName, 'readonly');
++    const store = tx.objectStore(storeName);
++    const items = [];
++    let cursor = await store.openCursor();
++    while (cursor) {
++      items.push({ key: cursor.key, value: cursor.value });
++      cursor = await cursor.continue();
++    }
++    exportData[storeName] = items;
++  }
++  
++  return JSON.stringify(exportData);
++}
++
++/**
++ * Mengimpor dan menimpa isi brankas kunci dari string JSON.
++ */
++export async function importDatabaseFromJson(jsonString: string): Promise<void> {
++  const db = await getDb();
++  let importData;
++  try {
++      importData = JSON.parse(jsonString);
++  } catch (e) {
++      throw new Error("Invalid vault file format.");
++  }
++
++  const stores = [
++    SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
++    PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
++    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME
++  ];
++  
++  const availableStores = stores.filter(s => db.objectStoreNames.contains(s));
++  const tx = db.transaction(availableStores, 'readwrite');
++  
++  for (const storeName of availableStores) {
++    if (importData[storeName]) {
++      const store = tx.objectStore(storeName);
++      await store.clear(); // Bersihkan brankas lama
++      for (const item of importData[storeName]) {
++        await store.put(item.value, item.key);
++      }
++    }
++  }
+   await tx.done;
+ }
+diff --git a/web/src/pages/DeviceScannerPage.tsx b/web/src/pages/DeviceScannerPage.tsx
+deleted file mode 100644
+index 7029d4f0..00000000
+--- a/web/src/pages/DeviceScannerPage.tsx
++++ /dev/null
+@@ -1,256 +0,0 @@
+-import { useEffect, useState, useRef, useCallback } from 'react';
+-import { Link, useNavigate } from 'react-router-dom';
+-import { FiChevronLeft, FiCheckCircle, FiXCircle, FiCamera, FiRefreshCw } from 'react-icons/fi';
+-import { toast } from 'react-hot-toast';
+-import { useAuthStore } from '@store/auth';
+-import { getSocket } from '@lib/socket';
+-import { getSodium } from '@lib/sodiumInitializer';
+-import { Html5Qrcode, Html5QrcodeScannerState } from 'html5-qrcode';
+-import { Spinner } from '@components/Spinner';
+-
+-export default function DeviceScannerPage() {
+-  const [status, setStatus] = useState<'scanning' | 'processing' | 'success' | 'failed'>('scanning');
+-  const [error, setError] = useState<string | null>(null);
+-  const navigate = useNavigate();
+-
+-  const getMasterSeed = useAuthStore(s => s.getMasterSeed);
+-  
+-  const scannerRef = useRef<Html5Qrcode | null>(null);
+-  const qrcodeRegionRef = useRef<HTMLDivElement>(null);
+-  const isProcessingRef = useRef(false);
+-
+-  const processQrCode = useCallback(async (decodedText: string) => {
+-    if (isProcessingRef.current) return;
+-    isProcessingRef.current = true;
+-
+-    setStatus('processing');
+-    toast.loading('QR Code detected. Synchronizing...', { id: 'linking-toast' });
+-    
+-    if (scannerRef.current?.isScanning) {
+-      scannerRef.current.pause(true);
+-    }
+-
+-    try {
+-      let data;
+-      try {
+-        data = JSON.parse(decodedText);
+-      } catch (e) {
+-        throw new Error("Invalid QR Code. Not a recognized Nyx code.");
+-      }
+-
+-      const { roomId, linkingPubKey } = data;
+-
+-      if (!roomId || typeof roomId !== 'string' || !roomId.trim()) {
+-        throw new Error('Missing or invalid roomId in QR code data.');
+-      }
+-
+-      if (!linkingPubKey || typeof linkingPubKey !== 'string' || !linkingPubKey.trim()) {
+-        throw new Error('Missing or invalid linkingPubKey in QR code data.');
+-      }
+-
+-      const sodium = await getSodium();
+-
+-      let linkingPubKeyBytes;
+-      try {
+-        linkingPubKeyBytes = sodium.from_base64(linkingPubKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+-        if (!linkingPubKeyBytes || linkingPubKeyBytes.length === 0) {
+-          throw new Error('Invalid linkingPubKey format in QR code data.');
+-        }
+-      } catch (e) {
+-        throw new Error("Invalid linkingPubKey format. Failed to decode Base64.");
+-      }
+-
+-      const masterSeed = await getMasterSeed();
+-      if (!masterSeed) {
+-        throw new Error("Your keys are locked. Please log in again to unlock them.");
+-      }
+-
+-      // [SECURITY] Create a defensive copy to avoid wiping the global cache
+-      const masterSeedCopy = new Uint8Array(masterSeed);
+-
+-      try {
+-        const encryptedPayload = sodium.crypto_box_seal(masterSeedCopy, linkingPubKeyBytes);
+-        const encryptedPayloadB64 = sodium.to_base64(encryptedPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
+-
+-        const socket = getSocket();
+-        socket.emit('linking:send_payload', {
+-          roomId,
+-          encryptedMasterKey: encryptedPayloadB64
+-        });
+-
+-        setStatus('success');
+-        toast.success('Device successfully linked!', { id: 'linking-toast' });
+-
+-        if (scannerRef.current?.isScanning) {
+-          await scannerRef.current.stop();
+-        }
+-
+-        setTimeout(() => navigate('/settings/sessions'), 2000);
+-      } finally {
+-        sodium.memzero(masterSeedCopy);
+-      }
+-
+-    } catch (err: any) {
+-      console.error("Linking error:", err);
+-      setError(err.message || 'Failed to process linking.');
+-      setStatus('failed');
+-      toast.error(err.message || 'Linking failed.', { id: 'linking-toast' });
+-    }
+-  }, [getMasterSeed, navigate]);
+-
+-  useEffect(() => {
+-    if (!qrcodeRegionRef.current) return;
+-    
+-    const html5QrCode = new Html5Qrcode(qrcodeRegionRef.current.id);
+-    scannerRef.current = html5QrCode;
+-
+-    const startScanner = async () => {
+-      try {
+-        await html5QrCode.start(
+-          { facingMode: "environment" },
+-          { fps: 10, qrbox: { width: 250, height: 250 }, aspectRatio: 1.0 },
+-          (decodedText) => {
+-            if (!isProcessingRef.current) {
+-              processQrCode(decodedText);
+-            }
+-          },
+-          (errorMessage) => { /* ignore frame parse errors */ }
+-        );
+-      } catch (err: any) {
+-        console.error("Camera start error:", err);
+-        setError('Could not access camera. Please check permissions and refresh the page.');
+-        setStatus('failed');
+-      }
+-    };
+-
+-    startScanner();
+-
+-    return () => {
+-      const stopAndClear = async () => {
+-        if (scannerRef.current) {
+-          try {
+-            const state = scannerRef.current.getState();
+-            if (state === Html5QrcodeScannerState.SCANNING || state === Html5QrcodeScannerState.PAUSED) {
+-              await scannerRef.current.stop();
+-            }
+-            scannerRef.current.clear();
+-          } catch (e) {
+-            console.error("Failed to cleanly stop scanner", e);
+-          }
+-        }
+-      };
+-      stopAndClear();
+-    };
+-  }, [processQrCode]);
+-
+-  const handleRetry = () => {
+-    if (scannerRef.current) {
+-      scannerRef.current.resume();
+-    }
+-    setStatus('scanning');
+-    setError(null);
+-    isProcessingRef.current = false;
+-  };
+-
+-  return (
+-    <div className="flex flex-col h-screen bg-bg-main text-text-primary">
+-      <header className="p-4 flex items-center justify-between border-b border-white/10 dark:border-black/10 shadow-neu-flat-light dark:shadow-neu-flat-dark z-10">
+-        <Link 
+-          to="/settings" 
+-          className="
+-            p-3 rounded-xl bg-bg-main text-text-secondary
+-            shadow-neu-flat-light dark:shadow-neu-flat-dark
+-            active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+-            transition-all
+-          "
+-        >
+-          <FiChevronLeft size={20} />
+-        </Link>
+-        <h1 className="text-sm font-black uppercase tracking-widest text-text-primary">Optical Scanner</h1>
+-        <div className="w-10"></div> {/* Spacer for balance */}
+-      </header>
+-
+-      <main className="flex-1 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+-        {/* Scanner Housing */}
+-        <div className="
+-          relative w-full max-w-sm aspect-square 
+-          bg-black/90 rounded-3xl overflow-hidden
+-          shadow-neu-pressed-light dark:shadow-neu-pressed-dark
+-          border-4 border-bg-main
+-        ">
+-          {/* Camera Feed */}
+-          <div id="qr-code-scanner-region" ref={qrcodeRegionRef} className="w-full h-full opacity-80" />
+-
+-          {/* HUD Overlay */}
+-          <div className="absolute inset-0 pointer-events-none p-6">
+-             <div className="w-full h-full border-2 border-accent/30 rounded-2xl relative">
+-                {/* Corners */}
+-                <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-accent"></div>
+-                <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-accent"></div>
+-                <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-accent"></div>
+-                <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-accent"></div>
+-                
+-                {/* Scan Line */}
+-                {status === 'scanning' && (
+-                   <div className="w-full h-0.5 bg-red-500 absolute top-1/2 shadow-[0_0_10px_red] animate-scan-line"></div>
+-                )}
+-             </div>
+-          </div>
+-        </div>
+-
+-        {/* Status Deck */}
+-        <div className="mt-8 w-full max-w-sm">
+-           <div className="
+-             p-4 rounded-2xl bg-bg-main
+-             shadow-neu-flat-light dark:shadow-neu-flat-dark
+-             flex flex-col items-center text-center
+-           ">
+-              {status === 'scanning' && (
+-                <>
+-                  <div className="flex items-center gap-2 text-accent mb-2">
+-                     <FiCamera className="animate-pulse" />
+-                     <span className="font-mono text-xs uppercase tracking-wider">Acquiring Target</span>
+-                  </div>
+-                  <p className="text-xs text-text-secondary">Align QR Code within the viewfinder.</p>
+-                </>
+-              )}
+-
+-              {status === 'processing' && (
+-                <div className="flex flex-col items-center gap-3">
+-                   <Spinner size="md" />
+-                   <span className="font-mono text-xs uppercase tracking-wider text-text-primary">Decrypting Handshake...</span>
+-                </div>
+-              )}
+-
+-              {status === 'success' && (
+-                <div className="flex flex-col items-center gap-2 text-green-500">
+-                   <FiCheckCircle size={32} className="animate-bounce-in" />
+-                   <span className="font-bold uppercase tracking-wide">Uplink Established</span>
+-                </div>
+-              )}
+-
+-              {status === 'failed' && (
+-                <div className="flex flex-col items-center gap-3">
+-                   <div className="flex items-center gap-2 text-red-500">
+-                      <FiXCircle size={24} />
+-                      <span className="font-bold uppercase">{error || 'Connection Failed'}</span>
+-                   </div>
+-                   <button 
+-                     onClick={handleRetry}
+-                     className="
+-                       flex items-center gap-2 px-4 py-2 rounded-lg 
+-                       bg-bg-main text-text-primary text-xs font-bold uppercase
+-                       shadow-neu-flat-light dark:shadow-neu-flat-dark
+-                       active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+-                     "
+-                   >
+-                      <FiRefreshCw /> Retry
+-                   </button>
+-                </div>
+-              )}
+-           </div>
+-        </div>
+-      </main>
+-    </div>
+-  );
+-}
+\ No newline at end of file
+diff --git a/web/src/pages/LinkDevicePage.tsx b/web/src/pages/LinkDevicePage.tsx
+deleted file mode 100644
+index 4c3d557a..00000000
+--- a/web/src/pages/LinkDevicePage.tsx
++++ /dev/null
+@@ -1,192 +0,0 @@
+-import { useState, useEffect, useRef, useCallback } from 'react';
+-import { Link, useNavigate } from 'react-router-dom';
+-import QRCode from 'react-qr-code';
+-import { FiCheckCircle, FiXCircle, FiChevronLeft, FiSmartphone, FiCpu } from 'react-icons/fi';
+-import { Spinner } from '@components/Spinner';
+-import { getSocket, connectSocket } from '@lib/socket';
+-import { getSodium } from '@lib/sodiumInitializer';
+-import { reEncryptBundleFromMasterKey } from '@lib/crypto-worker-proxy';
+-import { saveEncryptedKeys, setDeviceAutoUnlockReady } from '@lib/keyStorage';
+-import toast from 'react-hot-toast';
+-import { useAuthStore } from '@store/auth';
+-
+-export default function LinkDevicePage() {
+-  const [qrData, setQrData] = useState<string | null>(null);
+-  const [status, setStatus] = useState<'initializing' | 'waiting' | 'processing' | 'success' | 'failed'>('initializing');
+-  const [error, setError] = useState<string | null>(null);
+-  const navigate = useNavigate();
+-  const ephemeralKeyPair = useRef<{ publicKey: Uint8Array; privateKey: Uint8Array } | null>(null);
+-
+-  useEffect(() => {
+-    const isMounted = true;
+-    const socket = getSocket();
+-
+-    const initializeSession = async () => {
+-      try {
+-        setStatus('initializing');
+-        const sodium = await getSodium();
+-        const keyPair = sodium.crypto_box_keypair();
+-        ephemeralKeyPair.current = keyPair;
+-        
+-        const pubKeyB64 = sodium.to_base64(keyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+-
+-        if (!socket.connected) connectSocket();
+-
+-        socket.emit('auth:request_linking_qr', { publicKey: pubKeyB64 }, (response: any) => {
+-          if (!isMounted) return;
+-          if (response?.error) {
+-            setError(response.error);
+-            setStatus('failed');
+-            return;
+-          }
+-          if (response?.token) {
+-            setQrData(JSON.stringify({
+-              roomId: response.token,
+-              linkingPubKey: pubKeyB64
+-            }));
+-            setStatus('waiting');
+-          }
+-        });
+-
+-      } catch (err: any) {
+-        console.error("Init error:", err);
+-        if (isMounted) {
+-          setError("Failed to initialize.");
+-          setStatus('failed');
+-        }
+-      }
+-    };
+-
+-    initializeSession();
+-  }, []);
+-
+-  const handleLinkingSuccess = useCallback(async (data: any) => {
+-    setStatus('processing');
+-    toast.loading("Processing keys...", { id: 'link-process' });
+-
+-    try {
+-      const sodium = await getSodium();
+-      
+-      if (!ephemeralKeyPair.current) throw new Error("Keypair lost.");
+-      if (!data.encryptedMasterKey) throw new Error("Invalid payload.");
+-
+-      const cipherText = sodium.from_base64(data.encryptedMasterKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+-      
+-      const masterSeed = sodium.crypto_box_seal_open(
+-        cipherText, 
+-        ephemeralKeyPair.current.publicKey, 
+-        ephemeralKeyPair.current.privateKey
+-      );
+-
+-      const devicePasswordBytes = sodium.randombytes_buf(32);
+-      const devicePassword = sodium.to_base64(devicePasswordBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+-
+-      const result = await reEncryptBundleFromMasterKey(masterSeed, devicePassword);
+-
+-      // Save the new encrypted bundle
+-      await saveEncryptedKeys(result.encryptedPrivateKeys);
+-      
+-      // Set auto-unlock ready status
+-      await setDeviceAutoUnlockReady(true);
+-
+-      setStatus('success');
+-      toast.success("Paired! Redirecting to Login...", { id: 'link-process' });
+-
+-      setTimeout(() => {
+-        navigate('/login', { replace: true });
+-      }, 2000);
+-
+-    } catch (err: any) {
+-      console.error("Linking failed:", err);
+-      toast.error("Error: " + err.message, { id: 'link-process' });
+-      setStatus('failed');
+-      setError(err.message);
+-    }
+-  }, [navigate]);
+-
+-  useEffect(() => {
+-    const socket = getSocket();
+-    socket.on('auth:linking_success', handleLinkingSuccess);
+-    return () => {
+-      socket.off('auth:linking_success', handleLinkingSuccess);
+-    };
+-  }, [handleLinkingSuccess]);
+-
+-  return (
+-    <div className="relative flex flex-col items-center justify-center min-h-screen bg-bg-main text-text-primary p-4 overflow-hidden">
+-      
+-      <Link 
+-        to="/auth/login" 
+-        className="
+-          absolute top-6 left-6 
+-          p-3 rounded-full 
+-          bg-bg-main text-text-secondary
+-          shadow-neu-flat-light dark:shadow-neu-flat-dark
+-          active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+-          hover:text-accent transition-all
+-        "
+-      >
+-        <FiChevronLeft size={24} />
+-      </Link>
+-
+-      <div className="text-center mb-10">
+-         <div className="inline-flex items-center justify-center p-4 rounded-full bg-bg-main shadow-neu-pressed-light dark:shadow-neu-pressed-dark mb-4 text-accent">
+-            <FiCpu size={32} />
+-         </div>
+-         <h1 className="text-3xl font-black uppercase tracking-widest text-text-primary">Device Pairing</h1>
+-         <p className="font-mono text-xs text-text-secondary mt-2 tracking-wide uppercase">Secure Handshake Protocol v2.1</p>
+-      </div>
+-
+-      <div className="
+-        relative p-8 rounded-3xl
+-        bg-bg-main
+-        shadow-neu-flat-light dark:shadow-neu-flat-dark
+-        border border-white/20 dark:border-black/20
+-        flex flex-col items-center
+-      ">
+-        {/* QR Slot */}
+-        <div className="
+-          relative bg-white p-4 rounded-xl 
+-          shadow-[inset_0_2px_10px_rgba(0,0,0,0.2)] 
+-          border-4 border-bg-main
+-          mb-8
+-        ">
+-          <div className="w-[220px] h-[220px] flex items-center justify-center">
+-             {status === 'success' ? (
+-                <div className="flex flex-col items-center animate-bounce-in text-green-500">
+-                  <FiCheckCircle size={80} />
+-                </div>
+-              ) : qrData ? (
+-                <QRCode value={qrData} size={220} level="M" />
+-              ) : (
+-                <div className="flex items-center justify-center text-accent">
+-                  {status === 'failed' ? <FiXCircle size={60} className="text-red-400" /> : <Spinner size="lg" />}
+-                </div>
+-              )}
+-          </div>
+-          
+-          {/* Scan Line Animation */}
+-          {status === 'waiting' && (
+-             <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-lg">
+-                <div className="w-full h-1 bg-accent/50 absolute top-0 animate-scan-line shadow-[0_0_10px_rgba(var(--accent),0.5)]"></div>
+-             </div>
+-          )}
+-        </div>
+-
+-        {/* Status Display */}
+-        <div className="w-full h-12 flex items-center justify-center rounded-xl bg-bg-surface font-mono text-xs uppercase tracking-wider shadow-inner px-4">
+-          {status === 'initializing' && <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> <span>Initializing Uplink...</span></div>}
+-          {status === 'waiting' && <div className="flex items-center gap-2 text-accent animate-pulse"><FiSmartphone /> <span>Scan with Host Device</span></div>}
+-          {status === 'processing' && <div className="flex items-center gap-2 text-text-secondary"><Spinner size="sm" /> <span>Exchanging Keys...</span></div>}
+-          {status === 'success' && <div className="text-green-500 font-bold">Link Established. Redirecting...</div>}
+-          {status === 'failed' && <div className="text-red-500 font-bold">{error || "Handshake Failed"}</div>}
+-        </div>
+-
+-      </div>
+-      
+-      <p className="mt-8 text-xs text-text-secondary/50 font-mono text-center max-w-sm">
+-         Go to Settings &gt; Link Device on your primary mobile device to authorize this connection.
+-      </p>
+-    </div>
+-  );
+-}
+\ No newline at end of file
+diff --git a/web/src/pages/SettingsPage.tsx b/web/src/pages/SettingsPage.tsx
+index ffc693f1..66f16e13 100644
+--- a/web/src/pages/SettingsPage.tsx
++++ b/web/src/pages/SettingsPage.tsx
+@@ -9,12 +9,14 @@ import { usePushNotifications } from '@hooks/usePushNotifications';
+ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
+ import { 
+   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
+-  FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock
++  FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
++  FiDownload, FiUpload, FiDatabase
+ } from 'react-icons/fi';
+ import { startRegistration } from '@simplewebauthn/browser';
+ import { IoFingerPrint } from 'react-icons/io5';
+ import ReportBugModal from '../components/ReportBugModal';
+ import { api } from '@lib/api';
++import { exportDatabaseToJson, importDatabaseFromJson } from '@lib/keychainDb';
+ 
+ /* --- MICRO-COMPONENTS --- */
+ 
+@@ -123,6 +125,7 @@ export default function SettingsPage() {
+   const [isLoading, setIsLoading] = useState(false);
+   const [showReportModal, setShowReportModal] = useState(false);
+   const fileInputRef = useRef<HTMLInputElement>(null);
++  const vaultInputRef = useRef<HTMLInputElement>(null);
+ 
+   const colorMap: Record<AccentColor, string> = {
+     blue: 'hsl(217 91% 60%)',
+@@ -202,6 +205,50 @@ export default function SettingsPage() {
+     }
+   };
+ 
++  const handleExportVault = async () => {
++    try {
++      const json = await exportDatabaseToJson();
++      const blob = new Blob([json], { type: 'application/json' });
++      const url = URL.createObjectURL(blob);
++      const a = document.createElement('a');
++      a.href = url;
++      a.download = `nyx_vault_backup_${new Date().toISOString().slice(0, 10)}.nyxvault`;
++      document.body.appendChild(a);
++      a.click();
++      document.body.removeChild(a);
++      URL.revokeObjectURL(url);
++      toast.success("Vault exported successfully! Keep this file safe.");
++    } catch (error) {
++      console.error("Export failed:", error);
++      toast.error("Failed to export vault.");
++    }
++  };
++
++  const handleImportVault = async (e: React.ChangeEvent<HTMLInputElement>) => {
++    const file = e.target.files?.[0];
++    if (!file) return;
++
++    const reader = new FileReader();
++    reader.onload = async (event) => {
++      try {
++        const json = event.target?.result as string;
++        await importDatabaseFromJson(json);
++        toast.success("Vault imported successfully! Reloading...");
++        setTimeout(() => window.location.reload(), 1000);
++      } catch (error) {
++        console.error("Import failed:", error);
++        toast.error("Invalid vault file or corrupted data.");
++      }
++    };
++    reader.readAsText(file);
++    // Reset input value so same file can be selected again
++    e.target.value = '';
++  };
++
++  const triggerImport = () => {
++    vaultInputRef.current?.click();
++  };
++
+ 
+   const handleLogout = async () => {
+     showConfirm(
+@@ -467,11 +514,43 @@ export default function SettingsPage() {
+                 icon={FiSmartphone} 
+                 onClick={() => navigate('/settings/sessions')} 
+               />
+-              <ActionButton 
+-                label="Link Device" 
+-                icon={FiActivity} 
+-                onClick={() => navigate('/settings/link-device')} 
+-              />
++              
++              {/* VAULT ACTIONS */}
++              <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-text-secondary/10">
++                 <button 
++                   onClick={handleExportVault}
++                   className="
++                     flex flex-col items-center justify-center gap-2 p-3 rounded-xl
++                     bg-bg-main text-emerald-500 font-bold text-xs uppercase tracking-wider
++                     shadow-neu-flat-light dark:shadow-neu-flat-dark
++                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
++                     hover:brightness-110 transition-all
++                   "
++                 >
++                   <FiDownload size={18} />
++                   Export Vault
++                 </button>
++                 <button 
++                   onClick={triggerImport}
++                   className="
++                     flex flex-col items-center justify-center gap-2 p-3 rounded-xl
++                     bg-bg-main text-blue-500 font-bold text-xs uppercase tracking-wider
++                     shadow-neu-flat-light dark:shadow-neu-flat-dark
++                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
++                     hover:brightness-110 transition-all
++                   "
++                 >
++                   <FiUpload size={18} />
++                   Import Vault
++                 </button>
++                 <input 
++                    type="file" 
++                    ref={vaultInputRef} 
++                    onChange={handleImportVault} 
++                    accept=".nyxvault,.json" 
++                    className="hidden" 
++                 />
++              </div>
+             </div>
+           </ControlModule>
+         </div>

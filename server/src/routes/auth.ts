@@ -676,36 +676,6 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
 })
 
 // === DEVICE LINKING ===
-router.post(
-  '/finalize-linking',
-  zodValidate({ body: z.object({ linkingToken: z.string() }) }),
-  async (req, res, next) => {
-    try {
-      const { linkingToken } = req.body
-      const userId = await redisClient.get(linkingToken)
-      if (!userId) throw new ApiError(401, 'Invalid or expired linking token.')
-
-      await redisClient.del(linkingToken)
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-          id: true,
-          email: true,
-          username: true,
-          name: true,
-          avatarUrl: true,
-          isEmailVerified: true
-        }
-      })
-      if (!user) throw new ApiError(404, 'User not found.')
-
-      const tokens = await issueTokens(user, req)
-      setAuthCookies(res, tokens)
-      res.json({ user, accessToken: tokens.access })
-    } catch (e) {
-      next(e)
-    }
-  }
-)
+// (Removed: Device Linking is deprecated in favor of Local Vault Backup)
 
 export default router

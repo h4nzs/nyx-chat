@@ -272,13 +272,75 @@ export async function deleteMessageKey(messageId: string): Promise<void> {
  */
 export async function clearAllKeys(): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME], 'readwrite');
-  await tx.objectStore(SESSION_KEYS_STORE_NAME).clear();
-  await tx.objectStore(GROUP_KEYS_STORE_NAME).clear();
-  await tx.objectStore(OTPK_STORE_NAME).clear();
-  await tx.objectStore(PENDING_HEADERS_STORE_NAME).clear();
-  await tx.objectStore(RATCHET_SESSIONS_STORE_NAME).clear();
-  await tx.objectStore(SKIPPED_KEYS_STORE_NAME).clear();
-  await tx.objectStore(MESSAGE_KEYS_STORE_NAME).clear();
+  const storeNames = db.objectStoreNames;
+  const tx = db.transaction(storeNames, 'readwrite');
+  
+  for (const storeName of storeNames) {
+      await tx.objectStore(storeName).clear();
+  }
+  await tx.done;
+}
+
+/**
+ * Mengekspor seluruh isi brankas kunci menjadi string JSON.
+ * Aman karena setiap nilainya sudah terenkripsi oleh Master Seed.
+ */
+export async function exportDatabaseToJson(): Promise<string> {
+  const db = await getDb();
+  const stores = [
+    SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
+    PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
+    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME
+  ];
+  
+  const exportData: Record<string, any[]> = {};
+
+  for (const storeName of stores) {
+    if (!db.objectStoreNames.contains(storeName)) continue;
+    
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const items = [];
+    let cursor = await store.openCursor();
+    while (cursor) {
+      items.push({ key: cursor.key, value: cursor.value });
+      cursor = await cursor.continue();
+    }
+    exportData[storeName] = items;
+  }
+  
+  return JSON.stringify(exportData);
+}
+
+/**
+ * Mengimpor dan menimpa isi brankas kunci dari string JSON.
+ */
+export async function importDatabaseFromJson(jsonString: string): Promise<void> {
+  const db = await getDb();
+  let importData;
+  try {
+      importData = JSON.parse(jsonString);
+  } catch (e) {
+      throw new Error("Invalid vault file format.");
+  }
+
+  const stores = [
+    SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
+    PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
+    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME
+  ];
+  
+  const availableStores = stores.filter(s => db.objectStoreNames.contains(s));
+  const tx = db.transaction(availableStores, 'readwrite');
+  
+  for (const storeName of availableStores) {
+    if (importData[storeName]) {
+      const store = tx.objectStore(storeName);
+      await store.clear(); // Bersihkan brankas lama
+      for (const item of importData[storeName]) {
+        await store.put(item.value, item.key);
+      }
+    }
+  }
   await tx.done;
 }

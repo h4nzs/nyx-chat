@@ -12,8 +12,6 @@ const Chat = lazy(() => import('./pages/Chat'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const KeyManagementPage = lazy(() => import('./pages/KeyManagementPage'));
 const SessionManagerPage = lazy(() => import('./pages/SessionManagerPage'));
-const LinkDevicePage = lazy(() => import('./pages/LinkDevicePage'));
-const DeviceScannerPage = lazy(() => import('./pages/DeviceScannerPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const HelpPage = lazy(() => import('./pages/HelpPage'));
@@ -237,7 +235,6 @@ const AppContent = () => {
             <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
             <Route path="/register" element={<PageWrapper><Register /></PageWrapper>} />
             <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
-            <Route path="/link-device" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
             <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
             <Route path="/privacy" element={<PageWrapper><PrivacyPage /></PageWrapper>} />
 
@@ -249,7 +246,6 @@ const AppContent = () => {
               <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />
               <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
               <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
-              <Route path="/settings/link-device" element={<PageWrapper><DeviceScannerPage /></PageWrapper>} />
               <Route path="/admin-console" element={<PageWrapper><AdminDashboard /></PageWrapper>} />
 
               <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />

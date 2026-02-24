@@ -9,12 +9,14 @@ import { usePushNotifications } from '@hooks/usePushNotifications';
 import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
-  FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock
+  FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
+  FiDownload, FiUpload, FiDatabase
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
 import ReportBugModal from '../components/ReportBugModal';
 import { api } from '@lib/api';
+import { exportDatabaseToJson, importDatabaseFromJson } from '@lib/keychainDb';
 
 /* --- MICRO-COMPONENTS --- */
 
@@ -123,6 +125,7 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const vaultInputRef = useRef<HTMLInputElement>(null);
 
   const colorMap: Record<AccentColor, string> = {
     blue: 'hsl(217 91% 60%)',
@@ -200,6 +203,50 @@ export default function SettingsPage() {
         toast.error(`Error: ${error.message}`, { id: 'passkey' });
       }
     }
+  };
+
+  const handleExportVault = async () => {
+    try {
+      const json = await exportDatabaseToJson();
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `nyx_vault_backup_${new Date().toISOString().slice(0, 10)}.nyxvault`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Vault exported successfully! Keep this file safe.");
+    } catch (error) {
+      console.error("Export failed:", error);
+      toast.error("Failed to export vault.");
+    }
+  };
+
+  const handleImportVault = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const json = event.target?.result as string;
+        await importDatabaseFromJson(json);
+        toast.success("Vault imported successfully! Reloading...");
+        setTimeout(() => window.location.reload(), 1000);
+      } catch (error) {
+        console.error("Import failed:", error);
+        toast.error("Invalid vault file or corrupted data.");
+      }
+    };
+    reader.readAsText(file);
+    // Reset input value so same file can be selected again
+    e.target.value = '';
+  };
+
+  const triggerImport = () => {
+    vaultInputRef.current?.click();
   };
 
 
@@ -467,11 +514,43 @@ export default function SettingsPage() {
                 icon={FiSmartphone} 
                 onClick={() => navigate('/settings/sessions')} 
               />
-              <ActionButton 
-                label="Link Device" 
-                icon={FiActivity} 
-                onClick={() => navigate('/settings/link-device')} 
-              />
+              
+              {/* VAULT ACTIONS */}
+              <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-text-secondary/10">
+                 <button 
+                   onClick={handleExportVault}
+                   className="
+                     flex flex-col items-center justify-center gap-2 p-3 rounded-xl
+                     bg-bg-main text-emerald-500 font-bold text-xs uppercase tracking-wider
+                     shadow-neu-flat-light dark:shadow-neu-flat-dark
+                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                     hover:brightness-110 transition-all
+                   "
+                 >
+                   <FiDownload size={18} />
+                   Export Vault
+                 </button>
+                 <button 
+                   onClick={triggerImport}
+                   className="
+                     flex flex-col items-center justify-center gap-2 p-3 rounded-xl
+                     bg-bg-main text-blue-500 font-bold text-xs uppercase tracking-wider
+                     shadow-neu-flat-light dark:shadow-neu-flat-dark
+                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                     hover:brightness-110 transition-all
+                   "
+                 >
+                   <FiUpload size={18} />
+                   Import Vault
+                 </button>
+                 <input 
+                    type="file" 
+                    ref={vaultInputRef} 
+                    onChange={handleImportVault} 
+                    accept=".nyxvault,.json" 
+                    className="hidden" 
+                 />
+              </div>
             </div>
           </ControlModule>
         </div>
