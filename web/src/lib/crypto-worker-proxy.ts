@@ -100,6 +100,20 @@ export async function restoreFromPhrase(phrase: string, password: string): Promi
   return sendToWorker('restoreFromPhrase', { phrase, password });
 }
 
+export async function recoverAccountWithSignature(
+  phrase: string, 
+  newPassword: string, 
+  identifier: string, 
+  timestamp: number
+): Promise<{
+  encryptionPublicKeyB64: string,
+  signingPublicKeyB64: string,
+  encryptedPrivateKeys: string,
+  signatureB64: string
+}> {
+  return sendToWorker('recoverAccountWithSignature', { phrase, newPassword, identifier, timestamp });
+}
+
 export async function reEncryptBundleFromMasterKey(masterKey: Uint8Array, newPassword: string): Promise<{
   encryptedPrivateKeys: string;
   encryptionPublicKeyB64: string;

@@ -405,6 +405,69 @@ router.post('/refresh', async (req, res, next) => {
   }
 })
 
+// === ZERO-KNOWLEDGE ACCOUNT RECOVERY ===
+router.post('/recover', authLimiter, zodValidate({
+  body: z.object({
+    identifier: z.string().min(1),
+    newPassword: z.string().min(8),
+    newEncryptedKeys: z.string(),
+    signature: z.string(),
+    timestamp: z.number()
+  })
+}), async (req, res, next) => {
+  try {
+    const { identifier, newPassword, newEncryptedKeys, signature, timestamp } = req.body;
+
+    // 1. Cegah Replay Attack (Maksimal 5 menit)
+    const now = Date.now();
+    if (Math.abs(now - timestamp) > 5 * 60 * 1000) {
+       throw new ApiError(400, "Recovery request expired.");
+    }
+
+    // 2. Cari User
+    const user = await prisma.user.findFirst({
+      where: { OR: [{ email: identifier }, { username: identifier }] }
+    });
+    if (!user || !user.signingKey) throw new ApiError(404, "User not found or invalid keys.");
+
+    // 3. Verifikasi Signature menggunakan libsdoium
+    const { getSodium } = await import('../lib/sodium.js'); // Sesuaikan path import sodium server-mu
+    const sodium = await getSodium();
+    
+    const messageString = `${identifier}:${timestamp}`;
+    const messageBytes = Buffer.from(messageString, 'utf-8');
+    const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
+    const publicKeyBytes = sodium.from_base64(user.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+    const isValid = sodium.crypto_sign_verify_detached(signatureBytes, messageBytes, publicKeyBytes);
+    if (!isValid) {
+       throw new ApiError(401, "Cryptographic signature verification failed. Invalid phrase.");
+    }
+
+    // 4. Update Password dan Keys di Database
+    const passwordHash = await hashPassword(newPassword);
+    
+    // Revoke old sessions
+    await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
+
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: { 
+        passwordHash, 
+        encryptedPrivateKey: newEncryptedKeys 
+      }
+    });
+
+    // 5. Terbitkan Token Baru (Auto Login)
+    const tokens = await issueTokens(updatedUser, req);
+    setAuthCookies(res, tokens);
+
+    res.json({ message: "Account recovered successfully.", accessToken: tokens.access });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post('/logout', async (req, res) => {
   const { endpoint } = req.body
 

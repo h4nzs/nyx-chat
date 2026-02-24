@@ -615,6 +615,49 @@ self.onmessage = async (event: MessageEvent) => {
         }
         break;
       }
+      case 'recoverAccountWithSignature': {
+        const { phrase, newPassword, identifier, timestamp } = payload;
+        const masterSeedHex = bip39.mnemonicToEntropy(phrase);
+        const masterSeed = sodium.from_hex(masterSeedHex);
+
+        const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
+        const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));
+        const signedPreKeySeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
+        
+        const encryptionKeyPair = sodium.crypto_box_seed_keypair(encryptionSeed);
+        const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
+        const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
+        
+        try {
+          const encryptedPrivateKeys = await storePrivateKeys({
+            encryption: encryptionKeyPair.privateKey,
+            signing: signingKeyPair.privateKey,
+            signedPreKey: signedPreKeyPair.privateKey,
+            masterSeed: masterSeed
+          }, newPassword);
+
+          // BUAT DIGITAL SIGNATURE
+          const messageString = `${identifier}:${timestamp}`;
+          const messageBytes = new TextEncoder().encode(messageString);
+          const signature = sodium.crypto_sign_detached(messageBytes, signingKeyPair.privateKey);
+
+          result = {
+            encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
+            signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
+            encryptedPrivateKeys,
+            signatureB64: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING)
+          };
+        } finally {
+          sodium.memzero(masterSeed);
+          sodium.memzero(encryptionSeed);
+          sodium.memzero(signingSeed);
+          sodium.memzero(signedPreKeySeed);
+          sodium.memzero(encryptionKeyPair.privateKey);
+          sodium.memzero(signingKeyPair.privateKey);
+          sodium.memzero(signedPreKeyPair.privateKey);
+        }
+        break;
+      }
       case 'generate_random_key': {
         result = sodium.randombytes_buf(32);
         break;

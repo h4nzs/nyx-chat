@@ -1,129 +1,303 @@
-📑 Laporan Rencana Implementasi: Double Ratchet Algorithm
+*"Mari kita implementasikan arsitektur 'Zero-Knowledge Password Reset' untuk fitur Recovery Phrase. Kita akan menggunakan `signingPrivateKey` yang di-generate ulang dari Phrase untuk menandatangani sebuah payload otorisasi, lalu server akan memverifikasinya menggunakan `signingPublicKey` yang tersimpan di database.*
 
-  1. Analisis Kesiapan Arsitektur Saat Ini
+*Tolong eksekusi 4 langkah perubahan ini secara presisi:*
 
+### 1. Update Worker (`web/src/workers/crypto.worker.ts`)
 
-  ✅ Apa yang Sudah Kita Punya (Kuat):
-   1. X3DH Handshake: Kita sudah memiliki inisialisasi X3DH yang matang. Output dari X3DH (Shared Secret 32-byte) adalah titik awal (Root Key) yang
-      sempurna untuk memulai Double Ratchet.
-   2. Worker Isolation (`crypto.worker.ts`): Arsitektur kita sudah memisahkan operasi kriptografi ke Web Worker. Ini sangat ideal untuk Double
-      Ratchet karena kalkulasi matematika (DH step & KDF) akan semakin berat.
-   3. IndexedDB Storage (`keychainDb.ts`): Kita sudah memiliki mekanisme penyimpanan data lokal yang terenkripsi menggunakan Master Seed
-      (Argon2id).
-   4. JSON Payload Structure: sendMessage sudah bisa membungkus ciphertext ke dalam payload JSON (seperti yang kita lakukan untuk header X3DH).
+*Tambahkan sebuah case baru di dalam `self.onmessage` untuk menangani regenerasi kunci dan pembuatan Digital Signature sekaligus:*
 
+```typescript
+      case 'recoverAccountWithSignature': {
+        const { phrase, newPassword, identifier, timestamp } = payload;
+        const masterSeedHex = bip39.mnemonicToEntropy(phrase);
+        const masterSeed = sodium.from_hex(masterSeedHex);
 
-  ❌ Apa yang Kurang (Harus Dibangun):
-   1. KDF (Key Derivation Function): Double Ratchet sangat bergantung pada HKDF (HMAC-based Extract-and-Expand KDF). Saat ini kita hanya pakai
-      sodium.crypto_generichash (BLAKE2b). Kita perlu implementasi HKDF standar (bisa pakai Web Crypto API di dalam worker).
-   2. State Management (Ratchet State): Saat ini kita hanya menyimpan satu sessionKey per percakapan. Nanti, kita harus menyimpan State Object yang
-      kompleks.
-   3. Skipped Message Keys Store: Jika pesan datang tidak berurutan (misal pesan 3 datang sebelum pesan 2 karena delay jaringan), kita harus
-      memutar ratchet dua kali dan menyimpan kunci pesan ke-2 di penyimpanan sementara (Skipped Keys) sampai pesan ke-2 itu benar-benar tiba.
+        const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
+        const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));
+        const signedPreKeySeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
+        
+        const encryptionKeyPair = sodium.crypto_box_seed_keypair(encryptionSeed);
+        const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
+        const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
+        
+        try {
+          const encryptedPrivateKeys = await storePrivateKeys({
+            encryption: encryptionKeyPair.privateKey,
+            signing: signingKeyPair.privateKey,
+            signedPreKey: signedPreKeyPair.privateKey,
+            masterSeed: masterSeed
+          }, newPassword);
 
+          // BUAT DIGITAL SIGNATURE
+          const messageString = `${identifier}:${timestamp}`;
+          const messageBytes = new TextEncoder().encode(messageString);
+          const signature = sodium.crypto_sign_detached(messageBytes, signingKeyPair.privateKey);
 
-  ---
+          result = {
+            encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
+            signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
+            encryptedPrivateKeys,
+            signatureB64: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING)
+          };
+        } finally {
+          sodium.memzero(masterSeed);
+          sodium.memzero(encryptionSeed);
+          sodium.memzero(signingSeed);
+          sodium.memzero(signedPreKeySeed);
+          sodium.memzero(encryptionKeyPair.privateKey);
+          sodium.memzero(signingKeyPair.privateKey);
+          sodium.memzero(signedPreKeyPair.privateKey);
+        }
+        break;
+      }
 
-  2. Desain Arsitektur Double Ratchet untuk NYX
+```
 
+### 2. Update Proxy (`web/src/lib/crypto-worker-proxy.ts`)
 
-  A. Struktur State (Ratchet State)
-  Kita harus mengubah skema penyimpanan di IndexedDB. Alih-alih menyimpan sessionKey: Uint8Array, kita akan menyimpan state terenkripsi yang
-  berisi:
-   * RootKey (32 bytes): Kunci utama untuk menurunkan Chain Keys baru.
-   * SenderChainKey (32 bytes): Untuk mengirim pesan.
-   * ReceiverChainKey (32 bytes): Untuk menerima pesan.
-   * MessageNumber (Int): Nomor pesan terkirim di chain saat ini.
-   * PreviousChainLength (Int): Jumlah pesan di chain penerima sebelum rotasi DH terakhir.
-   * MyRatchetKeyPair (Private/Public): Kunci Curve25519 (ECDH) milik kita yang akan terus diganti.
-   * TheirRatchetPublicKey (Public): Kunci ECDH terakhir milik lawan bicara.
+*Tambahkan fungsi wrapper public untuk memanggil case di atas:*
 
+```typescript
+export async function recoverAccountWithSignature(
+  phrase: string, 
+  newPassword: string, 
+  identifier: string, 
+  timestamp: number
+): Promise<{
+  encryptionPublicKeyB64: string,
+  signingPublicKeyB64: string,
+  encryptedPrivateKeys: string,
+  signatureB64: string
+}> {
+  return sendToWorker('recoverAccountWithSignature', { phrase, newPassword, identifier, timestamp });
+}
 
-  B. Struktur Header Pesan (Double Ratchet Header)
-  Setiap ciphertext yang dikirim harus dilengkapi header yang tidak dienkripsi (tapi bisa di-autentikasi / AAD). Di NYX, kita akan memodifikasi
-  payload JSON dari:
-   1 { "ciphertext": "..." }
-  Menjadi:
+```
 
+### 3. Update Backend (`server/src/routes/auth.ts`)
 
-   1 {
-   2   "dr": {
-   3     "epk": "Base64(My_Current_Ratchet_Public_Key)",
-   4     "n": 5, // Message Number
-   5     "pn": 2 // Previous Chain Length
-   6   },
-   7   "ciphertext": "..."
-   8 }
+*Tambahkan endpoint baru khusus untuk Recovery. Pastikan kamu import `getSodium` di dalam router jika belum ada, atau gunakan library `sodium-native` / `libsodium-wrappers` yang sudah ada di server.*
+*(Letakkan endpoint ini sebelum `export default router`)*
 
-  ---
+```typescript
+// === ZERO-KNOWLEDGE ACCOUNT RECOVERY ===
+router.post('/recover', authLimiter, zodValidate({
+  body: z.object({
+    identifier: z.string().min(1),
+    newPassword: z.string().min(8),
+    newEncryptedKeys: z.string(),
+    signature: z.string(),
+    timestamp: z.number()
+  })
+}), async (req, res, next) => {
+  try {
+    const { identifier, newPassword, newEncryptedKeys, signature, timestamp } = req.body;
 
-  3. Rencana Alur Kerja (Implementation Workflow)
+    // 1. Cegah Replay Attack (Maksimal 5 menit)
+    const now = Date.now();
+    if (Math.abs(now - timestamp) > 5 * 60 * 1000) {
+       throw new ApiError(400, "Recovery request expired.");
+    }
 
+    // 2. Cari User
+    const user = await prisma.user.findFirst({
+      where: { OR: [{ email: identifier }, { username: identifier }] }
+    });
+    if (!user || !user.signingKey) throw new ApiError(404, "User not found or invalid keys.");
 
-  Implementasi ini cukup masif dan harus dilakukan dalam 4 fase (PR) yang terpisah agar tidak merusak sistem yang ada.
+    // 3. Verifikasi Signature menggunakan libsdoium
+    const { getSodium } = await import('../lib/sodium.js'); // Sesuaikan path import sodium server-mu
+    const sodium = await getSodium();
+    
+    const messageString = `${identifier}:${timestamp}`;
+    const messageBytes = Buffer.from(messageString, 'utf-8');
+    const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
+    const publicKeyBytes = sodium.from_base64(user.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
+    const isValid = sodium.crypto_sign_verify_detached(signatureBytes, messageBytes, publicKeyBytes);
+    if (!isValid) {
+       throw new ApiError(401, "Cryptographic signature verification failed. Invalid phrase.");
+    }
 
-  Fase 1: Fondasi Kriptografi (Worker Update)
-   1. Implementasi HKDF: Menambahkan fungsi HKDF-SHA256 ke dalam crypto.worker.ts menggunakan crypto.subtle.
-   2. Fungsi Ratchet Step:
-       * KdfRoot(RootKey, DH_Output) -> [NewRootKey, ChainKey]
-       * KdfChain(ChainKey) -> [NewChainKey, MessageKey]
-   3. Double Ratchet Init: Memodifikasi worker_x3dh_initiator dan worker_x3dh_recipient agar alih-alih mengembalikan satu sessionKey, mereka
-      mengembalikan struktur RatchetState awal.
+    // 4. Update Password dan Keys di Database
+    const passwordHash = await hashPassword(newPassword);
+    
+    // Revoke old sessions
+    await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
 
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: { 
+        passwordHash, 
+        encryptedPrivateKey: newEncryptedKeys 
+      }
+    });
 
-  Fase 2: Penyimpanan Lokal (State & Skipped Keys)
-   1. Refactor `keychainDb.ts`:
-       * Ubah SESSION_KEYS_STORE_NAME agar bisa menyimpan objek RatchetState yang dienkripsi dengan Master Seed.
-       * Tambahkan Object Store baru: skipped-message-keys (menyimpan kunci pesan yang datang out-of-order agar bisa didekripsi nanti).
+    // 5. Terbitkan Token Baru (Auto Login)
+    const tokens = await issueTokens(updatedUser, req);
+    setAuthCookies(res, tokens);
 
+    res.json({ message: "Account recovered successfully.", accessToken: tokens.access });
+  } catch (e) {
+    next(e);
+  }
+});
 
-  Fase 3: Modifikasi Alur Pengiriman (sendMessage)
-   1. Setiap memanggil sendMessage, panggil worker untuk:
-       * Lakukan Symmetric-key Ratchet (putar SenderChainKey menjadi kunci pesan baru).
-       * Gunakan MessageKey tersebut untuk enkripsi pesan.
-       * Naikkan MessageNumber (+1).
-       * Simpan RatchetState terbaru ke IndexedDB.
-   2. Sisipkan properti dr: { epk, n, pn } ke dalam payload JSON.
+```
 
+### 4. Update Frontend UI (`web/src/pages/Restore.tsx`)
 
-  Fase 4: Modifikasi Alur Penerimaan (addIncomingMessage)
-   1. Saat menerima pesan, baca header dr.
-   2. Cek apakah pesan ini sudah ada di skipped-message-keys. Jika ada, langsung dekripsi.
-   3. DH Ratchet (Jika Ephemeral Key Berubah): Jika dr.epk berbeda dari TheirRatchetPublicKey di state kita, artinya lawan bicara sudah mengganti
-      kuncinya.
-       * Kita hitung DH baru (Kunci Privat kita * Kunci Publik dia yang baru).
-       * Jalankan KdfRoot untuk mendapatkan ReceiverChainKey baru.
-       * Ganti Kunci Privat kita dengan yang baru (generate keypair baru), hitung DH lagi untuk mendapatkan SenderChainKey baru.
-   4. Symmetric Ratchet: Lakukan iterasi KdfChain pada ReceiverChainKey sampai nomor pesannya cocok dengan dr.n. (Jika ada pesan yang terlewat,
-      simpan kunci-kuncinya di skipped-message-keys).
-   5. Gunakan kunci pesan terakhir untuk mendekripsi ciphertext.
-   6. Simpan RatchetState terbaru ke IndexedDB.
+*Rombak halaman restore agar meminta identifier (Email/Username), lalu memanggil API endpoint yang baru:*
 
-  ---
+```tsx
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { FiKey, FiUpload } from 'react-icons/fi';
+import toast from 'react-hot-toast';
+import { Spinner } from '@components/Spinner';
+import { recoverAccountWithSignature } from '@lib/crypto-worker-proxy';
+import { saveEncryptedKeys } from '@lib/keyStorage';
+import { useAuthStore } from '@store/auth';
+import { api } from '@lib/api';
 
+export default function RestorePage() {
+  const [identifier, setIdentifier] = useState('');
+  const [phrase, setPhrase] = useState('');
+  const [password, setPassword] = useState('');
+  const [isRestoring, setIsRestoring] = useState(false);
+  const navigate = useNavigate();
 
-  4. Tantangan & Mitigasi Keamanan
+  const handleRestore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!identifier || !phrase.trim() || !password) {
+      toast.error("Please fill in all fields.");
+      return;
+    }
+    setIsRestoring(true);
+    try {
+      const trimmedPhrase = phrase.trim().toLowerCase();
+      const timestamp = Date.now();
+      
+      // 1. Generate keys & Sign Payload locally
+      const {
+        encryptedPrivateKeys,
+        signatureB64
+      } = await recoverAccountWithSignature(trimmedPhrase, password, identifier, timestamp);
 
+      if (!encryptedPrivateKeys || !signatureB64) {
+        throw new Error("Failed to generate recovery payload.");
+      }
 
-   1. Sinkronisasi Backup Server (`/sync`):
-       * Tantangan: Saat ini kita me-backup sessionKey statis ke server. Dengan Double Ratchet, State terus berubah setiap ada pesan. Mem-backup
-         state terus-menerus akan membebani server dan rentan race condition jika user login di dua device bersamaan.
-       * Mitigasi: Standar Signal Protocol tidak menyarankan sinkronisasi state antar device. Device baru (Linked Device) biasanya memulai sesi
-         (Session/Ratchet) yang benar-benar baru dengan lawan bicara (Multi-device architecture).
-       * Keputusan Arsitektur: Kita harus mengubah strategi. Untuk saat ini, kita bisa memilih untuk mem-backup state hanya secara berkala (misal
-         tiap 10 pesan) ATAU tidak mem-backupnya sama sekali (device baru = chat history kosong, mulai baru, layaknya Signal asli). Ini butuh
-         keputusan bisnismu.
+      // 2. Send Cryptographic Proof to Server
+      const res = await api<{ accessToken: string }>('/api/auth/recover', {
+        method: 'POST',
+        body: JSON.stringify({
+          identifier,
+          newPassword: password,
+          newEncryptedKeys: encryptedPrivateKeys,
+          signature: signatureB64,
+          timestamp
+        })
+      });
 
+      // 3. Save to local storage & finalize login
+      await saveEncryptedKeys(encryptedPrivateKeys);
+      useAuthStore.getState().setHasRestoredKeys(true);
+      
+      // Force fetch user profile to complete login state
+      await useAuthStore.getState().fetchProfile();
 
-   2. Out-of-Order Delivery (Pesan Tersendat):
-       * Jika jaringan buruk, algoritma ini menuntut penyimpanan sementara (Max Skip Limits, misal 1000 pesan). Jika lebih dari 1000 pesan
-         terlewat, sesi dianggap rusak dan butuh X3DH ulang.
+      toast.success('Account successfully recovered! Welcome back.');
+      navigate('/');
 
-  ---
+    } catch (error: any) {
+      console.error("Restore failed:", error);
+      if (error.message?.includes('mnemonic')) {
+        toast.error("Invalid recovery phrase. Please check for typos.");
+      } else {
+        toast.error(error.message || "Recovery failed. Please verify your details.");
+      }
+    } finally {
+      setIsRestoring(false);
+    }
+  };
 
-  Kesimpulan
+  return (
+    <div className="min-h-screen w-full flex flex-col items-center justify-center bg-bg-main text-text-primary p-4 font-mono">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <div className="inline-flex p-4 rounded-full bg-bg-surface shadow-neumorphic-convex mb-4 text-accent">
+             <FiKey size={40} />
+          </div>
+          <h1 className="text-2xl font-black uppercase tracking-[0.2em] text-text-primary">Account Recovery</h1>
+          <p className="text-xs text-text-secondary mt-2 tracking-widest uppercase">
+            Zero-Knowledge Password Reset
+          </p>
+        </div>
+        
+        <form onSubmit={handleRestore} className="bg-bg-surface p-8 rounded-2xl shadow-neumorphic-convex border border-white/5 relative overflow-hidden">
+          <div className="space-y-6">
+            <div className="form-control">
+              <label className="label mb-2 block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Email or Username</span>
+              </label>
+              <input
+                type="text"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                className="w-full p-4 rounded-xl bg-bg-main text-text-primary font-mono text-sm shadow-neumorphic-concave focus:outline-none focus:ring-1 focus:ring-accent/50"
+                placeholder="USER_ID..."
+                required
+              />
+            </div>
+            <div className="form-control">
+              <label className="label mb-2 block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Recovery Phrase</span>
+              </label>
+              <textarea
+                value={phrase}
+                onChange={(e) => setPhrase(e.target.value)}
+                className="w-full h-24 p-4 rounded-xl resize-none bg-bg-main text-text-primary font-mono text-sm shadow-neumorphic-concave focus:outline-none focus:ring-1 focus:ring-accent/50"
+                placeholder="ENTER_12_WORD_SEED_PHRASE..."
+                required
+              />
+            </div>
+            <div className="form-control">
+              <label className="label mb-2 block">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">New Server Password</span>
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full p-4 rounded-xl bg-bg-main text-text-primary font-mono text-sm shadow-neumorphic-concave focus:outline-none focus:ring-1 focus:ring-accent/50"
+                placeholder="SET_NEW_PASSWORD..."
+                required
+              />
+            </div>
+          </div>
+          <div className="mt-8">
+            <button 
+              type="submit" 
+              className="w-full py-4 rounded-xl font-bold uppercase tracking-wider text-sm bg-accent text-white shadow-neumorphic-convex active:shadow-neumorphic-pressed hover:brightness-110 flex items-center justify-center gap-3" 
+              disabled={isRestoring}
+            >
+              {isRestoring ? <Spinner size="sm" className="text-white" /> : <FiUpload />}
+              {isRestoring ? 'VERIFYING...' : 'RECOVER_ACCOUNT'}
+            </button>
+          </div>
+        </form>
+        <div className="mt-8 text-center">
+          <Link to="/login" className="text-xs font-mono text-text-secondary hover:text-accent uppercase tracking-widest transition-colors">
+            [ ABORT_SEQUENCE ]
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
 
+```
 
-  Sistem NYX saat ini sudah sangat kokoh sebagai pijakan. Menuju Double Ratchet adalah evolusi alami. Namun, perubahan ini akan merombak total
-  bagaimana state sesi disimpan dan dikelola.
+*Harap pastikan impor file utilitas sodium di rute backend (`server/src/routes/auth.ts`) menggunakan import path yang benar sesuai struktur kodemu (`import { getSodium } from '../lib/sodium.js';`). Eksekusi keempat poin di atas.*"
+
