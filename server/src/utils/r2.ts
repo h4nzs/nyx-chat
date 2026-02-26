@@ -9,11 +9,10 @@ export const s3Client = new S3Client({
     accessKeyId: env.r2AccessKeyId,
     secretAccessKey: env.r2SecretAccessKey
   },
-  // 1. INI MEMBUNUH BUG CRC32 (AAAAAA==)
-  forcePathStyle: true,
-  requestChecksumCalculation: "WHEN_REQUIRED"
+  // Nggak usah pake forcePathStyle, biar R2 pake default-nya
 })
 
+// Generate URL upload yang valid selama 5 menit
 export const getPresignedUploadUrl = async (key: string, contentType: string) => {
   const command = new PutObjectCommand({
     Bucket: env.r2BucketName,
@@ -23,13 +22,14 @@ export const getPresignedUploadUrl = async (key: string, contentType: string) =>
 
   const url = await getSignedUrl(s3Client, command, { 
     expiresIn: 300,
-    // 2. KITA KEMBALIKAN INI BIAR CONTENT-TYPE IKUT DITANDATANGANI!
-    signableHeaders: new Set(['host', 'content-type']) 
+    // 👇 INI MAGIC SAUCE-NYA: Kita HANYA sign content-type, HOST KITA TENDANG! 👇
+    signableHeaders: new Set(['content-type']) 
   })
 
   return url
 }
 
+// Hapus file
 export const deleteR2File = async (key: string) => {
   const command = new DeleteObjectCommand({
     Bucket: env.r2BucketName,
