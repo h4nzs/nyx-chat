@@ -634,24 +634,44 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
 
       socket?.emit("message:send", { ...payload, conversationId, tempId: actualTempId }, async (res: { ok: boolean, msg?: Message, error?: string }) => {
-        if (!isReactionPayload) {
-            if (res.ok && res.msg) {
-              get().replaceOptimisticMessage(conversationId, actualTempId, { ...res.msg, status: 'SENT' });
+        if (res.ok && res.msg) {
+            if (!isReactionPayload) {
+                get().replaceOptimisticMessage(conversationId, actualTempId, { ...res.msg, status: 'SENT' });
+            } else {
+                // [FIX] Replace Optimistic Reaction ID
+                // contentToEncrypt is the original plaintext JSON string of the reaction
+                const reactionData = parseReaction(contentToEncrypt);
+                if (reactionData) {
+                    const tempReactionId = `temp_react_${actualTempId}`;
+                    get().replaceOptimisticReaction(conversationId, reactionData.targetMessageId, tempReactionId, {
+                        ...reactionData,
+                        id: res.msg.id, // REAL ID FROM SERVER
+                        userId: user.id,
+                        createdAt: res.msg.createdAt,
+                        user: user,
+                        isMessage: true
+                    });
+                }
+            }
               
-              // LINK MESSAGE KEY FROM TEMP ID TO PERMANENT ID
-              const msgId = res.msg.id;
-              // We don't need to pass the raw key again, just tell store to copy/move if needed.
-              // But since we can't move keys easily in IDB without reading, we read from temp and write to real.
-              import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
-                 const mk = await retrieveMessageKeySecurely(`temp_${actualTempId}`);
-                 if (mk) {
-                     await storeMessageKeySecurely(msgId, mk);
-                     await deleteMessageKeySecurely(`temp_${actualTempId}`); // Clean up temp key
-                 }
-              }).catch(console.error);
+            // LINK MESSAGE KEY FROM TEMP ID TO PERMANENT ID
+            const msgId = res.msg.id;
+            // We don't need to pass the raw key again, just tell store to copy/move if needed.
+            // But since we can't move keys easily in IDB without reading, we read from temp and write to real.
+            import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
+                const mk = await retrieveMessageKeySecurely(`temp_${actualTempId}`);
+                if (mk) {
+                    await storeMessageKeySecurely(msgId, mk);
+                    await deleteMessageKeySecurely(`temp_${actualTempId}`); // Clean up temp key
+                }
+            }).catch(console.error);
               
-            } else if (!res.ok) {
-              get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
+        } else if (!res.ok) {
+            if (!isReactionPayload) {
+                get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
+            } else {
+                // TODO: Handle failed reaction UI feedback
+                toast.error("Failed to send reaction");
             }
         }
       });
