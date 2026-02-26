@@ -12,14 +12,14 @@ export async function uploadToR2(
   onProgress?: (percent: number) => void
 ): Promise<string> {
   
-  // 1. Minta Presigned URL ke Server kita
   let presignedResponse: PresignedResponse;
   try {
     presignedResponse = await api<PresignedResponse>('/api/uploads/presigned', {
       method: 'POST',
       body: JSON.stringify({
         fileName: (file as File).name || 'blob',
-        fileType: file.type,
+        // 👇 UBAH BARIS INI! Jangan pake file.type lagi! 👇
+        fileType: 'application/octet-stream', 
         folder,
         fileSize: file.size
       })

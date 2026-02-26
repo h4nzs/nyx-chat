@@ -10,6 +10,8 @@ export const s3Client = new S3Client({
     secretAccessKey: env.r2SecretAccessKey
   },
   // Nggak usah pake forcePathStyle, biar R2 pake default-nya
+  forcePathStyle: true,
+  requestChecksumCalculation: 'WHEN_REQUIRED'
 })
 
 // Generate URL upload yang valid selama 5 menit
