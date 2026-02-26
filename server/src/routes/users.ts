@@ -19,6 +19,11 @@ router.get('/search', async (req, res, next) => {
     }
 
     // q adalah usernameHash yang dikirim client
+    
+    // SANDBOX CHECK
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { isVerified: true } });
+    const limit = user?.isVerified ? 20 : 3;
+
     const users = await prisma.user.findMany({
       where: {
         AND: [
@@ -32,7 +37,7 @@ router.get('/search', async (req, res, next) => {
         isVerified: true,
         publicKey: true
       },
-      take: 5
+      take: limit
     })
 
     res.json(users)

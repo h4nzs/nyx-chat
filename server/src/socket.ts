@@ -316,7 +316,19 @@ export function registerSocket(httpServer: HttpServer) {
     });
 
     socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: Message, error?: string }) => void) => {
-      // 1. Rate Limit
+      // 1. Sandbox Rate Limit (Strict)
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
+      if (!user?.isVerified) {
+          const key = `sandbox:msg:${userId}`;
+          const count = await redisClient.incr(key);
+          if (count === 1) await redisClient.expire(key, 60);
+          
+          if (count > 5) {
+              return callback?.({ ok: false, error: "SANDBOX_LIMIT_REACHED: Max 5 messages per minute. Verify account to unlock." });
+          }
+      }
+
+      // 2. Standard Rate Limit
       if (!await checkRateLimit(userId, 'message', 15, 60)) { // 15 messages / minute
          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
       }

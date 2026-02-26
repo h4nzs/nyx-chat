@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
 import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
 import { ApiError } from '../utils/errors.js'
+import { redisClient } from '../lib/redis.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -83,6 +84,14 @@ router.post('/', async (req, res, next) => {
       return res.status(400).json({ error: 'userIds must be an array.' })
     }
 
+    // SANDBOX CHECK
+    const user = await prisma.user.findUnique({ where: { id: creatorId }, select: { isVerified: true } });
+    const isVerified = user?.isVerified ?? false;
+
+    if (!isVerified && isGroup) {
+        throw new ApiError(403, 'SANDBOX_GROUP_RESTRICTION: Unverified users cannot create groups.');
+    }
+
     if (userIds.length > MAX_GROUP_MEMBERS) {
       return res.status(400).json({ error: `Group cannot have more than ${MAX_GROUP_MEMBERS} members.` })
     }
@@ -103,6 +112,18 @@ router.post('/', async (req, res, next) => {
       })
 
       if (existingConversation) return res.status(200).json(existingConversation)
+        
+      // SANDBOX DM LIMIT (Only for NEW conversations)
+      if (!isVerified) {
+          const today = new Date().toISOString().split('T')[0];
+          const key = `sandbox:newchat:${creatorId}:${today}`;
+          const count = await redisClient.incr(key);
+          if (count === 1) await redisClient.expire(key, 86400); // 24h
+          
+          if (count > 3) {
+              throw new ApiError(429, 'SANDBOX_NEW_CHAT_LIMIT: Max 3 new conversations per day.');
+          }
+      }
     }
 
     const allUserIds = Array.from(new Set([...userIds, creatorId]))
