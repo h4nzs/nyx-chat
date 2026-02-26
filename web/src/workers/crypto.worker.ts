@@ -732,23 +732,32 @@ self.onmessage = async (event: MessageEvent) => {
         
         const saltBytes = new TextEncoder().encode(salt);
         
+        // Helper to convert buffer to hex
+        const toHex = (buffer: ArrayBuffer) => {
+            return Array.from(new Uint8Array(buffer))
+                .map(b => b.toString(16).padStart(2, '0'))
+                .join('');
+        };
+
         // Loop until we find a hash starting with targetPrefix
-        // Add a safety break (e.g. 10 million iterations) or just let it run
-        // Web Workers run in background so blocking loop is fine for the worker thread
         while (!found) {
             const nonceStr = nonce.toString();
             const nonceBytes = new TextEncoder().encode(nonceStr);
+            
+            // Concatenate salt + nonce
             const input = new Uint8Array(saltBytes.length + nonceBytes.length);
             input.set(saltBytes);
             input.set(nonceBytes, saltBytes.length);
             
-            const hashBytes = sodium.crypto_hash_sha256(input);
-            hash = sodium.to_hex(hashBytes);
+            // Native Web Crypto SHA-256 (Faster & Reliable)
+            const hashBuffer = await crypto.subtle.digest('SHA-256', input);
+            hash = toHex(hashBuffer);
             
             if (hash.startsWith(targetPrefix)) {
                 found = true;
             } else {
                 nonce++;
+                // Optional: Yield to event loop every N iterations to check for aborts (not strictly needed for worker)
             }
         }
         
