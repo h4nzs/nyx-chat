@@ -237,8 +237,13 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
           try {
               const parsed = JSON.parse(plainText);
               if (parsed.profileKey) {
-                  import('@lib/keychainDb').then(m => m.saveProfileKey(decryptedMsg.senderId, parsed.profileKey));
-                  import('@store/profile').then(m => m.useProfileStore.getState().decryptAndCache(decryptedMsg.senderId, decryptedMsg.sender?.encryptedProfile || null));
+                  const { saveProfileKey } = await import('@lib/keychainDb');
+                  const { useProfileStore } = await import('@store/profile');
+                  
+                  await saveProfileKey(decryptedMsg.senderId, parsed.profileKey);
+                  
+                  // Trigger cache update immediately
+                  useProfileStore.getState().decryptAndCache(decryptedMsg.senderId, decryptedMsg.sender?.encryptedProfile || null);
                   
                   delete parsed.profileKey;
                   

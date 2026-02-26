@@ -15,19 +15,28 @@ export function useUserProfile(user?: { id: string; encryptedProfile?: string | 
   useEffect(() => {
     if (!user) return;
     
-    // Jika sudah ada di memori RAM, langsung pakai
-    if (profiles[user.id]) {
-      setProfile(profiles[user.id]);
-      return;
-    }
+    let isMounted = true;
 
-    // Jika belum, suruh store decrypt (async)
-    if (user.encryptedProfile) {
-      decryptAndCache(user.id, user.encryptedProfile).then(setProfile);
-    } else {
-      setProfile({ name: "Anonymous" }); // Jika user belum setup profil
-    }
-  }, [user, user?.encryptedProfile, profiles, decryptAndCache]);
+    const loadProfile = async () => {
+        // Jika sudah ada di memori RAM, langsung pakai
+        if (profiles[user.id]) {
+            setProfile(profiles[user.id]);
+            return;
+        }
+
+        // Jika belum, suruh store decrypt (async) - INI AKAN MENGECEK IDB
+        if (user.encryptedProfile) {
+            const decrypted = await decryptAndCache(user.id, user.encryptedProfile);
+            if (isMounted) setProfile(decrypted);
+        } else {
+            if (isMounted) setProfile({ name: "Anonymous" }); // Jika user belum setup profil
+        }
+    };
+
+    loadProfile();
+
+    return () => { isMounted = false; };
+  }, [user?.id, user?.encryptedProfile, profiles]); // Depend on profiles to trigger re-render when cache updates
 
   return profile;
 }
