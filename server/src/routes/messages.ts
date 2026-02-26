@@ -44,12 +44,12 @@ router.get('/:conversationId', async (req, res, next) => {
       orderBy: { createdAt: 'desc' }, // Ambil dari yang terbaru dulu
       include: {
         sender: {
-          select: { id: true, name: true, username: true, avatarUrl: true }
+          select: { id: true, encryptedProfile: true }
         },
         statuses: true,
         repliedTo: {
           include: {
-            sender: { select: { id: true, name: true, username: true } }
+            sender: { select: { id: true, encryptedProfile: true } }
           }
         }
       }
@@ -163,9 +163,9 @@ router.post('/', zodValidate({
           }
         },
         include: {
-          sender: { select: { id: true, name: true, username: true, avatarUrl: true } },
+          sender: { select: { id: true, encryptedProfile: true } },
           statuses: true,
-          repliedTo: { include: { sender: { select: { id: true, name: true } } } }
+          repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }
         }
       }),
       prisma.conversation.update({

@@ -145,8 +145,7 @@ router.get('/:userId', async (req, res, next) => {
         encryptedProfile: true,
         createdAt: true,
         publicKey: true,
-        isVerified: true,
-        lastActive: true
+        isVerified: true
       }
     })
 
