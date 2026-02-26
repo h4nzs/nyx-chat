@@ -338,7 +338,7 @@ export function registerSocket(httpServer: HttpServer) {
         
         const newMessage = await prisma.message.create({
           data: { conversationId, senderId: userId, content, sessionId },
-          include: { sender: { select: { id: true, name: true, avatarUrl: true, username: true } } }
+          include: { sender: { select: { id: true, encryptedProfile: true } } }
         });
         
         const finalMessage = { ...newMessage, tempId };
@@ -348,7 +348,7 @@ export function registerSocket(httpServer: HttpServer) {
           
           if (participant.userId !== userId) {
              sendPushNotification(participant.userId, {
-                 title: newMessage.sender.name || newMessage.sender.username,
+                 title: "Encrypted Message",
                  body: "🔒 1 New Secure Message", 
                  conversationId: conversationId
              }).catch(console.error);
