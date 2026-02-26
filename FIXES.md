@@ -1,130 +1,40 @@
-*"Kita akan menyelesaikan Phase 4: 'The Key Delivery' dengan menyisipkan ProfileKey pengirim ke dalam payload pesan Double Ratchet, sehingga penerima dapat mendekripsi profil pengirim secara otomatis.*
+Setelah gw bedah daleman kode, ada 2 TERSANGKA UTAMA yang bikin R2 nendang request. Kita basmi dua-duanya sekarang:
+🔪 TERSANGKA 1: Bug AWS SDK v3 (Virtual Hosted-Style)
 
-*Tolong modifikasi file `web/src/store/message.ts` dengan presisi pada 3 titik berikut:*
+Coba lu perhatiin URL di error lu:
+https://chat-uploads.671c...
+AWS SDK secara default menggabungkan nama bucket (chat-uploads) ke depan Account ID lu. Ini bikin Host Header Signature yang dihitung sama SDK dan yang dikirim sama browser jadi BEDA, dan R2 benci banget sama ini.
 
-### STEP 1: Modifikasi fungsi `sendMessage` (Menyisipkan ProfileKey)
+Solusinya: Kita harus maksa AWS SDK buat pake gaya Path-Style.
+Buka server/src/utils/r2.ts lu, dan tambahin forcePathStyle: true di konfigurasinya:
+TypeScript
 
-Cari bagian di mana pesan dienkripsi:
+// server/src/utils/r2.ts
+export const s3Client = new S3Client({
+  region: 'auto',
+  endpoint: `https://${env.r2AccountId}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: env.r2AccessKeyId,
+    secretAccessKey: env.r2SecretAccessKey
+  },
+  forcePathStyle: true // <--- TAMBAHIN BARIS SAKTI INI!
+})
 
-```typescript
-      let mkToStore: Uint8Array | undefined;
+🔪 TERSANGKA 2: Content-Type Mismatch di Frontend
 
-      if (data.content) {
-        // Encrypt content
+Di Phase sebelumnya, kita udah ngerombak backend (server/src/routes/uploads.ts) biar SEMUA Presigned URL ditandatangani pakai tipe rahasia: application/octet-stream (karena filenya sekarang dienkripsi jadi data biner).
 
-```
+TAPI, di fungsi upload utama frontend lu (web/src/lib/r2.ts), lu masih nge- set header pakai file.type asli bawaan gambar (misal image/png). Kalau S3 disuruh nunggu kedatangan octet-stream, tapi yang datang malah image/png, dia otomatis ngelempar 403 Forbidden (CORS Error)!
 
-Ganti logika pembentukan `content` sebelum dikirim ke `encryptMessage` menjadi seperti ini:
+Buka web/src/lib/r2.ts, dan paksa Content-Type XHR-nya jadi octet-stream:
+TypeScript
 
-```typescript
-      let mkToStore: Uint8Array | undefined;
-      let contentToEncrypt = data.content;
+// web/src/lib/r2.ts
 
-      if (contentToEncrypt) {
-        // --- INJEKSI PROFILE KEY ---
-        try {
-            const profileKey = await import('@lib/keychainDb').then(m => m.getProfileKey(user.id));
-            if (profileKey) {
-                let parsedObj: any = null;
-                if (contentToEncrypt.trim().startsWith('{')) {
-                    try { parsedObj = JSON.parse(contentToEncrypt); } catch (e) {}
-                }
-                
-                if (parsedObj && typeof parsedObj === 'object') {
-                    parsedObj.profileKey = profileKey;
-                    contentToEncrypt = JSON.stringify(parsedObj);
-                } else {
-                    contentToEncrypt = JSON.stringify({ text: contentToEncrypt, profileKey });
-                }
-            }
-        } catch (e) {
-            console.error("Failed to inject profile key", e);
-        }
-        // ---------------------------
+  // Cari baris ini di dalam Promise:
+  // xhr.setRequestHeader('Content-Type', file.type);
+  
+  // GANTI JADI BEGINI:
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream'); // HARUS SAMA PERSIS KAYA DI BACKEND!
 
-        // Encrypt content (gunakan contentToEncrypt)
-        const result = await encryptMessage(contentToEncrypt, conversationId, isGroup, undefined, `temp_${actualTempId}`);
-
-```
-
-### STEP 2: Modifikasi `decryptMessageObject` - Main Branch (Mengekstrak ProfileKey)
-
-Cari blok di mana hasil dekripsi Double Ratchet sukses:
-
-```typescript
-    // 5. Proses Hasil
-    if (result?.status === 'success') {
-      const plainText = result.value;
-      decryptedMsg.content = plainText;
-
-```
-
-Ubah menjadi seperti ini untuk menangkap dan menyimpan ProfileKey:
-
-```typescript
-    // 5. Proses Hasil
-    if (result?.status === 'success') {
-      let plainText = result.value;
-
-      // --- EKSTRAKSI PROFILE KEY DARI PENERIMA ---
-      if (plainText && plainText.trim().startsWith('{')) {
-          try {
-              const parsed = JSON.parse(plainText);
-              if (parsed.profileKey) {
-                  import('@lib/keychainDb').then(m => m.saveProfileKey(decryptedMsg.senderId, parsed.profileKey));
-                  import('@store/profile').then(m => m.useProfileStore.getState().decryptAndCache(decryptedMsg.senderId, decryptedMsg.sender?.encryptedProfile || null));
-                  
-                  delete parsed.profileKey;
-                  
-                  if (parsed.text !== undefined && Object.keys(parsed).length === 1) {
-                      plainText = parsed.text;
-                  } else {
-                      plainText = JSON.stringify(parsed);
-                  }
-              }
-          } catch (e) {}
-      }
-      // ------------------------------------------
-
-      decryptedMsg.content = plainText;
-
-```
-
-### STEP 3: Modifikasi `decryptMessageObject` - Self Message Branch
-
-Cari bagian dekripsi pesan sendiri (di awal try block):
-
-```typescript
-                const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
-                
-                decryptedMsg.content = sodium.to_string(decryptedBytes);
-
-```
-
-Ubah menjadi seperti ini agar pesan sendiri yang berformat JSON wrapper tidak tampil sebagai objek string di UI:
-
-```typescript
-                const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
-                let plainText = sodium.to_string(decryptedBytes);
-                
-                // --- STRIP PROFILE KEY DARI PESAN SENDIRI ---
-                if (plainText && plainText.trim().startsWith('{')) {
-                    try {
-                        const parsed = JSON.parse(plainText);
-                        if (parsed.profileKey) {
-                            delete parsed.profileKey;
-                            if (parsed.text !== undefined && Object.keys(parsed).length === 1) {
-                                plainText = parsed.text;
-                            } else {
-                                plainText = JSON.stringify(parsed);
-                            }
-                        }
-                    } catch (e) {}
-                }
-                // --------------------------------------------
-                
-                decryptedMsg.content = plainText;
-
-```
-
-*Terapkan modifikasi ini dengan hati-hati agar tidak merusak logika X3DH yang ada di dalam `decryptMessageObject` dan `sendMessage`.*"
+(Catatan: Meskipun lu ngirim attachment di chat lewat message.ts yang udah bener, fungsi upload avatar di Settings dan beberapa fungsi cadangan masih pake r2.ts ini, jadi harus disamain semua!)

@@ -38,7 +38,7 @@ export async function uploadToR2(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', uploadUrl);
-    xhr.setRequestHeader('Content-Type', file.type);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
 
     // Handle Progress
     xhr.upload.onprogress = (event) => {
