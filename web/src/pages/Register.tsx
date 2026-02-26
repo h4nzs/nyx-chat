@@ -114,6 +114,7 @@ export default function Register() {
             onSubmit={handleRegister}
             button="Initialize Identity"
             hideEmail={true} 
+            isRegister={true}
           />
 
           {/* Turnstile Widget */}

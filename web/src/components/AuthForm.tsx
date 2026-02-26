@@ -3,7 +3,7 @@ import Alert from './Alert'
 import { Spinner } from './Spinner';
 import { handleApiError } from '@lib/api';
 
-export default function AuthForm({ onSubmit, button, hideEmail = false }: { onSubmit: (v: { a: string; b?: string; c?: string; d?: string; name?: string }) => Promise<void>; button: string; hideEmail?: boolean }) {
+export default function AuthForm({ onSubmit, button, hideEmail = false, isRegister = false }: { onSubmit: (v: { a: string; b?: string; c?: string; d?: string; name?: string }) => Promise<void>; button: string; hideEmail?: boolean; isRegister?: boolean }) {
   const [emailOrUsername, setA] = useState('')
   const [password, setB] = useState('')
   const [email, setC] = useState('')
@@ -49,7 +49,7 @@ export default function AuthForm({ onSubmit, button, hideEmail = false }: { onSu
     >
       {err ? <Alert message={err} /> : null}
 
-      {button === 'Sign Up' ? (
+      {isRegister ? (
         <>
           <div className="relative">
             <input
