@@ -189,7 +189,7 @@ router.post('/', zodValidate({
     if (pushRecipients.length > 0) {
       const pushBody = 'New message' // Generic for privacy
       const payload = {
-        title: req.user.username || 'New Message',
+        title: 'Encrypted Message',
         body: pushBody,
         data: { conversationId, messageId: newMessage.id }
       }

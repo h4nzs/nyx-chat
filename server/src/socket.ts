@@ -169,7 +169,7 @@ export function registerSocket(httpServer: HttpServer) {
       // OPTIMIZATION: Select publicKey here
       const user = await prisma.user.findUnique({ 
         where: { id: userId },
-        select: { id: true, email: true, username: true, publicKey: true }
+        select: { id: true, publicKey: true }
       });
 
       if (!user) {
@@ -179,8 +179,6 @@ export function registerSocket(httpServer: HttpServer) {
 
       socket.user = { 
         id: user.id, 
-        email: user.email, 
-        username: user.username,
         publicKey: user.publicKey 
       };
       next();
@@ -230,46 +228,6 @@ export function registerSocket(httpServer: HttpServer) {
         socket.emit("presence:init", onlineUserIds);
         socket.broadcast.emit("presence:user_joined", userId);
     }
-
-    // --- FITUR LINKING DEVICE (Sisi Scanner/HP Lama) ---
-    socket.on("linking:send_payload", async (data: { roomId: string, encryptedMasterKey: string }) => {
-      
-      try {
-        const user = socket.user!;
-
-        // 1. Generate Token Baru untuk device baru
-        // Kita pakai fungsi signAccessToken agar token valid & fresh
-        const accessToken = signAccessToken({
-            id: user.id,
-            email: user.email,
-            username: user.username
-        });
-
-        const jti = newJti();
-        const refreshToken = signAccessToken({ sub: user.id, jti }, { expiresIn: "30d" });
-
-        await prisma.refreshToken.create({
-          data: { 
-            jti, 
-            userId: user.id, 
-            expiresAt: refreshExpiryDate(), 
-            ipAddress: socket.handshake.address, 
-            userAgent: socket.handshake.headers['user-agent'] as string 
-          },
-        });
-
-        // 2. Kirim paket lengkap ke Device Baru (Guest di Room)
-        io.to(`linking:${data.roomId}`).emit("auth:linking_success", {
-            accessToken, 
-            refreshToken,
-            user,           
-            encryptedMasterKey: data.encryptedMasterKey 
-        });
-
-      } catch (e) {
-        console.error("[Linking] Failed to sign token or send payload:", e);
-      }
-    });
 
     // --- RATE LIMITER HELPER ---
     const checkRateLimit = async (userId: string, event: string, limit: number, windowSeconds: number): Promise<boolean> => {
