@@ -20,7 +20,10 @@ export const getPresignedUploadUrl = async (key: string, contentType: string) =>
     ContentType: contentType
   })
 
-  const url = await getSignedUrl(s3Client, command, { expiresIn: 300 })
+  const url = await getSignedUrl(s3Client, command, { 
+    expiresIn: 300,
+    signableHeaders: new Set(['host', 'content-type'])
+  })
 
   return url
 }

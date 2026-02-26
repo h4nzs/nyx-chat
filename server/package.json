@@ -17,8 +17,8 @@
   "author": "h4nzs",
   "license": "ISC",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.974.0",
-    "@aws-sdk/s3-request-presigner": "^3.974.0",
+    "@aws-sdk/client-s3": "^3.998.0",
+    "@aws-sdk/s3-request-presigner": "^3.998.0",
     "@google/generative-ai": "^0.24.1",
     "@prisma/client": "^5.14.0",
     "@simplewebauthn/server": "^13.2.2",
