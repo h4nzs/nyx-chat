@@ -142,8 +142,8 @@ router.post(
         where: { id: userId },
         data: { avatarUrl: fileUrl },
         select: {
-          id: true, email: true, username: true, name: true, avatarUrl: true,
-          description: true, showEmailToOthers: true, hasCompletedOnboarding: true
+          id: true, encryptedProfile: true, avatarUrl: true,
+          hasCompletedOnboarding: true, isVerified: true
         }
       })
 
@@ -187,11 +187,11 @@ router.post(
         include: {
           participants: {
             select: {
-              user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } },
+              user: { select: { id: true, encryptedProfile: true, publicKey: true } },
               role: true
             }
           },
-          creator: { select: { id: true, username: true } }
+          creator: { select: { id: true } }
         }
       })
 
