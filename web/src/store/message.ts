@@ -76,8 +76,25 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
                 const nonce = combined.slice(0, 24);
                 const encrypted = combined.slice(24);
                 const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
+                let plainText = sodium.to_string(decryptedBytes);
                 
-                decryptedMsg.content = sodium.to_string(decryptedBytes);
+                // --- STRIP PROFILE KEY DARI PESAN SENDIRI ---
+                if (plainText && plainText.trim().startsWith('{')) {
+                    try {
+                        const parsed = JSON.parse(plainText);
+                        if (parsed.profileKey) {
+                            delete parsed.profileKey;
+                            if (parsed.text !== undefined && Object.keys(parsed).length === 1) {
+                                plainText = parsed.text;
+                            } else {
+                                plainText = JSON.stringify(parsed);
+                            }
+                        }
+                    } catch (e) {}
+                }
+                // --------------------------------------------
+                
+                decryptedMsg.content = plainText;
                 // Handle blind attachment if needed
                 if (decryptedMsg.content && decryptedMsg.content.startsWith('{') && decryptedMsg.content.includes('"type":"file"')) {
                     try {
@@ -213,7 +230,28 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
 
     // 5. Proses Hasil
     if (result?.status === 'success') {
-      const plainText = result.value;
+      let plainText = result.value;
+
+      // --- EKSTRAKSI PROFILE KEY DARI PENERIMA ---
+      if (plainText && plainText.trim().startsWith('{')) {
+          try {
+              const parsed = JSON.parse(plainText);
+              if (parsed.profileKey) {
+                  import('@lib/keychainDb').then(m => m.saveProfileKey(decryptedMsg.senderId, parsed.profileKey));
+                  import('@store/profile').then(m => m.useProfileStore.getState().decryptAndCache(decryptedMsg.senderId, decryptedMsg.sender?.encryptedProfile || null));
+                  
+                  delete parsed.profileKey;
+                  
+                  if (parsed.text !== undefined && Object.keys(parsed).length === 1) {
+                      plainText = parsed.text;
+                  } else {
+                      plainText = JSON.stringify(parsed);
+                  }
+              }
+          } catch (e) {}
+      }
+      // ------------------------------------------
+
       decryptedMsg.content = plainText;
 
       // BLIND ATTACHMENT PARSING
@@ -518,10 +556,32 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
 
       let mkToStore: Uint8Array | undefined;
+      let contentToEncrypt = data.content;
 
-      if (data.content) {
-        // Encrypt content (encryptMessage now handles Ratchet state internally for 1-on-1)
-        const result = await encryptMessage(data.content, conversationId, isGroup, undefined, `temp_${actualTempId}`);
+      if (contentToEncrypt) {
+        // --- INJEKSI PROFILE KEY ---
+        try {
+            const profileKey = await import('@lib/keychainDb').then(m => m.getProfileKey(user.id));
+            if (profileKey) {
+                let parsedObj: any = null;
+                if (contentToEncrypt.trim().startsWith('{')) {
+                    try { parsedObj = JSON.parse(contentToEncrypt); } catch (e) {}
+                }
+                
+                if (parsedObj && typeof parsedObj === 'object') {
+                    parsedObj.profileKey = profileKey;
+                    contentToEncrypt = JSON.stringify(parsedObj);
+                } else {
+                    contentToEncrypt = JSON.stringify({ text: contentToEncrypt, profileKey });
+                }
+            }
+        } catch (e) {
+            console.error("Failed to inject profile key", e);
+        }
+        // ---------------------------
+
+        // Encrypt content (gunakan contentToEncrypt)
+        const result = await encryptMessage(contentToEncrypt, conversationId, isGroup, undefined, `temp_${actualTempId}`);
         ciphertext = result.ciphertext;
         
         // [FIX] Capture MK immediately before it's gone
