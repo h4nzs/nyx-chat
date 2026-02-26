@@ -1,84 +1,111 @@
-*"Kita akan membunuh fitur 'Device Linking' karena secara arsitektur itu merusak Perfect Forward Secrecy pada sistem Double Ratchet murni yang kita bangun. Sebagai gantinya, kita akan mengimplementasikan fitur 'Local Encrypted Backup (The NYX Vault)'.*
+*"Kita akan mengeksekusi Phase 2: 'Profile Encryption'. Tujuan kita adalah mengenkripsi data profil pengguna (Name, Bio, Avatar) di sisi klien sebelum dikirim ke server. Server hanya akan menyimpan teks acak (ciphertext).*
 
-*Karena semua object store di `keychainDb.ts` sudah terenkripsi secara at-rest oleh Master Seed, file hasil ekspor database ini sudah 100% aman secara default.*
+*Tolong lakukan perubahan presisi pada file-file berikut:*
 
-*Tolong eksekusi perombakan ini dalam 3 fase:*
+### STEP 1: Modifikasi Skema Database (`server/prisma/schema.prisma`)
 
-### FASE 1: THE PURGE (Hapus Device Linking)
+* Pada model `User`:
+* **HAPUS** kolom `name`, `avatarUrl`, dan `description`.
+* **TAMBAHKAN** kolom `encryptedProfile String? @db.Text`.
 
-*1. **Hapus File UI:** Hapus file `web/src/pages/LinkDevicePage.tsx` dan `web/src/pages/DeviceScannerPage.tsx` jika masih ada.*
-*2. **Update `App.tsx`:** Hapus rute (Route) yang mengarah ke `/link-device` atau scanner di dalam `web/src/App.tsx` dan hapus import-nya.*
-*3. **Update `auth.ts` (Backend):** Di file `server/src/routes/auth.ts`, hapus endpoint `POST /finalize-linking` beserta seluruh logic redis `linkingToken`-nya.*
 
-### FASE 2: THE VAULT CORE (Update `web/src/lib/keychainDb.ts`)
 
-*Tambahkan dua fungsi utilitas baru di bagian paling bawah `keychainDb.ts` untuk mengekstrak dan memasukkan kembali seluruh isi IndexedDB secara utuh menggunakan cursor:*
+### STEP 2: Rombak Backend Routes (`server/src/routes/auth.ts` & `server/src/routes/users.ts`)
+
+* **Di `auth.ts`:**
+* `POST /register`: Hapus validasi dan payload `name`. Ganti dengan menerima `encryptedProfile: z.string().optional()`. Simpan `encryptedProfile` saat `prisma.user.create`.
+* `POST /login` & `POST /webauthn/login/verify` & `POST /refresh`: Pada `select`, hapus `name`, `avatarUrl`, `description`. Ganti menjadi mengambil `encryptedProfile`.
+
+
+* **Di `users.ts`:**
+* `GET /me`, `GET /search`, `GET /:userId`, dan `POST /by-username`: Hapus semua pengambilan (select) dan kembalian (return) untuk `name`, `avatarUrl`, `description`. Ganti dengan `encryptedProfile`.
+* `PUT /me`: Ubah Zod validation untuk hanya menerima `encryptedProfile: z.string()`. Ubah logika update agar hanya meng-update field `encryptedProfile` di database.
+* Pada event emit socket `user:updated`, kirimkan object yang berisi `id` dan `encryptedProfile`.
+
+
+
+### STEP 3: Tambahkan Mesin Enkripsi di Worker (`web/src/workers/crypto.worker.ts`)
+
+* Tambahkan *case* baru di dalam `self.onmessage` switch untuk enkripsi profil menggunakan libsodium (XChaCha20-Poly1305):
 
 ```typescript
-/**
- * Mengekspor seluruh isi brankas kunci menjadi string JSON.
- * Aman karena setiap nilainya sudah terenkripsi oleh Master Seed.
- */
-export async function exportDatabaseToJson(): Promise<string> {
-  const db = await getDb();
-  const stores = [
-    SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
-    PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
-    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME
-  ];
-  
-  const exportData: Record<string, any[]> = {};
-
-  for (const storeName of stores) {
-    const tx = db.transaction(storeName, 'readonly');
-    const store = tx.objectStore(storeName);
-    const items = [];
-    let cursor = await store.openCursor();
-    while (cursor) {
-      items.push({ key: cursor.key, value: cursor.value });
-      cursor = await cursor.continue();
-    }
-    exportData[storeName] = items;
-  }
-  
-  return JSON.stringify(exportData);
-}
-
-/**
- * Mengimpor dan menimpa isi brankas kunci dari string JSON.
- */
-export async function importDatabaseFromJson(jsonString: string): Promise<void> {
-  const db = await getDb();
-  const importData = JSON.parse(jsonString);
-  const stores = [
-    SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
-    PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
-    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME
-  ];
-  
-  const tx = db.transaction(stores, 'readwrite');
-  for (const storeName of stores) {
-    if (importData[storeName]) {
-      const store = tx.objectStore(storeName);
-      await store.clear(); // Bersihkan brankas lama
-      for (const item of importData[storeName]) {
-        await store.put(item.value, item.key);
+      case 'encryptProfile': {
+        const { profileJsonString, profileKeyB64 } = payload;
+        const key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const message = new TextEncoder().encode(profileJsonString);
+        // Generate random nonce (24 bytes for XChaCha20)
+        const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+        
+        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+            message,
+            null, // no additional data
+            null, // secret nonce
+            nonce,
+            key
+        );
+        
+        // Combine nonce + ciphertext
+        const combined = new Uint8Array(nonce.length + ciphertext.length);
+        combined.set(nonce);
+        combined.set(ciphertext, nonce.length);
+        
+        result = sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
+        break;
       }
-    }
-  }
-  await tx.done;
+      case 'decryptProfile': {
+        const { encryptedProfileB64, profileKeyB64 } = payload;
+        const key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const combined = sodium.from_base64(encryptedProfileB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+        
+        const nonceBytes = sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+        const nonce = combined.slice(0, nonceBytes);
+        const ciphertext = combined.slice(nonceBytes);
+        
+        const decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+            null, // secret nonce
+            ciphertext,
+            null, // additional data
+            nonce,
+            key
+        );
+        
+        result = new TextDecoder().decode(decrypted);
+        break;
+      }
+      case 'generateProfileKey': {
+        // Generate a random 32-byte key for profile encryption
+        const key = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
+        result = sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
+        break;
+      }
+
+```
+
+### STEP 4: Proxy Worker (`web/src/lib/crypto-worker-proxy.ts`)
+
+* Tambahkan *wrapper functions* untuk memanggil worker di atas:
+
+```typescript
+export async function encryptProfile(profileJsonString: string, profileKeyB64: string): Promise<string> {
+  return sendToWorker('encryptProfile', { profileJsonString, profileKeyB64 });
+}
+export async function decryptProfile(encryptedProfileB64: string, profileKeyB64: string): Promise<string> {
+  return sendToWorker('decryptProfile', { encryptedProfileB64, profileKeyB64 });
+}
+export async function generateProfileKey(): Promise<string> {
+  return sendToWorker('generateProfileKey', {});
 }
 
 ```
 
-### FASE 3: UI IMPLEMENTATION (Update `web/src/pages/SettingsPage.tsx`)
+### STEP 5: Penyesuaian Tipe User di Frontend (`web/src/store/auth.ts` & `conversation.ts`)
 
-*Di dalam halaman Settings, tambahkan bagian **"Backup & Restore Vault"** dengan 2 tombol: Export dan Import.*
-*Buat fungsionalitasnya seperti ini:*
+* Pada tipe `User` (di `auth.ts` dan file tipe lainnya):
+* **Hapus** `name`, `avatarUrl`, dan `description`.
+* **Tambahkan** `encryptedProfile?: string | null;`
 
-*1. **Fungsi Export:** Memanggil `exportDatabaseToJson()`, lalu membuat Blob dari string tersebut, dan memicu download file otomatis dengan nama `nyx_vault_backup.nyxvault`.*
-*2. **Fungsi Import:** Menggunakan input file `<input type="file" accept=".nyxvault" />` (bisa disembunyikan/di-trigger lewat klik tombol). Saat file dipilih, baca sebagai teks (`file.text()`), parsing dan panggil `importDatabaseFromJson(text)`. Setelah sukses, tampilkan toast dan paksa reload browser (`window.location.reload()`) agar memori worker dan status aplikasi tersetel ulang mengikuti kunci yang baru masuk.*
 
-*Tolong integrasikan UI ini dengan gaya desain Neumorphic NYX yang ada.*
+* **PERHATIAN:** Ini akan menyebabkan banyak error TypeScript di komponen UI (seperti `ChatList.tsx`, `UserInfoModal.tsx`, dll) karena `user.name` tidak lagi ada. Untuk sementara, biarkan error UI tersebut, atau ubah pemanggilan `user.name` menjadi string fallback sementara seperti `"Encrypted User"` agar TypeScript lolos kompilasi. Kita akan merombak UI-nya di iterasi selanjutnya setelah kunci terdistribusi.
+* Di `Register.tsx`: Saat pendaftaran, fungsi `handleRegister` tidak lagi mengirimkan `name` ke store secara langsung, tetapi kita akan membuat `profileKey` dan melakukan enkripsi (ini akan kita sempurnakan setelah schema DB di-push). Sementara, cukup hapus input `name` dari UI atau sesuaikan agar lolos TS.
 
-*Pastikan tidak ada sisa kode Device Linking yang tertinggal dan fitur Vault ini diimplementasikan secara elegan."*
+*Fokus eksekusi ini murni pada Perubahan Skema, Route Backend, dan Mesin Enkripsi di Worker. Biarkan UI sedikit error untuk sementara waktu.*"

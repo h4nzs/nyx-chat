@@ -1,15 +1,14 @@
 import { createWithEqualityFn } from "zustand/traditional";
-import { authFetch, api } from "@lib/api";
+import { authFetch, api, apiUpload } from "@lib/api";
 import { disconnectSocket, connectSocket } from "@lib/socket";
 import { clearAuthCookies } from "@lib/tokenStorage";
-// import { getSodium } from '@lib/sodiumInitializer'; // Removed top-level import
 import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";
 import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
 import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady } from "@lib/keyStorage";
-import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; // Only import TYPE
-import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; // Import helper
+import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; 
+import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; 
 
 /**
  * Retrieves the persisted signed pre-key, signs it with the identity signing key,
@@ -18,7 +17,6 @@ import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto
  */
 export async function setupAndUploadPreKeyBundle() {
   try {
-    // Dynamic imports
     const { getSodium } = await import('@lib/sodiumInitializer');
     
     const { getSigningPrivateKey, getEncryptionKeyPair, getSignedPreKeyPair } = useAuthStore.getState();
@@ -29,7 +27,6 @@ export async function setupAndUploadPreKeyBundle() {
     const { publicKey: signedPreKey } = await getSignedPreKeyPair();
 
     const identityKeyB64 = sodium.to_base64(identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-    // The public key is the last 32 bytes of the 64-byte secret key.
     const signingPublicKey = signingPrivateKey.slice(32);
 
     const signature = sodium.crypto_sign_detached(signedPreKey, signingPrivateKey);
@@ -47,7 +44,6 @@ export async function setupAndUploadPreKeyBundle() {
       body: JSON.stringify(bundle),
     });
 
-    // Check and refill OTPKs after bundle upload
     await checkAndRefillOneTimePreKeys();
 
   } catch (e) {
@@ -57,39 +53,38 @@ export async function setupAndUploadPreKeyBundle() {
 
 export type User = {
   id: string;
-  email: string;
-  username: string;
-  name: string;
-  description?: string | null;
-  avatarUrl?: string | null;
-  hasCompletedOnboarding?: boolean;
-  showEmailToOthers?: boolean;
+  encryptedProfile?: string | null;
   role?: string;
+  isVerified?: boolean; // Trust Tier (WebAuthn)
+  hasCompletedOnboarding?: boolean;
 };
 
 type State = {
   user: User | null;
   accessToken: string | null;
+  isLoading: boolean;
   isBootstrapping: boolean;
-  isInitializingCrypto: boolean; // New state
+  isInitializingCrypto: boolean;
   sendReadReceipts: boolean;
   hasRestoredKeys: boolean;
+  blockedUserIds: string[];
 };
 
 type RegisterResponse = {
   phrase: string;
-  needVerification: boolean;
-  userId?: string;
-  email?: string;
 };
 
 type Actions = {
   bootstrap: () => Promise<void>;
   tryAutoUnlock: () => Promise<boolean>;
-  login: (emailOrUsername: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
-  registerAndGeneratePhrase: (data: any) => Promise<RegisterResponse>; 
-  verifyEmail: (userId: string, code: string) => Promise<void>;
-  resendVerification: (email: string) => Promise<void>;
+  login: (usernameHash: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
+  registerAndGeneratePhrase: (data: { 
+    name: string; 
+    usernameHash: string; // Blind Index
+    password: string; 
+    turnstileToken?: string; 
+  }) => Promise<RegisterResponse>;
+  
   logout: () => Promise<void>;
   getEncryptionKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getSigningPrivateKey: () => Promise<Uint8Array>;
@@ -97,27 +92,25 @@ type Actions = {
   getMasterSeed: () => Promise<Uint8Array | undefined>;
   setUser: (user: User) => void;
   setAccessToken: (token: string | null) => void;
-  updateProfile: (data: Partial<Pick<User, 'name' | 'description' | 'showEmailToOthers'>>) => Promise<void>;
+  updateProfile: (data: Partial<Pick<User, 'name' | 'description'>>) => Promise<void>;
   updateAvatar: (avatar: File) => Promise<void>;
   setReadReceipts: (value: boolean) => void;
   setHasRestoredKeys: (hasKeys: boolean) => void;
   blockUser: (userId: string) => Promise<void>;
   unblockUser: (userId: string) => Promise<void>;
   loadBlockedUsers: () => Promise<void>;
-  blockedUserIds: string[];
   setDecryptedKeys: (keys: RetrievedKeys) => void;
 };
 
 let privateKeysCache: RetrievedKeys | null = null;
 
 export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => {
-  const savedUser = localStorage.getItem("user"); // User is still in localStorage
+  const savedUser = localStorage.getItem("user");
   const savedReadReceipts = localStorage.getItem('sendReadReceipts');
 
   const retrieveAndCacheKeys = async (): Promise<RetrievedKeys> => {
     if (privateKeysCache) return privateKeysCache;
 
-    // Dynamic import for retrievePrivateKeys
     const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
 
     let autoUnlockKey: string | undefined | null = null;
@@ -137,49 +130,30 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           privateKeysCache = result.keys;
           return result.keys;
         }
-      } catch (e) {
-        // Fall through to password prompt
-      }
+      } catch (e) {}
     }
 
-    // Helper to wrap the modal prompt in a Promise
     const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
       return new Promise((resolve, reject) => {
         let unsubscribe: () => void;
+        const cleanup = () => { if (unsubscribe) unsubscribe(); };
 
-        const cleanup = () => {
-          if (unsubscribe) unsubscribe();
-        };
-
-        // Safety fallback: Reject if modal closes without submission
         unsubscribe = useModalStore.subscribe((state) => {
           if (!state.isPasswordPromptOpen) {
             cleanup();
-            // We use a timeout to allow the submit callback to fire first if that was the cause of closing
             setTimeout(() => {
-               // If we are still pending (though we can't check promise state directly, logic flow handles it)
-               // Ideally, we'd rely on the fact that if successful, resolve/reject was already called.
-               // But since we can't query promise state, we just reject.
-               // If it was already resolved, this reject is ignored.
                reject(new Error("Password prompt closed without input."));
             }, 100);
           }
         });
 
         useModalStore.getState().showPasswordPrompt(async (password) => {
-          cleanup(); // Clean up listener immediately on submit
-          
-          if (!password) {
-            reject(new Error("Password not provided."));
-            return;
-          }
+          cleanup();
+          if (!password) { reject(new Error("Password not provided.")); return; }
 
           try {
             const keysInner = await getEncryptedKeys();
-            if (!keysInner) {
-              reject(new Error("Encrypted private keys not found."));
-              return;
-            }
+            if (!keysInner) { reject(new Error("Encrypted private keys not found.")); return; }
 
             const result = await retrieveFn(keysInner, password);
             if (!result.success) {
@@ -190,9 +164,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
             privateKeysCache = result.keys;
             resolve(result.keys);
-          } catch (e) {
-            reject(e);
-          }
+          } catch (e) { reject(e); }
         });
       });
     };
@@ -203,10 +175,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
   return {
     user: savedUser ? JSON.parse(savedUser) : null,
     accessToken: null,
+    isLoading: false,
     isBootstrapping: true,
     isInitializingCrypto: false,
     sendReadReceipts: savedReadReceipts ? JSON.parse(savedReadReceipts) : true,
-    hasRestoredKeys: false, // Initial state, will be updated by bootstrap
+    hasRestoredKeys: false,
     blockedUserIds: [],
 
     setHasRestoredKeys: async (hasKeys) => set({ hasRestoredKeys: await hasStoredKeys() }),
@@ -231,12 +204,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             await setDeviceAutoUnlockReady(true);
             return true;
           }
-          console.error("Auto-unlock failed.");
-        } catch (e) {
-           console.error("Error during auto-unlock:", e);
-        } finally {
-          set({ isInitializingCrypto: false });
-        }
+        } catch (e) { console.error("Error during auto-unlock:", e); } finally { set({ isInitializingCrypto: false }); }
       }
       return false;
     },
@@ -248,10 +216,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     bootstrap: async () => {
-      // [FIX] Cek apakah kita baru saja register/login manual?
-      // Jika accessToken sudah ada (dari register), jangan bootstrap dulu biar gak tabrakan.
       if (get().accessToken) {
-        console.log("Bootstrap skipped: Session already active from register/login.");
         set({ isBootstrapping: false });
         return;
       }
@@ -266,18 +231,14 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           set({ user: me, hasRestoredKeys: await hasStoredKeys() });
           localStorage.setItem("user", JSON.stringify(me));
 
-          // Only load crypto if we have a valid session
           await get().tryAutoUnlock();
           connectSocket();
-
           get().loadBlockedUsers();
         } else {
           throw new Error("No valid session.");
         }
       } catch (error: any) {
         console.log("Bootstrap failed (No session):", error);
-        // [FIX] Jangan panggil logout() atau clearKeys() di sini!
-        // Cukup bersihkan state memori & localstorage user, TAPI JANGAN hapus kunci IndexedDB.
         privateKeysCache = null;
         set({ user: null, accessToken: null, blockedUserIds: [] });
         clearAuthCookies();
@@ -287,17 +248,16 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       }
     },
 
-    login: async (emailOrUsername, password, restoredNotSynced = false) => {
+    login: async (usernameHash, password, restoredNotSynced = false) => {
       privateKeysCache = null;
-      set({ isInitializingCrypto: true }); // Show loading for crypto init
+      set({ isInitializingCrypto: true });
 
       try {
         const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/login", {
           method: "POST",
-          body: JSON.stringify({ emailOrUsername, password }),
+          body: JSON.stringify({ usernameHash, password }),
         });
 
-        // [SYNC] Restore Encrypted Keys from Server if available
         if (res.encryptedPrivateKey) {
           await saveEncryptedKeys(res.encryptedPrivateKey);
           await saveDeviceAutoUnlockKey(password);
@@ -306,24 +266,17 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         }
 
         const hasKeys = await hasStoredKeys();
-
         set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeys, blockedUserIds: [] });
         localStorage.setItem("user", JSON.stringify(res.user));
 
         if (hasKeys) {
           try {
-            // Dynamic import
             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
-            
             const encryptedKeys = await getEncryptedKeys();
-            const isAutoUnlockReady = await getDeviceAutoUnlockReady();
-            let result;
-
-            result = await retrievePrivateKeys(encryptedKeys!, password);
+            const result = await retrievePrivateKeys(encryptedKeys!, password);
 
             if (result.success) {
               privateKeysCache = result.keys;
-              // If decryption was successful with a password, save it as the auto-unlock key for next time.
               await saveDeviceAutoUnlockKey(password);
               await setDeviceAutoUnlockReady(true);
             } else {
@@ -338,54 +291,17 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         get().loadBlockedUsers();
 
         if (restoredNotSynced) {
-          try {
-            await setupAndUploadPreKeyBundle();
-          } catch(e) {
-            console.error("Failed to sync restored keys with server:", e);
-          }
+          try { await setupAndUploadPreKeyBundle(); } catch(e) { console.error("Failed to sync restored keys:", e); }
         } else if (get().hasRestoredKeys) {
           setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload pre-key bundle on login:", e));
         } else {
           toast("To enable secure messaging, restore your account from your recovery phrase in Settings.", { duration: 7000 });
         }
 
-        // [RESET] Force rotate OTPK on new login to prevent stale key decryption errors
-        try {
-          await resetOneTimePreKeys();
-        } catch (e) { console.error("Reset OTPK failed:", e); }
-
+        try { await resetOneTimePreKeys(); } catch (e) { console.error("Reset OTPK failed:", e); }
         connectSocket();
       } catch (error: any) {
         console.error("Login error:", error);
-        if (error.message && error.message.includes("Email not verified")) {
-          const isEmail = emailOrUsername.includes('@');
-          try {
-            let userData: User | null = null;
-            if (isEmail) {
-              userData = await api<User>("/api/users/by-email", {
-                method: "POST",
-                body: JSON.stringify({ email: emailOrUsername }),
-              });
-            } else {
-              userData = await api<User>("/api/users/by-username", {
-                method: "POST",
-                body: JSON.stringify({ username: emailOrUsername }),
-              });
-            }
-
-            if (userData?.id && userData?.email) {
-              import('@utils/verificationPersistence').then(({ saveVerificationState }) => {
-                saveVerificationState({
-                  userId: userData!.id,
-                  email: userData!.email!,
-                  timestamp: Date.now()
-                });
-              });
-            }
-          } catch (userFetchErr) {
-            console.error("Could not fetch user details for verification persistence:", userFetchErr);
-          }
-        }
         set({ user: null, accessToken: null });
         throw error;
       } finally {
@@ -393,107 +309,50 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       }
     },
 
-    registerAndGeneratePhrase: async (data) => {
+    registerAndGeneratePhrase: async ({ name, usernameHash, password, turnstileToken }) => {
       set({ isInitializingCrypto: true });
       try {
-        // Dynamic Import
         const { registerAndGenerateKeys, retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
-
         const {
           encryptionPublicKeyB64,
           signingPublicKeyB64,
           encryptedPrivateKeys,
           phrase
-        } = await registerAndGenerateKeys(data.password);
+        } = await registerAndGenerateKeys(password);
 
-        // 1. Simpan Kunci Terenkripsi ke IndexedDB
         await saveEncryptedKeys(encryptedPrivateKeys);
-        
-        // [FIX] 2. Simpan Kunci Auto-Unlock (Biar ga minta password lagi pas refresh/chat)
-        await saveDeviceAutoUnlockKey(data.password);
+        await saveDeviceAutoUnlockKey(password);
         await setDeviceAutoUnlockReady(true);
-
         set({ hasRestoredKeys: true });
 
-        // 3. Cache di memori untuk sesi sekarang
+        // Cache keys
         try {
-          const result = await retrievePrivateKeys(encryptedPrivateKeys, data.password);
-          if (result.success) {
-             privateKeysCache = result.keys;
-          }
-        } catch (e) { console.error("Failed to cache keys:", e); }
+          const result = await retrievePrivateKeys(encryptedPrivateKeys, password);
+          if (result.success) privateKeysCache = result.keys;
+        } catch (e) {}
 
-        // 4. Panggil API Register
-        const res = await api<{ 
-          user?: User; 
-          accessToken?: string; 
-          message?: string; 
-          needVerification?: boolean;
-          userId?: string; 
-        }>("/api/auth/register", {
+        const res = await api<{ accessToken: string; user: User }>("/api/auth/register", {
           method: "POST",
           body: JSON.stringify({
-            ...data,
+            usernameHash,
+            password,
+            name,
             publicKey: encryptionPublicKeyB64,
             signingKey: signingPublicKeyB64,
-            encryptedPrivateKeys // Upload kunci terenkripsi ke server
+            encryptedPrivateKeys,
+            turnstileToken
           }),
         });
 
-        if (res.needVerification && res.userId) {
-          return { 
-            phrase, 
-            needVerification: true, 
-            userId: res.userId, 
-            email: data.email 
-          };
-        }
-
-        if (res.user && res.accessToken) {
-          set({ user: res.user, accessToken: res.accessToken });
-          localStorage.setItem("user", JSON.stringify(res.user));
-          setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
-          
-          connectSocket();
-          return { phrase, needVerification: false };
-        }
-
-        throw new Error("Unexpected response from registration.");
-      } finally {
-        set({ isInitializingCrypto: false });
-      }
-    },
-
-    verifyEmail: async (userId, code) => {
-      const res = await api<{ user: User; accessToken: string }>("/api/auth/verify-email", {
-        method: "POST",
-        body: JSON.stringify({ userId, code }),
-      });
-
-      if (res.user && res.accessToken) {
         set({ user: res.user, accessToken: res.accessToken });
         localStorage.setItem("user", JSON.stringify(res.user));
         
-        // [FIX] Ensure app knows keys are present and loaded
-        set({ hasRestoredKeys: true });
-        await get().tryAutoUnlock(); 
-
-        // Public keys and encrypted keys are already saved during registerAndGeneratePhrase
         setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
         connectSocket();
-      }
-    },
 
-    resendVerification: async (email) => {
-      try {
-        await api("/api/auth/resend-verification", {
-          method: "POST",
-          body: JSON.stringify({ email }),
-        });
-        toast.success("Verification code resent!");
-      } catch (error: any) {
-        console.error("Failed to resend verification code:", error);
-        throw error;
+        return { phrase };
+      } finally {
+        set({ isInitializingCrypto: false });
       }
     },
 
@@ -512,18 +371,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         } else {
            await api("/api/auth/logout", { method: "POST" }).catch(() => {});
         }
-      } catch (e) {
-        console.error("Logout error", e);
-      } finally {
+      } catch (e) { console.error("Logout error", e); } finally {
         clearAuthCookies();
         privateKeysCache = null;
-        
         await clearKeys(); 
-        
         localStorage.removeItem('user');
-
         set({ user: null, accessToken: null });
-
         disconnectSocket();
         useConversationStore.getState().reset();
         useMessageStore.getState().reset();
@@ -545,39 +398,23 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
     updateAvatar: async (avatar: File) => {
       const toastId = toast.loading('Processing avatar...');
-      
-      // Dynamic imports
       const { compressImage } = await import('@lib/fileUtils');
       const { uploadToR2 } = await import('@lib/r2');
-
       let fileToProcess = avatar;
-
       if (avatar.type.startsWith('image/')) {
-        try {
-          fileToProcess = await compressImage(avatar);
-        } catch (e) {
-          // Fallback, do nothing
-        }
+        try { fileToProcess = await compressImage(avatar); } catch (e) {}
       }
-
       try {
         toast.loading('Uploading to Cloud...', { id: toastId });
-        
-        const fileUrl = await uploadToR2(fileToProcess, 'avatars', (percent) => {
-           // Optional progress
-        });
-
+        const fileUrl = await uploadToR2(fileToProcess, 'avatars', () => {});
         toast.loading('Saving profile...', { id: toastId });
-        
         const updatedUser = await authFetch<User>('/api/uploads/avatars/save', {
           method: 'POST',
           body: JSON.stringify({ fileUrl }),
         });
-        
         set({ user: updatedUser });
         localStorage.setItem("user", JSON.stringify(updatedUser));
         toast.success('Avatar updated!', { id: toastId });
-
       } catch (e: any) {
         console.error(e);
         toast.error(`Update failed: ${e.message}`, { id: toastId });
@@ -595,14 +432,14 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
     async getEncryptionKeyPair() {
       const keys = await retrieveAndCacheKeys();
-      const { getSodium } = await import('@lib/sodiumInitializer'); // Dynamic
+      const { getSodium } = await import('@lib/sodiumInitializer');
       const sodium = await getSodium();
       const publicKey = sodium.crypto_scalarmult_base(keys.encryption);
       return { publicKey, privateKey: keys.encryption };
     },
     async getSignedPreKeyPair() {
       const keys = await retrieveAndCacheKeys();
-      const { getSodium } = await import('@lib/sodiumInitializer'); // Dynamic
+      const { getSodium } = await import('@lib/sodiumInitializer');
       const sodium = await getSodium();
       const publicKey = sodium.crypto_scalarmult_base(keys.signedPreKey);
       return { publicKey, privateKey: keys.signedPreKey };
@@ -615,14 +452,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     blockUser: async (userId) => {
       const toastId = toast.loading('Blocking user...');
       try {
-        await authFetch(`/api/users/${userId}/block`, {
-          method: 'POST'
-        });
+        await authFetch(`/api/users/${userId}/block`, { method: 'POST' });
         toast.success('User blocked', { id: toastId });
-
-        set(state => ({
-          blockedUserIds: [...state.blockedUserIds, userId]
-        }));
+        set(state => ({ blockedUserIds: [...state.blockedUserIds, userId] }));
       } catch (error: any) {
         const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
         toast.error(`Block failed: ${errorMsg}`, { id: toastId });
@@ -633,14 +465,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     unblockUser: async (userId) => {
       const toastId = toast.loading('Unblocking user...');
       try {
-        await authFetch(`/api/users/${userId}/block`, {
-          method: 'DELETE'
-        });
+        await authFetch(`/api/users/${userId}/block`, { method: 'DELETE' });
         toast.success('User unblocked', { id: toastId });
-
-        set(state => ({
-          blockedUserIds: state.blockedUserIds.filter(id => id !== userId)
-        }));
+        set(state => ({ blockedUserIds: state.blockedUserIds.filter(id => id !== userId) }));
       } catch (error: any) {
         const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
         toast.error(`Unblock failed: ${errorMsg}`, { id: toastId });
@@ -652,7 +479,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       try {
         const blockedUsers = await authFetch<{ id: string }[]>('/api/users/me/blocked');
         const blockedIds = blockedUsers.map(user => user.id);
-
         set({ blockedUserIds: blockedIds });
       } catch (error) {
         console.error('Failed to load blocked users:', error);

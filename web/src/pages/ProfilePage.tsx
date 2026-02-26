@@ -8,7 +8,6 @@ import { toast } from 'react-hot-toast';
 
 type ProfileUser = User & {
   createdAt?: string;
-  isEmailVerified?: boolean;
   publicKey?: string;
 };
 
@@ -52,7 +51,7 @@ export default function ProfilePage() {
   }, [userId, me, isMe]);
 
   const stats = [
-    { label: 'Security Clearance', value: profileUser?.isEmailVerified ? 'VERIFIED' : 'UNVERIFIED', color: profileUser?.isEmailVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
+    { label: 'Security Clearance', value: profileUser?.isVerified ? 'VERIFIED' : 'UNVERIFIED', color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
     { label: 'Encryption Protocol', value: profileUser?.publicKey ? 'ACTIVE' : 'INACTIVE', color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', icon: FiKey },
     { label: 'Home Server', value: 'ap-southeast-1', color: 'text-blue-500', icon: FiGlobe },
     { label: 'Session Status', value: 'ENCRYPTED', color: 'text-emerald-500', icon: FiActivity },
@@ -166,7 +165,11 @@ export default function ProfilePage() {
               </div>
 
               <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">{profileUser.name}</h2>
-              <p className="text-sm font-mono text-text-secondary">@{profileUser.username}</p>
+              {profileUser.isVerified && (
+                <div className="mt-2 inline-block px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-bold tracking-widest uppercase">
+                  VERIFIED OPERATOR
+                </div>
+              )}
             </div>
 
             {/* Technical Stats Widget */}
@@ -219,18 +222,6 @@ export default function ProfilePage() {
                     className="w-full bg-bg-main rounded-xl px-4 py-3 font-medium text-text-primary outline-none border-none shadow-neu-pressed dark:shadow-neu-pressed-dark focus:ring-1 focus:ring-accent/50 disabled:opacity-60 disabled:cursor-not-allowed resize-none transition-all"
                   />
                 </div>
-
-                {profileUser.email && (
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold uppercase text-text-secondary ml-1">Secure Contact</label>
-                    <input
-                      type="text"
-                      value={profileUser.email}
-                      disabled={true}
-                      className="w-full bg-bg-main/50 rounded-xl px-4 py-3 font-mono text-sm text-text-primary outline-none border-none shadow-neu-pressed dark:shadow-neu-pressed-dark opacity-70 cursor-not-allowed"
-                    />
-                  </div>
-                )}
               </div>
             </div>
 

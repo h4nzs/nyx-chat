@@ -658,6 +658,73 @@ self.onmessage = async (event: MessageEvent) => {
         }
         break;
       }
+      case 'hashUsername': {
+        const { username } = payload;
+        // STATIC SALT for Blind Indexing (Must be 16 bytes)
+        // "NYX_BLIND_IDX_V1" is exactly 16 chars
+        const SALT = new TextEncoder().encode("NYX_BLIND_IDX_V1"); 
+        
+        const hash = sodium.crypto_pwhash(
+            32, // Output length
+            new Uint8Array(new TextEncoder().encode(username.toLowerCase())), // Input (normalized)
+            SALT,
+            sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
+            sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE,
+            sodium.crypto_pwhash_ALG_ARGON2ID13
+        );
+        
+        result = sodium.to_base64(hash, sodium.base64_variants.URLSAFE_NO_PADDING);
+        break;
+      }
+      case 'encryptProfile': {
+        const { profileJsonString, profileKeyB64 } = payload;
+        const key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const message = new TextEncoder().encode(profileJsonString);
+        // Generate random nonce (24 bytes for XChaCha20)
+        const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+        
+        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+            message,
+            null, // no additional data
+            null, // secret nonce
+            nonce,
+            key
+        );
+        
+        // Combine nonce + ciphertext
+        const combined = new Uint8Array(nonce.length + ciphertext.length);
+        combined.set(nonce);
+        combined.set(ciphertext, nonce.length);
+        
+        result = sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
+        break;
+      }
+      case 'decryptProfile': {
+        const { encryptedProfileB64, profileKeyB64 } = payload;
+        const key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const combined = sodium.from_base64(encryptedProfileB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+        
+        const nonceBytes = sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+        const nonce = combined.slice(0, nonceBytes);
+        const ciphertext = combined.slice(nonceBytes);
+        
+        const decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+            null, // secret nonce
+            ciphertext,
+            null, // additional data
+            nonce,
+            key
+        );
+        
+        result = new TextDecoder().decode(decrypted);
+        break;
+      }
+      case 'generateProfileKey': {
+        // Generate a random 32-byte key for profile encryption
+        const key = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
+        result = sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
+        break;
+      }
       case 'generate_random_key': {
         result = sodium.randombytes_buf(32);
         break;

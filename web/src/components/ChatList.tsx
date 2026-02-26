@@ -52,7 +52,7 @@ const UserProfile = memo(() => {
         </div>
         <div className="min-w-0">
           <p className="text-sm font-bold text-text-primary truncate">{user.name}</p>
-          <p className="text-[10px] font-medium text-text-secondary truncate opacity-70">@{user.username}</p>
+          {user.isVerified && <span className="text-[10px] text-accent font-bold tracking-wider">VERIFIED</span>}
         </div>
       </div>
 
@@ -100,8 +100,10 @@ const SearchResults = memo(({ results, onSelect }: { results: User[], onSelect: 
       >
         <img src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
         <div className="flex-1 min-w-0">
-          <p className="font-bold text-sm text-text-primary">{user.name}</p>
-          <p className="text-xs text-text-secondary">@{user.username}</p>
+          <div className="flex items-center gap-2">
+             <p className="font-bold text-sm text-text-primary">{user.name}</p>
+             {user.isVerified && <div className="w-2 h-2 rounded-full bg-accent" title="Verified"></div>}
+          </div>
         </div>
       </button>
     )}

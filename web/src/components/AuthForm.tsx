@@ -3,7 +3,7 @@ import Alert from './Alert'
 import { Spinner } from './Spinner';
 import { handleApiError } from '@lib/api';
 
-export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: string; b?: string; c?: string; d?: string; name?: string }) => Promise<void>; button: string }) {
+export default function AuthForm({ onSubmit, button, hideEmail = false }: { onSubmit: (v: { a: string; b?: string; c?: string; d?: string; name?: string }) => Promise<void>; button: string; hideEmail?: boolean }) {
   const [emailOrUsername, setA] = useState('')
   const [password, setB] = useState('')
   const [email, setC] = useState('')
@@ -19,7 +19,7 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
     name: false
   })
 
-  // Function to validate email format
+  // Function to validate email format (Only relevant if email is used)
   const isValidEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     return emailRegex.test(email)
@@ -27,7 +27,8 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
 
   // Determine if email is valid for green glow effect
   const emailIsValid = isValidEmail(email)
-  const emailOrUsernameIsValid = isValidEmail(emailOrUsername)
+  // For login, we now only accept Username, so email validation is irrelevant
+  const emailOrUsernameIsValid = false; // Disable validation glow for login
 
   return (
     <form
@@ -58,7 +59,7 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
                   ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
                   : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
               }`}
-              placeholder="Name"
+              placeholder="Display Name"
               value={name}
               onChange={(e) => setE(e.target.value)}
               disabled={isLoading}
@@ -68,27 +69,29 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
             <div className="absolute right-3 top-1/2 transform -translate-y-1/2 w-2 h-2 rounded-full bg-transparent transition-colors duration-300"></div>
           </div>
 
-          <div className="relative">
-            <input
-              aria-label="Email"
-              className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
-                isFocused.email 
-                  ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
-                  : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
-              } ${
-                emailIsValid ? 'border border-green-500' : ''
-              }`}
-              placeholder="Email"
-              value={email}
-              onChange={(e) => setC(e.target.value)}
-              disabled={isLoading}
-              onFocus={() => setIsFocused({...isFocused, email: true})}
-              onBlur={() => setIsFocused({...isFocused, email: false})}
-            />
-            <div className={`absolute right-3 top-1/2 transform -translate-y-1/2 w-2 h-2 rounded-full transition-colors duration-300 ${
-              emailIsValid ? 'bg-green-500' : 'bg-transparent'
-            }`}></div>
-          </div>
+          {!hideEmail && (
+            <div className="relative">
+              <input
+                aria-label="Email"
+                className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
+                  isFocused.email 
+                    ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
+                    : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
+                } ${
+                  emailIsValid ? 'border border-green-500' : ''
+                }`}
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setC(e.target.value)}
+                disabled={isLoading}
+                onFocus={() => setIsFocused({...isFocused, email: true})}
+                onBlur={() => setIsFocused({...isFocused, email: false})}
+              />
+              <div className={`absolute right-3 top-1/2 transform -translate-y-1/2 w-2 h-2 rounded-full transition-colors duration-300 ${
+                emailIsValid ? 'bg-green-500' : 'bg-transparent'
+              }`}></div>
+            </div>
+          )}
 
           <div className="relative">
             <input
@@ -98,7 +101,7 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
                   ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
                   : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
               }`}
-              placeholder="Username"
+              placeholder="Username (ID)"
               value={username}
               onChange={(e) => setD(e.target.value)}
               disabled={isLoading}
@@ -111,24 +114,19 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
       ) : (
         <div className="relative">
           <input
-            aria-label="Email or Username"
+            aria-label="Username"
             className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
               isFocused.emailOrUsername 
                 ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
                 : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
-            } ${
-              emailOrUsernameIsValid ? 'border border-green-500' : ''
             }`}
-            placeholder="Email or Username"
+            placeholder="Username"
             value={emailOrUsername}
             onChange={(e) => setA(e.target.value)}
             disabled={isLoading}
             onFocus={() => setIsFocused({...isFocused, emailOrUsername: true})}
             onBlur={() => setIsFocused({...isFocused, emailOrUsername: false})}
           />
-          <div className={`absolute right-3 top-1/2 transform -translate-y-1/2 w-2 h-2 rounded-full transition-colors duration-300 ${
-            emailOrUsernameIsValid ? 'bg-green-500' : 'bg-transparent'
-          }`}></div>
         </div>
       )}
 

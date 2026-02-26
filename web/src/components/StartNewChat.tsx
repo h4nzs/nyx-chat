@@ -4,7 +4,7 @@ import { useConversationStore } from '@store/conversation';
 import toast from 'react-hot-toast';
 
 export default function StartNewChat({ query, onStarted }: { query: string; onStarted: (id: string) => void }) {
-  const [list, setList] = useState<{ id: string; username: string; name: string; avatarUrl?: string | null }[]>([]);
+  const [list, setList] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const { searchUsers, startConversation } = useConversationStore(state => ({
     searchUsers: state.searchUsers,
@@ -57,7 +57,6 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
               <img src={u.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${u.name}`} alt={u.name} className="w-10 h-10 rounded-full bg-gray-700 mr-3" />
               <div className="flex-1 text-left">
                 <div className="font-medium text-white">{u.name}</div>
-                <div className="text-sm text-text-secondary">@{u.username}</div>
               </div>
               {loadingId === u.id && <span className="ml-2 text-xs text-text-secondary">Starting…</span>}
             </button>

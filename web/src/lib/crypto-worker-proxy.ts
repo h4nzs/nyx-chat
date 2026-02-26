@@ -114,6 +114,22 @@ export async function recoverAccountWithSignature(
   return sendToWorker('recoverAccountWithSignature', { phrase, newPassword, identifier, timestamp });
 }
 
+export async function encryptProfile(profileJsonString: string, profileKeyB64: string): Promise<string> {
+  return sendToWorker('encryptProfile', { profileJsonString, profileKeyB64 });
+}
+
+export async function decryptProfile(encryptedProfileB64: string, profileKeyB64: string): Promise<string> {
+  return sendToWorker('decryptProfile', { encryptedProfileB64, profileKeyB64 });
+}
+
+export async function generateProfileKey(): Promise<string> {
+  return sendToWorker('generateProfileKey', {});
+}
+
+export async function hashUsername(username: string): Promise<string> {
+  return sendToWorker('hashUsername', { username });
+}
+
 export async function reEncryptBundleFromMasterKey(masterKey: Uint8Array, newPassword: string): Promise<{
   encryptedPrivateKeys: string;
   encryptionPublicKeyB64: string;

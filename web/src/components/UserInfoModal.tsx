@@ -16,7 +16,7 @@ import ModalBase from './ui/ModalBase';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 
-type ProfileUser = User & { email?: string; publicKey?: string };
+type ProfileUser = User & { publicKey?: string };
 
 export default function UserInfoModal() {
   const { isProfileModalOpen, profileUserId, closeProfileModal } = useModalStore();
@@ -144,10 +144,12 @@ export default function UserInfoModal() {
               <div className="flex flex-col items-start gap-2 mt-2">
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full shadow-neu-flat dark:shadow-neu-flat-dark bg-bg-main">
                    <span className="text-xs font-mono text-text-secondary uppercase">ID</span>
-                   <span className="text-sm font-mono text-accent">@{user.username}</span>
+                   <span className="text-sm font-mono text-accent">#{user.id.substring(0, 8)}</span>
                 </div>
-                {user.email && (
-                  <span className="text-xs font-mono text-text-secondary ml-1">{user.email}</span>
+                {user.isVerified && (
+                  <span className="text-[10px] text-emerald-500 font-bold tracking-widest uppercase px-2">
+                    Verified
+                  </span>
                 )}
               </div>
             </div>

@@ -6,7 +6,7 @@ import AuthForm from "../components/AuthForm";
 import { IoFingerPrint } from "react-icons/io5";
 import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api } from "@lib/api";
-import { retrievePrivateKeys } from "@lib/crypto-worker-proxy";
+import { retrievePrivateKeys, hashUsername } from "@lib/crypto-worker-proxy";
 import { connectSocket } from "@lib/socket";
 import { getEncryptedKeys } from "@lib/keyStorage";
 import toast from "react-hot-toast";
@@ -35,19 +35,14 @@ export default function Login() {
     }
     try {
       const restoredNotSynced = location.state?.restoredNotSynced === true;
-      await login(data.a, data.b, restoredNotSynced);
+      
+      // CLIENT-SIDE BLIND INDEXING
+      // Hash the username input before sending to server.
+      const usernameHash = await hashUsername(data.a);
 
-      // Check if user has pending email verification
-      const verificationState = await import('@utils/verificationPersistence').then(
-        ({ getVerificationState }) => getVerificationState()
-      );
+      await login(usernameHash, data.b, restoredNotSynced);
 
-      if (verificationState) {
-        // User has pending verification, redirect to verification page
-        navigate("/register", { state: { showVerification: true, ...verificationState } });
-      } else {
-        navigate("/chat");
-      }
+      navigate("/chat");
 
     } catch (err: any) {
       setError(err.message || "Login failed. Please check your credentials.");
@@ -106,13 +101,7 @@ export default function Login() {
                 await useAuthStore.getState().loadBlockedUsers();
                 connectSocket();
                 
-                // Redirect logic
-                const verificationState = await import('@utils/verificationPersistence').then(m => m.getVerificationState());
-                if (verificationState) {
-                  navigate("/register", { state: { showVerification: true, ...verificationState } });
-                } else {
-                  navigate("/chat");
-                }
+                navigate("/chat");
               } else {
                 toast.error("Password salah. Gagal mendekripsi kunci.");
               }
@@ -130,16 +119,7 @@ export default function Login() {
         await useAuthStore.getState().loadBlockedUsers();
         connectSocket();
 
-        // Check verification state
-        const verificationState = await import('@utils/verificationPersistence').then(
-          ({ getVerificationState }) => getVerificationState()
-        );
-
-        if (verificationState) {
-          navigate("/register", { state: { showVerification: true, ...verificationState } });
-        } else {
-          navigate("/chat");
-        }
+        navigate("/chat");
       }
     } catch (err: any) {
       console.error("Biometric login error:", err);

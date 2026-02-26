@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 
-type ProfileUser = User & { email?: string; publicKey?: string };
+type ProfileUser = User & { publicKey?: string };
 
 export default function UserInfoPanel({ userId }: { userId: string }) {
   const { activeId } = useConversationStore();
@@ -107,9 +107,8 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
               }}
             />
             <h3 className="text-xl font-bold text-text-primary">{user.name}</h3>
-            <p className="text-sm text-text-secondary">@{user.username}</p>
-            {user.email && (
-              <p className="text-sm text-accent mt-1">{user.email}</p>
+            {user.isVerified && (
+              <span className="inline-block mt-1 px-2 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-wider">Verified</span>
             )}
             <p className="text-text-secondary mt-2 text-sm">
               {user.description || 'This user prefers to keep an air of mystery.'}

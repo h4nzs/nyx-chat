@@ -120,7 +120,6 @@ export default function SettingsPage() {
   const [description, setDescription] = useState(user?.description || '');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(user?.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
-  const [showEmail, setShowEmail] = useState(user?.showEmailToOthers || false);
   const [readReceipts, setReadReceiptsState] = useState(sendReadReceipts);
   const [isLoading, setIsLoading] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -140,7 +139,6 @@ export default function SettingsPage() {
       setName(user.name || '');
       setDescription(user.description || '');
       setPreviewUrl(user.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
-      setShowEmail(user.showEmailToOthers || false);
       setReadReceiptsState(sendReadReceipts);
     }
   }, [user, sendReadReceipts]);
@@ -323,11 +321,11 @@ export default function SettingsPage() {
 
                 {/* Info Fields */}
                 <div className="flex-1 w-full space-y-6">
-                  {/* Username (Read Only) */}
+                  {/* ID (Read Only) */}
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">Username (ID)</label>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">ANONYMOUS ID</label>
                     <div className="w-full bg-black/5 dark:bg-white/5 text-sm font-mono text-text-primary p-4 rounded-xl flex items-center border border-transparent">
-                      <span className="text-accent mr-1">@</span>{user.username}
+                      <span className="text-accent mr-1">#</span>{user.id}
                       <FiLock className="ml-auto text-text-secondary opacity-50" size={12} />
                     </div>
                   </div>
@@ -467,14 +465,6 @@ export default function SettingsPage() {
                 onChange={() => {
                   setReadReceiptsState(!readReceipts);
                   setReadReceipts(!readReceipts);
-                }} 
-              />
-              <RockerSwitch 
-                label="Public Email" 
-                checked={showEmail} 
-                onChange={() => {
-                  setShowEmail(!showEmail);
-                  updateProfile({ showEmailToOthers: !showEmail });
                 }} 
               />
               <button

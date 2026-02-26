@@ -9,7 +9,6 @@ import { env } from '../config.js'
 import { requireAuth } from '../middleware/auth.js'
 import { authLimiter, otpLimiter } from '../middleware/rateLimiter.js'
 import { nanoid } from 'nanoid'
-import { sendVerificationEmail } from '../utils/mailer.js' // Pastikan file utils/mailer.ts sudah ada
 import crypto from 'crypto'
 import {
   generateRegistrationOptions,
@@ -56,16 +55,14 @@ function setAuthCookies (res: Response, { access, refresh }: { access: string; r
 }
 
 async function issueTokens (user: any, req: any) {
+  // PURE ANONYMITY: Only store ID and Role in JWT. No Email/Username.
   const access = signAccessToken({ 
     id: user.id, 
-    email: user.email, 
-    username: user.username,
     role: user.role 
   })
   const jti = newJti()
   const refresh = signAccessToken({ sub: user.id, jti }, { expiresIn: '30d' })
 
-  // Privacy: Hash IP address to prevent long-term logging of raw IPs
   const rawIp = req.ip || '';
   const ipAddress = crypto.createHash('sha256').update(rawIp).digest('hex').substring(0, 16);
   const userAgent = req.headers['user-agent']
@@ -78,9 +75,7 @@ async function issueTokens (user: any, req: any) {
 
 // Helper Turnstile
 async function verifyTurnstileToken (token: string): Promise<boolean> {
-  // Jika di development dan tidak ada key, kita bisa bypass atau return true untuk testing
   if (env.nodeEnv !== 'production' && !process.env.TURNSTILE_SECRET_KEY) return true
-
   if (!token) return false
 
   const formData = new FormData()
@@ -100,187 +95,85 @@ async function verifyTurnstileToken (token: string): Promise<boolean> {
   }
 }
 
-// === STANDARD AUTH ROUTES ===
+// === ANONYMOUS AUTH ROUTES ===
 
 router.post('/register', authLimiter, zodValidate({
   body: z.object({
-    email: z.string().email().max(200),
-    username: z.string().min(3).max(32),
+    usernameHash: z.string().min(10), // Blind Index
     password: z.string().min(8).max(128),
-    name: z.string().min(1).max(80),
+    encryptedProfile: z.string().optional(),
     publicKey: z.string().optional(),
     signingKey: z.string().optional(),
-    encryptedPrivateKeys: z.string().optional(), // New: Accept encrypted keys blob
-    turnstileToken: z.string().optional() // Token dari frontend
+    encryptedPrivateKeys: z.string().optional(),
+    turnstileToken: z.string().optional()
   })
 }),
 async (req, res, next) => {
   try {
-    const { email, username, password, name, publicKey, signingKey, encryptedPrivateKeys, turnstileToken } = req.body
+    const { usernameHash, password, encryptedProfile, publicKey, signingKey, encryptedPrivateKeys, turnstileToken } = req.body
 
     // 1. Verifikasi Captcha
     const isHuman = await verifyTurnstileToken(turnstileToken || '')
     if (!isHuman) throw new ApiError(400, 'Bot detected. Please try again.')
 
-    // 2. Cek Duplikat
-    const existingUser = await prisma.user.findFirst({
-      where: { OR: [{ email }, { username }] }
+    // 2. Cek Duplikat (Hash Collision Check)
+    const existingUser = await prisma.user.findUnique({
+      where: { usernameHash }
     })
-    if (existingUser) throw new ApiError(409, 'Email or username already exists.')
+    if (existingUser) throw new ApiError(409, 'Username already taken (Hash Collision).')
 
-    // 3. Buat User (Unverified)
+    // 3. Buat User (Verified: False = Sandbox)
     const passwordHash = await hashPassword(password)
     const user = await prisma.user.create({
       data: {
-        email,
-        username,
+        usernameHash,
         passwordHash,
-        name,
+        encryptedProfile,
         publicKey,
         signingKey,
-        encryptedPrivateKey: encryptedPrivateKeys, // Store the encrypted blob
-        isEmailVerified: false // Default false
+        encryptedPrivateKey: encryptedPrivateKeys,
+        isVerified: false // Sandbox mode by default
       }
     })
 
-    // 4. Generate & Kirim OTP
-    const otp = crypto.randomInt(100000, 999999).toString()
-    await redisClient.setEx(`verify:${user.id}`, 300, otp) // Expire 5 menit
+    // 4. Issue Tokens Immediately (No OTP)
+    const tokens = await issueTokens(user, req)
+    setAuthCookies(res, tokens)
 
-    // Kirim email background (jangan await agar response cepat)
-    sendVerificationEmail(email, otp).catch(err => console.error('Email fail:', err))
-
-    // 5. Response (TIDAK login dulu)
     res.status(201).json({
-      message: 'Registration successful. Please verify your email.',
-      userId: user.id,
-      email: user.email,
-      needVerification: true // Flag untuk frontend pindah ke halaman OTP
+      message: 'Registration successful.',
+      user: {
+        id: user.id,
+        encryptedProfile: user.encryptedProfile,
+        isVerified: user.isVerified
+      },
+      accessToken: tokens.access,
+      needVerification: false
     })
   } catch (e: any) {
     if (e?.code === 'P2002') {
-      return next(new ApiError(409, 'Email or username already in use.'))
+      return next(new ApiError(409, 'Username already taken.'))
     }
     next(e)
   }
-}
-)
-
-// Route Baru: Verifikasi Email
-router.post('/verify-email', otpLimiter, zodValidate({
-  body: z.object({
-    userId: z.string(),
-    code: z.string().length(6)
-  })
-}),
-async (req, res, next) => {
-  try {
-    const { userId, code } = req.body
-
-    // Cek OTP di Redis
-    const storedOtp = await redisClient.get(`verify:${userId}`)
-    if (!storedOtp) throw new ApiError(400, 'Verification code has expired. Please request a new one.')
-    if (storedOtp !== code) throw new ApiError(400, 'Invalid verification code. Please try again.')
-
-    // Update User jadi Verified
-    const user = await prisma.user.update({
-      where: { id: userId },
-      data: { isEmailVerified: true },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        showEmailToOthers: true,
-        description: true,
-        hasCompletedOnboarding: true,
-        isEmailVerified: true
-      }
-    })
-
-    // Hapus OTP dari Redis
-    await redisClient.del(`verify:${userId}`)
-
-    // Login otomatis setelah verifikasi
-    // Ambil user tanpa field sensitif untuk response
-    const safeUser = await prisma.user.findUnique({
-      where: { id: user.id },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        isEmailVerified: true,
-        description: true,
-        hasCompletedOnboarding: true,
-        showEmailToOthers: true
-      }
-    })
-
-    if (!safeUser) throw new ApiError(404, 'User not found after verification.')
-
-    const tokens = await issueTokens(safeUser, req)
-    setAuthCookies(res, tokens)
-
-    res.json({ message: 'Email verified successfully.', user: safeUser, accessToken: tokens.access })
-  } catch (e) {
-    next(e)
-  }
-}
-)
-
-// Route Baru: Kirim Ulang OTP
-router.post('/resend-verification', authLimiter, zodValidate({
-  body: z.object({ email: z.string().email() })
-}), async (req, res, next) => {
-  try {
-    const { email } = req.body
-    const user = await prisma.user.findUnique({
-      where: { email },
-      select: {
-        id: true,
-        email: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        isEmailVerified: true
-      }
-    })
-
-    if (!user) throw new ApiError(404, 'User not found.')
-    if (user.isEmailVerified) throw new ApiError(400, 'Email already verified.')
-
-    const otp = crypto.randomInt(100000, 999999).toString()
-    await redisClient.setEx(`verify:${user.id}`, 300, otp)
-
-    sendVerificationEmail(email, otp).catch(console.error)
-
-    res.json({ message: 'Verification code sent.' })
-  } catch (e) { next(e) }
 })
 
 router.post('/login', authLimiter, zodValidate({
-  body: z.object({ emailOrUsername: z.string().min(1), password: z.string().min(8) })
+  body: z.object({ usernameHash: z.string().min(10), password: z.string().min(8) })
 }),
 async (req, res, next) => {
   try {
-    const { emailOrUsername, password } = req.body
-    const user = await prisma.user.findFirst({
-      where: { OR: [{ email: emailOrUsername }, { username: emailOrUsername }] },
+    const { usernameHash, password } = req.body
+    
+    const user = await prisma.user.findUnique({
+      where: { usernameHash },
       select: {
         id: true,
-        email: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        isEmailVerified: true,
-        showEmailToOthers: true,
-        description: true,
-        passwordHash: true, // Tetap diperlukan untuk verifikasi password
-        hasCompletedOnboarding: true,
-        encryptedPrivateKey: true, // Retrieve the encrypted keys blob
+        usernameHash: true,
+        encryptedProfile: true,
+        isVerified: true,
+        passwordHash: true,
+        encryptedPrivateKey: true,
         role: true,
         bannedAt: true,
         banReason: true
@@ -289,7 +182,6 @@ async (req, res, next) => {
 
     if (!user) throw new ApiError(401, 'Invalid credentials')
     
-    // Cek Banned
     if (user.bannedAt) {
       return res.status(403).json({ 
         error: 'ACCESS DENIED: Your account has been suspended.',
@@ -300,30 +192,16 @@ async (req, res, next) => {
     const ok = await verifyPassword(password, user.passwordHash)
     if (!ok) throw new ApiError(401, 'Invalid credentials')
 
-    // Cek Status Verifikasi
-    if (!user.isEmailVerified) {
-      throw new ApiError(403, 'Email not verified. Please verify your email first.')
-    }
-
-    // Ambil ulang user tanpa passwordHash untuk response
-    // Note: We already selected encryptedPrivateKey above, so we can pass it directly
     const safeUser = {
         id: user.id,
-        email: user.email,
-        username: user.username,
-        name: user.name,
-        avatarUrl: user.avatarUrl,
-        isEmailVerified: user.isEmailVerified,
-        hasCompletedOnboarding: user.hasCompletedOnboarding,
-        description: user.description,
-        showEmailToOthers: user.showEmailToOthers,
+        encryptedProfile: user.encryptedProfile,
+        isVerified: user.isVerified,
         role: user.role
     }
 
     const tokens = await issueTokens(safeUser, req)
     setAuthCookies(res, tokens)
 
-    // Return encryptedPrivateKey separately so client can restore it
     res.json({ 
       user: safeUser, 
       accessToken: tokens.access,
@@ -332,8 +210,7 @@ async (req, res, next) => {
   } catch (e) {
     next(e)
   }
-}
-)
+})
 
 router.post('/refresh', async (req, res, next) => {
   try {
@@ -341,15 +218,8 @@ router.post('/refresh', async (req, res, next) => {
     if (!token) throw new ApiError(401, 'No refresh token')
     const payload = verifyJwt(token)
     if (typeof payload === 'string' || !payload?.jti || !payload?.sub) {
-      // Jika token tidak valid, hapus cookie untuk mencegah kondisi tidak konsisten
       const isProd = env.nodeEnv === 'production'
-      const cookieOpts: CookieOptions = {
-        path: '/',
-        httpOnly: true,
-        secure: isProd,
-        sameSite: isProd ? 'none' : 'lax'
-      }
-
+      const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
       res.clearCookie('at', cookieOpts)
       res.clearCookie('rt', cookieOpts)
       throw new ApiError(401, 'Invalid refresh token')
@@ -357,15 +227,8 @@ router.post('/refresh', async (req, res, next) => {
 
     const stored = await prisma.refreshToken.findUnique({ where: { jti: payload.jti } })
     if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
-      // Jika token tidak ditemukan, dicabut, atau kadaluarsa, hapus cookie
       const isProd = env.nodeEnv === 'production'
-      const cookieOpts: CookieOptions = {
-        path: '/',
-        httpOnly: true,
-        secure: isProd,
-        sameSite: isProd ? 'none' : 'lax'
-      }
-
+      const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
       res.clearCookie('at', cookieOpts)
       res.clearCookie('rt', cookieOpts)
       throw new ApiError(401, 'Refresh token expired/revoked')
@@ -375,11 +238,8 @@ router.post('/refresh', async (req, res, next) => {
       where: { id: payload.sub },
       select: {
         id: true,
-        email: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        isEmailVerified: true,
+        encryptedProfile: true,
+        isVerified: true,
         role: true,
         bannedAt: true,
         banReason: true
@@ -391,10 +251,7 @@ router.post('/refresh', async (req, res, next) => {
       throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
     }
 
-    // Refresh Token Rotation: Hapus token lama agar tidak menumpuk & mencegah Replay Attack
-    await prisma.refreshToken.delete({
-      where: { jti: payload.jti }
-    });
+    await prisma.refreshToken.delete({ where: { jti: payload.jti } });
 
     const tokens = await issueTokens(user, req)
     setAuthCookies(res, tokens)
@@ -408,7 +265,7 @@ router.post('/refresh', async (req, res, next) => {
 // === ZERO-KNOWLEDGE ACCOUNT RECOVERY ===
 router.post('/recover', authLimiter, zodValidate({
   body: z.object({
-    identifier: z.string().min(1),
+    identifier: z.string().min(10), // usernameHash
     newPassword: z.string().min(8),
     newEncryptedKeys: z.string(),
     signature: z.string(),
@@ -416,38 +273,35 @@ router.post('/recover', authLimiter, zodValidate({
   })
 }), async (req, res, next) => {
   try {
-    const { identifier, newPassword, newEncryptedKeys, signature, timestamp } = req.body;
+    const { identifier: usernameHash, newPassword, newEncryptedKeys, signature, timestamp } = req.body;
 
-    // 1. Cegah Replay Attack (Maksimal 5 menit)
     const now = Date.now();
     if (Math.abs(now - timestamp) > 5 * 60 * 1000) {
        throw new ApiError(400, "Recovery request expired.");
     }
 
-    // 2. Cari User
-    const user = await prisma.user.findFirst({
-      where: { OR: [{ email: identifier }, { username: identifier }] }
+    // Match by Hash
+    const user = await prisma.user.findUnique({
+      where: { usernameHash }
     });
     if (!user || !user.signingKey) throw new ApiError(404, "User not found or invalid keys.");
 
-    // 3. Verifikasi Signature menggunakan libsdoium
-    const { getSodium } = await import('../lib/sodium.js'); // Sesuaikan path import sodium server-mu
+    const { getSodium } = await import('../lib/sodium.js');
     const sodium = await getSodium();
     
-    const messageString = `${identifier}:${timestamp}`;
+    // Message: HASH:TIMESTAMP
+    const messageString = `${usernameHash}:${timestamp}`;
     const messageBytes = Buffer.from(messageString, 'utf-8');
     const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
     const publicKeyBytes = sodium.from_base64(user.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
     const isValid = sodium.crypto_sign_verify_detached(signatureBytes, messageBytes, publicKeyBytes);
     if (!isValid) {
-       throw new ApiError(401, "Cryptographic signature verification failed. Invalid phrase.");
+       throw new ApiError(401, "Cryptographic signature verification failed.");
     }
 
-    // 4. Update Password dan Keys di Database
     const passwordHash = await hashPassword(newPassword);
     
-    // Revoke old sessions
     await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
 
     const updatedUser = await prisma.user.update({
@@ -458,7 +312,6 @@ router.post('/recover', authLimiter, zodValidate({
       }
     });
 
-    // 5. Terbitkan Token Baru (Auto Login)
     const tokens = await issueTokens(updatedUser, req);
     setAuthCookies(res, tokens);
 
@@ -470,17 +323,11 @@ router.post('/recover', authLimiter, zodValidate({
 
 router.post('/logout', async (req, res) => {
   const { endpoint } = req.body
-
   if (endpoint) {
     try {
-      await prisma.pushSubscription.deleteMany({
-        where: { endpoint }
-      })
-    } catch (e) {
-      console.error('Failed to remove push subscription:', e)
-    }
+      await prisma.pushSubscription.deleteMany({ where: { endpoint } })
+    } catch (e) {}
   }
-
   const r = req.cookies?.rt
   if (r) {
     try {
@@ -490,15 +337,8 @@ router.post('/logout', async (req, res) => {
       }
     } catch (e) {}
   }
-
   const isProd = env.nodeEnv === 'production'
-  const cookieOpts: CookieOptions = {
-    path: '/',
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax'
-  }
-
+  const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
   res.clearCookie('at', cookieOpts)
   res.clearCookie('rt', cookieOpts)
   res.json({ ok: true })
@@ -514,11 +354,13 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) => 
       where: { userId: req.user.id }
     })
 
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+
     const options = await generateRegistrationOptions({
       rpName,
       rpID,
       userID: new Uint8Array(Buffer.from(req.user.id)),
-      userName: req.user.username,
+      userName: user?.name || "Anonymous User", 
       attestationType: 'none',
       excludeCredentials: userAuthenticators.map(auth => ({
         id: isoBase64URL.toBuffer(auth.credentialID),
@@ -573,7 +415,8 @@ router.post('/webauthn/register/verify', requireAuth, async (req, res, next) => 
         }
       })
 
-      await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: null } })
+      // Upgrade Trust Tier to Verified (VIP)
+      await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: null, isVerified: true } })
 
       res.json({ verified: true })
     } else {
@@ -588,9 +431,7 @@ router.get('/webauthn/login/options', async (req, res, next) => {
       rpID,
       userVerification: 'preferred'
     })
-
     res.cookie('webauthn_challenge', options.challenge, { httpOnly: true, maxAge: 60000, secure: env.nodeEnv === 'production' })
-
     res.json(options)
   } catch (e) { next(e) }
 })
@@ -599,7 +440,6 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
   try {
     const { body } = req
     const challenge = req.cookies.webauthn_challenge
-
     if (!challenge) throw new ApiError(400, 'Challenge expired or missing.')
 
     const credentialID = body.id
@@ -632,20 +472,13 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
         data: { counter: BigInt(authenticationInfo.newCounter) }
       })
 
-      // Ambil user tanpa field sensitif untuk response
       const safeUser = await prisma.user.findUnique({
         where: { id: userAuthenticator.user.id },
         select: {
           id: true,
-          email: true,
-          username: true,
-          name: true,
-          avatarUrl: true,
-          isEmailVerified: true,
-          showEmailToOthers: true,
-          description: true,
-          hasCompletedOnboarding: true,
-          encryptedPrivateKey: true, // Include encrypted key blob
+          encryptedProfile: true,
+          isVerified: true,
+          encryptedPrivateKey: true,
           role: true,
           bannedAt: true,
           banReason: true
@@ -653,14 +486,10 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
       })
 
       if (!safeUser) throw new ApiError(404, 'User not found')
-
-      if (safeUser.bannedAt) {
-        return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.', reason: safeUser.banReason })
-      }
+      if (safeUser.bannedAt) return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.', reason: safeUser.banReason })
 
       const tokens = await issueTokens(safeUser, req)
       setAuthCookies(res, tokens)
-
       res.clearCookie('webauthn_challenge')
 
       res.json({ 
@@ -674,8 +503,5 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
     }
   } catch (e) { next(e) }
 })
-
-// === DEVICE LINKING ===
-// (Removed: Device Linking is deprecated in favor of Local Vault Backup)
 
 export default router
