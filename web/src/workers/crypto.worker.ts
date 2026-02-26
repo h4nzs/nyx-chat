@@ -664,16 +664,14 @@ self.onmessage = async (event: MessageEvent) => {
         // "NYX_BLIND_IDX_V1" is exactly 16 chars
         const SALT = new TextEncoder().encode("NYX_BLIND_IDX_V1"); 
         
-        const hash = sodium.crypto_pwhash(
-            32, // Output length
-            new Uint8Array(new TextEncoder().encode(username.toLowerCase())), // Input (normalized)
-            SALT,
-            sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
-            sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE,
-            sodium.crypto_pwhash_ALG_ARGON2ID13
-        );
+        // Use hash-wasm's argon2id which is reliable
+        const hashBytes = await argon2id({
+          password: username.toLowerCase(),
+          salt: SALT,
+          ...ARGON_CONFIG,
+        });
         
-        result = sodium.to_base64(hash, sodium.base64_variants.URLSAFE_NO_PADDING);
+        result = sodium.to_base64(hashBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
         break;
       }
       case 'encryptProfile': {
