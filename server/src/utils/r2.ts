@@ -8,7 +8,8 @@ export const s3Client = new S3Client({
   credentials: {
     accessKeyId: env.r2AccessKeyId,
     secretAccessKey: env.r2SecretAccessKey
-  }
+  },
+  requestChecksumCalculation: 'WHEN_REQUIRED'
 })
 
 // Generate URL upload yang valid selama 5 menit
