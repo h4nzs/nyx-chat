@@ -162,7 +162,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
   searchUsers: async (query) => {
     try {
-      const safeQuery = encodeURIComponent(query || '');
+      if (!query.trim()) return [];
+      const { hashUsername } = await import('@lib/crypto-worker-proxy');
+      const hashedQuery = await hashUsername(query.trim());
+      const safeQuery = encodeURIComponent(hashedQuery);
       const users = await api<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>(`/api/users/search?q=${safeQuery}`);
       return users;
     } catch (error) {
