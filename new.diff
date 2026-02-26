@@ -1,290 +1,351 @@
-diff --git a/server/src/routes/conversations.ts b/server/src/routes/conversations.ts
-index 49f28e42..366c5b96 100644
---- a/server/src/routes/conversations.ts
-+++ b/server/src/routes/conversations.ts
-@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth.js'
- import { getIo } from '../socket.js'
- import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
- import { ApiError } from '../utils/errors.js'
-+import { redisClient } from '../lib/redis.js'
+diff --git a/server/src/routes/auth.ts b/server/src/routes/auth.ts
+index 383bf77d..76d33084 100644
+--- a/server/src/routes/auth.ts
++++ b/server/src/routes/auth.ts
+@@ -346,6 +346,62 @@ router.post('/logout', async (req, res) => {
  
- const router: Router = Router()
- router.use(requireAuth)
-@@ -83,6 +84,14 @@ router.post('/', async (req, res, next) => {
-       return res.status(400).json({ error: 'userIds must be an array.' })
-     }
+ // === WEBAUTHN ROUTES ===
  
-+    // SANDBOX CHECK
-+    const user = await prisma.user.findUnique({ where: { id: creatorId }, select: { isVerified: true } });
-+    const isVerified = user?.isVerified ?? false;
++// === PROOF OF WORK (PoW) ROUTES ===
 +
-+    if (!isVerified && isGroup) {
-+        throw new ApiError(403, 'SANDBOX_GROUP_RESTRICTION: Unverified users cannot create groups.');
-+    }
-+
-     if (userIds.length > MAX_GROUP_MEMBERS) {
-       return res.status(400).json({ error: `Group cannot have more than ${MAX_GROUP_MEMBERS} members.` })
-     }
-@@ -103,6 +112,18 @@ router.post('/', async (req, res, next) => {
-       })
- 
-       if (existingConversation) return res.status(200).json(existingConversation)
-+        
-+      // SANDBOX DM LIMIT (Only for NEW conversations)
-+      if (!isVerified) {
-+          const today = new Date().toISOString().split('T')[0];
-+          const key = `sandbox:newchat:${creatorId}:${today}`;
-+          const count = await redisClient.incr(key);
-+          if (count === 1) await redisClient.expire(key, 86400); // 24h
-+          
-+          if (count > 3) {
-+              throw new ApiError(429, 'SANDBOX_NEW_CHAT_LIMIT: Max 3 new conversations per day.');
-+          }
-+      }
-     }
- 
-     const allUserIds = Array.from(new Set([...userIds, creatorId]))
-diff --git a/server/src/routes/users.ts b/server/src/routes/users.ts
-index 6e1577f4..4c73a23e 100644
---- a/server/src/routes/users.ts
-+++ b/server/src/routes/users.ts
-@@ -19,6 +19,11 @@ router.get('/search', async (req, res, next) => {
-     }
- 
-     // q adalah usernameHash yang dikirim client
++router.get('/pow/challenge', requireAuth, async (req, res, next) => {
++  try {
++    const salt = crypto.randomBytes(16).toString('hex');
++    const difficulty = 4; // Target: Hash starts with '0000'
 +    
-+    // SANDBOX CHECK
-+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { isVerified: true } });
-+    const limit = user?.isVerified ? 20 : 3;
++    // Store challenge in Redis (5 mins expiry)
++    await redisClient.setEx(`pow:challenge:${req.user!.id}`, 300, JSON.stringify({ salt, difficulty }));
++    
++    res.json({ salt, difficulty });
++  } catch (e) {
++    next(e);
++  }
++});
 +
-     const users = await prisma.user.findMany({
-       where: {
-         AND: [
-@@ -32,7 +37,7 @@ router.get('/search', async (req, res, next) => {
-         isVerified: true,
-         publicKey: true
-       },
--      take: 5
-+      take: limit
-     })
- 
-     res.json(users)
-diff --git a/server/src/socket.ts b/server/src/socket.ts
-index 979dd7f7..45f8bf69 100644
---- a/server/src/socket.ts
-+++ b/server/src/socket.ts
-@@ -316,7 +316,19 @@ export function registerSocket(httpServer: HttpServer) {
-     });
- 
-     socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: Message, error?: string }) => void) => {
--      // 1. Rate Limit
-+      // 1. Sandbox Rate Limit (Strict)
-+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
-+      if (!user?.isVerified) {
-+          const key = `sandbox:msg:${userId}`;
-+          const count = await redisClient.incr(key);
-+          if (count === 1) await redisClient.expire(key, 60);
-+          
-+          if (count > 5) {
-+              return callback?.({ ok: false, error: "SANDBOX_LIMIT_REACHED: Max 5 messages per minute. Verify account to unlock." });
-+          }
++router.post('/pow/verify', 
++  requireAuth, 
++  zodValidate({
++    body: z.object({ nonce: z.number() })
++  }), 
++  async (req, res, next) => {
++    try {
++      const { nonce } = req.body;
++      const userId = req.user!.id;
++      
++      const challengeData = await redisClient.get(`pow:challenge:${userId}`);
++      if (!challengeData) {
++        throw new ApiError(400, 'Challenge expired or invalid. Please request a new one.');
 +      }
++      
++      const { salt, difficulty } = JSON.parse(challengeData as string);
++      
++      // Verify Hash: SHA256(salt + nonce)
++      const hash = crypto.createHash('sha256').update(salt + nonce.toString()).digest('hex');
++      
++      if (hash.startsWith('0'.repeat(difficulty))) {
++          // Valid PoW!
++          await redisClient.del(`pow:challenge:${userId}`);
++          
++          // Upgrade User
++          await prisma.user.update({
++              where: { id: userId },
++              data: { isVerified: true }
++          });
++          
++          res.json({ success: true, message: 'Account verified via Proof of Work' });
++      } else {
++          throw new ApiError(400, 'Invalid Proof of Work. Hash does not meet difficulty target.');
++      }
++    } catch (e) {
++      next(e);
++    }
++  }
++);
 +
-+      // 2. Standard Rate Limit
-       if (!await checkRateLimit(userId, 'message', 15, 60)) { // 15 messages / minute
-          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
-       }
-diff --git a/web/src/pages/Register.tsx b/web/src/pages/Register.tsx
-index 16e58492..d433065f 100644
---- a/web/src/pages/Register.tsx
-+++ b/web/src/pages/Register.tsx
-@@ -7,16 +7,26 @@ import { Turnstile } from '@marsidev/react-turnstile';
- import toast from "react-hot-toast";
- import { hashUsername, generateProfileKey, encryptProfile } from "@lib/crypto-worker-proxy";
- import { saveProfileKey } from "@lib/keychainDb";
-+import { startRegistration, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
-+import { api } from "@lib/api";
-+import { FiShield, FiSkipForward } from "react-icons/fi";
-+import { IoFingerPrint } from "react-icons/io5";
+ router.get('/webauthn/register/options', requireAuth, async (req, res, next) => {
+   try {
+     if (!req.user) throw new ApiError(401, 'Unauthorized')
+diff --git a/web/src/lib/crypto-worker-proxy.ts b/web/src/lib/crypto-worker-proxy.ts
+index f1fb5f39..1c388072 100644
+--- a/web/src/lib/crypto-worker-proxy.ts
++++ b/web/src/lib/crypto-worker-proxy.ts
+@@ -126,6 +126,10 @@ export async function generateProfileKey(): Promise<string> {
+   return sendToWorker('generateProfileKey', {});
+ }
  
- export default function Register() {
-   const [error, setError] = useState("");
--  const [step, setStep] = useState<'form' | 'recovery'>('form');
-+  const [step, setStep] = useState<'form' | 'biometric' | 'recovery'>('form');
-   const [recoveryPhrase, setRecoveryPhrase] = useState('');
-   const [turnstileToken, setTurnstileToken] = useState<string>('');
-+  const [isBiometricsSupported, setIsBiometricsSupported] = useState(false);
-+  const [isVerifyingBio, setIsVerifyingBio] = useState(false);
++export async function minePoW(salt: string, difficulty: number): Promise<{ nonce: number; hash: string }> {
++  return sendToWorker('minePoW', { salt, difficulty });
++}
++
+ export async function hashUsername(username: string): Promise<string> {
+   return sendToWorker('hashUsername', { username });
+ }
+diff --git a/web/src/pages/SettingsPage.tsx b/web/src/pages/SettingsPage.tsx
+index 9fdaa107..11f4c325 100644
+--- a/web/src/pages/SettingsPage.tsx
++++ b/web/src/pages/SettingsPage.tsx
+@@ -10,13 +10,19 @@ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
+ import { 
+   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
+   FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
+-  FiDownload, FiUpload, FiDatabase, FiSend
++  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap
+ } from 'react-icons/fi';
+ import { startRegistration } from '@simplewebauthn/browser';
+ import { IoFingerPrint } from 'react-icons/io5';
+ import ReportBugModal from '../components/ReportBugModal';
+ import { api } from '@lib/api';
+ import { exportDatabaseToJson, importDatabaseFromJson } from '@lib/keychainDb';
++import { useUserProfile } from '@hooks/useUserProfile';
++import { useProfileStore } from '@store/profile';
++import { generateProfileKey, encryptProfile, minePoW } from '@lib/crypto-worker-proxy';
++import { saveProfileKey } from '@lib/keychainDb';
++import ModalBase from '../components/ui/ModalBase';
++import { useSettingsStore } from '@store/settings';
  
+ /* --- MICRO-COMPONENTS --- */
+ 
+@@ -98,18 +104,11 @@ const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?
+   </button>
+ );
+ 
+-import { useSettingsStore } from '@store/settings';
+-
+ /* --- PAGE COMPONENT --- */
+ 
+-import { useUserProfile } from '@hooks/useUserProfile';
+-import { useProfileStore } from '@store/profile';
+-import { generateProfileKey, encryptProfile } from '@lib/crypto-worker-proxy';
+-import { saveProfileKey } from '@lib/keychainDb';
+-
+ export default function SettingsPage() {
    const navigate = useNavigate();
-   const { registerAndGeneratePhrase } = useAuthStore();
+-  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout } = useAuthStore();
++  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout, setUser } = useAuthStore();
+   const profile = useUserProfile(user);
+   const { theme, toggleTheme, accent, setAccent } = useThemeStore();
+   const { showConfirm } = useModalStore();
+@@ -129,6 +128,9 @@ export default function SettingsPage() {
+   const [readReceipts, setReadReceiptsState] = useState(sendReadReceipts);
+   const [isLoading, setIsLoading] = useState(false);
+   const [showReportModal, setShowReportModal] = useState(false);
++  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
++  const [miningStatus, setMiningStatus] = useState<'idle' | 'mining' | 'verifying'>('idle');
++  
+   const fileInputRef = useRef<HTMLInputElement>(null);
+   const vaultInputRef = useRef<HTMLInputElement>(null);
  
-+  useEffect(() => {
-+    platformAuthenticatorIsAvailable().then(setIsBiometricsSupported);
-+  }, []);
-+
-   async function handleRegister(data: { name?: string, d?: string, b?: string }) {
-     const { name, d: username, b: password } = data;
-     setError("");
-@@ -24,24 +34,15 @@ export default function Register() {
-     // --- Validation Logic ---
-     if (!name) { throw new Error("Name is required"); }
-     if (name.length > 80) { throw new Error("Name must be less than 80 characters"); }
--    
--    // Username constraints (min 3 chars)
-     if (!username || username.length < 3) { throw new Error("Username must be at least 3 characters"); }
-     const usernameRegex = /^[a-zA-Z0-9_]+$/;
-     if (!usernameRegex.test(username)) { throw new Error("Username can only contain letters, numbers, and underscores"); }
--    
-     if (!password) { throw new Error("Password is required"); }
-     if (password.length < 8) { throw new Error("Password must be at least 8 characters"); }
-     // --- End Validation ---
- 
--    // Validasi Turnstile
--    // if (!turnstileToken) { throw new Error("Please complete the CAPTCHA."); }
--
-     try {
--      // CLIENT-SIDE BLIND INDEXING
-       const usernameHash = await hashUsername(username);
--
--      // PROFILE ENCRYPTION
-       const profileKeyB64 = await generateProfileKey();
-       const profileJson = JSON.stringify({ name, description: "", avatarUrl: "" });
-       const encryptedProfile = await encryptProfile(profileJson, profileKeyB64);
-@@ -53,39 +54,124 @@ export default function Register() {
-         turnstileToken 
+@@ -208,7 +210,9 @@ export default function SettingsPage() {
        });
  
--      // Save own ProfileKey to IDB
-       await saveProfileKey(result.userId, profileKeyB64);
--
-       setRecoveryPhrase(result.phrase);
--      setStep('recovery'); // Success! Show phrase.
--      toast.success("Account created successfully!");
-+      
-+      // Move to Biometric step instead of Recovery directly
-+      setStep('biometric');
-+      toast.success("Identity initialized. Setup security.");
-       
-     } catch (err: any) {
-       setError(err.message || "Registration failed");
+       if (verificationResp.verified) {
+-        toast.success("Biometric signature confirmed.", { id: 'passkey' });
++        toast.success("Biometric signature confirmed. VIP Access Granted.", { id: 'passkey' });
++        setShowUpgradeModal(false);
++        if (user) setUser({ ...user, isVerified: true });
+       } else {
+         throw new Error("Verification failed");
+       }
+@@ -221,6 +225,42 @@ export default function SettingsPage() {
      }
-   }
+   };
  
-+  const handleBiometricRegister = async () => {
-+    setIsVerifyingBio(true);
++  const handleProofOfWork = async () => {
++    setMiningStatus('mining');
++    const toastId = toast.loading("Connecting to mining pool...");
++    
 +    try {
-+      // 1. Get Options
-+      const options = await api<any>("/api/auth/webauthn/register/options");
++      // 1. Get Challenge
++      const { salt, difficulty } = await api<{ salt: string, difficulty: number }>('/api/auth/pow/challenge');
 +      
-+      // 2. Browser Prompt
-+      const attResp = await startRegistration(options);
++      toast.loading("Mining cryptographic puzzle... (CPU Intensive)", { id: toastId });
 +      
-+      // 3. Verify on Server
-+      const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {
-+        method: "POST",
-+        body: JSON.stringify(attResp),
++      // 2. Mine in Worker (Non-blocking)
++      const { nonce } = await minePoW(salt, difficulty);
++      
++      setMiningStatus('verifying');
++      toast.loading("Verifying proof...", { id: toastId });
++      
++      // 3. Verify
++      const result = await api<{ success: boolean }>('/api/auth/pow/verify', {
++        method: 'POST',
++        body: JSON.stringify({ nonce })
 +      });
-+
-+      if (verificationResp.verified) {
-+        toast.success("Biometric verified! VIP Access granted.");
-+        setStep('recovery');
-+      } else {
-+        throw new Error("Verification failed");
++      
++      if (result.success) {
++        toast.success("Proof Accepted! Account upgraded to VIP.", { id: toastId });
++        setShowUpgradeModal(false);
++        if (user) setUser({ ...user, isVerified: true });
 +      }
++      
 +    } catch (error: any) {
-+      if (error.name === 'NotAllowedError') {
-+        toast.error("Biometric scan cancelled.");
-+      } else {
-+        toast.error(`Error: ${error.message}`);
-+      }
++      console.error(error);
++      toast.error(`Mining failed: ${error.message}`, { id: toastId });
 +    } finally {
-+      setIsVerifyingBio(false);
++      setMiningStatus('idle');
 +    }
 +  };
 +
-+  const handleSkipBiometric = () => {
-+    toast('You can verify later in Settings to unlock full features.', { icon: '🔒' });
-+    setStep('recovery');
-+  };
-+
-   useEffect(() => {
-     let timerId: NodeJS.Timeout;
--
-     if (step === 'recovery' && !recoveryPhrase) {
--      // If phrase is lost (e.g. refresh), just go to chat.
-       toast.success("Welcome! You can view your recovery phrase in Settings.");
-       timerId = setTimeout(() => navigate('/chat'), 100);
-     }
--
--    return () => {
--      if (timerId) clearTimeout(timerId);
--    };
-+    return () => { if (timerId) clearTimeout(timerId); };
-   }, [step, recoveryPhrase, navigate]);
+   const handleExportVault = async () => {
+     try {
+       const json = await exportDatabaseToJson();
+@@ -341,11 +381,31 @@ export default function SettingsPage() {
+                 <div className="flex-1 w-full space-y-6">
+                   {/* ID (Read Only) */}
+                   <div className="space-y-2">
+-                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">ANONYMOUS ID</label>
++                    <div className="flex justify-between items-center">
++                       <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">ANONYMOUS ID</label>
++                       {user.isVerified ? (
++                         <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1">
++                           <FiShield size={10} /> Verified
++                         </span>
++                       ) : (
++                         <button 
++                           type="button"
++                           onClick={() => setShowUpgradeModal(true)}
++                           className="text-[10px] bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-yellow-500/20 transition-colors animate-pulse"
++                         >
++                           <FiLock size={10} /> Sandboxed (Upgrade)
++                         </button>
++                       )}
++                    </div>
+                     <div className="w-full bg-black/5 dark:bg-white/5 text-sm font-mono text-text-primary p-4 rounded-xl flex items-center border border-transparent">
+                       <span className="text-accent mr-1">#</span>{user.id}
+                       <FiLock className="ml-auto text-text-secondary opacity-50" size={12} />
+                     </div>
++                    {!user.isVerified && (
++                        <p className="text-[10px] text-text-secondary pl-2">
++                           Limited access. Verify to unlock Groups and higher limits.
++                        </p>
++                    )}
+                   </div>
  
--  // STEP 2: RECOVERY PHRASE
-+  // STEP 3: RECOVERY PHRASE
-   if (step === 'recovery') {
-     if (!recoveryPhrase) return null;
--
-     return <RecoveryPhraseModal phrase={recoveryPhrase} onClose={() => navigate('/chat')} />
-   }
+                   <div className="space-y-2">
+@@ -487,22 +547,24 @@ export default function SettingsPage() {
+               />
+               <button
+                 onClick={handleRegisterPasskey}
+-                className="
++                disabled={user.isVerified}
++                className={`
+                   mt-4 w-full p-4 rounded-xl flex items-center justify-between
+                   bg-bg-main text-text-primary
+                   shadow-neu-flat-light dark:shadow-neu-flat-dark
+                   active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                   hover:text-accent transition-colors
+-                "
++                  ${user.isVerified ? 'opacity-50 cursor-not-allowed' : ''}
++                `}
+               >
+                 <div className="flex items-center gap-3">
+                   <IoFingerPrint size={20} />
+                   <div className="text-left">
+-                    <div className="font-bold text-sm">Biometric Key</div>
++                    <div className="font-bold text-sm">{user.isVerified ? 'Biometric Active' : 'Enable Biometrics'}</div>
+                     <div className="text-[10px] text-text-secondary">Fingerprint / Face ID</div>
+                   </div>
+                 </div>
+-                <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_#22c55e]"></div>
++                <div className={`w-2 h-2 rounded-full shadow-[0_0_5px] ${user.isVerified ? 'bg-green-500 shadow-green-500' : 'bg-gray-500 shadow-transparent'}`}></div>
+               </button>
+             </div>
+           </ControlModule>
+@@ -646,8 +708,52 @@ export default function SettingsPage() {
  
-+  // STEP 2: BIOMETRIC VERIFICATION
-+  if (step === 'biometric') {
-+    return (
-+      <div className="min-h-screen flex items-center justify-center bg-stone-900 p-4">
-+        <div className="max-w-md w-full bg-stone-800 rounded-2xl p-8 shadow-2xl border border-stone-700 text-center">
-+          <div className="w-16 h-16 bg-teal-500/10 rounded-full flex items-center justify-center mx-auto mb-6 text-teal-500">
-+            <IoFingerPrint size={32} />
-+          </div>
-+          
-+          <h2 className="text-2xl font-black text-white mb-2 tracking-tight">TRUST LEVEL VERIFICATION</h2>
-+          <p className="text-stone-400 text-sm mb-8">
-+            Verify you are human using your device's biometric sensor. 
-+            Verified accounts get unlimited access. Unverified accounts are sandboxed.
-+          </p>
+       </div>
+ 
++      {/* UPGRADE MODAL */}
++      <ModalBase isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} title="Upgrade to VIP">
++        <div className="space-y-6">
++           <p className="text-sm text-text-secondary text-center">
++             You are currently in <span className="text-yellow-500 font-bold">Sandbox Mode</span>. 
++             Upgrade to remove messaging limits and unlock group creation.
++           </p>
++           
++           <div className="grid grid-cols-1 gap-4">
++             {/* Option 1: Biometric */}
++             <button
++               onClick={handleRegisterPasskey}
++               className="p-4 bg-bg-surface rounded-xl border border-white/5 shadow-neu-flat hover:border-accent/50 transition-all text-left flex items-start gap-4 group"
++             >
++               <div className="p-3 bg-accent/10 text-accent rounded-full group-hover:bg-accent group-hover:text-white transition-colors">
++                 <FiZap size={24} />
++               </div>
++               <div>
++                 <h3 className="font-bold text-text-primary">Instant Biometric</h3>
++                 <p className="text-xs text-text-secondary mt-1">Use Fingerprint or FaceID. Takes 1 second.</p>
++               </div>
++             </button>
 +
-+          {isBiometricsSupported ? (
-+            <div className="space-y-4">
-+              <button
-+                onClick={handleBiometricRegister}
-+                disabled={isVerifyingBio}
-+                className="w-full py-4 rounded-xl bg-teal-500 hover:bg-teal-400 text-stone-900 font-bold uppercase tracking-wider shadow-lg shadow-teal-500/20 transition-all flex items-center justify-center gap-2"
-+              >
-+                {isVerifyingBio ? <span className="animate-pulse">Scanning...</span> : (
-+                  <>
-+                    <FiShield /> Verify Identity
-+                  </>
-+                )}
-+              </button>
-+              
-+              <button
-+                onClick={handleSkipBiometric}
-+                className="w-full py-4 rounded-xl bg-transparent border border-stone-600 text-stone-400 hover:text-white hover:border-stone-500 font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2"
-+              >
-+                <FiSkipForward /> Skip for now
-+              </button>
-+            </div>
-+          ) : (
-+            <div className="space-y-4">
-+              <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-500 text-xs">
-+                Your device does not support biometric authentication. You will start in Sandbox mode.
-+              </div>
-+              <button
-+                onClick={handleSkipBiometric}
-+                className="w-full py-4 rounded-xl bg-stone-700 hover:bg-stone-600 text-white font-bold uppercase tracking-wider transition-all"
-+              >
-+                Continue to App
-+              </button>
-+            </div>
-+          )}
++             {/* Option 2: Proof of Work */}
++             <button
++               onClick={handleProofOfWork}
++               disabled={miningStatus !== 'idle'}
++               className="p-4 bg-bg-surface rounded-xl border border-white/5 shadow-neu-flat hover:border-accent/50 transition-all text-left flex items-start gap-4 group disabled:opacity-50 disabled:cursor-not-allowed"
++             >
++               <div className="p-3 bg-blue-500/10 text-blue-500 rounded-full group-hover:bg-blue-500 group-hover:text-white transition-colors">
++                 {miningStatus === 'idle' ? <FiCpu size={24} /> : <Spinner size="sm" />}
++               </div>
++               <div>
++                 <h3 className="font-bold text-text-primary">Proof of Work Mining</h3>
++                 <p className="text-xs text-text-secondary mt-1">
++                   {miningStatus === 'idle' ? "Solve a cryptographic puzzle with your CPU. Takes 5-10 seconds." : 
++                    miningStatus === 'mining' ? "Mining hash collision... CPU at 100%" : "Verifying proof..."}
++                 </p>
++               </div>
++             </button>
++           </div>
 +        </div>
-+      </div>
-+    );
-+  }
++      </ModalBase>
 +
-   // STEP 1: REGISTER FORM
-   return (
-     <div className="min-h-screen flex flex-col md:flex-row bg-stone-900">
+       {/* MODALS */}
+       {showReportModal && <ReportBugModal onClose={() => setShowReportModal(false)} />}
+     </div>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/web/src/workers/crypto.worker.ts b/web/src/workers/crypto.worker.ts
+index 71b5bf6f..2ac0a248 100644
+--- a/web/src/workers/crypto.worker.ts
++++ b/web/src/workers/crypto.worker.ts
+@@ -723,6 +723,38 @@ self.onmessage = async (event: MessageEvent) => {
+         result = sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
+         break;
+       }
++      case 'minePoW': {
++        const { salt, difficulty } = payload;
++        const targetPrefix = '0'.repeat(difficulty);
++        let nonce = 0;
++        let hash = '';
++        let found = false;
++        
++        const saltBytes = new TextEncoder().encode(salt);
++        
++        // Loop until we find a hash starting with targetPrefix
++        // Add a safety break (e.g. 10 million iterations) or just let it run
++        // Web Workers run in background so blocking loop is fine for the worker thread
++        while (!found) {
++            const nonceStr = nonce.toString();
++            const nonceBytes = new TextEncoder().encode(nonceStr);
++            const input = new Uint8Array(saltBytes.length + nonceBytes.length);
++            input.set(saltBytes);
++            input.set(nonceBytes, saltBytes.length);
++            
++            const hashBytes = sodium.crypto_hash_sha256(input);
++            hash = sodium.to_hex(hashBytes);
++            
++            if (hash.startsWith(targetPrefix)) {
++                found = true;
++            } else {
++                nonce++;
++            }
++        }
++        
++        result = { nonce, hash };
++        break;
++      }
+       case 'generate_random_key': {
+         result = sodium.randombytes_buf(32);
+         break;

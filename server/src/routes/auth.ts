@@ -346,6 +346,62 @@ router.post('/logout', async (req, res) => {
 
 // === WEBAUTHN ROUTES ===
 
+// === PROOF OF WORK (PoW) ROUTES ===
+
+router.get('/pow/challenge', requireAuth, async (req, res, next) => {
+  try {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const difficulty = 4; // Target: Hash starts with '0000'
+    
+    // Store challenge in Redis (5 mins expiry)
+    await redisClient.setEx(`pow:challenge:${req.user!.id}`, 300, JSON.stringify({ salt, difficulty }));
+    
+    res.json({ salt, difficulty });
+  } catch (e) {
+    next(e);
+  }
+});
+
+router.post('/pow/verify', 
+  requireAuth, 
+  zodValidate({
+    body: z.object({ nonce: z.number() })
+  }), 
+  async (req, res, next) => {
+    try {
+      const { nonce } = req.body;
+      const userId = req.user!.id;
+      
+      const challengeData = await redisClient.get(`pow:challenge:${userId}`);
+      if (!challengeData) {
+        throw new ApiError(400, 'Challenge expired or invalid. Please request a new one.');
+      }
+      
+      const { salt, difficulty } = JSON.parse(challengeData as string);
+      
+      // Verify Hash: SHA256(salt + nonce)
+      const hash = crypto.createHash('sha256').update(salt + nonce.toString()).digest('hex');
+      
+      if (hash.startsWith('0'.repeat(difficulty))) {
+          // Valid PoW!
+          await redisClient.del(`pow:challenge:${userId}`);
+          
+          // Upgrade User
+          await prisma.user.update({
+              where: { id: userId },
+              data: { isVerified: true }
+          });
+          
+          res.json({ success: true, message: 'Account verified via Proof of Work' });
+      } else {
+          throw new ApiError(400, 'Invalid Proof of Work. Hash does not meet difficulty target.');
+      }
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
 router.get('/webauthn/register/options', requireAuth, async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Unauthorized')

@@ -10,13 +10,19 @@ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
   FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
-  FiDownload, FiUpload, FiDatabase, FiSend
+  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
 import ReportBugModal from '../components/ReportBugModal';
 import { api } from '@lib/api';
 import { exportDatabaseToJson, importDatabaseFromJson } from '@lib/keychainDb';
+import { useUserProfile } from '@hooks/useUserProfile';
+import { useProfileStore } from '@store/profile';
+import { generateProfileKey, encryptProfile, minePoW } from '@lib/crypto-worker-proxy';
+import { saveProfileKey } from '@lib/keychainDb';
+import ModalBase from '../components/ui/ModalBase';
+import { useSettingsStore } from '@store/settings';
 
 /* --- MICRO-COMPONENTS --- */
 
@@ -98,18 +104,11 @@ const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?
   </button>
 );
 
-import { useSettingsStore } from '@store/settings';
-
 /* --- PAGE COMPONENT --- */
-
-import { useUserProfile } from '@hooks/useUserProfile';
-import { useProfileStore } from '@store/profile';
-import { generateProfileKey, encryptProfile } from '@lib/crypto-worker-proxy';
-import { saveProfileKey } from '@lib/keychainDb';
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout } = useAuthStore();
+  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout, setUser } = useAuthStore();
   const profile = useUserProfile(user);
   const { theme, toggleTheme, accent, setAccent } = useThemeStore();
   const { showConfirm } = useModalStore();
@@ -129,6 +128,9 @@ export default function SettingsPage() {
   const [readReceipts, setReadReceiptsState] = useState(sendReadReceipts);
   const [isLoading, setIsLoading] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [miningStatus, setMiningStatus] = useState<'idle' | 'mining' | 'verifying'>('idle');
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vaultInputRef = useRef<HTMLInputElement>(null);
 
@@ -208,7 +210,9 @@ export default function SettingsPage() {
       });
 
       if (verificationResp.verified) {
-        toast.success("Biometric signature confirmed.", { id: 'passkey' });
+        toast.success("Biometric signature confirmed. VIP Access Granted.", { id: 'passkey' });
+        setShowUpgradeModal(false);
+        if (user) setUser({ ...user, isVerified: true });
       } else {
         throw new Error("Verification failed");
       }
@@ -218,6 +222,42 @@ export default function SettingsPage() {
       } else {
         toast.error(`Error: ${error.message}`, { id: 'passkey' });
       }
+    }
+  };
+
+  const handleProofOfWork = async () => {
+    setMiningStatus('mining');
+    const toastId = toast.loading("Connecting to mining pool...");
+    
+    try {
+      // 1. Get Challenge
+      const { salt, difficulty } = await api<{ salt: string, difficulty: number }>('/api/auth/pow/challenge');
+      
+      toast.loading("Mining cryptographic puzzle... (CPU Intensive)", { id: toastId });
+      
+      // 2. Mine in Worker (Non-blocking)
+      const { nonce } = await minePoW(salt, difficulty);
+      
+      setMiningStatus('verifying');
+      toast.loading("Verifying proof...", { id: toastId });
+      
+      // 3. Verify
+      const result = await api<{ success: boolean }>('/api/auth/pow/verify', {
+        method: 'POST',
+        body: JSON.stringify({ nonce })
+      });
+      
+      if (result.success) {
+        toast.success("Proof Accepted! Account upgraded to VIP.", { id: toastId });
+        setShowUpgradeModal(false);
+        if (user) setUser({ ...user, isVerified: true });
+      }
+      
+    } catch (error: any) {
+      console.error(error);
+      toast.error(`Mining failed: ${error.message}`, { id: toastId });
+    } finally {
+      setMiningStatus('idle');
     }
   };
 
@@ -341,11 +381,31 @@ export default function SettingsPage() {
                 <div className="flex-1 w-full space-y-6">
                   {/* ID (Read Only) */}
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">ANONYMOUS ID</label>
+                    <div className="flex justify-between items-center">
+                       <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">ANONYMOUS ID</label>
+                       {user.isVerified ? (
+                         <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1">
+                           <FiShield size={10} /> Verified
+                         </span>
+                       ) : (
+                         <button 
+                           type="button"
+                           onClick={() => setShowUpgradeModal(true)}
+                           className="text-[10px] bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-yellow-500/20 transition-colors animate-pulse"
+                         >
+                           <FiLock size={10} /> Sandboxed (Upgrade)
+                         </button>
+                       )}
+                    </div>
                     <div className="w-full bg-black/5 dark:bg-white/5 text-sm font-mono text-text-primary p-4 rounded-xl flex items-center border border-transparent">
                       <span className="text-accent mr-1">#</span>{user.id}
                       <FiLock className="ml-auto text-text-secondary opacity-50" size={12} />
                     </div>
+                    {!user.isVerified && (
+                        <p className="text-[10px] text-text-secondary pl-2">
+                           Limited access. Verify to unlock Groups and higher limits.
+                        </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -487,22 +547,24 @@ export default function SettingsPage() {
               />
               <button
                 onClick={handleRegisterPasskey}
-                className="
+                disabled={user.isVerified}
+                className={`
                   mt-4 w-full p-4 rounded-xl flex items-center justify-between
                   bg-bg-main text-text-primary
                   shadow-neu-flat-light dark:shadow-neu-flat-dark
                   active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
                   hover:text-accent transition-colors
-                "
+                  ${user.isVerified ? 'opacity-50 cursor-not-allowed' : ''}
+                `}
               >
                 <div className="flex items-center gap-3">
                   <IoFingerPrint size={20} />
                   <div className="text-left">
-                    <div className="font-bold text-sm">Biometric Key</div>
+                    <div className="font-bold text-sm">{user.isVerified ? 'Biometric Active' : 'Enable Biometrics'}</div>
                     <div className="text-[10px] text-text-secondary">Fingerprint / Face ID</div>
                   </div>
                 </div>
-                <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_#22c55e]"></div>
+                <div className={`w-2 h-2 rounded-full shadow-[0_0_5px] ${user.isVerified ? 'bg-green-500 shadow-green-500' : 'bg-gray-500 shadow-transparent'}`}></div>
               </button>
             </div>
           </ControlModule>
@@ -645,6 +707,50 @@ export default function SettingsPage() {
         </div>
 
       </div>
+
+      {/* UPGRADE MODAL */}
+      <ModalBase isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} title="Upgrade to VIP">
+        <div className="space-y-6">
+           <p className="text-sm text-text-secondary text-center">
+             You are currently in <span className="text-yellow-500 font-bold">Sandbox Mode</span>. 
+             Upgrade to remove messaging limits and unlock group creation.
+           </p>
+           
+           <div className="grid grid-cols-1 gap-4">
+             {/* Option 1: Biometric */}
+             <button
+               onClick={handleRegisterPasskey}
+               className="p-4 bg-bg-surface rounded-xl border border-white/5 shadow-neu-flat hover:border-accent/50 transition-all text-left flex items-start gap-4 group"
+             >
+               <div className="p-3 bg-accent/10 text-accent rounded-full group-hover:bg-accent group-hover:text-white transition-colors">
+                 <FiZap size={24} />
+               </div>
+               <div>
+                 <h3 className="font-bold text-text-primary">Instant Biometric</h3>
+                 <p className="text-xs text-text-secondary mt-1">Use Fingerprint or FaceID. Takes 1 second.</p>
+               </div>
+             </button>
+
+             {/* Option 2: Proof of Work */}
+             <button
+               onClick={handleProofOfWork}
+               disabled={miningStatus !== 'idle'}
+               className="p-4 bg-bg-surface rounded-xl border border-white/5 shadow-neu-flat hover:border-accent/50 transition-all text-left flex items-start gap-4 group disabled:opacity-50 disabled:cursor-not-allowed"
+             >
+               <div className="p-3 bg-blue-500/10 text-blue-500 rounded-full group-hover:bg-blue-500 group-hover:text-white transition-colors">
+                 {miningStatus === 'idle' ? <FiCpu size={24} /> : <Spinner size="sm" />}
+               </div>
+               <div>
+                 <h3 className="font-bold text-text-primary">Proof of Work Mining</h3>
+                 <p className="text-xs text-text-secondary mt-1">
+                   {miningStatus === 'idle' ? "Solve a cryptographic puzzle with your CPU. Takes 5-10 seconds." : 
+                    miningStatus === 'mining' ? "Mining hash collision... CPU at 100%" : "Verifying proof..."}
+                 </p>
+               </div>
+             </button>
+           </div>
+        </div>
+      </ModalBase>
 
       {/* MODALS */}
       {showReportModal && <ReportBugModal onClose={() => setShowReportModal(false)} />}

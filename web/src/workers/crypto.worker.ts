@@ -723,6 +723,38 @@ self.onmessage = async (event: MessageEvent) => {
         result = sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
         break;
       }
+      case 'minePoW': {
+        const { salt, difficulty } = payload;
+        const targetPrefix = '0'.repeat(difficulty);
+        let nonce = 0;
+        let hash = '';
+        let found = false;
+        
+        const saltBytes = new TextEncoder().encode(salt);
+        
+        // Loop until we find a hash starting with targetPrefix
+        // Add a safety break (e.g. 10 million iterations) or just let it run
+        // Web Workers run in background so blocking loop is fine for the worker thread
+        while (!found) {
+            const nonceStr = nonce.toString();
+            const nonceBytes = new TextEncoder().encode(nonceStr);
+            const input = new Uint8Array(saltBytes.length + nonceBytes.length);
+            input.set(saltBytes);
+            input.set(nonceBytes, saltBytes.length);
+            
+            const hashBytes = sodium.crypto_hash_sha256(input);
+            hash = sodium.to_hex(hashBytes);
+            
+            if (hash.startsWith(targetPrefix)) {
+                found = true;
+            } else {
+                nonce++;
+            }
+        }
+        
+        result = { nonce, hash };
+        break;
+      }
       case 'generate_random_key': {
         result = sodium.randombytes_buf(32);
         break;

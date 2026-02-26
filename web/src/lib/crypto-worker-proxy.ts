@@ -126,6 +126,10 @@ export async function generateProfileKey(): Promise<string> {
   return sendToWorker('generateProfileKey', {});
 }
 
+export async function minePoW(salt: string, difficulty: number): Promise<{ nonce: number; hash: string }> {
+  return sendToWorker('minePoW', { salt, difficulty });
+}
+
 export async function hashUsername(username: string): Promise<string> {
   return sendToWorker('hashUsername', { username });
 }
