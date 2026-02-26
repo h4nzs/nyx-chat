@@ -992,7 +992,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   updateSenderDetails: (user) => set(state => {
     const newMessages = { ...state.messages };
     for (const convoId in newMessages) {
-      newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id, name: user.name || '' }), ...user } } : m) as Message[];
+      newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id }), ...user } } : m) as Message[];
     }
     return { messages: newMessages };
   }),

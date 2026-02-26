@@ -83,7 +83,7 @@ export function useChatList() {
     }
   
     const filteredConversations = conversations.filter(c => {
-      const title = c.title || c.participants?.filter(p => p.id !== meId).map(p => p.name).join(', ') || 'Conversation';
+      const title = c.title || 'Conversation';
       return title.toLowerCase().includes(searchQuery.toLowerCase());
     });
   

@@ -338,7 +338,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
       const distributionKeys = await Promise.all(
         otherParticipants.map(async (p) => {
           if (!p.publicKey) {
-            missingKeys.push(p.name || p.id);
+            missingKeys.push(p.id);
             return null;
           }
           const theirPublicKey = sodium.from_base64(p.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);

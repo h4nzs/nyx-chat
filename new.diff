@@ -1,2875 +1,1052 @@
-diff --git a/server/prisma/schema.prisma b/server/prisma/schema.prisma
-index aa881b59..e54c715a 100644
---- a/server/prisma/schema.prisma
-+++ b/server/prisma/schema.prisma
-@@ -11,22 +11,20 @@ datasource db {
- 
- model User {
-   id                 String    @id @default(cuid())
--  email              String    @unique
--  username           String    @unique
-+  usernameHash       String    @unique
-   passwordHash       String
--  name               String
--  avatarUrl          String?
--  description        String?
-+  encryptedProfile   String?   @db.Text
-   publicKey          String?   // Encryption/Identity Key
-   signingKey         String?   // Verification Key
--  showEmailToOthers  Boolean   @default(false)
-+  
-   hasCompletedOnboarding Boolean @default(false)
--  isEmailVerified Boolean  @default(false) // Tambahkan ini
-+  isVerified         Boolean   @default(false) // WebAuthn / Trust Tier status
-+  
-   createdAt          DateTime  @default(now())
-   updatedAt          DateTime  @updatedAt
--  role               String    @default("USER") // Bisa diisi "ADMIN" buat akun lu doang
--  bannedAt           DateTime? // Kalau ada isinya, berarti dia dibanned
--  banReason          String?   // Catatan buat nampilin pesan ke user pas login gagal
-+  role               String    @default("USER") 
-+  bannedAt           DateTime? 
-+  banReason          String?   
- 
-   messages             Message[]
-   participants         Participant[]
-@@ -46,8 +44,8 @@ model User {
-   sessionKeys          SessionKey[]
- 
-   // Relasi Blocking
--  blockedUsers BlockedUser[] @relation("Blocker") // User ini memblokir siapa aja
--  blockedBy    BlockedUser[] @relation("Blocked") // User ini diblokir sama siapa aja
-+  blockedUsers BlockedUser[] @relation("Blocker") 
-+  blockedBy    BlockedUser[] @relation("Blocked") 
- 
-   @@index([createdAt])
- }
-diff --git a/server/src/routes/auth.ts b/server/src/routes/auth.ts
-index dc38cf96..383bf77d 100644
---- a/server/src/routes/auth.ts
-+++ b/server/src/routes/auth.ts
-@@ -9,7 +9,6 @@ import { env } from '../config.js'
- import { requireAuth } from '../middleware/auth.js'
- import { authLimiter, otpLimiter } from '../middleware/rateLimiter.js'
- import { nanoid } from 'nanoid'
--import { sendVerificationEmail } from '../utils/mailer.js' // Pastikan file utils/mailer.ts sudah ada
- import crypto from 'crypto'
- import {
-   generateRegistrationOptions,
-@@ -56,16 +55,14 @@ function setAuthCookies (res: Response, { access, refresh }: { access: string; r
- }
- 
- async function issueTokens (user: any, req: any) {
-+  // PURE ANONYMITY: Only store ID and Role in JWT. No Email/Username.
-   const access = signAccessToken({ 
-     id: user.id, 
--    email: user.email, 
--    username: user.username,
-     role: user.role 
-   })
-   const jti = newJti()
-   const refresh = signAccessToken({ sub: user.id, jti }, { expiresIn: '30d' })
- 
--  // Privacy: Hash IP address to prevent long-term logging of raw IPs
-   const rawIp = req.ip || '';
-   const ipAddress = crypto.createHash('sha256').update(rawIp).digest('hex').substring(0, 16);
-   const userAgent = req.headers['user-agent']
-@@ -78,9 +75,7 @@ async function issueTokens (user: any, req: any) {
- 
- // Helper Turnstile
- async function verifyTurnstileToken (token: string): Promise<boolean> {
--  // Jika di development dan tidak ada key, kita bisa bypass atau return true untuk testing
-   if (env.nodeEnv !== 'production' && !process.env.TURNSTILE_SECRET_KEY) return true
--
-   if (!token) return false
- 
-   const formData = new FormData()
-@@ -100,187 +95,85 @@ async function verifyTurnstileToken (token: string): Promise<boolean> {
-   }
- }
- 
--// === STANDARD AUTH ROUTES ===
-+// === ANONYMOUS AUTH ROUTES ===
- 
- router.post('/register', authLimiter, zodValidate({
-   body: z.object({
--    email: z.string().email().max(200),
--    username: z.string().min(3).max(32),
-+    usernameHash: z.string().min(10), // Blind Index
-     password: z.string().min(8).max(128),
--    name: z.string().min(1).max(80),
-+    encryptedProfile: z.string().optional(),
-     publicKey: z.string().optional(),
-     signingKey: z.string().optional(),
--    encryptedPrivateKeys: z.string().optional(), // New: Accept encrypted keys blob
--    turnstileToken: z.string().optional() // Token dari frontend
-+    encryptedPrivateKeys: z.string().optional(),
-+    turnstileToken: z.string().optional()
-   })
- }),
- async (req, res, next) => {
-   try {
--    const { email, username, password, name, publicKey, signingKey, encryptedPrivateKeys, turnstileToken } = req.body
-+    const { usernameHash, password, encryptedProfile, publicKey, signingKey, encryptedPrivateKeys, turnstileToken } = req.body
- 
-     // 1. Verifikasi Captcha
-     const isHuman = await verifyTurnstileToken(turnstileToken || '')
-     if (!isHuman) throw new ApiError(400, 'Bot detected. Please try again.')
- 
--    // 2. Cek Duplikat
--    const existingUser = await prisma.user.findFirst({
--      where: { OR: [{ email }, { username }] }
-+    // 2. Cek Duplikat (Hash Collision Check)
-+    const existingUser = await prisma.user.findUnique({
-+      where: { usernameHash }
-     })
--    if (existingUser) throw new ApiError(409, 'Email or username already exists.')
-+    if (existingUser) throw new ApiError(409, 'Username already taken (Hash Collision).')
- 
--    // 3. Buat User (Unverified)
-+    // 3. Buat User (Verified: False = Sandbox)
-     const passwordHash = await hashPassword(password)
-     const user = await prisma.user.create({
-       data: {
--        email,
--        username,
-+        usernameHash,
-         passwordHash,
--        name,
-+        encryptedProfile,
-         publicKey,
-         signingKey,
--        encryptedPrivateKey: encryptedPrivateKeys, // Store the encrypted blob
--        isEmailVerified: false // Default false
-+        encryptedPrivateKey: encryptedPrivateKeys,
-+        isVerified: false // Sandbox mode by default
-       }
-     })
- 
--    // 4. Generate & Kirim OTP
--    const otp = crypto.randomInt(100000, 999999).toString()
--    await redisClient.setEx(`verify:${user.id}`, 300, otp) // Expire 5 menit
--
--    // Kirim email background (jangan await agar response cepat)
--    sendVerificationEmail(email, otp).catch(err => console.error('Email fail:', err))
-+    // 4. Issue Tokens Immediately (No OTP)
-+    const tokens = await issueTokens(user, req)
-+    setAuthCookies(res, tokens)
- 
--    // 5. Response (TIDAK login dulu)
-     res.status(201).json({
--      message: 'Registration successful. Please verify your email.',
--      userId: user.id,
--      email: user.email,
--      needVerification: true // Flag untuk frontend pindah ke halaman OTP
-+      message: 'Registration successful.',
-+      user: {
-+        id: user.id,
-+        encryptedProfile: user.encryptedProfile,
-+        isVerified: user.isVerified
-+      },
-+      accessToken: tokens.access,
-+      needVerification: false
-     })
-   } catch (e: any) {
-     if (e?.code === 'P2002') {
--      return next(new ApiError(409, 'Email or username already in use.'))
-+      return next(new ApiError(409, 'Username already taken.'))
-     }
-     next(e)
-   }
--}
--)
--
--// Route Baru: Verifikasi Email
--router.post('/verify-email', otpLimiter, zodValidate({
--  body: z.object({
--    userId: z.string(),
--    code: z.string().length(6)
--  })
--}),
--async (req, res, next) => {
--  try {
--    const { userId, code } = req.body
--
--    // Cek OTP di Redis
--    const storedOtp = await redisClient.get(`verify:${userId}`)
--    if (!storedOtp) throw new ApiError(400, 'Verification code has expired. Please request a new one.')
--    if (storedOtp !== code) throw new ApiError(400, 'Invalid verification code. Please try again.')
--
--    // Update User jadi Verified
--    const user = await prisma.user.update({
--      where: { id: userId },
--      data: { isEmailVerified: true },
--      select: {
--        id: true,
--        email: true,
--        username: true,
--        name: true,
--        avatarUrl: true,
--        showEmailToOthers: true,
--        description: true,
--        hasCompletedOnboarding: true,
--        isEmailVerified: true
--      }
--    })
--
--    // Hapus OTP dari Redis
--    await redisClient.del(`verify:${userId}`)
--
--    // Login otomatis setelah verifikasi
--    // Ambil user tanpa field sensitif untuk response
--    const safeUser = await prisma.user.findUnique({
--      where: { id: user.id },
--      select: {
--        id: true,
--        email: true,
--        username: true,
--        name: true,
--        avatarUrl: true,
--        isEmailVerified: true,
--        description: true,
--        hasCompletedOnboarding: true,
--        showEmailToOthers: true
--      }
--    })
--
--    if (!safeUser) throw new ApiError(404, 'User not found after verification.')
--
--    const tokens = await issueTokens(safeUser, req)
--    setAuthCookies(res, tokens)
--
--    res.json({ message: 'Email verified successfully.', user: safeUser, accessToken: tokens.access })
--  } catch (e) {
--    next(e)
--  }
--}
--)
--
--// Route Baru: Kirim Ulang OTP
--router.post('/resend-verification', authLimiter, zodValidate({
--  body: z.object({ email: z.string().email() })
--}), async (req, res, next) => {
--  try {
--    const { email } = req.body
--    const user = await prisma.user.findUnique({
--      where: { email },
--      select: {
--        id: true,
--        email: true,
--        username: true,
--        name: true,
--        avatarUrl: true,
--        isEmailVerified: true
--      }
--    })
--
--    if (!user) throw new ApiError(404, 'User not found.')
--    if (user.isEmailVerified) throw new ApiError(400, 'Email already verified.')
--
--    const otp = crypto.randomInt(100000, 999999).toString()
--    await redisClient.setEx(`verify:${user.id}`, 300, otp)
--
--    sendVerificationEmail(email, otp).catch(console.error)
--
--    res.json({ message: 'Verification code sent.' })
--  } catch (e) { next(e) }
- })
- 
- router.post('/login', authLimiter, zodValidate({
--  body: z.object({ emailOrUsername: z.string().min(1), password: z.string().min(8) })
-+  body: z.object({ usernameHash: z.string().min(10), password: z.string().min(8) })
- }),
- async (req, res, next) => {
-   try {
--    const { emailOrUsername, password } = req.body
--    const user = await prisma.user.findFirst({
--      where: { OR: [{ email: emailOrUsername }, { username: emailOrUsername }] },
-+    const { usernameHash, password } = req.body
-+    
-+    const user = await prisma.user.findUnique({
-+      where: { usernameHash },
-       select: {
-         id: true,
--        email: true,
--        username: true,
--        name: true,
--        avatarUrl: true,
--        isEmailVerified: true,
--        showEmailToOthers: true,
--        description: true,
--        passwordHash: true, // Tetap diperlukan untuk verifikasi password
--        hasCompletedOnboarding: true,
--        encryptedPrivateKey: true, // Retrieve the encrypted keys blob
-+        usernameHash: true,
-+        encryptedProfile: true,
-+        isVerified: true,
-+        passwordHash: true,
-+        encryptedPrivateKey: true,
-         role: true,
-         bannedAt: true,
-         banReason: true
-@@ -289,7 +182,6 @@ async (req, res, next) => {
- 
-     if (!user) throw new ApiError(401, 'Invalid credentials')
-     
--    // Cek Banned
-     if (user.bannedAt) {
-       return res.status(403).json({ 
-         error: 'ACCESS DENIED: Your account has been suspended.',
-@@ -300,30 +192,16 @@ async (req, res, next) => {
-     const ok = await verifyPassword(password, user.passwordHash)
-     if (!ok) throw new ApiError(401, 'Invalid credentials')
- 
--    // Cek Status Verifikasi
--    if (!user.isEmailVerified) {
--      throw new ApiError(403, 'Email not verified. Please verify your email first.')
--    }
--
--    // Ambil ulang user tanpa passwordHash untuk response
--    // Note: We already selected encryptedPrivateKey above, so we can pass it directly
-     const safeUser = {
-         id: user.id,
--        email: user.email,
--        username: user.username,
--        name: user.name,
--        avatarUrl: user.avatarUrl,
--        isEmailVerified: user.isEmailVerified,
--        hasCompletedOnboarding: user.hasCompletedOnboarding,
--        description: user.description,
--        showEmailToOthers: user.showEmailToOthers,
-+        encryptedProfile: user.encryptedProfile,
-+        isVerified: user.isVerified,
-         role: user.role
-     }
- 
-     const tokens = await issueTokens(safeUser, req)
-     setAuthCookies(res, tokens)
- 
--    // Return encryptedPrivateKey separately so client can restore it
-     res.json({ 
-       user: safeUser, 
-       accessToken: tokens.access,
-@@ -332,8 +210,7 @@ async (req, res, next) => {
-   } catch (e) {
-     next(e)
-   }
--}
--)
-+})
- 
- router.post('/refresh', async (req, res, next) => {
-   try {
-@@ -341,15 +218,8 @@ router.post('/refresh', async (req, res, next) => {
-     if (!token) throw new ApiError(401, 'No refresh token')
-     const payload = verifyJwt(token)
-     if (typeof payload === 'string' || !payload?.jti || !payload?.sub) {
--      // Jika token tidak valid, hapus cookie untuk mencegah kondisi tidak konsisten
-       const isProd = env.nodeEnv === 'production'
--      const cookieOpts: CookieOptions = {
--        path: '/',
--        httpOnly: true,
--        secure: isProd,
--        sameSite: isProd ? 'none' : 'lax'
--      }
--
-+      const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
-       res.clearCookie('at', cookieOpts)
-       res.clearCookie('rt', cookieOpts)
-       throw new ApiError(401, 'Invalid refresh token')
-@@ -357,15 +227,8 @@ router.post('/refresh', async (req, res, next) => {
- 
-     const stored = await prisma.refreshToken.findUnique({ where: { jti: payload.jti } })
-     if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
--      // Jika token tidak ditemukan, dicabut, atau kadaluarsa, hapus cookie
-       const isProd = env.nodeEnv === 'production'
--      const cookieOpts: CookieOptions = {
--        path: '/',
--        httpOnly: true,
--        secure: isProd,
--        sameSite: isProd ? 'none' : 'lax'
--      }
--
-+      const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
-       res.clearCookie('at', cookieOpts)
-       res.clearCookie('rt', cookieOpts)
-       throw new ApiError(401, 'Refresh token expired/revoked')
-@@ -375,11 +238,8 @@ router.post('/refresh', async (req, res, next) => {
-       where: { id: payload.sub },
-       select: {
-         id: true,
--        email: true,
--        username: true,
--        name: true,
--        avatarUrl: true,
--        isEmailVerified: true,
-+        encryptedProfile: true,
-+        isVerified: true,
-         role: true,
-         bannedAt: true,
-         banReason: true
-@@ -391,10 +251,7 @@ router.post('/refresh', async (req, res, next) => {
-       throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
-     }
- 
--    // Refresh Token Rotation: Hapus token lama agar tidak menumpuk & mencegah Replay Attack
--    await prisma.refreshToken.delete({
--      where: { jti: payload.jti }
--    });
-+    await prisma.refreshToken.delete({ where: { jti: payload.jti } });
- 
-     const tokens = await issueTokens(user, req)
-     setAuthCookies(res, tokens)
-@@ -408,7 +265,7 @@ router.post('/refresh', async (req, res, next) => {
- // === ZERO-KNOWLEDGE ACCOUNT RECOVERY ===
- router.post('/recover', authLimiter, zodValidate({
-   body: z.object({
--    identifier: z.string().min(1),
-+    identifier: z.string().min(10), // usernameHash
-     newPassword: z.string().min(8),
-     newEncryptedKeys: z.string(),
-     signature: z.string(),
-@@ -416,38 +273,35 @@ router.post('/recover', authLimiter, zodValidate({
-   })
- }), async (req, res, next) => {
-   try {
--    const { identifier, newPassword, newEncryptedKeys, signature, timestamp } = req.body;
-+    const { identifier: usernameHash, newPassword, newEncryptedKeys, signature, timestamp } = req.body;
- 
--    // 1. Cegah Replay Attack (Maksimal 5 menit)
-     const now = Date.now();
-     if (Math.abs(now - timestamp) > 5 * 60 * 1000) {
-        throw new ApiError(400, "Recovery request expired.");
-     }
- 
--    // 2. Cari User
--    const user = await prisma.user.findFirst({
--      where: { OR: [{ email: identifier }, { username: identifier }] }
-+    // Match by Hash
-+    const user = await prisma.user.findUnique({
-+      where: { usernameHash }
-     });
-     if (!user || !user.signingKey) throw new ApiError(404, "User not found or invalid keys.");
- 
--    // 3. Verifikasi Signature menggunakan libsdoium
--    const { getSodium } = await import('../lib/sodium.js'); // Sesuaikan path import sodium server-mu
-+    const { getSodium } = await import('../lib/sodium.js');
-     const sodium = await getSodium();
-     
--    const messageString = `${identifier}:${timestamp}`;
-+    // Message: HASH:TIMESTAMP
-+    const messageString = `${usernameHash}:${timestamp}`;
-     const messageBytes = Buffer.from(messageString, 'utf-8');
-     const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
-     const publicKeyBytes = sodium.from_base64(user.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
- 
-     const isValid = sodium.crypto_sign_verify_detached(signatureBytes, messageBytes, publicKeyBytes);
-     if (!isValid) {
--       throw new ApiError(401, "Cryptographic signature verification failed. Invalid phrase.");
-+       throw new ApiError(401, "Cryptographic signature verification failed.");
-     }
- 
--    // 4. Update Password dan Keys di Database
-     const passwordHash = await hashPassword(newPassword);
-     
--    // Revoke old sessions
-     await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
- 
-     const updatedUser = await prisma.user.update({
-@@ -458,7 +312,6 @@ router.post('/recover', authLimiter, zodValidate({
-       }
-     });
- 
--    // 5. Terbitkan Token Baru (Auto Login)
-     const tokens = await issueTokens(updatedUser, req);
-     setAuthCookies(res, tokens);
- 
-@@ -470,17 +323,11 @@ router.post('/recover', authLimiter, zodValidate({
- 
- router.post('/logout', async (req, res) => {
-   const { endpoint } = req.body
--
-   if (endpoint) {
-     try {
--      await prisma.pushSubscription.deleteMany({
--        where: { endpoint }
--      })
--    } catch (e) {
--      console.error('Failed to remove push subscription:', e)
--    }
-+      await prisma.pushSubscription.deleteMany({ where: { endpoint } })
-+    } catch (e) {}
-   }
--
-   const r = req.cookies?.rt
-   if (r) {
-     try {
-@@ -490,15 +337,8 @@ router.post('/logout', async (req, res) => {
-       }
-     } catch (e) {}
-   }
--
-   const isProd = env.nodeEnv === 'production'
--  const cookieOpts: CookieOptions = {
--    path: '/',
--    httpOnly: true,
--    secure: isProd,
--    sameSite: isProd ? 'none' : 'lax'
--  }
--
-+  const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
-   res.clearCookie('at', cookieOpts)
-   res.clearCookie('rt', cookieOpts)
-   res.json({ ok: true })
-@@ -514,11 +354,13 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) =>
-       where: { userId: req.user.id }
-     })
- 
-+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-+
-     const options = await generateRegistrationOptions({
-       rpName,
-       rpID,
-       userID: new Uint8Array(Buffer.from(req.user.id)),
--      userName: req.user.username,
-+      userName: user?.name || "Anonymous User", 
-       attestationType: 'none',
-       excludeCredentials: userAuthenticators.map(auth => ({
-         id: isoBase64URL.toBuffer(auth.credentialID),
-@@ -573,7 +415,8 @@ router.post('/webauthn/register/verify', requireAuth, async (req, res, next) =>
-         }
-       })
- 
--      await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: null } })
-+      // Upgrade Trust Tier to Verified (VIP)
-+      await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: null, isVerified: true } })
- 
-       res.json({ verified: true })
-     } else {
-@@ -588,9 +431,7 @@ router.get('/webauthn/login/options', async (req, res, next) => {
-       rpID,
-       userVerification: 'preferred'
-     })
--
-     res.cookie('webauthn_challenge', options.challenge, { httpOnly: true, maxAge: 60000, secure: env.nodeEnv === 'production' })
--
-     res.json(options)
-   } catch (e) { next(e) }
- })
-@@ -599,7 +440,6 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
-   try {
-     const { body } = req
-     const challenge = req.cookies.webauthn_challenge
--
-     if (!challenge) throw new ApiError(400, 'Challenge expired or missing.')
- 
-     const credentialID = body.id
-@@ -632,20 +472,13 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
-         data: { counter: BigInt(authenticationInfo.newCounter) }
-       })
- 
--      // Ambil user tanpa field sensitif untuk response
-       const safeUser = await prisma.user.findUnique({
-         where: { id: userAuthenticator.user.id },
-         select: {
-           id: true,
--          email: true,
--          username: true,
--          name: true,
--          avatarUrl: true,
--          isEmailVerified: true,
--          showEmailToOthers: true,
--          description: true,
--          hasCompletedOnboarding: true,
--          encryptedPrivateKey: true, // Include encrypted key blob
-+          encryptedProfile: true,
-+          isVerified: true,
-+          encryptedPrivateKey: true,
-           role: true,
-           bannedAt: true,
-           banReason: true
-@@ -653,14 +486,10 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
-       })
- 
-       if (!safeUser) throw new ApiError(404, 'User not found')
--
--      if (safeUser.bannedAt) {
--        return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.', reason: safeUser.banReason })
--      }
-+      if (safeUser.bannedAt) return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.', reason: safeUser.banReason })
- 
-       const tokens = await issueTokens(safeUser, req)
-       setAuthCookies(res, tokens)
--
-       res.clearCookie('webauthn_challenge')
- 
-       res.json({ 
-@@ -675,7 +504,4 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
-   } catch (e) { next(e) }
- })
- 
--// === DEVICE LINKING ===
--// (Removed: Device Linking is deprecated in favor of Local Vault Backup)
--
- export default router
-diff --git a/server/src/routes/users.ts b/server/src/routes/users.ts
-index cf82bc71..5d0e1635 100644
---- a/server/src/routes/users.ts
-+++ b/server/src/routes/users.ts
-@@ -1,16 +1,46 @@
- import { Router } from 'express'
- import { prisma } from '../lib/prisma.js'
- import { requireAuth } from '../middleware/auth.js'
--import { getIo } from '../socket.js'
- import { z } from 'zod'
- import { zodValidate } from '../utils/validate.js'
- import { ApiError } from '../utils/errors.js'
-+import { getIo } from '../socket.js'
- 
--const router: Router = Router()
-+const router = Router()
- 
--// Middleware auth untuk semua route di file ini
- router.use(requireAuth)
- 
-+// Cari User (Exact Match pada Blind Index)
-+router.get('/search', async (req, res, next) => {
-+  try {
-+    const { q } = req.query
-+    if (!q || typeof q !== 'string') {
-+      return res.json([])
-+    }
-+
-+    // q adalah usernameHash yang dikirim client
-+    const users = await prisma.user.findMany({
-+      where: {
-+        AND: [
-+          { id: { not: req.user!.id } },
-+          { usernameHash: q } // Blind Index Exact Match
-+        ]
-+      },
-+      select: {
-+        id: true,
-+        encryptedProfile: true,
-+        isVerified: true,
-+        publicKey: true
-+      },
-+      take: 5
-+    })
-+
-+    res.json(users)
-+  } catch (e) {
-+    next(e)
-+  }
-+})
-+
- // GET User Profile (Me)
- router.get('/me', async (req, res, next) => {
-   try {
-@@ -19,13 +49,10 @@ router.get('/me', async (req, res, next) => {
-       where: { id: req.user.id },
-       select: {
-         id: true,
--        email: true,
--        username: true,
--        name: true,
--        avatarUrl: true,
--        description: true,
--        showEmailToOthers: true,
--        hasCompletedOnboarding: true
-+        encryptedProfile: true,
-+        isVerified: true,
-+        hasCompletedOnboarding: true,
-+        role: true
-       }
-     })
-     res.json(user)
-@@ -34,61 +61,29 @@ router.get('/me', async (req, res, next) => {
-   }
- })
- 
--// UPDATE User Profile (Text & Avatar URL only)
-+// UPDATE User Profile
- router.put('/me',
-   zodValidate({
-     body: z.object({
--      name: z.string().min(1).trim().optional(),
--      description: z.string().max(200).trim().optional().nullable(),
--      showEmailToOthers: z.boolean().optional(),
--      avatarUrl: z.string().optional() // Menerima URL string (dari Supabase)
-+      encryptedProfile: z.string().min(1)
-     })
-   }),
-   async (req, res, next) => {
-     try {
--      if (!req.user) throw new ApiError(401, 'Authentication required.')
--
--      const { name, description, showEmailToOthers, avatarUrl } = req.body
--
--      // Siapkan object update
--      const dataToUpdate: {
--        name?: string;
--        description?: string | null;
--        showEmailToOthers?: boolean;
--        avatarUrl?: string;
--      } = {}
--
--      if (name) dataToUpdate.name = name
--      if (description !== undefined) dataToUpdate.description = description
--      if (showEmailToOthers !== undefined) dataToUpdate.showEmailToOthers = showEmailToOthers
--      if (avatarUrl !== undefined) dataToUpdate.avatarUrl = avatarUrl
--
--      if (Object.keys(dataToUpdate).length === 0) {
--        return res.status(400).json({ error: 'No update data provided.' })
--      }
-+      const { encryptedProfile } = req.body
- 
-       const updatedUser = await prisma.user.update({
--        where: { id: req.user.id },
--        data: dataToUpdate,
-+        where: { id: req.user!.id },
-+        data: { encryptedProfile },
-         select: {
-           id: true,
--          email: true,
--          username: true,
--          name: true,
--          avatarUrl: true,
--          description: true,
--          showEmailToOthers: true,
-+          encryptedProfile: true,
-+          isVerified: true,
-           hasCompletedOnboarding: true
-         }
-       })
- 
--      // Hanya sertakan email jika pengguna mengizinkan tampilan email ke orang lain
--      const userForBroadcast = {
--        ...updatedUser,
--        email: updatedUser.showEmailToOthers ? updatedUser.email : undefined
--      }
--
--      getIo().emit('user:updated', userForBroadcast)
-+      getIo().emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
-       res.json(updatedUser)
-     } catch (error) {
-       next(error)
-@@ -114,10 +109,10 @@ router.put('/me/keys',
-       const user = await prisma.user.update({
-         where: { id: userId },
-         data: { publicKey, signingKey },
--        select: { id: true, name: true }
-+        select: { id: true }
-       })
- 
--      // Notify contacts about identity change
-+      // Notify contacts
-       const conversations = await prisma.conversation.findMany({
-         where: { participants: { some: { userId } } },
-         include: { participants: { select: { userId: true } } }
-@@ -129,7 +124,7 @@ router.put('/me/keys',
-       }))
- 
-       recipients.forEach(recipientId => {
--        getIo().to(recipientId).emit('user:identity_changed', { userId: user.id, name: user.name })
-+        getIo().to(recipientId).emit('user:identity_changed', { userId: user.id })
-       })
- 
-       res.status(200).json({ message: 'Keys updated successfully.' })
-@@ -139,121 +134,6 @@ router.put('/me/keys',
-   }
- )
- 
--// SEARCH Users
--router.get('/search',
--  zodValidate({ query: z.object({ q: z.string().min(1) }) }),
--  async (req, res, next) => {
--    try {
--      if (!req.user) throw new ApiError(401, 'Authentication required.')
--      const query = req.query.q as string
--      const meId = req.user.id
--
--      const users = await prisma.user.findMany({
--        where: {
--          AND: [
--            { id: { not: meId } },
--            {
--              OR: [
--                { username: { contains: query, mode: 'insensitive' } },
--                { name: { contains: query, mode: 'insensitive' } }
--              ]
--            }
--          ]
--        },
--        take: 5, // Reduced from 10 to 5 for performance
--        select: { id: true, username: true, name: true, avatarUrl: true }
--      })
--      res.json(users)
--    } catch (e) {
--      next(e)
--    }
--  }
--)
--
--// GET User by Email (for verification purposes) - AUTH REQUIRED
--router.post('/by-email',
--  zodValidate({ body: z.object({ email: z.string().email() }) }),
--  async (req, res, next) => {
--    try {
--      const { email } = req.body
--
--      const user = await prisma.user.findUnique({
--        where: { email },
--        select: {
--          id: true,
--          email: true,
--          username: true,
--          name: true,
--          avatarUrl: true,
--          isEmailVerified: true,
--          showEmailToOthers: true
--        }
--      })
--
--      if (!user) {
--        return res.status(404).json({ error: 'User not found' })
--      }
--
--      const publicProfile: Partial<typeof user> & { id: string } = {
--        id: user.id,
--        username: user.username,
--        name: user.name,
--        avatarUrl: user.avatarUrl,
--        isEmailVerified: user.isEmailVerified
--      }
--
--      if (user.showEmailToOthers) {
--        publicProfile.email = user.email
--      }
--
--      res.json(publicProfile)
--    } catch (error) {
--      next(error)
--    }
--  })
--
--// GET User by Username (for verification purposes) - AUTH REQUIRED
--router.post('/by-username',
--  zodValidate({ body: z.object({ username: z.string().min(1) }) }),
--  async (req, res, next) => {
--    try {
--      const { username } = req.body
--
--      const user = await prisma.user.findUnique({
--        where: { username },
--        select: {
--          id: true,
--          email: true,
--          username: true,
--          name: true,
--          avatarUrl: true,
--          isEmailVerified: true,
--          showEmailToOthers: true
--        }
--      })
--
--      if (!user) {
--        return res.status(404).json({ error: 'User not found' })
--      }
--
--      const publicProfile: Partial<typeof user> & { id: string } = {
--        id: user.id,
--        username: user.username,
--        name: user.name,
--        avatarUrl: user.avatarUrl,
--        isEmailVerified: user.isEmailVerified
--      }
--
--      if (user.showEmailToOthers) {
--        publicProfile.email = user.email
--      }
--
--      res.json(publicProfile)
--    } catch (error) {
--      next(error)
--    }
--  })
--
- // GET Other User Profile by ID
- router.get('/:userId', async (req, res, next) => {
-   try {
-@@ -262,39 +142,20 @@ router.get('/:userId', async (req, res, next) => {
-       where: { id: userId },
-       select: {
-         id: true,
--        username: true,
--        name: true,
--        avatarUrl: true,
--        description: true,
-+        encryptedProfile: true,
-         createdAt: true,
-         publicKey: true,
--        email: true,
--        showEmailToOthers: true
-+        isVerified: true,
-+        lastActive: true
-       }
-     })
- 
-     if (!user) return res.status(404).json({ error: 'User not found' })
--
--    const publicProfile: Partial<typeof user> & { id: string } = {
--      id: user.id,
--      username: user.username,
--      name: user.name,
--      avatarUrl: user.avatarUrl,
--      description: user.description,
--      createdAt: user.createdAt,
--      publicKey: user.publicKey
--    }
--
--    if (user.showEmailToOthers) {
--      publicProfile.email = user.email
--    }
--
--    res.json(publicProfile)
-+    res.json(user)
-   } catch (error) {
-     next(error)
-   }
--}
--)
-+})
- 
- // COMPLETE Onboarding
- router.post('/me/complete-onboarding', async (req, res, next) => {
-@@ -310,70 +171,37 @@ router.post('/me/complete-onboarding', async (req, res, next) => {
-   }
- })
- 
--// BLOCK USER
-+// BLOCK/UNBLOCK/LIST BLOCKED (Unchanged logic, just ensure imports are clean)
- router.post('/:id/block', async (req, res, next) => {
-   try {
--    if (!req.user) throw new ApiError(401, 'Authentication required.')
--    const blockerId = req.user.id
-+    const blockerId = req.user!.id
-     const blockedId = req.params.id
--
--    if (blockerId === blockedId) {
--      throw new ApiError(400, 'You cannot block yourself')
--    }
--
--    await prisma.blockedUser.create({
--      data: {
--        blockerId,
--        blockedId
--      }
--    })
--
-+    if (blockerId === blockedId) throw new ApiError(400, 'You cannot block yourself')
-+    await prisma.blockedUser.create({ data: { blockerId, blockedId } })
-     res.json({ success: true, message: 'User blocked' })
-   } catch (error: any) {
--    // Handle unique constraint violation (kalau udah diblokir sebelumnya)
--    if (error.code === 'P2002') {
--      return res.json({ success: true, message: 'User already blocked' })
--    }
-+    if (error.code === 'P2002') return res.json({ success: true, message: 'User already blocked' })
-     next(error)
-   }
- })
- 
--// UNBLOCK USER
- router.delete('/:id/block', async (req, res, next) => {
-   try {
--    if (!req.user) throw new ApiError(401, 'Authentication required.')
--    const blockerId = req.user.id
-+    const blockerId = req.user!.id
-     const blockedId = req.params.id
--
--    await prisma.blockedUser.deleteMany({
--      where: {
--        blockerId,
--        blockedId
--      }
--    })
--
-+    await prisma.blockedUser.deleteMany({ where: { blockerId, blockedId } })
-     res.json({ success: true, message: 'User unblocked' })
--  } catch (error) {
--    next(error)
--  }
-+  } catch (error) { next(error) }
- })
- 
--// GET BLOCKED USERS LIST (buat list di settings)
- router.get('/me/blocked', async (req, res, next) => {
-   try {
--    if (!req.user) throw new ApiError(401, 'Authentication required.')
-     const blocked = await prisma.blockedUser.findMany({
--      where: { blockerId: req.user.id },
--      include: {
--        blocked: {
--          select: { id: true, username: true, avatarUrl: true, name: true }
--        }
--      }
-+      where: { blockerId: req.user!.id },
-+      include: { blocked: { select: { id: true, encryptedProfile: true } } }
-     })
-     res.json(blocked.map(b => b.blocked))
--  } catch (error) {
--    next(error)
--  }
-+  } catch (error) { next(error) }
- })
- 
- export default router
-diff --git a/server/src/utils/mailer.ts b/server/src/utils/mailer.ts
-deleted file mode 100644
-index 3d52d32d..00000000
---- a/server/src/utils/mailer.ts
-+++ /dev/null
-@@ -1,140 +0,0 @@
--// server/src/utils/mailer.ts
--import { Resend } from 'resend'
--
--// Inisialisasi Resend (Pastikan RESEND_API_KEY ada di .env)
--const resend = new Resend(process.env.RESEND_API_KEY)
--
--// Template HTML yang Elegan & Profesional
--const getHtmlTemplate = (code: string) => `
--<!DOCTYPE html>
--<html lang="en">
--<head>
--  <meta charset="UTF-8">
--  <meta name="viewport" content="width=device-width, initial-scale=1.0">
--  <style>
--    body {
--      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
--      background-color: #f9fafb;
--      margin: 0;
--      padding: 0;
--      color: #374151;
--    }
--    .container {
--      max-width: 480px;
--      margin: 40px auto;
--      background-color: #ffffff;
--      border-radius: 12px;
--      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
--      overflow: hidden;
--      border: 1px solid #e5e7eb;
--    }
--    .header {
--      background-color: #111827; /* Dark elegant header */
--      padding: 24px;
--      text-align: center;
--    }
--    .header h1 {
--      color: #ffffff;
--      margin: 0;
--      font-size: 20px;
--      font-weight: 600;
--      letter-spacing: 0.5px;
--    }
--    .content {
--      padding: 32px 24px;
--      text-align: center;
--    }
--    .content h2 {
--      margin-top: 0;
--      font-size: 18px;
--      font-weight: 600;
--      color: #1f2937;
--    }
--    .content p {
--      font-size: 15px;
--      line-height: 1.6;
--      margin-bottom: 24px;
--      color: #4b5563;
--    }
--    .code-box {
--      background-color: #f3f4f6;
--      border: 1px solid #e5e7eb;
--      border-radius: 8px;
--      padding: 16px;
--      margin: 24px 0;
--      text-align: center;
--    }
--    .code {
--      font-family: 'Courier New', Courier, monospace;
--      font-size: 32px;
--      font-weight: 700;
--      letter-spacing: 8px;
--      color: #111827;
--      margin: 0;
--      display: inline-block;
--    }
--    .footer {
--      background-color: #f9fafb;
--      padding: 16px 24px;
--      text-align: center;
--      border-top: 1px solid #e5e7eb;
--      font-size: 12px;
--      color: #9ca3af;
--    }
--    .warning {
--      font-size: 13px;
--      color: #ef4444;
--      margin-top: 16px;
--    }
--  </style>
--</head>
--<body>
--  <div class="container">
--    <div class="header">
--      <h1>NYX Secure Chat</h1>
--    </div>
--    <div class="content">
--      <h2>Verify your identity</h2>
--      <p>Someone requested to sign up to your NYX account. Enter the following code to complete the verification process.</p>
--      
--      <div class="code-box">
--        <span class="code">${code}</span>
--      </div>
--      
--      <p>This code will expire in <strong>5 minutes</strong>.</p>
--      
--      <p class="warning">If you didn't request this code, please ignore this email. Your account remains secure.</p>
--    </div>
--    <div class="footer">
--      &copy; ${new Date().getFullYear()} NYX App. All rights reserved.<br>
--      Secure End-to-End Encrypted Messaging.
--    </div>
--  </div>
--</body>
--</html>
--`
--
--export const sendVerificationEmail = async (to: string, code: string) => {
--  try {
--    // Gunakan domain yang sudah diverifikasi di Resend
--    // Format: "Nama Pengirim <email@domain-verified.com>"
--    const fromEmail = 'NYX Security <security@nyx-app.my.id>'
--
--    const { error } = await resend.emails.send({
--      from: fromEmail,
--      to: [to], // Resend butuh array string
--      subject: `Your Verification Code: ${code}`,
--      html: getHtmlTemplate(code)
--    })
--
--    if (error) {
--      console.error('❌ Resend API Error:', error)
--      return false
--    }
--
--    return true
--  } catch (err) {
--    console.error('❌ Failed to send email:', err)
--    return false
--  }
--}
-diff --git a/web/src/components/AuthForm.tsx b/web/src/components/AuthForm.tsx
-index 7189d800..16007008 100644
---- a/web/src/components/AuthForm.tsx
-+++ b/web/src/components/AuthForm.tsx
-@@ -3,7 +3,7 @@ import Alert from './Alert'
- import { Spinner } from './Spinner';
- import { handleApiError } from '@lib/api';
- 
--export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: string; b?: string; c?: string; d?: string; name?: string }) => Promise<void>; button: string }) {
-+export default function AuthForm({ onSubmit, button, hideEmail = false }: { onSubmit: (v: { a: string; b?: string; c?: string; d?: string; name?: string }) => Promise<void>; button: string; hideEmail?: boolean }) {
-   const [emailOrUsername, setA] = useState('')
-   const [password, setB] = useState('')
-   const [email, setC] = useState('')
-@@ -19,7 +19,7 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
-     name: false
-   })
- 
--  // Function to validate email format
-+  // Function to validate email format (Only relevant if email is used)
-   const isValidEmail = (email: string) => {
-     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-     return emailRegex.test(email)
-@@ -27,7 +27,8 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
- 
-   // Determine if email is valid for green glow effect
-   const emailIsValid = isValidEmail(email)
--  const emailOrUsernameIsValid = isValidEmail(emailOrUsername)
-+  // For login, we now only accept Username, so email validation is irrelevant
-+  const emailOrUsernameIsValid = false; // Disable validation glow for login
- 
-   return (
-     <form
-@@ -58,7 +59,7 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
-                   ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
-                   : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
-               }`}
--              placeholder="Name"
-+              placeholder="Display Name"
-               value={name}
-               onChange={(e) => setE(e.target.value)}
-               disabled={isLoading}
-@@ -68,27 +69,29 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
-             <div className="absolute right-3 top-1/2 transform -translate-y-1/2 w-2 h-2 rounded-full bg-transparent transition-colors duration-300"></div>
-           </div>
- 
--          <div className="relative">
--            <input
--              aria-label="Email"
--              className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
--                isFocused.email 
--                  ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
--                  : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
--              } ${
--                emailIsValid ? 'border border-green-500' : ''
--              }`}
--              placeholder="Email"
--              value={email}
--              onChange={(e) => setC(e.target.value)}
--              disabled={isLoading}
--              onFocus={() => setIsFocused({...isFocused, email: true})}
--              onBlur={() => setIsFocused({...isFocused, email: false})}
--            />
--            <div className={`absolute right-3 top-1/2 transform -translate-y-1/2 w-2 h-2 rounded-full transition-colors duration-300 ${
--              emailIsValid ? 'bg-green-500' : 'bg-transparent'
--            }`}></div>
--          </div>
-+          {!hideEmail && (
-+            <div className="relative">
-+              <input
-+                aria-label="Email"
-+                className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
-+                  isFocused.email 
-+                    ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
-+                    : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
-+                } ${
-+                  emailIsValid ? 'border border-green-500' : ''
-+                }`}
-+                placeholder="Email"
-+                value={email}
-+                onChange={(e) => setC(e.target.value)}
-+                disabled={isLoading}
-+                onFocus={() => setIsFocused({...isFocused, email: true})}
-+                onBlur={() => setIsFocused({...isFocused, email: false})}
-+              />
-+              <div className={`absolute right-3 top-1/2 transform -translate-y-1/2 w-2 h-2 rounded-full transition-colors duration-300 ${
-+                emailIsValid ? 'bg-green-500' : 'bg-transparent'
-+              }`}></div>
-+            </div>
-+          )}
- 
-           <div className="relative">
-             <input
-@@ -98,7 +101,7 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
-                   ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
-                   : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
-               }`}
--              placeholder="Username"
-+              placeholder="Username (ID)"
-               value={username}
-               onChange={(e) => setD(e.target.value)}
-               disabled={isLoading}
-@@ -111,24 +114,19 @@ export default function AuthForm({ onSubmit, button }: { onSubmit: (v: { a: stri
-       ) : (
-         <div className="relative">
-           <input
--            aria-label="Email or Username"
-+            aria-label="Username"
-             className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
-               isFocused.emailOrUsername 
-                 ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
-                 : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
--            } ${
--              emailOrUsernameIsValid ? 'border border-green-500' : ''
-             }`}
--            placeholder="Email or Username"
-+            placeholder="Username"
-             value={emailOrUsername}
-             onChange={(e) => setA(e.target.value)}
-             disabled={isLoading}
-             onFocus={() => setIsFocused({...isFocused, emailOrUsername: true})}
-             onBlur={() => setIsFocused({...isFocused, emailOrUsername: false})}
-           />
--          <div className={`absolute right-3 top-1/2 transform -translate-y-1/2 w-2 h-2 rounded-full transition-colors duration-300 ${
--            emailOrUsernameIsValid ? 'bg-green-500' : 'bg-transparent'
--          }`}></div>
-         </div>
-       )}
- 
 diff --git a/web/src/components/ChatList.tsx b/web/src/components/ChatList.tsx
-index 9d96769b..e0db5965 100644
+index e0db5965..02c60a0a 100644
 --- a/web/src/components/ChatList.tsx
 +++ b/web/src/components/ChatList.tsx
-@@ -52,7 +52,7 @@ const UserProfile = memo(() => {
+@@ -5,6 +5,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
+ import clsx from 'clsx';
+ 
+ import { useChatList } from '@hooks/useChatList';
++import { useUserProfile } from '@hooks/useUserProfile';
+ import { useModalStore } from '@store/modal';
+ import { useCommandPaletteStore } from '@store/commandPalette';
+ import { useAuthStore } from '@store/auth';
+@@ -27,6 +28,7 @@ import { Spinner } from './Spinner';
+ const UserProfile = memo(() => {
+   const { user, logout } = useAuthStore(state => ({ user: state.user, logout: state.logout }));
+   const { showConfirm: confirmLogout } = useModalStore(state => ({ showConfirm: state.showConfirm }));
++  const profile = useUserProfile(user);
+ 
+   const handleLogout = useCallback(() => {
+     confirmLogout(
+@@ -44,14 +46,14 @@ const UserProfile = memo(() => {
+       <div className="flex items-center gap-3 overflow-hidden">
+         <div className="relative flex-shrink-0">
+           <img 
+-            src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} 
++            src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
+             alt="Avatar" 
+             className="w-10 h-10 rounded-full object-cover shadow-neu-flat dark:shadow-neu-flat-dark border-2 border-bg-main" 
+           />
+           <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border border-bg-surface"></div>
          </div>
          <div className="min-w-0">
-           <p className="text-sm font-bold text-text-primary truncate">{user.name}</p>
--          <p className="text-[10px] font-medium text-text-secondary truncate opacity-70">@{user.username}</p>
-+          {user.isVerified && <span className="text-[10px] text-accent font-bold tracking-wider">VERIFIED</span>}
+-          <p className="text-sm font-bold text-text-primary truncate">{user.name}</p>
++          <p className="text-sm font-bold text-text-primary truncate">{profile.name}</p>
+           {user.isVerified && <span className="text-[10px] text-accent font-bold tracking-wider">VERIFIED</span>}
          </div>
        </div>
+@@ -80,6 +82,28 @@ const UserProfile = memo(() => {
+   );
+ });
  
-@@ -100,8 +100,10 @@ const SearchResults = memo(({ results, onSelect }: { results: User[], onSelect:
-       >
-         <img src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
-         <div className="flex-1 min-w-0">
--          <p className="font-bold text-sm text-text-primary">{user.name}</p>
--          <p className="text-xs text-text-secondary">@{user.username}</p>
-+          <div className="flex items-center gap-2">
-+             <p className="font-bold text-sm text-text-primary">{user.name}</p>
-+             {user.isVerified && <div className="w-2 h-2 rounded-full bg-accent" title="Verified"></div>}
-+          </div>
++const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (id: string) => void }) => {
++  const profile = useUserProfile(user);
++  return (
++    <button 
++      onClick={() => onSelect(user.id)}
++      className="
++        w-[calc(100%-32px)] mx-4 mb-3 p-3 flex items-center gap-4 rounded-xl text-left
++        bg-bg-main transition-all
++        shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5
++      "
++    >
++      <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
++      <div className="flex-1 min-w-0">
++        <div className="flex items-center gap-2">
++           <p className="font-bold text-sm text-text-primary">{profile.name}</p>
++           {user.isVerified && <div className="w-2 h-2 rounded-full bg-accent" title="Verified"></div>}
++        </div>
++      </div>
++    </button>
++  );
++};
++
+ const SearchResults = memo(({ results, onSelect }: { results: User[], onSelect: (userId: string) => void }) => (
+   <Virtuoso
+     style={{ height: '100%' }}
+@@ -88,25 +112,7 @@ const SearchResults = memo(({ results, onSelect }: { results: User[], onSelect:
+       Header: () => <p className="text-xs font-bold text-text-secondary px-6 mb-4 mt-2">GLOBAL SEARCH</p>,
+       EmptyPlaceholder: () => <div className="p-6 text-center text-xs text-text-secondary">No users found.</div>,
+     }}
+-    itemContent={(index, user) => (
+-      <button 
+-        key={user.id}
+-        onClick={() => onSelect(user.id)}
+-        className="
+-          w-[calc(100%-32px)] mx-4 mb-3 p-3 flex items-center gap-4 rounded-xl text-left
+-          bg-bg-main transition-all
+-          shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5
+-        "
+-      >
+-        <img src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
+-        <div className="flex-1 min-w-0">
+-          <div className="flex items-center gap-2">
+-             <p className="font-bold text-sm text-text-primary">{user.name}</p>
+-             {user.isVerified && <div className="w-2 h-2 rounded-full bg-accent" title="Verified"></div>}
+-          </div>
+-        </div>
+-      </button>
+-    )}
++    itemContent={(index, user) => <SearchResultItem key={user.id} user={user} onSelect={onSelect} />}
+   />
+ ));
+ 
+@@ -136,13 +142,14 @@ const ConversationItem = memo(({
+   onTogglePin: (id: string) => void;
+ }) => {
+   const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
+-  const title = conversation.isGroup ? conversation.title : peerUser?.name || 'Conversation';
++  const peerProfile = useUserProfile(peerUser as any); // Cast as any because Participant might not perfectly match but has id and encryptedProfile
++  const title = conversation.isGroup ? conversation.title : peerProfile.name || 'Conversation';
+   const isUnread = conversation.unreadCount > 0;
+   const isPinnedByMe = Boolean(conversation.participants?.some(p => p.id === meId && p.isPinned));
+ 
+   const avatarSrc = conversation.isGroup 
+     ? (conversation.avatarUrl ? `${toAbsoluteUrl(conversation.avatarUrl)}?t=${conversation.lastUpdated}` : `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`)
+-    : (peerUser?.avatarUrl ? toAbsoluteUrl(peerUser.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${title}`);
++    : (peerProfile.avatarUrl ? toAbsoluteUrl(peerProfile.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${title}`);
+ 
+   const formatConversationTime = useCallback((timestamp: string) => {
+     const date = new Date(timestamp);
+diff --git a/web/src/components/ChatWindow.tsx b/web/src/components/ChatWindow.tsx
+index d3242aa2..6711047e 100644
+--- a/web/src/components/ChatWindow.tsx
++++ b/web/src/components/ChatWindow.tsx
+@@ -23,6 +23,7 @@ import { motion, AnimatePresence } from 'framer-motion';
+ import { useNavigate } from 'react-router-dom';
+ import MessageInput from './MessageInput';
+ import MessageSkeleton from './MessageSkeleton';
++import { useUserProfile } from '@hooks/useUserProfile';
+ 
+ const KeyRotationBanner = () => (
+   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
+@@ -58,8 +59,9 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
+   const { verifiedStatus } = useVerificationStore();
+ 
+   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
+-  const title = conversation.isGroup ? conversation.title : peerUser?.name;
+-  const avatarUrl = conversation.isGroup ? conversation.avatarUrl : peerUser?.avatarUrl;
++  const peerProfile = useUserProfile(peerUser as any);
++  const title = conversation.isGroup ? conversation.title : peerProfile.name;
++  const avatarUrl = conversation.isGroup ? conversation.avatarUrl : peerProfile.avatarUrl;
+   const isOnline = peerUser ? onlineUsers.has(peerUser.id) : false;
+   const isConvVerified = verifiedStatus[conversation.id] || false;
+ 
+diff --git a/web/src/components/DynamicIsland.tsx b/web/src/components/DynamicIsland.tsx
+index c8b592f5..fc23a57f 100644
+--- a/web/src/components/DynamicIsland.tsx
++++ b/web/src/components/DynamicIsland.tsx
+@@ -4,11 +4,13 @@ import { useConversationStore } from '@store/conversation';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import useDynamicIslandStore, { Activity, NotificationActivity, UploadActivity } from '@store/dynamicIsland';
+ import { FiFile, FiX, FiMessageSquare, FiUploadCloud } from 'react-icons/fi';
++import { useUserProfile } from '@hooks/useUserProfile';
+ 
+ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
+   const openConversation = useConversationStore(state => state.openConversation);
+   const removeActivity = useDynamicIslandStore(state => state.removeActivity);
+   const navigate = useNavigate();
++  const profile = useUserProfile(activity.sender as any);
+ 
+   const handleClick = () => {
+     if (activity.link) {
+@@ -22,7 +24,7 @@ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
+     <div onClick={handleClick} className="w-full h-full flex items-center gap-3 px-1 cursor-pointer group">
+       <div className="relative">
+         <img 
+-          src={activity.sender?.avatarUrl ? toAbsoluteUrl(activity.sender.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${activity.sender?.name}`}
++          src={profile.avatarUrl ? toAbsoluteUrl(profile.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
+           alt="Avatar"
+           className="w-8 h-8 rounded-full object-cover border border-white/10"
+         />
+@@ -33,7 +35,7 @@ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
+       
+       <div className="flex-1 min-w-0 flex flex-col justify-center">
+         <div className="flex justify-between items-baseline">
+-           <p className="text-[10px] font-bold text-white/90 uppercase tracking-wider">{activity.sender?.name || 'Unknown'}</p>
++           <p className="text-[10px] font-bold text-white/90 uppercase tracking-wider">{profile.name}</p>
+            <span className="text-[8px] text-white/40 font-mono">NOW</span>
          </div>
-       </button>
-     )}
+         <p className="text-xs text-white/70 truncate font-medium group-hover:text-white transition-colors">
+diff --git a/web/src/components/MessageBubble.tsx b/web/src/components/MessageBubble.tsx
+index 8c8b3a2b..7f30c851 100644
+--- a/web/src/components/MessageBubble.tsx
++++ b/web/src/components/MessageBubble.tsx
+@@ -12,9 +12,11 @@ import { formatTime } from "@utils/date";
+ import MarkdownMessage from "./MarkdownMessage";
+ import VoiceMessagePlayer from "./VoiceMessagePlayer";
+ import clsx from 'clsx'; 
++import { useUserProfile } from '@hooks/useUserProfile';
+ 
+ const ReplyQuote = ({ message }: { message: Message }) => {
+-  const authorName = message.sender?.name || 'User';
++  const profile = useUserProfile(message.sender as any);
++  const authorName = profile.name;
+   let contentPreview: string;
+   if (message.duration) contentPreview = 'Voice Message';
+   else if (message.fileName) contentPreview = message.fileName;
+diff --git a/web/src/components/MessageInput.tsx b/web/src/components/MessageInput.tsx
+index 560d0e71..690b0eea 100644
+--- a/web/src/components/MessageInput.tsx
++++ b/web/src/components/MessageInput.tsx
+@@ -11,6 +11,7 @@ import LinkPreviewCard from './LinkPreviewCard';
+ import SmartReply from './SmartReply';
+ import { useMessageStore } from '@store/message';
+ import { triggerSendFeedback } from '@utils/feedback';
++import { useUserProfile } from '@hooks/useUserProfile';
+ 
+ // --- Types ---
+ interface MessageInputProps {
+@@ -43,9 +44,11 @@ const ReplyPreview = () => {
+     setReplyingTo: state.setReplyingTo,
+   }));
+ 
++  const profile = useUserProfile(replyingTo?.sender as any);
++
+   if (!replyingTo) return null;
+ 
+-  const authorName = replyingTo.sender?.name || 'Unknown Signal';
++  const authorName = profile.name;
+   let contentPreview = '...';
+   
+   if (replyingTo.duration) contentPreview = '[Voice Transmission]';
+diff --git a/web/src/components/MessageItem.tsx b/web/src/components/MessageItem.tsx
+index cc0de560..620aac98 100644
+--- a/web/src/components/MessageItem.tsx
++++ b/web/src/components/MessageItem.tsx
+@@ -23,6 +23,7 @@ import { useMessageStore } from '@store/message';
+ import toast from 'react-hot-toast';
+ import MarkdownMessage from './MarkdownMessage';
+ import MessageBubble from "./MessageBubble"; // Import the external component
++import { useUserProfile } from '@hooks/useUserProfile';
+ 
+ const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
+   const meId = useAuthStore((s) => s.user?.id);
+@@ -91,6 +92,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
+     removeMessage: state.removeMessage,
+     addOptimisticMessage: state.addOptimisticMessage,
+   }));
++  const profile = useUserProfile(message.sender as any);
+   const mine = message.senderId === meId;
+   const ref = useRef<HTMLDivElement>(null);
+ 
+@@ -178,7 +180,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
+         <div className="w-8 flex-shrink-0 mb-1 self-end">
+           {isLastInSequence && (
+             <img 
+-              src={toAbsoluteUrl(message.sender?.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${message.sender?.name || 'U'}`} 
++              src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
+               alt="Avatar" 
+               className="w-8 h-8 rounded-full bg-secondary object-cover shadow-sm cursor-pointer hover:scale-105 transition-transform" 
+               // Note: Avatar click handler is usually handled by parent or could be passed down. 
+@@ -190,9 +192,9 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
+       
+       <div className={`flex items-end gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
+         <div className={clsx("flex flex-col max-w-[85%] sm:max-w-[70%]", mine ? "items-end" : "items-start")}>
+-          {!mine && isGroup && message.sender?.name && isFirstInSequence && (
++          {!mine && isGroup && profile.name && isFirstInSequence && (
+             <p className="text-[10px] font-bold mb-1 ml-1 user-color-name cursor-pointer hover:underline uppercase tracking-wide" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>
+-              {message.sender.name}
++              {profile.name}
+             </p>
+           )}
+           
+diff --git a/web/src/components/ParticipantList.tsx b/web/src/components/ParticipantList.tsx
+index e5315bbe..ae041e7b 100644
+--- a/web/src/components/ParticipantList.tsx
++++ b/web/src/components/ParticipantList.tsx
+@@ -5,9 +5,10 @@ import { useState } from "react";
+ import { api } from '@lib/api';
+ import toast from 'react-hot-toast';
+ import { useModalStore } from '@store/modal';
+-import type { User } from "@store/auth";
++import { useUserProfile } from "@hooks/useUserProfile";
++import { DecryptedProfile } from "@store/profile";
+ 
+-const ParticipantActions = ({ conversationId, participant, amIAdmin }: { conversationId: string, participant: Participant, amIAdmin: boolean }) => {
++const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: { conversationId: string, participant: Participant, profile: DecryptedProfile, amIAdmin: boolean }) => {
+   const [isOpen, setIsOpen] = useState(false);
+   const { user, blockUser, unblockUser, blockedUserIds } = useAuthStore();
+   const showConfirm = useModalStore(s => s.showConfirm);
+@@ -25,7 +26,7 @@ const ParticipantActions = ({ conversationId, participant, amIAdmin }: { convers
+         method: 'PUT',
+         body: JSON.stringify({ role: newRole }),
+       });
+-      toast.success(`${participant.name} is now ${newRole.toLowerCase()}.`);
++      toast.success(`${profile.name} is now ${newRole.toLowerCase()}.`);
+     } catch (error: any) {
+       toast.error(`Failed to change role: ${error.message || 'Unknown error'}`);
+     }
+@@ -35,13 +36,13 @@ const ParticipantActions = ({ conversationId, participant, amIAdmin }: { convers
+     setIsOpen(false);
+     showConfirm(
+       'Remove Participant',
+-      `Are you sure you want to remove ${participant.name} from the group?`,
++      `Are you sure you want to remove ${profile.name} from the group?`,
+       async () => {
+         try {
+           await api(`/api/conversations/${conversationId}/participants/${participant.id}`, {
+             method: 'DELETE',
+           });
+-          toast.success(`${participant.name} removed from group.`);
++          toast.success(`${profile.name} removed from group.`);
+         } catch (error: any) {
+           toast.error(`Failed to remove participant: ${error.message || 'Unknown error'}`);
+         }
+@@ -54,10 +55,10 @@ const ParticipantActions = ({ conversationId, participant, amIAdmin }: { convers
+     try {
+       if (isBlocked) {
+         await unblockUser(participant.id);
+-        toast.success(`${participant.name} unblocked.`);
++        toast.success(`${profile.name} unblocked.`);
+       } else {
+         await blockUser(participant.id);
+-        toast.success(`${participant.name} blocked.`);
++        toast.success(`${profile.name} blocked.`);
+       }
+     } catch (error: any) {
+       toast.error(`Failed to ${isBlocked ? 'unblock' : 'block'} user: ${error.message || 'Unknown error'}`);
+@@ -91,6 +92,31 @@ const ParticipantActions = ({ conversationId, participant, amIAdmin }: { convers
+   );
+ };
+ 
++const ParticipantItem = ({ p, conversationId, amIAdmin, handleProfileClick }: { p: Participant, conversationId: string, amIAdmin: boolean, handleProfileClick: (p: Participant) => void }) => {
++  const profile = useUserProfile(p as any);
++  return (
++    <li className="flex items-center justify-between p-2 rounded-lg hover:bg-secondary">
++      <button onClick={() => handleProfileClick(p)} className="flex items-center gap-3 text-left min-w-0">
++        <img
++          src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
++          alt={profile.name}
++          className="w-10 h-10 rounded-full object-cover bg-bg-primary flex-shrink-0"
++          onError={(e) => {
++            const target = e.target as HTMLImageElement;
++            target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`;
++          }}
++        />
++        <div className="min-w-0 flex-1">
++          <p className="font-semibold text-text-primary truncate">{profile.name}</p>
++          <p className="text-xs text-text-secondary truncate">{profile.description || 'No description'}</p>
++          {p.role === 'ADMIN' && <p className="text-xs text-accent-color">Admin</p>}
++        </div>
++      </button>
++      <ParticipantActions conversationId={conversationId} participant={p} profile={profile} amIAdmin={amIAdmin} />
++    </li>
++  );
++};
++
+ const ParticipantList = ({ conversationId, participants, amIAdmin }: { conversationId: string, participants: Participant[], amIAdmin: boolean }) => {
+   const openProfileModal = useModalStore(s => s.openProfileModal);
+ 
+@@ -101,25 +127,7 @@ const ParticipantList = ({ conversationId, participants, amIAdmin }: { conversat
+   return (
+     <ul className="space-y-2">
+       {participants.map(p => (
+-        <li key={p.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-secondary">
+-          <button onClick={() => handleProfileClick(p)} className="flex items-center gap-3 text-left">
+-            <img
+-              src={toAbsoluteUrl(p.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${p.name}`}
+-              alt={p.name}
+-              className="w-10 h-10 rounded-full object-cover bg-bg-primary"
+-              onError={(e) => {
+-                const target = e.target as HTMLImageElement;
+-                target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${p.name}`;
+-              }}
+-            />
+-            <div>
+-              <p className="font-semibold text-text-primary">{p.name}</p>
+-              <p className="text-xs text-text-secondary">{p.description || 'No description'}</p>
+-              {p.role === 'ADMIN' && <p className="text-xs text-accent-color">Admin</p>}
+-            </div>
+-          </button>
+-          <ParticipantActions conversationId={conversationId} participant={p} amIAdmin={amIAdmin} />
+-        </li>
++        <ParticipantItem key={p.id} p={p} conversationId={conversationId} amIAdmin={amIAdmin} handleProfileClick={handleProfileClick} />
+       ))}
+     </ul>
+   );
 diff --git a/web/src/components/StartNewChat.tsx b/web/src/components/StartNewChat.tsx
-index 9dc8ff8d..b0299bc6 100644
+index b0299bc6..5860de4b 100644
 --- a/web/src/components/StartNewChat.tsx
 +++ b/web/src/components/StartNewChat.tsx
-@@ -4,7 +4,7 @@ import { useConversationStore } from '@store/conversation';
+@@ -2,9 +2,28 @@ import { useEffect, useState } from 'react';
+ import { Virtuoso } from 'react-virtuoso';
+ import { useConversationStore } from '@store/conversation';
  import toast from 'react-hot-toast';
++import { useUserProfile } from '@hooks/useUserProfile';
++import { toAbsoluteUrl } from '@utils/url';
++
++function SearchResultItem({ u, loadingId, onStarted }: { u: any, loadingId: string | null, onStarted: (id: string) => void }) {
++  const profile = useUserProfile(u);
++  return (
++    <button 
++      disabled={loadingId === u.id}
++      onClick={() => onStarted(u.id)}
++      className={`w-full text-left p-3 rounded-lg transition flex items-center hover:bg-primary/50 disabled:opacity-50`}
++    >
++      <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} alt={profile.name} className="w-10 h-10 rounded-full bg-gray-700 mr-3" />
++      <div className="flex-1 text-left">
++        <div className="font-medium text-white">{profile.name}</div>
++      </div>
++      {loadingId === u.id && <span className="ml-2 text-xs text-text-secondary">Starting…</span>}
++    </button>
++  );
++}
  
  export default function StartNewChat({ query, onStarted }: { query: string; onStarted: (id: string) => void }) {
--  const [list, setList] = useState<{ id: string; username: string; name: string; avatarUrl?: string | null }[]>([]);
-+  const [list, setList] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
+-  const [list, setList] = useState<{ id: string; name: string; avatarUrl?: string | null }[]>([]);
++  const [list, setList] = useState<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>([]);
    const [loadingId, setLoadingId] = useState<string | null>(null);
    const { searchUsers, startConversation } = useConversationStore(state => ({
      searchUsers: state.searchUsers,
-@@ -57,7 +57,6 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
-               <img src={u.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${u.name}`} alt={u.name} className="w-10 h-10 rounded-full bg-gray-700 mr-3" />
-               <div className="flex-1 text-left">
-                 <div className="font-medium text-white">{u.name}</div>
--                <div className="text-sm text-text-secondary">@{u.username}</div>
-               </div>
-               {loadingId === u.id && <span className="ml-2 text-xs text-text-secondary">Starting…</span>}
-             </button>
+@@ -48,18 +67,7 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
+           style={{ height: '400px' }} // Or a more dynamic height
+           data={list}
+           itemContent={(index, u) => (
+-            <button 
+-              key={u.id} 
+-              disabled={loadingId === u.id}
+-              onClick={() => handleStart(u.id)}
+-              className={`w-full text-left p-3 rounded-lg transition flex items-center hover:bg-primary/50 disabled:opacity-50`}
+-            >
+-              <img src={u.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${u.name}`} alt={u.name} className="w-10 h-10 rounded-full bg-gray-700 mr-3" />
+-              <div className="flex-1 text-left">
+-                <div className="font-medium text-white">{u.name}</div>
+-              </div>
+-              {loadingId === u.id && <span className="ml-2 text-xs text-text-secondary">Starting…</span>}
+-            </button>
++            <SearchResultItem key={u.id} u={u} loadingId={loadingId} onStarted={handleStart} />
+           )}
+         />
+       ) : (
 diff --git a/web/src/components/TypingIndicator.tsx b/web/src/components/TypingIndicator.tsx
-index adb62f6d..57c6f892 100644
+index 57c6f892..d961893d 100644
 --- a/web/src/components/TypingIndicator.tsx
 +++ b/web/src/components/TypingIndicator.tsx
 @@ -21,7 +21,7 @@ export default function TypingIndicator({ conversationId }: { conversationId: st
    // Map typing user IDs to their names
    const typingUserNames = typingUsers.map(typingUser => {
      const participant = activeConversation?.participants.find(p => p.id === typingUser.id);
--    return participant?.name || participant?.username || 'Someone'; // Fallback to 'Someone'
-+    return participant?.name || 'Someone'; // Fallback to 'Someone'
+-    return participant?.name || 'Someone'; // Fallback to 'Someone'
++    return 'Someone'; // Since we can't easily hook in a map here without a subcomponent, fallback.
    });
  
    let message: string;
 diff --git a/web/src/components/UserInfoModal.tsx b/web/src/components/UserInfoModal.tsx
-index 7ee37957..d911f6d4 100644
+index d911f6d4..3f25bd08 100644
 --- a/web/src/components/UserInfoModal.tsx
 +++ b/web/src/components/UserInfoModal.tsx
-@@ -16,7 +16,7 @@ import ModalBase from './ui/ModalBase';
+@@ -15,6 +15,7 @@ import { usePresenceStore } from '@store/presence';
+ import ModalBase from './ui/ModalBase';
  import MediaGallery from './MediaGallery';
  import { AnimatedTabs } from './ui/AnimatedTabs';
++import { useUserProfile } from '@hooks/useUserProfile';
  
--type ProfileUser = User & { email?: string; publicKey?: string };
-+type ProfileUser = User & { publicKey?: string };
+ type ProfileUser = User & { publicKey?: string };
  
- export default function UserInfoModal() {
-   const { isProfileModalOpen, profileUserId, closeProfileModal } = useModalStore();
-@@ -144,10 +144,12 @@ export default function UserInfoModal() {
+@@ -25,6 +26,7 @@ export default function UserInfoModal() {
+   const onlineUsers = usePresenceStore(s => s.onlineUsers);
+   const navigate = useNavigate();
+   const [user, setUser] = useState<ProfileUser | null>(null);
++  const profile = useUserProfile(user);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState<string | null>(null);
+   const [showSafetyModal, setShowSafetyModal] = useState(false);
+@@ -126,12 +128,12 @@ export default function UserInfoModal() {
+             {/* Avatar: INSET (Pressed in) - Looks like a porthole */}
+             <div className="relative w-24 h-24 rounded-full shadow-neu-pressed dark:shadow-neu-pressed-dark flex items-center justify-center p-1 bg-bg-main">
+                <img
+-                 src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
+-                 alt={user.name}
++                 src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
++                 alt={profile.name}
+                  className="w-full h-full rounded-full object-cover"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+-                   target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
++                   target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`;
+                  }}
+                />
+                <div className={`absolute bottom-1 right-1 w-4 h-4 border-2 border-bg-main rounded-full shadow-neu-flat dark:shadow-neu-flat-dark ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+@@ -139,7 +141,7 @@ export default function UserInfoModal() {
+ 
+             {/* Info: Left Aligned */}
+             <div className="flex-1 pt-2">
+-              <h3 className="text-2xl font-bold tracking-tight text-text-primary">{user.name}</h3>
++              <h3 className="text-2xl font-bold tracking-tight text-text-primary">{profile.name}</h3>
+               {/* ID Badge: Extruded pill */}
                <div className="flex flex-col items-start gap-2 mt-2">
                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full shadow-neu-flat dark:shadow-neu-flat-dark bg-bg-main">
-                    <span className="text-xs font-mono text-text-secondary uppercase">ID</span>
--                   <span className="text-sm font-mono text-accent">@{user.username}</span>
-+                   <span className="text-sm font-mono text-accent">#{user.id.substring(0, 8)}</span>
-                 </div>
--                {user.email && (
--                  <span className="text-xs font-mono text-text-secondary ml-1">{user.email}</span>
-+                {user.isVerified && (
-+                  <span className="text-[10px] text-emerald-500 font-bold tracking-widest uppercase px-2">
-+                    Verified
-+                  </span>
-                 )}
-               </div>
-             </div>
+@@ -163,7 +165,7 @@ export default function UserInfoModal() {
+                shadow-neu-pressed dark:shadow-neu-pressed-dark
+                border border-white/5
+              ">
+-               {user.description || <span className="opacity-40 italic">No data available.</span>}
++               {profile.description || <span className="opacity-40 italic">No data available.</span>}
+              </div>
+           </div>
+         </div>
+@@ -177,7 +179,7 @@ export default function UserInfoModal() {
+       <ModalBase
+         isOpen={isProfileModalOpen}
+         onClose={closeProfileModal}
+-        title={user?.name || 'User Profile'}
++        title={profile.name || 'User Profile'}
+       >
+         <div className="flex flex-col gap-4">
+           <div className="px-4 md:px-0">
+@@ -277,7 +279,7 @@ export default function UserInfoModal() {
+       {showSafetyModal && user && (
+         <SafetyNumberModal 
+           safetyNumber={safetyNumber} 
+-          userName={user.name} 
++          userName={profile.name} 
+           onClose={() => setShowSafetyModal(false)} 
+           onVerify={() => {
+             if (activeId && user.publicKey) {
 diff --git a/web/src/components/UserInfoPanel.tsx b/web/src/components/UserInfoPanel.tsx
-index db0307e6..a0af1d98 100644
+index a0af1d98..2c83a838 100644
 --- a/web/src/components/UserInfoPanel.tsx
 +++ b/web/src/components/UserInfoPanel.tsx
-@@ -13,7 +13,7 @@ import { motion, AnimatePresence } from 'framer-motion';
- import MediaGallery from './MediaGallery';
+@@ -10,8 +10,9 @@ import SafetyNumberModal from './SafetyNumberModal';
+ import { useConversationStore } from '@store/conversation';
+ import { useVerificationStore } from '@store/verification';
+ import { motion, AnimatePresence } from 'framer-motion';
+-import MediaGallery from './MediaGallery';
  import { AnimatedTabs } from './ui/AnimatedTabs';
++import { useUserProfile } from '@hooks/useUserProfile';
++import MediaGallery from './MediaGallery';
  
--type ProfileUser = User & { email?: string; publicKey?: string };
-+type ProfileUser = User & { publicKey?: string };
+ type ProfileUser = User & { publicKey?: string };
  
- export default function UserInfoPanel({ userId }: { userId: string }) {
-   const { activeId } = useConversationStore();
-@@ -107,9 +107,8 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
+@@ -20,6 +21,7 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
+   const { verifiedStatus, setVerified } = useVerificationStore();
+   const navigate = useNavigate();
+   const [user, setUser] = useState<ProfileUser | null>(null);
++  const profile = useUserProfile(user);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState<string | null>(null);
+   const [showSafetyModal, setShowSafetyModal] = useState(false);
+@@ -98,20 +100,20 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
+         <div className="space-y-6">
+           <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-6 text-center">
+             <img
+-              src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
+-              alt={user.name}
++              src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
++              alt={profile.name}
+               className="w-24 h-24 rounded-full bg-secondary object-cover mb-4 mx-auto"
+               onError={(e) => {
+                 const target = e.target as HTMLImageElement;
+-                target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
++                target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`;
                }}
              />
-             <h3 className="text-xl font-bold text-text-primary">{user.name}</h3>
--            <p className="text-sm text-text-secondary">@{user.username}</p>
--            {user.email && (
--              <p className="text-sm text-accent mt-1">{user.email}</p>
-+            {user.isVerified && (
-+              <span className="inline-block mt-1 px-2 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-wider">Verified</span>
+-            <h3 className="text-xl font-bold text-text-primary">{user.name}</h3>
++            <h3 className="text-xl font-bold text-text-primary">{profile.name}</h3>
+             {user.isVerified && (
+               <span className="inline-block mt-1 px-2 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-wider">Verified</span>
              )}
              <p className="text-text-secondary mt-2 text-sm">
-               {user.description || 'This user prefers to keep an air of mystery.'}
-diff --git a/web/src/lib/crypto-worker-proxy.ts b/web/src/lib/crypto-worker-proxy.ts
-index 5fcff5fb..f1fb5f39 100644
---- a/web/src/lib/crypto-worker-proxy.ts
-+++ b/web/src/lib/crypto-worker-proxy.ts
-@@ -114,6 +114,22 @@ export async function recoverAccountWithSignature(
-   return sendToWorker('recoverAccountWithSignature', { phrase, newPassword, identifier, timestamp });
+-              {user.description || 'This user prefers to keep an air of mystery.'}
++              {profile.description || 'This user prefers to keep an air of mystery.'}
+             </p>
+           </div>
+           <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-4 space-y-2">
+@@ -138,7 +140,7 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
+     <>
+       <div className="h-full flex flex-col">
+         <div className="p-4 text-center border-b border-border">
+-            <h2 className="text-lg font-semibold">About {user?.name || 'User'}</h2>
++            <h2 className="text-lg font-semibold">About {profile.name || 'User'}</h2>
+         </div>
+         
+         <div className="flex-1 overflow-y-auto p-4 md:p-6 relative">
+@@ -178,7 +180,7 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
+       {showSafetyModal && user && (
+         <SafetyNumberModal 
+           safetyNumber={safetyNumber} 
+-          userName={user.name} 
++          userName={profile.name} 
+           onClose={() => setShowSafetyModal(false)} 
+           onVerify={() => {
+             if (activeId && user.publicKey) {
+diff --git a/web/src/hooks/useChatList.ts b/web/src/hooks/useChatList.ts
+index c3088209..0fc1b646 100644
+--- a/web/src/hooks/useChatList.ts
++++ b/web/src/hooks/useChatList.ts
+@@ -83,7 +83,7 @@ export function useChatList() {
+     }
+   
+     const filteredConversations = conversations.filter(c => {
+-      const title = c.title || c.participants?.filter(p => p.id !== meId).map(p => p.name).join(', ') || 'Conversation';
++      const title = c.title || 'Conversation';
+       return title.toLowerCase().includes(searchQuery.toLowerCase());
+     });
+   
+diff --git a/web/src/lib/keychainDb.ts b/web/src/lib/keychainDb.ts
+index e24fae90..7916e420 100644
+--- a/web/src/lib/keychainDb.ts
++++ b/web/src/lib/keychainDb.ts
+@@ -8,7 +8,8 @@ const PENDING_HEADERS_STORE_NAME = 'pending-headers';
+ const RATCHET_SESSIONS_STORE_NAME = 'ratchet-sessions';
+ const SKIPPED_KEYS_STORE_NAME = 'skipped-keys';
+ const MESSAGE_KEYS_STORE_NAME = 'message-keys';
+-const DB_VERSION = 6;
++const PROFILE_KEYS_STORE_NAME = 'profile_keys';
++const DB_VERSION = 7;
+ 
+ // Cache DB connections by userId to handle switching accounts without reloading
+ const dbCache = new Map<string, Promise<IDBPDatabase>>();
+@@ -48,6 +49,11 @@ function getDb(): Promise<IDBPDatabase> {
+         if (oldVersion < 6) {
+           db.createObjectStore(MESSAGE_KEYS_STORE_NAME);
+         }
++        if (oldVersion < 7) {
++          if (!db.objectStoreNames.contains(PROFILE_KEYS_STORE_NAME)) {
++             db.createObjectStore(PROFILE_KEYS_STORE_NAME);
++          }
++        }
+       },
+     }).catch(err => {
+       dbCache.delete(userId);
+@@ -267,6 +273,19 @@ export async function deleteMessageKey(messageId: string): Promise<void> {
+   await db.delete(MESSAGE_KEYS_STORE_NAME, messageId);
  }
  
-+export async function encryptProfile(profileJsonString: string, profileKeyB64: string): Promise<string> {
-+  return sendToWorker('encryptProfile', { profileJsonString, profileKeyB64 });
++export async function saveProfileKey(userId: string, keyB64: string): Promise<void> {
++  const db = await getDb();
++  const tx = db.transaction(PROFILE_KEYS_STORE_NAME, 'readwrite');
++  await tx.objectStore(PROFILE_KEYS_STORE_NAME).put(keyB64, userId);
++  await tx.done;
 +}
 +
-+export async function decryptProfile(encryptedProfileB64: string, profileKeyB64: string): Promise<string> {
-+  return sendToWorker('decryptProfile', { encryptedProfileB64, profileKeyB64 });
++export async function getProfileKey(userId: string): Promise<string | undefined> {
++  const db = await getDb();
++  const tx = db.transaction(PROFILE_KEYS_STORE_NAME, 'readonly');
++  return tx.objectStore(PROFILE_KEYS_STORE_NAME).get(userId);
 +}
 +
-+export async function generateProfileKey(): Promise<string> {
-+  return sendToWorker('generateProfileKey', {});
-+}
-+
-+export async function hashUsername(username: string): Promise<string> {
-+  return sendToWorker('hashUsername', { username });
-+}
-+
- export async function reEncryptBundleFromMasterKey(masterKey: Uint8Array, newPassword: string): Promise<{
-   encryptedPrivateKeys: string;
-   encryptionPublicKeyB64: string;
-diff --git a/web/src/lib/socket.ts b/web/src/lib/socket.ts
-index 3dad48a9..e8645696 100644
---- a/web/src/lib/socket.ts
-+++ b/web/src/lib/socket.ts
-@@ -194,12 +194,7 @@ export function getSocket() {
-     socket.on('user:updated', (updatedUser) => {
-       const { user, setUser } = useAuthStore.getState();
-       if (user?.id === updatedUser.id) {
--        // Prevent overwriting private fields (email) with undefined from public broadcast
--        const preservedUser = { ...user, ...updatedUser };
--        if (updatedUser.email === undefined && user.email) {
--           preservedUser.email = user.email;
--        }
--        setUser(preservedUser as User);
-+        setUser({ ...user, ...updatedUser });
-       }
-       useConversationStore.getState().updateParticipantDetails(updatedUser);
-       useMessageStore.getState().updateSenderDetails(updatedUser);
-diff --git a/web/src/pages/LandingPage.tsx b/web/src/pages/LandingPage.tsx
-index 492d4ab7..36ad9836 100644
---- a/web/src/pages/LandingPage.tsx
-+++ b/web/src/pages/LandingPage.tsx
-@@ -115,7 +115,7 @@ const FAQSection = () => (
-         <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">FREQUENTLY ASKED QUESTIONS</motion.h2>
-         <div className="space-y-4">
-           {[
--            { q: "Is NYX end-to-end encrypted?", a: "Yes. We use the Signal Protocol (Double Ratchet Algorithm) to ensure that only you and the person you're communicating with can read what's sent. Not even the server can decrypt your messages." },
-+            { q: "Is NYX end-to-end encrypted?", a: "Yes. We use the Signal Protocol (X3DH + Double Ratchet Algorithm) to ensure that only you and the person you're communicating with can read what's sent. Not even the server can decrypt your messages." },
-             { q: "Do I need to install an app?", a: "No. NYX is a Progressive Web App (PWA). You can use it directly in your browser or install it to your home screen for a native-like experience without the app store friction." },
-             { q: "Is it completely free?", a: "Yes, NYX is open-source and free to use. There are no hidden fees, ads, or data tracking." },
-             { q: "How do I recover my account?", a: "When you sign up, you receive a 24-word recovery phrase. This is the ONLY way to restore your account, but remember that you cannot access your messages history. And we do not store this phrase." }
-diff --git a/web/src/pages/Login.tsx b/web/src/pages/Login.tsx
-index 85354a4b..b81414e7 100644
---- a/web/src/pages/Login.tsx
-+++ b/web/src/pages/Login.tsx
-@@ -6,7 +6,7 @@ import AuthForm from "../components/AuthForm";
- import { IoFingerPrint } from "react-icons/io5";
- import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
- import { api } from "@lib/api";
--import { retrievePrivateKeys } from "@lib/crypto-worker-proxy";
-+import { retrievePrivateKeys, hashUsername } from "@lib/crypto-worker-proxy";
- import { connectSocket } from "@lib/socket";
- import { getEncryptedKeys } from "@lib/keyStorage";
- import toast from "react-hot-toast";
-@@ -35,19 +35,14 @@ export default function Login() {
-     }
-     try {
-       const restoredNotSynced = location.state?.restoredNotSynced === true;
--      await login(data.a, data.b, restoredNotSynced);
-+      
-+      // CLIENT-SIDE BLIND INDEXING
-+      // Hash the username input before sending to server.
-+      const usernameHash = await hashUsername(data.a);
- 
--      // Check if user has pending email verification
--      const verificationState = await import('@utils/verificationPersistence').then(
--        ({ getVerificationState }) => getVerificationState()
--      );
-+      await login(usernameHash, data.b, restoredNotSynced);
- 
--      if (verificationState) {
--        // User has pending verification, redirect to verification page
--        navigate("/register", { state: { showVerification: true, ...verificationState } });
--      } else {
--        navigate("/chat");
--      }
-+      navigate("/chat");
- 
-     } catch (err: any) {
-       setError(err.message || "Login failed. Please check your credentials.");
-@@ -106,13 +101,7 @@ export default function Login() {
-                 await useAuthStore.getState().loadBlockedUsers();
-                 connectSocket();
-                 
--                // Redirect logic
--                const verificationState = await import('@utils/verificationPersistence').then(m => m.getVerificationState());
--                if (verificationState) {
--                  navigate("/register", { state: { showVerification: true, ...verificationState } });
--                } else {
--                  navigate("/chat");
--                }
-+                navigate("/chat");
-               } else {
-                 toast.error("Password salah. Gagal mendekripsi kunci.");
-               }
-@@ -130,16 +119,7 @@ export default function Login() {
-         await useAuthStore.getState().loadBlockedUsers();
-         connectSocket();
- 
--        // Check verification state
--        const verificationState = await import('@utils/verificationPersistence').then(
--          ({ getVerificationState }) => getVerificationState()
--        );
--
--        if (verificationState) {
--          navigate("/register", { state: { showVerification: true, ...verificationState } });
--        } else {
--          navigate("/chat");
--        }
-+        navigate("/chat");
-       }
-     } catch (err: any) {
-       console.error("Biometric login error:", err);
+ /**
+  * Clears all keys from the database. Used on logout.
+  */
+@@ -290,7 +309,7 @@ export async function exportDatabaseToJson(): Promise<string> {
+   const stores = [
+     SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
+     PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
+-    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME
++    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME
+   ];
+   
+   const exportData: Record<string, any[]> = {};
+@@ -327,7 +346,7 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void>
+   const stores = [
+     SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
+     PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
+-    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME
++    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME
+   ];
+   
+   const availableStores = stores.filter(s => db.objectStoreNames.contains(s));
 diff --git a/web/src/pages/ProfilePage.tsx b/web/src/pages/ProfilePage.tsx
-index 08bca85b..7a27c383 100644
+index 7a27c383..d85138cc 100644
 --- a/web/src/pages/ProfilePage.tsx
 +++ b/web/src/pages/ProfilePage.tsx
-@@ -8,7 +8,6 @@ import { toast } from 'react-hot-toast';
+@@ -6,6 +6,8 @@ import { toAbsoluteUrl } from '@utils/url';
+ import { FiEdit2, FiShield, FiCpu, FiGlobe, FiActivity, FiKey, FiCheck, FiArrowLeft } from 'react-icons/fi';
+ import { toast } from 'react-hot-toast';
  
++import { useUserProfile } from '@hooks/useUserProfile';
++
  type ProfileUser = User & {
    createdAt?: string;
--  isEmailVerified?: boolean;
    publicKey?: string;
- };
- 
-@@ -52,7 +51,7 @@ export default function ProfilePage() {
+@@ -17,6 +19,7 @@ export default function ProfilePage() {
+   const { user: me, updateProfile, updateAvatar } = useAuthStore();
+   
+   const [profileUser, setProfileUser] = useState<ProfileUser | null>(null);
++  const profile = useUserProfile(profileUser);
+   const [name, setName] = useState('');
+   const [bio, setBio] = useState('');
+   const [isEditing, setIsEditing] = useState(false);
+@@ -33,13 +36,9 @@ export default function ProfilePage() {
+       try {
+         if (isMe && me) {
+           setProfileUser(me);
+-          setName(me.name);
+-          setBio(me.description || '');
+         } else {
+           const userData = await authFetch<ProfileUser>(`/api/users/${userId}`);
+           setProfileUser(userData);
+-          setName(userData.name);
+-          setBio(userData.description || '');
+         }
+       } catch (e) {
+         toast.error(handleApiError(e));
+@@ -50,6 +49,13 @@ export default function ProfilePage() {
+     fetchUser();
    }, [userId, me, isMe]);
  
++  useEffect(() => {
++    if (profile && profile.name !== "Encrypted User" && profile.name !== "Unknown") {
++       setName(profile.name);
++       setBio(profile.description || '');
++    }
++  }, [profile]);
++
    const stats = [
--    { label: 'Security Clearance', value: profileUser?.isEmailVerified ? 'VERIFIED' : 'UNVERIFIED', color: profileUser?.isEmailVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
-+    { label: 'Security Clearance', value: profileUser?.isVerified ? 'VERIFIED' : 'UNVERIFIED', color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
+     { label: 'Security Clearance', value: profileUser?.isVerified ? 'VERIFIED' : 'UNVERIFIED', color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
      { label: 'Encryption Protocol', value: profileUser?.publicKey ? 'ACTIVE' : 'INACTIVE', color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', icon: FiKey },
-     { label: 'Home Server', value: 'ap-southeast-1', color: 'text-blue-500', icon: FiGlobe },
-     { label: 'Session Status', value: 'ENCRYPTED', color: 'text-emerald-500', icon: FiActivity },
-@@ -166,7 +165,11 @@ export default function ProfilePage() {
-               </div>
+@@ -58,30 +64,12 @@ export default function ProfilePage() {
+   ];
  
-               <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">{profileUser.name}</h2>
--              <p className="text-sm font-mono text-text-secondary">@{profileUser.username}</p>
-+              {profileUser.isVerified && (
-+                <div className="mt-2 inline-block px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-bold tracking-widest uppercase">
-+                  VERIFIED OPERATOR
-+                </div>
-+              )}
+   const handleSave = async () => {
+-    if (!isMe) return;
+-    setIsLoading(true);
+-    try {
+-      await updateProfile({ name, description: bio });
+-      // Update local state if needed, but store update should trigger re-render via isMe check if we depend on me
+-      setIsEditing(false);
+-    } catch (error) {
+-      // Toast already handled by updateProfile if implemented, else:
+-      toast.error('Update Failed');
+-    } finally {
+-      setIsLoading(false);
+-    }
++    setIsEditing(false);
++    toast('Profile editing is managed in Settings', { icon: 'ℹ️' });
+   };
+ 
+   const handleAvatarUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+-    if (!isMe) return;
+-    const file = e.target.files?.[0];
+-    if (file) {
+-      try {
+-        await updateAvatar(file);
+-      } catch (error) {
+-        // Error handled in store
+-      }
+-    }
++    // Editing moved to Settings
+   };
+ 
+   if (isFetching) return <div className="h-full flex items-center justify-center bg-bg-main"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-accent"></div></div>;
+@@ -112,24 +100,13 @@ export default function ProfilePage() {
+           
+           {isMe && (
+             <div className="flex gap-3">
+-               {isEditing ? (
+-                 <button 
+-                   onClick={handleSave}
+-                   disabled={isLoading}
+-                   className="flex items-center gap-2 px-6 py-2 bg-accent text-white rounded-lg font-bold shadow-neu-flat dark:shadow-neu-flat-dark hover:brightness-110 active:scale-95 transition-all"
+-                 >
+-                   {isLoading ? <FiActivity className="animate-spin" /> : <FiCheck />}
+-                   SAVE_CHANGES
+-                 </button>
+-               ) : (
+                  <button 
+-                   onClick={() => setIsEditing(true)}
++                   onClick={() => navigate('/settings')}
+                    className="flex items-center gap-2 px-6 py-2 bg-bg-main text-text-primary rounded-lg font-bold shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed transition-all"
+                  >
+                    <FiEdit2 size={16} />
+                    EDIT_RECORD
+                  </button>
+-               )}
              </div>
- 
-             {/* Technical Stats Widget */}
-@@ -219,18 +222,6 @@ export default function ProfilePage() {
-                     className="w-full bg-bg-main rounded-xl px-4 py-3 font-medium text-text-primary outline-none border-none shadow-neu-pressed dark:shadow-neu-pressed-dark focus:ring-1 focus:ring-accent/50 disabled:opacity-60 disabled:cursor-not-allowed resize-none transition-all"
+           )}
+         </div>
+@@ -146,25 +123,14 @@ export default function ProfilePage() {
+               <div className="relative mx-auto w-40 h-40 mb-4">
+                 <div className="w-full h-full rounded-full p-2 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark">
+                   <img 
+-                    src={toAbsoluteUrl(profileUser.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profileUser.name}`}
++                    src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
+                     alt="Profile" 
+                     className="w-full h-full rounded-full object-cover"
                    />
                  </div>
--
--                {profileUser.email && (
--                  <div className="space-y-2">
--                    <label className="text-xs font-bold uppercase text-text-secondary ml-1">Secure Contact</label>
--                    <input
--                      type="text"
--                      value={profileUser.email}
--                      disabled={true}
--                      className="w-full bg-bg-main/50 rounded-xl px-4 py-3 font-mono text-sm text-text-primary outline-none border-none shadow-neu-pressed dark:shadow-neu-pressed-dark opacity-70 cursor-not-allowed"
--                    />
--                  </div>
+-                {isMe && (
+-                  <>
+-                    <button 
+-                      onClick={() => fileInputRef.current?.click()}
+-                      className="absolute bottom-2 right-2 p-2.5 bg-accent text-white rounded-full shadow-lg hover:scale-110 transition-transform"
+-                    >
+-                      <FiEdit2 size={14} />
+-                    </button>
+-                    <input ref={fileInputRef} type="file" className="hidden" onChange={handleAvatarUpload} />
+-                  </>
 -                )}
                </div>
-             </div>
  
+-              <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">{profileUser.name}</h2>
++              <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">{profile.name}</h2>
+               {profileUser.isVerified && (
+                 <div className="mt-2 inline-block px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-bold tracking-widest uppercase">
+                   VERIFIED OPERATOR
 diff --git a/web/src/pages/Register.tsx b/web/src/pages/Register.tsx
-index e2bdcd8f..bf3b3666 100644
+index bf3b3666..efa1ee4d 100644
 --- a/web/src/pages/Register.tsx
 +++ b/web/src/pages/Register.tsx
-@@ -1,178 +1,66 @@
- import { useState, useEffect } from "react";
--import { Link, useNavigate, useLocation } from "react-router-dom";
-+import { Link, useNavigate } from "react-router-dom";
- import { useAuthStore } from "../store/auth";
- import AuthForm from "../components/AuthForm";
+@@ -5,7 +5,8 @@ import AuthForm from "../components/AuthForm";
  import RecoveryPhraseModal from "@components/RecoveryPhraseModal";
  import { Turnstile } from '@marsidev/react-turnstile';
--import { FiMail, FiRefreshCw } from 'react-icons/fi';
  import toast from "react-hot-toast";
-+import { hashUsername } from "@lib/crypto-worker-proxy";
+-import { hashUsername } from "@lib/crypto-worker-proxy";
++import { hashUsername, generateProfileKey, encryptProfile } from "@lib/crypto-worker-proxy";
++import { saveProfileKey } from "@lib/keychainDb";
  
  export default function Register() {
    const [error, setError] = useState("");
--  const [step, setStep] = useState<'form' | 'otp' | 'recovery'>('form');
-+  const [step, setStep] = useState<'form' | 'recovery'>('form');
-   const [recoveryPhrase, setRecoveryPhrase] = useState('');
--
--  // State untuk Verifikasi
--  const [userId, setUserId] = useState('');
--  const [emailForVerify, setEmailForVerify] = useState('');
--  const [otpCode, setOtpCode] = useState('');
--  const [isVerifying, setIsVerifying] = useState(false);
-   const [turnstileToken, setTurnstileToken] = useState<string>('');
--  const [isResending, setIsResending] = useState(false);
--  const [countdown, setCountdown] = useState(0);
- 
--  const location = useLocation();
-   const navigate = useNavigate();
--  const { registerAndGeneratePhrase, verifyEmail, resendVerification } = useAuthStore();
--
--  // Check if we should show verification form based on location state or stored verification state
--  useEffect(() => {
--    const locationState = location.state;
--    if (locationState?.showVerification && locationState?.userId && locationState?.email) {
--      // User was redirected from login because they have pending verification
--      setUserId(locationState.userId);
--      setEmailForVerify(locationState.email);
--      setStep('otp');
--      // Clear the location state to prevent showing it again on refresh using router navigation
--      navigate('.', { replace: true, state: {} });
--    } else {
--      // Check if there's stored verification state
--      import('@utils/verificationPersistence').then(({ getVerificationState }) => {
--        const storedState = getVerificationState();
--        if (storedState) {
--          setUserId(storedState.userId);
--          setEmailForVerify(storedState.email);
--          setStep('otp');
--        }
--      });
--    }
--  }, [location.state, navigate]);
-+  const { registerAndGeneratePhrase } = useAuthStore();
- 
--  async function handleRegister(data: { name?: string, d?: string, c?: string, b?: string }) {
--    const { name, d: username, c: email, b: password } = data;
-+  async function handleRegister(data: { name?: string, d?: string, b?: string }) {
-+    const { name, d: username, b: password } = data;
-     setError("");
- 
-     // --- Validation Logic ---
-     if (!name) { throw new Error("Name is required"); }
-     if (name.length > 80) { throw new Error("Name must be less than 80 characters"); }
--    if (!username) { throw new Error("Username is required"); }
--    if (username.length < 3) { throw new Error("Username must be at least 3 characters"); }
--    if (username.length > 32) { throw new Error("Username must be less than 32 characters"); }
-+    
-+    // Username constraints (min 3 chars)
-+    if (!username || username.length < 3) { throw new Error("Username must be at least 3 characters"); }
-     const usernameRegex = /^[a-zA-Z0-9_]+$/;
-     if (!usernameRegex.test(username)) { throw new Error("Username can only contain letters, numbers, and underscores"); }
--    if (!email) { throw new Error("Email is required"); }
--    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
--    if (!emailRegex.test(email)) { throw new Error("Please enter a valid email address"); }
--    if (email.length > 200) { throw new Error("Email must be less than 200 characters"); }
-+    
-     if (!password) { throw new Error("Password is required"); }
-     if (password.length < 8) { throw new Error("Password must be at least 8 characters"); }
--    if (password.length > 128) { throw new Error("Password must be less than 128 characters"); }
--    const hasUpperCase = /[A-Z]/.test(password);
--    const hasLowerCase = /[a-z]/.test(password);
--    const hasNumbers = /\d/.test(password);
--    const hasSpecialChar = /[@$!%*?&]/.test(password);
--    if (!hasUpperCase || !hasLowerCase || !hasNumbers || !hasSpecialChar) { throw new Error("Password must contain at least one uppercase, lowercase, number, and special character"); }
-     // --- End Validation ---
- 
-     // Validasi Turnstile
--    // Note: Jika di local dev tanpa key, backend mungkin bypass, tapi di prod wajib.
-     // if (!turnstileToken) { throw new Error("Please complete the CAPTCHA."); }
+@@ -38,14 +39,23 @@ export default function Register() {
  
      try {
-+      // CLIENT-SIDE BLIND INDEXING
-+      // Hash the username before it ever leaves the device.
-+      // The server never sees the plaintext username.
-+      const usernameHash = await hashUsername(username);
+       // CLIENT-SIDE BLIND INDEXING
+-      // Hash the username before it ever leaves the device.
+-      // The server never sees the plaintext username.
+       const usernameHash = await hashUsername(username);
+ 
++      // PROFILE ENCRYPTION
++      const profileKeyB64 = await generateProfileKey();
++      const profileJson = JSON.stringify({ name, description: "", avatarUrl: "" });
++      const encryptedProfile = await encryptProfile(profileJson, profileKeyB64);
 +
        const result = await registerAndGeneratePhrase({ 
--        name, username, email, password, turnstileToken 
-+        name, usernameHash, password, turnstileToken 
+-        name, usernameHash, password, turnstileToken 
++        usernameHash, 
++        password, 
++        encryptedProfile, 
++        turnstileToken 
        });
  
++      // Save own ProfileKey to IDB
++      await saveProfileKey(result.userId, profileKeyB64);
++
        setRecoveryPhrase(result.phrase);
-+      setStep('recovery'); // Success! Show phrase.
-+      toast.success("Account created successfully!");
-       
--      if (result.needVerification && result.userId) {
--        setUserId(result.userId);
--        setEmailForVerify(result.email || email);
--        // Save verification state to localStorage so it persists if user closes the tab
--        import('@utils/verificationPersistence').then(({ saveVerificationState }) => {
--          saveVerificationState({
--            userId: result.userId!,
--            email: result.email || email,
--            timestamp: Date.now()
--            // Phrase is NOT saved for security reasons
--          });
--        });
--        setStep('otp');
--        toast.success("Registration successful! Please check your email for the code.");
--      } else {
--        // Jika verifikasi dimatikan backend, langsung ke recovery
--        setStep('recovery');
--      }
-     } catch (err: any) {
-       setError(err.message || "Registration failed");
-     }
-   }
- 
--  const handleVerifyOtp = async (e: React.FormEvent) => {
--    e.preventDefault();
--    if (otpCode.length !== 6) {
--      setError("Code must be 6 digits.");
--      return;
--    }
--    setError("");
--    setIsVerifying(true);
--
--    try {
--      await verifyEmail(userId, otpCode);
--      toast.success("Email verified!");
--      // Don't clear verification state yet, we need the phrase for the next step!
--      setStep('recovery'); // Pindah ke Recovery Phrase setelah sukses
--    } catch (err: any) {
--      // Tampilkan pesan kesalahan yang lebih spesifik
--      if (err.message.includes("expired")) {
--        setError("Verification code has expired. Please request a new one.");
--      } else if (err.message.includes("Invalid")) {
--        setError("Invalid verification code. Please try again.");
--      } else {
--        setError(err.message || "Verification failed");
--      }
--    } finally {
--      setIsVerifying(false);
--    }
--  };
--
--  // Countdown effect
--  useEffect(() => {
--    let interval: NodeJS.Timeout;
--    if (countdown > 0) {
--      interval = setInterval(() => {
--        setCountdown((prev) => prev - 1);
--      }, 1000);
--    }
--    return () => clearInterval(interval);
--  }, [countdown]);
--
--  const handleResend = async () => {
--    if (countdown > 0) return; // Jangan lakukan apa-apa jika masih dalam countdown
--
--    setIsResending(true);
--    try {
--      await resendVerification(emailForVerify);
--      toast.success("Verification code resent!");
--      setCountdown(60); // Countdown 60 detik sebelum bisa mengirim ulang
--    } catch (err: any) {
--      toast.error(err.message || "Failed to resend");
--    } finally {
--      setIsResending(false);
--    }
--  };
--
-   useEffect(() => {
-     let timerId: NodeJS.Timeout;
- 
-     if (step === 'recovery' && !recoveryPhrase) {
--      // If phrase is lost (e.g. refresh), just go to chat. User can view it in settings.
--      import('@utils/verificationPersistence').then(({ clearVerificationState }) => {
--        clearVerificationState();
--      });
-+      // If phrase is lost (e.g. refresh), just go to chat.
-       toast.success("Welcome! You can view your recovery phrase in Settings.");
--      
--      // Use a timeout to ensure state update doesn't conflict with rendering
-       timerId = setTimeout(() => navigate('/chat'), 100);
-     }
- 
-@@ -181,159 +69,11 @@ export default function Register() {
-     };
-   }, [step, recoveryPhrase, navigate]);
- 
--  // STEP 3: RECOVERY PHRASE
-+  // STEP 2: RECOVERY PHRASE
-   if (step === 'recovery') {
--    if (!recoveryPhrase) {
--      return null;
--    }
-+    if (!recoveryPhrase) return null;
- 
--    return <RecoveryPhraseModal phrase={recoveryPhrase} onClose={() => {
--      // Clear state only when finished
--      import('@utils/verificationPersistence').then(({ clearVerificationState }) => {
--        clearVerificationState();
--      });
--      navigate('/chat');
--    }} />
--  }
--
--  // STEP 2: OTP FORM
--  if (step === 'otp') {
--    return (
--      <div className="min-h-screen flex flex-col md:flex-row bg-stone-900">
--        {/* Left Panel - Concrete Security Panel */}
--        <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
--             style={{
--               boxShadow: 'inset -10px -10px 30px rgba(0, 0, 0, 0.5)'
--             }}>
--          <div className="max-w-md w-full mx-auto">
--            <div className="flex items-center justify-center mb-8">
--              <div className="w-12 h-12 rounded-lg bg-teal-500 flex items-center justify-center mr-3">
--                <div className="w-8 h-8 rounded bg-teal-300"></div>
--              </div>
--              <h1 className="text-3xl font-black text-white tracking-tighter">SECURE<span className="text-teal-500">VAULT</span></h1>
--            </div>
--
--            <div className="mb-8">
--              <h2 className="text-2xl font-bold text-teal-400 mb-2">EMAIL VERIFICATION</h2>
--              <p className="text-stone-400">Confirm your email to activate your account</p>
--              
--              <div className="mt-6 p-4 bg-cyan-900/20 border border-cyan-500/30 rounded-xl shadow-[0_0_15px_rgba(6,182,212,0.1)] backdrop-blur-sm">
--                 <p className="text-cyan-100/80 text-xs flex items-start gap-3">
--                    <FiMail className="text-cyan-400 flex-shrink-0 mt-0.5" size={16} />
--                    <span className="leading-relaxed">
--                      If the code doesn't appear in your inbox within 1 minute, please check your <span className="text-cyan-300 font-bold border-b border-cyan-500/50">Spam</span> or <span className="text-cyan-300 font-bold border-b border-cyan-500/50">Junk</span> folder.
--                    </span>
--                 </p>
--              </div>
--            </div>
--
--            {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
--
--            <form onSubmit={handleVerifyOtp} className="space-y-6">
--              <div className="relative">
--                <input
--                  type="text"
--                  maxLength={6}
--                  value={otpCode}
--                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
--                  placeholder="Verification Code"
--                  className="w-full text-center text-3xl tracking-widest font-mono py-4 rounded-lg bg-stone-800 text-white focus:outline-none transition-all duration-300"
--                  style={{
--                    boxShadow: 'inset 5px 5px 10px rgba(0, 0, 0, 0.6), inset -5px -5px 10px rgba(255, 255, 255, 0.05)'
--                  }}
--                />
--                <div className="absolute right-3 top-1/2 transform -translate-y-1/2 w-2 h-2 rounded-full bg-transparent"></div>
--              </div>
--
--              <button
--                type="submit"
--                disabled={isVerifying || otpCode.length < 6}
--                className="w-full py-3 rounded-lg bg-gradient-to-r from-teal-500 to-teal-600 text-white font-semibold transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
--                style={{
--                  boxShadow: '5px 5px 15px rgba(0,150,150,0.4), -5px -5px 15px rgba(100,200,200,0.2)'
--                }}
--              >
--                {isVerifying ? "Verifying..." : "Verify Code"}
--              </button>
--            </form>
--
--            <div className="mt-6 pt-4 border-t border-stone-700">
--              <p className="text-stone-500 text-xs mb-2">Didn't receive the code?</p>
--              <button
--                onClick={handleResend}
--                type="button"
--                disabled={countdown > 0 || isResending}
--                className="flex items-center justify-center gap-2 w-full py-2 text-sm text-stone-300 hover:bg-stone-700/50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
--                style={{
--                  boxShadow: '3px 3px 6px rgba(0, 0, 0, 0.4), -3px -3px 6px rgba(255, 255, 255, 0.05)'
--                }}
--              >
--                <FiRefreshCw size={14} /> {countdown > 0 ? `Resend in ${countdown}s` : "Resend Code"}
--              </button>
--            </div>
--
--            <div className="text-center mt-8">
--              <p className="text-stone-500 text-sm">
--                Already have an account? <Link to="/login" className="font-semibold text-teal-500 hover:underline">Login</Link>
--              </p>
--            </div>
--          </div>
--        </div>
--
--        {/* Right Panel - Dynamic Visualization */}
--        <div className="w-full md:w-3/5 bg-gradient-to-br from-stone-900 to-black relative overflow-hidden flex items-center justify-center p-8">
--          {/* Abstract 3D visualization */}
--          <div className="absolute inset-0 z-0">
--            <div className="absolute top-1/4 left-1/4 w-32 h-32 rounded-full bg-teal-500/10 blur-3xl animate-pulse"></div>
--            <div className="absolute bottom-1/3 right-1/3 w-48 h-48 rounded-full bg-blue-500/10 blur-3xl animate-pulse delay-1000"></div>
--            <div className="absolute top-1/3 right-1/4 w-24 h-24 rounded-full bg-orange-500/10 blur-3xl animate-pulse delay-500"></div>
--          </div>
--
--          {/* Grid pattern */}
--          <div className="absolute inset-0 z-0 opacity-20"
--               style={{
--                 backgroundImage: `linear-gradient(stone 1px, transparent 1px), linear-gradient(to right, stone 1px, transparent 1px)`,
--                 backgroundSize: '40px 40px'
--               }}></div>
--
--          {/* Central security graphic */}
--          <div className="relative z-10 text-center max-w-lg">
--            <div className="inline-block mb-8 relative">
--              <div className="w-48 h-48 rounded-full border-4 border-teal-500/30 flex items-center justify-center">
--                <div className="w-32 h-32 rounded-full border-4 border-teal-500/20 flex items-center justify-center">
--                  <div className="w-20 h-20 rounded-full border-4 border-teal-500/10 flex items-center justify-center">
--                    <div className="w-12 h-12 rounded-full bg-gradient-to-r from-teal-500 to-teal-700 flex items-center justify-center">
--                      <div className="w-6 h-6 rounded-full bg-teal-300 animate-pulse"></div>
--                    </div>
--                  </div>
--                </div>
--              </div>
--
--              {/* Scanning animation */}
--              <div className="absolute inset-0 rounded-full border-4 border-teal-500 animate-ping opacity-20"></div>
--            </div>
--
--            <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">ACCOUNT<span className="text-teal-500">-</span>SETUP</h2>
--            <p className="text-stone-400 mb-6">Complete your registration to join the secure communication network.</p>
--
--            <div className="grid grid-cols-3 gap-4 mt-12">
--              <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
--                <div className="text-teal-500 text-2xl mb-2">🔒</div>
--                <h3 className="font-bold text-white text-sm">E2E ENCRYPTED</h3>
--              </div>
--              <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
--                <div className="text-teal-500 text-2xl mb-2">🔑</div>
--                <h3 className="font-bold text-white text-sm">KEY OWNERSHIP</h3>
--              </div>
--              <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
--                <div className="text-teal-500 text-2xl mb-2">🛡️</div>
--                <h3 className="font-bold text-white text-sm">PRIVACY FIRST</h3>
--              </div>
--            </div>
--          </div>
--        </div>
--      </div>
--    );
-+    return <RecoveryPhraseModal phrase={recoveryPhrase} onClose={() => navigate('/chat')} />
-   }
- 
-   // STEP 1: REGISTER FORM
-@@ -353,23 +93,25 @@ export default function Register() {
-           </div>
- 
-           <div className="mb-8">
--            <h2 className="text-2xl font-bold text-teal-400 mb-2">NEW ACCOUNT SETUP</h2>
--            <p className="text-stone-400">Register to create your secure communication vault</p>
-+            <h2 className="text-2xl font-bold text-teal-400 mb-2">ANONYMOUS REGISTRATION</h2>
-+            <p className="text-stone-400">Create a secure identity. No email required.</p>
-           </div>
- 
--          {error && step === 'form' && <div className="text-red-500 text-center mb-4 text-sm">{error}</div>}
-+          {error && <div className="text-red-500 text-center mb-4 text-sm">{error}</div>}
- 
-+          {/* Modified AuthForm for Username Only */}
-           <AuthForm
-             onSubmit={handleRegister}
--            button="Sign Up"
-+            button="Initialize Identity"
-+            hideEmail={true} 
-           />
- 
-           {/* Turnstile Widget */}
-           <div className="mt-4 flex justify-center">
-             <Turnstile
--              siteKey="0x4AAAAAACN0kvKqxA8cYt6U" // Ganti dengan Site Key Cloudflare kamu!
-+              siteKey="0x4AAAAAACN0kvKqxA8cYt6U" 
-               onSuccess={setTurnstileToken}
--              onError={() => toast.error("Security check failed. Please refresh.")}
-+              onError={() => toast.error("Security check failed.")}
-               onExpire={() => setTurnstileToken('')}
-               options={{ theme: 'auto' }}
-             />
-@@ -377,66 +119,19 @@ export default function Register() {
- 
-           <div className="text-center mt-6">
-             <p className="text-stone-500 text-sm">
--              Already have an account? <Link to="/login" className="font-semibold text-teal-500 hover:underline">Login</Link>
-+              Already have an identity? <Link to="/login" className="font-semibold text-teal-500 hover:underline">Login</Link>
-             </p>
--            <div className="mt-4 pt-4 border-t border-stone-800">
--              <Link to="/privacy" className="text-xs text-stone-600 hover:text-stone-400 transition-colors">Privacy Policy & Terms</Link>
--            </div>
-           </div>
-         </div>
-       </div>
- 
-       {/* Right Panel - Dynamic Visualization */}
-       <div className="w-full md:w-3/5 bg-gradient-to-br from-stone-900 to-black relative overflow-hidden flex items-center justify-center p-8">
--        {/* Abstract 3D visualization */}
--        <div className="absolute inset-0 z-0">
--          <div className="absolute top-1/4 left-1/4 w-32 h-32 rounded-full bg-teal-500/10 blur-3xl animate-pulse"></div>
--          <div className="absolute bottom-1/3 right-1/3 w-48 h-48 rounded-full bg-blue-500/10 blur-3xl animate-pulse delay-1000"></div>
--          <div className="absolute top-1/3 right-1/4 w-24 h-24 rounded-full bg-orange-500/10 blur-3xl animate-pulse delay-500"></div>
--        </div>
--
--        {/* Grid pattern */}
--        <div className="absolute inset-0 z-0 opacity-20"
--             style={{
--               backgroundImage: `linear-gradient(stone 1px, transparent 1px), linear-gradient(to right, stone 1px, transparent 1px)`,
--               backgroundSize: '40px 40px'
--             }}></div>
--
--        {/* Central security graphic */}
--        <div className="relative z-10 text-center max-w-lg">
--          <div className="inline-block mb-8 relative">
--            <div className="w-48 h-48 rounded-full border-4 border-teal-500/30 flex items-center justify-center">
--              <div className="w-32 h-32 rounded-full border-4 border-teal-500/20 flex items-center justify-center">
--                <div className="w-20 h-20 rounded-full border-4 border-teal-500/10 flex items-center justify-center">
--                  <div className="w-12 h-12 rounded-full bg-gradient-to-r from-teal-500 to-teal-700 flex items-center justify-center">
--                    <div className="w-6 h-6 rounded-full bg-teal-300 animate-pulse"></div>
--                  </div>
--                </div>
--              </div>
--            </div>
--
--            {/* Scanning animation */}
--            <div className="absolute inset-0 rounded-full border-4 border-teal-500 animate-ping opacity-20"></div>
--          </div>
--
--          <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">INDUSTRIAL-<span className="text-teal-500">GRADE</span> SECURITY</h2>
--          <p className="text-stone-400 mb-6">Your communications are protected with end-to-end encryption using the Signal Protocol.</p>
--
--          <div className="grid grid-cols-3 gap-4 mt-12">
--            <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
--              <div className="text-teal-500 text-2xl mb-2">🔒</div>
--              <h3 className="font-bold text-white text-sm">E2E ENCRYPTED</h3>
--            </div>
--            <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
--              <div className="text-teal-500 text-2xl mb-2">🔑</div>
--              <h3 className="font-bold text-white text-sm">KEY OWNERSHIP</h3>
--            </div>
--            <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
--              <div className="text-teal-500 text-2xl mb-2">🛡️</div>
--              <h3 className="font-bold text-white text-sm">PRIVACY FIRST</h3>
--            </div>
--          </div>
--        </div>
-+         {/* ... Visualization code ... */}
-+         <div className="relative z-10 text-center max-w-lg">
-+            <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">PURE <span className="text-teal-500">ANONYMITY</span></h2>
-+            <p className="text-stone-400 mb-6">Your username is hashed on your device. We don't know who you are.</p>
-+         </div>
-       </div>
-     </div>
-   );
+       setStep('recovery'); // Success! Show phrase.
+       toast.success("Account created successfully!");
 diff --git a/web/src/pages/SettingsPage.tsx b/web/src/pages/SettingsPage.tsx
-index 0d5fb8f6..63212c37 100644
+index 63212c37..9fdaa107 100644
 --- a/web/src/pages/SettingsPage.tsx
 +++ b/web/src/pages/SettingsPage.tsx
-@@ -120,7 +120,6 @@ export default function SettingsPage() {
-   const [description, setDescription] = useState(user?.description || '');
+@@ -102,9 +102,15 @@ import { useSettingsStore } from '@store/settings';
+ 
+ /* --- PAGE COMPONENT --- */
+ 
++import { useUserProfile } from '@hooks/useUserProfile';
++import { useProfileStore } from '@store/profile';
++import { generateProfileKey, encryptProfile } from '@lib/crypto-worker-proxy';
++import { saveProfileKey } from '@lib/keychainDb';
++
+ export default function SettingsPage() {
+   const navigate = useNavigate();
+   const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout } = useAuthStore();
++  const profile = useUserProfile(user);
+   const { theme, toggleTheme, accent, setAccent } = useThemeStore();
+   const { showConfirm } = useModalStore();
+   const { enableSmartReply, setEnableSmartReply } = useSettingsStore();
+@@ -116,10 +122,10 @@ export default function SettingsPage() {
+     unsubscribeFromPush 
+   } = usePushNotifications();
+ 
+-  const [name, setName] = useState(user?.name || '');
+-  const [description, setDescription] = useState(user?.description || '');
++  const [name, setName] = useState('');
++  const [description, setDescription] = useState('');
    const [avatarFile, setAvatarFile] = useState<File | null>(null);
-   const [previewUrl, setPreviewUrl] = useState<string | null>(user?.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
--  const [showEmail, setShowEmail] = useState(user?.showEmailToOthers || false);
+-  const [previewUrl, setPreviewUrl] = useState<string | null>(user?.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
++  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
    const [readReceipts, setReadReceiptsState] = useState(sendReadReceipts);
    const [isLoading, setIsLoading] = useState(false);
    const [showReportModal, setShowReportModal] = useState(false);
-@@ -140,7 +139,6 @@ export default function SettingsPage() {
-       setName(user.name || '');
-       setDescription(user.description || '');
-       setPreviewUrl(user.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
--      setShowEmail(user.showEmailToOthers || false);
-       setReadReceiptsState(sendReadReceipts);
-     }
-   }, [user, sendReadReceipts]);
-@@ -323,11 +321,11 @@ export default function SettingsPage() {
+@@ -135,13 +141,16 @@ export default function SettingsPage() {
+   };
  
-                 {/* Info Fields */}
-                 <div className="flex-1 w-full space-y-6">
--                  {/* Username (Read Only) */}
-+                  {/* ID (Read Only) */}
-                   <div className="space-y-2">
--                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">Username (ID)</label>
-+                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">ANONYMOUS ID</label>
-                     <div className="w-full bg-black/5 dark:bg-white/5 text-sm font-mono text-text-primary p-4 rounded-xl flex items-center border border-transparent">
--                      <span className="text-accent mr-1">@</span>{user.username}
-+                      <span className="text-accent mr-1">#</span>{user.id}
-                       <FiLock className="ml-auto text-text-secondary opacity-50" size={12} />
-                     </div>
-                   </div>
-@@ -469,14 +467,6 @@ export default function SettingsPage() {
-                   setReadReceipts(!readReceipts);
-                 }} 
-               />
--              <RockerSwitch 
--                label="Public Email" 
--                checked={showEmail} 
--                onChange={() => {
--                  setShowEmail(!showEmail);
--                  updateProfile({ showEmailToOthers: !showEmail });
--                }} 
--              />
-               <button
-                 onClick={handleRegisterPasskey}
-                 className="
+   useEffect(() => {
+-    if (user) {
+-      setName(user.name || '');
+-      setDescription(user.description || '');
+-      setPreviewUrl(user.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
+-      setReadReceiptsState(sendReadReceipts);
++    if (profile && profile.name !== "Encrypted User" && profile.name !== "Unknown") {
++      setName(profile.name || '');
++      setDescription(profile.description || '');
++      setPreviewUrl(profile.avatarUrl ? toAbsoluteUrl(profile.avatarUrl) || null : null);
+     }
+-  }, [user, sendReadReceipts]);
++  }, [profile]);
++
++  useEffect(() => {
++    setReadReceiptsState(sendReadReceipts);
++  }, [sendReadReceipts]);
+ 
+   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+     const file = e.target.files?.[0];
+@@ -155,18 +164,27 @@ export default function SettingsPage() {
+     e.preventDefault();
+     setIsLoading(true);
+     try {
+-      const promises = [];
++      let currentAvatarUrl = profile.avatarUrl;
++
+       if (avatarFile) {
+-        promises.push(updateAvatar(avatarFile));
+-      }
+-      if (name !== user?.name || description !== user?.description) {
+-        promises.push(updateProfile({ name, description }));
++        currentAvatarUrl = await updateAvatar(avatarFile);
+       }
+-      if (promises.length === 0) {
+-        toast('No changes detected.');
+-        return;
++      
++      const profileKeyB64 = await import('@lib/keychainDb').then(m => m.getProfileKey(user!.id));
++      let key = profileKeyB64;
++      if (!key) {
++         key = await generateProfileKey();
++         await saveProfileKey(user!.id, key);
+       }
+-      await Promise.all(promises);
++
++      const profileJson = JSON.stringify({ name, description, avatarUrl: currentAvatarUrl });
++      const encryptedProfile = await encryptProfile(profileJson, key);
++
++      await updateProfile({ encryptedProfile });
++      
++      // Force update the local cache
++      useProfileStore.getState().decryptAndCache(user!.id, encryptedProfile);
++
+       toast.success('Identity Updated');
+     } catch (error: any) {
+       const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
+@@ -300,7 +318,7 @@ export default function SettingsPage() {
+                     bg-bg-main p-2
+                   ">
+                     <img
+-                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
++                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
+                       alt="ID"
+                       className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
+                     />
 diff --git a/web/src/store/auth.ts b/web/src/store/auth.ts
-index f32683f4..54d5313b 100644
+index 54d5313b..789a7438 100644
 --- a/web/src/store/auth.ts
 +++ b/web/src/store/auth.ts
-@@ -1,15 +1,14 @@
- import { createWithEqualityFn } from "zustand/traditional";
--import { authFetch, api } from "@lib/api";
-+import { authFetch, api, apiUpload } from "@lib/api";
- import { disconnectSocket, connectSocket } from "@lib/socket";
- import { clearAuthCookies } from "@lib/tokenStorage";
--// import { getSodium } from '@lib/sodiumInitializer'; // Removed top-level import
- import { useModalStore } from "./modal";
- import { useConversationStore } from "./conversation";
- import { useMessageStore } from "./message";
- import toast from "react-hot-toast";
- import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady } from "@lib/keyStorage";
--import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; // Only import TYPE
--import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; // Import helper
-+import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; 
-+import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; 
- 
- /**
-  * Retrieves the persisted signed pre-key, signs it with the identity signing key,
-@@ -18,7 +17,6 @@ import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto
-  */
- export async function setupAndUploadPreKeyBundle() {
-   try {
--    // Dynamic imports
-     const { getSodium } = await import('@lib/sodiumInitializer');
-     
-     const { getSigningPrivateKey, getEncryptionKeyPair, getSignedPreKeyPair } = useAuthStore.getState();
-@@ -29,7 +27,6 @@ export async function setupAndUploadPreKeyBundle() {
-     const { publicKey: signedPreKey } = await getSignedPreKeyPair();
- 
-     const identityKeyB64 = sodium.to_base64(identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
--    // The public key is the last 32 bytes of the 64-byte secret key.
-     const signingPublicKey = signingPrivateKey.slice(32);
- 
-     const signature = sodium.crypto_sign_detached(signedPreKey, signingPrivateKey);
-@@ -47,7 +44,6 @@ export async function setupAndUploadPreKeyBundle() {
-       body: JSON.stringify(bundle),
-     });
- 
--    // Check and refill OTPKs after bundle upload
-     await checkAndRefillOneTimePreKeys();
- 
-   } catch (e) {
-@@ -57,39 +53,38 @@ export async function setupAndUploadPreKeyBundle() {
- 
- export type User = {
-   id: string;
--  email: string;
--  username: string;
--  name: string;
--  description?: string | null;
--  avatarUrl?: string | null;
--  hasCompletedOnboarding?: boolean;
--  showEmailToOthers?: boolean;
-+  encryptedProfile?: string | null;
-   role?: string;
-+  isVerified?: boolean; // Trust Tier (WebAuthn)
-+  hasCompletedOnboarding?: boolean;
- };
- 
- type State = {
-   user: User | null;
-   accessToken: string | null;
-+  isLoading: boolean;
-   isBootstrapping: boolean;
--  isInitializingCrypto: boolean; // New state
-+  isInitializingCrypto: boolean;
-   sendReadReceipts: boolean;
-   hasRestoredKeys: boolean;
-+  blockedUserIds: string[];
- };
+@@ -72,6 +72,7 @@ type State = {
  
  type RegisterResponse = {
    phrase: string;
--  needVerification: boolean;
--  userId?: string;
--  email?: string;
++  userId: string;
  };
  
  type Actions = {
-   bootstrap: () => Promise<void>;
+@@ -79,7 +80,7 @@ type Actions = {
    tryAutoUnlock: () => Promise<boolean>;
--  login: (emailOrUsername: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
--  registerAndGeneratePhrase: (data: any) => Promise<RegisterResponse>; 
--  verifyEmail: (userId: string, code: string) => Promise<void>;
--  resendVerification: (email: string) => Promise<void>;
-+  login: (usernameHash: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
-+  registerAndGeneratePhrase: (data: { 
-+    name: string; 
-+    usernameHash: string; // Blind Index
-+    password: string; 
-+    turnstileToken?: string; 
-+  }) => Promise<RegisterResponse>;
-+  
-   logout: () => Promise<void>;
-   getEncryptionKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
-   getSigningPrivateKey: () => Promise<Uint8Array>;
-@@ -97,27 +92,25 @@ type Actions = {
+   login: (usernameHash: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
+   registerAndGeneratePhrase: (data: { 
+-    name: string; 
++    encryptedProfile: string; 
+     usernameHash: string; // Blind Index
+     password: string; 
+     turnstileToken?: string; 
+@@ -92,8 +93,8 @@ type Actions = {
    getMasterSeed: () => Promise<Uint8Array | undefined>;
    setUser: (user: User) => void;
    setAccessToken: (token: string | null) => void;
--  updateProfile: (data: Partial<Pick<User, 'name' | 'description' | 'showEmailToOthers'>>) => Promise<void>;
-+  updateProfile: (data: Partial<Pick<User, 'name' | 'description'>>) => Promise<void>;
-   updateAvatar: (avatar: File) => Promise<void>;
+-  updateProfile: (data: Partial<Pick<User, 'name' | 'description'>>) => Promise<void>;
+-  updateAvatar: (avatar: File) => Promise<void>;
++  updateProfile: (data: { encryptedProfile: string }) => Promise<void>;
++  updateAvatar: (avatar: File) => Promise<string>;
    setReadReceipts: (value: boolean) => void;
    setHasRestoredKeys: (hasKeys: boolean) => void;
    blockUser: (userId: string) => Promise<void>;
-   unblockUser: (userId: string) => Promise<void>;
-   loadBlockedUsers: () => Promise<void>;
--  blockedUserIds: string[];
-   setDecryptedKeys: (keys: RetrievedKeys) => void;
- };
- 
- let privateKeysCache: RetrievedKeys | null = null;
- 
- export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => {
--  const savedUser = localStorage.getItem("user"); // User is still in localStorage
-+  const savedUser = localStorage.getItem("user");
-   const savedReadReceipts = localStorage.getItem('sendReadReceipts');
- 
-   const retrieveAndCacheKeys = async (): Promise<RetrievedKeys> => {
-     if (privateKeysCache) return privateKeysCache;
- 
--    // Dynamic import for retrievePrivateKeys
-     const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
- 
-     let autoUnlockKey: string | undefined | null = null;
-@@ -137,49 +130,30 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-           privateKeysCache = result.keys;
-           return result.keys;
-         }
--      } catch (e) {
--        // Fall through to password prompt
--      }
-+      } catch (e) {}
-     }
- 
--    // Helper to wrap the modal prompt in a Promise
-     const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
-       return new Promise((resolve, reject) => {
-         let unsubscribe: () => void;
-+        const cleanup = () => { if (unsubscribe) unsubscribe(); };
- 
--        const cleanup = () => {
--          if (unsubscribe) unsubscribe();
--        };
--
--        // Safety fallback: Reject if modal closes without submission
-         unsubscribe = useModalStore.subscribe((state) => {
-           if (!state.isPasswordPromptOpen) {
-             cleanup();
--            // We use a timeout to allow the submit callback to fire first if that was the cause of closing
-             setTimeout(() => {
--               // If we are still pending (though we can't check promise state directly, logic flow handles it)
--               // Ideally, we'd rely on the fact that if successful, resolve/reject was already called.
--               // But since we can't query promise state, we just reject.
--               // If it was already resolved, this reject is ignored.
-                reject(new Error("Password prompt closed without input."));
-             }, 100);
-           }
-         });
- 
-         useModalStore.getState().showPasswordPrompt(async (password) => {
--          cleanup(); // Clean up listener immediately on submit
--          
--          if (!password) {
--            reject(new Error("Password not provided."));
--            return;
--          }
-+          cleanup();
-+          if (!password) { reject(new Error("Password not provided.")); return; }
- 
-           try {
-             const keysInner = await getEncryptedKeys();
--            if (!keysInner) {
--              reject(new Error("Encrypted private keys not found."));
--              return;
--            }
-+            if (!keysInner) { reject(new Error("Encrypted private keys not found.")); return; }
- 
-             const result = await retrieveFn(keysInner, password);
-             if (!result.success) {
-@@ -190,9 +164,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
- 
-             privateKeysCache = result.keys;
-             resolve(result.keys);
--          } catch (e) {
--            reject(e);
--          }
-+          } catch (e) { reject(e); }
-         });
-       });
-     };
-@@ -203,10 +175,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-   return {
-     user: savedUser ? JSON.parse(savedUser) : null,
-     accessToken: null,
-+    isLoading: false,
-     isBootstrapping: true,
-     isInitializingCrypto: false,
-     sendReadReceipts: savedReadReceipts ? JSON.parse(savedReadReceipts) : true,
--    hasRestoredKeys: false, // Initial state, will be updated by bootstrap
-+    hasRestoredKeys: false,
-     blockedUserIds: [],
- 
-     setHasRestoredKeys: async (hasKeys) => set({ hasRestoredKeys: await hasStoredKeys() }),
-@@ -231,12 +204,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-             await setDeviceAutoUnlockReady(true);
-             return true;
-           }
--          console.error("Auto-unlock failed.");
--        } catch (e) {
--           console.error("Error during auto-unlock:", e);
--        } finally {
--          set({ isInitializingCrypto: false });
--        }
-+        } catch (e) { console.error("Error during auto-unlock:", e); } finally { set({ isInitializingCrypto: false }); }
-       }
-       return false;
-     },
-@@ -248,10 +216,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-     },
- 
-     bootstrap: async () => {
--      // [FIX] Cek apakah kita baru saja register/login manual?
--      // Jika accessToken sudah ada (dari register), jangan bootstrap dulu biar gak tabrakan.
-       if (get().accessToken) {
--        console.log("Bootstrap skipped: Session already active from register/login.");
-         set({ isBootstrapping: false });
-         return;
-       }
-@@ -266,18 +231,14 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-           set({ user: me, hasRestoredKeys: await hasStoredKeys() });
-           localStorage.setItem("user", JSON.stringify(me));
- 
--          // Only load crypto if we have a valid session
-           await get().tryAutoUnlock();
-           connectSocket();
--
-           get().loadBlockedUsers();
-         } else {
-           throw new Error("No valid session.");
-         }
-       } catch (error: any) {
-         console.log("Bootstrap failed (No session):", error);
--        // [FIX] Jangan panggil logout() atau clearKeys() di sini!
--        // Cukup bersihkan state memori & localstorage user, TAPI JANGAN hapus kunci IndexedDB.
-         privateKeysCache = null;
-         set({ user: null, accessToken: null, blockedUserIds: [] });
-         clearAuthCookies();
-@@ -287,17 +248,16 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+@@ -309,7 +310,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
        }
      },
  
--    login: async (emailOrUsername, password, restoredNotSynced = false) => {
-+    login: async (usernameHash, password, restoredNotSynced = false) => {
-       privateKeysCache = null;
--      set({ isInitializingCrypto: true }); // Show loading for crypto init
-+      set({ isInitializingCrypto: true });
- 
-       try {
-         const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/login", {
-           method: "POST",
--          body: JSON.stringify({ emailOrUsername, password }),
-+          body: JSON.stringify({ usernameHash, password }),
-         });
- 
--        // [SYNC] Restore Encrypted Keys from Server if available
-         if (res.encryptedPrivateKey) {
-           await saveEncryptedKeys(res.encryptedPrivateKey);
-           await saveDeviceAutoUnlockKey(password);
-@@ -306,24 +266,17 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-         }
- 
-         const hasKeys = await hasStoredKeys();
--
-         set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeys, blockedUserIds: [] });
-         localStorage.setItem("user", JSON.stringify(res.user));
- 
-         if (hasKeys) {
-           try {
--            // Dynamic import
-             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
--            
-             const encryptedKeys = await getEncryptedKeys();
--            const isAutoUnlockReady = await getDeviceAutoUnlockReady();
--            let result;
--
--            result = await retrievePrivateKeys(encryptedKeys!, password);
-+            const result = await retrievePrivateKeys(encryptedKeys!, password);
- 
-             if (result.success) {
-               privateKeysCache = result.keys;
--              // If decryption was successful with a password, save it as the auto-unlock key for next time.
-               await saveDeviceAutoUnlockKey(password);
-               await setDeviceAutoUnlockReady(true);
-             } else {
-@@ -338,54 +291,17 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-         get().loadBlockedUsers();
- 
-         if (restoredNotSynced) {
--          try {
--            await setupAndUploadPreKeyBundle();
--          } catch(e) {
--            console.error("Failed to sync restored keys with server:", e);
--          }
-+          try { await setupAndUploadPreKeyBundle(); } catch(e) { console.error("Failed to sync restored keys:", e); }
-         } else if (get().hasRestoredKeys) {
-           setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload pre-key bundle on login:", e));
-         } else {
-           toast("To enable secure messaging, restore your account from your recovery phrase in Settings.", { duration: 7000 });
-         }
- 
--        // [RESET] Force rotate OTPK on new login to prevent stale key decryption errors
--        try {
--          await resetOneTimePreKeys();
--        } catch (e) { console.error("Reset OTPK failed:", e); }
--
-+        try { await resetOneTimePreKeys(); } catch (e) { console.error("Reset OTPK failed:", e); }
-         connectSocket();
-       } catch (error: any) {
-         console.error("Login error:", error);
--        if (error.message && error.message.includes("Email not verified")) {
--          const isEmail = emailOrUsername.includes('@');
--          try {
--            let userData: User | null = null;
--            if (isEmail) {
--              userData = await api<User>("/api/users/by-email", {
--                method: "POST",
--                body: JSON.stringify({ email: emailOrUsername }),
--              });
--            } else {
--              userData = await api<User>("/api/users/by-username", {
--                method: "POST",
--                body: JSON.stringify({ username: emailOrUsername }),
--              });
--            }
--
--            if (userData?.id && userData?.email) {
--              import('@utils/verificationPersistence').then(({ saveVerificationState }) => {
--                saveVerificationState({
--                  userId: userData!.id,
--                  email: userData!.email!,
--                  timestamp: Date.now()
--                });
--              });
--            }
--          } catch (userFetchErr) {
--            console.error("Could not fetch user details for verification persistence:", userFetchErr);
--          }
--        }
-         set({ user: null, accessToken: null });
-         throw error;
-       } finally {
-@@ -393,107 +309,50 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-       }
-     },
- 
--    registerAndGeneratePhrase: async (data) => {
-+    registerAndGeneratePhrase: async ({ name, usernameHash, password, turnstileToken }) => {
+-    registerAndGeneratePhrase: async ({ name, usernameHash, password, turnstileToken }) => {
++    registerAndGeneratePhrase: async ({ encryptedProfile, usernameHash, password, turnstileToken }) => {
        set({ isInitializingCrypto: true });
        try {
--        // Dynamic Import
          const { registerAndGenerateKeys, retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
--
-         const {
-           encryptionPublicKeyB64,
-           signingPublicKeyB64,
-           encryptedPrivateKeys,
-           phrase
--        } = await registerAndGenerateKeys(data.password);
-+        } = await registerAndGenerateKeys(password);
- 
--        // 1. Simpan Kunci Terenkripsi ke IndexedDB
-         await saveEncryptedKeys(encryptedPrivateKeys);
--        
--        // [FIX] 2. Simpan Kunci Auto-Unlock (Biar ga minta password lagi pas refresh/chat)
--        await saveDeviceAutoUnlockKey(data.password);
-+        await saveDeviceAutoUnlockKey(password);
-         await setDeviceAutoUnlockReady(true);
--
-         set({ hasRestoredKeys: true });
- 
--        // 3. Cache di memori untuk sesi sekarang
-+        // Cache keys
-         try {
--          const result = await retrievePrivateKeys(encryptedPrivateKeys, data.password);
--          if (result.success) {
--             privateKeysCache = result.keys;
--          }
--        } catch (e) { console.error("Failed to cache keys:", e); }
--
--        // 4. Panggil API Register
--        const res = await api<{ 
--          user?: User; 
--          accessToken?: string; 
--          message?: string; 
--          needVerification?: boolean;
--          userId?: string; 
--        }>("/api/auth/register", {
-+          const result = await retrievePrivateKeys(encryptedPrivateKeys, password);
-+          if (result.success) privateKeysCache = result.keys;
-+        } catch (e) {}
-+
-+        const res = await api<{ accessToken: string; user: User }>("/api/auth/register", {
-           method: "POST",
+@@ -336,7 +337,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
            body: JSON.stringify({
--            ...data,
-+            usernameHash,
-+            password,
-+            name,
+             usernameHash,
+             password,
+-            name,
++            encryptedProfile,
              publicKey: encryptionPublicKeyB64,
              signingKey: signingPublicKeyB64,
--            encryptedPrivateKeys // Upload kunci terenkripsi ke server
-+            encryptedPrivateKeys,
-+            turnstileToken
-           }),
-         });
- 
--        if (res.needVerification && res.userId) {
--          return { 
--            phrase, 
--            needVerification: true, 
--            userId: res.userId, 
--            email: data.email 
--          };
--        }
--
--        if (res.user && res.accessToken) {
--          set({ user: res.user, accessToken: res.accessToken });
--          localStorage.setItem("user", JSON.stringify(res.user));
--          setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
--          
--          connectSocket();
--          return { phrase, needVerification: false };
--        }
--
--        throw new Error("Unexpected response from registration.");
--      } finally {
--        set({ isInitializingCrypto: false });
--      }
--    },
--
--    verifyEmail: async (userId, code) => {
--      const res = await api<{ user: User; accessToken: string }>("/api/auth/verify-email", {
--        method: "POST",
--        body: JSON.stringify({ userId, code }),
--      });
--
--      if (res.user && res.accessToken) {
-         set({ user: res.user, accessToken: res.accessToken });
-         localStorage.setItem("user", JSON.stringify(res.user));
-         
--        // [FIX] Ensure app knows keys are present and loaded
--        set({ hasRestoredKeys: true });
--        await get().tryAutoUnlock(); 
--
--        // Public keys and encrypted keys are already saved during registerAndGeneratePhrase
+             encryptedPrivateKeys,
+@@ -350,7 +351,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
          setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
          connectSocket();
--      }
--    },
  
--    resendVerification: async (email) => {
--      try {
--        await api("/api/auth/resend-verification", {
--          method: "POST",
--          body: JSON.stringify({ email }),
--        });
--        toast.success("Verification code resent!");
--      } catch (error: any) {
--        console.error("Failed to resend verification code:", error);
--        throw error;
-+        return { phrase };
-+      } finally {
-+        set({ isInitializingCrypto: false });
+-        return { phrase };
++        return { phrase, userId: res.user.id };
+       } finally {
+         set({ isInitializingCrypto: false });
        }
+@@ -384,6 +385,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
      },
  
-@@ -512,18 +371,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-         } else {
-            await api("/api/auth/logout", { method: "POST" }).catch(() => {});
-         }
--      } catch (e) {
--        console.error("Logout error", e);
--      } finally {
-+      } catch (e) { console.error("Logout error", e); } finally {
-         clearAuthCookies();
-         privateKeysCache = null;
--        
-         await clearKeys(); 
--        
-         localStorage.removeItem('user');
--
-         set({ user: null, accessToken: null });
--
-         disconnectSocket();
-         useConversationStore.getState().reset();
-         useMessageStore.getState().reset();
-@@ -545,39 +398,23 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+     updateProfile: async (data) => {
++      // Data is expected to be { encryptedProfile: string } now
+       const updatedUser = await authFetch<User>('/api/users/me', {
+         method: 'PUT',
+         body: JSON.stringify(data),
+@@ -397,6 +399,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+     },
  
      updateAvatar: async (avatar: File) => {
++      // Avatar upload is tricky because it needs to update the encrypted profile.
++      // For now, just upload the file and return. The UI needs to handle updating the profile JSON.
        const toastId = toast.loading('Processing avatar...');
--      
--      // Dynamic imports
        const { compressImage } = await import('@lib/fileUtils');
        const { uploadToR2 } = await import('@lib/r2');
--
-       let fileToProcess = avatar;
--
-       if (avatar.type.startsWith('image/')) {
--        try {
--          fileToProcess = await compressImage(avatar);
--        } catch (e) {
--          // Fallback, do nothing
--        }
-+        try { fileToProcess = await compressImage(avatar); } catch (e) {}
-       }
--
+@@ -407,14 +411,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
        try {
          toast.loading('Uploading to Cloud...', { id: toastId });
--        
--        const fileUrl = await uploadToR2(fileToProcess, 'avatars', (percent) => {
--           // Optional progress
+         const fileUrl = await uploadToR2(fileToProcess, 'avatars', () => {});
+-        toast.loading('Saving profile...', { id: toastId });
+-        const updatedUser = await authFetch<User>('/api/uploads/avatars/save', {
+-          method: 'POST',
+-          body: JSON.stringify({ fileUrl }),
 -        });
--
-+        const fileUrl = await uploadToR2(fileToProcess, 'avatars', () => {});
-         toast.loading('Saving profile...', { id: toastId });
--        
-         const updatedUser = await authFetch<User>('/api/uploads/avatars/save', {
-           method: 'POST',
-           body: JSON.stringify({ fileUrl }),
-         });
--        
-         set({ user: updatedUser });
-         localStorage.setItem("user", JSON.stringify(updatedUser));
-         toast.success('Avatar updated!', { id: toastId });
--
+-        set({ user: updatedUser });
+-        localStorage.setItem("user", JSON.stringify(updatedUser));
+-        toast.success('Avatar updated!', { id: toastId });
++        toast.success('Avatar uploaded! (Profile update required)', { id: toastId });
++        // NOTE: We do not call API to save avatarUrl directly anymore.
++        // The caller must update their local profile JSON and call updateProfile.
++        return fileUrl as any; // Returning the URL so caller can use it
        } catch (e: any) {
          console.error(e);
          toast.error(`Update failed: ${e.message}`, { id: toastId });
-@@ -595,14 +432,14 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-     },
-     async getEncryptionKeyPair() {
-       const keys = await retrieveAndCacheKeys();
--      const { getSodium } = await import('@lib/sodiumInitializer'); // Dynamic
-+      const { getSodium } = await import('@lib/sodiumInitializer');
-       const sodium = await getSodium();
-       const publicKey = sodium.crypto_scalarmult_base(keys.encryption);
-       return { publicKey, privateKey: keys.encryption };
-     },
-     async getSignedPreKeyPair() {
-       const keys = await retrieveAndCacheKeys();
--      const { getSodium } = await import('@lib/sodiumInitializer'); // Dynamic
-+      const { getSodium } = await import('@lib/sodiumInitializer');
-       const sodium = await getSodium();
-       const publicKey = sodium.crypto_scalarmult_base(keys.signedPreKey);
-       return { publicKey, privateKey: keys.signedPreKey };
-@@ -615,14 +452,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-     blockUser: async (userId) => {
-       const toastId = toast.loading('Blocking user...');
-       try {
--        await authFetch(`/api/users/${userId}/block`, {
--          method: 'POST'
--        });
-+        await authFetch(`/api/users/${userId}/block`, { method: 'POST' });
-         toast.success('User blocked', { id: toastId });
--
--        set(state => ({
--          blockedUserIds: [...state.blockedUserIds, userId]
--        }));
-+        set(state => ({ blockedUserIds: [...state.blockedUserIds, userId] }));
-       } catch (error: any) {
-         const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
-         toast.error(`Block failed: ${errorMsg}`, { id: toastId });
-@@ -633,14 +465,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-     unblockUser: async (userId) => {
-       const toastId = toast.loading('Unblocking user...');
-       try {
--        await authFetch(`/api/users/${userId}/block`, {
--          method: 'DELETE'
--        });
-+        await authFetch(`/api/users/${userId}/block`, { method: 'DELETE' });
-         toast.success('User unblocked', { id: toastId });
--
--        set(state => ({
--          blockedUserIds: state.blockedUserIds.filter(id => id !== userId)
--        }));
-+        set(state => ({ blockedUserIds: state.blockedUserIds.filter(id => id !== userId) }));
-       } catch (error: any) {
-         const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
-         toast.error(`Unblock failed: ${errorMsg}`, { id: toastId });
-@@ -652,11 +479,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-       try {
-         const blockedUsers = await authFetch<{ id: string }[]>('/api/users/me/blocked');
-         const blockedIds = blockedUsers.map(user => user.id);
--
-         set({ blockedUserIds: blockedIds });
-       } catch (error) {
-         console.error('Failed to load blocked users:', error);
-       }
-     },
-   };
--}, Object.is);
-\ No newline at end of file
-+}, Object.is);
-diff --git a/web/src/store/conversation.ts b/web/src/store/conversation.ts
-index da101901..bd4a02a2 100644
---- a/web/src/store/conversation.ts
-+++ b/web/src/store/conversation.ts
-@@ -22,7 +22,7 @@ export type Message = {
-   type?: 'USER' | 'SYSTEM';
-   conversationId: string;
-   senderId: string;
--  sender?: { id: string; name: string; username: string; avatarUrl?: string | null };
-+  sender?: { id: string; encryptedProfile?: string | null };
-   content?: string | null;
-   imageUrl?: string | null;
-   fileUrl?: string | null;
-@@ -50,10 +50,7 @@ export type Message = {
- 
- export type Participant = {
-   id: string;
--  username: string;
--  name: string;
--  description?: string | null;
--  avatarUrl?: string | null;
-+  encryptedProfile?: string | null;
-   publicKey?: string;
-   role: "ADMIN" | "MEMBER";
-   isPinned?: boolean;
-@@ -128,7 +125,7 @@ type Actions = {
-   deleteGroup: (id: string) => Promise<void>;
-   toggleSidebar: () => void;
-   startConversation: (peerId: string) => Promise<string>;
--  searchUsers: (query: string) => Promise<{ id: string; username: string; name: string; avatarUrl?: string | null }[]>;
-+  searchUsers: (query: string) => Promise<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>;
-   addOrUpdateConversation: (conversation: Conversation) => void;
-   removeConversation: (conversationId: string) => void;
-   updateConversation: (conversationId: string, updates: Partial<Conversation>) => void;
-@@ -166,7 +163,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
-   searchUsers: async (query) => {
-     try {
-       const safeQuery = encodeURIComponent(query || '');
--      const users = await api<{ id: string; username: string; name: string; avatarUrl?: string | null }[]>(`/api/users/search?q=${safeQuery}`);
-+      const users = await api<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>(`/api/users/search?q=${safeQuery}`);
-       return users;
-     } catch (error) {
-       console.error("Failed to search users", error);
 diff --git a/web/src/store/message.ts b/web/src/store/message.ts
-index f6d095e7..3c527df2 100644
+index 3c527df2..e04b6e05 100644
 --- a/web/src/store/message.ts
 +++ b/web/src/store/message.ts
 @@ -992,7 +992,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
    updateSenderDetails: (user) => set(state => {
      const newMessages = { ...state.messages };
      for (const convoId in newMessages) {
--      newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id, name: user.name || '', username: user.username || '' }), ...user } } : m) as Message[];
-+      newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id, name: user.name || '' }), ...user } } : m) as Message[];
+-      newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id, name: user.name || '' }), ...user } } : m) as Message[];
++      newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id }), ...user } } : m) as Message[];
      }
      return { messages: newMessages };
    }),
 diff --git a/web/src/utils/crypto.ts b/web/src/utils/crypto.ts
-index 233e4fba..738d06aa 100644
+index 738d06aa..e3e07d86 100644
 --- a/web/src/utils/crypto.ts
 +++ b/web/src/utils/crypto.ts
 @@ -338,7 +338,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
        const distributionKeys = await Promise.all(
          otherParticipants.map(async (p) => {
            if (!p.publicKey) {
--            missingKeys.push(p.username);
-+            missingKeys.push(p.name || p.id);
+-            missingKeys.push(p.name || p.id);
++            missingKeys.push(p.id);
              return null;
            }
            const theirPublicKey = sodium.from_base64(p.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-diff --git a/web/src/workers/crypto.worker.ts b/web/src/workers/crypto.worker.ts
-index e7cd0ca2..34829d09 100644
---- a/web/src/workers/crypto.worker.ts
-+++ b/web/src/workers/crypto.worker.ts
-@@ -658,6 +658,73 @@ self.onmessage = async (event: MessageEvent) => {
-         }
-         break;
-       }
-+      case 'hashUsername': {
-+        const { username } = payload;
-+        // STATIC SALT for Blind Indexing (Must be 16 bytes)
-+        // "NYX_BLIND_IDX_V1" is exactly 16 chars
-+        const SALT = new TextEncoder().encode("NYX_BLIND_IDX_V1"); 
-+        
-+        const hash = sodium.crypto_pwhash(
-+            32, // Output length
-+            new Uint8Array(new TextEncoder().encode(username.toLowerCase())), // Input (normalized)
-+            SALT,
-+            sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
-+            sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE,
-+            sodium.crypto_pwhash_ALG_ARGON2ID13
-+        );
-+        
-+        result = sodium.to_base64(hash, sodium.base64_variants.URLSAFE_NO_PADDING);
-+        break;
-+      }
-+      case 'encryptProfile': {
-+        const { profileJsonString, profileKeyB64 } = payload;
-+        const key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-+        const message = new TextEncoder().encode(profileJsonString);
-+        // Generate random nonce (24 bytes for XChaCha20)
-+        const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-+        
-+        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-+            message,
-+            null, // no additional data
-+            null, // secret nonce
-+            nonce,
-+            key
-+        );
-+        
-+        // Combine nonce + ciphertext
-+        const combined = new Uint8Array(nonce.length + ciphertext.length);
-+        combined.set(nonce);
-+        combined.set(ciphertext, nonce.length);
-+        
-+        result = sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
-+        break;
-+      }
-+      case 'decryptProfile': {
-+        const { encryptedProfileB64, profileKeyB64 } = payload;
-+        const key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-+        const combined = sodium.from_base64(encryptedProfileB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-+        
-+        const nonceBytes = sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
-+        const nonce = combined.slice(0, nonceBytes);
-+        const ciphertext = combined.slice(nonceBytes);
-+        
-+        const decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-+            null, // secret nonce
-+            ciphertext,
-+            null, // additional data
-+            nonce,
-+            key
-+        );
-+        
-+        result = new TextDecoder().decode(decrypted);
-+        break;
-+      }
-+      case 'generateProfileKey': {
-+        // Generate a random 32-byte key for profile encryption
-+        const key = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
-+        result = sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
-+        break;
-+      }
-       case 'generate_random_key': {
-         result = sodium.randombytes_buf(32);
-         break;

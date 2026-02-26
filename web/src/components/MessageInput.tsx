@@ -11,6 +11,7 @@ import LinkPreviewCard from './LinkPreviewCard';
 import SmartReply from './SmartReply';
 import { useMessageStore } from '@store/message';
 import { triggerSendFeedback } from '@utils/feedback';
+import { useUserProfile } from '@hooks/useUserProfile';
 
 // --- Types ---
 interface MessageInputProps {
@@ -43,9 +44,11 @@ const ReplyPreview = () => {
     setReplyingTo: state.setReplyingTo,
   }));
 
+  const profile = useUserProfile(replyingTo?.sender as any);
+
   if (!replyingTo) return null;
 
-  const authorName = replyingTo.sender?.name || 'Unknown Signal';
+  const authorName = profile.name;
   let contentPreview = '...';
   
   if (replyingTo.duration) contentPreview = '[Voice Transmission]';

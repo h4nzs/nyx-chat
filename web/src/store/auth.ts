@@ -72,6 +72,7 @@ type State = {
 
 type RegisterResponse = {
   phrase: string;
+  userId: string;
 };
 
 type Actions = {
@@ -79,7 +80,7 @@ type Actions = {
   tryAutoUnlock: () => Promise<boolean>;
   login: (usernameHash: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
   registerAndGeneratePhrase: (data: { 
-    name: string; 
+    encryptedProfile: string; 
     usernameHash: string; // Blind Index
     password: string; 
     turnstileToken?: string; 
@@ -92,8 +93,8 @@ type Actions = {
   getMasterSeed: () => Promise<Uint8Array | undefined>;
   setUser: (user: User) => void;
   setAccessToken: (token: string | null) => void;
-  updateProfile: (data: Partial<Pick<User, 'name' | 'description'>>) => Promise<void>;
-  updateAvatar: (avatar: File) => Promise<void>;
+  updateProfile: (data: { encryptedProfile: string }) => Promise<void>;
+  updateAvatar: (avatar: File) => Promise<string>;
   setReadReceipts: (value: boolean) => void;
   setHasRestoredKeys: (hasKeys: boolean) => void;
   blockUser: (userId: string) => Promise<void>;
@@ -309,7 +310,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       }
     },
 
-    registerAndGeneratePhrase: async ({ name, usernameHash, password, turnstileToken }) => {
+    registerAndGeneratePhrase: async ({ encryptedProfile, usernameHash, password, turnstileToken }) => {
       set({ isInitializingCrypto: true });
       try {
         const { registerAndGenerateKeys, retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
@@ -336,7 +337,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           body: JSON.stringify({
             usernameHash,
             password,
-            name,
+            encryptedProfile,
             publicKey: encryptionPublicKeyB64,
             signingKey: signingPublicKeyB64,
             encryptedPrivateKeys,
@@ -350,7 +351,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         setupAndUploadPreKeyBundle().catch(e => console.error("Failed to upload initial pre-key bundle:", e));
         connectSocket();
 
-        return { phrase };
+        return { phrase, userId: res.user.id };
       } finally {
         set({ isInitializingCrypto: false });
       }
@@ -384,6 +385,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     updateProfile: async (data) => {
+      // Data is expected to be { encryptedProfile: string } now
       const updatedUser = await authFetch<User>('/api/users/me', {
         method: 'PUT',
         body: JSON.stringify(data),
@@ -397,6 +399,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     updateAvatar: async (avatar: File) => {
+      // Avatar upload is tricky because it needs to update the encrypted profile.
+      // For now, just upload the file and return. The UI needs to handle updating the profile JSON.
       const toastId = toast.loading('Processing avatar...');
       const { compressImage } = await import('@lib/fileUtils');
       const { uploadToR2 } = await import('@lib/r2');
@@ -407,14 +411,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       try {
         toast.loading('Uploading to Cloud...', { id: toastId });
         const fileUrl = await uploadToR2(fileToProcess, 'avatars', () => {});
-        toast.loading('Saving profile...', { id: toastId });
-        const updatedUser = await authFetch<User>('/api/uploads/avatars/save', {
-          method: 'POST',
-          body: JSON.stringify({ fileUrl }),
-        });
-        set({ user: updatedUser });
-        localStorage.setItem("user", JSON.stringify(updatedUser));
-        toast.success('Avatar updated!', { id: toastId });
+        toast.success('Avatar uploaded! (Profile update required)', { id: toastId });
+        // NOTE: We do not call API to save avatarUrl directly anymore.
+        // The caller must update their local profile JSON and call updateProfile.
+        return fileUrl as any; // Returning the URL so caller can use it
       } catch (e: any) {
         console.error(e);
         toast.error(`Update failed: ${e.message}`, { id: toastId });

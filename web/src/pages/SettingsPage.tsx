@@ -102,9 +102,15 @@ import { useSettingsStore } from '@store/settings';
 
 /* --- PAGE COMPONENT --- */
 
+import { useUserProfile } from '@hooks/useUserProfile';
+import { useProfileStore } from '@store/profile';
+import { generateProfileKey, encryptProfile } from '@lib/crypto-worker-proxy';
+import { saveProfileKey } from '@lib/keychainDb';
+
 export default function SettingsPage() {
   const navigate = useNavigate();
   const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout } = useAuthStore();
+  const profile = useUserProfile(user);
   const { theme, toggleTheme, accent, setAccent } = useThemeStore();
   const { showConfirm } = useModalStore();
   const { enableSmartReply, setEnableSmartReply } = useSettingsStore();
@@ -116,10 +122,10 @@ export default function SettingsPage() {
     unsubscribeFromPush 
   } = usePushNotifications();
 
-  const [name, setName] = useState(user?.name || '');
-  const [description, setDescription] = useState(user?.description || '');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(user?.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [readReceipts, setReadReceiptsState] = useState(sendReadReceipts);
   const [isLoading, setIsLoading] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -135,13 +141,16 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    if (user) {
-      setName(user.name || '');
-      setDescription(user.description || '');
-      setPreviewUrl(user.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
-      setReadReceiptsState(sendReadReceipts);
+    if (profile && profile.name !== "Encrypted User" && profile.name !== "Unknown") {
+      setName(profile.name || '');
+      setDescription(profile.description || '');
+      setPreviewUrl(profile.avatarUrl ? toAbsoluteUrl(profile.avatarUrl) || null : null);
     }
-  }, [user, sendReadReceipts]);
+  }, [profile]);
+
+  useEffect(() => {
+    setReadReceiptsState(sendReadReceipts);
+  }, [sendReadReceipts]);
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -155,18 +164,27 @@ export default function SettingsPage() {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const promises = [];
+      let currentAvatarUrl = profile.avatarUrl;
+
       if (avatarFile) {
-        promises.push(updateAvatar(avatarFile));
+        currentAvatarUrl = await updateAvatar(avatarFile);
       }
-      if (name !== user?.name || description !== user?.description) {
-        promises.push(updateProfile({ name, description }));
+      
+      const profileKeyB64 = await import('@lib/keychainDb').then(m => m.getProfileKey(user!.id));
+      let key = profileKeyB64;
+      if (!key) {
+         key = await generateProfileKey();
+         await saveProfileKey(user!.id, key);
       }
-      if (promises.length === 0) {
-        toast('No changes detected.');
-        return;
-      }
-      await Promise.all(promises);
+
+      const profileJson = JSON.stringify({ name, description, avatarUrl: currentAvatarUrl });
+      const encryptedProfile = await encryptProfile(profileJson, key);
+
+      await updateProfile({ encryptedProfile });
+      
+      // Force update the local cache
+      useProfileStore.getState().decryptAndCache(user!.id, encryptedProfile);
+
       toast.success('Identity Updated');
     } catch (error: any) {
       const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
@@ -300,7 +318,7 @@ export default function SettingsPage() {
                     bg-bg-main p-2
                   ">
                     <img
-                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
+                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
                       alt="ID"
                       className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
                     />

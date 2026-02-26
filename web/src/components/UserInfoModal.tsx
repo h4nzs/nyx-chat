@@ -15,6 +15,7 @@ import { usePresenceStore } from '@store/presence';
 import ModalBase from './ui/ModalBase';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
+import { useUserProfile } from '@hooks/useUserProfile';
 
 type ProfileUser = User & { publicKey?: string };
 
@@ -25,6 +26,7 @@ export default function UserInfoModal() {
   const onlineUsers = usePresenceStore(s => s.onlineUsers);
   const navigate = useNavigate();
   const [user, setUser] = useState<ProfileUser | null>(null);
+  const profile = useUserProfile(user);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSafetyModal, setShowSafetyModal] = useState(false);
@@ -126,12 +128,12 @@ export default function UserInfoModal() {
             {/* Avatar: INSET (Pressed in) - Looks like a porthole */}
             <div className="relative w-24 h-24 rounded-full shadow-neu-pressed dark:shadow-neu-pressed-dark flex items-center justify-center p-1 bg-bg-main">
                <img
-                 src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
-                 alt={user.name}
+                 src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
+                 alt={profile.name}
                  className="w-full h-full rounded-full object-cover"
                  onError={(e) => {
                    const target = e.target as HTMLImageElement;
-                   target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
+                   target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`;
                  }}
                />
                <div className={`absolute bottom-1 right-1 w-4 h-4 border-2 border-bg-main rounded-full shadow-neu-flat dark:shadow-neu-flat-dark ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
@@ -139,7 +141,7 @@ export default function UserInfoModal() {
 
             {/* Info: Left Aligned */}
             <div className="flex-1 pt-2">
-              <h3 className="text-2xl font-bold tracking-tight text-text-primary">{user.name}</h3>
+              <h3 className="text-2xl font-bold tracking-tight text-text-primary">{profile.name}</h3>
               {/* ID Badge: Extruded pill */}
               <div className="flex flex-col items-start gap-2 mt-2">
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full shadow-neu-flat dark:shadow-neu-flat-dark bg-bg-main">
@@ -163,7 +165,7 @@ export default function UserInfoModal() {
                shadow-neu-pressed dark:shadow-neu-pressed-dark
                border border-white/5
              ">
-               {user.description || <span className="opacity-40 italic">No data available.</span>}
+               {profile.description || <span className="opacity-40 italic">No data available.</span>}
              </div>
           </div>
         </div>
@@ -177,7 +179,7 @@ export default function UserInfoModal() {
       <ModalBase
         isOpen={isProfileModalOpen}
         onClose={closeProfileModal}
-        title={user?.name || 'User Profile'}
+        title={profile.name || 'User Profile'}
       >
         <div className="flex flex-col gap-4">
           <div className="px-4 md:px-0">
@@ -277,7 +279,7 @@ export default function UserInfoModal() {
       {showSafetyModal && user && (
         <SafetyNumberModal 
           safetyNumber={safetyNumber} 
-          userName={user.name} 
+          userName={profile.name} 
           onClose={() => setShowSafetyModal(false)} 
           onVerify={() => {
             if (activeId && user.publicKey) {

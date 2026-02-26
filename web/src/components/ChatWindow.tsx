@@ -23,6 +23,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import MessageInput from './MessageInput';
 import MessageSkeleton from './MessageSkeleton';
+import { useUserProfile } from '@hooks/useUserProfile';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -58,8 +59,9 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const { verifiedStatus } = useVerificationStore();
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
-  const title = conversation.isGroup ? conversation.title : peerUser?.name;
-  const avatarUrl = conversation.isGroup ? conversation.avatarUrl : peerUser?.avatarUrl;
+  const peerProfile = useUserProfile(peerUser as any);
+  const title = conversation.isGroup ? conversation.title : peerProfile.name;
+  const avatarUrl = conversation.isGroup ? conversation.avatarUrl : peerProfile.avatarUrl;
   const isOnline = peerUser ? onlineUsers.has(peerUser.id) : false;
   const isConvVerified = verifiedStatus[conversation.id] || false;
 

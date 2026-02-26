@@ -8,7 +8,8 @@ const PENDING_HEADERS_STORE_NAME = 'pending-headers';
 const RATCHET_SESSIONS_STORE_NAME = 'ratchet-sessions';
 const SKIPPED_KEYS_STORE_NAME = 'skipped-keys';
 const MESSAGE_KEYS_STORE_NAME = 'message-keys';
-const DB_VERSION = 6;
+const PROFILE_KEYS_STORE_NAME = 'profile_keys';
+const DB_VERSION = 7;
 
 // Cache DB connections by userId to handle switching accounts without reloading
 const dbCache = new Map<string, Promise<IDBPDatabase>>();
@@ -47,6 +48,11 @@ function getDb(): Promise<IDBPDatabase> {
         }
         if (oldVersion < 6) {
           db.createObjectStore(MESSAGE_KEYS_STORE_NAME);
+        }
+        if (oldVersion < 7) {
+          if (!db.objectStoreNames.contains(PROFILE_KEYS_STORE_NAME)) {
+             db.createObjectStore(PROFILE_KEYS_STORE_NAME);
+          }
         }
       },
     }).catch(err => {
@@ -267,6 +273,19 @@ export async function deleteMessageKey(messageId: string): Promise<void> {
   await db.delete(MESSAGE_KEYS_STORE_NAME, messageId);
 }
 
+export async function saveProfileKey(userId: string, keyB64: string): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(PROFILE_KEYS_STORE_NAME, 'readwrite');
+  await tx.objectStore(PROFILE_KEYS_STORE_NAME).put(keyB64, userId);
+  await tx.done;
+}
+
+export async function getProfileKey(userId: string): Promise<string | undefined> {
+  const db = await getDb();
+  const tx = db.transaction(PROFILE_KEYS_STORE_NAME, 'readonly');
+  return tx.objectStore(PROFILE_KEYS_STORE_NAME).get(userId);
+}
+
 /**
  * Clears all keys from the database. Used on logout.
  */
@@ -290,7 +309,7 @@ export async function exportDatabaseToJson(): Promise<string> {
   const stores = [
     SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
     PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
-    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME
+    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME
   ];
   
   const exportData: Record<string, any[]> = {};
@@ -327,7 +346,7 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
   const stores = [
     SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
     PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
-    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME
+    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME
   ];
   
   const availableStores = stores.filter(s => db.objectStoreNames.contains(s));

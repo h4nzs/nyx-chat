@@ -6,6 +6,8 @@ import { toAbsoluteUrl } from '@utils/url';
 import { FiEdit2, FiShield, FiCpu, FiGlobe, FiActivity, FiKey, FiCheck, FiArrowLeft } from 'react-icons/fi';
 import { toast } from 'react-hot-toast';
 
+import { useUserProfile } from '@hooks/useUserProfile';
+
 type ProfileUser = User & {
   createdAt?: string;
   publicKey?: string;
@@ -17,6 +19,7 @@ export default function ProfilePage() {
   const { user: me, updateProfile, updateAvatar } = useAuthStore();
   
   const [profileUser, setProfileUser] = useState<ProfileUser | null>(null);
+  const profile = useUserProfile(profileUser);
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
   const [isEditing, setIsEditing] = useState(false);
@@ -33,13 +36,9 @@ export default function ProfilePage() {
       try {
         if (isMe && me) {
           setProfileUser(me);
-          setName(me.name);
-          setBio(me.description || '');
         } else {
           const userData = await authFetch<ProfileUser>(`/api/users/${userId}`);
           setProfileUser(userData);
-          setName(userData.name);
-          setBio(userData.description || '');
         }
       } catch (e) {
         toast.error(handleApiError(e));
@@ -50,6 +49,13 @@ export default function ProfilePage() {
     fetchUser();
   }, [userId, me, isMe]);
 
+  useEffect(() => {
+    if (profile && profile.name !== "Encrypted User" && profile.name !== "Unknown") {
+       setName(profile.name);
+       setBio(profile.description || '');
+    }
+  }, [profile]);
+
   const stats = [
     { label: 'Security Clearance', value: profileUser?.isVerified ? 'VERIFIED' : 'UNVERIFIED', color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
     { label: 'Encryption Protocol', value: profileUser?.publicKey ? 'ACTIVE' : 'INACTIVE', color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', icon: FiKey },
@@ -58,30 +64,12 @@ export default function ProfilePage() {
   ];
 
   const handleSave = async () => {
-    if (!isMe) return;
-    setIsLoading(true);
-    try {
-      await updateProfile({ name, description: bio });
-      // Update local state if needed, but store update should trigger re-render via isMe check if we depend on me
-      setIsEditing(false);
-    } catch (error) {
-      // Toast already handled by updateProfile if implemented, else:
-      toast.error('Update Failed');
-    } finally {
-      setIsLoading(false);
-    }
+    setIsEditing(false);
+    toast('Profile editing is managed in Settings', { icon: 'ℹ️' });
   };
 
   const handleAvatarUpload = async (e: ChangeEvent<HTMLInputElement>) => {
-    if (!isMe) return;
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        await updateAvatar(file);
-      } catch (error) {
-        // Error handled in store
-      }
-    }
+    // Editing moved to Settings
   };
 
   if (isFetching) return <div className="h-full flex items-center justify-center bg-bg-main"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-accent"></div></div>;
@@ -112,24 +100,13 @@ export default function ProfilePage() {
           
           {isMe && (
             <div className="flex gap-3">
-               {isEditing ? (
                  <button 
-                   onClick={handleSave}
-                   disabled={isLoading}
-                   className="flex items-center gap-2 px-6 py-2 bg-accent text-white rounded-lg font-bold shadow-neu-flat dark:shadow-neu-flat-dark hover:brightness-110 active:scale-95 transition-all"
-                 >
-                   {isLoading ? <FiActivity className="animate-spin" /> : <FiCheck />}
-                   SAVE_CHANGES
-                 </button>
-               ) : (
-                 <button 
-                   onClick={() => setIsEditing(true)}
+                   onClick={() => navigate('/settings')}
                    className="flex items-center gap-2 px-6 py-2 bg-bg-main text-text-primary rounded-lg font-bold shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed transition-all"
                  >
                    <FiEdit2 size={16} />
                    EDIT_RECORD
                  </button>
-               )}
             </div>
           )}
         </div>
@@ -146,25 +123,14 @@ export default function ProfilePage() {
               <div className="relative mx-auto w-40 h-40 mb-4">
                 <div className="w-full h-full rounded-full p-2 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark">
                   <img 
-                    src={toAbsoluteUrl(profileUser.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profileUser.name}`}
+                    src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
                     alt="Profile" 
                     className="w-full h-full rounded-full object-cover"
                   />
                 </div>
-                {isMe && (
-                  <>
-                    <button 
-                      onClick={() => fileInputRef.current?.click()}
-                      className="absolute bottom-2 right-2 p-2.5 bg-accent text-white rounded-full shadow-lg hover:scale-110 transition-transform"
-                    >
-                      <FiEdit2 size={14} />
-                    </button>
-                    <input ref={fileInputRef} type="file" className="hidden" onChange={handleAvatarUpload} />
-                  </>
-                )}
               </div>
 
-              <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">{profileUser.name}</h2>
+              <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">{profile.name}</h2>
               {profileUser.isVerified && (
                 <div className="mt-2 inline-block px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-bold tracking-widest uppercase">
                   VERIFIED OPERATOR

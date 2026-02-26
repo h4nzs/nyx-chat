@@ -5,7 +5,8 @@ import AuthForm from "../components/AuthForm";
 import RecoveryPhraseModal from "@components/RecoveryPhraseModal";
 import { Turnstile } from '@marsidev/react-turnstile';
 import toast from "react-hot-toast";
-import { hashUsername } from "@lib/crypto-worker-proxy";
+import { hashUsername, generateProfileKey, encryptProfile } from "@lib/crypto-worker-proxy";
+import { saveProfileKey } from "@lib/keychainDb";
 
 export default function Register() {
   const [error, setError] = useState("");
@@ -38,13 +39,22 @@ export default function Register() {
 
     try {
       // CLIENT-SIDE BLIND INDEXING
-      // Hash the username before it ever leaves the device.
-      // The server never sees the plaintext username.
       const usernameHash = await hashUsername(username);
 
+      // PROFILE ENCRYPTION
+      const profileKeyB64 = await generateProfileKey();
+      const profileJson = JSON.stringify({ name, description: "", avatarUrl: "" });
+      const encryptedProfile = await encryptProfile(profileJson, profileKeyB64);
+
       const result = await registerAndGeneratePhrase({ 
-        name, usernameHash, password, turnstileToken 
+        usernameHash, 
+        password, 
+        encryptedProfile, 
+        turnstileToken 
       });
+
+      // Save own ProfileKey to IDB
+      await saveProfileKey(result.userId, profileKeyB64);
 
       setRecoveryPhrase(result.phrase);
       setStep('recovery'); // Success! Show phrase.
