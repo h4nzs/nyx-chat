@@ -9,7 +9,24 @@ const RATCHET_SESSIONS_STORE_NAME = 'ratchet-sessions';
 const SKIPPED_KEYS_STORE_NAME = 'skipped-keys';
 const MESSAGE_KEYS_STORE_NAME = 'message-keys';
 const PROFILE_KEYS_STORE_NAME = 'profile_keys';
-const DB_VERSION = 7;
+const GROUP_SENDER_STATES_STORE = 'group_sender_states';
+const GROUP_RECEIVER_STATES_STORE = 'group_receiver_states';
+const DB_VERSION = 8;
+
+export interface GroupSenderState {
+  conversationId: string;
+  CK: string;
+  N: number;
+}
+
+export interface GroupReceiverState {
+  id: string; // conversationId_senderId
+  conversationId: string;
+  senderId: string;
+  CK: string;
+  N: number;
+  skippedKeys: { n: number, mk: string }[];
+}
 
 // Cache DB connections by userId to handle switching accounts without reloading
 const dbCache = new Map<string, Promise<IDBPDatabase>>();
@@ -54,6 +71,14 @@ function getDb(): Promise<IDBPDatabase> {
              db.createObjectStore(PROFILE_KEYS_STORE_NAME);
           }
         }
+        if (oldVersion < 8) {
+          if (!db.objectStoreNames.contains(GROUP_SENDER_STATES_STORE)) {
+             db.createObjectStore(GROUP_SENDER_STATES_STORE, { keyPath: 'conversationId' });
+          }
+          if (!db.objectStoreNames.contains(GROUP_RECEIVER_STATES_STORE)) {
+             db.createObjectStore(GROUP_RECEIVER_STATES_STORE, { keyPath: 'id' });
+          }
+        }
       },
     }).catch(err => {
       dbCache.delete(userId);
@@ -63,6 +88,51 @@ function getDb(): Promise<IDBPDatabase> {
   }
   
   return dbCache.get(userId)!;
+}
+
+// ... existing helpers ...
+
+export async function getGroupSenderState(conversationId: string): Promise<GroupSenderState | null> {
+  const db = await getDb();
+  return (await db.get(GROUP_SENDER_STATES_STORE, conversationId)) || null;
+}
+
+export async function saveGroupSenderState(state: GroupSenderState): Promise<void> {
+  const db = await getDb();
+  await db.put(GROUP_SENDER_STATES_STORE, state);
+}
+
+export async function getGroupReceiverState(conversationId: string, senderId: string): Promise<GroupReceiverState | null> {
+  const db = await getDb();
+  const id = `${conversationId}_${senderId}`;
+  return (await db.get(GROUP_RECEIVER_STATES_STORE, id)) || null;
+}
+
+export async function saveGroupReceiverState(state: GroupReceiverState): Promise<void> {
+  const db = await getDb();
+  await db.put(GROUP_RECEIVER_STATES_STORE, state);
+}
+
+export async function deleteGroupStates(conversationId: string): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction([GROUP_SENDER_STATES_STORE, GROUP_RECEIVER_STATES_STORE], 'readwrite');
+  
+  // Delete sender state
+  await tx.objectStore(GROUP_SENDER_STATES_STORE).delete(conversationId);
+  
+  // Delete all receiver states for this conversation
+  // Since we use composite keys, we iterate and delete. 
+  // Optimization: Could use an index on conversationId if performance becomes an issue.
+  const receiverStore = tx.objectStore(GROUP_RECEIVER_STATES_STORE);
+  let cursor = await receiverStore.openCursor();
+  while (cursor) {
+    if (cursor.value.conversationId === conversationId) {
+      await cursor.delete();
+    }
+    cursor = await cursor.continue();
+  }
+  
+  await tx.done;
 }
 
 /**

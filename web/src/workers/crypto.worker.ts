@@ -1145,6 +1145,113 @@ self.onmessage = async (event: MessageEvent) => {
         }
         break;
       }
+      case 'group_init_sender_key': {
+        // Generates a new sender key (acts as the initial Chain Key)
+        const senderKey = sodium.randombytes_buf(32);
+        result = {
+          senderKeyB64: sodium.to_base64(senderKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+        };
+        sodium.memzero(senderKey);
+        break;
+      }
+      case 'group_ratchet_encrypt': {
+        const { serializedState, plaintext, signingPrivateKey } = payload;
+        const CKBytes = b64ToBytes(serializedState.CK);
+        if (!CKBytes) throw new Error("Invalid Group Chain Key");
+        const plaintextBytes = typeof plaintext === 'string' ? new TextEncoder().encode(plaintext) : new Uint8Array(plaintext);
+
+        // Ratchet the Chain Key to get Message Key
+        const [newCK, mk] = await kdfChain(CKBytes);
+        const currentN = serializedState.N || 0;
+
+        // Encrypt with Message Key
+        const nonce = sodium.randombytes_buf(24);
+        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(plaintextBytes, null, null, nonce, mk);
+        
+        const combined = new Uint8Array(nonce.length + ciphertext.length);
+        combined.set(nonce);
+        combined.set(ciphertext, nonce.length);
+
+        const header = { n: currentN };
+
+        // Sign the message (Header N + Ciphertext) to prevent identity spoofing in group
+        const signingKeyBytes = new Uint8Array(signingPrivateKey);
+        const dataToSign = new Uint8Array(4 + combined.length);
+        new DataView(dataToSign.buffer).setUint32(0, currentN, false); // N as 4-byte BE
+        dataToSign.set(combined, 4);
+        
+        const signature = sodium.crypto_sign_detached(dataToSign, signingKeyBytes);
+
+        result = {
+           state: { CK: bytesToB64(newCK), N: currentN + 1 },
+           header,
+           ciphertext: combined,
+           signature: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING)
+        };
+
+        sodium.memzero(CKBytes);
+        sodium.memzero(newCK);
+        sodium.memzero(mk);
+        sodium.memzero(signingKeyBytes);
+        break;
+      }
+      case 'group_ratchet_decrypt': {
+        const { serializedState, header, ciphertext, signature, senderSigningPublicKey } = payload;
+        let CKBytes = b64ToBytes(serializedState.CK);
+        if (!CKBytes) throw new Error("Invalid Group Chain Key");
+        const ciphertextBytes = new Uint8Array(ciphertext);
+        const signatureBytes = b64ToBytes(signature);
+        const signingPublicKeyBytes = new Uint8Array(senderSigningPublicKey);
+
+        if (!signatureBytes) throw new Error("Missing signature");
+
+        // 1. Verify Signature FIRST (Anti-Spoofing)
+        const dataToVerify = new Uint8Array(4 + ciphertextBytes.length);
+        new DataView(dataToVerify.buffer).setUint32(0, header.n, false);
+        dataToVerify.set(ciphertextBytes, 4);
+
+        const isValid = sodium.crypto_sign_verify_detached(signatureBytes, dataToVerify, signingPublicKeyBytes);
+        if (!isValid) throw new Error("Invalid group message signature. Potential spoofing detected!");
+
+        let currentN = serializedState.N || 0;
+        let mk: Uint8Array | null = null;
+        let skippedKeys: any[] = [];
+
+        // 2. Fast-forward ratchet if receiving out-of-order/newer messages
+        while (currentN < header.n) {
+           const [nextCK, skippedMK] = await kdfChain(CKBytes);
+           skippedKeys.push({ n: currentN, mk: bytesToB64(skippedMK) });
+           sodium.memzero(CKBytes);
+           CKBytes = nextCK;
+           currentN++;
+        }
+
+        // 3. Derive Message Key for this exact message
+        if (currentN === header.n) {
+           const [nextCK, messageKey] = await kdfChain(CKBytes);
+           mk = messageKey;
+           sodium.memzero(CKBytes);
+           CKBytes = nextCK;
+           currentN++;
+        } else {
+           throw new Error("Message N is older than current state. Possibly replayed or already decrypted.");
+        }
+
+        // 4. Decrypt
+        const nonce = ciphertextBytes.slice(0, 24);
+        const ctext = ciphertextBytes.slice(24);
+        const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
+
+        result = {
+           state: { CK: bytesToB64(CKBytes), N: currentN },
+           plaintext,
+           skippedKeys
+        };
+
+        sodium.memzero(CKBytes);
+        if (mk) sodium.memzero(mk);
+        break;
+      }
       default:
         self.postMessage({ type: 'error', id, error: `Unknown worker command: ${type}` });
         return;

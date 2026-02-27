@@ -21,7 +21,14 @@ import {
   deleteSkippedKey,
   storeMessageKey,
   getMessageKey,
-  deleteMessageKey
+  deleteMessageKey,
+  getGroupSenderState,
+  saveGroupSenderState,
+  getGroupReceiverState,
+  saveGroupReceiverState,
+  deleteGroupStates,
+  GroupSenderState,
+  GroupReceiverState
 } from '@lib/keychainDb';
 import { 
   emitSessionKeyFulfillment, 
@@ -288,9 +295,6 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
     const { sessionId, encryptedKey } = await authFetch<{ sessionId: string; encryptedKey: string }>(
       `/api/session-keys/${conversationId}/ratchet`, { method: 'POST' }
     );
-    // Legacy support: Ratchet usually implies new key from server or other peer? 
-    // In this app, ratchet just means getting a new pre-generated key?
-    // We assume encryptedKey is for US.
     const { publicKey, privateKey } = await getMyEncryptionKeyPair();
     const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
 
@@ -322,19 +326,28 @@ export async function ensureGroupSession(conversationId: string, participants: P
 
   const promise = (async () => {
     try {
-      const existingKey = await retrieveGroupKeySecurely(conversationId);
-      if (existingKey) return null;
+      // PHASE 2: Sender Key Protocol
+      const existingSenderState = await getGroupSenderState(conversationId);
+      if (existingSenderState) return null; // We already have a sender key for this group
 
       const sodium = await getSodiumLib();
-      const { worker_generate_random_key, worker_crypto_box_seal } = await getWorkerProxy();
+      const { groupInitSenderKey, worker_crypto_box_seal } = await getWorkerProxy();
 
-      const groupKey = await worker_generate_random_key();
-      await storeGroupKeySecurely(conversationId, groupKey);
+      // 1. Generate NEW Sender Key (Chain Key)
+      const { senderKeyB64 } = await groupInitSenderKey();
+      
+      // 2. Save Initial Sender State
+      await saveGroupSenderState({
+          conversationId,
+          CK: senderKeyB64,
+          N: 0
+      });
 
       const myId = useAuthStore.getState().user?.id;
       const otherParticipants = participants.filter(p => p.id !== myId);
       const missingKeys: string[] = [];
 
+      // 3. Encrypt Sender Key for EACH participant (Fan-out)
       const distributionKeys = await Promise.all(
         otherParticipants.map(async (p) => {
           if (!p.publicKey) {
@@ -342,7 +355,11 @@ export async function ensureGroupSession(conversationId: string, participants: P
             return null;
           }
           const theirPublicKey = sodium.from_base64(p.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-          const encryptedKey = await worker_crypto_box_seal(groupKey, theirPublicKey);
+          const encryptedKey = await worker_crypto_box_seal(
+              sodium.from_base64(senderKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING), 
+              theirPublicKey
+          );
+          
           return {
             userId: p.id,
             key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
@@ -365,14 +382,33 @@ export async function ensureGroupSession(conversationId: string, participants: P
   }
 }
 
-export async function handleGroupKeyDistribution(conversationId: string, encryptedKey: string): Promise<void> {
+export async function handleGroupKeyDistribution(
+    conversationId: string, 
+    encryptedKey: string,
+    senderId: string // Need to know WHOSE key this is
+): Promise<void> {
   const { publicKey, privateKey } = await getMyEncryptionKeyPair();
-  const groupKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
-  await storeGroupKeySecurely(conversationId, groupKey);
+  const sodium = await getSodiumLib();
+  
+  // 1. Decrypt the Sender Key (Chain Key)
+  const senderKeyBytes = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+  const senderKeyB64 = sodium.to_base64(senderKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+  
+  // 2. Save as Receiver State
+  await saveGroupReceiverState({
+      id: `${conversationId}_${senderId}`,
+      conversationId,
+      senderId,
+      CK: senderKeyB64,
+      N: 0,
+      skippedKeys: []
+  });
 }
 
 export async function rotateGroupKey(conversationId: string, reason: 'membership_change' | 'periodic_rotation' = 'membership_change'): Promise<void> {
-  await deleteGroupKey(conversationId);
+  // Clear OLD states
+  await deleteGroupStates(conversationId);
+  
   try {
     await authFetch(`/api/conversations/${conversationId}/key-rotation`, {
       method: 'POST',
@@ -424,7 +460,6 @@ async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0) {
     if (attempt < MAX_KEY_REQUEST_RETRIES) {
       requestGroupKeyWithTimeout(conversationId, attempt + 1);
     } else {
-      // Dynamic import to break cycle
       const { useMessageStore } = await import('@store/message');
       useMessageStore.getState().failPendingMessages(conversationId, '[Key request timed out]');
     }
@@ -435,7 +470,6 @@ async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0) {
 
 // --- Message Encryption/Decryption ---
 
-// Explicit constant for XChaCha20 nonce size to improve readability and decoupling
 const XCHACHA20_NONCE_BYTES = 24;
 
 export async function encryptMessage(
@@ -446,21 +480,38 @@ export async function encryptMessage(
   messageId?: string
 ): Promise<{ ciphertext: string; sessionId?: string; drHeader?: any; mk?: Uint8Array }> {
   const sodium = await getSodiumLib();
-  const { worker_crypto_secretbox_xchacha20poly1305_easy, worker_dr_ratchet_encrypt } = await getWorkerProxy();
+  const { worker_crypto_secretbox_xchacha20poly1305_easy, worker_dr_ratchet_encrypt, groupRatchetEncrypt } = await getWorkerProxy();
 
   if (isGroup) {
-    const groupKey = await retrieveGroupKeySecurely(conversationId);
-    if (!groupKey) throw new Error(`No group key available for conversation ${conversationId}.`);
+    // SENDER KEY PROTOCOL
+    const senderState = await getGroupSenderState(conversationId);
+    if (!senderState) throw new Error(`No sender key available for conversation ${conversationId}.`);
     
-    const nonce = sodium.randombytes_buf(XCHACHA20_NONCE_BYTES);
-    const messageBytes = sodium.from_string(text);
-    const encrypted = await worker_crypto_secretbox_xchacha20poly1305_easy(messageBytes, nonce, groupKey);
-
-    const combined = new Uint8Array(nonce.length + encrypted.length);
-    combined.set(nonce);
-    combined.set(encrypted, nonce.length);
-
-    return { ciphertext: sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING) };
+    const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
+    
+    // Encrypt & Ratchet
+    const result = await groupRatchetEncrypt(
+        { CK: senderState.CK, N: senderState.N },
+        text,
+        signingPrivateKey
+    );
+    
+    // Update State
+    await saveGroupSenderState({
+        conversationId,
+        CK: result.state.CK,
+        N: result.state.N
+    });
+    
+    // Construct Payload: JSON { header: {n}, ciphertext, signature }
+    const payload = JSON.stringify({
+        header: result.header,
+        ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
+        signature: result.signature
+    });
+    
+    return { ciphertext: payload };
+    
   } else {
     // DOUBLE RATCHET
     const state = await retrieveRatchetStateSecurely(conversationId);
@@ -482,7 +533,7 @@ export async function encryptMessage(
     return { 
         ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
         drHeader: result.header,
-        mk: mkUint8 // Return Uint8Array
+        mk: mkUint8 
     };
   }
 }
@@ -491,30 +542,68 @@ export async function decryptMessage(
   cipher: string,
   conversationId: string,
   isGroup: boolean,
-  sessionId: string | null | undefined,
+  sessionId: string | null | undefined, // In group, this might be senderId
   messageId?: string
 ): Promise<DecryptResult> {
   if (!cipher) return { status: 'success', value: '' };
 
   const sodium = await getSodiumLib();
-  const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await getWorkerProxy();
+  const { worker_crypto_secretbox_xchacha20poly1305_open_easy, groupRatchetDecrypt } = await getWorkerProxy();
 
   if (isGroup) {
-    const key = await retrieveGroupKeySecurely(conversationId);
-    if (!key) {
-      requestGroupKeyWithTimeout(conversationId);
-      return { status: 'pending', reason: 'waiting_for_key' };
+    // Sender ID is critical here. In the old code, sessionId was mostly unused for groups or misused.
+    // We MUST pass senderId into this function now.
+    // Assuming `sessionId` parameter carries `senderId` for group messages.
+    const senderId = sessionId; 
+    
+    if (!senderId) return { status: 'error', error: new Error('Missing senderId for group decryption') };
+    
+    const receiverState = await getGroupReceiverState(conversationId, senderId);
+    if (!receiverState) {
+        // Request key for THIS sender
+        requestGroupKeyWithTimeout(conversationId); 
+        return { status: 'pending', reason: 'waiting_for_key' };
     }
     
     try {
-      const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
-      const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
-      const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
-      
-      const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, key);
-      return { status: 'success', value: sodium.to_string(decrypted) };
+        const payload = JSON.parse(cipher);
+        const { header, ciphertext, signature } = payload;
+        
+        // Need sender's SIGNING PUBLIC KEY.
+        // We can get it from the conversation participants list or cache.
+        const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+        const sender = conversation?.participants.find(p => p.id === senderId);
+        
+        if (!sender?.publicKey) {
+             // If we don't have their public key (signing key), we can't verify signature.
+             // This might happen if participant list isn't synced.
+             return { status: 'error', error: new Error('Missing sender signing key') };
+        }
+        
+        // Identity Key IS the Signing Key in this app's architecture (Ed25519)
+        const senderSigningKey = sodium.from_base64(sender.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const ciphertextBytes = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
+        
+        const result = await groupRatchetDecrypt(
+            { CK: receiverState.CK, N: receiverState.N },
+            header,
+            ciphertextBytes,
+            signature,
+            senderSigningKey
+        );
+        
+        // Update State
+        await saveGroupReceiverState({
+            ...receiverState,
+            CK: result.state.CK,
+            N: result.state.N,
+            skippedKeys: [...(receiverState.skippedKeys || []), ...result.skippedKeys]
+        });
+        
+        return { status: 'success', value: sodium.to_string(result.plaintext) };
+        
     } catch (e: any) {
-      console.error(`Decryption failed for group convo ${conversationId}:`, e);
+      console.error(`Group Decryption failed for convo ${conversationId}:`, e);
       return { status: 'error', error: new Error('Failed to decrypt group message') };
     }
   } else {
@@ -760,6 +849,7 @@ interface ReceiveKeyPayload {
   sessionId?: string;
   encryptedKey: string;
   type?: 'GROUP_KEY' | 'SESSION_KEY';
+  senderId?: string; // New: Needed for Group Sender Keys
   initiatorEphemeralKey?: string; // Need this for X3DH calc
   initiatorIdentityKey?: string; // Need this for X3DH calc
 }
@@ -806,30 +896,34 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
 
 export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promise<void> {
   if (!payload || typeof payload !== 'object') return;
-  const { conversationId, sessionId, encryptedKey, type, initiatorEphemeralKey, initiatorIdentityKey } = payload;
+  const { conversationId, sessionId, encryptedKey, type, senderId, initiatorEphemeralKey, initiatorIdentityKey } = payload;
   
-  // [SECURITY FIX] Block dummy keys from polluting the store
   if (encryptedKey === 'dummy' || (sessionId && sessionId.startsWith('dummy'))) {
       console.warn("🛡️ [Crypto] BERHASIL MEMBLOKIR KUNCI DUMMY DARI SERVER!", { conversationId, sessionId });
       return; 
   }
 
   if (type === 'GROUP_KEY') {
+    if (!senderId) {
+        console.error("Received GROUP_KEY but missing senderId. Cannot store key.");
+        return;
+    }
     const pendingRequest = pendingGroupKeyRequests.get(conversationId);
     if (pendingRequest) {
       clearTimeout(pendingRequest.timerId);
       pendingGroupKeyRequests.delete(conversationId);
     }
-    await handleGroupKeyDistribution(conversationId, encryptedKey);
+    
+    // Use the NEW handler for Sender Key
+    await handleGroupKeyDistribution(conversationId, encryptedKey, senderId);
+    
   } else if (sessionId) {
     let newSessionKey: Uint8Array | undefined;
 
-    // Check if this is an X3DH initialization payload (JSON marker)
     if (encryptedKey.startsWith('{') && encryptedKey.includes('"x3dh":true')) {
         try {
             const metadata = JSON.parse(encryptedKey);
             if (metadata.x3dh && initiatorEphemeralKey && initiatorIdentityKey) {
-                // Perform X3DH Calculation on Recipient Side
                 const { getEncryptionKeyPair, getSignedPreKeyPair } = useAuthStore.getState();
                 const myIdentityKeyPair = await getEncryptionKeyPair();
                 const mySignedPreKeyPair = await getSignedPreKeyPair();
@@ -846,7 +940,6 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
             }
         } catch (e) {
             console.error("X3DH derivation failed, falling back to legacy decrypt:", e);
-            // Fallback only if key looks valid
             if (encryptedKey.length > 20) {
                 const { publicKey, privateKey } = await getMyEncryptionKeyPair();
                 newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
@@ -856,8 +949,6 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
             }
         }
     } else {
-        // Legacy: Encrypted with Identity Key
-        // GUARD: Ignore placeholders/empty keys
         if (!encryptedKey || encryptedKey.length < 20) {
              console.warn("[Crypto] Received empty or short session key. Ignoring placeholder.");
              return;
@@ -870,7 +961,6 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     if (newSessionKey) {
         await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
         
-        // Dynamic import to break cycle
         import('@store/message').then(({ useMessageStore }) => {
             useMessageStore.getState().reDecryptPendingMessages(conversationId);
         });

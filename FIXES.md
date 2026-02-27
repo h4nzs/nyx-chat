@@ -1,145 +1,81 @@
-**WebAuthn PRF Extension (Pseudo-Random Function).**
-
-### 🔑 Apa itu WebAuthn PRF?
-
-Ini adalah fitur *bleeding-edge* dari WebAuthn yang ngubah sensor sidik jari/FaceID lu dari sekadar "alat login server" menjadi **Mesin Pembuat Kunci Dekripsi Lokal**.
-
-*Password manager* sekelas **Bitwarden** dan **1Password** pakai teknologi ini biar *user*-nya bisa nge- *unlock* brankas *password* mereka murni cuma pakai sidik jari (tanpa *Master Password*).
-
-**Cara Kerjanya (Konsep Hacker-nya):**
-
-1. Pas lu daftar biometrik, *browser* lu ngirim sebuah teks acak (Salt) ke *hardware* sidik jari lu.
-2. *Hardware* itu bakal ngeluarin **32-byte kunci rahasia (Symmetric Key)** yang sifatnya deterministik (hasilnya bakal selalu sama persis setiap kali sidik jari lu ditempel).
-3. Lu pakai kunci 32-byte ini buat **nge-enkripsi Master Key/Profile Key** lu, terus simpen hasil enkripsinya di IndexedDB (`keychainDb.ts`).
-4. Pas lu *login* lagi, lu tempel sidik jari -> WebAuthn nge- *generate* ulang kunci 32-byte itu di memori -> *Browser* langsung pakai kunci itu buat nge-dekripsi IndexedDB.
-
-**BOOM! 💥 Brankas kebuka, chat kebaca, TANPA NGETIK PASSWORD SAMA SEKALI!**
-
-### 🛠️ Gimana Menerapkannya di NYX?
-
-Kalau lu pake `@simplewebauthn/browser`, mereka udah *support* PRF extension ini. Lu cuma perlu rombak alur simpannya:
-
-**Skenario Gagal (Aplikasi Biasa):**
-Login Sidik Jari -> Masuk ke *shell* aplikasi -> Aplikasi minta *Recovery Phrase* buat buka *chat* -> *User* males, akhirnya *uninstall*.
-
-**Skenario Cypherpunk (Pakai PRF):**
-
-1. *User* masukin *Recovery Phrase* (cuma butuh 1x seumur hidup di *device* itu).
-2. *User* klik "Enable Biometric Unlock".
-3. NYX manggil `navigator.credentials.create({ extensions: { prf: ... } })`.
-4. NYX dapet Kunci Kripto dari sidik jari, lalu nge-gembok *Recovery Phrase* tadi pake kunci itu, dan disimpen di memori HP (IndexedDB).
-5. Besoknya pas *user* buka NYX, tinggal tempel jempol, PRF jalan, *phrase* ke-dekripsi otomatis di *background*, semua *chat* langsung kebaca!
-
 **CONTEXT:**
-Kita akan mengimplementasikan ekstensi WebAuthn PRF (Pseudo-Random Function) untuk mengizinkan pengguna membuka kunci akun secara lokal (mendekripsi Recovery Phrase) murni hanya menggunakan biometrik, tanpa harus mengetik password/phrase.
+Kita akan mengeksekusi "Phase 2: Group Ratchet Keychain & Distribution". Kita perlu memperbarui IndexedDB (`keychainDb.ts`) untuk menyimpan state Ratchet (Sender dan Receiver) dan memodifikasi `ensureGroupSession` di `crypto.ts` untuk menggunakan `groupInitSenderKey` alih-alih kunci simetris statis.
 
 **TASK:**
-Buat sistem "Biometric Local Unlock" menggunakan Web Crypto API dan WebAuthn PRF Extension.
+Modifikasi file `keychainDb.ts` dan `crypto.ts`.
 
-**Langkah 1: Buat file `web/src/lib/biometricUnlock.ts**`
-Buat modul baru ini untuk menangani enkripsi/dekripsi lokal menggunakan PRF.
+**Langkah 1: Modifikasi `web/src/lib/keychainDb.ts**`
 
+1. Di `openDatabase()`, pada blok `onupgradeneeded`, tambahkan dua *object store* baru:
+* `db.createObjectStore('group_sender_states', { keyPath: 'conversationId' })`
+* `db.createObjectStore('group_receiver_states', { keyPath: 'id' })` // id akan berupa gabungan `conversationId_senderId`
+
+
+2. Tambahkan tipe data untuk state:
 ```typescript
-import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
-
-// Salt statis untuk PRF (harus sama persis setiap kali diminta). 
-// Dalam skenario nyata, salt ini bisa di-generate unik per user dan disimpan di localStorage (tidak rahasia).
-const PRF_SALT = new TextEncoder().encode("NYX_CYPHERPUNK_LOCAL_UNLOCK_SALT_12345678"); // Harus 32 bytes
-
-// Helper: WebCrypto AES-GCM
-async function encryptData(text: string, keyBuffer: ArrayBuffer): Promise<{ ciphertext: string, iv: string }> {
-  const key = await crypto.subtle.importKey('raw', keyBuffer, 'AES-GCM', false, ['encrypt']);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(text));
-  return { 
-    ciphertext: btoa(String.fromCharCode(...new Uint8Array(encrypted))), 
-    iv: btoa(String.fromCharCode(...iv)) 
-  };
+export interface GroupSenderState {
+  conversationId: string;
+  CK: string;
+  N: number;
 }
-
-async function decryptData(ciphertextB64: string, ivB64: string, keyBuffer: ArrayBuffer): Promise<string> {
-  const key = await crypto.subtle.importKey('raw', keyBuffer, 'AES-GCM', false, ['decrypt']);
-  const iv = Uint8Array.from(atob(ivB64), c => c.charCodeAt(0));
-  const encrypted = Uint8Array.from(atob(ciphertextB64), c => c.charCodeAt(0));
-  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, encrypted);
-  return new TextDecoder().decode(decrypted);
-}
-
-// 1. SETUP (Dipanggil saat user mengaktifkan Biometric di Settings)
-// Meminta otentikator untuk membuat kredensial baru dengan dukungan PRF, 
-// lalu mengenkripsi Recovery Phrase dengan kunci dari PRF tersebut.
-export async function setupBiometricUnlock(options: any, recoveryPhrase: string): Promise<boolean> {
-  try {
-    // Inject PRF extension ke options dari server
-    const authOptions = {
-      ...options,
-      extensions: { prf: { eval: { first: PRF_SALT } } }
-    };
-
-    const attResp = await startRegistration(authOptions);
-    
-    // Ambil kunci rahasia yang dihasilkan oleh hardware sidik jari (PRF)
-    const prfResults = (attResp.clientExtensionResults as any)?.prf;
-    if (!prfResults || !prfResults.results || !prfResults.results.first) {
-        throw new Error("Device does not support WebAuthn PRF extension for local unlock.");
-    }
-    
-    const symmetricKey = new Uint8Array(prfResults.results.first).buffer;
-    
-    // Enkripsi recovery phrase menggunakan kunci dari sidik jari
-    const { ciphertext, iv } = await encryptData(recoveryPhrase, symmetricKey);
-    
-    // Simpan hasil enkripsi ke localStorage (Aman karena hanya bisa dibuka dengan sidik jari user)
-    localStorage.setItem('nyx_bio_vault', JSON.stringify({ ciphertext, iv }));
-    return true;
-  } catch (err) {
-    console.error("PRF Setup Error:", err);
-    throw err;
-  }
-}
-
-// 2. UNLOCK (Dipanggil di halaman Login)
-export async function unlockWithBiometric(options: any): Promise<string> {
-  const vaultStr = localStorage.getItem('nyx_bio_vault');
-  if (!vaultStr) throw new Error("No biometric vault found on this device.");
-  const vault = JSON.parse(vaultStr);
-
-  const authOptions = {
-    ...options,
-    extensions: { prf: { eval: { first: PRF_SALT } } }
-  };
-
-  const asseResp = await startAuthentication(authOptions);
-  
-  const prfResults = (asseResp.clientExtensionResults as any)?.prf;
-  if (!prfResults || !prfResults.results || !prfResults.results.first) {
-      throw new Error("Failed to extract PRF key from authenticator.");
-  }
-
-  const symmetricKey = new Uint8Array(prfResults.results.first).buffer;
-  
-  // Dekripsi phrase menggunakan kunci yang baru saja dibuat ulang oleh sidik jari
-  const recoveryPhrase = await decryptData(vault.ciphertext, vault.iv, symmetricKey);
-  return recoveryPhrase;
+export interface GroupReceiverState {
+  id: string; // "conversationId_senderId"
+  conversationId: string;
+  senderId: string;
+  CK: string;
+  N: number;
+  skippedKeys: { n: number, mk: string }[];
 }
 
 ```
 
-**Langkah 2: Integrasikan ke `web/src/pages/SettingsPage.tsx` (Proses Setup)**
-Di fungsi `handleRegisterPasskey`, setelah `startRegistration` sukses dan diverifikasi oleh server (atau sebagai langkah paralel/modifikasi dari `startRegistration` bawaan):
 
-1. Import `setupBiometricUnlock`.
-2. Ubah alur agar menggunakan `setupBiometricUnlock(options, userRecoveryPhrase)` alih-alih `startRegistration` biasa. *(Catatan untuk AI: Asumsikan Anda bisa mengambil recovery phrase user dari state/keychain saat setup ini, atau buat prompt konfirmasi yang meminta user memasukkan phrase mereka sekali saja untuk digembok).*
+3. Buat fungsi helper CRUD untuk store tersebut:
+* `export async function getGroupSenderState(conversationId: string): Promise<GroupSenderState | null>`
+* `export async function saveGroupSenderState(state: GroupSenderState): Promise<void>`
+* `export async function getGroupReceiverState(conversationId: string, senderId: string): Promise<GroupReceiverState | null>` // ingat parameter id-nya `conversationId_senderId`
+* `export async function saveGroupReceiverState(state: GroupReceiverState): Promise<void>`
+* `export async function deleteGroupStates(conversationId: string): Promise<void>` // Hapus state sender dan semua receiver yang memiliki conversationId ini (bisa gunakan cursor atau hapus manual jika membership berubah).
 
-**Langkah 3: Integrasikan ke `web/src/pages/Login.tsx` (Proses Unlock)**
 
-1. Cek apakah `localStorage.getItem('nyx_bio_vault')` ada.
-2. Jika ada, tampilkan tombol besar: **"Unlock with Fingerprint / FaceID"**.
-3. Saat diklik, panggil API `/api/auth/webauthn/login/options` untuk mendapatkan options, lalu panggil `unlockWithBiometric(options)`.
-4. Jika berhasil mendeskripsi, nilai yang dikembalikan adalah `Recovery Phrase`.
-5. Langsung gunakan `Recovery Phrase` tersebut untuk melakukan login/restore session secara otomatis tanpa user perlu mengetik apapun!
 
-**Aturan Tambahan:**
+**Langkah 2: Rombak `ensureGroupSession` di `web/src/utils/crypto.ts**`
+Ubah logika `ensureGroupSession` dari menggunakan `worker_generate_random_key` menjadi `groupInitSenderKey`:
 
-* Tangani error dengan elegan (misal jika user membatalkan scan sidik jari, atau jika device tidak mendukung PRF, fallback ke input teks manual).
-* Pastikan TypeScript `any` di-handle secukupnya agar build tidak gagal, karena tipe PRF di `@simplewebauthn` versi lama mungkin belum terdefinisi penuh di interface-nya.
+1. Import `groupInitSenderKey` dari `@lib/crypto-worker-proxy`.
+2. Import fungsi-fungsi DB yang baru dibuat dari `keychainDb.ts`.
+3. Alur `ensureGroupSession`:
+* Cek apakah kita sudah punya `GroupSenderState` untuk `conversationId` tersebut menggunakan `getGroupSenderState`.
+* Jika sudah ada, return `[]` (tidak perlu distribusi ulang).
+* Jika belum ada:
+a. Panggil `const { senderKeyB64 } = await groupInitSenderKey()`.
+b. Simpan ke lokal: `await saveGroupSenderState({ conversationId, CK: senderKeyB64, N: 0 })`.
+c. Lakukan *fan-out encryption* persis seperti sebelumnya: loop daftar `participants`, ambil public key mereka dari cache/DB, lalu enkripsi `senderKeyB64` menggunakan `worker_crypto_box_seal`.
+d. Return array `distributionKeys` yang berisi object `{ userId, key: encryptedKey }`.
+
+
+
+**Langkah 3: Rombak `processNewSessionKey` di `web/src/utils/crypto.ts` (Bagian GROUP_KEY)**
+Saat menerima `GROUP_KEY` dari socket, sistem akan masuk ke `processNewSessionKey` (atau fungsi serupa yang menangani incoming `GROUP_KEY` di `crypto.ts`).
+
+1. Decrypt kunci tersebut menggunakan `worker_crypto_box_seal_open` (kode lama sudah melakukan ini).
+2. Dulu, hasil decrypt disimpan sebagai `groupKey`. **Ubah ini!**
+3. Simpan hasil decrypt (yang merupakan `senderKeyB64` dari pengirim) ke `group_receiver_states`:
+```typescript
+await saveGroupReceiverState({
+  id: `${conversationId}_${senderId}`,
+  conversationId,
+  senderId,
+  CK: decryptedSenderKeyB64,
+  N: 0,
+  skippedKeys: []
+});
+
+```
+
+
+
+**Aturan Penulisan Kode:**
+
+* Jangan hapus fungsi IndexedDB yang lama (`session_keys`, `message_keys`) karena itu masih dipakai untuk chat 1-on-1.
+* Pastikan penggunaan `conversationId_senderId` konsisten sebagai key di `group_receiver_states`.
