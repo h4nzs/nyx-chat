@@ -17,8 +17,7 @@ export const s3Client = new S3Client({
 export const getPresignedUploadUrl = async (key: string, contentType: string) => {
   const command = new PutObjectCommand({
     Bucket: env.r2BucketName,
-    Key: key,
-    ContentType: contentType
+    Key: key
   })
 
   const url = await getSignedUrl(s3Client, command, {
