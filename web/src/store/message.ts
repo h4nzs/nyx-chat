@@ -47,23 +47,7 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
     // [FIX #1] SELF-MESSAGE DECRYPTION (Pesan Sendiri)
     // Jika ini pesan saya sendiri
     if (currentUser && decryptedMsg.senderId === currentUser.id) {
-        // A. Jika Grup: Kita tidak bisa mendekripsi pesan sendiri via Ratchet Receiver karena kita tidak punya Receiver State untuk diri sendiri.
-        if (isGroup) {
-            // Jika konten masih ciphertext (belum didekripsi optimis)
-            if (decryptedMsg.content && decryptedMsg.content.startsWith('{') && decryptedMsg.content.includes('"ciphertext"')) {
-                 // Coba cek apakah ini pesan optimis yang baru saja dikirim?
-                 // Biasanya pesan optimis sudah plaintext. Jika masuk sini, berarti ini pesan dari fetch history (reload).
-                 // Tanpa penyimpanan MK lokal khusus grup, kita tidak bisa mendekripsinya.
-                 
-                 // Fallback UX:
-                 decryptedMsg.content = "🔒 You sent this message (Encrypted)";
-                 // Idealnya: Kita simpan MK lokal saat kirim, lalu coba retrieveMessageKeySecurely di sini.
-                 // Tapi sesuai instruksi, kita handle gracefully.
-            }
-            return decryptedMsg;
-        }
-
-        // B. Jika 1-on-1: Coba ambil Message Key dari brankas lokal (MK Vault)
+        // Coba ambil Message Key dari brankas lokal (MK Vault) - Works for BOTH Group & 1-on-1 now!
         const { retrieveMessageKeySecurely } = await import('@utils/crypto');
         const mk = await retrieveMessageKeySecurely(decryptedMsg.id);
         
@@ -75,60 +59,71 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
             // [FIX] Matryoshka Parsing Loop: Peel all JSON layers (X3DH, DR) until raw ciphertext
             let cipherTextToUse = decryptedMsg.ciphertext || decryptedMsg.content;
             
-            while (cipherTextToUse && typeof cipherTextToUse === 'string' && cipherTextToUse.trim().startsWith('{')) {
-                try {
-                    const parsed = JSON.parse(cipherTextToUse);
-                    if (parsed.ciphertext) {
-                        cipherTextToUse = parsed.ciphertext;
-                    } else {
-                        break;
-                    }
-                } catch {
-                    break;
-                }
+            // Helper to unwrap
+            const unwrap = (str: string): string => {
+                 if (str && typeof str === 'string' && str.trim().startsWith('{')) {
+                     try {
+                         const p = JSON.parse(str);
+                         if (p.ciphertext) return unwrap(p.ciphertext);
+                     } catch {}
+                 }
+                 return str;
             }
+            
+            cipherTextToUse = unwrap(cipherTextToUse!);
 
             if (cipherTextToUse) {
-                const combined = sodium.from_base64(cipherTextToUse, sodium.base64_variants.URLSAFE_NO_PADDING);
-                const nonce = combined.slice(0, 24);
-                const encrypted = combined.slice(24);
-                const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
-                let plainText = sodium.to_string(decryptedBytes);
-                
-                // --- STRIP PROFILE KEY DARI PESAN SENDIRI ---
-                if (plainText && plainText.trim().startsWith('{')) {
-                    try {
-                        const parsed = JSON.parse(plainText);
-                        if (parsed.profileKey) {
-                            delete parsed.profileKey;
-                            if (parsed.text !== undefined && Object.keys(parsed).length === 1) {
-                                plainText = parsed.text;
-                            } else {
-                                plainText = JSON.stringify(parsed);
+                try {
+                    const combined = sodium.from_base64(cipherTextToUse, sodium.base64_variants.URLSAFE_NO_PADDING);
+                    const nonce = combined.slice(0, 24);
+                    const encrypted = combined.slice(24);
+                    const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
+                    let plainText = sodium.to_string(decryptedBytes);
+                    
+                    // --- STRIP PROFILE KEY DARI PESAN SENDIRI ---
+                    if (plainText && plainText.trim().startsWith('{')) {
+                        try {
+                            const parsed = JSON.parse(plainText);
+                            if (parsed.profileKey) {
+                                delete parsed.profileKey;
+                                if (parsed.text !== undefined && Object.keys(parsed).length === 1) {
+                                    plainText = parsed.text;
+                                } else {
+                                    plainText = JSON.stringify(parsed);
+                                }
                             }
-                        }
-                    } catch (e) {}
+                        } catch (e) {}
+                    }
+                    
+                    decryptedMsg.content = plainText;
+                    
+                    if (decryptedMsg.content && decryptedMsg.content.startsWith('{') && decryptedMsg.content.includes('"type":"file"')) {
+                        try {
+                            const metadata = JSON.parse(decryptedMsg.content);
+                            if (metadata.type === 'file') {
+                                decryptedMsg.fileUrl = metadata.url;
+                                decryptedMsg.fileKey = metadata.key;
+                                decryptedMsg.fileName = metadata.name;
+                                decryptedMsg.fileSize = metadata.size;
+                                decryptedMsg.fileType = metadata.mimeType;
+                                decryptedMsg.content = null;
+                                decryptedMsg.isBlindAttachment = true;
+                            }
+                        } catch {}
+                    }
+                    return decryptedMsg;
+                } catch (e) {
+                    console.error("Self-decrypt failed with stored key:", e);
                 }
-                
-                decryptedMsg.content = plainText;
-                
-                if (decryptedMsg.content && decryptedMsg.content.startsWith('{') && decryptedMsg.content.includes('"type":"file"')) {
-                    try {
-                        const metadata = JSON.parse(decryptedMsg.content);
-                        if (metadata.type === 'file') {
-                            decryptedMsg.fileUrl = metadata.url;
-                            decryptedMsg.fileKey = metadata.key;
-                            decryptedMsg.fileName = metadata.name;
-                            decryptedMsg.fileSize = metadata.size;
-                            decryptedMsg.fileType = metadata.mimeType;
-                            decryptedMsg.content = null;
-                            decryptedMsg.isBlindAttachment = true;
-                        }
-                    } catch {}
-                }
-                return decryptedMsg;
             }
         }
+        
+        // Fallback jika MK tidak ada (misal clear cache tapi DB pesan masih ada)
+        // Kita tidak bisa mendekripsi pesan sendiri tanpa MK lokal.
+        if (decryptedMsg.content && decryptedMsg.content.trim().startsWith('{')) {
+             decryptedMsg.content = "🔒 You sent this message (Encrypted)";
+        }
+        return decryptedMsg;
     }
 
     // 2. Tentukan Payload yang Akan Didekripsi
