@@ -54,7 +54,7 @@ export default function OnboardingTour({ isOpen, onClose }: OnboardingTourProps)
       title: "Your Recovery Phrase",
       content: (
         <>
-          <p>During registration, you generated a 24-word Recovery Phrase. This is the **only** way to restore your account if you forget your password.</p>
+          <p>During registration, you generated a 24-word Recovery Phrase. This is the <strong>only</strong> way to restore your account if you forget your password.</p>
           <p className="font-bold">We do not store it. If you lose it, your account is gone forever.</p>
         </>
       )

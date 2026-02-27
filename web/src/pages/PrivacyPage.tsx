@@ -89,17 +89,17 @@ export default function PrivacyPage() {
             </p>
             <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">1. Data We Collect</h3>
             <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Account Information:</strong> Username, display name, email address (for verification), and avatar image.</li>
+              <li><strong>Blind Identity:</strong> We do not store your real username. We only store a cryptographic hash (`usernameHash`) to allow login. We cannot reverse this hash to find your real handle.</li>
+              <li><strong>Encrypted Profile:</strong> Your display name, bio, and avatar are <strong>End-to-End Encrypted</strong>. To our servers, your profile is just a random blob of ciphertext. Only your contacts can decrypt it.</li>
               <li><strong>Cryptographic Keys:</strong> Public keys (Identity Keys, Signed Pre-keys) are stored on our servers to enable others to start encrypted chats with you. Your <strong>Private Keys</strong> are stored as an encrypted blob that <strong>only you</strong> can decrypt with your password.</li>
-              <li><strong>Connection Data:</strong> IP address and User Agent strings are temporarily logged for security purposes (Rate Limiting, Refresh Tokens) to prevent abuse.</li>
-              <li><strong>Messages:</strong> Your messages are <strong>End-to-End Encrypted (E2EE)</strong>. Our servers only relay encrypted blobs ("ciphertext"). We cannot read, analyze, or modify your messages. Messages are stored on your device (IndexedDB) and temporarily in our database until delivered or for sync purposes.</li>
+              <li><strong>Connection Data:</strong> IP addresses are hashed (SHA-256) before storage. User Agent strings are temporarily logged for security purposes (Refresh Tokens) to prevent abuse.</li>
+              <li><strong>Messages:</strong> Your messages are <strong>End-to-End Encrypted (E2EE)</strong>. Our servers only relay encrypted blobs ("ciphertext"). We cannot read, analyze, or modify your messages. Messages are stored on your device (IndexedDB) and temporarily in our database until delivered.</li>
             </ul>
 
             <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">2. Third-Party Processors</h3>
             <p>We use trusted third-party services for specific infrastructure needs:</p>
             <ul className="list-disc pl-5 space-y-2 mt-2">
-              <li><strong>Cloudflare:</strong> For DDoS protection, CDN, and Turnstile (CAPTCHA) verification.</li>
-              <li><strong>DiceBear:</strong> For generating default user avatars.</li>
+              <li><strong>Cloudflare:</strong> For DDoS protection, CDN, encrypted storage (R2), and Turnstile (CAPTCHA) verification.</li>
               <li><strong>Google Gemini:</strong> For the optional "Smart Reply" feature (see AI section).</li>
             </ul>
           </Section>
@@ -107,6 +107,7 @@ export default function PrivacyPage() {
           <Section id="terms" title="Terms of Service" icon={FiGlobe}>
             <p>By using NYX, you agree to the following terms:</p>
             <ul className="list-disc pl-5 space-y-2 mt-4">
+              <li><strong>Trust Tiers:</strong> New accounts start in "Sandbox Mode" with rate limits to prevent spam. You can unlock full access by verifying your humanity via Biometrics or Proof of Work.</li>
               <li><strong>Acceptable Use:</strong> You agree not to use NYX for illegal activities, harassment, spamming, or distributing malware.</li>
               <li><strong>Account Security:</strong> You are responsible for keeping your password and recovery phrase safe. Because we do not store your raw password or private keys, <strong>we cannot recover your account if you lose both your password and recovery phrase.</strong></li>
               <li><strong>Termination:</strong> We reserve the right to ban accounts that violate these terms or abuse the service API (e.g., botting).</li>
