@@ -3,6 +3,7 @@ import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import { toAbsoluteUrl } from '@utils/url';
 import { useConversationStore } from '@store/conversation';
+import { hashUsername } from '@lib/crypto-worker-proxy';
 import ModalBase from './ui/ModalBase';
 
 interface UserSearchResult {
@@ -33,7 +34,9 @@ const AddParticipantModal = ({ conversationId, onClose }: {
       if (searchTerm.trim().length > 2) {
         setIsSearching(true);
         try {
-          const users = await api<UserSearchResult[]>(`/api/users/search?q=${searchTerm}`);
+          const hashedQuery = await hashUsername(searchTerm.trim());
+          const safeQuery = encodeURIComponent(hashedQuery);
+          const users = await api<UserSearchResult[]>(`/api/users/search?q=${safeQuery}`);
           setSearchResults(users.filter(u => !existingParticipantIds.includes(u.id)));
         } catch (error) {
           console.error("Failed to search users:", error);

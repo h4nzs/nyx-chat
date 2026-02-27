@@ -4,6 +4,7 @@ import { useAuthStore } from '@store/auth';
 import { authFetch } from '@lib/api';
 import { toAbsoluteUrl } from '@utils/url';
 import { getSocket } from '@lib/socket';
+import { hashUsername } from '@lib/crypto-worker-proxy';
 import toast from 'react-hot-toast';
 import ModalBase from './ui/ModalBase';
 import { FiCheck } from 'react-icons/fi';
@@ -34,11 +35,13 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
     }
     const timer = setTimeout(async () => {
       try {
-        const results = await authFetch<UserSearchResult[]>(`/api/users/search?q=${searchQuery}`);
+        const hashedQuery = await hashUsername(searchQuery.trim());
+        const safeQuery = encodeURIComponent(hashedQuery);
+        const results = await authFetch<UserSearchResult[]>(`/api/users/search?q=${safeQuery}`);
         const selectedIds = selectedUsers.map(u => u.id);
         setUserList(results.filter(u => u.id !== me?.id && !selectedIds.includes(u.id)));
       } catch {
-        toast.error("Failed to search users.");
+        // Silent fail or show toast? Silent is better for typing.
       }
     }, 300);
     return () => clearTimeout(timer);
