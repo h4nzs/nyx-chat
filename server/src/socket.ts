@@ -29,6 +29,7 @@ interface MessageSendPayload {
   content: string;
   sessionId?: string;
   tempId: number;
+  expiresAt?: string; // New field for Disappearing Messages
 }
 
 interface PushSubscribePayload {
@@ -333,7 +334,7 @@ export function registerSocket(httpServer: HttpServer) {
          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
       }
 
-      const { conversationId, content, sessionId, tempId } = message;
+      const { conversationId, content, sessionId, tempId, expiresAt } = message;
 
       if (!content || typeof content !== 'string' || content.length > 10000) {
         return callback?.({ ok: false, error: "Invalid message content." });
@@ -349,7 +350,13 @@ export function registerSocket(httpServer: HttpServer) {
         }
         
         const newMessage = await prisma.message.create({
-          data: { conversationId, senderId: userId, content, sessionId },
+          data: { 
+              conversationId, 
+              senderId: userId, 
+              content, 
+              sessionId,
+              expiresAt: expiresAt ? new Date(expiresAt) : null // Save expiration
+          },
           include: { sender: { select: { id: true, encryptedProfile: true } } }
         });
         
