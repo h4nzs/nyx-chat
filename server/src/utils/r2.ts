@@ -8,10 +8,8 @@ export const s3Client = new S3Client({
   credentials: {
     accessKeyId: env.r2AccessKeyId,
     secretAccessKey: env.r2SecretAccessKey
-  },
+  }
   // Nggak usah pake forcePathStyle, biar R2 pake default-nya
-  forcePathStyle: true,
-  requestChecksumCalculation: 'WHEN_REQUIRED'
 })
 
 // Generate URL upload yang valid selama 5 menit
@@ -22,10 +20,9 @@ export const getPresignedUploadUrl = async (key: string, contentType: string) =>
     ContentType: contentType
   })
 
-  const url = await getSignedUrl(s3Client, command, { 
-    expiresIn: 300,
+  const url = await getSignedUrl(s3Client, command, {
+    expiresIn: 300
     // 👇 INI MAGIC SAUCE-NYA: Kita HANYA sign content-type, HOST KITA TENDANG! 👇
-    signableHeaders: new Set(['content-type']) 
   })
 
   return url
