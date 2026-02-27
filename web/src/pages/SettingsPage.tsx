@@ -109,7 +109,7 @@ const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout, setUser } = useAuthStore();
+  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout, emergencyLogout, setUser } = useAuthStore();
   const profile = useUserProfile(user);
   const { theme, toggleTheme, accent, setAccent } = useThemeStore();
   const { showConfirm } = useModalStore();
@@ -131,6 +131,7 @@ export default function SettingsPage() {
   const [showReportModal, setShowReportModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [miningStatus, setMiningStatus] = useState<'idle' | 'mining' | 'verifying'>('idle');
+  const [hasBioVault, setHasBioVault] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vaultInputRef = useRef<HTMLInputElement>(null);
@@ -154,6 +155,17 @@ export default function SettingsPage() {
   useEffect(() => {
     setReadReceiptsState(sendReadReceipts);
   }, [sendReadReceipts]);
+
+  useEffect(() => {
+    const checkBioVault = () => {
+        const vault = localStorage.getItem('nyx_bio_vault');
+        setHasBioVault(!!vault);
+    };
+    checkBioVault();
+    // Listen for storage events in case it changes in another tab (optional but good practice)
+    window.addEventListener('storage', checkBioVault);
+    return () => window.removeEventListener('storage', checkBioVault);
+  }, []);
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -244,6 +256,7 @@ export default function SettingsPage() {
       if (verificationResp.verified) {
         toast.success("Biometric active! You can now login without password.", { id: 'passkey' });
         setShowUpgradeModal(false);
+        setHasBioVault(true);
         if (user) setUser({ ...user, isVerified: true });
       } else {
         throw new Error("Verification failed");
@@ -341,9 +354,9 @@ export default function SettingsPage() {
   const handleLogout = async () => {
     showConfirm(
       "Emergency Eject",
-      "WARNING: You are about to terminate all active sessions. Proceed?",
+      "WARNING: This will log you out of ALL devices and permanently delete your local history and keys from this browser. This action cannot be undone.",
       async () => {
-        await logout();
+        await emergencyLogout();
         navigate('/login');
       }
     );
@@ -579,24 +592,24 @@ export default function SettingsPage() {
               />
               <button
                 onClick={handleRegisterPasskey}
-                disabled={user.isVerified}
                 className={`
                   mt-4 w-full p-4 rounded-xl flex items-center justify-between
                   bg-bg-main text-text-primary
                   shadow-neu-flat-light dark:shadow-neu-flat-dark
                   active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
                   hover:text-accent transition-colors
-                  ${user.isVerified ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
               >
                 <div className="flex items-center gap-3">
                   <IoFingerPrint size={20} />
                   <div className="text-left">
-                    <div className="font-bold text-sm">{user.isVerified ? 'Biometric Active' : 'Enable Biometrics'}</div>
-                    <div className="text-[10px] text-text-secondary">Fingerprint / Face ID</div>
+                    <div className="font-bold text-sm">
+                        {hasBioVault ? 'Vault Active (VIP)' : (user.isVerified ? 'Setup Vault Unlock' : 'Enable Biometrics')}
+                    </div>
+                    <div className="text-[10px] text-text-secondary">Unlock Vault & Verify VIP</div>
                   </div>
                 </div>
-                <div className={`w-2 h-2 rounded-full shadow-[0_0_5px] ${user.isVerified ? 'bg-green-500 shadow-green-500' : 'bg-gray-500 shadow-transparent'}`}></div>
+                <div className={`w-2 h-2 rounded-full shadow-[0_0_5px] ${hasBioVault ? 'bg-green-500 shadow-green-500' : 'bg-gray-500 shadow-transparent'}`}></div>
               </button>
             </div>
           </ControlModule>

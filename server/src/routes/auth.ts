@@ -321,6 +321,27 @@ router.post('/recover', authLimiter, zodValidate({
   }
 });
 
+router.post('/logout-all', requireAuth, async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Unauthorized');
+    
+    // Nuke all sessions from DB
+    await prisma.refreshToken.deleteMany({
+      where: { userId: req.user.id }
+    });
+    
+    // Clear cookies
+    const isProd = env.nodeEnv === 'production'
+    const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
+    res.clearCookie('at', cookieOpts)
+    res.clearCookie('rt', cookieOpts)
+    
+    res.json({ message: "All sessions terminated." });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post('/logout', async (req, res) => {
   const { endpoint } = req.body
   if (endpoint) {

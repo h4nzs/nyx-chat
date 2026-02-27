@@ -6,7 +6,7 @@ import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";
 import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
-import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady } from "@lib/keyStorage";
+import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady, nuclearWipe } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; 
 import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; 
 
@@ -87,6 +87,7 @@ type Actions = {
   }) => Promise<RegisterResponse>;
   
   logout: () => Promise<void>;
+  emergencyLogout: () => Promise<void>; // Nuclear Option
   getEncryptionKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getSigningPrivateKey: () => Promise<Uint8Array>;
   getSignedPreKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
@@ -381,6 +382,35 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         disconnectSocket();
         useConversationStore.getState().reset();
         useMessageStore.getState().reset();
+      }
+    },
+
+    emergencyLogout: async () => {
+      try {
+        // 1. Tell server to kill ALL sessions
+        await api("/api/auth/logout-all", { method: "POST" }).catch((e) => console.error("Server kill failed:", e));
+        
+        // 2. Unsubscribe Push (Optional, best effort)
+        if ('serviceWorker' in navigator && 'PushManager' in window) {
+           const registration = await navigator.serviceWorker.ready;
+           const subscription = await registration.pushManager.getSubscription();
+           if (subscription) await subscription.unsubscribe();
+        }
+      } catch (e) { 
+        console.error("Emergency logout error", e); 
+      } finally {
+        // 3. NUCLEAR WIPE LOCAL
+        clearAuthCookies();
+        privateKeysCache = null;
+        await nuclearWipe(); // THE BIG ONE
+        
+        set({ user: null, accessToken: null });
+        disconnectSocket();
+        useConversationStore.getState().reset();
+        useMessageStore.getState().reset();
+        
+        // Force reload to clear memory state
+        window.location.href = '/login';
       }
     },
 

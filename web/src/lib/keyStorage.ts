@@ -4,8 +4,8 @@ import { clearAllKeys as clearSessionKeys } from './keychainDb';
 
 const STORAGE_KEYS = {
   ENCRYPTED_KEYS: 'nyx_encrypted_keys',
-  DEVICE_AUTO_UNLOCK_KEY: 'nyx_device_auto_unlock_key', // Mengganti localStorage key
-  DEVICE_AUTO_UNLOCK_READY: 'nyx_device_auto_unlock_ready', // Flag untuk auto-unlock
+  DEVICE_AUTO_UNLOCK_KEY: 'nyx_device_auto_unlock_key',
+  DEVICE_AUTO_UNLOCK_READY: 'nyx_device_auto_unlock_ready',
 };
 
 /**
@@ -81,20 +81,47 @@ export const getDeviceAutoUnlockReady = async (): Promise<boolean> => {
 };
 
 /**
- * Menghapus Keys (Logout/Reset)
+ * Menghapus Keys (Logout Biasa)
+ * Hanya menghapus kunci dekripsi lokal, tapi mempertahankan database history (keychain-db)
+ * agar user tidak kehilangan chat saat login kembali.
  */
 export const clearKeys = async () => {
   try {
-    // [CHANGE] Jangan hapus session keys saat logout.
-    // Jika dihapus, user tidak bisa membaca history chat lama saat login kembali.
-    // Keamanan tetap terjaga karena Master Key (yang membuka akses identitas) dihapus.
-    // await clearSessionKeys();
-    
     await del(STORAGE_KEYS.ENCRYPTED_KEYS);
     await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
     await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_READY);
   } catch (error) {
     console.error('Failed to clear keys:', error);
+  }
+};
+
+/**
+ * NUCLEAR WIPE (Emergency Eject)
+ * Menghapus SEMUA jejak data dari browser ini.
+ * - Menghapus Session Keys & History (IndexedDB)
+ * - Menghapus Master Keys (IDB-Keyval)
+ * - Menghapus LocalStorage & SessionStorage
+ */
+export const nuclearWipe = async () => {
+  try {
+    console.warn("INITIATING NUCLEAR WIPE...");
+    
+    // 1. Hapus Kunci Master
+    await clearKeys();
+    
+    // 2. Hapus History & Session Keys (The Vault)
+    await clearSessionKeys();
+    
+    // 3. Hapus Bio Vault (WebAuthn PRF Storage)
+    localStorage.removeItem('nyx_bio_vault');
+    
+    // 4. Hapus sisa LocalStorage (User Profile, Settings, dll)
+    localStorage.clear();
+    sessionStorage.clear();
+    
+    console.warn("NUCLEAR WIPE COMPLETE.");
+  } catch (error) {
+    console.error('Nuclear wipe failed partially:', error);
   }
 };
 
