@@ -25,8 +25,8 @@ export const getPresignedUploadUrl = async (key: string, contentType: string) =>
   })
 
   const url = await getSignedUrl(s3Client, command, {
-    expiresIn: 300
-    // 👇 INI MAGIC SAUCE-NYA: Kita HANYA sign content-type, HOST KITA TENDANG! 👇
+    expiresIn: 300,
+    signableHeaders: new Set(['content-type'])
   })
 
   return url
