@@ -9,8 +9,7 @@ export const s3Client = new S3Client({
     accessKeyId: env.r2AccessKeyId,
     secretAccessKey: env.r2SecretAccessKey
   },
-  requestChecksumCalculation: 'WHEN_REQUIRED',
-  responseChecksumValidation: 'WHEN_REQUIRED'
+  forcePathStyle: true
 })
 
 // Generate URL upload yang valid selama 5 menit
@@ -22,7 +21,8 @@ export const getPresignedUploadUrl = async (key: string, contentType: string) =>
   })
 
   const url = await getSignedUrl(s3Client, command, {
-    expiresIn: 300
+    expiresIn: 300,
+    signableHeaders: new Set(['content-type'])
   })
 
   return url
