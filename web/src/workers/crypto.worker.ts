@@ -1186,7 +1186,8 @@ self.onmessage = async (event: MessageEvent) => {
            state: { CK: bytesToB64(newCK), N: currentN + 1 },
            header,
            ciphertext: combined,
-           signature: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING)
+           signature: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING),
+           mk: Array.from(mk) // Return MK so sender can store it for history
         };
 
         sodium.memzero(CKBytes);

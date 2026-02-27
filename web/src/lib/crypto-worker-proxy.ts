@@ -341,14 +341,15 @@ export async function groupRatchetEncrypt(
   serializedState: { CK: string; N: number },
   plaintext: string | Uint8Array,
   signingPrivateKey: Uint8Array
-): Promise<{ state: { CK: string; N: number }, header: { n: number }, ciphertext: Uint8Array, signature: string }> {
-  return sendToWorker<{ state: { CK: string; N: number }, header: { n: number }, ciphertext: any, signature: string }>('group_ratchet_encrypt', { 
+): Promise<{ state: { CK: string; N: number }, header: { n: number }, ciphertext: Uint8Array, signature: string, mk: Uint8Array }> {
+  return sendToWorker<{ state: { CK: string; N: number }, header: { n: number }, ciphertext: any, signature: string, mk: any }>('group_ratchet_encrypt', { 
     serializedState, 
     plaintext: typeof plaintext === 'string' ? plaintext : Array.from(plaintext),
     signingPrivateKey: Array.from(signingPrivateKey) 
   }).then(res => ({
       ...res,
-      ciphertext: new Uint8Array(res.ciphertext)
+      ciphertext: new Uint8Array(res.ciphertext),
+      mk: new Uint8Array(res.mk)
   }));
 }
 
