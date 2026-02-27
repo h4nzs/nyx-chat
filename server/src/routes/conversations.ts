@@ -27,7 +27,7 @@ router.get('/', async (req, res, next) => {
         participants: {
           select: {
             user: {
-              select: { id: true, encryptedProfile: true, publicKey: true }
+              select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true }
             },
             isPinned: true,
             role: true
@@ -145,7 +145,7 @@ router.post('/', async (req, res, next) => {
           participants: {
             select: {
               role: true,
-              user: { select: { id: true, encryptedProfile: true, publicKey: true } }
+              user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }
             }
           },
           creator: true
@@ -201,7 +201,7 @@ router.get('/:id', async (req, res, next) => {
       include: {
         participants: {
           select: {
-            user: { select: { id: true, encryptedProfile: true, publicKey: true } },
+            user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } },
             isPinned: true,
             role: true
           }
@@ -272,7 +272,7 @@ router.post('/:id/participants', async (req, res, next) => {
       await rotateAndDistributeSessionKeys(conversationId, req.user!.id, tx)
       return await tx.participant.findMany({
         where: { conversationId, userId: { in: userIds } },
-        include: { user: { select: { id: true, encryptedProfile: true, publicKey: true } } }
+        include: { user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } }
       })
     })
 

@@ -52,6 +52,7 @@ export type Participant = {
   id: string;
   encryptedProfile?: string | null;
   publicKey?: string;
+  signingKey?: string; // New: Ed25519 Signing Key for Sender Keys
   role: "ADMIN" | "MEMBER";
   isPinned?: boolean;
 };
