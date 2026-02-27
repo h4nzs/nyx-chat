@@ -503,14 +503,19 @@ export async function encryptMessage(
         N: result.state.N
     });
     
-    // Construct Payload: JSON { header: {n}, ciphertext, signature }
+    // [FIX PERSISTENCE] Store MK for Self-Message History
+    if (messageId && result.mk) {
+        await storeMessageKeySecurely(messageId, result.mk);
+    }
+    
+    // Construct Payload
     const payload = JSON.stringify({
         header: result.header,
         ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
         signature: result.signature
     });
     
-    return { ciphertext: payload };
+    return { ciphertext: payload, mk: result.mk };
     
   } else {
     // DOUBLE RATCHET
@@ -550,17 +555,43 @@ export async function decryptMessage(
   const sodium = await getSodiumLib();
   const { worker_crypto_secretbox_xchacha20poly1305_open_easy, groupRatchetDecrypt } = await getWorkerProxy();
 
+  // [FIX PERSISTENCE] GLOBAL SHORTCUT: Check Local Message Key Cache First
+  if (messageId) {
+      const mk = await retrieveMessageKeySecurely(messageId);
+      if (mk) {
+          let actualCipher = cipher;
+          
+          const unwrapCipher = (str: string): string => {
+              if (str.trim().startsWith('{')) {
+                  try {
+                      const p = JSON.parse(str);
+                      if (p.ciphertext) return unwrapCipher(p.ciphertext);
+                  } catch {}
+              }
+              return str;
+          };
+          
+          actualCipher = unwrapCipher(cipher);
+
+          try {
+              const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
+              const nonce = combined.slice(0, XCHACHA20_NONCE_BYTES);
+              const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
+              const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
+              return { status: 'success', value: sodium.to_string(decrypted) };
+          } catch (e) {
+              // Fail silently and try fallback
+          }
+      }
+  }
+
   if (isGroup) {
-    // Sender ID is critical here. In the old code, sessionId was mostly unused for groups or misused.
-    // We MUST pass senderId into this function now.
-    // Assuming `sessionId` parameter carries `senderId` for group messages.
     const senderId = sessionId; 
     
     if (!senderId) return { status: 'error', error: new Error('Missing senderId for group decryption') };
     
     const receiverState = await getGroupReceiverState(conversationId, senderId);
     if (!receiverState) {
-        // Request key for THIS sender
         requestGroupKeyWithTimeout(conversationId); 
         return { status: 'pending', reason: 'waiting_for_key' };
     }
@@ -569,24 +600,14 @@ export async function decryptMessage(
         const payload = JSON.parse(cipher);
         const { header, ciphertext, signature } = payload;
         
-        // Need sender's SIGNING PUBLIC KEY.
-        // We can get it from the conversation participants list or cache.
         const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
         const sender = conversation?.participants.find(p => p.id === senderId);
         
-        if (!sender?.publicKey) {
-             // If we don't have their public key (signing key), we can't verify signature.
-             // This might happen if participant list isn't synced.
-             return { status: 'error', error: new Error('Missing sender signing key') };
-        }
-        
-        // Identity Key IS the Signing Key in this app's architecture (Ed25519)
-        // [FIX] Use the specific signingKey (Ed25519) if available, otherwise fallback to publicKey (legacy/mismatch risk)
-        const keyToUse = sender.signingKey || sender.publicKey;
+        const keyToUse = sender?.signingKey || sender?.publicKey;
         if (!keyToUse) {
              return { status: 'error', error: new Error('Missing sender signing key') };
         }
-
+        
         const senderSigningKey = sodium.from_base64(keyToUse, sodium.base64_variants.URLSAFE_NO_PADDING);
         const ciphertextBytes = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
         
@@ -610,44 +631,15 @@ export async function decryptMessage(
         
     } catch (e: any) {
       console.error(`Group Decryption failed for convo ${conversationId}:`, e);
-      return { status: 'error', error: new Error('Failed to decrypt group message') };
+      return { status: 'error', error: new Error(e.message || 'Failed to decrypt group message') };
     }
   } else {
     // DOUBLE RATCHET & LEGACY FALLBACK
     try {
-      // 0. Check Message Key Vault First
-      if (messageId) {
-          const mk = await retrieveMessageKeySecurely(messageId);
-          if (mk) {
-              let actualCipher = cipher;
-              
-              // Peel nested JSON layers (Matryoshka loop)
-              while (actualCipher && typeof actualCipher === 'string' && actualCipher.trim().startsWith('{')) {
-                  try {
-                      const payload = JSON.parse(actualCipher);
-                      if (payload.ciphertext) {
-                          actualCipher = payload.ciphertext;
-                      } else {
-                          break;
-                      }
-                  } catch {
-                      break;
-                  }
-              }
-
-              const combined = sodium.from_base64(actualCipher, sodium.base64_variants.URLSAFE_NO_PADDING);
-              const nonce = combined.slice(0, 24);
-              const encrypted = combined.slice(24);
-              const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
-              return { status: 'success', value: sodium.to_string(decrypted) };
-          }
-      }
-
       let payload;
       try {
         payload = JSON.parse(cipher);
       } catch {
-        // Legacy string ciphertext (not JSON)
         if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt legacy message: Missing session ID.') };
         const key = await retrieveSessionKeySecurely(conversationId, sessionId);
         if (!key) {
@@ -662,7 +654,6 @@ export async function decryptMessage(
       }
 
       if (!payload.dr || !payload.ciphertext) {
-        // Not a DR envelope. Try legacy fallback.
         if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt legacy message: Missing session ID.') };
         const key = await retrieveSessionKeySecurely(conversationId, sessionId);
         if (!key) {
@@ -680,7 +671,6 @@ export async function decryptMessage(
       const actualCipher = payload.ciphertext;
       const headerKey = `${conversationId}_${drHeader.dh}_${drHeader.n}`;
 
-      // 1. Try Skipped Message Keys
       const skippedMkStr = await retrieveSkippedMessageKeySecurely(headerKey);
       if (skippedMkStr) {
           const mk = sodium.from_base64(skippedMkStr, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -693,7 +683,6 @@ export async function decryptMessage(
           return { status: 'success', value: sodium.to_string(decrypted) };
       }
 
-      // 2. Main Ratchet State
       const state = await retrieveRatchetStateSecurely(conversationId);
       if (!state) {
           return { status: 'pending', reason: 'waiting_for_ratchet_state' };
@@ -708,15 +697,12 @@ export async function decryptMessage(
           ciphertext: combined
       });
 
-      // Save new state
       await storeRatchetStateSecurely(conversationId, result.state);
 
-      // Save Message Key for Reloads
       if (messageId) {
           await storeMessageKeySecurely(messageId, result.mk);
       }
 
-      // Store any skipped keys
       for (const sk of result.skippedKeys) {
           const hKey = `${conversationId}_${sk.dh}_${sk.n}`;
           await storeSkippedMessageKeySecurely(hKey, sk.mk);
