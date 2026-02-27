@@ -6,9 +6,10 @@ import AuthForm from "../components/AuthForm";
 import { IoFingerPrint } from "react-icons/io5";
 import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api } from "@lib/api";
-import { retrievePrivateKeys, hashUsername } from "@lib/crypto-worker-proxy";
+import { retrievePrivateKeys, restoreFromPhrase, hashUsername } from "@lib/crypto-worker-proxy";
 import { connectSocket } from "@lib/socket";
-import { getEncryptedKeys } from "@lib/keyStorage";
+import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } from "@lib/keyStorage";
+import { unlockWithBiometric } from "@lib/biometricUnlock";
 import toast from "react-hot-toast";
 
 export default function Login() {
@@ -56,8 +57,8 @@ export default function Login() {
       // A. Minta Challenge Login
       const options = await api<any>("/api/auth/webauthn/login/options");
 
-      // B. Browser minta fingerprint user
-      const authResp = await startAuthentication(options);
+      // B. Browser minta fingerprint user (Login Server + Unlock Local Vault)
+      const { authResp, recoveryPhrase } = await unlockWithBiometric(options);
 
       // C. Verifikasi ke Server
       const result = await api<{ verified: boolean; user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/webauthn/login/verify", {
@@ -70,52 +71,62 @@ export default function Login() {
         useAuthStore.getState().setAccessToken(result.accessToken);
         useAuthStore.getState().setUser(result.user);
 
-        // [SYNC] Restore Encrypted Keys from Server if available
-        if (result.encryptedPrivateKey) {
-          const { saveEncryptedKeys } = await import("@lib/keyStorage");
-          await saveEncryptedKeys(result.encryptedPrivateKey);
-          useAuthStore.getState().setHasRestoredKeys(true);
+        // E. MAGIC UNLOCK: Jika PRF berhasil membuka Recovery Phrase
+        if (recoveryPhrase) {
+            // Kita punya Phrase! Kita bisa regenerasi semua kunci tanpa password user.
+            // Buat password sementara untuk sesi lokal ini agar bisa disimpan di IDB
+            const sessionPassword = crypto.randomUUID(); 
+            
+            // Regenerasi bundle kunci dari phrase
+            const { encryptedPrivateKeys } = await restoreFromPhrase(recoveryPhrase, sessionPassword);
+            
+            // Simpan ke IDB
+            await saveEncryptedKeys(encryptedPrivateKeys);
+            await saveDeviceAutoUnlockKey(sessionPassword);
+            await setDeviceAutoUnlockReady(true);
+            
+            // Beritahu store bahwa kunci sudah siap
+            useAuthStore.getState().setHasRestoredKeys(true);
+            
+            toast.success("Vault unlocked via Biometric PRF!");
+        } else if (result.encryptedPrivateKey) {
+            // Fallback: Jika PRF tidak jalan/tidak disetup, pakai bundle dari server (tapi masih terkunci password)
+            const { saveEncryptedKeys } = await import("@lib/keyStorage");
+            await saveEncryptedKeys(result.encryptedPrivateKey);
+            useAuthStore.getState().setHasRestoredKeys(true);
         }
 
-        // Try auto-unlock first
+        // Try auto-unlock (akan sukses jika PRF jalan tadi)
         const autoUnlockSuccess = await useAuthStore.getState().tryAutoUnlock();
-        const hasEncryptedKeys = await getEncryptedKeys();
-
-        if (!autoUnlockSuccess && hasEncryptedKeys) {
-          // Kunci ada (baru diunduh), tapi tidak bisa dibuka otomatis (karena biometric gak bawa password).
-          // Minta user input password SEKALI untuk membuka brankas.
-          useModalStore.getState().showPasswordPrompt(async (password) => {
-            if (!password) return; // User cancel
-
-            try {
-              const encryptedKeys = await getEncryptedKeys();
-              const result = await retrievePrivateKeys(encryptedKeys!, password);
-              
-              if (result.success) {
-                // Sukses! Simpan password biar besok2 auto-unlock jalan
-                const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } = await import("@lib/keyStorage");
-                await saveDeviceAutoUnlockKey(password);
-                await setDeviceAutoUnlockReady(true);
-
-                useAuthStore.getState().setDecryptedKeys(result.keys);
-                await useAuthStore.getState().loadBlockedUsers();
-                connectSocket();
-                
-                navigate("/chat");
-              } else {
-                toast.error("Password salah. Gagal mendekripsi kunci.");
-              }
-            } catch (e) {
-              console.error("Decryption error:", e);
-              toast.error("Terjadi kesalahan saat dekripsi.");
-            }
-          });
-          
-          // Jangan redirect dulu, tunggu user isi password di modal
-          return; 
-        } 
         
-        // Kalau auto-unlock sukses (jarang terjadi di flow baru ini) atau tidak ada kunci
+        if (!autoUnlockSuccess) {
+             // Jika PRF gagal/belum setup, user harus input password manual untuk dekripsi
+             const hasKeys = await getEncryptedKeys();
+             if (hasKeys) {
+                useModalStore.getState().showPasswordPrompt(async (password) => {
+                    if (!password) return;
+                    try {
+                        const encryptedKeys = await getEncryptedKeys();
+                        const result = await retrievePrivateKeys(encryptedKeys!, password);
+                        if (result.success) {
+                            const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } = await import("@lib/keyStorage");
+                            await saveDeviceAutoUnlockKey(password);
+                            await setDeviceAutoUnlockReady(true);
+                            useAuthStore.getState().setDecryptedKeys(result.keys);
+                            await useAuthStore.getState().loadBlockedUsers();
+                            connectSocket();
+                            navigate("/chat");
+                        } else {
+                            toast.error("Password salah. Gagal mendekripsi kunci.");
+                        }
+                    } catch (e) {
+                        toast.error("Terjadi kesalahan saat dekripsi.");
+                    }
+                });
+                return;
+             }
+        }
+        
         await useAuthStore.getState().loadBlockedUsers();
         connectSocket();
 
@@ -181,9 +192,9 @@ export default function Login() {
               }}
             >
               <div className="w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center">
-                <div className="w-2 h-2 rounded-full bg-orange-200"></div>
+                <IoFingerPrint size={16} className="text-orange-900" />
               </div>
-              <span>Biometric Authentication</span>
+              <span>Biometric Unlock</span>
             </button>
           )}
 

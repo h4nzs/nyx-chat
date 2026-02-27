@@ -16,13 +16,14 @@ import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
 import ReportBugModal from '../components/ReportBugModal';
 import { api } from '@lib/api';
-import { exportDatabaseToJson, importDatabaseFromJson } from '@lib/keychainDb';
+import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@lib/keychainDb';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useProfileStore } from '@store/profile';
-import { generateProfileKey, encryptProfile, minePoW } from '@lib/crypto-worker-proxy';
-import { saveProfileKey } from '@lib/keychainDb';
+import { generateProfileKey, encryptProfile, minePoW, getRecoveryPhrase } from '@lib/crypto-worker-proxy';
 import ModalBase from '../components/ui/ModalBase';
 import { useSettingsStore } from '@store/settings';
+import { setupBiometricUnlock } from '@lib/biometricUnlock';
+import { getDeviceAutoUnlockKey, getEncryptedKeys } from '@lib/keyStorage';
 
 /* --- MICRO-COMPONENTS --- */
 
@@ -198,19 +199,50 @@ export default function SettingsPage() {
 
   const handleRegisterPasskey = async () => {
     try {
+      // 1. Dapatkan Recovery Phrase untuk diamankan (Digembok oleh Jari)
+      let phraseToLock = '';
+      
+      const autoUnlockKey = await getDeviceAutoUnlockKey();
+      const encryptedKeysStr = await getEncryptedKeys();
+      
+      if (autoUnlockKey && encryptedKeysStr) {
+          try {
+              phraseToLock = await getRecoveryPhrase(encryptedKeysStr, autoUnlockKey);
+          } catch (e) {}
+      }
+
+      // Jika gagal otomatis, minta user input password (DEMI KEAMANAN MAKSIMAL)
+      if (!phraseToLock) {
+          await new Promise<void>((resolve, reject) => {
+              useModalStore.getState().showPasswordPrompt(async (password) => {
+                  if (!password) { reject(new Error("Password required to enable biometric unlock.")); return; }
+                  try {
+                      const encKeys = await getEncryptedKeys();
+                      if (!encKeys) throw new Error("No keys found.");
+                      phraseToLock = await getRecoveryPhrase(encKeys, password);
+                      resolve();
+                  } catch (e) { reject(e); }
+              });
+          });
+      }
+
       toast.loading("Initializing biometric scanner...", { id: 'passkey' });
       const options = await api<any>("/api/auth/webauthn/register/options");
       
-      toast.loading("Scan fingerprint now...", { id: 'passkey' });
-      const attResp = await startRegistration(options);
+      toast.loading("Scan fingerprint now to LOCK your vault...", { id: 'passkey' });
       
+      // 2. Setup Biometric with PRF (Magic Happens Here)
+      // Ini akan mendaftarkan jari ke server SEKALIGUS mengenkripsi phrase di lokal
+      const attResp = await setupBiometricUnlock(options, phraseToLock);
+      
+      // 3. Verifikasi Server (Hanya untuk login, server tidak menerima phrase)
       const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {
         method: "POST",
         body: JSON.stringify(attResp),
       });
 
       if (verificationResp.verified) {
-        toast.success("Biometric signature confirmed. VIP Access Granted.", { id: 'passkey' });
+        toast.success("Biometric active! You can now login without password.", { id: 'passkey' });
         setShowUpgradeModal(false);
         if (user) setUser({ ...user, isVerified: true });
       } else {

@@ -5,6 +5,7 @@ import { getIo } from '../socket.js'
 import { ApiError } from '../utils/errors.js'
 import { UAParser } from 'ua-parser-js'
 import { verifyJwt } from '../utils/jwt.js'
+import crypto from 'crypto'
 
 const router: Router = Router()
 
@@ -31,6 +32,10 @@ router.get('/', requireAuth, async (req, res, next) => {
       }
     })
 
+    // Calculate hash of current requester's IP to match against DB
+    const rawIp = req.ip || '';
+    const currentIpHash = crypto.createHash('sha256').update(rawIp).digest('hex').substring(0, 16);
+
     const parsedSessions = sessions.map(s => {
       const parser = new UAParser(s.userAgent || "")
       const browser = parser.getBrowser()
@@ -44,8 +49,22 @@ router.get('/', requireAuth, async (req, res, next) => {
         browser.name
       ].filter(Boolean).join(' ') || 'Unknown Device'
 
+      // Check if this session is from the same IP as the current request
+      let displayIp = s.ipAddress;
+      if (s.ipAddress === currentIpHash) {
+          // It's a match! Show the real IP.
+          displayIp = rawIp;
+          // Clean up IPv6 prefix if local
+          if (displayIp === '::1') displayIp = '127.0.0.1';
+          if (displayIp.startsWith('::ffff:')) displayIp = displayIp.replace('::ffff:', '');
+      } else {
+          // Mask the hash so it doesn't look scary/ugly
+          displayIp = `HIDDEN (${s.ipAddress.substring(0, 6)}...)`;
+      }
+
       return {
         ...s,
+        ipAddress: displayIp,
         isCurrent: s.jti === currentJti,
         deviceInfo
       }

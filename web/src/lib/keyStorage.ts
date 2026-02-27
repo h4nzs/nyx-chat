@@ -105,4 +105,3 @@ export const hasStoredKeys = async (): Promise<boolean> => {
   const keys = await getEncryptedKeys();
   return !!keys;
 };
-
