@@ -581,7 +581,13 @@ export async function decryptMessage(
         }
         
         // Identity Key IS the Signing Key in this app's architecture (Ed25519)
-        const senderSigningKey = sodium.from_base64(sender.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+        // [FIX] Use the specific signingKey (Ed25519) if available, otherwise fallback to publicKey (legacy/mismatch risk)
+        const keyToUse = sender.signingKey || sender.publicKey;
+        if (!keyToUse) {
+             return { status: 'error', error: new Error('Missing sender signing key') };
+        }
+
+        const senderSigningKey = sodium.from_base64(keyToUse, sodium.base64_variants.URLSAFE_NO_PADDING);
         const ciphertextBytes = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
         
         const result = await groupRatchetDecrypt(
