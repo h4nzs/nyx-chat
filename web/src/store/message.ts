@@ -587,7 +587,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const result = await encryptMessage(contentToEncrypt, conversationId, isGroup, undefined, `temp_${actualTempId}`);
         ciphertext = result.ciphertext;
         
-        if (!isGroup && result.mk) {
+        // [FIX PERSISTENCE] Store MK for ALL chats (Group + 1on1)
+        if (result.mk) {
              mkToStore = result.mk;
              await import('@utils/crypto').then(({ storeMessageKeySecurely }) => 
                  storeMessageKeySecurely(`temp_${actualTempId}`, mkToStore!)

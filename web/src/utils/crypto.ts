@@ -627,6 +627,11 @@ export async function decryptMessage(
             skippedKeys: [...(receiverState.skippedKeys || []), ...result.skippedKeys]
         });
         
+        // [FIX PERSISTENCE] Save Message Key for Fast Reloads
+        if (messageId && result.mk) {
+            await storeMessageKeySecurely(messageId, result.mk);
+        }
+        
         return { status: 'success', value: sodium.to_string(result.plaintext) };
         
     } catch (e: any) {

@@ -1246,7 +1246,8 @@ self.onmessage = async (event: MessageEvent) => {
         result = {
            state: { CK: bytesToB64(CKBytes), N: currentN },
            plaintext,
-           skippedKeys
+           skippedKeys,
+           mk: Array.from(mk) // Return MK for persistence
         };
 
         sodium.memzero(CKBytes);

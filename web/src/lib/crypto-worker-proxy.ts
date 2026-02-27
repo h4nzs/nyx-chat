@@ -359,8 +359,8 @@ export async function groupRatchetDecrypt(
   ciphertext: Uint8Array,
   signature: string,
   senderSigningPublicKey: Uint8Array
-): Promise<{ state: { CK: string; N: number }, plaintext: Uint8Array, skippedKeys: any[] }> {
-  return sendToWorker<{ state: { CK: string; N: number }, plaintext: any, skippedKeys: any[] }>('group_ratchet_decrypt', { 
+): Promise<{ state: { CK: string; N: number }, plaintext: Uint8Array, skippedKeys: any[], mk: Uint8Array }> {
+  return sendToWorker<{ state: { CK: string; N: number }, plaintext: any, skippedKeys: any[], mk: any }>('group_ratchet_decrypt', { 
     serializedState, 
     header, 
     ciphertext: Array.from(ciphertext), 
@@ -368,6 +368,7 @@ export async function groupRatchetDecrypt(
     senderSigningPublicKey: Array.from(senderSigningPublicKey) 
   }).then(res => ({
       ...res,
-      plaintext: new Uint8Array(res.plaintext)
+      plaintext: new Uint8Array(res.plaintext),
+      mk: new Uint8Array(res.mk)
   }));
 }
