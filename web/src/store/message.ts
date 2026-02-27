@@ -138,12 +138,26 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
         contentToDecrypt = decryptedMsg.fileKey || decryptedMsg.content;
     }
 
-    if (contentToDecrypt === 'waiting_for_key' || contentToDecrypt === '[Requesting key to decrypt...]') {
+    if (!contentToDecrypt || contentToDecrypt === 'waiting_for_key' || contentToDecrypt === '[Requesting key to decrypt...]') {
         return decryptedMsg;
     }
 
-    if (!contentToDecrypt) {
-      return decryptedMsg;
+    // [FIX] PREVENT RE-DECRYPTION LOOP
+    // If content doesn't look like JSON, it's likely already plaintext.
+    if (typeof contentToDecrypt === 'string' && !contentToDecrypt.trim().startsWith('{')) {
+        return decryptedMsg;
+    }
+    
+    // Check if it's a valid encryption payload (contains specific keys)
+    try {
+        if (contentToDecrypt.includes('"header"') || contentToDecrypt.includes('"ciphertext"') || contentToDecrypt.includes('"dr"')) {
+            // It looks like a payload, proceed to decrypt
+        } else {
+            // Probably just a JSON message (like file metadata) that is already decrypted
+            return decryptedMsg;
+        }
+    } catch {
+        return decryptedMsg;
     }
 
     // -------------------------------------------------------------------------
