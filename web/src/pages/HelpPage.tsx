@@ -16,82 +16,70 @@ export default function HelpPage() {
         <div className="space-y-6 text-text-secondary">
 
           <section>
-            <h2 className="text-xl font-semibold text-text-primary mb-3">What's the easiest way to use my account on a new device?</h2>
+            <h2 className="text-xl font-semibold text-text-primary mb-3">How do I move my account to a new device?</h2>
             <p className="mb-2">
-              The best and easiest method is to use the <span className="font-bold text-text-primary">Link Device</span> feature.
+              Since NYX stores your keys and history locally for maximum privacy, you cannot simply log in to see old messages. You have two secure ways to move:
             </p>
-            <ul className="list-disc list-inside ml-4 space-y-1">
-              <li>On your new, logged-out device, click "Link Device" on the login screen. It will show a QR code.</li>
-              <li>On your existing, logged-in device, go to <span className="font-mono bg-bg-main p-1 rounded">Settings &gt; Link Device</span> and scan the QR code.</li>
+            <ul className="list-disc list-inside ml-4 space-y-2">
+              <li>
+                <span className="font-bold text-text-primary">Device Migration (Recommended):</span> Go to <span className="font-mono bg-bg-surface p-1 rounded">Settings &gt; Transfer to New Device</span>. This creates a secure, direct tunnel to your new phone via QR code.
+              </li>
+              <li>
+                <span className="font-bold text-text-primary">Vault Backup:</span> Go to <span className="font-mono bg-bg-surface p-1 rounded">Settings &gt; Export Vault</span>. Save the `.nyxvault` file and import it on your new device login screen.
+              </li>
             </ul>
-            <p className="mt-2">
-              Your account will be securely transferred, and you will be logged in automatically on the new device.
-            </p>
           </section>
 
           <div className="border-b border-border my-6" />
 
           <section>
-            <h2 className="text-xl font-semibold text-text-primary mb-3">When should I use my 24-word Recovery Phrase?</h2>
+            <h2 className="text-xl font-semibold text-text-primary mb-3">Why is my account "Sandboxed"?</h2>
             <p className="mb-2">
-              Your Recovery Phrase is your ultimate backup. You should only need it in one situation: <span className="font-bold text-text-primary">when you've lost access to ALL of your logged-in devices</span> (for example, if you lost your phone and have no other active sessions).
+              To prevent spam bots without collecting personal data (like phone numbers), new accounts start in <strong>Sandbox Mode</strong> with limited messaging quotas.
             </p>
             <p>
-              It allows you to regenerate your Master Key from scratch on a new device.
+              You can upgrade to <strong>VIP Status</strong> instantly for free by verifying you are human. Go to <span className="font-mono bg-bg-surface p-1 rounded">Settings &gt; Upgrade to VIP</span> and choose either <strong>Biometric Verification</strong> (Fingerprint/FaceID) or <strong>Proof of Work</strong> (CPU Mining).
             </p>
           </section>
-          
+
           <div className="border-b border-border my-6" />
 
           <section>
-            <h2 className="text-xl font-semibold text-text-primary mb-3">I forgot my password, but I have my Recovery Phrase. What do I do?</h2>
+            <h2 className="text-xl font-semibold text-text-primary mb-3">I forgot my password. What do I do?</h2>
              <p className="mb-2">
-              You can regain access by using the "Restore" feature.
+              Because we don't have your email, we cannot send you a reset link. You must use your <strong>Recovery Phrase</strong>.
             </p>
             <ul className="list-disc list-inside ml-4 space-y-1">
-              <li>First, ensure you are logged out.</li>
-              <li>On the login screen, click "Restore Account".</li>
-              <li>Enter your 24-word Recovery Phrase and choose a <span className="font-bold text-text-primary">new password</span> for this device.</li>
+              <li>On the login screen, click "Restore from phrase".</li>
+              <li>Enter your 24-word Recovery Phrase to prove your identity.</li>
+              <li>Set a new password.</li>
             </ul>
-            <p className="mt-2">
-              After restoring, you can log in with your email/username and the new password you just set.
+            <p className="mt-2 text-yellow-500 text-sm">
+              Note: Restoring from a phrase resets your identity keys. You will regain access to your account ID, but <strong>chat history will be lost</strong> unless you have a Vault Backup.
             </p>
           </section>
 
           <div className="border-b border-border my-6" />
 
           <section>
-            <h2 className="text-xl font-semibold text-text-primary mb-3">Why are my old messages not on my new device?</h2>
+            <h2 className="text-xl font-semibold text-text-primary mb-3">Why are my messages not syncing?</h2>
             <p className="mb-2">
-              This is a feature of the end-to-end encryption design. For your privacy, message contents are only stored on the devices involved in the conversation, not on our servers.
+              NYX is <strong>Local-First</strong>. Messages live on your device, not the cloud. If you use NYX on multiple devices (e.g. Phone + Laptop), they act as independent clients.
             </p>
             <p>
-              When you set up a new device, it will only start receiving new messages sent after it has been linked or restored. It cannot recover the history from other devices.
-            </p>
-          </section>
-
-          <div className="border-b border-border my-6" />
-          
-          <section>
-            <h2 className="text-xl font-semibold text-text-primary mb-3">Some messages show "[Failed to decrypt]". Why?</h2>
-            <p className="mb-2">
-              This can happen in E2EE chats when the session keys between you and your contact go out of sync. This usually occurs if one of you has reinstalled the app, restored from a phrase, or linked a new device, which generates new encryption keys.
-            </p>
-            <h3 className="font-semibold text-text-primary mt-3">Solution:</h3>
-            <p>
-              Ask your contact to send a new message in the chat. This forces both your apps to establish a new, secure session key, and subsequent messages should decrypt correctly.
+              We are working on a secure "Sync Protocol" for the future, but currently, history does not automatically sync between devices to ensure zero-knowledge privacy.
             </p>
           </section>
 
           <div className="border-b border-border my-6" />
 
           <section>
-            <h2 className="text-xl font-semibold text-text-primary mb-3">What if I lose BOTH my password and my Recovery Phrase?</h2>
+            <h2 className="text-xl font-semibold text-text-primary mb-3">What if I lose my Recovery Phrase?</h2>
             <p className="mb-2 font-semibold text-destructive">
-              Unfortunately, in this case, your account is permanently irrecoverable.
+              Your account is mathematically irrecoverable.
             </p>
             <p>
-              Because of the privacy-first design, we never have access to your password, keys, or phrase. There is no "forgot password" link, and we have no way to access your account data. This is the trade-off for ensuring no one but you can ever access your conversations.
+              We do not store your phrase or password. If you lose them, no one on Earth—including us—can decrypt your data. Please write down your phrase and store it safely offline.
             </p>
           </section>
 

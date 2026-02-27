@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-02-26
+
+This release introduces the "Pure Anonymity" architecture, completely decoupling the application from email and phone numbers. It establishes NYX as a Trust-Tier system with Zero-Knowledge principles at its core.
+
+### The Great Decoupling (Pure Anonymity)
+- **Email Removal:** Completely removed all email-related logic, columns, and dependencies from the database and backend. Registration and Login now use a **Blind Indexing** mechanism.
+- **Blind Indexing:** Usernames are hashed client-side using Argon2id with a static salt before being sent to the server. The server stores only `usernameHash` and has no knowledge of the original username.
+- **No PII Storage:** The server database no longer contains any Personally Identifiable Information (PII). `name`, `avatarUrl`, and `description` are encrypted client-side.
+
+### Trust-Tier System (The Sandbox)
+- **Sandbox Mode:** New accounts start in "Sandbox Mode" (Unverified) by default to prevent spam.
+- **Gatekeeper:** Implemented strict server-side rate limiting for unverified users:
+  - Max 5 messages/minute.
+  - No group creation allowed.
+  - Max 3 new private conversations per day.
+  - Search results limited to 3 items.
+- **VIP Upgrade:** Users can upgrade to "Verified" status (VIP) via:
+  - **Biometric Verification:** Instant upgrade using WebAuthn (Fingerprint/FaceID).
+  - **Proof of Work (PoW):** A privacy-friendly alternative where users solve a cryptographic puzzle (SHA-256 mining) in the browser to prove they are human.
+
+### Security & Cryptography
+- **Profile Encryption:** User profiles (Name, Bio, Avatar) are now encrypted client-side using a symmetric `ProfileKey`. This key is securely exchanged via the Double Ratchet header in the first message to a new contact. The server only stores `encryptedProfile`.
+- **WebAuthn PRF (Biometric Vault):** Implemented the WebAuthn Pseudo-Random Function (PRF) extension. This allows users to decrypt their local key vault (containing the Recovery Phrase) using only their biometric authentication, enabling a true passwordless login experience.
+- **Zero-Knowledge Recovery:** Account recovery now uses a cryptographic signature derived from the 24-word phrase to authorize password resets, without ever revealing the phrase to the server.
+- **Device Migration Tunnel:** Added a secure, direct WebSocket tunnel for transferring account data from an old device to a new one via QR code, bypassing the need for cloud backups.
+
+### Infrastructure
+- **Cloudflare R2 Hardening:** Fixed critical CORS issues with AWS SDK v3 by disabling checksum calculation and enforcing path-style URLs for compatibility with Cloudflare R2.
+- **Redis Integration:** Expanded Redis usage for PoW challenges, Sandbox rate limiting, and ephemeral state management.
+
+### UI/UX
+- **Settings Overhaul:** Redesigned the Settings page to display Trust Tier status (Verified/Sandboxed) and manage the new security features (Vault Export/Import, Biometric Setup).
+- **Registration Flow:** Updated the registration process to offer immediate Biometric Verification for VIP status.
+- **Visual Feedback:** Added visual indicators for Verified users in chat lists and profiles.
+
 ## [2.1.1] - 2026-02-22
 
 ### Privacy & Security

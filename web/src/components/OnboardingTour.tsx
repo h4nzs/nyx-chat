@@ -47,22 +47,27 @@ export default function OnboardingTour({ isOpen, onClose }: OnboardingTourProps)
     {
       icon: <FiSmile size={32} className="text-accent" />,
       title: "Welcome to Nyx!",
-      content: <p>Let's quickly go over a few key security features to keep your conversations private.</p>
+      content: <p>You have entered a <strong>Zero-Knowledge</strong> zone. We don't know who you are, and we can't read your messages. Total anonymity.</p>
     },
     {
       icon: <FiKey size={32} className="text-accent" />,
       title: "Your Recovery Phrase",
       content: (
         <>
-          <p>During registration, you were given a unique 24-word Recovery Phrase. This is the **only** way to restore your account if you forget your password.</p>
-          <p className="font-bold">We do not store it and cannot recover it for you. Keep it safe and offline!</p>
+          <p>During registration, you generated a 24-word Recovery Phrase. This is the **only** way to restore your account if you forget your password.</p>
+          <p className="font-bold">We do not store it. If you lose it, your account is gone forever.</p>
         </>
       )
     },
     {
       icon: <FiShield size={32} className="text-accent" />,
+      title: "Sandbox & Verification",
+      content: <p>To prevent spam without using phone numbers, new accounts start in <strong>Sandbox Mode</strong>. You can unlock unlimited messaging by verifying you are human (Biometric or Proof of Work) in Settings.</p>
+    },
+    {
+      icon: <FiShield size={32} className="text-accent" />,
       title: "Safety Numbers",
-      content: <p>Each conversation has a unique "Safety Number". You can compare this number with your contact out-of-band (e.g., in person or on a video call) to verify your end-to-end encryption connection and ensure you're talking to the right person.</p>
+      content: <p>Each conversation has a unique "Safety Number". You can compare this with your contact to verify no one is intercepting your chat.</p>
     },
     {
       // --- SLIDE BARU: Server Status & Support ---
