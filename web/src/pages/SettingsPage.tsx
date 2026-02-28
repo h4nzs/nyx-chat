@@ -239,7 +239,8 @@ export default function SettingsPage() {
       }
 
       toast.loading("Initializing biometric scanner...", { id: 'passkey' });
-      const options = await api<any>("/api/auth/webauthn/register/options");
+      // Force creation of a NEW credential (even if one exists) to ensure PRF support is enabled
+      const options = await api<any>("/api/auth/webauthn/register/options?force=true");
       
       toast.loading("Scan fingerprint now to LOCK your vault...", { id: 'passkey' });
       

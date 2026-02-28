@@ -432,18 +432,18 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) => 
     })
 
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-
-    const options = await generateRegistrationOptions({
-      rpName,
-      rpID,
-      userID: new Uint8Array(Buffer.from(req.user.id)),
-      userName: user?.name || "Anonymous User", 
-      attestationType: 'none',
-      excludeCredentials: userAuthenticators.reduce((acc: any[], auth) => {
+    
+    // If force=true (e.g. upgrading to PRF or re-registering), don't exclude existing creds.
+    // This allows creating a NEW credential on the same device.
+    const forceNew = req.query.force === 'true';
+    
+    const excludeCredentials = forceNew ? [] : userAuthenticators.reduce((acc: any[], auth) => {
         try {
           if (!auth.credentialID) return acc;
+          const base64 = String(auth.credentialID).replace(/-/g, '+').replace(/_/g, '/');
+          const idBuffer = Buffer.from(base64, 'base64');
           acc.push({
-            id: isoBase64URL.toBuffer(String(auth.credentialID)),
+            id: idBuffer,
             type: 'public-key',
             transports: auth.transports ? (auth.transports.split(',') as any) : undefined
           });
@@ -451,7 +451,15 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) => 
           console.warn(`Skipping invalid credential ID: ${auth.credentialID}`, e);
         }
         return acc;
-      }, []),
+      }, []);
+
+    const options = await generateRegistrationOptions({
+      rpName,
+      rpID,
+      userID: new Uint8Array(Buffer.from(req.user.id)),
+      userName: user?.name || "Anonymous User", 
+      attestationType: 'none',
+      excludeCredentials,
       authenticatorSelection: {
         residentKey: 'preferred',
         userVerification: 'preferred',
