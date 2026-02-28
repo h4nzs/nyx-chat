@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, DeleteObjectCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '../config.js'
 
@@ -33,6 +33,21 @@ export const deleteR2File = async (key: string) => {
   const command = new DeleteObjectCommand({
     Bucket: env.r2BucketName,
     Key: key
+  })
+
+  return await s3Client.send(command)
+}
+
+// Hapus BANYAK file sekaligus (Batch Delete)
+export const deleteR2Files = async (keys: string[]) => {
+  if (keys.length === 0) return;
+  
+  const command = new DeleteObjectsCommand({
+    Bucket: env.r2BucketName,
+    Delete: {
+      Objects: keys.map(Key => ({ Key })),
+      Quiet: true
+    }
   })
 
   return await s3Client.send(command)

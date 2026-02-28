@@ -10,7 +10,7 @@ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
   FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
-  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap
+  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';

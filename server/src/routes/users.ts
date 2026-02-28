@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { Router, CookieOptions } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
 import { z } from 'zod'
@@ -207,5 +207,60 @@ router.get('/me/blocked', async (req, res, next) => {
     res.json(blocked.map(b => b.blocked))
   } catch (error) { next(error) }
 })
+
+// DELETE Account (Self-Destruct)
+router.delete('/me', 
+  zodValidate({
+    body: z.object({
+      password: z.string().min(1),
+      fileKeys: z.array(z.string()).optional() // Client provides keys to delete (Zero-Knowledge cleanup)
+    })
+  }),
+  async (req, res, next) => {
+    try {
+      if (!req.user) throw new ApiError(401, 'Authentication required.')
+      const { password, fileKeys } = req.body
+      const userId = req.user.id
+
+      // 1. Re-verify Password (Security Check)
+      const user = await prisma.user.findUnique({ where: { id: userId } })
+      if (!user) throw new ApiError(404, 'User not found')
+      
+      const isPasswordValid = await import('../utils/password.js').then(m => m.verifyPassword(password, user.passwordHash))
+      if (!isPasswordValid) throw new ApiError(401, 'Invalid password. Account deletion aborted.')
+
+      // 2. Cleanup Storage (R2)
+      // Since we don't store file keys in DB, we rely on the client to tell us what to delete.
+      if (fileKeys && fileKeys.length > 0) {
+         try {
+             const { deleteR2Files } = await import('../utils/r2.js')
+             await deleteR2Files(fileKeys)
+         } catch (e) {
+             console.error("Failed to cleanup R2 files:", e)
+             // Continue deletion anyway
+         }
+      }
+
+      // 3. Nuke Database
+      await prisma.user.delete({ where: { id: userId } })
+
+      // 4. Clear Cookies
+      const { env } = await import('../config.js')
+      const isProd = env.nodeEnv === 'production'
+      const cookieOpts: CookieOptions = { 
+          path: '/', 
+          httpOnly: true, 
+          secure: isProd, 
+          sameSite: isProd ? 'none' : 'lax' 
+      }
+      res.clearCookie('at', cookieOpts)
+      res.clearCookie('rt', cookieOpts)
+
+      res.json({ message: 'Account permanently deleted.' })
+    } catch (error) {
+      next(error)
+    }
+  }
+)
 
 export default router
