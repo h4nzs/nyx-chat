@@ -115,22 +115,12 @@ export async function saveGroupReceiverState(state: GroupReceiverState): Promise
 
 export async function deleteGroupStates(conversationId: string): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction([GROUP_SENDER_STATES_STORE, GROUP_RECEIVER_STATES_STORE], 'readwrite');
+  const tx = db.transaction([GROUP_SENDER_STATES_STORE], 'readwrite');
   
-  // Delete sender state
+  // ONLY Delete sender state (my own keys).
+  // Do NOT delete receiver states, otherwise I can't read messages from others 
+  // who haven't rotated their keys yet.
   await tx.objectStore(GROUP_SENDER_STATES_STORE).delete(conversationId);
-  
-  // Delete all receiver states for this conversation
-  // Since we use composite keys, we iterate and delete. 
-  // Optimization: Could use an index on conversationId if performance becomes an issue.
-  const receiverStore = tx.objectStore(GROUP_RECEIVER_STATES_STORE);
-  let cursor = await receiverStore.openCursor();
-  while (cursor) {
-    if (cursor.value.conversationId === conversationId) {
-      await cursor.delete();
-    }
-    cursor = await cursor.continue();
-  }
   
   await tx.done;
 }

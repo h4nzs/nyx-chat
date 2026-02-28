@@ -856,14 +856,16 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (!conversation || !conversation.participants.some(p => p.id === requesterId)) return;
 
-  const key = await retrieveGroupKeySecurely(conversationId);
-  if (!key) return;
+  // [FIX] Send the CURRENT Sender Key (Ratchet Chain Key)
+  const senderState = await getGroupSenderState(conversationId);
+  if (!senderState) return;
 
   const sodium = await getSodiumLib();
   const { worker_crypto_box_seal } = await getWorkerProxy();
 
   const requesterPublicKey = sodium.from_base64(requesterPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const encryptedKeyForRequester = await worker_crypto_box_seal(key, requesterPublicKey);
+  const senderKeyBytes = sodium.from_base64(senderState.CK, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const encryptedKeyForRequester = await worker_crypto_box_seal(senderKeyBytes, requesterPublicKey);
 
   emitGroupKeyFulfillment({
     requesterId,
