@@ -24,6 +24,7 @@ import ModalBase from '../components/ui/ModalBase';
 import { useSettingsStore } from '@store/settings';
 import { setupBiometricUnlock } from '@lib/biometricUnlock';
 import { getDeviceAutoUnlockKey, getEncryptedKeys } from '@lib/keyStorage';
+import { useMessageStore } from '@store/message';
 
 /* --- MICRO-COMPONENTS --- */
 
@@ -130,11 +131,51 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
   const [miningStatus, setMiningStatus] = useState<'idle' | 'mining' | 'verifying'>('idle');
   const [hasBioVault, setHasBioVault] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vaultInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deletePassword) return;
+    
+    setIsDeleting(true);
+    try {
+        // 1. Collect garbage (Best Effort from Memory)
+        const messagesMap = useMessageStore.getState().messages;
+        const fileKeys: string[] = [];
+        
+        Object.values(messagesMap).flat().forEach((msg: any) => {
+            if (msg.senderId === user?.id && msg.fileKey) {
+                fileKeys.push(msg.fileKey);
+            }
+        });
+
+        // 2. Nuke Server
+        await api('/api/users/me', {
+            method: 'DELETE',
+            body: JSON.stringify({
+                password: deletePassword,
+                fileKeys
+            })
+        });
+
+        // 3. Nuke Local
+        await emergencyLogout();
+        
+        toast.success("Account obliterated.");
+        navigate('/register');
+    } catch (error: any) {
+        setIsDeleting(false);
+        const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
+        toast.error(`Deletion failed: ${errorMsg}`);
+    }
+  };
 
   const colorMap: Record<AccentColor, string> = {
     blue: 'hsl(217 91% 60%)',
@@ -730,24 +771,45 @@ export default function SettingsPage() {
         </div>
 
         {/* 7. EMERGENCY EJECT (Logout) */}
-        <div className="col-span-1 md:col-span-12 mt-8 mb-10">
+        <div className="col-span-1 md:col-span-12 mt-8 mb-10 space-y-4">
           <button
             onClick={handleLogout}
             className="
               group w-full relative overflow-hidden rounded-xl p-6
-              bg-bg-main border-2 border-red-500/20
+              bg-bg-main border-2 border-orange-500/20
               shadow-neu-flat-light dark:shadow-neu-flat-dark
               active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark active:scale-[0.99]
               transition-all duration-200
             "
           >
             {/* Warning Stripes Pattern */}
-            <div className="absolute inset-0 opacity-5 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(239,68,68,0.05)_10px,rgba(239,68,68,0.05)_20px)]"></div>
+            <div className="absolute inset-0 opacity-5 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(249,115,22,0.05)_10px,rgba(249,115,22,0.05)_20px)]"></div>
             
-            <div className="relative z-10 flex flex-col items-center justify-center gap-2 text-red-500 group-hover:text-red-600">
+            <div className="relative z-10 flex flex-col items-center justify-center gap-2 text-orange-500 group-hover:text-orange-600">
               <FiLogOut size={32} />
               <span className="text-xl font-black uppercase tracking-[0.2em]">Emergency Eject</span>
               <span className="text-xs font-mono opacity-70">Terminate All Sessions</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="
+              group w-full relative overflow-hidden rounded-xl p-6
+              bg-red-950/10 border-2 border-red-600/30
+              hover:bg-red-950/20 hover:border-red-600/50
+              active:scale-[0.99]
+              transition-all duration-200
+            "
+          >
+            <div className="relative z-10 flex flex-col items-center justify-center gap-2 text-red-600">
+              <div className="p-3 bg-red-600 text-white rounded-full mb-1">
+                 <FiAlertTriangle size={24} />
+              </div>
+              <span className="text-xl font-black uppercase tracking-[0.2em]">Delete Account</span>
+              <span className="text-xs font-mono opacity-70 text-center max-w-md">
+                PERMANENTLY erase all data from servers. This action is irreversible.
+              </span>
             </div>
           </button>
         </div>
@@ -796,6 +858,63 @@ export default function SettingsPage() {
              </button>
            </div>
         </div>
+      </ModalBase>
+
+      {/* DELETE ACCOUNT MODAL */}
+      <ModalBase isOpen={showDeleteConfirm} onClose={() => { setShowDeleteConfirm(false); setDeletePassword(''); }} title="Confirm Deletion">
+        <form onSubmit={handleDeleteAccount} className="space-y-6">
+            <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-start gap-3">
+                <FiAlertTriangle className="text-red-500 shrink-0 mt-1" />
+                <div className="space-y-2">
+                    <h4 className="text-red-500 font-bold text-sm">FINAL WARNING</h4>
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                        You are about to execute a self-destruct sequence. 
+                        All messages, keys, and profile data will be wiped from the server.
+                        Orphaned files may remain in encrypted storage but will be inaccessible forever.
+                    </p>
+                </div>
+            </div>
+
+            <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">
+                    Confirm Password
+                </label>
+                <input
+                    type="password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    placeholder="Enter your password..."
+                    className="
+                        w-full bg-bg-main text-text-primary p-4 rounded-xl outline-none
+                        border border-red-500/30 focus:border-red-500
+                        shadow-neu-pressed-light dark:shadow-neu-pressed-dark
+                    "
+                    autoFocus
+                />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+                <button
+                    type="button"
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 py-3 rounded-xl font-bold text-sm text-text-secondary hover:bg-bg-surface transition-colors"
+                >
+                    Abort
+                </button>
+                <button
+                    type="submit"
+                    disabled={!deletePassword || isDeleting}
+                    className="
+                        flex-1 py-3 rounded-xl font-bold text-sm text-white
+                        bg-red-600 hover:bg-red-700
+                        disabled:opacity-50 disabled:cursor-not-allowed
+                        shadow-lg shadow-red-600/20
+                    "
+                >
+                    {isDeleting ? 'Deleting...' : 'Execute Delete'}
+                </button>
+            </div>
+        </form>
       </ModalBase>
 
       {/* MODALS */}
