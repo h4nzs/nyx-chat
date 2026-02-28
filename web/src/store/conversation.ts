@@ -22,7 +22,7 @@ export type Message = {
   type?: 'USER' | 'SYSTEM';
   conversationId: string;
   senderId: string;
-  sender?: { id: string; name: string; username: string; avatarUrl?: string | null };
+  sender?: { id: string; encryptedProfile?: string | null };
   content?: string | null;
   imageUrl?: string | null;
   fileUrl?: string | null;
@@ -50,11 +50,9 @@ export type Message = {
 
 export type Participant = {
   id: string;
-  username: string;
-  name: string;
-  description?: string | null;
-  avatarUrl?: string | null;
+  encryptedProfile?: string | null;
   publicKey?: string;
+  signingKey?: string; // New: Ed25519 Signing Key for Sender Keys
   role: "ADMIN" | "MEMBER";
   isPinned?: boolean;
 };
@@ -128,7 +126,7 @@ type Actions = {
   deleteGroup: (id: string) => Promise<void>;
   toggleSidebar: () => void;
   startConversation: (peerId: string) => Promise<string>;
-  searchUsers: (query: string) => Promise<{ id: string; username: string; name: string; avatarUrl?: string | null }[]>;
+  searchUsers: (query: string) => Promise<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>;
   addOrUpdateConversation: (conversation: Conversation) => void;
   removeConversation: (conversationId: string) => void;
   updateConversation: (conversationId: string, updates: Partial<Conversation>) => void;
@@ -165,8 +163,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
   searchUsers: async (query) => {
     try {
-      const safeQuery = encodeURIComponent(query || '');
-      const users = await api<{ id: string; username: string; name: string; avatarUrl?: string | null }[]>(`/api/users/search?q=${safeQuery}`);
+      if (!query.trim()) return [];
+      const { hashUsername } = await import('@lib/crypto-worker-proxy');
+      const hashedQuery = await hashUsername(query.trim());
+      const safeQuery = encodeURIComponent(hashedQuery);
+      const users = await api<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>(`/api/users/search?q=${safeQuery}`);
       return users;
     } catch (error) {
       console.error("Failed to search users", error);

@@ -157,9 +157,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           method: 'POST',
           body: JSON.stringify({
               fileName: file.name,
-              fileType: file.type || 'application/octet-stream', 
+              fileType: 'application/octet-stream', 
               folder: 'attachments',
-              fileSize: file.size 
+              fileSize: encryptedBlob.size 
           })
       });
 
@@ -167,7 +167,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', presignedRes.uploadUrl, true);
-          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+          xhr.setRequestHeader('Content-Type', 'application/octet-stream');
           
           xhr.upload.onprogress = (e) => {
               if (e.lengthComputable) {
@@ -262,9 +262,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           method: 'POST',
           body: JSON.stringify({
               fileName: "voice-message.webm",
-              fileType: "audio/webm",
+              fileType: "application/octet-stream",
               folder: 'attachments',
-              fileSize: blob.size
+              fileSize: encryptedBlob.size
           })
       });
 
@@ -272,7 +272,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', presignedRes.uploadUrl, true);
-          xhr.setRequestHeader('Content-Type', "audio/webm");
+          xhr.setRequestHeader('Content-Type', "application/octet-stream");
           xhr.upload.onprogress = (e) => {
               if (e.lengthComputable) {
                   const percentComplete = (e.loaded / e.total) * 50; 

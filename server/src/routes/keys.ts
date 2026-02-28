@@ -148,7 +148,7 @@ router.get(
       })
 
       if (!userWithBundle?.preKeyBundle || !userWithBundle.signingKey) {
-        throw new Error('User does not have a valid pre-key bundle available.')
+        throw new ApiError(404, 'User does not have a valid pre-key bundle available.')
       }
 
       // 2. Atomic Pop: Fetch ONE OTPK and Delete it
@@ -190,9 +190,6 @@ router.get(
 
       res.json(responseBundle)
     } catch (e: any) {
-      if (e.message.includes('pre-key bundle')) {
-        return res.status(404).json({ error: e.message })
-      }
       next(e)
     }
   }

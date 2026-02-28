@@ -1,15 +1,50 @@
-import { Router } from 'express'
+import { Router, CookieOptions } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
-import { getIo } from '../socket.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
+import { getIo } from '../socket.js'
 
-const router: Router = Router()
+const router = Router()
 
-// Middleware auth untuk semua route di file ini
 router.use(requireAuth)
+
+// Cari User (Exact Match pada Blind Index)
+router.get('/search', async (req, res, next) => {
+  try {
+    const { q } = req.query
+    if (!q || typeof q !== 'string') {
+      return res.json([])
+    }
+
+    // q adalah usernameHash yang dikirim client
+    
+    // SANDBOX CHECK
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { isVerified: true } });
+    const limit = user?.isVerified ? 20 : 3;
+
+    const users = await prisma.user.findMany({
+      where: {
+        AND: [
+          { id: { not: req.user!.id } },
+          { usernameHash: q } // Blind Index Exact Match
+        ]
+      },
+      select: {
+        id: true,
+        encryptedProfile: true,
+        isVerified: true,
+        publicKey: true
+      },
+      take: limit
+    })
+
+    res.json(users)
+  } catch (e) {
+    next(e)
+  }
+})
 
 // GET User Profile (Me)
 router.get('/me', async (req, res, next) => {
@@ -19,13 +54,10 @@ router.get('/me', async (req, res, next) => {
       where: { id: req.user.id },
       select: {
         id: true,
-        email: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        description: true,
-        showEmailToOthers: true,
-        hasCompletedOnboarding: true
+        encryptedProfile: true,
+        isVerified: true,
+        hasCompletedOnboarding: true,
+        role: true
       }
     })
     res.json(user)
@@ -34,61 +66,29 @@ router.get('/me', async (req, res, next) => {
   }
 })
 
-// UPDATE User Profile (Text & Avatar URL only)
+// UPDATE User Profile
 router.put('/me',
   zodValidate({
     body: z.object({
-      name: z.string().min(1).trim().optional(),
-      description: z.string().max(200).trim().optional().nullable(),
-      showEmailToOthers: z.boolean().optional(),
-      avatarUrl: z.string().optional() // Menerima URL string (dari Supabase)
+      encryptedProfile: z.string().min(1)
     })
   }),
   async (req, res, next) => {
     try {
-      if (!req.user) throw new ApiError(401, 'Authentication required.')
-
-      const { name, description, showEmailToOthers, avatarUrl } = req.body
-
-      // Siapkan object update
-      const dataToUpdate: {
-        name?: string;
-        description?: string | null;
-        showEmailToOthers?: boolean;
-        avatarUrl?: string;
-      } = {}
-
-      if (name) dataToUpdate.name = name
-      if (description !== undefined) dataToUpdate.description = description
-      if (showEmailToOthers !== undefined) dataToUpdate.showEmailToOthers = showEmailToOthers
-      if (avatarUrl !== undefined) dataToUpdate.avatarUrl = avatarUrl
-
-      if (Object.keys(dataToUpdate).length === 0) {
-        return res.status(400).json({ error: 'No update data provided.' })
-      }
+      const { encryptedProfile } = req.body
 
       const updatedUser = await prisma.user.update({
-        where: { id: req.user.id },
-        data: dataToUpdate,
+        where: { id: req.user!.id },
+        data: { encryptedProfile },
         select: {
           id: true,
-          email: true,
-          username: true,
-          name: true,
-          avatarUrl: true,
-          description: true,
-          showEmailToOthers: true,
+          encryptedProfile: true,
+          isVerified: true,
           hasCompletedOnboarding: true
         }
       })
 
-      // Hanya sertakan email jika pengguna mengizinkan tampilan email ke orang lain
-      const userForBroadcast = {
-        ...updatedUser,
-        email: updatedUser.showEmailToOthers ? updatedUser.email : undefined
-      }
-
-      getIo().emit('user:updated', userForBroadcast)
+      getIo().emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
       res.json(updatedUser)
     } catch (error) {
       next(error)
@@ -114,10 +114,10 @@ router.put('/me/keys',
       const user = await prisma.user.update({
         where: { id: userId },
         data: { publicKey, signingKey },
-        select: { id: true, name: true }
+        select: { id: true }
       })
 
-      // Notify contacts about identity change
+      // Notify contacts
       const conversations = await prisma.conversation.findMany({
         where: { participants: { some: { userId } } },
         include: { participants: { select: { userId: true } } }
@@ -129,7 +129,7 @@ router.put('/me/keys',
       }))
 
       recipients.forEach(recipientId => {
-        getIo().to(recipientId).emit('user:identity_changed', { userId: user.id, name: user.name })
+        getIo().to(recipientId).emit('user:identity_changed', { userId: user.id })
       })
 
       res.status(200).json({ message: 'Keys updated successfully.' })
@@ -139,121 +139,6 @@ router.put('/me/keys',
   }
 )
 
-// SEARCH Users
-router.get('/search',
-  zodValidate({ query: z.object({ q: z.string().min(1) }) }),
-  async (req, res, next) => {
-    try {
-      if (!req.user) throw new ApiError(401, 'Authentication required.')
-      const query = req.query.q as string
-      const meId = req.user.id
-
-      const users = await prisma.user.findMany({
-        where: {
-          AND: [
-            { id: { not: meId } },
-            {
-              OR: [
-                { username: { contains: query, mode: 'insensitive' } },
-                { name: { contains: query, mode: 'insensitive' } }
-              ]
-            }
-          ]
-        },
-        take: 5, // Reduced from 10 to 5 for performance
-        select: { id: true, username: true, name: true, avatarUrl: true }
-      })
-      res.json(users)
-    } catch (e) {
-      next(e)
-    }
-  }
-)
-
-// GET User by Email (for verification purposes) - AUTH REQUIRED
-router.post('/by-email',
-  zodValidate({ body: z.object({ email: z.string().email() }) }),
-  async (req, res, next) => {
-    try {
-      const { email } = req.body
-
-      const user = await prisma.user.findUnique({
-        where: { email },
-        select: {
-          id: true,
-          email: true,
-          username: true,
-          name: true,
-          avatarUrl: true,
-          isEmailVerified: true,
-          showEmailToOthers: true
-        }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      const publicProfile: Partial<typeof user> & { id: string } = {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        avatarUrl: user.avatarUrl,
-        isEmailVerified: user.isEmailVerified
-      }
-
-      if (user.showEmailToOthers) {
-        publicProfile.email = user.email
-      }
-
-      res.json(publicProfile)
-    } catch (error) {
-      next(error)
-    }
-  })
-
-// GET User by Username (for verification purposes) - AUTH REQUIRED
-router.post('/by-username',
-  zodValidate({ body: z.object({ username: z.string().min(1) }) }),
-  async (req, res, next) => {
-    try {
-      const { username } = req.body
-
-      const user = await prisma.user.findUnique({
-        where: { username },
-        select: {
-          id: true,
-          email: true,
-          username: true,
-          name: true,
-          avatarUrl: true,
-          isEmailVerified: true,
-          showEmailToOthers: true
-        }
-      })
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' })
-      }
-
-      const publicProfile: Partial<typeof user> & { id: string } = {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        avatarUrl: user.avatarUrl,
-        isEmailVerified: user.isEmailVerified
-      }
-
-      if (user.showEmailToOthers) {
-        publicProfile.email = user.email
-      }
-
-      res.json(publicProfile)
-    } catch (error) {
-      next(error)
-    }
-  })
-
 // GET Other User Profile by ID
 router.get('/:userId', async (req, res, next) => {
   try {
@@ -262,39 +147,19 @@ router.get('/:userId', async (req, res, next) => {
       where: { id: userId },
       select: {
         id: true,
-        username: true,
-        name: true,
-        avatarUrl: true,
-        description: true,
+        encryptedProfile: true,
         createdAt: true,
         publicKey: true,
-        email: true,
-        showEmailToOthers: true
+        isVerified: true
       }
     })
 
     if (!user) return res.status(404).json({ error: 'User not found' })
-
-    const publicProfile: Partial<typeof user> & { id: string } = {
-      id: user.id,
-      username: user.username,
-      name: user.name,
-      avatarUrl: user.avatarUrl,
-      description: user.description,
-      createdAt: user.createdAt,
-      publicKey: user.publicKey
-    }
-
-    if (user.showEmailToOthers) {
-      publicProfile.email = user.email
-    }
-
-    res.json(publicProfile)
+    res.json(user)
   } catch (error) {
     next(error)
   }
-}
-)
+})
 
 // COMPLETE Onboarding
 router.post('/me/complete-onboarding', async (req, res, next) => {
@@ -310,70 +175,92 @@ router.post('/me/complete-onboarding', async (req, res, next) => {
   }
 })
 
-// BLOCK USER
+// BLOCK/UNBLOCK/LIST BLOCKED (Unchanged logic, just ensure imports are clean)
 router.post('/:id/block', async (req, res, next) => {
   try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const blockerId = req.user.id
+    const blockerId = req.user!.id
     const blockedId = req.params.id
-
-    if (blockerId === blockedId) {
-      throw new ApiError(400, 'You cannot block yourself')
-    }
-
-    await prisma.blockedUser.create({
-      data: {
-        blockerId,
-        blockedId
-      }
-    })
-
+    if (blockerId === blockedId) throw new ApiError(400, 'You cannot block yourself')
+    await prisma.blockedUser.create({ data: { blockerId, blockedId } })
     res.json({ success: true, message: 'User blocked' })
   } catch (error: any) {
-    // Handle unique constraint violation (kalau udah diblokir sebelumnya)
-    if (error.code === 'P2002') {
-      return res.json({ success: true, message: 'User already blocked' })
-    }
+    if (error.code === 'P2002') return res.json({ success: true, message: 'User already blocked' })
     next(error)
   }
 })
 
-// UNBLOCK USER
 router.delete('/:id/block', async (req, res, next) => {
   try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const blockerId = req.user.id
+    const blockerId = req.user!.id
     const blockedId = req.params.id
-
-    await prisma.blockedUser.deleteMany({
-      where: {
-        blockerId,
-        blockedId
-      }
-    })
-
+    await prisma.blockedUser.deleteMany({ where: { blockerId, blockedId } })
     res.json({ success: true, message: 'User unblocked' })
-  } catch (error) {
-    next(error)
-  }
+  } catch (error) { next(error) }
 })
 
-// GET BLOCKED USERS LIST (buat list di settings)
 router.get('/me/blocked', async (req, res, next) => {
   try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
     const blocked = await prisma.blockedUser.findMany({
-      where: { blockerId: req.user.id },
-      include: {
-        blocked: {
-          select: { id: true, username: true, avatarUrl: true, name: true }
-        }
-      }
+      where: { blockerId: req.user!.id },
+      include: { blocked: { select: { id: true, encryptedProfile: true } } }
     })
     res.json(blocked.map(b => b.blocked))
-  } catch (error) {
-    next(error)
-  }
+  } catch (error) { next(error) }
 })
+
+// DELETE Account (Self-Destruct)
+router.delete('/me', 
+  zodValidate({
+    body: z.object({
+      password: z.string().min(1),
+      fileKeys: z.array(z.string()).optional() // Client provides keys to delete (Zero-Knowledge cleanup)
+    })
+  }),
+  async (req, res, next) => {
+    try {
+      if (!req.user) throw new ApiError(401, 'Authentication required.')
+      const { password, fileKeys } = req.body
+      const userId = req.user.id
+
+      // 1. Re-verify Password (Security Check)
+      const user = await prisma.user.findUnique({ where: { id: userId } })
+      if (!user) throw new ApiError(404, 'User not found')
+      
+      const isPasswordValid = await import('../utils/password.js').then(m => m.verifyPassword(password, user.passwordHash))
+      if (!isPasswordValid) throw new ApiError(401, 'Invalid password. Account deletion aborted.')
+
+      // 2. Cleanup Storage (R2)
+      // Since we don't store file keys in DB, we rely on the client to tell us what to delete.
+      if (fileKeys && fileKeys.length > 0) {
+         try {
+             const { deleteR2Files } = await import('../utils/r2.js')
+             await deleteR2Files(fileKeys)
+         } catch (e) {
+             console.error("Failed to cleanup R2 files:", e)
+             // Continue deletion anyway
+         }
+      }
+
+      // 3. Nuke Database
+      await prisma.user.delete({ where: { id: userId } })
+
+      // 4. Clear Cookies
+      const { env } = await import('../config.js')
+      const isProd = env.nodeEnv === 'production'
+      const cookieOpts: CookieOptions = { 
+          path: '/', 
+          httpOnly: true, 
+          secure: isProd, 
+          sameSite: isProd ? 'none' : 'lax' 
+      }
+      res.clearCookie('at', cookieOpts)
+      res.clearCookie('rt', cookieOpts)
+
+      res.json({ message: 'Account permanently deleted.' })
+    } catch (error) {
+      next(error)
+    }
+  }
+)
 
 export default router

@@ -115,10 +115,10 @@ const FAQSection = () => (
         <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">FREQUENTLY ASKED QUESTIONS</motion.h2>
         <div className="space-y-4">
           {[
-            { q: "Is NYX end-to-end encrypted?", a: "Yes. We use the Signal Protocol (Double Ratchet Algorithm) to ensure that only you and the person you're communicating with can read what's sent. Not even the server can decrypt your messages." },
+            { q: "Is NYX end-to-end encrypted?", a: "Yes. We use the Signal Protocol (X3DH + Double Ratchet Algorithm) to ensure that only you and the person you're communicating with can read what's sent. Not even the server can decrypt your messages." },
             { q: "Do I need to install an app?", a: "No. NYX is a Progressive Web App (PWA). You can use it directly in your browser or install it to your home screen for a native-like experience without the app store friction." },
             { q: "Is it completely free?", a: "Yes, NYX is open-source and free to use. There are no hidden fees, ads, or data tracking." },
-            { q: "How do I recover my account?", a: "When you sign up, you receive a 24-word recovery phrase. This is the ONLY way to restore your keys and messages on a new device. We do not store this phrase." }
+            { q: "How do I recover my account?", a: "When you sign up, you receive a 24-word recovery phrase. This is the ONLY way to restore your account, but remember that you cannot access your messages history. And we do not store this phrase." }
           ].map((item, i) => (
             <motion.div variants={itemVariants} key={i} className="bg-bg-surface rounded-lg shadow-[4px_4px_8px_rgba(0,0,0,0.1),-4px_-4px_8px_rgba(255,255,255,0.05)] overflow-hidden">
               <details className="group">

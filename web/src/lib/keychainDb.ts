@@ -5,7 +5,28 @@ const SESSION_KEYS_STORE_NAME = 'session-keys';
 const GROUP_KEYS_STORE_NAME = 'group-keys';
 const OTPK_STORE_NAME = 'one-time-pre-keys';
 const PENDING_HEADERS_STORE_NAME = 'pending-headers';
-const DB_VERSION = 4;
+const RATCHET_SESSIONS_STORE_NAME = 'ratchet-sessions';
+const SKIPPED_KEYS_STORE_NAME = 'skipped-keys';
+const MESSAGE_KEYS_STORE_NAME = 'message-keys';
+const PROFILE_KEYS_STORE_NAME = 'profile_keys';
+const GROUP_SENDER_STATES_STORE = 'group_sender_states';
+const GROUP_RECEIVER_STATES_STORE = 'group_receiver_states';
+const DB_VERSION = 8;
+
+export interface GroupSenderState {
+  conversationId: string;
+  CK: string;
+  N: number;
+}
+
+export interface GroupReceiverState {
+  id: string; // conversationId_senderId
+  conversationId: string;
+  senderId: string;
+  CK: string;
+  N: number;
+  skippedKeys: { n: number, mk: string }[];
+}
 
 // Cache DB connections by userId to handle switching accounts without reloading
 const dbCache = new Map<string, Promise<IDBPDatabase>>();
@@ -38,12 +59,70 @@ function getDb(): Promise<IDBPDatabase> {
         if (oldVersion < 4) {
           db.createObjectStore(PENDING_HEADERS_STORE_NAME);
         }
+        if (oldVersion < 5) {
+          db.createObjectStore(RATCHET_SESSIONS_STORE_NAME);
+          db.createObjectStore(SKIPPED_KEYS_STORE_NAME);
+        }
+        if (oldVersion < 6) {
+          db.createObjectStore(MESSAGE_KEYS_STORE_NAME);
+        }
+        if (oldVersion < 7) {
+          if (!db.objectStoreNames.contains(PROFILE_KEYS_STORE_NAME)) {
+             db.createObjectStore(PROFILE_KEYS_STORE_NAME);
+          }
+        }
+        if (oldVersion < 8) {
+          if (!db.objectStoreNames.contains(GROUP_SENDER_STATES_STORE)) {
+             db.createObjectStore(GROUP_SENDER_STATES_STORE, { keyPath: 'conversationId' });
+          }
+          if (!db.objectStoreNames.contains(GROUP_RECEIVER_STATES_STORE)) {
+             db.createObjectStore(GROUP_RECEIVER_STATES_STORE, { keyPath: 'id' });
+          }
+        }
       },
+    }).catch(err => {
+      dbCache.delete(userId);
+      throw err;
     });
     dbCache.set(userId, promise);
   }
   
   return dbCache.get(userId)!;
+}
+
+// ... existing helpers ...
+
+export async function getGroupSenderState(conversationId: string): Promise<GroupSenderState | null> {
+  const db = await getDb();
+  return (await db.get(GROUP_SENDER_STATES_STORE, conversationId)) || null;
+}
+
+export async function saveGroupSenderState(state: GroupSenderState): Promise<void> {
+  const db = await getDb();
+  await db.put(GROUP_SENDER_STATES_STORE, state);
+}
+
+export async function getGroupReceiverState(conversationId: string, senderId: string): Promise<GroupReceiverState | null> {
+  const db = await getDb();
+  const id = `${conversationId}_${senderId}`;
+  return (await db.get(GROUP_RECEIVER_STATES_STORE, id)) || null;
+}
+
+export async function saveGroupReceiverState(state: GroupReceiverState): Promise<void> {
+  const db = await getDb();
+  await db.put(GROUP_RECEIVER_STATES_STORE, state);
+}
+
+export async function deleteGroupStates(conversationId: string): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction([GROUP_SENDER_STATES_STORE], 'readwrite');
+  
+  // ONLY Delete sender state (my own keys).
+  // Do NOT delete receiver states, otherwise I can't read messages from others 
+  // who haven't rotated their keys yet.
+  await tx.objectStore(GROUP_SENDER_STATES_STORE).delete(conversationId);
+  
+  await tx.done;
 }
 
 /**
@@ -191,14 +270,156 @@ export async function deleteGroupKey(conversationId: string): Promise<void> {
 }
 
 /**
+ * Stores the encrypted RatchetState for a conversation.
+ */
+export async function storeRatchetSession(conversationId: string, encryptedState: Uint8Array): Promise<void> {
+  const db = await getDb();
+  await db.put(RATCHET_SESSIONS_STORE_NAME, encryptedState, conversationId);
+}
+
+/**
+ * Retrieves the encrypted RatchetState for a conversation.
+ */
+export async function getRatchetSession(conversationId: string): Promise<Uint8Array | null> {
+  const db = await getDb();
+  return (await db.get(RATCHET_SESSIONS_STORE_NAME, conversationId)) || null;
+}
+
+/**
+ * Stores an encrypted skipped message key.
+ */
+export async function storeSkippedKey(headerKey: string, encryptedKey: Uint8Array): Promise<void> {
+  const db = await getDb();
+  await db.put(SKIPPED_KEYS_STORE_NAME, encryptedKey, headerKey);
+}
+
+/**
+ * Retrieves an encrypted skipped message key.
+ */
+export async function getSkippedKey(headerKey: string): Promise<Uint8Array | null> {
+  const db = await getDb();
+  return (await db.get(SKIPPED_KEYS_STORE_NAME, headerKey)) || null;
+}
+
+/**
+ * Deletes a skipped message key.
+ */
+export async function deleteSkippedKey(headerKey: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(SKIPPED_KEYS_STORE_NAME, headerKey);
+}
+
+/**
+ * Stores an encrypted Message Key locally for history decryption.
+ */
+export async function storeMessageKey(messageId: string, encryptedMk: Uint8Array): Promise<void> {
+  const db = await getDb();
+  await db.put(MESSAGE_KEYS_STORE_NAME, encryptedMk, messageId);
+}
+
+/**
+ * Retrieves an encrypted Message Key.
+ */
+export async function getMessageKey(messageId: string): Promise<Uint8Array | null> {
+  const db = await getDb();
+  return (await db.get(MESSAGE_KEYS_STORE_NAME, messageId)) || null;
+}
+
+/**
+ * Deletes an encrypted Message Key locally.
+ */
+export async function deleteMessageKey(messageId: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(MESSAGE_KEYS_STORE_NAME, messageId);
+}
+
+export async function saveProfileKey(userId: string, keyB64: string): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(PROFILE_KEYS_STORE_NAME, 'readwrite');
+  await tx.objectStore(PROFILE_KEYS_STORE_NAME).put(keyB64, userId);
+  await tx.done;
+}
+
+export async function getProfileKey(userId: string): Promise<string | undefined> {
+  const db = await getDb();
+  const tx = db.transaction(PROFILE_KEYS_STORE_NAME, 'readonly');
+  return tx.objectStore(PROFILE_KEYS_STORE_NAME).get(userId);
+}
+
+/**
  * Clears all keys from the database. Used on logout.
  */
 export async function clearAllKeys(): Promise<void> {
   const db = await getDb();
-  const tx = db.transaction([SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, PENDING_HEADERS_STORE_NAME], 'readwrite');
-  await tx.objectStore(SESSION_KEYS_STORE_NAME).clear();
-  await tx.objectStore(GROUP_KEYS_STORE_NAME).clear();
-  await tx.objectStore(OTPK_STORE_NAME).clear();
-  await tx.objectStore(PENDING_HEADERS_STORE_NAME).clear();
+  const storeNames = db.objectStoreNames;
+  const tx = db.transaction(storeNames, 'readwrite');
+  
+  for (const storeName of storeNames) {
+      await tx.objectStore(storeName).clear();
+  }
+  await tx.done;
+}
+
+/**
+ * Mengekspor seluruh isi brankas kunci menjadi string JSON.
+ * Aman karena setiap nilainya sudah terenkripsi oleh Master Seed.
+ */
+export async function exportDatabaseToJson(): Promise<string> {
+  const db = await getDb();
+  const stores = [
+    SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
+    PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
+    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME
+  ];
+  
+  const exportData: Record<string, any[]> = {};
+
+  for (const storeName of stores) {
+    if (!db.objectStoreNames.contains(storeName)) continue;
+    
+    const tx = db.transaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const items = [];
+    let cursor = await store.openCursor();
+    while (cursor) {
+      items.push({ key: cursor.key, value: cursor.value });
+      cursor = await cursor.continue();
+    }
+    exportData[storeName] = items;
+  }
+  
+  return JSON.stringify(exportData);
+}
+
+/**
+ * Mengimpor dan menimpa isi brankas kunci dari string JSON.
+ */
+export async function importDatabaseFromJson(jsonString: string): Promise<void> {
+  const db = await getDb();
+  let importData;
+  try {
+      importData = JSON.parse(jsonString);
+  } catch (e) {
+      throw new Error("Invalid vault file format.");
+  }
+
+  const stores = [
+    SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
+    PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
+    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME
+  ];
+  
+  const availableStores = stores.filter(s => db.objectStoreNames.contains(s));
+  const tx = db.transaction(availableStores, 'readwrite');
+  
+  for (const storeName of availableStores) {
+    if (importData[storeName]) {
+      const store = tx.objectStore(storeName);
+      await store.clear(); // Bersihkan brankas lama
+      for (const item of importData[storeName]) {
+        await store.put(item.value, item.key);
+      }
+    }
+  }
   await tx.done;
 }

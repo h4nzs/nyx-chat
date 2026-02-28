@@ -14,15 +14,18 @@ const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content }) => {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeSanitize]}
         components={{
-          code({ inline, className, children, ...props }: any) {
-            return inline ? (
-              <code className="bg-secondary px-1.5 py-0.5 rounded text-sm font-mono" {...props}>
+          code({ className, children, ...props }: any) {
+            return (
+              <code className="bg-secondary/50 px-1 py-0.5 rounded text-sm font-mono" {...props}>
                 {children}
               </code>
-            ) : (
-              <code className="block bg-secondary p-2 rounded-md my-1 text-sm font-mono overflow-x-auto" {...props}>
+            );
+          },
+          pre({ children }: any) {
+            return (
+              <pre className="block bg-secondary p-2 rounded-md my-1 text-sm font-mono overflow-x-auto [&>code]:bg-transparent [&>code]:p-0">
                 {children}
-              </code>
+              </pre>
             );
           },
           a({ node, ...props }) {

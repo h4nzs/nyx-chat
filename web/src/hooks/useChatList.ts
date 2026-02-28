@@ -5,6 +5,7 @@ import { usePresenceStore } from '@store/presence';
 import { useAuthStore, type User } from '@store/auth';
 import { authFetch } from '@lib/api';
 import { debounce } from 'lodash';
+import { hashUsername } from '@lib/crypto-worker-proxy';
 
 export function useChatList() {
   const navigate = useNavigate();
@@ -52,7 +53,8 @@ export function useChatList() {
       }
       setIsSearching(true);
       try {
-        const users = await authFetch<User[]>(`/api/users/search?q=${query}`);
+        const hashedQuery = await hashUsername(query.trim());
+        const users = await authFetch<User[]>(`/api/users/search?q=${encodeURIComponent(hashedQuery)}`);
         setSearchResults(users);
       } catch (err) {
         console.error("Search failed", err);
@@ -83,7 +85,7 @@ export function useChatList() {
     }
   
     const filteredConversations = conversations.filter(c => {
-      const title = c.title || c.participants?.filter(p => p.id !== meId).map(p => p.name).join(', ') || 'Conversation';
+      const title = c.title || 'Conversation';
       return title.toLowerCase().includes(searchQuery.toLowerCase());
     });
   

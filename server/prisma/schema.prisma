@@ -11,22 +11,20 @@ datasource db {
 
 model User {
   id                 String    @id @default(cuid())
-  email              String    @unique
-  username           String    @unique
+  usernameHash       String    @unique
   passwordHash       String
-  name               String
-  avatarUrl          String?
-  description        String?
+  encryptedProfile   String?   @db.Text
   publicKey          String?   // Encryption/Identity Key
   signingKey         String?   // Verification Key
-  showEmailToOthers  Boolean   @default(false)
+  
   hasCompletedOnboarding Boolean @default(false)
-  isEmailVerified Boolean  @default(false) // Tambahkan ini
+  isVerified         Boolean   @default(false) // WebAuthn / Trust Tier status
+  
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
-  role               String    @default("USER") // Bisa diisi "ADMIN" buat akun lu doang
-  bannedAt           DateTime? // Kalau ada isinya, berarti dia dibanned
-  banReason          String?   // Catatan buat nampilin pesan ke user pas login gagal
+  role               String    @default("USER") 
+  bannedAt           DateTime? 
+  banReason          String?   
 
   messages             Message[]
   participants         Participant[]
@@ -46,8 +44,8 @@ model User {
   sessionKeys          SessionKey[]
 
   // Relasi Blocking
-  blockedUsers BlockedUser[] @relation("Blocker") // User ini memblokir siapa aja
-  blockedBy    BlockedUser[] @relation("Blocked") // User ini diblokir sama siapa aja
+  blockedUsers BlockedUser[] @relation("Blocker") 
+  blockedBy    BlockedUser[] @relation("Blocked") 
 
   @@index([createdAt])
 }
@@ -204,6 +202,7 @@ model SessionKey {
   expiresAt             DateTime?
 
   @@index([conversationId, userId, sessionId])
+  @@unique([userId, sessionId])
 }
 
 model PushSubscription {

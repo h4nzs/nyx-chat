@@ -12,9 +12,11 @@ import { formatTime } from "@utils/date";
 import MarkdownMessage from "./MarkdownMessage";
 import VoiceMessagePlayer from "./VoiceMessagePlayer";
 import clsx from 'clsx'; 
+import { useUserProfile } from '@hooks/useUserProfile';
 
 const ReplyQuote = ({ message }: { message: Message }) => {
-  const authorName = message.sender?.name || 'User';
+  const profile = useUserProfile(message.sender as any);
+  const authorName = profile.name;
   let contentPreview: string;
   if (message.duration) contentPreview = 'Voice Message';
   else if (message.fileName) contentPreview = message.fileName;

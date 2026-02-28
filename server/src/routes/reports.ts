@@ -24,8 +24,8 @@ router.post('/user', generalLimiter, requireAuth, async (req, res) => {
         title: "🚨 USER REPORT",
         color: 16711680, // Merah Darah
         fields: [
-          { name: "Reporter", value: `${reporter.username} (\`${reporter.id}\`)`, inline: true },
-          { name: "Reported User", value: `${reportedUser?.username || 'Unknown'} (\`${reportedUserId}\`)`, inline: true },
+          { name: "Reporter", value: `ID: \`${reporter.id}\``, inline: true },
+          { name: "Reported User", value: `ID: \`${reportedUserId}\``, inline: true },
           { name: "Reason", value: reason || 'No reason provided' },
         ],
         timestamp: new Date().toISOString(),
@@ -68,7 +68,7 @@ router.post('/', generalLimiter, requireAuth, async (req, res, _next) => {
           fields: [
             {
               name: '👤 User',
-              value: `${user.username} (ID: \`${user.id}\`)`,
+              value: `ID: \`${user.id}\``,
               inline: true
             },
             {

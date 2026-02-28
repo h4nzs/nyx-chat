@@ -17,7 +17,9 @@ async function deleteOldFile (url: string) {
     if (!url) {
       return
     }
-    if (url.includes(env.r2PublicDomain)) {
+    // [FIX] Ensure r2PublicDomain is valid before checking includes.
+    // If r2PublicDomain is empty string, url.includes('') is always true!
+    if (env.r2PublicDomain && env.r2PublicDomain.length > 0 && url.includes(env.r2PublicDomain)) {
       const key = url.replace(`${env.r2PublicDomain}/`, '')
       await deleteR2File(key)
     }
@@ -82,7 +84,11 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
         maxSize = documentMaxSize
       }
 
-      if (fileSize > maxSize) {
+      // Encryption Overhead Buffer (IV + Auth Tag + Margin)
+      // AES-GCM adds ~28 bytes. We add 1KB to be safe.
+      const ENCRYPTION_OVERHEAD = 1024; 
+      
+      if (fileSize > (maxSize + ENCRYPTION_OVERHEAD)) {
         const maxSizeMB = maxSize / (1024 * 1024)
         return res.status(400).json({
           error: `File too large. Maximum size for this file type is ${maxSizeMB}MB.`
@@ -96,7 +102,9 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
     }
 
     const key = `${targetFolder}/${req.user!.id}-${nanoid()}.${ext}`
-    const uploadUrl = await getPresignedUploadUrl(key, fileType)
+    
+    // [FIX] Force Content-Type to octet-stream because file is ENCRYPTED
+    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream')
 
     res.json({
       uploadUrl,
@@ -134,8 +142,8 @@ router.post(
         where: { id: userId },
         data: { avatarUrl: fileUrl },
         select: {
-          id: true, email: true, username: true, name: true, avatarUrl: true,
-          description: true, showEmailToOthers: true, hasCompletedOnboarding: true
+          id: true, encryptedProfile: true, avatarUrl: true,
+          hasCompletedOnboarding: true, isVerified: true
         }
       })
 
@@ -179,11 +187,11 @@ router.post(
         include: {
           participants: {
             select: {
-              user: { select: { id: true, username: true, name: true, avatarUrl: true, description: true, publicKey: true } },
+              user: { select: { id: true, encryptedProfile: true, publicKey: true } },
               role: true
             }
           },
-          creator: { select: { id: true, username: true } }
+          creator: { select: { id: true } }
         }
       })
 

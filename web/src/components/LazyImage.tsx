@@ -75,6 +75,9 @@ export default function LazyImage({
             // LEGACY: DEKRIPSI KUNCI (DENGAN AUTO-RETRY LOGIC)
             const conversation = conversations.find(c => c.id === message.conversationId);
             const isGroup = conversation ? conversation.isGroup : false;
+            
+            // [FIX] Max Retry Limit
+            const MAX_KEY_RETRIES = 5;
 
             const keyResult = await decryptMessage(
                 encryptedFileKey,
@@ -85,6 +88,12 @@ export default function LazyImage({
 
             if (keyResult.status === 'pending') {
                 if (isMounted) {
+                    if (retryCount >= MAX_KEY_RETRIES) {
+                        setDecryptionStatus('failed');
+                        setError("Key not received after retries");
+                        return; // Stop retrying
+                    }
+
                     setDecryptionStatus('waiting_for_key');
                     setError(keyResult.reason || "Key not found yet");
                     

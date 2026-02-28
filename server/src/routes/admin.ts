@@ -61,8 +61,7 @@ router.get('/banned-users', requireAuth, requireAdmin, async (req, res) => {
       where: { bannedAt: { not: null } },
       select: {
         id: true,
-        username: true,
-        email: true,
+        usernameHash: true,
         bannedAt: true,
         banReason: true
       },

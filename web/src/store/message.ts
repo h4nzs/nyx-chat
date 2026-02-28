@@ -12,6 +12,8 @@ import {
   getMyEncryptionKeyPair, 
   storeSessionKeySecurely, 
   deriveSessionKeyAsRecipient,
+  storeRatchetStateSecurely,
+  retrieveRatchetStateSecurely,
   PreKeyBundle 
 } from "@utils/crypto";
 import toast from "react-hot-toast";
@@ -22,15 +24,15 @@ import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
 import { useConnectionStore } from "./connection";
 import { getSodium } from "@lib/sodiumInitializer";
-// getPendingHeader removed as requested
 
 /**
  * Logika Dekripsi Terpusat (Single Source of Truth)
  * Menangani dekripsi teks biasa DAN kunci file.
  */
-export async function decryptMessageObject(message: Message, seenIds = new Set<string>(), depth = 0): Promise<Message> {
+export async function decryptMessageObject(message: Message, seenIds = new Set<string>(), depth = 0, options: { skipRetries?: boolean } = {}): Promise<Message> {
   // 1. Clone pesan dan tambahkan recursion guard
   const decryptedMsg = { ...message };
+  const currentUser = useAuthStore.getState().user;
   
   if (seenIds.has(decryptedMsg.id) || depth > 10) {
     decryptedMsg.repliedTo = undefined; // Putus rantai rekursif
@@ -38,8 +40,91 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
   }
   seenIds.add(decryptedMsg.id);
 
+  const conversation = useConversationStore.getState().conversations.find(c => c.id === decryptedMsg.conversationId);
+  const isGroup = conversation?.isGroup || false;
+
   try {
-    const isGroup = !decryptedMsg.sessionId;
+    // [FIX #1] SELF-MESSAGE DECRYPTION (Pesan Sendiri)
+    // Jika ini pesan saya sendiri
+    if (currentUser && decryptedMsg.senderId === currentUser.id) {
+        // Coba ambil Message Key dari brankas lokal (MK Vault) - Works for BOTH Group & 1-on-1 now!
+        const { retrieveMessageKeySecurely } = await import('@utils/crypto');
+        const mk = await retrieveMessageKeySecurely(decryptedMsg.id);
+        
+        if (mk) {
+            // Kita punya kuncinya! Dekripsi langsung secara statis.
+            const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
+            const sodium = await getSodium();
+            
+            // [FIX] Matryoshka Parsing Loop: Peel all JSON layers (X3DH, DR) until raw ciphertext
+            let cipherTextToUse = decryptedMsg.ciphertext || decryptedMsg.content;
+            
+            // Helper to unwrap
+            const unwrap = (str: string): string => {
+                 if (str && typeof str === 'string' && str.trim().startsWith('{')) {
+                     try {
+                         const p = JSON.parse(str);
+                         if (p.ciphertext) return unwrap(p.ciphertext);
+                     } catch {}
+                 }
+                 return str;
+            }
+            
+            cipherTextToUse = unwrap(cipherTextToUse!);
+
+            if (cipherTextToUse) {
+                try {
+                    const combined = sodium.from_base64(cipherTextToUse, sodium.base64_variants.URLSAFE_NO_PADDING);
+                    const nonce = combined.slice(0, 24);
+                    const encrypted = combined.slice(24);
+                    const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
+                    let plainText = sodium.to_string(decryptedBytes);
+                    
+                    // --- STRIP PROFILE KEY DARI PESAN SENDIRI ---
+                    if (plainText && plainText.trim().startsWith('{')) {
+                        try {
+                            const parsed = JSON.parse(plainText);
+                            if (parsed.profileKey) {
+                                delete parsed.profileKey;
+                                if (parsed.text !== undefined && Object.keys(parsed).length === 1) {
+                                    plainText = parsed.text;
+                                } else {
+                                    plainText = JSON.stringify(parsed);
+                                }
+                            }
+                        } catch (e) {}
+                    }
+                    
+                    decryptedMsg.content = plainText;
+                    
+                    if (decryptedMsg.content && decryptedMsg.content.startsWith('{') && decryptedMsg.content.includes('"type":"file"')) {
+                        try {
+                            const metadata = JSON.parse(decryptedMsg.content);
+                            if (metadata.type === 'file') {
+                                decryptedMsg.fileUrl = metadata.url;
+                                decryptedMsg.fileKey = metadata.key;
+                                decryptedMsg.fileName = metadata.name;
+                                decryptedMsg.fileSize = metadata.size;
+                                decryptedMsg.fileType = metadata.mimeType;
+                                decryptedMsg.content = null;
+                                decryptedMsg.isBlindAttachment = true;
+                            }
+                        } catch {}
+                    }
+                    return decryptedMsg;
+                } catch (e) {
+                    console.error("Self-decrypt failed with stored key:", e);
+                }
+            }
+        }
+        
+        // Fallback jika MK tidak ada (misal clear cache tapi DB pesan masih ada)
+        // Kita tidak bisa mendekripsi pesan sendiri tanpa MK lokal.
+        if (decryptedMsg.content && decryptedMsg.content.trim().startsWith('{')) {
+             decryptedMsg.content = "🔒 You sent this message (Encrypted)";
+        }
+        return decryptedMsg;
+    }
 
     // 2. Tentukan Payload yang Akan Didekripsi
     let contentToDecrypt = decryptedMsg.ciphertext;
@@ -48,28 +133,43 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
         contentToDecrypt = decryptedMsg.fileKey || decryptedMsg.content;
     }
 
-    if (contentToDecrypt === 'waiting_for_key' || contentToDecrypt === '[Requesting key to decrypt...]') {
+    if (!contentToDecrypt || contentToDecrypt === 'waiting_for_key' || contentToDecrypt === '[Requesting key to decrypt...]') {
         return decryptedMsg;
     }
 
-    if (!contentToDecrypt) {
-      return decryptedMsg;
+    // [FIX] PREVENT RE-DECRYPTION LOOP
+    // If content doesn't look like JSON, it's likely already plaintext.
+    if (typeof contentToDecrypt === 'string' && !contentToDecrypt.trim().startsWith('{')) {
+        return decryptedMsg;
+    }
+    
+    // Check if it's a valid encryption payload (contains specific keys)
+    try {
+        if (contentToDecrypt.includes('"header"') || contentToDecrypt.includes('"ciphertext"') || contentToDecrypt.includes('"dr"')) {
+            // It looks like a payload, proceed to decrypt
+        } else {
+            // Probably just a JSON message (like file metadata) that is already decrypted
+            return decryptedMsg;
+        }
+    } catch {
+        return decryptedMsg;
     }
 
     // -------------------------------------------------------------------------
-    // FLOW BARU: X3DH HEADER DETECTION (RECEIVING)
+    // FLOW BARU: X3DH HEADER DETECTION (RECEIVING - 1on1 Only)
     // -------------------------------------------------------------------------
     if (!isGroup && contentToDecrypt.startsWith('{') && contentToDecrypt.includes('"x3dh":')) {
        try {
            const payload = JSON.parse(contentToDecrypt);
-           if (payload.x3dh && payload.ciphertext) {
-               console.log(`[X3DH] Detected embedded header in msg ${message.id}`);
-               
-               // Extract Header
+           const { retrieveMessageKeySecurely } = await import('@utils/crypto');
+           const mk = await retrieveMessageKeySecurely(message.id);
+           
+           if (mk) {
+               contentToDecrypt = payload.ciphertext;
+           } else if (payload.x3dh && payload.ciphertext) {
                const { ik, ek, otpkId } = payload.x3dh;
                const ciphertext = payload.ciphertext;
 
-               // Derive Key
                const myIdentityKeyPair = await getMyEncryptionKeyPair();
                const { getSignedPreKeyPair } = useAuthStore.getState();
                const mySignedPreKeyPair = await getSignedPreKeyPair();
@@ -82,15 +182,35 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
                    otpkId
                );
 
-               // Store Key & Use it
-               if (message.sessionId) {
-                   await storeSessionKeySecurely(message.conversationId, message.sessionId, sessionKey);
-                   contentToDecrypt = ciphertext; // Update target content
+               let theirRatchetPublicKey: Uint8Array | undefined;
+               
+               try {
+                   const innerPayload = JSON.parse(ciphertext);
+                   if (innerPayload.dr) {
+                        const epk = innerPayload.dr.dh || innerPayload.dr.epk;
+                        if (epk) {
+                            const sodium = await getSodium();
+                            theirRatchetPublicKey = sodium.from_base64(epk, sodium.base64_variants.URLSAFE_NO_PADDING);
+                        }
+                   }
+               } catch (e) { console.error("Failed to parse inner DR header for init:", e); }
+
+               if (!theirRatchetPublicKey) {
+                   throw new Error("Cannot initialize Bob: Missing sender's ratchet key in first message.");
                }
+
+               const { worker_dr_init_bob } = await import('@lib/crypto-worker-proxy');
+               const newState = await worker_dr_init_bob({
+                   sk: sessionKey,
+                   mySignedPreKey: mySignedPreKeyPair,
+                   theirRatchetPublicKey: theirRatchetPublicKey
+               });
+
+               await storeRatchetStateSecurely(message.conversationId, newState);
+               contentToDecrypt = ciphertext; 
            }
        } catch (e) {
            console.error("[X3DH] Failed to parse/derive from header:", e);
-           // Fallback to treat as normal ciphertext if parsing fails
        }
     }
 
@@ -100,32 +220,58 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
     // 4. Eksekusi Dekripsi dengan Retry Loop
     let result;
     let attempts = 0;
-    const MAX_ATTEMPTS = 3;
+    const MAX_ATTEMPTS = options.skipRetries ? 1 : 3;
+
+    // [PHASE 3 FIX] Correct Session ID / Sender ID mapping
+    const sessionOrSenderId = isGroup ? decryptedMsg.senderId : decryptedMsg.sessionId;
 
     while (attempts < MAX_ATTEMPTS) {
         result = await decryptMessage(
-          contentToDecrypt!, // Non-null assertion guarded by check above
+          contentToDecrypt!, 
           decryptedMsg.conversationId,
           isGroup,
-          decryptedMsg.sessionId
+          sessionOrSenderId, // Updated Argument
+          decryptedMsg.id
         );
 
         if (result.status === 'success' || result.status === 'error') {
-            break; // Selesai atau error fatal
+            break; 
         }
 
-        // Jika pending, tunggu sebentar siapa tau kuncinya sedang diproses/disimpan
         if (result.status === 'pending') {
             attempts++;
             if (attempts < MAX_ATTEMPTS) {
-                await new Promise(r => setTimeout(r, 800)); // Tunggu 800ms
+                await new Promise(r => setTimeout(r, 800)); 
             }
         }
     }
 
     // 5. Proses Hasil
     if (result?.status === 'success') {
-      const plainText = result.value;
+      let plainText = result.value;
+
+      // --- EKSTRAKSI PROFILE KEY ---
+      if (plainText && plainText.trim().startsWith('{')) {
+          try {
+              const parsed = JSON.parse(plainText);
+              if (parsed.profileKey) {
+                  const { saveProfileKey } = await import('@lib/keychainDb');
+                  const { useProfileStore } = await import('@store/profile');
+                  
+                  await saveProfileKey(decryptedMsg.senderId, parsed.profileKey);
+                  useProfileStore.getState().decryptAndCache(decryptedMsg.senderId, decryptedMsg.sender?.encryptedProfile || null);
+                  
+                  delete parsed.profileKey;
+                  
+                  if (parsed.text !== undefined && Object.keys(parsed).length === 1) {
+                      plainText = parsed.text;
+                  } else {
+                      plainText = JSON.stringify(parsed);
+                  }
+              }
+          } catch (e) {}
+      }
+
       decryptedMsg.content = plainText;
 
       // BLIND ATTACHMENT PARSING
@@ -139,7 +285,7 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
             decryptedMsg.fileSize = metadata.size;
             decryptedMsg.fileType = metadata.mimeType;
             decryptedMsg.content = null; 
-            decryptedMsg.isBlindAttachment = true; // Flag as raw key
+            decryptedMsg.isBlindAttachment = true; 
           }
         } catch (e) { }
       }
@@ -148,13 +294,13 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
       console.warn(`[Decrypt] Failed for msg ${decryptedMsg.id}:`, result?.error);
-      decryptedMsg.content = 'waiting_for_key'; // Retryable state
+      decryptedMsg.content = 'waiting_for_key'; 
       decryptedMsg.type = 'SYSTEM'; 
     }
 
     // 6. Dekripsi Replied Message
     if (decryptedMsg.repliedTo) {
-        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1);
+        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1, options);
     }
 
     return decryptedMsg;
@@ -235,7 +381,7 @@ type Actions = {
   loadMessagesForConversation: (id: string) => Promise<void>;
   loadPreviousMessages: (conversationId: string) => Promise<void>;
   addOptimisticMessage: (conversationId: string, message: Message) => void;
-  addIncomingMessage: (conversationId: string, message: Message) => void;
+  addIncomingMessage: (conversationId: string, message: Message) => Promise<Message>;
   replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => void;
   removeMessage: (conversationId: string, messageId: string) => void;
   updateMessage: (conversationId: string, messageId: string, updates: Partial<Message>) => void;
@@ -288,7 +434,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const { user } = useAuthStore.getState();
       if (!user) return;
 
-      // Optimistic Update
       const timestamp = Date.now();
       const tempReactionId = `temp_react_${timestamp}`;
       const optimisticReaction = {
@@ -302,14 +447,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       };
       get().addLocalReaction(conversationId, messageId, optimisticReaction);
 
-      // Send as Message
       const metadata = {
           type: 'reaction',
           targetMessageId: messageId,
           emoji
       };
       
-      // Use timestamp as tempId to correlate socket response
       await get().sendMessage(conversationId, {
           content: JSON.stringify(metadata)
       }, timestamp);
@@ -318,8 +461,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   sendMessage: async (conversationId, data, tempId?: number) => {
     const { user, hasRestoredKeys } = useAuthStore.getState();
     if (!user) return;
-
-    console.log(`[SendMessage] START: conversationId=${conversationId}, tempId=${tempId}`);
 
     if (!hasRestoredKeys) {
       toast.error("You must restore your keys from your recovery phrase before you can send messages.");
@@ -333,7 +474,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       return;
     }
     const isGroup = conversation.isGroup;
-    console.log(`[SendMessage] Conversation FOUND. isGroup=${isGroup}`);
 
     if (isGroup && useConnectionStore.getState().status === 'connected') {
       try {
@@ -347,11 +487,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     }
 
     const actualTempId = tempId !== undefined ? tempId : Date.now();
-    
-    // Use helper to detect reaction
     const isReactionPayload = !!parseReaction(data.content);
 
-    // Create optimistic message ONLY if it is NOT a reaction
     if (!isReactionPayload) {
         const optimisticMessage: Message = {
             ...data,
@@ -365,7 +502,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             reactions: [],
             statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${actualTempId}`, id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
             status: 'SENDING', 
-            // [FIX] Include full repliedTo object for optimistic UI
             repliedTo: data.repliedTo,
         };
 
@@ -386,78 +522,86 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     }
 
     try {
-      let ciphertext = '', sessionId: string | undefined;
+      let ciphertext = '';
       let x3dhHeader: any = null;
-      let encryptionSession: { sessionId: string; key: Uint8Array } | undefined;
 
-      // LAZY SESSION INITIALIZATION (X3DH) - SINGLE SOURCE OF TRUTH
-      // No more getPendingHeader check here.
       if (!isGroup && data.content) {
-          console.log(`[SendMessage] Checking session key for private chat...`);
-          const latestKey = await retrieveLatestSessionKeySecurely(conversationId);
-          console.log(`[SendMessage] Latest Key:`, latestKey ? 'FOUND' : 'NULL');
-          
-          if (!latestKey) {
-             console.log(`[X3DH] No session key found for ${conversationId}. Initiating handshake...`);
-             // Fix: Use p.id instead of p.userId
+          const state = await retrieveRatchetStateSecurely(conversationId);
+          if (!state) {
              const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
-             console.log(`[X3DH] Found peerId: ${peerId} (My ID: ${user.id})`);
-             
              if (peerId) {
-                 // 1. Fetch Bundle
                  const theirBundle = await authFetch<any>(`/api/keys/prekey-bundle/${peerId}`);
-                 console.log(`[X3DH] Bundle fetched for ${peerId}`);
-                 
-                 // 2. Establish Session
                  const myKeyPair = await getMyEncryptionKeyPair();
                  const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
-                 
-                 // 3. Generate Session ID & Store Self-Key
                  const sodium = await getSodium();
-                 sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`;
-                 await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
-                 console.log(`[X3DH] Session stored: ${sessionId}`);
+                 
+                 const { worker_dr_init_alice } = await import('@lib/crypto-worker-proxy');
+                 const newState = await worker_dr_init_alice({
+                     sk: sessionKey,
+                     theirSignedPreKeyPublic: sodium.from_base64(theirBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING)
+                 });
+                 
+                 await storeRatchetStateSecurely(conversationId, newState);
 
-                 encryptionSession = { sessionId, key: sessionKey };
-
-                 // 4. Prepare Header for Peer
                  x3dhHeader = {
                      ik: sodium.to_base64(myKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
                      ek: ephemeralPublicKey,
                      otpkId: otpkId
                  };
-                 
-                 console.log(`[X3DH] Handshake prepared (Lazy). Header attached to message.`);
              } else {
-                 console.error(`[X3DH] Peer not found in participants for ${conversationId}. Participants:`, conversation.participants);
+                 console.error(`[X3DH] Peer not found in participants for ${conversationId}.`);
                  toast.error("Encryption failed: Cannot identify recipient.");
-                 return; // STOP HERE
+                 return;
              }
-          } else {
-             // Reuse existing session
-             console.log(`[X3DH] Reusing existing session ${latestKey.sessionId}`);
-             sessionId = latestKey.sessionId;
-             encryptionSession = latestKey;
           }
       }
 
-      if (data.content) {
-        if (!isGroup && !encryptionSession) {
-            console.error("[Crypto] Attempted to encrypt without session:", { conversationId, isGroup });
-            throw new Error("Encryption setup failed. Please try reloading the chat.");
+      let mkToStore: Uint8Array | undefined;
+      let contentToEncrypt = data.content;
+
+      if (contentToEncrypt) {
+        try {
+            const profileKey = await import('@lib/keychainDb').then(m => m.getProfileKey(user.id));
+            if (profileKey) {
+                let parsedObj: any = null;
+                if (contentToEncrypt.trim().startsWith('{')) {
+                    try { parsedObj = JSON.parse(contentToEncrypt); } catch (e) {}
+                }
+                
+                if (parsedObj && typeof parsedObj === 'object') {
+                    parsedObj.profileKey = profileKey;
+                    contentToEncrypt = JSON.stringify(parsedObj);
+                } else {
+                    contentToEncrypt = JSON.stringify({ text: contentToEncrypt, profileKey });
+                }
+            }
+        } catch (e) {
+            console.error("Failed to inject profile key", e);
         }
 
-        // Encrypt content
-        const result = await encryptMessage(data.content, conversationId, isGroup, encryptionSession);
+        const result = await encryptMessage(contentToEncrypt, conversationId, isGroup, undefined, `temp_${actualTempId}`);
         ciphertext = result.ciphertext;
-        if (!sessionId) sessionId = result.sessionId; 
+        
+        // [FIX PERSISTENCE] Store MK for ALL chats (Group + 1on1)
+        if (result.mk) {
+             mkToStore = result.mk;
+             await import('@utils/crypto').then(({ storeMessageKeySecurely }) => 
+                 storeMessageKeySecurely(`temp_${actualTempId}`, mkToStore!)
+             );
+        }
+        
+        if (!isGroup && result.drHeader) {
+            ciphertext = JSON.stringify({
+                dr: result.drHeader,
+                ciphertext: ciphertext
+            });
+        }
       }
       
-      // EMBED HEADER IF NEW SESSION
       if (x3dhHeader) {
           const payloadJson = JSON.stringify({
               x3dh: x3dhHeader,
-              ciphertext: ciphertext
+              ciphertext: ciphertext 
           });
           ciphertext = payloadJson;
       }
@@ -465,7 +609,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const payload = {
           ...data,
           content: ciphertext,
-          sessionId,
+          sessionId: undefined, // [PHASE 3 FIX] No session ID needed for group anymore, or managed by logic
           fileKey: undefined, fileName: undefined, fileType: undefined, fileSize: undefined
       };
 
@@ -473,18 +617,44 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const isConnected = socket?.connected;
 
       if (!isConnected && !isReactionPayload) {
-        // [CRITICAL FIX] Use PAYLOAD (Encrypted), NOT data (Plaintext)
         const queueMsg = { ...payload, id: `temp_${actualTempId}`, tempId: actualTempId, conversationId, senderId: user.id, createdAt: new Date().toISOString() } as Message;
         await addToQueue(conversationId, queueMsg, actualTempId);
         return;
       }
 
       socket?.emit("message:send", { ...payload, conversationId, tempId: actualTempId }, async (res: { ok: boolean, msg?: Message, error?: string }) => {
-        if (!isReactionPayload) {
-            if (res.ok && res.msg && tempId !== undefined) {
-              get().replaceOptimisticMessage(conversationId, actualTempId, { ...res.msg, status: 'SENT' });
-            } else if (!res.ok) {
-              get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
+        if (res.ok && res.msg) {
+            if (!isReactionPayload) {
+                get().replaceOptimisticMessage(conversationId, actualTempId, { ...res.msg, status: 'SENT' });
+            } else {
+                const reactionData = parseReaction(contentToEncrypt);
+                if (reactionData) {
+                    const tempReactionId = `temp_react_${actualTempId}`;
+                    get().replaceOptimisticReaction(conversationId, reactionData.targetMessageId, tempReactionId, {
+                        ...reactionData,
+                        id: res.msg.id, 
+                        userId: user.id,
+                        createdAt: res.msg.createdAt,
+                        user: user,
+                        isMessage: true
+                    });
+                }
+            }
+              
+            const msgId = res.msg.id;
+            import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
+                const mk = await retrieveMessageKeySecurely(`temp_${actualTempId}`);
+                if (mk) {
+                    await storeMessageKeySecurely(msgId, mk);
+                    await deleteMessageKeySecurely(`temp_${actualTempId}`);
+                }
+            }).catch(console.error);
+              
+        } else if (!res.ok) {
+            if (!isReactionPayload) {
+                get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
+            } else {
+                toast.error("Failed to send reaction");
             }
         }
       });
@@ -508,14 +678,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const { tempId, conversationId, data, attempt } = item;
       
       if (attempt > 5) {
-        // Give up after 5 retries
         console.warn(`[Queue] Dropping message ${tempId} after too many retries.`);
         await removeFromQueue(tempId);
         get().updateMessage(conversationId, `temp_${tempId}`, { error: true, status: 'FAILED' });
         continue;
       }
 
-      // Update UI to show we are trying again
       get().updateMessage(conversationId, `temp_${tempId}`, { status: 'SENDING', error: false });
 
       socket.emit("message:send", data, async (res: { ok: boolean, msg?: Message, error?: string }) => {
@@ -525,12 +693,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         } else {
           console.error(`[Queue] Failed to send queued message ${tempId}:`, res.error);
           await updateQueueAttempt(tempId, attempt + 1);
-          // Keep it in queue, but maybe mark visual error if needed?
-          // For now, let it stay 'SENDING' or maybe 'FAILED' until next retry
         }
       });
 
-      // Small delay to prevent flooding
       await new Promise(r => setTimeout(r, 200)); 
     }
   },
@@ -555,7 +720,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const uploadId = addActivity(activity);
     const tempId = Date.now();
     
-    // 1. Create optimistic message
     const optimisticMessage: Message = {
       id: `temp_${tempId}`,
       tempId: tempId,
@@ -569,7 +733,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       fileName: file.name,
       fileSize: file.size,
       fileType: file.type,
-      fileUrl: URL.createObjectURL(file) // Use local blob URL for instant preview
+      fileUrl: URL.createObjectURL(file) 
     };
     get().addOptimisticMessage(conversationId, optimisticMessage);
     useConversationStore.getState().updateConversationLastMessage(conversationId, optimisticMessage);
@@ -577,51 +741,30 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     try {
       updateActivity(uploadId, { progress: 5 });
 
-      // 2. Encrypt file content and get the key
       const { encryptedBlob, key: fileKey } = await encryptFile(file);
-      
-      // 3. Encrypt the file key (using conversation session)
-      // Note: We don't send this separately anymore, but we need it for the JSON payload
-      // Wait, we can't use `encryptMessage` here because it returns { ciphertext, sessionId }
-      // AND we want to put this ciphertext INSIDE the JSON payload which is THEN encrypted again?
-      // NO.
-      // The JSON payload should contain the KEY that decrypts the file.
-      // If we put the PLAIN key in the JSON, and then ENCRYPT the JSON with the session key, is it safe?
-      // YES. The session key protects the JSON. The JSON protects the file key. The file key protects the file.
-      // Double encryption is fine.
-      // BUT, if we want to be super standard:
-      // We can just put the `fileKey` (base64) into the JSON.
-      // Then `sendMessage` encrypts the WHOLE JSON string.
-      // So the `fileKey` is never exposed.
       
       updateActivity(uploadId, { progress: 20 });
 
-      // 4. Get Presigned URL
       const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
           method: 'POST',
           body: JSON.stringify({
-              fileName: file.name,
-              fileType: file.type || 'application/octet-stream', // Use octet-stream for encrypted? Or keep original mime for validation?
-              // Ideally we upload encrypted blob, so mime might be application/octet-stream
-              // But R2 validation checks extension.
-              // Let's keep original fileType for presigned request so server validation passes,
-              // but upload the encrypted blob.
+              fileName: file.name, 
+              fileType: 'application/octet-stream', 
               folder: 'attachments',
-              fileSize: file.size // Approximate
+              fileSize: encryptedBlob.size 
           })
       });
 
       updateActivity(uploadId, { progress: 30 });
 
-      // 5. Upload to R2 (PUT)
       await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', presignedRes.uploadUrl, true);
-          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream'); // R2 requires matching content-type
+          xhr.setRequestHeader('Content-Type', 'application/octet-stream'); 
           
           xhr.upload.onprogress = (e) => {
               if (e.lengthComputable) {
-                  const percentComplete = (e.loaded / e.total) * 60; // Max 60% of total progress bar (30+60=90)
+                  const percentComplete = (e.loaded / e.total) * 60; 
                   updateActivity(uploadId, { progress: 30 + percentComplete });
               }
           };
@@ -637,20 +780,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       updateActivity(uploadId, { progress: 95 });
 
-      // 6. Create Metadata Payload
       const metadata = {
           type: 'file',
           url: presignedRes.publicUrl,
-          key: fileKey, // Plain key, will be encrypted by sendMessage
+          key: fileKey, 
           name: file.name,
           size: file.size,
           mimeType: file.type
       };
 
-      // 7. Send as Message
       await get().sendMessage(conversationId, {
           content: JSON.stringify(metadata),
-          // Store these for optimistic local use (but sendMessage will override content with ciphertext)
           fileName: file.name,
           fileType: file.type
       }, tempId);
@@ -662,7 +802,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       removeActivity(uploadId);
       console.error("File upload failed:", error);
       toast.error(`Failed to upload ${file.name}.`);
-      // Mark optimistic message as failed
       set(state => ({
         messages: {
           ...state.messages,
@@ -678,14 +817,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     if (hasRestoredKeys) {
       try {
-        // Find the conversation first to determine its type
         const conversation = useConversationStore.getState().conversations.find(c => c.id === id);
-        // Key distribution logic is now handled by sendMessage, but we still need to handle the 1-on-1 case.
-        // [PRIVACY FIX] Disable server-side ratchet on load. 
-        // We want to force Client-Side X3DH (Lazy Init) in sendMessage for the first message.
-        // if (conversation && !conversation.isGroup) {
-        //   await ensureAndRatchetSession(id);
-        // }
       } catch (sessionError) {
         console.error("Failed to establish session, decryption may fail:", sessionError);
       }
@@ -697,7 +829,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const fetchedMessages = res.items || [];
       const processedMessages: Message[] = [];
       for (const message of fetchedMessages) {
-        processedMessages.push(await decryptMessageObject(message));
+        processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
       }
       set(state => {
         const existingMessages = state.messages[id] || [];
@@ -722,14 +854,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: true } }));
     try {
       const res = await api<{ items: Message[] }>(`/api/messages/${conversationId}?cursor=${oldestMessage.id}`);
-      const decryptedItems = await Promise.all((res.items || []).map(m => decryptMessageObject(m)));
+      const decryptedItems = await Promise.all((res.items || []).map(m => decryptMessageObject(m, undefined, 0, { skipRetries: true })));
       
       set(state => {
         const existingMessages = state.messages[conversationId] || [];
         const allMessages = processMessagesAndReactions(decryptedItems, existingMessages);
 
-        if (decryptedItems.length < 50) set(state => ({ hasMore: { ...state.hasMore, [conversationId]: false } }));
-        return { messages: { ...state.messages, [conversationId]: allMessages } };
+        const newState: any = { messages: { ...state.messages, [conversationId]: allMessages } };
+
+        if (decryptedItems.length < 50) {
+            newState.hasMore = { ...state.hasMore, [conversationId]: false };
+        }
+        
+        return newState;
       });
     } catch (error) {
       console.error("Failed to load previous messages", error);
@@ -741,7 +878,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   addOptimisticMessage: (conversationId, message) => {
     set(state => {
       const currentMessages = state.messages[conversationId] || [];
-      // Prevent duplicates based on ID or tempId
       if (currentMessages.some(m => m.id === message.id || (m.tempId && message.tempId && m.tempId === message.tempId))) {
         return state;
       }
@@ -753,15 +889,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const currentUser = useAuthStore.getState().user;
       let decrypted = message;
 
-      // [FIX] Self-Echo Handling:
-      // If message is from ME, and I have an optimistic version, 
-      // DON'T decrypt (I don't have the private key for my own X3DH header).
-      // Use the local content instead.
       if (currentUser && message.senderId === currentUser.id && message.tempId) {
-          // [FIX] Loose comparison for tempId (String vs Number issue)
           const optimistic = get().messages[conversationId]?.find(m => m.tempId && String(m.tempId) === String(message.tempId));
           if (optimistic) {
-              // Copy content/file data from optimistic message
               decrypted = {
                   ...message,
                   content: optimistic.content,
@@ -770,21 +900,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   fileName: optimistic.fileName,
                   fileSize: optimistic.fileSize,
                   fileType: optimistic.fileType,
-                  // Keep server metadata
                   id: message.id,
                   createdAt: message.createdAt,
                   statuses: message.statuses
               };
           } else {
-              // Fallback: Try decrypt (might fail if X3DH)
               decrypted = await decryptMessageObject(message);
           }
       } else {
-          // Normal inbound message
           decrypted = await decryptMessageObject(message);
       }
       
-      // Check if reaction
       const reactionPayload = parseReaction(decrypted.content);
       
       if (reactionPayload) {
@@ -798,7 +924,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               isMessage: true
           };
           
-          // CRITICAL FIX: Only replace optimistic reaction if WE are the sender
           if (message.tempId && currentUser && message.senderId === currentUser.id) {
               const optimisticId = `temp_react_${message.tempId}`;
               get().replaceOptimisticReaction(conversationId, reaction.messageId, optimisticId, reaction);
@@ -806,7 +931,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               get().addLocalReaction(conversationId, reaction.messageId, reaction);
           }
       } else {
-          // FIX: If this is our own message with a tempId, replace the optimistic one
           if (message.tempId && currentUser && message.senderId === currentUser.id) {
               get().replaceOptimisticMessage(conversationId, message.tempId, decrypted);
           } else {
@@ -817,12 +941,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               });
           }
       }
+      
+      return decrypted;
   },
 
   replaceOptimisticMessage: (conversationId, tempId, newMessage) => set(state => {
-    // [FIX] Don't revoke Blob URL yet, as we might copy it to the new message for smooth transition.
-    // Let browser GC handle it on navigation/refresh.
-    
     return {
       messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => (m.tempId && String(m.tempId) === String(tempId)) ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m) }
     };
@@ -830,15 +953,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   removeMessage: (conversationId, messageId) => set(state => {
     const messages = state.messages[conversationId] || [];
     
-    // 1. Remove from main list (if it's a regular message)
     const messageToRemove = messages.find(m => m.id === messageId);
     if (messageToRemove?.fileUrl?.startsWith('blob:')) {
       URL.revokeObjectURL(messageToRemove.fileUrl);
     }
     const filteredMessages = messages.filter(m => m.id !== messageId);
 
-    // 2. Remove from nested reactions (if it's a reaction message)
-    // This handles the "Reaction as Message" deletion sync
     const updatedMessages = filteredMessages.map(m => {
         if (m.reactions && m.reactions.some(r => r.id === messageId)) {
             return {
@@ -864,7 +984,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       [conversationId]: (state.messages[conversationId] || []).map(m => {
         if (m.id === messageId) {
           const newReactions = [...(m.reactions || [])];
-          // Prevent duplicates
           if (!newReactions.some(r => r.id === reaction.id)) {
             newReactions.push(reaction);
           }
@@ -894,7 +1013,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   updateSenderDetails: (user) => set(state => {
     const newMessages = { ...state.messages };
     for (const convoId in newMessages) {
-      newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id, name: user.name || '', username: user.username || '' }), ...user } } : m) as Message[];
+      newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id }), ...user } } : m) as Message[];
     }
     return { messages: newMessages };
   }),
@@ -925,18 +1044,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     set(state => ({
       messages: { ...state.messages, [conversationId]: state.messages[conversationId]?.filter(m => m.tempId !== tempId) || [] },
     }));
-    // Use the original content from the 'preview' field for the retry and preserve the original tempId
     get().sendMessage(conversationId, { content: preview, fileUrl, fileName, fileType, fileSize, repliedToId }, tempId);
   },
 
-  // Resend all pending messages (for sync after reconnect)
   resendPendingMessages: () => {
     const state = get();
     Object.entries(state.messages).forEach(([conversationId, messages]) => {
       messages
-        .filter(m => m.optimistic && !m.error) // Only optimistic messages that haven't failed yet
+        .filter(m => m.optimistic && !m.error)
         .forEach(m => {
-          // Retry sending the message
           get().retrySendMessage(m);
         });
     });
@@ -949,7 +1065,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   reDecryptPendingMessages: async (conversationId: string) => {
-    // Add a small delay to ensure IndexedDB consistency after key storage
     await new Promise(r => setTimeout(r, 1000));
 
     const state = get();
@@ -966,16 +1081,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const reDecryptedMessages = await Promise.all(
       pendingMessages.map(async (msg) => {
-          // Pass the message object directly. decryptMessageObject will handle ciphertext priority.
           return await decryptMessageObject(msg);
       })
     );
 
     const messageMap = new Map(conversationMessages.map(m => [m.id, m]));
     reDecryptedMessages.forEach(m => {
-        // Only update if we actually managed to decrypt it or status changed
         if (m.content !== 'waiting_for_key' && m.content !== '[Requesting key to decrypt...]') {
-             // Process potential reactions that were stuck in pending state
              const payload = parseReaction(m.content);
              if (payload) {
                  get().addLocalReaction(conversationId, payload.targetMessageId, {
@@ -987,13 +1099,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                      user: m.sender,
                      isMessage: true
                  });
-                 // Don't add reaction message to the list (filter it out)
                  messageMap.delete(m.id);
                  return;
              }
              messageMap.set(m.id, m);
         } else {
-             // Still pending, keep it in map
              messageMap.set(m.id, m);
         }
     });

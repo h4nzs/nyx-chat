@@ -1,91 +1,83 @@
-# GEMINI.md
+# NYX Chat Lite - Developer Context
 
 ## Project Overview
 
-This project is a full-stack, real-time messaging application called NYX. It prioritizes security with end-to-end encryption (E2EE) and features a modern, responsive user interface.
+NYX Chat Lite is a secure, zero-knowledge messaging application designed with a "Privacy First" architecture. It operates on a **Pure Anonymity** model, decoupling digital identity from physical identity by removing dependencies on email and phone numbers.
 
-*   **Frontend:** The frontend is a single-page application built with **React** and **Vite**. It uses **TypeScript** for static typing, **Zustand** for state management, and **Tailwind CSS** for styling. The UI is a custom Neumorphic design with light and dark modes.
-*   **Backend:** The backend is a **Node.js** server using the **Express.js** framework. It uses **Prisma** as a database ORM to interact with a **PostgreSQL** database. Real-time communication is handled with **Socket.IO**.
-*   **Security:** End-to-end encryption is implemented using the `libsodium-wrappers` library. The authentication system is based on the Signal Protocol (X3DH) for secure key exchange.
+**Core Philosophy:**
+*   **Zero-Knowledge:** The server cannot read messages or view user profiles.
+*   **Pure Anonymity:** No PII storage. Usernames are hashed (Blind Indexing).
+*   **Local-First:** Chat history and private keys are stored exclusively on the user's device (IndexedDB).
+*   **Trust-Tier System:** Anti-spam mechanism using "Sandbox" (unverified) and "VIP" (Verified via WebAuthn/PoW) tiers.
 
-## Building and Running
+## Tech Stack
 
-### Prerequisites
+**Monorepo Structure (pnpm workspaces):**
+*   `server/`: Backend API and WebSocket server.
+*   `web/`: Frontend React application.
 
-*   Node.js (v18+)
-*   pnpm (or npm/yarn)
+**Frontend (`web`):**
+*   **Framework:** React 18 + Vite
+*   **Language:** TypeScript
+*   **State Management:** Zustand
+*   **Styling:** Tailwind CSS (Custom "Industrial Neumorphism" design system)
+*   **Cryptography:** `libsodium-wrappers` + Web Crypto API (running in a dedicated Web Worker)
+*   **Storage:** IndexedDB (`idb`, `idb-keyval`) for "The Vault" (Keys & Messages)
+*   **PWA:** Vite PWA plugin
+
+**Backend (`server`):**
+*   **Runtime:** Node.js (Express)
+*   **Language:** TypeScript
+*   **Database:** PostgreSQL (via Prisma ORM)
+*   **Real-time:** Socket.IO (with Redis Adapter)
+*   **Caching/Queue:** Redis (Rate limiting, Presence, PoW Challenges)
+*   **Storage:** Cloudflare R2 (Encrypted binary blobs only) using AWS SDK v3
+*   **Auth:** WebAuthn (`@simplewebauthn/server`), Argon2id hashing
+
+## Key Architecture Concepts
+
+1.  **Blind Indexing:** Usernames are hashed client-side (Argon2id) before being sent to the server. The server stores `usernameHash` and performs exact-match lookups.
+2.  **Profile Encryption:** User profiles (Name, Bio, Avatar) are encrypted client-side with a symmetric `ProfileKey`. This key is shared via the Double Ratchet header in messages. The server stores only `encryptedProfile`.
+3.  **Double Ratchet E2EE:** Implementation of the Signal Protocol (X3DH + Double Ratchet) for message encryption.
+4.  **Device Migration Tunnel:** Direct WebSocket tunnel for transferring data between devices via QR code (Zero-Knowledge migration).
+5.  **WebAuthn PRF:** Uses the PRF extension to allow biometric unlocking of the local key vault.
+
+## Build and Run
+
+**Prerequisites:**
+*   Node.js v18+
+*   pnpm
 *   PostgreSQL
+*   Redis
 
-### All-in-One Development
+**Root Commands:**
+*   `pnpm install`: Install dependencies for all workspaces.
+*   `pnpm run build`: Build both server and web projects.
+*   `pnpm run test`: Run tests for both projects.
+*   `./start-dev.sh`: Helper script to start both frontend and backend in development mode.
 
-To run both the frontend and backend servers concurrently, use the provided shell script from the project root:
+**Server Commands (`cd server`):**
+*   `pnpm run dev`: Start development server (`tsx watch`).
+*   `pnpm run build`: Build TypeScript to `dist/`.
+*   `pnpm run start`: Run production server.
+*   `npx prisma migrate dev`: Run database migrations.
+*   `npx prisma studio`: Open Prisma Studio.
 
-```bash
-./start-dev.sh
-```
-
-### Manual Setup
-
-**Backend (Server):**
-
-1.  **Navigate to the server directory:**
-    ```bash
-    cd server
-    ```
-2.  **Install dependencies:**
-    ```bash
-    pnpm install
-    ```
-3.  **Create a `.env` file** in the `server` directory with the following content, replacing the placeholder values:
-    ```env
-    # PostgreSQL connection URL
-    DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public"
-
-    # JWT secret for signing tokens
-    JWT_SECRET="your-super-secret-jwt-key"
-
-    # Port for the server to run on
-    PORT=4000
-
-    # The origin URL of your frontend application
-    CORS_ORIGIN="http://localhost:5173"
-    ```
-4.  **Apply database migrations:**
-    ```bash
-    npx prisma migrate dev
-    ```
-5.  **Run the development server:**
-    ```bash
-    pnpm run dev
-    ```
-
-**Frontend (Web):**
-
-1.  **Navigate to the web directory:**
-    ```bash
-    cd web
-    ```
-2.  **Install dependencies:**
-    ```bash
-    pnpm install
-    ```
-3.  **Run the development server:**
-    ```bash
-    pnpm run dev
-    ```
-    The application will be available at `http://localhost:5173`.
-
-### Key Commands
-
-*   `pnpm run dev`: Starts the development server.
-*   `pnpm run build`: Builds the application for production.
-*   `pnpm run test`: Runs the tests.
-*   `npx prisma migrate dev`: Applies database migrations.
-*   `pnpm run seed`: Seeds the database with initial data (in the `server` directory).
+**Web Commands (`cd web`):**
+*   `pnpm run dev`: Start Vite development server.
+*   `pnpm run build`: Build for production.
+*   `pnpm run test`: Run Vitest tests.
 
 ## Development Conventions
 
-*   **Code Style:** The project uses ESLint for code linting. Run `pnpm run lint` in the `web` directory to check for linting errors.
-*   **Testing:** The frontend uses `vitest` for unit and integration testing. The backend uses `supertest` for API testing.
-*   **Branching:** The `README.md` suggests a feature branching workflow for contributions (`feature/AmazingFeature`).
-*   **Commits:** Commit messages should be clear and descriptive.
+*   **Security:**
+    *   **NEVER** log sensitive data (keys, plaintext messages) to the console.
+    *   Use `sodium.memzero()` to wipe sensitive data from memory in `crypto.worker.ts`.
+    *   Respect the strict Content Security Policy (CSP).
+*   **Code Style:**
+    *   Follow TypeScript best practices (strict types).
+    *   Use `eslint` and `prettier` (configured in `package.json`).
+*   **State Management:**
+    *   Use specific Zustand stores (e.g., `useAuthStore`, `useMessageStore`) rather than a monolithic store.
+*   **Cryptography:**
+    *   All heavy crypto operations **MUST** be performed in the Web Worker (`crypto.worker.ts`) via the proxy (`crypto-worker-proxy.ts`) to avoid blocking the main thread.

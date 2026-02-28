@@ -23,6 +23,7 @@ import { useMessageStore } from '@store/message';
 import toast from 'react-hot-toast';
 import MarkdownMessage from './MarkdownMessage';
 import MessageBubble from "./MessageBubble"; // Import the external component
+import { useUserProfile } from '@hooks/useUserProfile';
 
 const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
   const meId = useAuthStore((s) => s.user?.id);
@@ -91,6 +92,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     removeMessage: state.removeMessage,
     addOptimisticMessage: state.addOptimisticMessage,
   }));
+  const profile = useUserProfile(message.sender as any);
   const mine = message.senderId === meId;
   const ref = useRef<HTMLDivElement>(null);
 
@@ -178,7 +180,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
         <div className="w-8 flex-shrink-0 mb-1 self-end">
           {isLastInSequence && (
             <img 
-              src={toAbsoluteUrl(message.sender?.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${message.sender?.name || 'U'}`} 
+              src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
               alt="Avatar" 
               className="w-8 h-8 rounded-full bg-secondary object-cover shadow-sm cursor-pointer hover:scale-105 transition-transform" 
               // Note: Avatar click handler is usually handled by parent or could be passed down. 
@@ -190,9 +192,9 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
       
       <div className={`flex items-end gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
         <div className={clsx("flex flex-col max-w-[85%] sm:max-w-[70%]", mine ? "items-end" : "items-start")}>
-          {!mine && isGroup && message.sender?.name && isFirstInSequence && (
+          {!mine && isGroup && profile.name && isFirstInSequence && (
             <p className="text-[10px] font-bold mb-1 ml-1 user-color-name cursor-pointer hover:underline uppercase tracking-wide" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>
-              {message.sender.name}
+              {profile.name}
             </p>
           )}
           

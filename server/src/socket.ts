@@ -29,6 +29,7 @@ interface MessageSendPayload {
   content: string;
   sessionId?: string;
   tempId: number;
+  expiresAt?: string; // New field for Disappearing Messages
 }
 
 interface PushSubscribePayload {
@@ -169,7 +170,7 @@ export function registerSocket(httpServer: HttpServer) {
       // OPTIMIZATION: Select publicKey here
       const user = await prisma.user.findUnique({ 
         where: { id: userId },
-        select: { id: true, email: true, username: true, publicKey: true }
+        select: { id: true, publicKey: true }
       });
 
       if (!user) {
@@ -179,8 +180,6 @@ export function registerSocket(httpServer: HttpServer) {
 
       socket.user = { 
         id: user.id, 
-        email: user.email, 
-        username: user.username,
         publicKey: user.publicKey 
       };
       next();
@@ -230,46 +229,6 @@ export function registerSocket(httpServer: HttpServer) {
         socket.emit("presence:init", onlineUserIds);
         socket.broadcast.emit("presence:user_joined", userId);
     }
-
-    // --- FITUR LINKING DEVICE (Sisi Scanner/HP Lama) ---
-    socket.on("linking:send_payload", async (data: { roomId: string, encryptedMasterKey: string }) => {
-      
-      try {
-        const user = socket.user!;
-
-        // 1. Generate Token Baru untuk device baru
-        // Kita pakai fungsi signAccessToken agar token valid & fresh
-        const accessToken = signAccessToken({
-            id: user.id,
-            email: user.email,
-            username: user.username
-        });
-
-        const jti = newJti();
-        const refreshToken = signAccessToken({ sub: user.id, jti }, { expiresIn: "30d" });
-
-        await prisma.refreshToken.create({
-          data: { 
-            jti, 
-            userId: user.id, 
-            expiresAt: refreshExpiryDate(), 
-            ipAddress: socket.handshake.address, 
-            userAgent: socket.handshake.headers['user-agent'] as string 
-          },
-        });
-
-        // 2. Kirim paket lengkap ke Device Baru (Guest di Room)
-        io.to(`linking:${data.roomId}`).emit("auth:linking_success", {
-            accessToken, 
-            refreshToken,
-            user,           
-            encryptedMasterKey: data.encryptedMasterKey 
-        });
-
-      } catch (e) {
-        console.error("[Linking] Failed to sign token or send payload:", e);
-      }
-    });
 
     // --- RATE LIMITER HELPER ---
     const checkRateLimit = async (userId: string, event: string, limit: number, windowSeconds: number): Promise<boolean> => {
@@ -358,12 +317,24 @@ export function registerSocket(httpServer: HttpServer) {
     });
 
     socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: Message, error?: string }) => void) => {
-      // 1. Rate Limit
+      // 1. Sandbox Rate Limit (Strict)
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
+      if (!user?.isVerified) {
+          const key = `sandbox:msg:${userId}`;
+          const count = await redisClient.incr(key);
+          if (count === 1) await redisClient.expire(key, 60);
+          
+          if (count > 5) {
+              return callback?.({ ok: false, error: "SANDBOX_LIMIT_REACHED: Max 5 messages per minute. Verify account to unlock." });
+          }
+      }
+
+      // 2. Standard Rate Limit
       if (!await checkRateLimit(userId, 'message', 15, 60)) { // 15 messages / minute
          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
       }
 
-      const { conversationId, content, sessionId, tempId } = message;
+      const { conversationId, content, sessionId, tempId, expiresAt } = message;
 
       if (!content || typeof content !== 'string' || content.length > 10000) {
         return callback?.({ ok: false, error: "Invalid message content." });
@@ -379,8 +350,14 @@ export function registerSocket(httpServer: HttpServer) {
         }
         
         const newMessage = await prisma.message.create({
-          data: { conversationId, senderId: userId, content, sessionId },
-          include: { sender: { select: { id: true, name: true, avatarUrl: true, username: true } } }
+          data: { 
+              conversationId, 
+              senderId: userId, 
+              content, 
+              sessionId,
+              expiresAt: expiresAt ? new Date(expiresAt) : null // Save expiration
+          },
+          include: { sender: { select: { id: true, encryptedProfile: true } } }
         });
         
         const finalMessage = { ...newMessage, tempId };
@@ -390,7 +367,7 @@ export function registerSocket(httpServer: HttpServer) {
           
           if (participant.userId !== userId) {
              sendPushNotification(participant.userId, {
-                 title: newMessage.sender.name || newMessage.sender.username,
+                 title: "Encrypted Message",
                  body: "🔒 1 New Secure Message", 
                  conversationId: conversationId
              }).catch(console.error);
@@ -541,6 +518,19 @@ export function registerSocket(httpServer: HttpServer) {
         type: 'SESSION_KEY',
         senderId: userId
       });
+    });
+
+    // === DEVICE MIGRATION TUNNEL ===
+    socket.on('migration:join', (roomId: string) => {
+      socket.join(roomId);
+    });
+
+    socket.on('migration:start', (data: { roomId: string, totalChunks: number, sealedKey: string, iv: string }) => {
+      socket.to(data.roomId).emit('migration:start', data);
+    });
+
+    socket.on('migration:chunk', (data: { roomId: string, chunkIndex: number, chunk: any }) => {
+      socket.to(data.roomId).emit('migration:chunk', data);
     });
 
     // Disconnect Handler (Untuk User)

@@ -12,13 +12,13 @@ const Chat = lazy(() => import('./pages/Chat'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const KeyManagementPage = lazy(() => import('./pages/KeyManagementPage'));
 const SessionManagerPage = lazy(() => import('./pages/SessionManagerPage'));
-const LinkDevicePage = lazy(() => import('./pages/LinkDevicePage'));
-const DeviceScannerPage = lazy(() => import('./pages/DeviceScannerPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const HelpPage = lazy(() => import('./pages/HelpPage'));
 const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const MigrationReceivePage = lazy(() => import('./pages/MigrationReceivePage'));
+const MigrationSendPage = lazy(() => import('./pages/MigrationSendPage'));
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -39,10 +39,6 @@ import { useGlobalShortcut } from './hooks/useGlobalShortcut';
 
 // Libs & Utils
 import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
-import { syncSessionKeys } from './utils/sessionSync';
-
-// Variabel global untuk mencegah double-sync saat render cepat
-let isSyncing = false;
 
 // Initialize socket instance once
 getSocket();
@@ -151,23 +147,7 @@ const AppContent = () => {
     }
   }, [user, location.pathname]);
 
-  // 3. Sync Encryption Keys
-  useEffect(() => {
-    const sync = async () => {
-      if (user && !location.pathname.startsWith('/link-device') && sessionStorage.getItem('keys_synced') !== 'true' && !isSyncing) {
-        try {
-          isSyncing = true;
-          await syncSessionKeys();
-          sessionStorage.setItem('keys_synced', 'true');
-        } catch (error) {
-          console.error("❌ Key synchronization failed:", error);
-        } finally {
-          isSyncing = false;
-        }
-      }
-    };
-    sync();
-  }, [user, location.pathname]);
+  // 3. (Reserved for future use)
 
   // 4. Apply Theme
   useEffect(() => {
@@ -257,7 +237,7 @@ const AppContent = () => {
             <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
             <Route path="/register" element={<PageWrapper><Register /></PageWrapper>} />
             <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
-            <Route path="/link-device" element={<PageWrapper><LinkDevicePage /></PageWrapper>} />
+            <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
             <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
             <Route path="/privacy" element={<PageWrapper><PrivacyPage /></PageWrapper>} />
 
@@ -269,7 +249,7 @@ const AppContent = () => {
               <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />
               <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
               <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
-              <Route path="/settings/link-device" element={<PageWrapper><DeviceScannerPage /></PageWrapper>} />
+              <Route path="/settings/migrate-send" element={<PageWrapper><MigrationSendPage /></PageWrapper>} />
               <Route path="/admin-console" element={<PageWrapper><AdminDashboard /></PageWrapper>} />
 
               <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />

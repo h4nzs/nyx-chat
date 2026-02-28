@@ -100,6 +100,40 @@ export async function restoreFromPhrase(phrase: string, password: string): Promi
   return sendToWorker('restoreFromPhrase', { phrase, password });
 }
 
+export async function recoverAccountWithSignature(
+  phrase: string, 
+  newPassword: string, 
+  identifier: string, 
+  timestamp: number
+): Promise<{
+  encryptionPublicKeyB64: string,
+  signingPublicKeyB64: string,
+  encryptedPrivateKeys: string,
+  signatureB64: string
+}> {
+  return sendToWorker('recoverAccountWithSignature', { phrase, newPassword, identifier, timestamp });
+}
+
+export async function encryptProfile(profileJsonString: string, profileKeyB64: string): Promise<string> {
+  return sendToWorker('encryptProfile', { profileJsonString, profileKeyB64 });
+}
+
+export async function decryptProfile(encryptedProfileB64: string, profileKeyB64: string): Promise<string> {
+  return sendToWorker('decryptProfile', { encryptedProfileB64, profileKeyB64 });
+}
+
+export async function generateProfileKey(): Promise<string> {
+  return sendToWorker('generateProfileKey', {});
+}
+
+export async function minePoW(salt: string, difficulty: number): Promise<{ nonce: number; hash: string }> {
+  return sendToWorker('minePoW', { salt, difficulty });
+}
+
+export async function hashUsername(username: string): Promise<string> {
+  return sendToWorker('hashUsername', { username });
+}
+
 export async function reEncryptBundleFromMasterKey(masterKey: Uint8Array, newPassword: string): Promise<{
   encryptedPrivateKeys: string;
   encryptionPublicKeyB64: string;
@@ -227,4 +261,114 @@ export function worker_x3dh_recipient_regenerate(payload: {
         theirIdentityKey: Array.from(payload.theirIdentityKey),
         theirEphemeralKey: Array.from(payload.theirEphemeralKey)
     });
+}
+
+// --- DOUBLE RATCHET PROXY FUNCTIONS ---
+
+export interface SerializedRatchetState {
+    RK: string;
+    CKs: string | null;
+    CKr: string | null;
+    DHs: { publicKey: string, privateKey: string };
+    DHr: string | null;
+    Ns: number;
+    Nr: number;
+    PN: number;
+}
+
+export function worker_dr_init_alice(payload: {
+    sk: Uint8Array,
+    theirSignedPreKeyPublic: Uint8Array
+}): Promise<SerializedRatchetState> {
+    return sendToWorker('dr_init_alice', { 
+        sk: Array.from(payload.sk), 
+        theirSignedPreKeyPublic: Array.from(payload.theirSignedPreKeyPublic) 
+    });
+}
+
+export function worker_dr_init_bob(payload: {
+    sk: Uint8Array,
+    mySignedPreKey: { publicKey: Uint8Array, privateKey: Uint8Array },
+    theirRatchetPublicKey: Uint8Array
+}): Promise<SerializedRatchetState> {
+    return sendToWorker('dr_init_bob', {
+        sk: Array.from(payload.sk),
+        mySignedPreKey: {
+            publicKey: Array.from(payload.mySignedPreKey.publicKey),
+            privateKey: Array.from(payload.mySignedPreKey.privateKey)
+        },
+        theirRatchetPublicKey: Array.from(payload.theirRatchetPublicKey)
+    });
+}
+
+export function worker_dr_ratchet_encrypt(payload: {
+    serializedState: SerializedRatchetState,
+    plaintext: Uint8Array | string
+}): Promise<{ state: SerializedRatchetState, header: any, ciphertext: Uint8Array, mk: Uint8Array }> {
+    return sendToWorker<{ state: SerializedRatchetState, header: any, ciphertext: any, mk: any }>('dr_ratchet_encrypt', {
+        serializedState: payload.serializedState,
+        plaintext: typeof payload.plaintext === 'string' ? payload.plaintext : Array.from(payload.plaintext)
+    }).then(res => ({
+        ...res,
+        ciphertext: new Uint8Array(res.ciphertext),
+        mk: new Uint8Array(res.mk)
+    }));
+}
+
+export function worker_dr_ratchet_decrypt(payload: {
+    serializedState: SerializedRatchetState,
+    header: any,
+    ciphertext: Uint8Array
+}): Promise<{ state: SerializedRatchetState, plaintext: Uint8Array, skippedKeys: { dh: string, n: number, mk: string }[], mk: Uint8Array }> {
+    return sendToWorker<{ state: SerializedRatchetState, plaintext: any, skippedKeys: any[], mk: any }>('dr_ratchet_decrypt', {
+        serializedState: payload.serializedState,
+        header: payload.header,
+        ciphertext: Array.from(payload.ciphertext)
+    }).then(res => ({
+        ...res,
+        plaintext: new Uint8Array(res.plaintext),
+        mk: new Uint8Array(res.mk)
+    }));
+}
+
+// --- GROUP RATCHET PROXY FUNCTIONS ---
+
+export async function groupInitSenderKey(): Promise<{ senderKeyB64: string }> {
+  return sendToWorker('group_init_sender_key', {});
+}
+
+export async function groupRatchetEncrypt(
+  serializedState: { CK: string; N: number },
+  plaintext: string | Uint8Array,
+  signingPrivateKey: Uint8Array
+): Promise<{ state: { CK: string; N: number }, header: { n: number }, ciphertext: Uint8Array, signature: string, mk: Uint8Array }> {
+  return sendToWorker<{ state: { CK: string; N: number }, header: { n: number }, ciphertext: any, signature: string, mk: any }>('group_ratchet_encrypt', { 
+    serializedState, 
+    plaintext: typeof plaintext === 'string' ? plaintext : Array.from(plaintext),
+    signingPrivateKey: Array.from(signingPrivateKey) 
+  }).then(res => ({
+      ...res,
+      ciphertext: new Uint8Array(res.ciphertext),
+      mk: new Uint8Array(res.mk)
+  }));
+}
+
+export async function groupRatchetDecrypt(
+  serializedState: { CK: string; N: number },
+  header: { n: number },
+  ciphertext: Uint8Array,
+  signature: string,
+  senderSigningPublicKey: Uint8Array
+): Promise<{ state: { CK: string; N: number }, plaintext: Uint8Array, skippedKeys: any[], mk: Uint8Array }> {
+  return sendToWorker<{ state: { CK: string; N: number }, plaintext: any, skippedKeys: any[], mk: any }>('group_ratchet_decrypt', { 
+    serializedState, 
+    header, 
+    ciphertext: Array.from(ciphertext), 
+    signature, 
+    senderSigningPublicKey: Array.from(senderSigningPublicKey) 
+  }).then(res => ({
+      ...res,
+      plaintext: new Uint8Array(res.plaintext),
+      mk: new Uint8Array(res.mk)
+  }));
 }

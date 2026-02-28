@@ -113,16 +113,13 @@ export function getSocket() {
         
         // Delegate EVERYTHING to the store. 
         // The store handles decryption, reaction parsing, and optimistic replacement internally.
-        addIncomingMessage(newMessage.conversationId, newMessage);
+        const decryptedMessage = await addIncomingMessage(newMessage.conversationId, newMessage);
           
         triggerReceiveFeedback();
 
-        // Update notification/preview only if needed (store handles optimistic updates, but we need to check raw content for notifications)
-        // Note: newMessage.content is encrypted. We can't check it easily here without decrypting again.
-        // However, addIncomingMessage is async. Ideally we should wait for it, but it doesn't return the decrypted msg.
-        // For now, we rely on the store to update UI. 
-        // Notifications might be tricky with encrypted content. 
-        // Let's assume the store handles internal notifications or we can move notification logic there later.
+        // Update notification/preview using decrypted content
+        // TODO: Trigger Desktop/Push Notification here using decryptedMessage.content or decryptedMessage.fileName
+        // e.g. showNotification(decryptedMessage.sender.name, decryptedMessage.content || "Sent a file");
         
         socket?.emit('message:ack_delivered', { messageId: newMessage.id, conversationId: newMessage.conversationId });
       } catch (e: any) {
@@ -197,12 +194,7 @@ export function getSocket() {
     socket.on('user:updated', (updatedUser) => {
       const { user, setUser } = useAuthStore.getState();
       if (user?.id === updatedUser.id) {
-        // Prevent overwriting private fields (email) with undefined from public broadcast
-        const preservedUser = { ...user, ...updatedUser };
-        if (updatedUser.email === undefined && user.email) {
-           preservedUser.email = user.email;
-        }
-        setUser(preservedUser as User);
+        setUser({ ...user, ...updatedUser });
       }
       useConversationStore.getState().updateParticipantDetails(updatedUser);
       useMessageStore.getState().updateSenderDetails(updatedUser);

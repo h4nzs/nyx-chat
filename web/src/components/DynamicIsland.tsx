@@ -4,11 +4,13 @@ import { useConversationStore } from '@store/conversation';
 import { motion, AnimatePresence } from 'framer-motion';
 import useDynamicIslandStore, { Activity, NotificationActivity, UploadActivity } from '@store/dynamicIsland';
 import { FiFile, FiX, FiMessageSquare, FiUploadCloud } from 'react-icons/fi';
+import { useUserProfile } from '@hooks/useUserProfile';
 
 const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
   const openConversation = useConversationStore(state => state.openConversation);
   const removeActivity = useDynamicIslandStore(state => state.removeActivity);
   const navigate = useNavigate();
+  const profile = useUserProfile(activity.sender as any);
 
   const handleClick = () => {
     if (activity.link) {
@@ -22,7 +24,7 @@ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
     <div onClick={handleClick} className="w-full h-full flex items-center gap-3 px-1 cursor-pointer group">
       <div className="relative">
         <img 
-          src={activity.sender?.avatarUrl ? toAbsoluteUrl(activity.sender.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${activity.sender?.name}`}
+          src={profile.avatarUrl ? toAbsoluteUrl(profile.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
           alt="Avatar"
           className="w-8 h-8 rounded-full object-cover border border-white/10"
         />
@@ -33,7 +35,7 @@ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
       
       <div className="flex-1 min-w-0 flex flex-col justify-center">
         <div className="flex justify-between items-baseline">
-           <p className="text-[10px] font-bold text-white/90 uppercase tracking-wider">{activity.sender?.name || 'Unknown'}</p>
+           <p className="text-[10px] font-bold text-white/90 uppercase tracking-wider">{profile.name}</p>
            <span className="text-[8px] text-white/40 font-mono">NOW</span>
         </div>
         <p className="text-xs text-white/70 truncate font-medium group-hover:text-white transition-colors">

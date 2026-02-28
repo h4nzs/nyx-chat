@@ -9,54 +9,6 @@ import { zodValidate } from '../utils/validate.js'
 const router: Router = Router()
 router.use(requireAuth)
 
-// GET all encrypted session keys for a user across ALL conversations
-router.get('/sync', async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const userId = req.user.id
-
-    // 1. Find all conversations the user is a participant in
-    const conversations = await prisma.conversation.findMany({
-      where: {
-        participants: { some: { userId } }
-      },
-      select: { id: true }
-    })
-
-    const conversationIds = conversations.map(c => c.id)
-
-    // 2. Fetch all session keys for this user in those conversations
-    const allKeys = await prisma.sessionKey.findMany({
-      where: {
-        userId,
-        conversationId: { in: conversationIds }
-      },
-      select: {
-        conversationId: true,
-        sessionId: true,
-        encryptedKey: true
-      },
-      orderBy: { createdAt: 'asc' }
-    })
-
-    // 3. Group keys by conversationId
-    const groupedKeys = allKeys.reduce((acc, key) => {
-      if (!acc[key.conversationId]) {
-        acc[key.conversationId] = []
-      }
-      acc[key.conversationId].push({
-        sessionId: key.sessionId,
-        encryptedKey: key.encryptedKey
-      })
-      return acc
-    }, {} as Record<string, { sessionId: string; encryptedKey: string }[]>)
-
-    res.json(groupedKeys)
-  } catch (error) {
-    next(error)
-  }
-})
-
 // GET all encrypted session keys for a user in a conversation
 router.get('/:conversationId', async (req, res, next) => {
   try {
@@ -117,45 +69,5 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
     next(error)
   }
 })
-
-// POST: Backup session keys from client to server (encrypted)
-router.post(
-  '/backup',
-  zodValidate({
-    body: z.object({
-      conversationId: z.string(),
-      sessionId: z.string(),
-      encryptedKey: z.string()
-    })
-  }),
-  async (req, res, next) => {
-    try {
-      if (!req.user) throw new ApiError(401, 'Authentication required.')
-      const userId = req.user.id
-      const { conversationId, sessionId, encryptedKey } = req.body
-
-      // Idempotent backup: Only create if not exists.
-      const existing = await prisma.sessionKey.findFirst({
-        where: { userId, sessionId }
-      })
-
-      if (!existing) {
-        await prisma.sessionKey.create({
-          data: {
-            userId,
-            conversationId,
-            sessionId,
-            encryptedKey,
-            isInitiator: true // Client-side generated keys are owned by the creator
-          }
-        })
-      }
-
-      res.status(200).json({ success: true })
-    } catch (error) {
-      next(error)
-    }
-  }
-)
 
 export default router

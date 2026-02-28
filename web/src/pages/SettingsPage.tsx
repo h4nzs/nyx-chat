@@ -9,12 +9,22 @@ import { usePushNotifications } from '@hooks/usePushNotifications';
 import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
-  FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock
+  FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
+  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
 import ReportBugModal from '../components/ReportBugModal';
 import { api } from '@lib/api';
+import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@lib/keychainDb';
+import { useUserProfile } from '@hooks/useUserProfile';
+import { useProfileStore } from '@store/profile';
+import { generateProfileKey, encryptProfile, minePoW, getRecoveryPhrase } from '@lib/crypto-worker-proxy';
+import ModalBase from '../components/ui/ModalBase';
+import { useSettingsStore } from '@store/settings';
+import { setupBiometricUnlock } from '@lib/biometricUnlock';
+import { getDeviceAutoUnlockKey, getEncryptedKeys } from '@lib/keyStorage';
+import { useMessageStore } from '@store/message';
 
 /* --- MICRO-COMPONENTS --- */
 
@@ -96,13 +106,12 @@ const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?
   </button>
 );
 
-import { useSettingsStore } from '@store/settings';
-
 /* --- PAGE COMPONENT --- */
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout } = useAuthStore();
+  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout, emergencyLogout, setUser } = useAuthStore();
+  const profile = useUserProfile(user);
   const { theme, toggleTheme, accent, setAccent } = useThemeStore();
   const { showConfirm } = useModalStore();
   const { enableSmartReply, setEnableSmartReply } = useSettingsStore();
@@ -114,15 +123,59 @@ export default function SettingsPage() {
     unsubscribeFromPush 
   } = usePushNotifications();
 
-  const [name, setName] = useState(user?.name || '');
-  const [description, setDescription] = useState(user?.description || '');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(user?.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
-  const [showEmail, setShowEmail] = useState(user?.showEmailToOthers || false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [readReceipts, setReadReceiptsState] = useState(sendReadReceipts);
   const [isLoading, setIsLoading] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [miningStatus, setMiningStatus] = useState<'idle' | 'mining' | 'verifying'>('idle');
+  const [hasBioVault, setHasBioVault] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const vaultInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDeleteAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deletePassword) return;
+    
+    setIsDeleting(true);
+    try {
+        // 1. Collect garbage (Best Effort from Memory)
+        const messagesMap = useMessageStore.getState().messages;
+        const fileKeys: string[] = [];
+        
+        Object.values(messagesMap).flat().forEach((msg: any) => {
+            if (msg.senderId === user?.id && msg.fileKey) {
+                fileKeys.push(msg.fileKey);
+            }
+        });
+
+        // 2. Nuke Server
+        await api('/api/users/me', {
+            method: 'DELETE',
+            body: JSON.stringify({
+                password: deletePassword,
+                fileKeys
+            })
+        });
+
+        // 3. Nuke Local
+        await emergencyLogout();
+        
+        toast.success("Account obliterated.");
+        navigate('/register');
+    } catch (error: any) {
+        setIsDeleting(false);
+        const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
+        toast.error(`Deletion failed: ${errorMsg}`);
+    }
+  };
 
   const colorMap: Record<AccentColor, string> = {
     blue: 'hsl(217 91% 60%)',
@@ -133,14 +186,27 @@ export default function SettingsPage() {
   };
 
   useEffect(() => {
-    if (user) {
-      setName(user.name || '');
-      setDescription(user.description || '');
-      setPreviewUrl(user.avatarUrl ? toAbsoluteUrl(user.avatarUrl) || null : null);
-      setShowEmail(user.showEmailToOthers || false);
-      setReadReceiptsState(sendReadReceipts);
+    if (profile && profile.name !== "Encrypted User" && profile.name !== "Unknown") {
+      setName(profile.name || '');
+      setDescription(profile.description || '');
+      setPreviewUrl(profile.avatarUrl ? toAbsoluteUrl(profile.avatarUrl) || null : null);
     }
-  }, [user, sendReadReceipts]);
+  }, [profile]);
+
+  useEffect(() => {
+    setReadReceiptsState(sendReadReceipts);
+  }, [sendReadReceipts]);
+
+  useEffect(() => {
+    const checkBioVault = () => {
+        const vault = localStorage.getItem('nyx_bio_vault');
+        setHasBioVault(!!vault);
+    };
+    checkBioVault();
+    // Listen for storage events in case it changes in another tab (optional but good practice)
+    window.addEventListener('storage', checkBioVault);
+    return () => window.removeEventListener('storage', checkBioVault);
+  }, []);
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -154,18 +220,27 @@ export default function SettingsPage() {
     e.preventDefault();
     setIsLoading(true);
     try {
-      const promises = [];
+      let currentAvatarUrl = profile.avatarUrl;
+
       if (avatarFile) {
-        promises.push(updateAvatar(avatarFile));
+        currentAvatarUrl = await updateAvatar(avatarFile);
       }
-      if (name !== user?.name || description !== user?.description) {
-        promises.push(updateProfile({ name, description }));
+      
+      const profileKeyB64 = await import('@lib/keychainDb').then(m => m.getProfileKey(user!.id));
+      let key = profileKeyB64;
+      if (!key) {
+         key = await generateProfileKey();
+         await saveProfileKey(user!.id, key);
       }
-      if (promises.length === 0) {
-        toast('No changes detected.');
-        return;
-      }
-      await Promise.all(promises);
+
+      const profileJson = JSON.stringify({ name, description, avatarUrl: currentAvatarUrl });
+      const encryptedProfile = await encryptProfile(profileJson, key);
+
+      await updateProfile({ encryptedProfile });
+      
+      // Force update the local cache
+      useProfileStore.getState().decryptAndCache(user!.id, encryptedProfile);
+
       toast.success('Identity Updated');
     } catch (error: any) {
       const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
@@ -177,19 +252,54 @@ export default function SettingsPage() {
 
   const handleRegisterPasskey = async () => {
     try {
+      // 1. Dapatkan Recovery Phrase untuk diamankan (Digembok oleh Jari)
+      let phraseToLock = '';
+      
+      const autoUnlockKey = await getDeviceAutoUnlockKey();
+      const encryptedKeysStr = await getEncryptedKeys();
+      
+      if (autoUnlockKey && encryptedKeysStr) {
+          try {
+              phraseToLock = await getRecoveryPhrase(encryptedKeysStr, autoUnlockKey);
+          } catch (e) {}
+      }
+
+      // Jika gagal otomatis, minta user input password (DEMI KEAMANAN MAKSIMAL)
+      if (!phraseToLock) {
+          await new Promise<void>((resolve, reject) => {
+              useModalStore.getState().showPasswordPrompt(async (password) => {
+                  if (!password) { reject(new Error("Password required to enable biometric unlock.")); return; }
+                  try {
+                      const encKeys = await getEncryptedKeys();
+                      if (!encKeys) throw new Error("No keys found.");
+                      phraseToLock = await getRecoveryPhrase(encKeys, password);
+                      resolve();
+                  } catch (e) { reject(e); }
+              });
+          });
+      }
+
       toast.loading("Initializing biometric scanner...", { id: 'passkey' });
-      const options = await api<any>("/api/auth/webauthn/register/options");
+      // Force creation of a NEW credential (even if one exists) to ensure PRF support is enabled
+      const options = await api<any>("/api/auth/webauthn/register/options?force=true");
       
-      toast.loading("Scan fingerprint now...", { id: 'passkey' });
-      const attResp = await startRegistration(options);
+      toast.loading("Scan fingerprint now to LOCK your vault...", { id: 'passkey' });
       
+      // 2. Setup Biometric with PRF (Magic Happens Here)
+      // Ini akan mendaftarkan jari ke server SEKALIGUS mengenkripsi phrase di lokal
+      const attResp = await setupBiometricUnlock(options, phraseToLock);
+      
+      // 3. Verifikasi Server (Hanya untuk login, server tidak menerima phrase)
       const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {
         method: "POST",
         body: JSON.stringify(attResp),
       });
 
       if (verificationResp.verified) {
-        toast.success("Biometric signature confirmed.", { id: 'passkey' });
+        toast.success("Biometric active! You can now login without password.", { id: 'passkey' });
+        setShowUpgradeModal(false);
+        setHasBioVault(true);
+        if (user) setUser({ ...user, isVerified: true });
       } else {
         throw new Error("Verification failed");
       }
@@ -202,13 +312,93 @@ export default function SettingsPage() {
     }
   };
 
+  const handleProofOfWork = async () => {
+    setMiningStatus('mining');
+    const toastId = toast.loading("Connecting to mining pool...");
+    
+    try {
+      // 1. Get Challenge
+      const { salt, difficulty } = await api<{ salt: string, difficulty: number }>('/api/auth/pow/challenge');
+      
+      toast.loading("Mining cryptographic puzzle... (CPU Intensive)", { id: toastId });
+      
+      // 2. Mine in Worker (Non-blocking)
+      const { nonce } = await minePoW(salt, difficulty);
+      
+      setMiningStatus('verifying');
+      toast.loading("Verifying proof...", { id: toastId });
+      
+      // 3. Verify
+      const result = await api<{ success: boolean }>('/api/auth/pow/verify', {
+        method: 'POST',
+        body: JSON.stringify({ nonce })
+      });
+      
+      if (result.success) {
+        toast.success("Proof Accepted! Account upgraded to VIP.", { id: toastId });
+        setShowUpgradeModal(false);
+        if (user) setUser({ ...user, isVerified: true });
+      }
+      
+    } catch (error: any) {
+      console.error(error);
+      toast.error(`Mining failed: ${error.message}`, { id: toastId });
+    } finally {
+      setMiningStatus('idle');
+    }
+  };
+
+  const handleExportVault = async () => {
+    try {
+      const json = await exportDatabaseToJson();
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `nyx_vault_backup_${new Date().toISOString().slice(0, 10)}.nyxvault`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Vault exported successfully! Keep this file safe.");
+    } catch (error) {
+      console.error("Export failed:", error);
+      toast.error("Failed to export vault.");
+    }
+  };
+
+  const handleImportVault = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const json = event.target?.result as string;
+        await importDatabaseFromJson(json);
+        toast.success("Vault imported successfully! Reloading...");
+        setTimeout(() => window.location.reload(), 1000);
+      } catch (error) {
+        console.error("Import failed:", error);
+        toast.error("Invalid vault file or corrupted data.");
+      }
+    };
+    reader.readAsText(file);
+    // Reset input value so same file can be selected again
+    e.target.value = '';
+  };
+
+  const triggerImport = () => {
+    vaultInputRef.current?.click();
+  };
+
 
   const handleLogout = async () => {
     showConfirm(
       "Emergency Eject",
-      "WARNING: You are about to terminate all active sessions. Proceed?",
+      "WARNING: This will log you out of ALL devices and permanently delete your local history and keys from this browser. This action cannot be undone.",
       async () => {
-        await logout();
+        await emergencyLogout();
         navigate('/login');
       }
     );
@@ -255,7 +445,7 @@ export default function SettingsPage() {
                     bg-bg-main p-2
                   ">
                     <img
-                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
+                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
                       alt="ID"
                       className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
                     />
@@ -276,13 +466,33 @@ export default function SettingsPage() {
 
                 {/* Info Fields */}
                 <div className="flex-1 w-full space-y-6">
-                  {/* Username (Read Only) */}
+                  {/* ID (Read Only) */}
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">Username (ID)</label>
+                    <div className="flex justify-between items-center">
+                       <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">ANONYMOUS ID</label>
+                       {user.isVerified ? (
+                         <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1">
+                           <FiShield size={10} /> Verified
+                         </span>
+                       ) : (
+                         <button 
+                           type="button"
+                           onClick={() => setShowUpgradeModal(true)}
+                           className="text-[10px] bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-yellow-500/20 transition-colors animate-pulse"
+                         >
+                           <FiLock size={10} /> Sandboxed (Upgrade)
+                         </button>
+                       )}
+                    </div>
                     <div className="w-full bg-black/5 dark:bg-white/5 text-sm font-mono text-text-primary p-4 rounded-xl flex items-center border border-transparent">
-                      <span className="text-accent mr-1">@</span>{user.username}
+                      <span className="text-accent mr-1">#</span>{user.id}
                       <FiLock className="ml-auto text-text-secondary opacity-50" size={12} />
                     </div>
+                    {!user.isVerified && (
+                        <p className="text-[10px] text-text-secondary pl-2">
+                           Limited access. Verify to unlock Groups and higher limits.
+                        </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -422,32 +632,26 @@ export default function SettingsPage() {
                   setReadReceipts(!readReceipts);
                 }} 
               />
-              <RockerSwitch 
-                label="Public Email" 
-                checked={showEmail} 
-                onChange={() => {
-                  setShowEmail(!showEmail);
-                  updateProfile({ showEmailToOthers: !showEmail });
-                }} 
-              />
               <button
                 onClick={handleRegisterPasskey}
-                className="
+                className={`
                   mt-4 w-full p-4 rounded-xl flex items-center justify-between
                   bg-bg-main text-text-primary
                   shadow-neu-flat-light dark:shadow-neu-flat-dark
                   active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
                   hover:text-accent transition-colors
-                "
+                `}
               >
                 <div className="flex items-center gap-3">
                   <IoFingerPrint size={20} />
                   <div className="text-left">
-                    <div className="font-bold text-sm">Biometric Key</div>
-                    <div className="text-[10px] text-text-secondary">Fingerprint / Face ID</div>
+                    <div className="font-bold text-sm">
+                        {hasBioVault ? 'Vault Active (VIP)' : (user.isVerified ? 'Setup Vault Unlock' : 'Enable Biometrics')}
+                    </div>
+                    <div className="text-[10px] text-text-secondary">Unlock Vault & Verify VIP</div>
                   </div>
                 </div>
-                <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_#22c55e]"></div>
+                <div className={`w-2 h-2 rounded-full shadow-[0_0_5px] ${hasBioVault ? 'bg-green-500 shadow-green-500' : 'bg-gray-500 shadow-transparent'}`}></div>
               </button>
             </div>
           </ControlModule>
@@ -467,11 +671,56 @@ export default function SettingsPage() {
                 icon={FiSmartphone} 
                 onClick={() => navigate('/settings/sessions')} 
               />
-              <ActionButton 
-                label="Link Device" 
-                icon={FiActivity} 
-                onClick={() => navigate('/settings/link-device')} 
-              />
+              
+              {/* VAULT ACTIONS */}
+              <div className="grid grid-cols-2 gap-3 mt-4 pt-4 border-t border-text-secondary/10">
+                 <button 
+                   onClick={handleExportVault}
+                   className="
+                     flex flex-col items-center justify-center gap-2 p-3 rounded-xl
+                     bg-bg-main text-emerald-500 font-bold text-xs uppercase tracking-wider
+                     shadow-neu-flat-light dark:shadow-neu-flat-dark
+                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                     hover:brightness-110 transition-all
+                   "
+                 >
+                   <FiDownload size={18} />
+                   Export Vault
+                 </button>
+                 <button 
+                   onClick={triggerImport}
+                   className="
+                     flex flex-col items-center justify-center gap-2 p-3 rounded-xl
+                     bg-bg-main text-blue-500 font-bold text-xs uppercase tracking-wider
+                     shadow-neu-flat-light dark:shadow-neu-flat-dark
+                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                     hover:brightness-110 transition-all
+                   "
+                 >
+                   <FiUpload size={18} />
+                   Import Vault
+                 </button>
+                 <button 
+                   onClick={() => navigate('/settings/migrate-send')}
+                   className="
+                     col-span-2 flex items-center justify-center gap-2 p-3 rounded-xl
+                     bg-bg-main text-accent font-bold text-xs uppercase tracking-wider
+                     shadow-neu-flat-light dark:shadow-neu-flat-dark
+                     active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
+                     hover:brightness-110 transition-all
+                   "
+                 >
+                   <FiSend size={18} />
+                   Transfer to New Device (QR)
+                 </button>
+                 <input 
+                    type="file" 
+                    ref={vaultInputRef} 
+                    onChange={handleImportVault} 
+                    accept=".nyxvault,.json" 
+                    className="hidden" 
+                 />
+              </div>
             </div>
           </ControlModule>
         </div>
@@ -522,29 +771,151 @@ export default function SettingsPage() {
         </div>
 
         {/* 7. EMERGENCY EJECT (Logout) */}
-        <div className="col-span-1 md:col-span-12 mt-8 mb-10">
+        <div className="col-span-1 md:col-span-12 mt-8 mb-10 space-y-4">
           <button
             onClick={handleLogout}
             className="
               group w-full relative overflow-hidden rounded-xl p-6
-              bg-bg-main border-2 border-red-500/20
+              bg-bg-main border-2 border-orange-500/20
               shadow-neu-flat-light dark:shadow-neu-flat-dark
               active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark active:scale-[0.99]
               transition-all duration-200
             "
           >
             {/* Warning Stripes Pattern */}
-            <div className="absolute inset-0 opacity-5 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(239,68,68,0.05)_10px,rgba(239,68,68,0.05)_20px)]"></div>
+            <div className="absolute inset-0 opacity-5 bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,rgba(249,115,22,0.05)_10px,rgba(249,115,22,0.05)_20px)]"></div>
             
-            <div className="relative z-10 flex flex-col items-center justify-center gap-2 text-red-500 group-hover:text-red-600">
+            <div className="relative z-10 flex flex-col items-center justify-center gap-2 text-orange-500 group-hover:text-orange-600">
               <FiLogOut size={32} />
               <span className="text-xl font-black uppercase tracking-[0.2em]">Emergency Eject</span>
               <span className="text-xs font-mono opacity-70">Terminate All Sessions</span>
             </div>
           </button>
+
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="
+              group w-full relative overflow-hidden rounded-xl p-6
+              bg-red-950/10 border-2 border-red-600/30
+              hover:bg-red-950/20 hover:border-red-600/50
+              active:scale-[0.99]
+              transition-all duration-200
+            "
+          >
+            <div className="relative z-10 flex flex-col items-center justify-center gap-2 text-red-600">
+              <div className="p-3 bg-red-600 text-white rounded-full mb-1">
+                 <FiAlertTriangle size={24} />
+              </div>
+              <span className="text-xl font-black uppercase tracking-[0.2em]">Delete Account</span>
+              <span className="text-xs font-mono opacity-70 text-center max-w-md">
+                PERMANENTLY erase all data from servers. This action is irreversible.
+              </span>
+            </div>
+          </button>
         </div>
 
       </div>
+
+      {/* UPGRADE MODAL */}
+      <ModalBase isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} title="Upgrade to VIP">
+        <div className="space-y-6">
+           <p className="text-sm text-text-secondary text-center">
+             You are currently in <span className="text-yellow-500 font-bold">Sandbox Mode</span>. 
+             Upgrade to remove messaging limits and unlock group creation.
+           </p>
+           
+           <div className="grid grid-cols-1 gap-4">
+             {/* Option 1: Biometric */}
+             <button
+               onClick={handleRegisterPasskey}
+               className="p-4 bg-bg-surface rounded-xl border border-white/5 shadow-neu-flat hover:border-accent/50 transition-all text-left flex items-start gap-4 group"
+             >
+               <div className="p-3 bg-accent/10 text-accent rounded-full group-hover:bg-accent group-hover:text-white transition-colors">
+                 <FiZap size={24} />
+               </div>
+               <div>
+                 <h3 className="font-bold text-text-primary">Instant Biometric</h3>
+                 <p className="text-xs text-text-secondary mt-1">Use Fingerprint or FaceID. Takes 1 second.</p>
+               </div>
+             </button>
+
+             {/* Option 2: Proof of Work */}
+             <button
+               onClick={handleProofOfWork}
+               disabled={miningStatus !== 'idle'}
+               className="p-4 bg-bg-surface rounded-xl border border-white/5 shadow-neu-flat hover:border-accent/50 transition-all text-left flex items-start gap-4 group disabled:opacity-50 disabled:cursor-not-allowed"
+             >
+               <div className="p-3 bg-blue-500/10 text-blue-500 rounded-full group-hover:bg-blue-500 group-hover:text-white transition-colors">
+                 {miningStatus === 'idle' ? <FiCpu size={24} /> : <Spinner size="sm" />}
+               </div>
+               <div>
+                 <h3 className="font-bold text-text-primary">Proof of Work Mining</h3>
+                 <p className="text-xs text-text-secondary mt-1">
+                   {miningStatus === 'idle' ? "Solve a cryptographic puzzle with your CPU. Takes 5-10 seconds." : 
+                    miningStatus === 'mining' ? "Mining hash collision... CPU at 100%" : "Verifying proof..."}
+                 </p>
+               </div>
+             </button>
+           </div>
+        </div>
+      </ModalBase>
+
+      {/* DELETE ACCOUNT MODAL */}
+      <ModalBase isOpen={showDeleteConfirm} onClose={() => { setShowDeleteConfirm(false); setDeletePassword(''); }} title="Confirm Deletion">
+        <form onSubmit={handleDeleteAccount} className="space-y-6">
+            <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-start gap-3">
+                <FiAlertTriangle className="text-red-500 shrink-0 mt-1" />
+                <div className="space-y-2">
+                    <h4 className="text-red-500 font-bold text-sm">FINAL WARNING</h4>
+                    <p className="text-xs text-text-secondary leading-relaxed">
+                        You are about to execute a self-destruct sequence. 
+                        All messages, keys, and profile data will be wiped from the server.
+                        Orphaned files may remain in encrypted storage but will be inaccessible forever.
+                    </p>
+                </div>
+            </div>
+
+            <div className="space-y-2">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">
+                    Confirm Password
+                </label>
+                <input
+                    type="password"
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    placeholder="Enter your password..."
+                    className="
+                        w-full bg-bg-main text-text-primary p-4 rounded-xl outline-none
+                        border border-red-500/30 focus:border-red-500
+                        shadow-neu-pressed-light dark:shadow-neu-pressed-dark
+                    "
+                    autoFocus
+                />
+            </div>
+
+            <div className="flex gap-3 pt-2">
+                <button
+                    type="button"
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 py-3 rounded-xl font-bold text-sm text-text-secondary hover:bg-bg-surface transition-colors"
+                >
+                    Abort
+                </button>
+                <button
+                    type="submit"
+                    disabled={!deletePassword || isDeleting}
+                    className="
+                        flex-1 py-3 rounded-xl font-bold text-sm text-white
+                        bg-red-600 hover:bg-red-700
+                        disabled:opacity-50 disabled:cursor-not-allowed
+                        shadow-lg shadow-red-600/20
+                    "
+                >
+                    {isDeleting ? 'Deleting...' : 'Execute Delete'}
+                </button>
+            </div>
+        </form>
+      </ModalBase>
 
       {/* MODALS */}
       {showReportModal && <ReportBugModal onClose={() => setShowReportModal(false)} />}

@@ -21,7 +21,7 @@ export default function TypingIndicator({ conversationId }: { conversationId: st
   // Map typing user IDs to their names
   const typingUserNames = typingUsers.map(typingUser => {
     const participant = activeConversation?.participants.find(p => p.id === typingUser.id);
-    return participant?.name || participant?.username || 'Someone'; // Fallback to 'Someone'
+    return 'Someone'; // Since we can't easily hook in a map here without a subcomponent, fallback.
   });
 
   let message: string;

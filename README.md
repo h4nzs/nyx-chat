@@ -1,151 +1,139 @@
-# 💬 NYX
+# NYX: The Zero-Knowledge Messenger
 
-A secure, modern, and customizable real-time messaging application built with a focus on user experience and end-to-end encryption.
+> **"Privacy is not a feature. It's the architecture."**
 
-![App Screenshot](./screenshots/hero-dark.png)
+![NYX Banner](https://nyx-app.my.id/assets/nyx.png)
 
-## 📸 Screenshots
+NYX is a radical experiment in **Pure Anonymity** and **Zero-Knowledge Architecture**. Unlike Signal or Telegram, NYX **does not require** a phone number or email address. It decouples your digital identity from your physical one, operating under a strict "Trust No One" (TNO) model where the server is mathematically incapable of reading your messages or knowing who you are.
 
-| Desktop | Tablet | Mobile |
-| :---: | :---: | :---: |
-| <img src="./web/public/normal-desktop-dark.png" alt="Desktop View" width="400"/> | <img src="./web/public/tablet-dark.png" alt="Tablet View" width="300"/> | <img src="./web/public/mobile-light.png" alt="Mobile View" width="200"/> |
+---
 
-## About The Project
+## 🏴☠️ Core Philosophy: Pure Anonymity
 
-NYX is a full-stack messaging application designed for users who prioritize privacy and a clean, modern user interface. At its core, it provides a robust end-to-end encryption (E2EE) system, ensuring that your conversations remain private and secure. No one outside of your conversation—not even the server—can read your messages.
+1.  **No PII Storage:** We do not store emails, phone numbers, IP addresses (hashed), or even usernames in plaintext.
+2.  **Blind Indexing:** Your username is hashed client-side (Argon2id). The server only sees a random hash (`usernameHash`) and cannot reverse it to find your real handle.
+3.  **Profile Encryption:** Your name, bio, and avatar are encrypted locally with a symmetric `ProfileKey`. This key is shared *only* with friends via the Double Ratchet header. To the server, your profile is just a blob of ciphertext.
+4.  **Local-First Sovereignty:** Your chat history lives **exclusively** on your device (IndexedDB). We provide a "Vault" export feature for backups, but we never sync plaintext history to the cloud.
 
-Built with a modern tech stack, NYX offers a seamless real-time experience across devices, wrapped in a beautiful, tactile Neumorphic UI that is both visually appealing and highly functional.
+---
 
-## ✨ Core Features
+## 🛡️ Security Architecture
 
-### 🛡️ Security & Privacy First
+### Cryptography (The Signal Protocol Implementation)
+*   **Key Exchange:** X3DH (Extended Triple Diffie-Hellman) for asynchronous key agreement.
+*   **Message Encryption:** Double Ratchet Algorithm for Perfect Forward Secrecy (PFS) and Post-Compromise Security (PCS).
+*   **Primitives:**
+    *   **Cipher:** XChaCha20-Poly1305 (IETF) via `libsodium`.
+    *   **Hashing:** SHA-256 & BLAKE2b.
+    *   **KDF:** HKDF (HMAC-based Key Derivation Function).
+    *   **Signatures:** Ed25519.
 
-- **End-to-End Encryption**: All messages and files are secured using the audited `libsodium` cryptographic library. Communications are encrypted on your device and can only be decrypted by the recipient.
-- **Account Restore via Recovery Phrase**: A 24-word recovery phrase, generated from your unique master key, is the only way to access your account on a new device, ensuring you—and only you—have control.
-- **Device Linking**: Securely link a new device using a QR code without needing to re-enter your recovery phrase.
-- **Session Management**: View and manage all your active sessions from the settings page.
+### Trust-Tier System (Anti-Spam)
+To prevent bot spam without collecting phone numbers, we use a **Proof-of-Humanity** system:
+1.  **Sandbox Mode (Default):** New accounts are rate-limited (5 msgs/min, no groups).
+2.  **VIP Status (Verified):** Unlocked via:
+    *   **Biometric (WebAuthn):** Instant verification via Fingerprint/FaceID.
+    *   **Proof of Work (PoW):** Solve a client-side cryptographic puzzle (SHA-256 mining) to prove computational cost.
 
-### 🎨 Modern User Experience
+---
 
-- **Neumorphic UI**: A beautiful, tactile user interface with meticulously crafted light and dark modes.
-- **Theme Customization**: Personalize your experience by choosing your own accent color from a predefined palette.
-- **Command Palette (`Ctrl+K`)**: A power-user feature to quickly navigate the app and execute commands like "New Group" or "Settings".
-- **Advanced Keyboard Navigation**: Navigate your chat list with arrow keys, open chats with Enter, and close any modal with the Escape key.
-- **Responsive & Adaptive Layout**: Features a unique three-column "Command Center" layout for ultrawide screens and a hybrid experience for tablets that adapts to orientation.
+## ⚡ Tech Stack
 
-### 💬 Rich Messaging Features
+### Frontend (Client)
+*   **Framework:** React 18 + Vite (TypeScript)
+*   **State:** Zustand (with Persist middleware)
+*   **Crypto:** `libsodium-wrappers` + Web Crypto API (running in a dedicated **Web Worker**)
+*   **Storage:** IndexedDB (`idb-keyval`) for "The Vault" (Keys & Messages)
+*   **UI:** Tailwind CSS v3 (Industrial Neumorphism Design)
 
-- **Real-Time Communication**: Instant messaging, typing indicators, read receipts, and online presence status powered by WebSockets.
-- **Group Chats**: Easily create and manage group conversations.
-- **Rich Media & File Sharing**: Securely send images, videos, audio, and documents, all end-to-end encrypted.
-- **In-Chat Previews**: Get rich link previews for URLs and in-app previews for PDFs, videos, and audio files.
-- **And More**: Message replies, emoji reactions, and a gallery to view all media shared in a conversation.
+### Backend (Server)
+*   **Runtime:** Node.js (Express)
+*   **Database:** PostgreSQL (via Prisma ORM)
+*   **Real-time:** Socket.IO (with Redis Adapter for clustering)
+*   **Caching/Queue:** Redis (Rate limiting, Presence, PoW Challenges)
+*   **Object Storage:** Cloudflare R2 (Encrypted binary blobs only)
 
-## 🔐 How It Works: The Security Model
-
-NYX's E2EE is built on established cryptographic principles to ensure no one can intercept your messages.
-
-1.  **Key Generation**: When you register, your device generates a **Master Seed**. From this seed, three distinct key pairs are deterministically created: an **Identity Key** (for encryption), a **Signing Key** (for verifying authenticity), and a **Signed Pre-Key** (for initiating secure chats).
-2.  **Secure Storage**: Your private keys never leave your device. They are encrypted with a key derived from your password and stored securely in your browser's local storage.
-3.  **Recovery Phrase**: Your 24-word recovery phrase is a representation of your Master Seed. It is the only way to regenerate your keys on a new device. **If you lose your password AND your recovery phrase, your account is irrecoverable.**
-4.  **Secure Session Handshake**: When you start a conversation with someone for the first time, your app fetches their "pre-key bundle" from the server. Using an approach inspired by the **Signal Protocol (X3DH)**, your devices perform a cryptographic handshake to establish a shared session key. This process happens securely even if the recipient is offline.
+---
 
 ## 🚀 Getting Started
 
-<details>
-<summary>Click to expand setup instructions</summary>
-
 ### Prerequisites
+*   Node.js v18+
+*   pnpm (Preferred)
+*   PostgreSQL
+*   Redis
 
-- Node.js (v18+)
-- pnpm (or npm/yarn)
-- PostgreSQL
-
-### 1. Setup the Backend
-
+### 1. Clone & Install
 ```bash
-# Navigate to the server directory
-cd server
-
-# Install dependencies
-pnpm install
+git clone https://github.com/your-username/nyx-chat.git
+cd nyx-chat
+./start-dev.sh # Installs dependencies for both server & web
 ```
 
-Create a `.env` file in the `server` directory with the following content, replacing the placeholder values:
+### 2. Environment Setup
+Create a `.env` file in the `server/` directory:
 
 ```env
-# PostgreSQL connection URL
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE?schema=public"
+# Database
+DATABASE_URL="postgresql://user:pass@localhost:5432/nyx_db"
+REDIS_URL="redis://localhost:6379"
 
-# JWT secret for signing tokens
-JWT_SECRET="your-super-secret-jwt-key"
+# Security Secrets (Generate strong random strings!)
+JWT_SECRET="super-long-random-string-min-32-chars"
+COOKIE_SECRET="another-super-long-random-string"
 
-# Port for the server to run on
+# Cloudflare R2 (For encrypted attachment storage)
+R2_ACCOUNT_ID="your-cf-account-id"
+R2_ACCESS_KEY_ID="your-r2-key-id"
+R2_SECRET_ACCESS_KEY="your-r2-secret"
+R2_BUCKET_NAME="nyx-uploads"
+R2_PUBLIC_DOMAIN="https://pub-r2.yourdomain.com"
+
+# Cloudflare Turnstile (Optional - Anti-bot)
+TURNSTILE_SECRET_KEY="your-turnstile-secret"
+
+# App Config
 PORT=4000
-
-# The origin URL of your frontend application
 CORS_ORIGIN="http://localhost:5173"
+NODE_ENV="development"
 ```
 
-Now, set up the database and run the server:
-
+### 3. Database Migration
 ```bash
-# Apply database migrations
-npx prisma migrate dev
-
-# Run the development server
-pnpm run dev
+cd server
+npx prisma migrate dev --name init
 ```
 
-### 2. Setup the Frontend
-
+### 4. Run Development
 ```bash
-# Navigate to the web directory from the root
-cd web
-
-# Install dependencies
-pnpm install
-
-# Run the development server
-pnpm run dev
-```
-
-The application will be available at `http://localhost:5173`.
-
-### All-in-One Development
-
-To run both frontend and backend servers concurrently, use the provided shell script from the project root:
-
-```bash
+# In root directory
 ./start-dev.sh
 ```
+*   Frontend: `http://localhost:5173`
+*   Backend: `http://localhost:4000`
 
-</details>
+---
 
-## 🛠️ Tech Stack
+## 💾 The "NYX Vault" & Migration
 
-- **Frontend**: React, Vite, TypeScript, Zustand, Tailwind CSS, Framer Motion
-- **Backend**: Node.js, Express, Prisma, PostgreSQL, Socket.IO
-- **Encryption**: `libsodium-wrappers`
+Since there is no cloud history sync, NYX provides tools for you to manage your own data:
+
+1.  **Export Vault:** In *Settings*, you can export a `.nyxvault` file. This contains your encrypted keys and conversation metadata.
+2.  **Device Migration Tunnel:** Moving to a new phone? Use the **Transfer to New Device** feature. It opens a direct, encrypted WebSocket tunnel between your old and new device to transfer your entire history via QR code, without ever storing it on our servers.
+
+---
 
 ## 🤝 Contributing
 
-Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
+We welcome contributions, especially in:
+*   **Crypto Analysis:** Audit our `crypto.worker.ts` implementation.
+*   **Performance:** Optimization of the React render cycle for large chat lists.
+*   **Accessibility:** Improvements to screen reader support.
 
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+Please follow the `conventional-commits` format for PRs.
 
-## 📝 License
+---
 
-Distributed under the MIT License. See `LICENSE` for more information.
+## 📄 License
 
-## 📁 Project Structure
-
-```
-nyx/
-├── server/       # Backend (Node.js, Express, Prisma)
-└── web/          # Frontend (React, Vite)
-```
+MIT License. Built for the community, owned by no one.

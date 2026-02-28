@@ -10,16 +10,18 @@ import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
 import { useVerificationStore } from '@store/verification';
 import { motion, AnimatePresence } from 'framer-motion';
-import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
+import { useUserProfile } from '@hooks/useUserProfile';
+import MediaGallery from './MediaGallery';
 
-type ProfileUser = User & { email?: string; publicKey?: string };
+type ProfileUser = User & { publicKey?: string };
 
 export default function UserInfoPanel({ userId }: { userId: string }) {
   const { activeId } = useConversationStore();
   const { verifiedStatus, setVerified } = useVerificationStore();
   const navigate = useNavigate();
   const [user, setUser] = useState<ProfileUser | null>(null);
+  const profile = useUserProfile(user);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSafetyModal, setShowSafetyModal] = useState(false);
@@ -98,21 +100,20 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
         <div className="space-y-6">
           <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-6 text-center">
             <img
-              src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
-              alt={user.name}
+              src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
+              alt={profile.name}
               className="w-24 h-24 rounded-full bg-secondary object-cover mb-4 mx-auto"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
-                target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
+                target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`;
               }}
             />
-            <h3 className="text-xl font-bold text-text-primary">{user.name}</h3>
-            <p className="text-sm text-text-secondary">@{user.username}</p>
-            {user.email && (
-              <p className="text-sm text-accent mt-1">{user.email}</p>
+            <h3 className="text-xl font-bold text-text-primary">{profile.name}</h3>
+            {user.isVerified && (
+              <span className="inline-block mt-1 px-2 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-wider">Verified</span>
             )}
             <p className="text-text-secondary mt-2 text-sm">
-              {user.description || 'This user prefers to keep an air of mystery.'}
+              {profile.description || 'This user prefers to keep an air of mystery.'}
             </p>
           </div>
           <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-4 space-y-2">
@@ -139,7 +140,7 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
     <>
       <div className="h-full flex flex-col">
         <div className="p-4 text-center border-b border-border">
-            <h2 className="text-lg font-semibold">About {user?.name || 'User'}</h2>
+            <h2 className="text-lg font-semibold">About {profile.name || 'User'}</h2>
         </div>
         
         <div className="flex-1 overflow-y-auto p-4 md:p-6 relative">
@@ -179,7 +180,7 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
       {showSafetyModal && user && (
         <SafetyNumberModal 
           safetyNumber={safetyNumber} 
-          userName={user.name} 
+          userName={profile.name} 
           onClose={() => setShowSafetyModal(false)} 
           onVerify={() => {
             if (activeId && user.publicKey) {

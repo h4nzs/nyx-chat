@@ -121,79 +121,193 @@ Kalau lu masih gatel pengen ngoding fitur berat.
    * Dampak UI: Client harus decrypt dulu baru tahu ini pesan dari
      siapa (kiri/kanan).
 
-Ini detail implementasi buat *upgrade* X3DH nyx ke standar Signal:
+Double Ratchet Algorithm (Rotasi Kunci Dinamis): Saat ini aplikasi menggunakan Static Session Key dari hasil awal X3DH. Untuk ke depannya, setiap kali User A mengirim pesan ke B, kuncinya harus berputar (ratchet). Ini memberikan Forward Secrecy sempurna per-pesan.
 
-### 1. Update Database Server (`schema.prisma`)
+Key Compromise Indicator: Tambahkan fitur peringatan UI (warna merah) jika Safety Number / Identity Key lawan bicara tiba-tiba berubah secara drastis (pertanda akun mereka di-restore ulang atau ada potensi intervensi pihak ketiga).
 
-Server butuh "lemari" buat nyimpen ratusan kunci publik sekali pakai dari setiap *user*.
+📑 Laporan Rencana Implementasi: Double Ratchet Algorithm
 
-```prisma
-// Tambahin model ini di schema.prisma
-model OneTimePreKey {
-  id        String   @id // Pakai ID unik yang di-generate dari client (misal: integer ID 1, 2, 3...)
-  userId    String
-  publicKey String   // Public key (Base64/Hex) dari Curve25519
-  createdAt DateTime @default(now())
+  1. Analisis Kesiapan Arsitektur Saat Ini
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
-}
+  ✅ Apa yang Sudah Kita Punya (Kuat):
+   1. X3DH Handshake: Kita sudah memiliki inisialisasi X3DH yang matang. Output dari X3DH (Shared Secret 32-byte) adalah titik awal (Root Key) yang
+      sempurna untuk memulai Double Ratchet.
+   2. Worker Isolation (`crypto.worker.ts`): Arsitektur kita sudah memisahkan operasi kriptografi ke Web Worker. Ini sangat ideal untuk Double
+      Ratchet karena kalkulasi matematika (DH step & KDF) akan semakin berat.
+   3. IndexedDB Storage (`keychainDb.ts`): Kita sudah memiliki mekanisme penyimpanan data lokal yang terenkripsi menggunakan Master Seed
+      (Argon2id).
+   4. JSON Payload Structure: sendMessage sudah bisa membungkus ciphertext ke dalam payload JSON (seperti yang kita lakukan untuk header X3DH).
 
-```
 
-*Catatan:* Di model `User`, lu juga harus nambahin relasi `oneTimePreKeys OneTimePreKey[]`.
+  ❌ Apa yang Kurang (Harus Dibangun):
+   1. KDF (Key Derivation Function): Double Ratchet sangat bergantung pada HKDF (HMAC-based Extract-and-Expand KDF). Saat ini kita hanya pakai
+      sodium.crypto_generichash (BLAKE2b). Kita perlu implementasi HKDF standar (bisa pakai Web Crypto API di dalam worker).
+   2. State Management (Ratchet State): Saat ini kita hanya menyimpan satu sessionKey per percakapan. Nanti, kita harus menyimpan State Object yang
+      kompleks.
+   3. Skipped Message Keys Store: Jika pesan datang tidak berurutan (misal pesan 3 datang sebelum pesan 2 karena delay jaringan), kita harus
+      memutar ratchet dua kali dan menyimpan kunci pesan ke-2 di penyimpanan sementara (Skipped Keys) sampai pesan ke-2 itu benar-benar tiba.
 
-### 2. Client-Side: Generate & Upload Batch
 
-Pas *user* register atau pas *stock* kunci di server udah mau abis, *client* (Web Worker) harus nge- *generate* banyak kunci sekaligus (Signal biasanya bikin 100 kunci).
+  ---
 
-* **Generate:** Bikin 100 pasang *keypair* Curve25519 (`crypto_box_keypair`).
-* **Store Local:** Simpen 100 *Private Key*-nya di `keychainDb.ts` (IndexedDB) pake enkripsi *master seed* lu. Jangan lupa catat `keyId`-nya.
-* **Upload:** Kirim 100 *Public Key*-nya beserta `keyId` ke server lewat API.
+  2. Desain Arsitektur Double Ratchet untuk NYX
 
-### 3. Server-Side: Sistem "Pop" (Dispense Key)
 
-Ini bagian penting dari konsep *One-Time*. Saat Alice mau ngechat Bob, Alice bakal minta *Pre-Key Bundle* Bob ke server.
+  A. Struktur State (Ratchet State)
+  Kita harus mengubah skema penyimpanan di IndexedDB. Alih-alih menyimpan sessionKey: Uint8Array, kita akan menyimpan state terenkripsi yang
+  berisi:
+   * RootKey (32 bytes): Kunci utama untuk menurunkan Chain Keys baru.
+   * SenderChainKey (32 bytes): Untuk mengirim pesan.
+   * ReceiverChainKey (32 bytes): Untuk menerima pesan.
+   * MessageNumber (Int): Nomor pesan terkirim di chain saat ini.
+   * PreviousChainLength (Int): Jumlah pesan di chain penerima sebelum rotasi DH terakhir.
+   * MyRatchetKeyPair (Private/Public): Kunci Curve25519 (ECDH) milik kita yang akan terus diganti.
+   * TheirRatchetPublicKey (Public): Kunci ECDH terakhir milik lawan bicara.
 
-Server harus mengembalikan:
 
-1. Identity Key Bob ()
-2. Signed Pre-Key Bob () beserta *signature*-nya.
-3. **Satu** One-Time Pre-Key Bob ().
+  B. Struktur Header Pesan (Double Ratchet Header)
+  Setiap ciphertext yang dikirim harus dilengkapi header yang tidak dienkripsi (tapi bisa di-autentikasi / AAD). Di NYX, kita akan memodifikasi
+  payload JSON dari:
+   1 { "ciphertext": "..." }
+  Menjadi:
 
-**Krusial:** Begitu server ngirim  ke Alice, server **HARUS LANGSUNG MENGHAPUS**  tersebut dari *database*. Jadi kalau orang lain mau ngechat Bob sedetik kemudian, dia bakal dapet  yang berbeda.
 
-### 4. Upgrade Kalkulasi X3DH (Di Web Worker Alice)
+   1 {
+   2   "dr": {
+   3     "epk": "Base64(My_Current_Ratchet_Public_Key)",
+   4     "n": 5, // Message Number
+   5     "pn": 2 // Previous Chain Length
+   6   },
+   7   "ciphertext": "..."
+   8 }
 
-Nah, di sinilah *math* kriptografinya berubah. Sekarang kita punya 4 tahap kalkulasi *Diffie-Hellman* (`crypto_scalarmult`), bukan 3 lagi.
+  ---
 
-Di `crypto.worker.ts`, lu harus ngitung 4 *shared secrets* ini:
+  3. Rencana Alur Kerja (Implementation Workflow)
 
-*
-*
-*
-* *(Ini yang baru!)*
 
-Setelah dapet keempatnya, gabungin semua (di- *concatenate*) dan masukin ke *Key Derivation Function* (KDF), biasanya pake HKDF (HMAC-based Extract-and-Expand KDF) buat dapet *Shared Secret* ():
+  Implementasi ini cukup masif dan harus dilakukan dalam 4 fase (PR) yang terpisah agar tidak merusak sistem yang ada.
 
-*Note:*  = Identity Key,  = Ephemeral Key (kunci sementara yang Alice bikin pas mau ngechat),  = Signed Pre-Key.
 
-### 5. Inisialisasi Pesan & Eksekusi di Sisi Bob
+  Fase 1: Fondasi Kriptografi (Worker Update)
+   1. Implementasi HKDF: Menambahkan fungsi HKDF-SHA256 ke dalam crypto.worker.ts menggunakan crypto.subtle.
+   2. Fungsi Ratchet Step:
+       * KdfRoot(RootKey, DH_Output) -> [NewRootKey, ChainKey]
+       * KdfChain(ChainKey) -> [NewChainKey, MessageKey]
+   3. Double Ratchet Init: Memodifikasi worker_x3dh_initiator dan worker_x3dh_recipient agar alih-alih mengembalikan satu sessionKey, mereka
+      mengembalikan struktur RatchetState awal.
 
-Pas Alice ngirim pesan pertama ke Bob, pesan itu harus nyertain:
 
-*  (Identity Key Alice)
-*  (Ephemeral Key Alice)
-* **ID dari  yang dipakai Alice.**
+  Fase 2: Penyimpanan Lokal (State & Skipped Keys)
+   1. Refactor `keychainDb.ts`:
+       * Ubah SESSION_KEYS_STORE_NAME agar bisa menyimpan objek RatchetState yang dienkripsi dengan Master Seed.
+       * Tambahkan Object Store baru: skipped-message-keys (menyimpan kunci pesan yang datang out-of-order agar bisa didekripsi nanti).
 
-**Apa yang Bob lakuin pas nerima pesan ini?**
 
-1. Bob ngeliat *payload* pesannya: *"Oh, Alice pake OTPK ID nomor 42"*.
-2. Bob nyari *Private Key* nomor 42 di `keychainDb.ts` (IndexedDB).
-3. Bob ngelakuin kalkulasi X3DH yang sama buat dapetin .
-4. **Paranoia Step:** Bob **MENGHAPUS SECARA PERMANEN** *Private Key* nomor 42 dari IndexedDB-nya. Ini menjamin *Forward Secrecy*. Kalau HP/Browser Bob dibajak besok, *hacker* gak bisa baca pesan Alice yang ini karena kuncinya bener-bener udah musnah.
+  Fase 3: Modifikasi Alur Pengiriman (sendMessage)
+   1. Setiap memanggil sendMessage, panggil worker untuk:
+       * Lakukan Symmetric-key Ratchet (putar SenderChainKey menjadi kunci pesan baru).
+       * Gunakan MessageKey tersebut untuk enkripsi pesan.
+       * Naikkan MessageNumber (+1).
+       * Simpan RatchetState terbaru ke IndexedDB.
+   2. Sisipkan properti dr: { epk, n, pn } ke dalam payload JSON.
 
----
 
-Dengan *flow* ini, bahkan seandainya *server* lu di- *hack* dan *Signed Pre-Key* Bob dipalsuin, *hacker* tetep gak bisa ngedekripsi pesan, karena dia gak punya *Private Key* dari  yang disimpen di *browser* Bob.
+  Fase 4: Modifikasi Alur Penerimaan (addIncomingMessage)
+   1. Saat menerima pesan, baca header dr.
+   2. Cek apakah pesan ini sudah ada di skipped-message-keys. Jika ada, langsung dekripsi.
+   3. DH Ratchet (Jika Ephemeral Key Berubah): Jika dr.epk berbeda dari TheirRatchetPublicKey di state kita, artinya lawan bicara sudah mengganti
+      kuncinya.
+       * Kita hitung DH baru (Kunci Privat kita * Kunci Publik dia yang baru).
+       * Jalankan KdfRoot untuk mendapatkan ReceiverChainKey baru.
+       * Ganti Kunci Privat kita dengan yang baru (generate keypair baru), hitung DH lagi untuk mendapatkan SenderChainKey baru.
+   4. Symmetric Ratchet: Lakukan iterasi KdfChain pada ReceiverChainKey sampai nomor pesannya cocok dengan dr.n. (Jika ada pesan yang terlewat,
+      simpan kunci-kuncinya di skipped-message-keys).
+   5. Gunakan kunci pesan terakhir untuk mendekripsi ciphertext.
+   6. Simpan RatchetState terbaru ke IndexedDB.
+
+  ---
+
+
+  4. Tantangan & Mitigasi Keamanan
+
+
+   1. Sinkronisasi Backup Server (`/sync`):
+       * Tantangan: Saat ini kita me-backup sessionKey statis ke server. Dengan Double Ratchet, State terus berubah setiap ada pesan. Mem-backup
+         state terus-menerus akan membebani server dan rentan race condition jika user login di dua device bersamaan.
+       * Mitigasi: Standar Signal Protocol tidak menyarankan sinkronisasi state antar device. Device baru (Linked Device) biasanya memulai sesi
+         (Session/Ratchet) yang benar-benar baru dengan lawan bicara (Multi-device architecture).
+       * Keputusan Arsitektur: Kita harus mengubah strategi. Untuk saat ini, kita bisa memilih untuk mem-backup state hanya secara berkala (misal
+         tiap 10 pesan) ATAU tidak mem-backupnya sama sekali (device baru = chat history kosong, mulai baru, layaknya Signal asli). Ini butuh
+         keputusan bisnismu.
+
+
+   2. Out-of-Order Delivery (Pesan Tersendat):
+       * Jika jaringan buruk, algoritma ini menuntut penyimpanan sementara (Max Skip Limits, misal 1000 pesan). Jika lebih dari 1000 pesan
+         terlewat, sesi dianggap rusak dan butuh X3DH ulang.
+
+  ---
+
+  Kesimpulan
+
+
+  Sistem NYX saat ini sudah sangat kokoh sebagai pijakan. Menuju Double Ratchet adalah evolusi alami. Namun, perubahan ini akan merombak total
+  bagaimana state sesi disimpan dan dikelola.
+
+
+  Apakah kamu ingin kita mulai mengeksekusi Fase 1 (Membangun Fondasi Kriptografi HKDF & KdfChain di Worker)? Atau kamu ingin mendiskusikan bagian
+  arsitektur (seperti nasib Backup Server) terlebih dahulu?
+
+  🔄 Arsitektur "Periodic Epoch Ratcheting" (Rotasi Sesi Berkala)
+
+
+  Daripada memutar kunci di setiap pesan (Double Ratchet), kita memutar keseluruhan sesi X3DH secara transparan setelah jangka waktu atau jumlah
+  pesan tertentu.
+
+  Bagaimana Cara Kerjanya?
+
+
+   1. Epoch 1 (Pesan 1 - 100):
+      User A dan User B melakukan X3DH Handshake. Tercipta session_123. Kunci ini di-backup ke server. Mereka bertukar 100 pesan menggunakan kunci
+  ini.
+   2. Trigger Rotasi:
+      Saat User A ingin mengirim pesan ke-101, sistem (secara background) mendeteksi batas rotasi tercapai.
+   3. Epoch 2 (Pesan 101 - 200):
+      Sistem User A diam-diam mengambil OTPK baru milik User B dari server, melakukan X3DH Handshake BARU, dan menciptakan session_456.
+   4. Transisi Halus:
+      Pesan ke-101 dikirim menggunakan session_456. Kunci baru ini di-backup ke server.
+   5. Penerima (User B):
+      Saat menerima pesan ke-101, User B mendeteksi header X3DH baru, memprosesnya, dan menyimpan session_456 ke lokal & server backup.
+
+  Mengapa Ini Sangat Cocok untuk NYX?
+
+
+   * 100% Menggunakan Kode yang Ada: Kita tidak perlu menulis algoritma KDF yang rumit. Kita hanya memicu ulang logika "Lazy Init X3DH" yang sudah
+     kita buat dengan susah payah kemarin! Database kita (SessionKey) juga sudah mendukung penyimpanan banyak sessionId untuk satu percakapan.
+   * Forward Secrecy yang Praktis: Jika kunci session_456 bocor, hacker HANYA bisa membaca pesan 101-200. Pesan 1-100 tetap aman karena kuncinya
+     (session_123) berbeda dan terenkripsi kuat di server.
+   * UX Tidak Dikorbankan: Saat user login di browser baru, fitur /api/session-keys/sync (Restore) yang baru saja kita perbaiki akan men-download
+     SEMUA kunci epoch (session_123, session_456, dll) dan user tetap bisa membaca seluruh riwayat chat-nya secara instan.
+   * Performa Ringan: Melakukan asimetris X3DH setiap 100 pesan (atau setiap 3 hari) sangat ringan di CPU dan baterai dibandingkan melakukannya di
+     setiap ketikan pesan.
+
+  Rencana Implementasi (Jika kamu setuju)
+
+  Kita hanya perlu menambahkan sedikit logika di web/src/store/message.ts (di dalam sendMessage):
+
+
+    1 // Konsep Kasar
+    2 const LATEST_KEY = await retrieveLatestSessionKeySecurely(conversationId);
+    3 const MESSAGE_COUNT = countMessagesInSession(conversationId, LATEST_KEY.sessionId);
+    4
+    5 if (MESSAGE_COUNT >= 50) { 
+    6    // Waktunya Rotasi!
+    7    // Buang LATEST_KEY, paksa sistem melakukan X3DH baru seperti saat pesan pertama kali dikirim.
+    8 } else {
+    9    // Pakai LATEST_KEY
+   10 }
+
+
+  Ini adalah jalan tengah emas (Golden Compromise) antara kemudahan sinkronisasi cloud ala WhatsApp/Telegram dan keamanan kriptografi tingkat
+  tinggi ala Signal.

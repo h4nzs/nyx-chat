@@ -5,6 +5,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import clsx from 'clsx';
 
 import { useChatList } from '@hooks/useChatList';
+import { useUserProfile } from '@hooks/useUserProfile';
 import { useModalStore } from '@store/modal';
 import { useCommandPaletteStore } from '@store/commandPalette';
 import { useAuthStore } from '@store/auth';
@@ -27,6 +28,7 @@ import { Spinner } from './Spinner';
 const UserProfile = memo(() => {
   const { user, logout } = useAuthStore(state => ({ user: state.user, logout: state.logout }));
   const { showConfirm: confirmLogout } = useModalStore(state => ({ showConfirm: state.showConfirm }));
+  const profile = useUserProfile(user);
 
   const handleLogout = useCallback(() => {
     confirmLogout(
@@ -44,15 +46,15 @@ const UserProfile = memo(() => {
       <div className="flex items-center gap-3 overflow-hidden">
         <div className="relative flex-shrink-0">
           <img 
-            src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} 
+            src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
             alt="Avatar" 
             className="w-10 h-10 rounded-full object-cover shadow-neu-flat dark:shadow-neu-flat-dark border-2 border-bg-main" 
           />
           <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border border-bg-surface"></div>
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-bold text-text-primary truncate">{user.name}</p>
-          <p className="text-[10px] font-medium text-text-secondary truncate opacity-70">@{user.username}</p>
+          <p className="text-sm font-bold text-text-primary truncate">{profile.name}</p>
+          {user.isVerified && <span className="text-[10px] text-accent font-bold tracking-wider">VERIFIED</span>}
         </div>
       </div>
 
@@ -80,6 +82,28 @@ const UserProfile = memo(() => {
   );
 });
 
+const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (id: string) => void }) => {
+  const profile = useUserProfile(user);
+  return (
+    <button 
+      onClick={() => onSelect(user.id)}
+      className="
+        w-[calc(100%-32px)] mx-4 mb-3 p-3 flex items-center gap-4 rounded-xl text-left
+        bg-bg-main transition-all
+        shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5
+      "
+    >
+      <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+           <p className="font-bold text-sm text-text-primary">{profile.name}</p>
+           {user.isVerified && <div className="w-2 h-2 rounded-full bg-accent" title="Verified"></div>}
+        </div>
+      </div>
+    </button>
+  );
+};
+
 const SearchResults = memo(({ results, onSelect }: { results: User[], onSelect: (userId: string) => void }) => (
   <Virtuoso
     style={{ height: '100%' }}
@@ -88,23 +112,7 @@ const SearchResults = memo(({ results, onSelect }: { results: User[], onSelect: 
       Header: () => <p className="text-xs font-bold text-text-secondary px-6 mb-4 mt-2">GLOBAL SEARCH</p>,
       EmptyPlaceholder: () => <div className="p-6 text-center text-xs text-text-secondary">No users found.</div>,
     }}
-    itemContent={(index, user) => (
-      <button 
-        key={user.id}
-        onClick={() => onSelect(user.id)}
-        className="
-          w-[calc(100%-32px)] mx-4 mb-3 p-3 flex items-center gap-4 rounded-xl text-left
-          bg-bg-main transition-all
-          shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5
-        "
-      >
-        <img src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
-        <div className="flex-1 min-w-0">
-          <p className="font-bold text-sm text-text-primary">{user.name}</p>
-          <p className="text-xs text-text-secondary">@{user.username}</p>
-        </div>
-      </button>
-    )}
+    itemContent={(index, user) => <SearchResultItem key={user.id} user={user} onSelect={onSelect} />}
   />
 ));
 
@@ -134,13 +142,14 @@ const ConversationItem = memo(({
   onTogglePin: (id: string) => void;
 }) => {
   const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
-  const title = conversation.isGroup ? conversation.title : peerUser?.name || 'Conversation';
+  const peerProfile = useUserProfile(peerUser as any); // Cast as any because Participant might not perfectly match but has id and encryptedProfile
+  const title = conversation.isGroup ? conversation.title : peerProfile.name || 'Conversation';
   const isUnread = conversation.unreadCount > 0;
   const isPinnedByMe = Boolean(conversation.participants?.some(p => p.id === meId && p.isPinned));
 
   const avatarSrc = conversation.isGroup 
     ? (conversation.avatarUrl ? `${toAbsoluteUrl(conversation.avatarUrl)}?t=${conversation.lastUpdated}` : `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`)
-    : (peerUser?.avatarUrl ? toAbsoluteUrl(peerUser.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${title}`);
+    : (peerProfile.avatarUrl ? toAbsoluteUrl(peerProfile.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${title}`);
 
   const formatConversationTime = useCallback((timestamp: string) => {
     const date = new Date(timestamp);

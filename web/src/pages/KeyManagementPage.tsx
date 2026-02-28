@@ -135,7 +135,7 @@ export default function KeyManagementPage() {
                  <FiShield className="text-green-500 mt-1" size={20} />
                  <div>
                    <h3 className="font-bold text-text-primary">Master Recovery Phrase</h3>
-                   <p className="text-xs text-text-secondary mt-1">Reveal your 12-word seed phrase for backup.</p>
+                   <p className="text-xs text-text-secondary mt-1">Reveal your 24-word seed phrase for backup.</p>
                  </div>
               </div>
               <button 
