@@ -220,7 +220,7 @@ export default function SettingsPage() {
     e.preventDefault();
     setIsLoading(true);
     try {
-      let currentAvatarUrl = profile.avatarUrl;
+      let currentAvatarUrl = profile?.avatarUrl;
 
       if (avatarFile) {
         currentAvatarUrl = await updateAvatar(avatarFile);
@@ -445,7 +445,7 @@ export default function SettingsPage() {
                     bg-bg-main p-2
                   ">
                     <img
-                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
+                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${profile?.name || 'Anonymous'}`}
                       alt="ID"
                       className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
                     />

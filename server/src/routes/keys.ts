@@ -154,7 +154,7 @@ router.get(
       // 2. Atomic Pop: Fetch ONE OTPK and Delete it
       // Prisma doesn't support "DELETE RETURNING" directly in standard API easily for this logic without raw query or transaction.
       // We use a transaction: Find First -> Delete ID.
-      
+
       const otpk = await prisma.$transaction(async (tx) => {
         const key = await tx.oneTimePreKey.findFirst({
           where: { userId },

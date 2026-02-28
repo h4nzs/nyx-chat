@@ -55,7 +55,7 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
       'video/mp4', 'video/quicktime', 'video/x-msvideo',
       'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/mp3',
       'application/zip', 'application/x-rar-compressed',
-      'application/octet-stream' 
+      'application/octet-stream'
     ]
 
     if (!allowedTypes.includes(fileType)) {
@@ -64,10 +64,10 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
 
     const fileSize = req.body.fileSize ? parseInt(req.body.fileSize, 10) : 0
     if (fileSize > 0) {
-      const avatarMaxSize = 5 * 1024 * 1024 
-      const imageMaxSize = 15 * 1024 * 1024 
-      const videoMaxSize = 100 * 1024 * 1024 
-      const documentMaxSize = 50 * 1024 * 1024 
+      const avatarMaxSize = 5 * 1024 * 1024
+      const imageMaxSize = 15 * 1024 * 1024
+      const videoMaxSize = 100 * 1024 * 1024
+      const documentMaxSize = 50 * 1024 * 1024
 
       let maxSize: number
       if (targetFolder === 'avatars') {
@@ -77,7 +77,7 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
       } else if (fileType.startsWith('video/')) {
         maxSize = videoMaxSize
       } else if (fileType.startsWith('audio/')) {
-        maxSize = videoMaxSize 
+        maxSize = videoMaxSize
       } else if (fileType.startsWith('application/') || fileType === 'text/plain') {
         maxSize = documentMaxSize
       } else {
@@ -87,11 +87,12 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
       // Encryption Overhead Buffer (IV + Auth Tag + Margin)
       // AES-GCM adds ~28 bytes. We add 1KB to be safe.
       const ENCRYPTION_OVERHEAD = 1024; 
-      
-      if (fileSize > (maxSize + ENCRYPTION_OVERHEAD)) {
-        const maxSizeMB = maxSize / (1024 * 1024)
+      const allowedMax = maxSize + ENCRYPTION_OVERHEAD;
+
+      if (fileSize > allowedMax) {
+        const allowedMaxMB = (allowedMax / (1024 * 1024)).toFixed(2)
         return res.status(400).json({
-          error: `File too large. Maximum size for this file type is ${maxSizeMB}MB.`
+          error: `File too large. Maximum size for this file type is ${allowedMaxMB}MB (including encryption overhead).`
         })
       }
     }
@@ -102,7 +103,7 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
     }
 
     const key = `${targetFolder}/${req.user!.id}-${nanoid()}.${ext}`
-    
+
     // [FIX] Force Content-Type to octet-stream because file is ENCRYPTED
     const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream')
 
@@ -117,44 +118,10 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
   }
 })
 
-// === 1. SIMPAN AVATAR USER ===
-router.post(
-  '/avatars/save', 
-  requireAuth,
-  uploadLimiter,
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { fileUrl } = req.body 
-      if (!req.user) throw new ApiError(401, 'Unauthorized')
-      if (!fileUrl) throw new ApiError(400, 'Missing fileUrl.')
+// User avatars are now E2E Encrypted and updated via PUT /api/users/me along with the profile.
+// The server cannot decrypt the profile to extract the old avatar URL, so client must handle garbage collection or rely on orphaned file cleanup.
 
-      const userId = req.user.id
-      const oldUser = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { avatarUrl: true }
-      })
-
-      if (oldUser?.avatarUrl) {
-        deleteOldFile(oldUser.avatarUrl).catch(console.error)
-      }
-
-      const updatedUser = await prisma.user.update({
-        where: { id: userId },
-        data: { avatarUrl: fileUrl },
-        select: {
-          id: true, encryptedProfile: true, avatarUrl: true,
-          hasCompletedOnboarding: true, isVerified: true
-        }
-      })
-
-      res.json(updatedUser)
-    } catch (e) {
-      next(e)
-    }
-  }
-)
-
-// === 2. SIMPAN AVATAR GROUP ===
+// === 1. SIMPAN AVATAR GROUP ===
 router.post(
   '/groups/:id/avatar',
   uploadLimiter,

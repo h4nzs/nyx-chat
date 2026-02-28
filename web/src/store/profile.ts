@@ -16,24 +16,27 @@ type ProfileState = {
 export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => ({
   profiles: {},
   decryptAndCache: async (userId, encryptedProfile) => {
-    // 1. Return cache if exists
-    if (get().profiles[userId]) return get().profiles[userId];
+    // 1. Generate composite cache key to prevent stale data if profile changes
+    const cacheKey = encryptedProfile ? `${userId}_${encryptedProfile.substring(0, 32)}` : userId;
+
+    // 2. Return cache if exists
+    if (get().profiles[cacheKey]) return get().profiles[cacheKey];
     
-    // 2. Default fallback
+    // 3. Default fallback
     const fallback: DecryptedProfile = { name: "Encrypted User" };
     if (!encryptedProfile) return fallback;
 
     try {
-      // 3. Cari ProfileKey di IndexedDB
+      // 4. Cari ProfileKey di IndexedDB
       const profileKey = await getProfileKey(userId);
       if (!profileKey) return fallback;
 
-      // 4. Decrypt via Worker
+      // 5. Decrypt via Worker
       const jsonString = await decryptProfile(encryptedProfile, profileKey);
       const parsed = JSON.parse(jsonString) as DecryptedProfile;
       
-      // 5. Save to RAM
-      set((state) => ({ profiles: { ...state.profiles, [userId]: parsed } }));
+      // 6. Save to RAM
+      set((state) => ({ profiles: { ...state.profiles, [cacheKey]: parsed } }));
       return parsed;
     } catch (e) {
       console.error(`Failed to decrypt profile for ${userId}`, e);

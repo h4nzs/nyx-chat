@@ -138,20 +138,22 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
     }
 
     // [FIX] PREVENT RE-DECRYPTION LOOP
-    // If content doesn't look like JSON, it's likely already plaintext.
-    if (typeof contentToDecrypt === 'string' && !contentToDecrypt.trim().startsWith('{')) {
-        return decryptedMsg;
-    }
-    
-    // Check if it's a valid encryption payload (contains specific keys)
-    try {
-        if (contentToDecrypt.includes('"header"') || contentToDecrypt.includes('"ciphertext"') || contentToDecrypt.includes('"dr"')) {
-            // It looks like a payload, proceed to decrypt
-        } else {
-            // Probably just a JSON message (like file metadata) that is already decrypted
-            return decryptedMsg;
+    const isLikelyEncrypted = (str: string) => {
+        const trimmed = str.trim();
+        // 1. Check for JSON payload containing encryption markers
+        if (trimmed.startsWith('{') && (trimmed.includes('"header"') || trimmed.includes('"ciphertext"') || trimmed.includes('"dr"'))) {
+            return true;
         }
-    } catch {
+        // 2. Check for legacy/base64 encoded ciphertexts
+        // A valid base64 string shouldn't contain spaces and typically matches this regex
+        const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+        if (base64Regex.test(trimmed) && trimmed.length > 20) { // arbitrary min length for a real ciphertext
+            return true;
+        }
+        return false;
+    };
+
+    if (!isLikelyEncrypted(contentToDecrypt)) {
         return decryptedMsg;
     }
 
@@ -690,6 +692,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         if (res.ok && res.msg) {
           await removeFromQueue(tempId);
           get().replaceOptimisticMessage(conversationId, tempId, { ...res.msg, status: 'SENT' });
+          
+          const msgId = res.msg.id;
+          import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
+              const mk = await retrieveMessageKeySecurely(`temp_${tempId}`);
+              if (mk) {
+                  await storeMessageKeySecurely(msgId, mk);
+                  await deleteMessageKeySecurely(`temp_${tempId}`);
+              }
+          }).catch(console.error);
         } else {
           console.error(`[Queue] Failed to send queued message ${tempId}:`, res.error);
           await updateQueueAttempt(tempId, attempt + 1);

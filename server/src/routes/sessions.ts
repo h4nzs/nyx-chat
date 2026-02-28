@@ -13,7 +13,7 @@ const router: Router = Router()
 router.get('/', requireAuth, async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
-    
+
     let currentJti: string | null = null
     if (req.cookies.rt) {
       const payload = verifyJwt(req.cookies.rt)
@@ -41,7 +41,7 @@ router.get('/', requireAuth, async (req, res, next) => {
       const browser = parser.getBrowser()
       const os = parser.getOS()
       const device = parser.getDevice()
-      
+
       const deviceInfo = [
         device.vendor,
         device.model,

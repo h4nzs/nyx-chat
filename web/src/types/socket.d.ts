@@ -50,6 +50,7 @@ export interface ServerToClientEvents {
     // --- DEVICE MIGRATION TUNNEL (SERVER -> CLIENT) ---
     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
     "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: any }) => void;
+    "migration:ack": (payload: { roomId: string; success: boolean }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -87,4 +88,5 @@ export interface ClientToServerEvents {
     "migration:join": (roomId: string) => void;
     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
     "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: any }) => void;
+    "migration:ack": (payload: { roomId: string; success: boolean }) => void;
 }

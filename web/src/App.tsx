@@ -130,6 +130,10 @@ const AppContent = () => {
 
   // --- Lifecycle & Effects ---
 
+  const isDeviceFlow = useCallback((pathname: string) => {
+      return pathname.startsWith('/link-device') || pathname.startsWith('/migrate-receive');
+  }, []);
+
   // 1. Bootstrap Auth
   useEffect(() => {
     bootstrap();
@@ -137,7 +141,7 @@ const AppContent = () => {
 
   // 2. Manage Socket Connection
   useEffect(() => {
-    if (location.pathname.startsWith('/link-device')) {
+    if (isDeviceFlow(location.pathname)) {
       return;
     }
     if (user) {
@@ -145,7 +149,7 @@ const AppContent = () => {
     } else {
       disconnectSocket();
     }
-  }, [user, location.pathname]);
+  }, [user, location.pathname, isDeviceFlow]);
 
   // 3. (Reserved for future use)
 
@@ -161,7 +165,7 @@ const AppContent = () => {
   // 5. Visibility Change Handler
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (location.pathname.startsWith('/link-device')) {
+      if (isDeviceFlow(location.pathname)) {
         return;
       }
 

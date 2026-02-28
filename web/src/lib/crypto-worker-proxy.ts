@@ -101,19 +101,19 @@ export async function restoreFromPhrase(phrase: string, password: string): Promi
 }
 
 export async function recoverAccountWithSignature(
-  phrase: string, 
-  newPassword: string, 
-  identifier: string, 
-  timestamp: number
+  phrase: string,
+  newPassword: string,
+  identifier: string,
+  timestamp: number,
+  nonce: string
 ): Promise<{
   encryptionPublicKeyB64: string,
   signingPublicKeyB64: string,
   encryptedPrivateKeys: string,
   signatureB64: string
 }> {
-  return sendToWorker('recoverAccountWithSignature', { phrase, newPassword, identifier, timestamp });
+  return sendToWorker('recoverAccountWithSignature', { phrase, newPassword, identifier, timestamp, nonce });
 }
-
 export async function encryptProfile(profileJsonString: string, profileKeyB64: string): Promise<string> {
   return sendToWorker('encryptProfile', { profileJsonString, profileKeyB64 });
 }
@@ -319,7 +319,7 @@ export function worker_dr_ratchet_decrypt(payload: {
     serializedState: SerializedRatchetState,
     header: any,
     ciphertext: Uint8Array
-}): Promise<{ state: SerializedRatchetState, plaintext: Uint8Array, skippedKeys: { dh: string, n: number, mk: string }[], mk: Uint8Array }> {
+}): Promise<{ state: SerializedRatchetState, plaintext: Uint8Array, skippedKeys: { dh: string, epk?: string, n: number, mk: string }[], mk: Uint8Array }> {
     return sendToWorker<{ state: SerializedRatchetState, plaintext: any, skippedKeys: any[], mk: any }>('dr_ratchet_decrypt', {
         serializedState: payload.serializedState,
         header: payload.header,

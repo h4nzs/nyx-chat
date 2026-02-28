@@ -76,7 +76,7 @@ type RegisterResponse = {
 };
 
 type Actions = {
-  bootstrap: () => Promise<void>;
+  bootstrap: (force?: boolean) => Promise<void>;
   tryAutoUnlock: () => Promise<boolean>;
   login: (usernameHash: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
   registerAndGeneratePhrase: (data: { 
@@ -217,8 +217,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       await setDeviceAutoUnlockReady(true);
     },
 
-    bootstrap: async () => {
-      if (get().accessToken) {
+    bootstrap: async (force = false) => {
+      // If we already have a token and user profile, and we aren't forcing a refresh, return early.
+      if (!force && get().accessToken && get().user) {
         set({ isBootstrapping: false });
         return;
       }
@@ -322,17 +323,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           phrase
         } = await registerAndGenerateKeys(password);
 
-        await saveEncryptedKeys(encryptedPrivateKeys);
-        await saveDeviceAutoUnlockKey(password);
-        await setDeviceAutoUnlockReady(true);
-        set({ hasRestoredKeys: true });
-
-        // Cache keys
-        try {
-          const result = await retrievePrivateKeys(encryptedPrivateKeys, password);
-          if (result.success) privateKeysCache = result.keys;
-        } catch (e) {}
-
+        // API Call First
         const res = await api<{ accessToken: string; user: User }>("/api/auth/register", {
           method: "POST",
           body: JSON.stringify({
@@ -345,6 +336,18 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             turnstileToken
           }),
         });
+
+        // Only persist local vault state if the server registration succeeds
+        await saveEncryptedKeys(encryptedPrivateKeys);
+        await saveDeviceAutoUnlockKey(password);
+        await setDeviceAutoUnlockReady(true);
+        set({ hasRestoredKeys: true });
+
+        // Cache keys
+        try {
+          const result = await retrievePrivateKeys(encryptedPrivateKeys, password);
+          if (result.success) privateKeysCache = result.keys;
+        } catch (e) {}
 
         set({ user: res.user, accessToken: res.accessToken });
         localStorage.setItem("user", JSON.stringify(res.user));

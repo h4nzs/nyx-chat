@@ -5,7 +5,14 @@ import toast from 'react-hot-toast';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { toAbsoluteUrl } from '@utils/url';
 
-function SearchResultItem({ u, loadingId, onStarted }: { u: any, loadingId: string | null, onStarted: (id: string) => void }) {
+export interface SearchUser {
+  id: string;
+  encryptedProfile?: string | null;
+  isVerified?: boolean;
+  publicKey?: string;
+}
+
+function SearchResultItem({ u, loadingId, onStarted }: { u: SearchUser, loadingId: string | null, onStarted: (id: string) => void }) {
   const profile = useUserProfile(u);
   return (
     <button 
@@ -23,7 +30,7 @@ function SearchResultItem({ u, loadingId, onStarted }: { u: any, loadingId: stri
 }
 
 export default function StartNewChat({ query, onStarted }: { query: string; onStarted: (id: string) => void }) {
-  const [list, setList] = useState<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>([]);
+  const [list, setList] = useState<SearchUser[]>([]);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const { searchUsers, startConversation } = useConversationStore(state => ({
     searchUsers: state.searchUsers,

@@ -360,6 +360,11 @@ export async function clearAllKeys(): Promise<void> {
   await tx.done;
 }
 
+export interface VaultEntry {
+  key: any;
+  value: any;
+}
+
 /**
  * Mengekspor seluruh isi brankas kunci menjadi string JSON.
  * Aman karena setiap nilainya sudah terenkripsi oleh Master Seed.
@@ -369,17 +374,18 @@ export async function exportDatabaseToJson(): Promise<string> {
   const stores = [
     SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
     PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
-    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME
+    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME,
+    GROUP_SENDER_STATES_STORE, GROUP_RECEIVER_STATES_STORE
   ];
   
-  const exportData: Record<string, any[]> = {};
+  const exportData: Record<string, VaultEntry[]> = {};
 
   for (const storeName of stores) {
     if (!db.objectStoreNames.contains(storeName)) continue;
     
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
-    const items = [];
+    const items: VaultEntry[] = [];
     let cursor = await store.openCursor();
     while (cursor) {
       items.push({ key: cursor.key, value: cursor.value });
@@ -396,7 +402,7 @@ export async function exportDatabaseToJson(): Promise<string> {
  */
 export async function importDatabaseFromJson(jsonString: string): Promise<void> {
   const db = await getDb();
-  let importData;
+  let importData: Record<string, VaultEntry[]>;
   try {
       importData = JSON.parse(jsonString);
   } catch (e) {
@@ -406,16 +412,17 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
   const stores = [
     SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
     PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
-    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME
+    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME,
+    GROUP_SENDER_STATES_STORE, GROUP_RECEIVER_STATES_STORE
   ];
   
   const availableStores = stores.filter(s => db.objectStoreNames.contains(s));
   const tx = db.transaction(availableStores, 'readwrite');
   
   for (const storeName of availableStores) {
+    const store = tx.objectStore(storeName);
+    await store.clear(); // Selalu bersihkan brankas lama, bahkan jika importData[storeName] tidak ada
     if (importData[storeName]) {
-      const store = tx.objectStore(storeName);
-      await store.clear(); // Bersihkan brankas lama
       for (const item of importData[storeName]) {
         await store.put(item.value, item.key);
       }

@@ -86,6 +86,7 @@ export default function MigrationSendPage() {
       const socket = getSocket();
       const totalChunks = Math.ceil(encryptedData.byteLength / CHUNK_SIZE);
       
+      socket.emit('migration:join', roomId);
       socket.emit('migration:start', { roomId, totalChunks, sealedKey, iv: ivB64 });
 
       for (let i = 0; i < totalChunks; i++) {
@@ -100,13 +101,30 @@ export default function MigrationSendPage() {
         await new Promise(r => setTimeout(r, 50));
       }
 
-      setStatus('success');
-      toast.success('Transfer Complete!', { id: 'send' });
-      setTimeout(() => navigate('/settings'), 2000);
+      toast.loading('Waiting for receiver to process...', { id: 'send' });
+
+      // Wait for ACK
+      const ackResult = await new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve(false), 30000); // 30s timeout
+        socket.once('migration:ack', (data: { roomId: string, success: boolean }) => {
+           if (data.roomId === roomId) {
+               clearTimeout(timeout);
+               resolve(data.success);
+           }
+        });
+      });
+
+      if (ackResult) {
+        setStatus('success');
+        toast.success('Transfer Complete!', { id: 'send' });
+        setTimeout(() => navigate('/settings'), 2000);
+      } else {
+        throw new Error("Receiver failed to decrypt or timed out");
+      }
 
     } catch (e) {
       console.error(e);
-      toast.error('Migration failed. Invalid QR or Network error.', { id: 'send' });
+      toast.error('Migration failed. Invalid QR, Network error, or Timeout.', { id: 'send' });
       setStatus('scanning');
     }
   };
