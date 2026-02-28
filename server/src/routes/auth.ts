@@ -439,11 +439,19 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) => 
       userID: new Uint8Array(Buffer.from(req.user.id)),
       userName: user?.name || "Anonymous User", 
       attestationType: 'none',
-      excludeCredentials: userAuthenticators.map(auth => ({
-        id: isoBase64URL.toBuffer(auth.credentialID),
-        type: 'public-key',
-        transports: auth.transports ? (auth.transports.split(',') as any) : undefined
-      })),
+      excludeCredentials: userAuthenticators.reduce((acc: any[], auth) => {
+        try {
+          if (!auth.credentialID) return acc;
+          acc.push({
+            id: isoBase64URL.toBuffer(String(auth.credentialID)),
+            type: 'public-key',
+            transports: auth.transports ? (auth.transports.split(',') as any) : undefined
+          });
+        } catch (e) {
+          console.warn(`Skipping invalid credential ID: ${auth.credentialID}`, e);
+        }
+        return acc;
+      }, []),
       authenticatorSelection: {
         residentKey: 'preferred',
         userVerification: 'preferred',
