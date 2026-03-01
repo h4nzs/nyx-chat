@@ -17,8 +17,15 @@ const disallowedRanges = [
 ]
 
 // Custom DNS resolver to prevent SSRF
-export async function resolveDns (url: string): Promise<string> {
-  const hostname = new URL(url).hostname
+export async function resolveDns (urlOrHostname: string): Promise<string> {
+  let hostname = urlOrHostname;
+  try {
+    // If it's a full URL, extract the hostname
+    hostname = new URL(urlOrHostname).hostname;
+  } catch (e) {
+    // If new URL() throws, it means it's already a plain hostname (e.g. from link-preview-js)
+  }
+
   // Validate hostname format to prevent injection
   if (!/^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(hostname) && !/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
      // Allow simple hostnames or IPs if they are valid, but be strict about weird chars

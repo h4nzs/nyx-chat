@@ -18,8 +18,8 @@ router.post('/', requireAuth, async (req, res, next) => {
       res.status(404).json({ error: 'Could not generate a preview for this link.' })
     }
   } catch (error) {
-    console.error('Link preview error:', error)
-    next(error)
+    console.warn(`[Link Preview] Failed to fetch metadata for ${url}:`, (error as Error).message);
+    res.status(400).json({ error: 'Failed to extract link preview. Target site is protected or unreachable.' });
   }
 })
 

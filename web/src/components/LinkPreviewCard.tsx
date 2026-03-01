@@ -24,7 +24,8 @@ const LinkPreviewCard = ({ preview }: LinkPreviewProps) => {
 
     const fetchImage = async () => {
       try {
-        const res = await fetch(`/api/previews/image?url=${encodeURIComponent(preview.image)}`, {
+        const baseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, "").replace(/\/$/, "");
+        const res = await fetch(`${baseUrl}/api/previews/image?url=${encodeURIComponent(preview.image)}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         
