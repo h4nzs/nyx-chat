@@ -32,6 +32,7 @@
     "libsodium-wrappers": "^0.7.15",
     "lighthouse": "^13.0.2",
     "lodash": "^4.17.21",
+    "lucide-react": "^0.575.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-hot-toast": "^2.6.0",

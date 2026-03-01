@@ -28,6 +28,7 @@ import PasswordPromptModal from './components/PasswordPromptModal';
 import ChatInfoModal from './components/ChatInfoModal';
 import DynamicIsland from './components/DynamicIsland';
 import CommandPalette from './components/CommandPalette';
+import ContextMenu from './components/ContextMenu';
 import { Spinner } from './components/Spinner';
 
 // Stores & Hooks
@@ -232,6 +233,7 @@ const AppContent = () => {
       <PasswordPromptModal />
       <ChatInfoModal />
       <DynamicIsland />
+      <ContextMenu />
 
       <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
         <Suspense fallback={<LoadingScreen />}>

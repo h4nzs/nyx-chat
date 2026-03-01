@@ -1,0 +1,674 @@
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index a73fecb7..0a502ef3 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -271,6 +271,9 @@ importers:
+       lodash:
+         specifier: ^4.17.21
+         version: 4.17.23
++      lucide-react:
++        specifier: ^0.575.0
++        version: 0.575.0(react@19.2.4)
+       react:
+         specifier: ^19.2.4
+         version: 19.2.4
+@@ -5273,6 +5276,11 @@ packages:
+     resolution: {integrity: sha512-jumlc0BIUrS3qJGgIkWZsyfAM7NCWiBcCDhnd+3NNM5KbBmLTgHVfWBcg6W+rLUsIpzpERPsvwUP7CckAQSOoA==}
+     engines: {node: '>=12'}
+ 
++  lucide-react@0.575.0:
++    resolution: {integrity: sha512-VuXgKZrk0uiDlWjGGXmKV6MSk9Yy4l10qgVvzGn2AWBx1Ylt0iBexKOAoA6I7JO3m+M9oeovJd3yYENfkUbOeg==}
++    peerDependencies:
++      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
++
+   lz-string@1.5.0:
+     resolution: {integrity: sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==}
+     hasBin: true
+@@ -13429,6 +13437,10 @@ snapshots:
+ 
+   lru-cache@7.18.3: {}
+ 
++  lucide-react@0.575.0(react@19.2.4):
++    dependencies:
++      react: 19.2.4
++
+   lz-string@1.5.0: {}
+ 
+   magic-string@0.25.9:
+diff --git a/web/package.json b/web/package.json
+index 8c9a2706..a434ef06 100644
+--- a/web/package.json
++++ b/web/package.json
+@@ -32,6 +32,7 @@
+     "libsodium-wrappers": "^0.7.15",
+     "lighthouse": "^13.0.2",
+     "lodash": "^4.17.21",
++    "lucide-react": "^0.575.0",
+     "react": "^19.2.4",
+     "react-dom": "^19.2.4",
+     "react-hot-toast": "^2.6.0",
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index 03631f7d..cc8ed754 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -28,6 +28,7 @@ import PasswordPromptModal from './components/PasswordPromptModal';
+ import ChatInfoModal from './components/ChatInfoModal';
+ import DynamicIsland from './components/DynamicIsland';
+ import CommandPalette from './components/CommandPalette';
++import ContextMenu from './components/ContextMenu';
+ import { Spinner } from './components/Spinner';
+ 
+ // Stores & Hooks
+@@ -232,6 +233,7 @@ const AppContent = () => {
+       <PasswordPromptModal />
+       <ChatInfoModal />
+       <DynamicIsland />
++      <ContextMenu />
+ 
+       <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
+         <Suspense fallback={<LoadingScreen />}>
+diff --git a/web/src/components/ChatList.tsx b/web/src/components/ChatList.tsx
+index 02c60a0a..59d26d9c 100644
+--- a/web/src/components/ChatList.tsx
++++ b/web/src/components/ChatList.tsx
+@@ -15,13 +15,13 @@ import type { Conversation } from '@store/conversation';
+ 
+ import { toAbsoluteUrl } from '@utils/url';
+ 
+-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+-import { FiUsers, FiSearch, FiMoreVertical, FiSettings, FiLogOut } from 'react-icons/fi';
++import { FiUsers, FiSearch, FiSettings, FiLogOut, FiUser, FiMaximize2, FiSlash, FiTrash2 } from 'react-icons/fi';
+ 
+ import CreateGroupChat from './CreateGroupChat';
+ import NotificationBell from './NotificationBell';
+ import { Spinner } from './Spinner';
+-
++import SwipeableItem from './SwipeableItem';
++import { useContextMenuStore } from '../store/contextMenu';
+ 
+ // --- Sub-components ---
+ 
+@@ -42,7 +42,6 @@ const UserProfile = memo(() => {
+ 
+   return (
+     <div className="flex items-center justify-between px-6 py-6 bg-bg-main z-10">
+-      {/* Identity Slot */}
+       <div className="flex items-center gap-3 overflow-hidden">
+         <div className="relative flex-shrink-0">
+           <img 
+@@ -58,10 +57,8 @@ const UserProfile = memo(() => {
+         </div>
+       </div>
+ 
+-      {/* Control Cluster */}
+       <div className="flex items-center gap-1 flex-shrink-0">
+         <NotificationBell />
+-        
+         <Link 
+           to="/settings" 
+           aria-label="Settings" 
+@@ -69,7 +66,6 @@ const UserProfile = memo(() => {
+         >
+           <FiSettings size={20} />
+         </Link>
+-        
+         <button 
+           onClick={handleLogout} 
+           aria-label="Logout" 
+@@ -142,10 +138,11 @@ const ConversationItem = memo(({
+   onTogglePin: (id: string) => void;
+ }) => {
+   const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
+-  const peerProfile = useUserProfile(peerUser as any); // Cast as any because Participant might not perfectly match but has id and encryptedProfile
++  const peerProfile = useUserProfile(peerUser as any);
+   const title = conversation.isGroup ? conversation.title : peerProfile.name || 'Conversation';
+   const isUnread = conversation.unreadCount > 0;
+   const isPinnedByMe = Boolean(conversation.participants?.some(p => p.id === meId && p.isPinned));
++  const openMenu = useContextMenuStore(s => s.openMenu);
+ 
+   const avatarSrc = conversation.isGroup 
+     ? (conversation.avatarUrl ? `${toAbsoluteUrl(conversation.avatarUrl)}?t=${conversation.lastUpdated}` : `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`)
+@@ -162,9 +159,21 @@ const ConversationItem = memo(({
+ 
+   const previewText = conversation.lastMessage?.content || conversation.lastMessage?.preview || 'No messages yet';
+ 
++  const handleContextMenu = (e: React.MouseEvent | React.TouchEvent) => {
++    e.preventDefault();
++    openMenu(e, [
++      ...(peerUser ? [{ label: 'View Profile', icon: <FiUser />, onClick: () => onUserClick(peerUser.id) }] : []),
++      { label: isPinnedByMe ? 'Unpin Chat' : 'Pin Chat', icon: <FiMaximize2 />, onClick: () => onTogglePin(conversation.id) },
++      ...(!conversation.isGroup ? [{ label: isBlocked ? 'Unblock User' : 'Block User', icon: <FiSlash />, onClick: () => {
++         const other = conversation.participants.find(p => p.id !== meId);
++         if (other) { isBlocked ? unblockUser(other.id) : blockUser(other.id); }
++      } }] : []),
++      { label: conversation.isGroup ? 'Delete Group' : 'Delete Chat', icon: <FiTrash2 />, destructive: true, onClick: () => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat') },
++    ]);
++  };
++
+   return (
+     <motion.div 
+-      // Removed 'layout' prop for performance
+       key={conversation.id} 
+       className={clsx(
+         'relative mx-4 my-3 rounded-2xl p-1 transition-all duration-200 select-none group',
+@@ -176,144 +185,95 @@ const ConversationItem = memo(({
+       animate={{ opacity: 1, y: 0 }}
+       transition={{ duration: 0.2 }}
+     >
+-      <div className="w-full text-left p-3 pr-8 flex items-center gap-4 cursor-pointer rounded-xl" onClick={onClick}>
+-        {/* Avatar */}
+-        <div className="relative flex-shrink-0">
+-          <button 
+-            onClick={(e) => {
+-              if (peerUser) {
+-                e.stopPropagation();
+-                onUserClick(peerUser.id);
+-              }
+-            }}
+-            disabled={!peerUser}
+-            className="block"
+-          >
+-            <img
+-              src={avatarSrc}
+-              alt="Avatar"
+-              className={clsx(
+-                "w-12 h-12 rounded-full object-cover border-2 transition-all",
+-                isActive ? "border-bg-surface shadow-inner" : "border-bg-main shadow-sm"
+-              )}
+-              onError={(e) => {
+-                const target = e.target as HTMLImageElement;
+-                if (conversation.isGroup) {
+-                  target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`;
+-                } else {
+-                  target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${title}`;
++      <SwipeableItem
++        leftAction={{ icon: <FiMaximize2 size={24} />, color: isPinnedByMe ? 'bg-blue-500' : 'bg-green-500', onAction: () => onTogglePin(conversation.id) }}
++        rightAction={{ icon: <FiTrash2 size={24} />, color: 'bg-red-500', onAction: () => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat') }}
++      >
++        <div 
++          onContextMenu={handleContextMenu}
++          className="w-full text-left p-3 pr-4 flex items-center gap-4 cursor-pointer rounded-xl bg-bg-main" 
++          onClick={onClick}
++        >
++          {/* Avatar */}
++          <div className="relative flex-shrink-0">
++            <button 
++              onClick={(e) => {
++                if (peerUser) {
++                  e.stopPropagation();
++                  onUserClick(peerUser.id);
+                 }
+               }}
+-            />
+-          </button>
+-          {peerUser && (
+-            <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-bg-surface ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+-          )}
+-        </div>
++              disabled={!peerUser}
++              className="block"
++            >
++              <img
++                src={avatarSrc}
++                alt="Avatar"
++                className={clsx(
++                  "w-12 h-12 rounded-full object-cover border-2 transition-all pointer-events-none",
++                  isActive ? "border-bg-surface shadow-inner" : "border-bg-main shadow-sm"
++                )}
++                onError={(e) => {
++                  const target = e.target as HTMLImageElement;
++                  if (conversation.isGroup) {
++                    target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`;
++                  } else {
++                    target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${title}`;
++                  }
++                }}
++              />
++            </button>
++            {peerUser && (
++              <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-bg-surface ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
++            )}
++          </div>
+ 
+-        {/* Info */}
+-        <div className="flex-1 min-w-0">
+-          <div className="flex justify-between items-center mb-0.5">
+-            <div className="flex items-center gap-1.5 min-w-0">
+-              {isPinnedByMe && (
+-                <span className="text-accent flex-shrink-0">
+-                   <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 8 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+-                </span>
++          {/* Info */}
++          <div className="flex-1 min-w-0 pointer-events-none">
++            <div className="flex justify-between items-center mb-0.5">
++              <div className="flex items-center gap-1.5 min-w-0">
++                {isPinnedByMe && (
++                  <span className="text-accent flex-shrink-0">
++                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 8 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
++                  </span>
++                )}
++                <p className={clsx(
++                  "text-sm font-bold truncate transition-colors",
++                  isActive ? 'text-accent' : 'text-text-primary'
++                )}>
++                  {title}
++                </p>
++              </div>
++              {conversation.lastMessage && (
++                <p className="text-[10px] font-medium text-text-secondary flex-shrink-0 opacity-80">
++                  {formatConversationTime(conversation.lastMessage.createdAt)}
++                </p>
+               )}
++            </div>
++            
++            <div className="flex justify-between items-center">
+               <p className={clsx(
+-                "text-sm font-bold truncate transition-colors",
+-                isActive ? 'text-accent' : 'text-text-primary'
++                "text-xs truncate max-w-[85%]",
++                isUnread ? 'font-bold text-text-primary' : 'text-text-secondary opacity-80'
+               )}>
+-                {title}
++                {previewText}
+               </p>
++              {isUnread && (
++                <span className="
++                  flex items-center justify-center min-w-[1.25rem] h-5 px-1.5
++                  bg-accent text-white text-[10px] font-bold 
++                  rounded-full shadow-sm
++                ">
++                  {conversation.unreadCount}
++                </span>
++              )}
+             </div>
+-            {conversation.lastMessage && (
+-              <p className="text-[10px] font-medium text-text-secondary flex-shrink-0 opacity-80">
+-                {formatConversationTime(conversation.lastMessage.createdAt)}
+-              </p>
+-            )}
+-          </div>
+-          
+-          <div className="flex justify-between items-center">
+-            <p className={clsx(
+-              "text-xs truncate max-w-[85%]",
+-              isUnread ? 'font-bold text-text-primary' : 'text-text-secondary opacity-80'
+-            )}>
+-              {previewText}
+-            </p>
+-            {isUnread && (
+-              <span className="
+-                flex items-center justify-center min-w-[1.25rem] h-5 px-1.5
+-                bg-accent text-white text-[10px] font-bold 
+-                rounded-full shadow-sm
+-              ">
+-                {conversation.unreadCount}
+-              </span>
+-            )}
+           </div>
+         </div>
+-      </div>
+-
+-      {/* Dropdown Menu */}
+-      <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+-        <DropdownMenu.Root>
+-          <DropdownMenu.Trigger asChild>
+-            <button 
+-              onClick={(e) => e.stopPropagation()} 
+-              aria-label="Options" 
+-              className="
+-                p-3 rounded-full text-text-secondary 
+-                hover:bg-bg-main hover:text-accent
+-                transition-colors
+-              "
+-            >
+-              <FiMoreVertical size={16} />
+-            </button>
+-          </DropdownMenu.Trigger>
+-          <DropdownMenu.Portal>
+-            <DropdownMenu.Content sideOffset={5} align="end" className="
+-              min-w-[160px] bg-bg-main 
+-              rounded-xl shadow-neu-float dark:shadow-neu-float-dark
+-              border border-white/50 dark:border-white/5
+-              p-1.5 z-50
+-            ">
+-              <DropdownMenu.Item
+-                onSelect={() => onTogglePin(conversation.id)}
+-                className="w-full text-left px-3 py-2 text-xs font-medium rounded-lg cursor-pointer hover:bg-bg-main hover:text-accent outline-none transition-colors"
+-              >
+-                {isPinnedByMe ? 'Unpin' : 'Pin'} Chat
+-              </DropdownMenu.Item>
+-              
+-              {!conversation.isGroup && (
+-                <DropdownMenu.Item
+-                  onSelect={() => {
+-                    const other = conversation.participants.find(p => p.id !== meId);
+-                    if (other) {
+-                      isBlocked ? unblockUser(other.id) : blockUser(other.id);
+-                    }
+-                  }}
+-                  className="w-full text-left px-3 py-2 text-xs font-medium rounded-lg cursor-pointer hover:bg-bg-main hover:text-accent outline-none transition-colors"
+-                >
+-                   {isBlocked ? 'Unblock' : 'Block'} User
+-                </DropdownMenu.Item>
+-              )}
+-              
+-              <div className="h-px bg-border my-1" />
+-              
+-              <DropdownMenu.Item
+-                onSelect={() => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat')}
+-                className="w-full text-left px-3 py-2 text-xs font-medium text-red-500 rounded-lg cursor-pointer hover:bg-red-500/10 outline-none transition-colors"
+-              >
+-                {conversation.isGroup ? 'Delete Group' : 'Delete Chat'}
+-              </DropdownMenu.Item>
+-            </DropdownMenu.Content>
+-          </DropdownMenu.Portal>
+-        </DropdownMenu.Root>
+-      </div>
++      </SwipeableItem>
+     </motion.div>
+   );
+ }, (prev, next) => {
+-  // Custom comparison for Memo
+   return (
+     prev.conversation === next.conversation &&
+     prev.isActive === next.isActive &&
+@@ -362,7 +322,6 @@ export default function ChatList() {
+   }));
+ 
+   const [showGroupModal, setShowGroupModal] = useState(false);
+-  const [selectedIndex, setSelectedIndex] = useState(-1);
+   const virtuosoRef = useRef<VirtuosoHandle>(null);
+   const { addCommands, removeCommands } = useCommandPaletteStore();
+ 
+@@ -377,7 +336,6 @@ export default function ChatList() {
+     return () => removeCommands(commands.map(c => c.id));
+   }, [addCommands, removeCommands, openCreateGroupModal]);
+ 
+-  // Memoized Item Renderer to prevent re-creating the function on every render
+   const itemContent = useCallback((index: number, c: Conversation) => {
+     const peerUser = !c.isGroup ? c.participants?.find(p => p.id !== meId) : null;
+     const isOnline = peerUser ? presence.includes(peerUser.id) : false;
+@@ -401,7 +359,7 @@ export default function ChatList() {
+         onTogglePin={togglePinConversation}
+       />
+     );
+-  }, [meId, presence, blockedUserIds, activeId, selectedIndex, handleConversationClick, openProfileModal, deleteGroup, deleteConversation, togglePinConversation, blockUser, unblockUser]);
++  }, [meId, presence, blockedUserIds, activeId, handleConversationClick, openProfileModal, deleteGroup, deleteConversation, togglePinConversation, blockUser, unblockUser]);
+ 
+   return (
+     <div className="
+@@ -491,4 +449,4 @@ export default function ChatList() {
+       {showGroupModal && <CreateGroupChat onClose={() => setShowGroupModal(false)} />}
+     </div>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/web/src/components/MessageItem.tsx b/web/src/components/MessageItem.tsx
+index 620aac98..770679ab 100644
+--- a/web/src/components/MessageItem.tsx
++++ b/web/src/components/MessageItem.tsx
+@@ -3,27 +3,20 @@ import type { Message, Conversation, Participant, MessageStatus } from "@store/c
+ import { useAuthStore } from "@store/auth";
+ import { useMessageInputStore } from "@store/messageInput";
+ import { getSocket } from "@lib/socket";
+-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+ import { api } from "@lib/api";
+-import ReactionPopover from "./Reactions";
+ import { toAbsoluteUrl } from "@utils/url";
+-import LazyImage from "./LazyImage";
+-import FileAttachment from "./FileAttachment";
+ import { useModalStore } from '@store/modal';
+ import { motion } from 'framer-motion';
+ import clsx from 'clsx';
+-import LinkPreviewCard from './LinkPreviewCard';
+-import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock } from 'react-icons/fi';
++import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock, FiInfo } from 'react-icons/fi';
+ import { getUserColor } from '@utils/color';
+ import { FaCheck, FaCheckDouble } from 'react-icons/fa';
+-import VoiceMessagePlayer from './VoiceMessagePlayer';
+-import { decryptMessage } from "@utils/crypto";
+-import { useKeychainStore } from "@store/keychain";
+ import { useMessageStore } from '@store/message';
+ import toast from 'react-hot-toast';
+-import MarkdownMessage from './MarkdownMessage';
+-import MessageBubble from "./MessageBubble"; // Import the external component
++import MessageBubble from "./MessageBubble";
+ import { useUserProfile } from '@hooks/useUserProfile';
++import SwipeableItem from "./SwipeableItem";
++import { useContextMenuStore } from "../store/contextMenu";
+ 
+ const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
+   const meId = useAuthStore((s) => s.user?.id);
+@@ -31,7 +24,6 @@ const MessageStatusIcon = ({ message, participants }: { message: Message; partic
+   
+   if (message.senderId !== meId) return null;
+   
+-  // Prioritize explicit status field
+   if (message.status === 'FAILED' || message.error) {
+     return (
+       <button onClick={() => retrySendMessage(message)} title="Failed to send. Click to retry.">
+@@ -88,13 +80,18 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
+   const meId = useAuthStore((s) => s.user?.id);
+   const setReplyingTo = useMessageInputStore(state => state.setReplyingTo);
+   const showConfirm = useModalStore(state => state.showConfirm);
+-  const { removeMessage, addOptimisticMessage } = useMessageStore(state => ({
++  const { removeMessage, addOptimisticMessage, sendReaction, removeLocalReaction } = useMessageStore(state => ({
+     removeMessage: state.removeMessage,
+     addOptimisticMessage: state.addOptimisticMessage,
++    sendReaction: state.sendReaction,
++    removeLocalReaction: state.removeLocalReaction,
+   }));
++  const user = useAuthStore((s) => s.user);
++
+   const profile = useUserProfile(message.sender as any);
+   const mine = message.senderId === meId;
+   const ref = useRef<HTMLDivElement>(null);
++  const openMenu = useContextMenuStore(s => s.openMenu);
+ 
+   useEffect(() => {
+     if (!ref.current || mine) return;
+@@ -130,13 +127,8 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
+ 
+   const handleDelete = () => {
+     showConfirm('Delete Message', 'Are you sure you want to permanently delete this message?', () => {
+-      // Optimistically remove the message from the UI
+       removeMessage(message.conversationId, message.id);
+-      
+-      // Prepare Query Params for Blind Attachment Deletion
+       let query = '';
+-      
+-      // Try to get real R2 URL from JSON content first (because fileUrl might be a Blob)
+       let targetUrl = message.fileUrl;
+       try {
+           if (message.content && message.content.startsWith('{')) {
+@@ -147,18 +139,15 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
+ 
+       if (targetUrl && !targetUrl.startsWith('blob:')) {
+           try {
+-              // Extract key from URL (e.g. https://pub.r2.../attachments/key.ext -> attachments/key.ext)
+               const url = new URL(targetUrl);
+-              const key = url.pathname.substring(1); // Remove leading slash
++              const key = url.pathname.substring(1);
+               if (key) query = `?r2Key=${encodeURIComponent(key)}`;
+           } catch (e) {
+               console.error("Failed to parse file URL for deletion:", e);
+           }
+       }
+ 
+-      // Call the API to delete the message from the server
+       api(`/api/messages/${message.id}${query}`, { method: 'DELETE' }).catch((error) => {
+-        // If the API call fails, revert the change by re-adding the message
+         console.error("Failed to delete message:", error);
+         toast.error("Failed to delete message.");
+         addOptimisticMessage(message.conversationId, message);
+@@ -174,82 +163,97 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
+     );
+   }
+ 
++  const reactToMessage = async (emoji: string) => {
++    if (!user) return;
++    const userReaction = message.reactions?.find(r => r.userId === user.id);
++    
++    if (userReaction?.emoji === emoji) {
++      removeLocalReaction(message.conversationId, message.id, userReaction.id);
++      try {
++        if ((userReaction as any).isMessage) {
++            await api(`/api/messages/${userReaction.id}`, { method: 'DELETE' });
++        } else {
++            await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
++        }
++      } catch (e) {
++        console.error("Failed to remove reaction:", e);
++      }
++      return;
++    }
++
++    if (userReaction) {
++        removeLocalReaction(message.conversationId, message.id, userReaction.id);
++        const deletePromise = (userReaction as any).isMessage
++            ? api(`/api/messages/${userReaction.id}`, { method: 'DELETE' })
++            : api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
++        deletePromise.catch(console.error);
++    }
++
++    try {
++        await sendReaction(message.conversationId, message.id, emoji);
++    } catch (e) {
++        console.error("Failed to send reaction:", e);
++    }
++  };
++
++  const handleContextMenu = (e: React.MouseEvent | React.TouchEvent) => {
++    e.preventDefault();
++    openMenu(e, [
++      { label: 'Reply', icon: <FiCornerUpLeft />, onClick: () => setReplyingTo(message) },
++      { label: 'Copy Text', icon: <FiCopy />, onClick: () => navigator.clipboard.writeText(message.content || '') },
++      { label: 'Security Info', icon: <FiShield />, onClick: () => toast('End-to-End Encrypted via Signal Protocol', { icon: '🔒' }) },
++      { label: 'Copy Message ID', icon: <FiInfo />, onClick: () => navigator.clipboard.writeText(message.id) },
++      ...(mine && !message.optimistic ? [{ label: 'Delete', icon: <FiTrash2 />, destructive: true, onClick: handleDelete }] : [])
++    ], [
++      { emoji: '👍', onClick: () => reactToMessage('👍') },
++      { emoji: '❤️', onClick: () => reactToMessage('❤️') },
++      { emoji: '😂', onClick: () => reactToMessage('😂') },
++      { emoji: '😮', onClick: () => reactToMessage('😮') },
++      { emoji: '😢', onClick: () => reactToMessage('😢') },
++    ]);
++  };
++
+   return (
+-    <motion.div ref={ref} id={message.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }} className={clsx('group flex items-end gap-2', isFirstInSequence ? 'mt-3' : 'mt-1', mine ? 'justify-end' : 'justify-start', isHighlighted && 'bg-accent/10 rounded-lg p-1 -mx-1')}>
+-      {!mine && (
+-        <div className="w-8 flex-shrink-0 mb-1 self-end">
+-          {isLastInSequence && (
+-            <img 
+-              src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
+-              alt="Avatar" 
+-              className="w-8 h-8 rounded-full bg-secondary object-cover shadow-sm cursor-pointer hover:scale-105 transition-transform" 
+-              // Note: Avatar click handler is usually handled by parent or could be passed down. 
+-              // For simplicity, we can leave it visual or add onClick if needed.
+-            />
+-          )}
+-        </div>
+-      )}
+-      
+-      <div className={`flex items-end gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
+-        <div className={clsx("flex flex-col max-w-[85%] sm:max-w-[70%]", mine ? "items-end" : "items-start")}>
+-          {!mine && isGroup && profile.name && isFirstInSequence && (
+-            <p className="text-[10px] font-bold mb-1 ml-1 user-color-name cursor-pointer hover:underline uppercase tracking-wide" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>
+-              {profile.name}
+-            </p>
++    <motion.div ref={ref} id={message.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }} className={clsx('group flex flex-col', isFirstInSequence ? 'mt-3' : 'mt-1', mine ? 'items-end' : 'items-start', isHighlighted && 'bg-accent/10 rounded-lg p-1 -mx-1')}>
++      <SwipeableItem 
++        leftAction={{ icon: <FiCornerUpLeft size={20} />, color: 'bg-blue-500/80', onAction: () => setReplyingTo(message) }}
++        rightAction={{ icon: <FiInfo size={20} />, color: 'bg-secondary/80', onAction: () => toast('Message ID: ' + message.id, { icon: 'ℹ️' }) }}
++      >
++        <div onContextMenu={handleContextMenu} className={`flex items-end gap-2 w-full select-none ${mine ? 'flex-row-reverse justify-start' : 'flex-row justify-start'}`}>
++          {!mine && (
++            <div className="w-8 flex-shrink-0 mb-1 self-end">
++              {isLastInSequence && (
++                <img 
++                  src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
++                  alt="Avatar" 
++                  className="w-8 h-8 rounded-full bg-secondary object-cover shadow-sm cursor-pointer hover:scale-105 transition-transform pointer-events-auto" 
++                />
++              )}
++            </div>
+           )}
+           
+-          <MessageBubble 
+-            message={message} 
+-            isOwn={mine} 
+-            onImageClick={onImageClick}
+-            isLastInSequence={isLastInSequence}
+-          />
+-          
+-          <ReactionsDisplay reactions={message.reactions} />
+-        </div>
+-
+-        {/* Dropdown Menu (Three dots / Actions) */}
+-        <div className="opacity-0 group-hover:opacity-100 transition-opacity self-center mb-2">
+-          <DropdownMenu.Root>
+-            <DropdownMenu.Trigger asChild><button className="p-1.5 rounded-full hover:bg-secondary"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-text-secondary" viewBox="0 0 20 20" fill="currentColor"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 12a2 2 0 110-4 2 2 0 010 4zm0-6a2 2 0 110-4 2 2 0 010 4z" /></svg></button></DropdownMenu.Trigger>
+-            <DropdownMenu.Portal>
+-              <DropdownMenu.Content 
+-                sideOffset={5} 
+-                align="center" 
+-                className="
+-                  z-50 min-w-[180px] p-2
+-                  rounded-xl bg-bg-main
+-                  shadow-[8px_8px_20px_rgba(0,0,0,0.15),-8px_-8px_20px_rgba(255,255,255,1)]
+-                  dark:shadow-[8px_8px_20px_rgba(0,0,0,0.5),-8px_-8px_20px_rgba(255,255,255,0.05)]
+-                  border border-white/40 dark:border-white/5
+-                  border-b-white/10 dark:border-b-black/50
+-                "
+-              >
+-                <DropdownMenu.Item onSelect={() => setReplyingTo(message)} className="group flex items-center gap-3 px-3 py-2.5 mb-1 rounded-lg text-sm font-bold text-text-secondary outline-none cursor-pointer transition-all duration-200 data-[highlighted]:text-accent data-[highlighted]:shadow-[inset_3px_3px_6px_rgba(0,0,0,0.1),inset_-3px_-3px_6px_rgba(255,255,255,0.8)] dark:data-[highlighted]:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.5),inset_-2px_-2px_5px_rgba(255,255,255,0.05)]">
+-                  <FiCornerUpLeft className="opacity-70 group-data-[highlighted]:scale-110 transition-transform" />
+-                  <span>Reply</span>
+-                </DropdownMenu.Item>
+-                
+-                <ReactionPopover message={message}>
+-                  <div className="group flex items-center gap-3 px-3 py-2.5 mb-1 rounded-lg text-sm font-bold text-text-secondary outline-none cursor-pointer transition-all duration-200 hover:text-accent hover:shadow-[inset_3px_3px_6px_rgba(0,0,0,0.1),inset_-3px_-3px_6px_rgba(255,255,255,0.8)] dark:hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.5),inset_-2px_-2px_5px_rgba(255,255,255,0.05)]">
+-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 opacity-70 group-hover:scale-110 transition-transform" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 100-2 1 1 0 000 2zm7-1a1 1 0 11-2 0 1 1 0 012 0zm-.464 5.535a.75.75 0 01.028.022l.028.027a.75.75 0 01.027.028l.027.028a.75.75 0 01.022.028l.022.028a.75.75 0 01.016.023l.016.023a.75.75 0 01.01.016l.01.016c.004.005.007.01.01.015l.004.005a.75.75 0 01.005.004l.005.004a.75.75 0 01.002.002l.002.002a.75.75 0 010 .004c0 .001 0 .002 0 .002a.75.75 0 01-.004 0l-.002-.002a.75.75 0 01-.005-.004l-.005-.004a.75.75 0 01-.01-.015l-.01-.016a.75.75 0 01-.016-.023l-.016-.023a.75.T5 0 01-.022-.028l-.022-.028a.75.75 0 01-.027-.028l-.027-.028a.75.75 0 01-.028-.022l-.028-.027a.75.75 0 01-.022-.028l-.022-.028a.75.75 0 01-.016-.023l-.016-.023a.75.75 0 01-.01-.016l-.01-.016a.75.75 0 01-.005-.004l-.005-.004a.75.75 0 01-.002-.002l-.002-.002a.75.75 0 010-.004c.09.34.26.65.49.93a.75.75 0 01-1.06 1.06 5.25 5.25 0 00-1.5 3.75.75.75 0 01-1.5 0 6.75 6.75 0 011.94-4.71.75.75 0 011.06-1.06z" clipRule="evenodd" /></svg>
+-                    <span>React</span>
+-                  </div>
+-                </ReactionPopover>
+-
+-                {mine && !message.optimistic && (
+-                  <DropdownMenu.Item onSelect={handleDelete} className="group flex items-center gap-3 px-3 py-2.5 mb-1 rounded-lg text-sm font-bold text-destructive outline-none cursor-pointer transition-all duration-200 data-[highlighted]:text-destructive data-[highlighted]:shadow-[inset_3px_3px_6px_rgba(0,0,0,0.1),inset_-3px_-3px_6px_rgba(255,255,255,0.8)] dark:data-[highlighted]:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.5),inset_-2px_-2px_5px_rgba(255,255,255,0.05)]">
+-                    <FiTrash2 className="opacity-70 group-data-[highlighted]:scale-110 transition-transform" />
+-                    <span>Delete</span>
+-                  </DropdownMenu.Item>
+-                )}
+-              </DropdownMenu.Content>
+-            </DropdownMenu.Portal>
+-          </DropdownMenu.Root>
++          <div className={clsx("flex flex-col max-w-[85%] sm:max-w-[70%]", mine ? "items-end" : "items-start")}>
++            {!mine && isGroup && profile.name && isFirstInSequence && (
++              <p className="text-[10px] font-bold mb-1 ml-1 user-color-name cursor-pointer hover:underline uppercase tracking-wide pointer-events-auto" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>
++                {profile.name}
++              </p>
++            )}
++            
++            <div className="pointer-events-auto w-full">
++              <MessageBubble 
++                message={message} 
++                isOwn={mine} 
++                onImageClick={onImageClick}
++                isLastInSequence={isLastInSequence}
++              />
++            </div>
++            
++            <ReactionsDisplay reactions={message.reactions} />
++          </div>
+         </div>
+-      </div>
++      </SwipeableItem>
+     </motion.div>
+   );
+ };
+ 
+-export default memo(MessageItem);
+\ No newline at end of file
++export default memo(MessageItem);
