@@ -80,12 +80,10 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
   const meId = useAuthStore((s) => s.user?.id);
   const setReplyingTo = useMessageInputStore(state => state.setReplyingTo);
   const showConfirm = useModalStore(state => state.showConfirm);
-  const { removeMessage, addOptimisticMessage, sendReaction, removeLocalReaction } = useMessageStore(state => ({
-    removeMessage: state.removeMessage,
-    addOptimisticMessage: state.addOptimisticMessage,
-    sendReaction: state.sendReaction,
-    removeLocalReaction: state.removeLocalReaction,
-  }));
+  const removeMessage = useMessageStore(state => state.removeMessage);
+  const addOptimisticMessage = useMessageStore(state => state.addOptimisticMessage);
+  const sendReaction = useMessageStore(state => state.sendReaction);
+  const removeLocalReaction = useMessageStore(state => state.removeLocalReaction);
   const user = useAuthStore((s) => s.user);
 
   const profile = useUserProfile(message.sender as any);
