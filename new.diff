@@ -1,0 +1,181 @@
+diff --git a/server/src/socket.ts b/server/src/socket.ts
+index 0cbc73ee..5fdd43ae 100644
+--- a/server/src/socket.ts
++++ b/server/src/socket.ts
+@@ -535,6 +535,42 @@ export function registerSocket(httpServer: HttpServer) {
+       });
+     });
+ 
++    // === WEBRTC SIGNALING (P2P CALLS) ===
++    socket.on('call:request', (data: { to: string, isVideo: boolean, callerProfile: any }) => {
++      if (!data || !data.to) return;
++      socket.to(data.to).emit('call:incoming', { from: userId, isVideo: data.isVideo, callerProfile: data.callerProfile });
++    });
++
++    socket.on('call:accept', (data: { to: string }) => {
++      if (!data || !data.to) return;
++      socket.to(data.to).emit('call:accepted', { from: userId });
++    });
++
++    socket.on('call:reject', (data: { to: string, reason?: string }) => {
++      if (!data || !data.to) return;
++      socket.to(data.to).emit('call:rejected', { from: userId, reason: data.reason || 'declined' });
++    });
++
++    socket.on('call:end', (data: { to: string }) => {
++      if (!data || !data.to) return;
++      socket.to(data.to).emit('call:ended', { from: userId });
++    });
++
++    socket.on('webrtc:offer', (data: { to: string, offer: RTCSessionDescriptionInit }) => {
++      if (!data || !data.to) return;
++      socket.to(data.to).emit('webrtc:offer', { from: userId, offer: data.offer });
++    });
++
++    socket.on('webrtc:answer', (data: { to: string, answer: RTCSessionDescriptionInit }) => {
++      if (!data || !data.to) return;
++      socket.to(data.to).emit('webrtc:answer', { from: userId, answer: data.answer });
++    });
++
++    socket.on('webrtc:ice-candidate', (data: { to: string, candidate: RTCIceCandidateInit }) => {
++      if (!data || !data.to) return;
++      socket.to(data.to).emit('webrtc:ice-candidate', { from: userId, candidate: data.candidate });
++    });
++
+     // === DEVICE MIGRATION TUNNEL ===
+     socket.on('migration:join', (roomId: string) => {
+       // Allow logged-in user to join a migration room (just in case they are the receiver somehow)
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index cc8ed754..8ba935d8 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -29,6 +29,7 @@ import ChatInfoModal from './components/ChatInfoModal';
+ import DynamicIsland from './components/DynamicIsland';
+ import CommandPalette from './components/CommandPalette';
+ import ContextMenu from './components/ContextMenu';
++import CallOverlay from './components/CallOverlay';
+ import { Spinner } from './components/Spinner';
+ 
+ // Stores & Hooks
+@@ -234,6 +235,7 @@ const AppContent = () => {
+       <ChatInfoModal />
+       <DynamicIsland />
+       <ContextMenu />
++      <CallOverlay />
+ 
+       <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
+         <Suspense fallback={<LoadingScreen />}>
+diff --git a/web/src/components/ChatWindow.tsx b/web/src/components/ChatWindow.tsx
+index 749a2548..afb3ac2b 100644
+--- a/web/src/components/ChatWindow.tsx
++++ b/web/src/components/ChatWindow.tsx
+@@ -18,13 +18,14 @@ import Lightbox from "./Lightbox";
+ import GroupInfoPanel from './GroupInfoPanel';
+ import clsx from "clsx";
+ import { useVerificationStore } from '@store/verification';
+-import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers } from 'react-icons/fi';
++import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers, FiPhone, FiVideo } from 'react-icons/fi';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import { useNavigate } from 'react-router-dom';
+ import MessageInput from './MessageInput';
+ import MessageSkeleton from './MessageSkeleton';
+ import { useUserProfile } from '@hooks/useUserProfile';
+ import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
++import { useWebRTC } from '@hooks/useWebRTC';
+ 
+ const KeyRotationBanner = () => (
+   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
+@@ -54,10 +55,12 @@ const NewConversationBanner = () => (
+ );
+ 
+ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conversation: Conversation; onBack: () => void; onInfoToggle: () => void; onMenuClick: () => void; }) => {
+-  const meId = useAuthStore((s) => s.user?.id);
++  const user = useAuthStore((s) => s.user);
++  const meId = user?.id;
+   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
+   const { openProfileModal, openChatInfoModal } = useModalStore(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal }));
+   const { verifiedStatus } = useVerificationStore();
++  const { startCall } = useWebRTC();
+ 
+   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
+   const peerProfile = useUserProfile(peerUser as any);
+@@ -81,6 +84,18 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
+     return isOnline ? "Online" : "Offline";
+   };
+ 
++  const handleVoiceCall = () => {
++    if (peerUser) {
++      startCall(peerUser.id, false, user);
++    }
++  };
++
++  const handleVideoCall = () => {
++    if (peerUser) {
++      startCall(peerUser.id, true, user);
++    }
++  };
++
+   return (
+     <div className="
+       flex items-center justify-between px-4 py-3 z-30
+@@ -135,7 +150,23 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
+       </div>
+ 
+       {/* Action Module */}
+-      <div className="flex items-center gap-3">
++      <div className="flex items-center gap-2 md:gap-3">
++        {!conversation.isGroup && (
++          <>
++            <button 
++              onClick={handleVoiceCall} 
++              className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-main text-text-secondary shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all duration-200"
++            >
++              <FiPhone size={16} />
++            </button>
++            <button 
++              onClick={handleVideoCall} 
++              className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-main text-text-secondary shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all duration-200"
++            >
++              <FiVideo size={16} />
++            </button>
++          </>
++        )}
+         <SearchMessages conversationId={conversation.id} />
+         <button 
+           onClick={openChatInfoModal} 
+diff --git a/web/src/types/socket.d.ts b/web/src/types/socket.d.ts
+index 8929c61b..a5493d23 100644
+--- a/web/src/types/socket.d.ts
++++ b/web/src/types/socket.d.ts
+@@ -47,6 +47,15 @@ export interface ServerToClientEvents {
+     force_logout: () => void;
+     'user:identity_changed': (data: { userId: string; name: string }) => void;
+ 
++    // --- WEBRTC SIGNALING ---
++    "call:incoming": (payload: { from: string; isVideo: boolean; callerProfile: any }) => void;
++    "call:accepted": (payload: { from: string }) => void;
++    "call:rejected": (payload: { from: string; reason?: string }) => void;
++    "call:ended": (payload: { from: string }) => void;
++    "webrtc:offer": (payload: { from: string; offer: RTCSessionDescriptionInit }) => void;
++    "webrtc:answer": (payload: { from: string; answer: RTCSessionDescriptionInit }) => void;
++    "webrtc:ice-candidate": (payload: { from: string; candidate: RTCIceCandidateInit }) => void;
++
+     // --- DEVICE MIGRATION TUNNEL (SERVER -> CLIENT) ---
+     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
+     "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: any }) => void;
+@@ -84,6 +93,15 @@ export interface ClientToServerEvents {
+     }) => void;
+     "push:unsubscribe": () => void;
+     
++    // --- WEBRTC SIGNALING ---
++    "call:request": (payload: { to: string; isVideo: boolean; callerProfile: any }) => void;
++    "call:accept": (payload: { to: string }) => void;
++    "call:reject": (payload: { to: string; reason?: string }) => void;
++    "call:end": (payload: { to: string }) => void;
++    "webrtc:offer": (payload: { to: string; offer: RTCSessionDescriptionInit }) => void;
++    "webrtc:answer": (payload: { to: string; answer: RTCSessionDescriptionInit }) => void;
++    "webrtc:ice-candidate": (payload: { to: string; candidate: RTCIceCandidateInit }) => void;
++    
+     // --- DEVICE MIGRATION TUNNEL (CLIENT -> SERVER) ---
+     "migration:join": (roomId: string) => void;
+     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;

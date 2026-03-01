@@ -535,6 +535,42 @@ export function registerSocket(httpServer: HttpServer) {
       });
     });
 
+    // === WEBRTC SIGNALING (P2P CALLS) ===
+    socket.on('call:request', (data: { to: string, isVideo: boolean, callerProfile: any }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('call:incoming', { from: userId, isVideo: data.isVideo, callerProfile: data.callerProfile });
+    });
+
+    socket.on('call:accept', (data: { to: string }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('call:accepted', { from: userId });
+    });
+
+    socket.on('call:reject', (data: { to: string, reason?: string }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('call:rejected', { from: userId, reason: data.reason || 'declined' });
+    });
+
+    socket.on('call:end', (data: { to: string }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('call:ended', { from: userId });
+    });
+
+    socket.on('webrtc:offer', (data: { to: string, offer: RTCSessionDescriptionInit }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('webrtc:offer', { from: userId, offer: data.offer });
+    });
+
+    socket.on('webrtc:answer', (data: { to: string, answer: RTCSessionDescriptionInit }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('webrtc:answer', { from: userId, answer: data.answer });
+    });
+
+    socket.on('webrtc:ice-candidate', (data: { to: string, candidate: RTCIceCandidateInit }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('webrtc:ice-candidate', { from: userId, candidate: data.candidate });
+    });
+
     // === DEVICE MIGRATION TUNNEL ===
     socket.on('migration:join', (roomId: string) => {
       // Allow logged-in user to join a migration room (just in case they are the receiver somehow)

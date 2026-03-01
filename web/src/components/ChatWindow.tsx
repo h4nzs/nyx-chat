@@ -18,13 +18,14 @@ import Lightbox from "./Lightbox";
 import GroupInfoPanel from './GroupInfoPanel';
 import clsx from "clsx";
 import { useVerificationStore } from '@store/verification';
-import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers } from 'react-icons/fi';
+import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers, FiPhone, FiVideo } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import MessageInput from './MessageInput';
 import MessageSkeleton from './MessageSkeleton';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
+import { useWebRTC } from '@hooks/useWebRTC';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -54,10 +55,12 @@ const NewConversationBanner = () => (
 );
 
 const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conversation: Conversation; onBack: () => void; onInfoToggle: () => void; onMenuClick: () => void; }) => {
-  const meId = useAuthStore((s) => s.user?.id);
+  const user = useAuthStore((s) => s.user);
+  const meId = user?.id;
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
   const { openProfileModal, openChatInfoModal } = useModalStore(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal }));
   const { verifiedStatus } = useVerificationStore();
+  const { startCall } = useWebRTC();
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
   const peerProfile = useUserProfile(peerUser as any);
@@ -79,6 +82,18 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
       return `${conversation.participants.length} members`;
     }
     return isOnline ? "Online" : "Offline";
+  };
+
+  const handleVoiceCall = () => {
+    if (peerUser) {
+      startCall(peerUser.id, false, user);
+    }
+  };
+
+  const handleVideoCall = () => {
+    if (peerUser) {
+      startCall(peerUser.id, true, user);
+    }
   };
 
   return (
@@ -135,7 +150,23 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
       </div>
 
       {/* Action Module */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 md:gap-3">
+        {!conversation.isGroup && (
+          <>
+            <button 
+              onClick={handleVoiceCall} 
+              className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-main text-text-secondary shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all duration-200"
+            >
+              <FiPhone size={16} />
+            </button>
+            <button 
+              onClick={handleVideoCall} 
+              className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-main text-text-secondary shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all duration-200"
+            >
+              <FiVideo size={16} />
+            </button>
+          </>
+        )}
         <SearchMessages conversationId={conversation.id} />
         <button 
           onClick={openChatInfoModal} 

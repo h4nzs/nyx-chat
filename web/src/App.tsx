@@ -29,6 +29,7 @@ import ChatInfoModal from './components/ChatInfoModal';
 import DynamicIsland from './components/DynamicIsland';
 import CommandPalette from './components/CommandPalette';
 import ContextMenu from './components/ContextMenu';
+import CallOverlay from './components/CallOverlay';
 import { Spinner } from './components/Spinner';
 
 // Stores & Hooks
@@ -234,6 +235,7 @@ const AppContent = () => {
       <ChatInfoModal />
       <DynamicIsland />
       <ContextMenu />
+      <CallOverlay />
 
       <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
         <Suspense fallback={<LoadingScreen />}>
