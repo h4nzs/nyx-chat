@@ -80,7 +80,7 @@ export default function SwipeableItem({ children, leftAction, rightAction, disab
 
     // Always bounce back
     setTriggered(null);
-    controls.start({ x: 0, transition: { type: 'spring', stiffness: 400, damping: 30 } });
+    controls.start({ x: 0, transition: { type: 'spring', stiffness: 600, damping: 25, mass: 0.8 } });
   };
 
   return (
@@ -114,7 +114,8 @@ export default function SwipeableItem({ children, leftAction, rightAction, disab
       <motion.div
         drag={disableSwipe ? false : "x"}
         dragConstraints={{ left: 0, right: 0 }}
-        dragElastic={0.2}
+        dragElastic={0.9}
+        dragTransition={{ bounceStiffness: 600, bounceDamping: 25 }}
         dragDirectionLock={true}
         onDragEnd={handleDragEnd}
         animate={controls}
