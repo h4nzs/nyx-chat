@@ -17,7 +17,7 @@ const disallowedRanges = [
 ]
 
 // Custom DNS resolver to prevent SSRF
-async function resolveDns (url: string): Promise<string> {
+export async function resolveDns (url: string): Promise<string> {
   const hostname = new URL(url).hostname
   // Validate hostname format to prevent injection
   if (!/^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(hostname) && !/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
