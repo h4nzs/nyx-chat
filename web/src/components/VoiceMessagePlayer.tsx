@@ -126,9 +126,14 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
       setCurrentTime(ws.getCurrentTime());
     });
 
+    // CRITICAL FIX: Let WaveSurfer dictate the React state, not the other way around.
+    ws.on('play', () => setIsPlaying(true));
+    ws.on('pause', () => setIsPlaying(false));
+    
     ws.on('finish', () => {
       setIsPlaying(false);
       setCurrentTime(0);
+      ws.seekTo(0); // Reset visual cursor to beginning
     });
 
     return () => {
@@ -136,10 +141,17 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
     };
   }, [audioSrc]);
 
-  const togglePlay = () => {
+  const togglePlay = async () => {
     if (wavesurferRef.current) {
-      wavesurferRef.current.playPause();
-      setIsPlaying(!isPlaying);
+      try {
+        if (wavesurferRef.current.isPlaying()) {
+          wavesurferRef.current.pause();
+        } else {
+          await wavesurferRef.current.play();
+        }
+      } catch (e) {
+        console.error("Playback failed:", e);
+      }
     }
   };
 
