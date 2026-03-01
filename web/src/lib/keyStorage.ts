@@ -32,9 +32,9 @@ export const getEncryptedKeys = async (): Promise<string | undefined> => {
   }
 };
 
-export const saveDeviceAutoUnlockKey = async (payload: string) => {
+export const saveDeviceAutoUnlockKey = async (key: string) => {
   try {
-    await set(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, payload);
+    await set(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, key);
   } catch (error) {
     console.error('Failed to save device auto unlock key to IndexedDB:', error);
     throw new Error('Storage failure');
