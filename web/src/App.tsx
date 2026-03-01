@@ -30,6 +30,7 @@ import DynamicIsland from './components/DynamicIsland';
 import CommandPalette from './components/CommandPalette';
 import ContextMenu from './components/ContextMenu';
 import CallOverlay from './components/CallOverlay';
+import SystemInitModal from './components/SystemInitModal';
 import { Spinner } from './components/Spinner';
 
 // Stores & Hooks
@@ -245,6 +246,7 @@ const AppContent = () => {
       <DynamicIsland />
       <ContextMenu />
       <CallOverlay />
+      <SystemInitModal />
 
       <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
         <Suspense fallback={<LoadingScreen />}>
