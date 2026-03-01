@@ -148,8 +148,15 @@ const AppContent = () => {
       return;
     }
     if (user) {
-      connectSocket();
-      setTimeout(() => initWebRTCListeners(getSocket()), 1000);
+      const token = useAuthStore.getState().accessToken;
+      if (token) {
+        connectSocket();
+        const socket = getSocket();
+        // Safely attach WebRTC listeners immediately to the socket instance
+        import('./lib/webrtc').then(({ initWebRTCListeners }) => {
+          initWebRTCListeners(socket);
+        });
+      }
     } else {
       disconnectSocket();
     }

@@ -401,7 +401,13 @@ export async function exportDatabaseToJson(): Promise<string> {
     exportData[storeName] = items;
   }
   
-  return JSON.stringify(exportData);
+  return JSON.stringify(exportData, (key, value) => {
+    // Custom replacer to preserve Uint8Array
+    if (value instanceof Uint8Array) {
+      return { __type: 'Uint8Array', data: Array.from(value) };
+    }
+    return value;
+  });
 }
 
 /**
@@ -411,7 +417,13 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
   const db = await getDb();
   let importData: Record<string, VaultEntry[]>;
   try {
-      importData = JSON.parse(jsonString);
+      importData = JSON.parse(jsonString, (key, value) => {
+        // Custom reviver to restore Uint8Array
+        if (value && typeof value === 'object' && value.__type === 'Uint8Array') {
+          return new Uint8Array(value.data);
+        }
+        return value;
+      });
   } catch (e) {
       throw new Error("Invalid vault file format.");
   }

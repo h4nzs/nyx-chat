@@ -7,7 +7,6 @@ const ICE_SERVERS = {
 
 let peerConnection: RTCPeerConnection | null = null;
 let localMediaStream: MediaStream | null = null;
-let isListenersInitialized = false;
 
 export const cleanupCall = () => {
   if (localMediaStream) {
@@ -44,12 +43,19 @@ const createPeerConnection = (targetUserId: string) => {
 
 const getMediaStream = async (video: boolean) => {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ video, audio: true });
+    // Better constraints for mobile compatibility
+    const constraints: MediaStreamConstraints = {
+      audio: true,
+      video: video ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
     localMediaStream = stream;
     useCallStore.getState().setLocalStream(stream);
     return stream;
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error accessing media devices.', error);
+    // Show toast so it doesn't fail silently
+    import('react-hot-toast').then(m => m.default.error(`Media Error: ${error.message || 'Permission denied'}`));
     throw error;
   }
 };
@@ -98,8 +104,10 @@ export const hangup = () => {
 };
 
 export const initWebRTCListeners = (socket: any) => {
-  if (isListenersInitialized || !socket) return;
-  isListenersInitialized = true;
+  if (!socket) return;
+  
+  // Prevent duplicates natively via socket.io instead of a global boolean
+  if (socket.listeners('call:incoming').length > 0) return;
 
   socket.on('call:incoming', (data: { from: string, isVideo: boolean, callerProfile: any }) => {
     const currentState = useCallStore.getState().callState;
