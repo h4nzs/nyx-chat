@@ -31,6 +31,7 @@ import CommandPalette from './components/CommandPalette';
 import ContextMenu from './components/ContextMenu';
 import CallOverlay from './components/CallOverlay';
 import SystemInitModal from './components/SystemInitModal';
+import PrivacyCloak from './components/PrivacyCloak';
 import { Spinner } from './components/Spinner';
 
 // Stores & Hooks
@@ -236,6 +237,8 @@ const AppContent = () => {
           },
         }}
       />
+
+      <PrivacyCloak />
 
       {/* Global Modals & UI Elements */}
       <CommandPalette />
