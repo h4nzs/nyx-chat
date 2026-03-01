@@ -24,6 +24,7 @@ import { useNavigate } from 'react-router-dom';
 import MessageInput from './MessageInput';
 import MessageSkeleton from './MessageSkeleton';
 import { useUserProfile } from '@hooks/useUserProfile';
+import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -162,7 +163,14 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const meId = useAuthStore((s) => s.user?.id);
   const { conversation, messages, isLoading, error, actions, isFetchingMore } = useConversation(id);
   const loadMessagesForConversation = useMessageStore(s => s.loadMessagesForConversation);
+  const openConversation = useConversationStore(state => state.openConversation);
   
+  useEdgeSwipe(() => {
+    if (window.innerWidth < 768) {
+      openConversation(null);
+    }
+  });
+
   const { highlightedMessageId, setHighlightedMessageId } = useMessageSearchStore(state => ({
     highlightedMessageId: state.highlightedMessageId,
     setHighlightedMessageId: state.setHighlightedMessageId,
