@@ -347,13 +347,24 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     });
   },
 
-  updateConversation: (conversationId, updates) => {
-    set(state => ({
-      conversations: state.conversations.map(c => 
-        c.id === conversationId ? { ...c, ...updates } : c
-      )
-    }));
-  },
+  updateConversation: (id, data) => set((state) => {
+    const oldConv = state.conversations.find((c) => c.id === id);
+    
+    // Check for membership changes in groups to trigger Key Rotation
+    if (oldConv && oldConv.isGroup && data.participants) {
+      const oldIds = oldConv.participants.map(p => p.id).sort().join(',');
+      const newIds = data.participants.map(p => p.id).sort().join(',');
+      if (oldIds !== newIds) {
+        import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(id));
+      }
+    }
+
+    return {
+      conversations: state.conversations.map((c) =>
+        c.id === id ? { ...c, ...data } : c
+      ),
+    };
+  }),
 
   updateParticipantDetails: (user) => {
     // Destructure role to exclude it, preventing conflict with Participant role type

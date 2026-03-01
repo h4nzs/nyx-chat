@@ -1019,3 +1019,13 @@ export async function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicK
   const { generateSafetyNumber } = await getWorkerProxy();
   return generateSafetyNumber(myPublicKey, theirPublicKey);
 }
+
+export async function forceRotateGroupSenderKey(conversationId: string) {
+    try {
+        const { deleteGroupSenderState } = await import('../lib/keychainDb');
+        await deleteGroupSenderState(conversationId);
+        console.log(`[Crypto] Group Sender Key for ${conversationId} wiped. Forced rotation on next message.`);
+    } catch (e) {
+        console.error('Failed to rotate group key:', e);
+    }
+}

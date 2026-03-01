@@ -296,8 +296,14 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
       console.warn(`[Decrypt] Failed for msg ${decryptedMsg.id}:`, result?.error);
-      decryptedMsg.content = 'waiting_for_key'; 
-      decryptedMsg.type = 'SYSTEM'; 
+      const errMsg = result?.error?.message || '';
+      if (errMsg.includes('waiting for key') || errMsg.includes('Missing sender')) {
+          decryptedMsg.content = 'waiting_for_key';
+      } else {
+          decryptedMsg.content = '[Decryption Failed: Key out of sync]';
+          decryptedMsg.error = true;
+      }
+      decryptedMsg.type = 'SYSTEM';
     }
 
     // 6. Dekripsi Replied Message

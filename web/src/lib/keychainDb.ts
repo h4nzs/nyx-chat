@@ -125,6 +125,13 @@ export async function deleteGroupStates(conversationId: string): Promise<void> {
   await tx.done;
 }
 
+export async function deleteGroupSenderState(conversationId: string): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction([GROUP_SENDER_STATES_STORE], 'readwrite');
+  await tx.objectStore(GROUP_SENDER_STATES_STORE).delete(conversationId);
+  await tx.done;
+}
+
 /**
  * Stores a pending X3DH header for a conversation.
  * Used when a session is created but no message has been sent yet.
