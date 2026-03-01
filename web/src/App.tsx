@@ -41,6 +41,7 @@ import { useGlobalShortcut } from './hooks/useGlobalShortcut';
 
 // Libs & Utils
 import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
+import { initWebRTCListeners } from './lib/webrtc';
 
 // Initialize socket instance once
 getSocket();
@@ -148,6 +149,7 @@ const AppContent = () => {
     }
     if (user) {
       connectSocket();
+      setTimeout(() => initWebRTCListeners(getSocket()), 1000);
     } else {
       disconnectSocket();
     }

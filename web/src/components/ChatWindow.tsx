@@ -25,7 +25,7 @@ import MessageInput from './MessageInput';
 import MessageSkeleton from './MessageSkeleton';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
-import { useWebRTC } from '@hooks/useWebRTC';
+import { startCall } from '@lib/webrtc';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -60,7 +60,6 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
   const { openProfileModal, openChatInfoModal } = useModalStore(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal }));
   const { verifiedStatus } = useVerificationStore();
-  const { startCall } = useWebRTC();
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
   const peerProfile = useUserProfile(peerUser as any);

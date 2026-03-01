@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiPhone, FiVideo, FiVideoOff, FiMic, FiMicOff, FiPhoneOff } from 'react-icons/fi';
 import { useCallStore } from '../store/callStore';
-import { useWebRTC } from '../hooks/useWebRTC';
+import { acceptCall, rejectCall, hangup } from '../lib/webrtc';
 import { toAbsoluteUrl } from '../utils/url';
 
 export default function CallOverlay() {
@@ -10,16 +10,10 @@ export default function CallOverlay() {
     callState, 
     remoteUserProfile, 
     isVideoCall, 
-    isReceivingCall 
-  } = useCallStore();
-
-  const {
+    isReceivingCall,
     localStream,
-    remoteStream,
-    acceptCall,
-    rejectCall,
-    hangup,
-  } = useWebRTC();
+    remoteStream
+  } = useCallStore();
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);

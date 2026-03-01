@@ -8,10 +8,14 @@ interface CallStoreState {
   remoteUserProfile: any | null;
   isVideoCall: boolean;
   isReceivingCall: boolean;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
   
   setCallState: (state: CallState) => void;
   setIncomingCall: (from: string, isVideo: boolean, profile: any) => void;
   setOutgoingCall: (to: string, isVideo: boolean, profile: any) => void;
+  setLocalStream: (stream: MediaStream | null) => void;
+  setRemoteStream: (stream: MediaStream | null) => void;
   endCall: () => void;
 }
 
@@ -21,8 +25,12 @@ export const useCallStore = create<CallStoreState>((set) => ({
   remoteUserProfile: null,
   isVideoCall: false,
   isReceivingCall: false,
+  localStream: null,
+  remoteStream: null,
 
   setCallState: (state) => set({ callState: state }),
+  setLocalStream: (stream) => set({ localStream: stream }),
+  setRemoteStream: (stream) => set({ remoteStream: stream }),
   
   setIncomingCall: (from, isVideo, profile) => set({
     callState: 'ringing',
@@ -46,5 +54,7 @@ export const useCallStore = create<CallStoreState>((set) => ({
     remoteUserProfile: null,
     isVideoCall: false,
     isReceivingCall: false,
+    localStream: null,
+    remoteStream: null,
   }),
 }));
