@@ -32,70 +32,18 @@ export const getEncryptedKeys = async (): Promise<string | undefined> => {
   }
 };
 
-/**
- * Generates or retrieves a device-bound non-extractable storage key.
- */
-const getOrCreateDeviceStorageKey = async (): Promise<CryptoKey> => {
-  let key = await get<CryptoKey>('nyx_device_storage_key');
-  if (!key) {
-    key = await crypto.subtle.generateKey(
-      { name: 'AES-GCM', length: 256 },
-      false, // non-extractable!
-      ['encrypt', 'decrypt']
-    );
-    await set('nyx_device_storage_key', key);
-  }
-  return key;
-};
-
-/**
- * Menyimpan kunci auto-unlock perangkat ke IndexedDB (Encrypted)
- */
-export const saveDeviceAutoUnlockKey = async (password: string) => {
+export const saveDeviceAutoUnlockKey = async (payload: string) => {
   try {
-    const key = await getOrCreateDeviceStorageKey();
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const enc = new TextEncoder();
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
-      key,
-      enc.encode(password)
-    );
-    
-    const payload = {
-      iv: Array.from(iv),
-      data: Array.from(new Uint8Array(encrypted))
-    };
-    await set(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, JSON.stringify(payload));
+    await set(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, payload);
   } catch (error) {
     console.error('Failed to save device auto unlock key to IndexedDB:', error);
     throw new Error('Storage failure');
   }
 };
 
-/**
- * Mengambil kunci auto-unlock perangkat dari IndexedDB
- */
 export const getDeviceAutoUnlockKey = async (): Promise<string | undefined> => {
   try {
-    const payloadStr = await get<string>(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
-    if (!payloadStr) return undefined;
-    
-    // Fallback for legacy plaintext passwords
-    if (!payloadStr.startsWith('{')) {
-      return payloadStr; 
-    }
-    
-    const payload = JSON.parse(payloadStr);
-    const key = await getOrCreateDeviceStorageKey();
-    
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: new Uint8Array(payload.iv) },
-      key,
-      new Uint8Array(payload.data)
-    );
-    
-    return new TextDecoder().decode(decrypted);
+    return await get<string>(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
   } catch (error) {
     console.error('Failed to retrieve device auto unlock key from IndexedDB:', error);
     return undefined;
