@@ -193,6 +193,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const meId = useAuthStore((s) => s.user?.id);
   const { conversation, messages, isLoading, error, actions, isFetchingMore } = useConversation(id);
   const loadMessagesForConversation = useMessageStore(s => s.loadMessagesForConversation);
+  const loadMessageContext = useMessageStore(s => s.loadMessageContext);
   const openConversation = useConversationStore(state => state.openConversation);
   
   useEdgeSwipe(() => {
@@ -205,6 +206,8 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     highlightedMessageId: state.highlightedMessageId,
     setHighlightedMessageId: state.setHighlightedMessageId,
   }));
+  const clearSearch = useMessageSearchStore(s => s.clearSearch);
+
   const { handleStopRecording } = useMessageInputStore(state => ({
     handleStopRecording: state.handleStopRecording,
   }));
@@ -222,14 +225,38 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);
 
   useEffect(() => {
-    if (highlightedMessageId && virtuosoRef.current && messages.length > 0) {
-      const index = messages.findIndex(m => m.id === highlightedMessageId);
-      if (index !== -1) {
-        virtuosoRef.current.scrollToIndex({ index, align: 'center', behavior: 'smooth' });
-        setTimeout(() => setHighlightedMessageId(null), 2000);
+    if (!highlightedMessageId) return;
+
+    const handleJump = async () => {
+      // 1. Check if the message is already rendered in the DOM
+      let el = document.getElementById(`msg-${highlightedMessageId}`);
+      
+      // 2. If not in DOM, we need to fetch its context from the server
+      if (!el) {
+        await loadMessageContext(highlightedMessageId);
+        // Wait for React to re-render the new messages
+        await new Promise(resolve => setTimeout(resolve, 300));
+        el = document.getElementById(`msg-${highlightedMessageId}`);
       }
-    }
-  }, [highlightedMessageId, messages, setHighlightedMessageId]);
+
+      // 3. Scroll and Highlight
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+        // Add a temporary highlight class
+        el.classList.add('ring-2', 'ring-accent', 'ring-offset-2', 'ring-offset-bg-main', 'scale-[1.02]', 'transition-all', 'duration-500', 'z-10');
+        
+        setTimeout(() => {
+          el?.classList.remove('ring-2', 'ring-accent', 'ring-offset-2', 'ring-offset-bg-main', 'scale-[1.02]', 'z-10');
+        }, 2000);
+      }
+      
+      // Clear the highlight state so it can be triggered again later
+      useMessageSearchStore.getState().setHighlightedMessageId(null);
+    };
+
+    handleJump();
+  }, [highlightedMessageId, messages, loadMessageContext, setHighlightedMessageId]);
 
   const typingUsersInThisConvo = typingIndicators.filter(i => i.conversationId === id && i.id !== meId && i.isTyping);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);

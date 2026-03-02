@@ -389,6 +389,7 @@ type Actions = {
   uploadFile: (conversationId: string, file: File) => Promise<void>;
   loadMessagesForConversation: (id: string) => Promise<void>;
   loadPreviousMessages: (conversationId: string) => Promise<void>;
+  loadMessageContext: (messageId: string) => Promise<void>;
   addOptimisticMessage: (conversationId: string, message: Message) => void;
   addIncomingMessage: (conversationId: string, message: Message) => Promise<Message>;
   replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => void;
@@ -894,6 +895,41 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       console.error("Failed to load previous messages", error);
     } finally {
       set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: false } }));
+    }
+  },
+
+  loadMessageContext: async (messageId: string) => {
+    const state = get();
+    try {
+      // Show loading state if we want to handle it globally, but for now we just fetch
+      const res = await api<{ items: Message[], conversationId: string }>(`/api/messages/context/${messageId}`);
+      const fetchedMessages = res.items || [];
+      const convoId = res.conversationId;
+
+      if (!convoId) return;
+
+      const processedMessages: Message[] = [];
+      for (const message of fetchedMessages) {
+        processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
+      }
+
+      set(state => {
+        const existingMessages = state.messages[convoId] || [];
+        // Merge logic: Combine, remove duplicates by ID, then sort
+        const combined = [...existingMessages, ...processedMessages];
+        const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
+        
+        // Separate reactions and normal messages
+        const finalMessages = processMessagesAndReactions(uniqueMessages, []);
+
+        return {
+          messages: { ...state.messages, [convoId]: finalMessages },
+          // If we jump back, we might still have older messages to fetch later
+          hasMore: { ...state.hasMore, [convoId]: true } 
+        };
+      });
+    } catch (error) {
+      console.error(`Failed to load context for message ${messageId}`, error);
     }
   },
 

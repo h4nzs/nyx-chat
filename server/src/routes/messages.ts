@@ -62,6 +62,52 @@ router.get('/:conversationId', async (req, res, next) => {
   }
 })
 
+// GET Context (Surrounding Messages)
+router.get('/context/:id', async (req, res, next) => {
+  try {
+    const targetId = req.params.id;
+    
+    // Get the target message first to find its timestamp and conversationId
+    const targetMsg = await prisma.message.findUnique({
+      where: { id: targetId },
+      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+    });
+
+    if (!targetMsg) {
+      throw new ApiError(404, 'Message not found');
+    }
+
+    // Verify participation
+    const participation = await prisma.participant.findUnique({
+      where: { userId_conversationId: { userId: req.user!.id, conversationId: targetMsg.conversationId } }
+    });
+    if (!participation) throw new ApiError(403, 'Not a participant');
+
+    // Fetch older messages (before target)
+    const older = await prisma.message.findMany({
+      where: { conversationId: targetMsg.conversationId, createdAt: { lt: targetMsg.createdAt } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+    });
+
+    // Fetch newer messages (after target)
+    const newer = await prisma.message.findMany({
+      where: { conversationId: targetMsg.conversationId, createdAt: { gt: targetMsg.createdAt } },
+      orderBy: { createdAt: 'asc' },
+      take: 20,
+      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+    });
+
+    // Combine and sort chronologically
+    const allMessages = [...older.reverse(), targetMsg, ...newer];
+
+    res.json({ items: allMessages, conversationId: targetMsg.conversationId });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // SEND Message
 router.post('/', zodValidate({
   body: z.object({
