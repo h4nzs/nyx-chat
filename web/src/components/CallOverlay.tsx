@@ -33,6 +33,8 @@ export default function CallOverlay() {
   const originalVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
 
+  const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
   useEffect(() => {
     // Initialize audio only once
     if (!ringtoneRef.current) {
@@ -88,6 +90,13 @@ export default function CallOverlay() {
     e.stopPropagation();
     try {
       const newMode = facingMode === 'user' ? 'environment' : 'user';
+      
+      // CRITICAL FIX FOR MOBILE: Stop existing camera before requesting the new one
+      const oldStream = localVideoRef.current?.srcObject as MediaStream;
+      if (oldStream) {
+        oldStream.getVideoTracks().forEach(t => t.stop());
+      }
+
       // Request new camera
       const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: newMode } });
       const newVideoTrack = newStream.getVideoTracks()[0];
@@ -97,17 +106,12 @@ export default function CallOverlay() {
 
       // Update local video element.
       if (localVideoRef.current) {
-        const oldStream = localVideoRef.current.srcObject as MediaStream;
-        if (oldStream) oldStream.getVideoTracks().forEach(t => t.stop()); // Stop old camera
-
-        // Create a new stream for the local preview containing the new video track
-        const updatedLocalStream = new MediaStream([newVideoTrack]);
-        localVideoRef.current.srcObject = updatedLocalStream;
+        localVideoRef.current.srcObject = new MediaStream([newVideoTrack]);
       }
       setFacingMode(newMode);
     } catch (err) {
       console.error("Camera switch failed:", err);
-      toast.error("Secondary camera not found");
+      toast.error("Failed to switch camera");
     }
   };
 
@@ -384,8 +388,8 @@ export default function CallOverlay() {
                 </button>
               )}
               
-              {/* Screen Share Toggle (Only for Video Calls) */}
-              {isVideoCall && (
+              {/* Screen Share Toggle (Only for Video Calls & Non-Mobile) */}
+              {isVideoCall && !isMobile && (
                 <button 
                   onClick={handleToggleScreenShare} 
                   className={`w-12 h-12 rounded-full ${isScreenSharing ? 'bg-blue-500' : 'bg-white/10 hover:bg-white/20'} text-white flex items-center justify-center transition-all backdrop-blur-md`}

@@ -224,6 +224,7 @@ const AppContent = () => {
       <Toaster
         position="top-center"
         reverseOrder={false}
+        containerStyle={{ zIndex: 99999 }} // <-- ADD THIS LINE
         toastOptions={{
           duration: 5000,
           className: 'glass-toast',
