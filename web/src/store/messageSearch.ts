@@ -1,11 +1,13 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { useMessageStore } from "./message";
 import type { Message } from "./conversation";
+import { shadowVault } from '@lib/shadowVaultDb';
 
 type State = {
-  searchResults: Message[];
+  searchResults: any[];
   highlightedMessageId: string | null;
   searchQuery: string;
+  isSearching: boolean;
   
   // Actions
   searchMessages: (query: string, conversationId: string) => Promise<void>;
@@ -17,20 +19,37 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
   searchResults: [],
   highlightedMessageId: null,
   searchQuery: '',
+  isSearching: false,
 
   searchMessages: async (query, conversationId) => {
-    set({ searchQuery: query });
+    set({ searchQuery: query, isSearching: true });
+    
     if (!query.trim()) {
-      set({ searchResults: [] });
+      set({ searchResults: [], isSearching: false });
       return;
     }
-    // Get messages from the main message store
-    const allMessages = useMessageStore.getState().messages[conversationId] || [];
-    const results = allMessages.filter(m => m.content && m.content.toLowerCase().includes(query.toLowerCase()));
-    set({ searchResults: results });
+
+    try {
+      // ⚡ LIGHTNING FAST DEEP LOCAL SEARCH
+      const results = await shadowVault.messages
+        .where('conversationId')
+        .equals(conversationId)
+        .filter(msg => {
+          // Privacy layer: Do not return View Once media in text search
+          if (msg.isViewOnce) return false;
+          return msg.content.toLowerCase().includes(query.toLowerCase());
+        })
+        .reverse() // Show newest matching messages first
+        .sortBy('createdAt');
+        
+      set({ searchResults: results, isSearching: false });
+    } catch (error) {
+      console.error("Shadow Search failed:", error);
+      set({ searchResults: [], isSearching: false });
+    }
   },
 
   setHighlightedMessageId: (messageId) => set({ highlightedMessageId: messageId }),
   
-  clearSearch: () => set({ searchResults: [], searchQuery: '', highlightedMessageId: null }),
+  clearSearch: () => set({ searchResults: [], searchQuery: '', isSearching: false, highlightedMessageId: null }),
 }));

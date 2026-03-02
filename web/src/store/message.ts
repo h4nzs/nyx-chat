@@ -24,6 +24,7 @@ import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
 import { useConnectionStore } from "./connection";
 import { getSodium } from "@lib/sodiumInitializer";
+import { shadowVault } from '@lib/shadowVaultDb';
 
 /**
  * Logika Dekripsi Terpusat (Single Source of Truth)
@@ -852,6 +853,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const existingMessages = state.messages[id] || [];
         const allMessages = processMessagesAndReactions(processedMessages, existingMessages);
         
+        shadowVault.upsertMessages(allMessages); // Archive to shadow vault
+
         return {
           messages: { ...state.messages, [id]: allMessages },
           hasMore: { ...state.hasMore, [id]: fetchedMessages.length >= 50 },
@@ -877,6 +880,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const existingMessages = state.messages[conversationId] || [];
         const allMessages = processMessagesAndReactions(decryptedItems, existingMessages);
 
+        shadowVault.upsertMessages(allMessages); // Archive to shadow vault
+
         const newState: any = { messages: { ...state.messages, [conversationId]: allMessages } };
 
         if (decryptedItems.length < 50) {
@@ -893,6 +898,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   addOptimisticMessage: (conversationId, message) => {
+    shadowVault.upsertMessages([message]); // Archive to shadow vault
     set(state => {
       const currentMessages = state.messages[conversationId] || [];
       if (currentMessages.some(m => m.id === message.id || (m.tempId && message.tempId && m.tempId === message.tempId))) {
@@ -954,6 +960,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               set(state => {
                 const currentMessages = state.messages[conversationId] || [];
                 if (currentMessages.some(m => m.id === message.id)) return state;
+                shadowVault.upsertMessages([decrypted]); // Archive to shadow vault
                 return { messages: { ...state.messages, [conversationId]: [...currentMessages, decrypted] } };
               });
           }
@@ -962,11 +969,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       return decrypted;
   },
 
-  replaceOptimisticMessage: (conversationId, tempId, newMessage) => set(state => {
-    return {
-      messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => (m.tempId && String(m.tempId) === String(tempId)) ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m) }
-    };
-  }),
+  replaceOptimisticMessage: (conversationId, tempId, newMessage) => {
+    set(state => {
+      const updatedMessages = (state.messages[conversationId] || []).map(m => (m.tempId && String(m.tempId) === String(tempId)) ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m);
+      const msg = updatedMessages.find(m => m.id === newMessage.id);
+      if (msg) shadowVault.upsertMessages([msg]); // Archive to shadow vault
+      return {
+        messages: { ...state.messages, [conversationId]: updatedMessages }
+      };
+    })
+  },
   removeMessage: (conversationId, messageId) => set(state => {
     const messages = state.messages[conversationId] || [];
     
@@ -993,7 +1005,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
     };
   }),
-  updateMessage: (conversationId, messageId, updates) => set(state => ({ messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, ...updates } : m) } })),
+  updateMessage: (conversationId, messageId, updates) => {
+    set(state => {
+      const updatedMessages = (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, ...updates } : m);
+      const updatedMsg = updatedMessages.find(m => m.id === messageId);
+      if (updatedMsg) shadowVault.upsertMessages([updatedMsg]); // Archive to shadow vault
+      return { messages: { ...state.messages, [conversationId]: updatedMessages } };
+    })
+  },
   
   addLocalReaction: (conversationId, messageId, reaction: any) => set(state => ({
     messages: {
