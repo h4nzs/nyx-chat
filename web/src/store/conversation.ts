@@ -46,6 +46,8 @@ export type Message = {
   deletedAt?: string | Date | null;
   expiresAt?: string | null; // New: Disappearing messages
   isBlindAttachment?: boolean; // New: Flag for Blind Attachments (raw key in fileKey)
+  isViewOnce?: boolean;
+  isViewed?: boolean;
 };
 
 export type Participant = {

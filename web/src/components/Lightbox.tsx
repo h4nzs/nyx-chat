@@ -4,6 +4,7 @@ import type { Message } from '@store/conversation';
 import { decryptFile, decryptMessage } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
 import { useConversationStore } from '@store/conversation';
+import { useMessageStore } from '@store/message';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
 
@@ -18,11 +19,21 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
   const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
 
+  const handleClose = () => {
+    if (message.isViewOnce && !message.isViewed) {
+      useMessageStore.getState().updateMessage(message.conversationId, message.id, { isViewed: true });
+      import('@lib/api').then(({ authFetch }) => {
+        authFetch(`/api/messages/${message.id}/viewed`, { method: 'PUT' }).catch(console.error);
+      });
+    }
+    onClose();
+  };
+
   // Close on escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose();
+        handleClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -32,7 +43,7 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
       window.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = 'unset';
     };
-  }, [onClose]);
+  }, [handleClose]);
 
   // Decryption logic
   useEffect(() => {
@@ -145,11 +156,11 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
   const content = (
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 backdrop-blur-xl animate-fade-in p-4 md:p-8"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <button
         className="absolute top-4 right-4 text-white text-3xl hover:opacity-80 transition-opacity z-10"
-        onClick={onClose}
+        onClick={handleClose}
       >
         &times;
       </button>

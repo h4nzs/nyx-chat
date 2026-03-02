@@ -15,10 +15,12 @@ type State = {
   replyingTo: Message | null;
   typingLinkPreview: any | null;
   expiresIn: number | null;
+  isViewOnce: boolean;
 
   // Actions
   setReplyingTo: (message: Message | null) => void;
   setExpiresIn: (seconds: number | null) => void;
+  setIsViewOnce: (value: boolean) => void;
   fetchTypingLinkPreview: (text: string) => void;
   clearTypingLinkPreview: () => void;
   sendMessage: (conversationId: string, data: { content: string }, tempId?: number) => Promise<void>;
@@ -53,9 +55,11 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   replyingTo: null,
   typingLinkPreview: null,
   expiresIn: null,
+  isViewOnce: false,
 
   setReplyingTo: (message) => set({ replyingTo: message }),
   setExpiresIn: (seconds) => set({ expiresIn: seconds }),
+  setIsViewOnce: (value) => set({ isViewOnce: value }),
 
   fetchTypingLinkPreview: async (text) => {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -79,7 +83,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
   sendMessage: async (conversationId, data, tempId?: number) => {
     const { sendMessage: coreSendMessage } = useMessageStore.getState();
-    const { replyingTo, expiresIn } = get();
+    const { replyingTo, expiresIn, isViewOnce } = get();
 
     // Delegate to Core Logic in message.ts (Centralized X3DH & Queue handling)
     await coreSendMessage(conversationId, {
@@ -88,18 +92,19 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       // [FIX] Pass full object for optimistic UI
       repliedTo: replyingTo || undefined,
       expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
+      isViewOnce,
       // Pass original content. message.ts handles encryption.
     }, tempId);
 
     // Clear Input State
-    set({ replyingTo: null });
+    set({ replyingTo: null, isViewOnce: false });
   },
   
   uploadFile: async (conversationId, file) => {
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Processing ${file.name}...`, progress: 0 };
     const activityId = addActivity(activity);
-    const { replyingTo, expiresIn } = get();
+    const { replyingTo, expiresIn, isViewOnce } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     if (!me) {
@@ -134,9 +139,10 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       fileSize: file.size,
       expiresAt,
       repliedTo: replyingTo || undefined,
+      isViewOnce,
     };
     addOptimisticMessage(conversationId, optimisticMessage);
-    set({ replyingTo: null });
+    set({ replyingTo: null, isViewOnce: false });
 
     try {
       let fileToProcess = file;
@@ -190,11 +196,11 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           key: rawFileKey, // Will be encrypted by sendMessage
           name: file.name,
           size: file.size,
-          mimeType: file.type
+          mimeType: file.type,
       };
 
       await get().sendMessage(conversationId, {
-          content: JSON.stringify(metadata)
+          content: JSON.stringify(metadata),
       }, tempId); // Reuse tempId to link optimistic message
       
       updateActivity(activityId, { progress: 100, fileName: 'Done!' });

@@ -71,7 +71,8 @@ router.post('/', zodValidate({
     sessionId: z.string().optional().nullable(),
     repliedToId: z.string().optional().nullable(),
     tempId: z.union([z.string(), z.number()]).optional(),
-    expiresIn: z.number().optional().nullable()
+    expiresIn: z.number().optional().nullable(),
+    isViewOnce: z.boolean().optional()
   }).refine(data => data.content, {
     message: "Message must contain content"
   })
@@ -79,7 +80,7 @@ router.post('/', zodValidate({
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const senderId = req.user.id
-    const { conversationId, content, sessionId, repliedToId, tempId, expiresIn } = req.body
+    const { conversationId, content, sessionId, repliedToId, tempId, expiresIn, isViewOnce } = req.body
 
     // 1. Ambil Participants
     const participants = await prisma.participant.findMany({
@@ -158,6 +159,7 @@ router.post('/', zodValidate({
           sessionId,
           repliedToId,
           expiresAt, // Store expiration time
+          isViewOnce: isViewOnce === true,
           statuses: {
             createMany: { data: statusData as any } // createMany lebih cepat dari nested create
           }
@@ -244,5 +246,30 @@ router.delete('/:id', async (req, res, next) => {
     next(error)
   }
 })
+
+// VIEW ONCE Message
+router.put('/:id/viewed', async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const messageId = req.params.id;
+    const userId = req.user.id;
+
+    const message = await prisma.message.findUnique({ where: { id: messageId }, include: { conversation: true } });
+    if (!message || !message.isViewOnce || message.senderId === userId) return res.status(400).json({ error: 'Invalid operation' });
+
+    const updated = await prisma.message.update({
+      where: { id: messageId },
+      data: { isViewed: true }
+    });
+
+    // Notify sender and receiver
+    const io = getIo();
+    io.to(message.conversationId).emit('message:viewed', { messageId, conversationId: message.conversationId });
+
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
 
 export default router

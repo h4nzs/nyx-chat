@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus } from 'react-icons/fi';
+import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import clsx from 'clsx';
 import { useMessageInputStore } from '@store/messageInput';
@@ -93,7 +93,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const timerMenuRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   
-  const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, expiresIn, setExpiresIn } = useMessageInputStore();
+  const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, expiresIn, setExpiresIn, isViewOnce, setIsViewOnce } = useMessageInputStore();
   const { status: connectionStatus } = useConnectionStore();
   const blockedUserIds = useAuthStore(state => state.blockedUserIds);
   const user = useAuthStore(state => state.user);
@@ -292,6 +292,13 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
             <span>Auto-Delete</span>
           </button>
           <button
+            onClick={() => { setIsViewOnce(!isViewOnce); setShowPlusMenu(false); }}
+            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
+          >
+            <FiEye size={18} className={isViewOnce ? "text-accent" : ""} />
+            <span>View Once</span>
+          </button>
+          <button
             onClick={() => { setShowEmojiPicker(true); setShowPlusMenu(false); }}
             className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
           >
@@ -371,6 +378,18 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               )}
             >
               <FiClock size={18} />
+            </button>
+            <button 
+              type="button" 
+              onClick={() => setIsViewOnce(!isViewOnce)} 
+              disabled={isInputDisabled}
+              aria-label="Toggle View Once"
+              className={clsx(
+                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark",
+                isViewOnce ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent"
+              )}
+            >
+              <FiEye size={18} />
             </button>
             <button 
               type="button" 

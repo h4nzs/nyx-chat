@@ -7,6 +7,7 @@ export interface ServerToClientEvents {
     "message:new": (message: Message) => void;
     "message:updated": (message: Message) => void;
     "message:deleted": (payload: { conversationId: string; id: string }) => void;
+    "message:viewed": (payload: { messageId: string; conversationId: string }) => void;
     "messages:expired": (payload: { messageIds: string[] }) => void; // New event for disappearing messages
     "reaction:new": (payload: { conversationId: string; messageId: string; reaction: any }) => void;
     "reaction:deleted": (payload: { conversationId: string; messageId: string; reactionId: string }) => void;

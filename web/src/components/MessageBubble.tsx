@@ -3,7 +3,7 @@ import { Message, MessageStatus } from "@store/conversation";
 import { useAuthStore } from "@store/auth";
 import classNames from "classnames";
 import { FaCheck, FaCheckDouble } from "react-icons/fa";
-import { FiClock } from "react-icons/fi";
+import { FiClock, FiEyeOff, FiCamera, FiVideo } from "react-icons/fi";
 import FileAttachment from "./FileAttachment";
 import LinkPreviewCard from "./LinkPreviewCard";
 import LazyImage from "./LazyImage";
@@ -131,18 +131,39 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
             </div>
           )}
           
-          {message.fileUrl && isImage && (
-            <button onClick={() => onImageClick?.(message)} className="block w-full">
-              <LazyImage 
-                message={message} 
-                alt={message.fileName || 'Image attachment'} 
-                className="rounded-lg max-h-80 w-full object-cover cursor-pointer hover:opacity-95" 
-              />
-            </button>
-          )}
-          
-          {message.fileUrl && !isImage && !isVoiceMessage && (
-            <FileAttachment message={message} isOwn={isOwn} />
+          {message.isViewOnce && message.fileUrl ? (
+            <div className="p-3 bg-black/20 rounded-xl flex items-center justify-center min-w-[160px] my-1 mx-2 border border-white/5">
+              {message.isViewed ? (
+                <div className="flex items-center gap-2 text-text-secondary/50 italic select-none">
+                  <FiEyeOff size={18} />
+                  <span className="text-sm font-medium">Opened</span>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => onImageClick?.(message)} 
+                  className="flex items-center gap-2 text-accent hover:text-indigo-400 hover:scale-105 active:scale-95 transition-all"
+                >
+                  {message.fileType?.startsWith('video/') ? <FiVideo size={20} /> : <FiCamera size={20} />}
+                  <span className="text-sm font-bold tracking-wider uppercase">View Once</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              {message.fileUrl && isImage && (
+                <button onClick={() => onImageClick?.(message)} className="block w-full">
+                  <LazyImage 
+                    message={message} 
+                    alt={message.fileName || 'Image attachment'} 
+                    className="rounded-lg max-h-80 w-full object-cover cursor-pointer hover:opacity-95" 
+                  />
+                </button>
+              )}
+              
+              {message.fileUrl && !isImage && !isVoiceMessage && (
+                <FileAttachment message={message} isOwn={isOwn} />
+              )}
+            </>
           )}
           
           {!message.fileUrl && (

@@ -107,12 +107,8 @@ Setelah lu nge-*deploy* *compose* baru ini ke VPS, lu **WAJIB** melakukan 2 hal 
 * Protokol: **TCP & UDP**, Destination Port: **3478**
 * Protokol: **UDP**, Destination Port Range: **50000-50050**
 
-
-
-
 2. **Buka Port di OS iptables/ufw (SSH ke VPS):**
 * Eksekusi *command* ini di terminal VPS lu:
-
 
 ```bash
 sudo iptables -I INPUT -p tcp --dport 3478 -j ACCEPT
@@ -121,8 +117,6 @@ sudo iptables -I INPUT -p udp --dport 50000:50050 -j ACCEPT
 sudo netfilter-persistent save
 
 ```
-
-
 
 *(Kalau lu belum siap buka-buka port di Oracle malam ini, biarin `iceTransportPolicy: 'relay'` di `webrtc.ts` **dikomen / dimatikan** dulu. Biar *call*-nya tetap bisa jalan pakai STUN Google).*
 
