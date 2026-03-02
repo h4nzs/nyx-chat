@@ -160,7 +160,11 @@ const ConversationItem = memo(({
   const renderPreviewText = () => {
     if (!conversation.lastMessage) return 'No messages yet';
     if (conversation.lastMessage.isViewOnce) {
-        return conversation.lastMessage.isViewed ? '🔒 Opened' : '📸 View Once Message';
+        return (
+            <span className="flex items-center gap-1 text-accent text-sm font-medium">
+               {conversation.lastMessage.isViewed ? '🔒 Opened' : '📸 View Once Message'}
+            </span>
+        );
     }
     return conversation.lastMessage.content || conversation.lastMessage.preview || 'No messages yet';
   };
