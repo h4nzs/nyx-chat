@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useCallback, Suspense, lazy } from 'react';
-import { Toaster } from 'react-hot-toast';
+import { Toaster, useToasterStore, toast } from 'react-hot-toast';
 import { FiLogOut, FiSettings } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 
@@ -109,6 +109,17 @@ const AppContent = () => {
 
   useGlobalShortcut(['Control', 'k'], openCommandPalette);
   useGlobalShortcut(['Meta', 'k'], openCommandPalette);
+
+  // --- Toast Limiter ---
+  const { toasts } = useToasterStore();
+  const MAX_TOASTS = 3;
+
+  useEffect(() => {
+    toasts
+      .filter((t) => t.visible) // Only consider visible toasts
+      .filter((_, i) => i >= MAX_TOASTS) // Get toasts beyond the limit
+      .forEach((t) => toast.dismiss(t.id)); // Dismiss them
+  }, [toasts]);
 
   useEffect(() => {
     const commands = [

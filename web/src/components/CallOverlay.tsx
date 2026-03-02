@@ -29,6 +29,7 @@ export default function CallOverlay() {
   const [networkQuality, setNetworkQuality] = useState<'Good' | 'Fair' | 'Poor'>('Good');
   const [isSpeakerphone, setIsSpeakerphone] = useState(true);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const originalVideoTrackRef = useRef<MediaStreamTrack | null>(null);
   const screenTrackRef = useRef<MediaStreamTrack | null>(null);
 
@@ -276,13 +277,28 @@ export default function CallOverlay() {
       {(callState === 'calling' || callState === 'connected') && (
         <motion.div 
           initial={{ opacity: 0 }} 
-          animate={{ opacity: 1 }} 
+          // Animate x and y back to 0 when full-screen to prevent off-center maximization
+          animate={{ opacity: 1, x: isMinimized ? undefined : 0, y: isMinimized ? undefined : 0 }} 
           exit={{ opacity: 0 }}
-          onClick={() => { if (isMinimized) toggleMinimize(); }}
+          drag={isMinimized}
+          dragMomentum={false}
+          onDragStart={() => setIsDragging(true)}
+          onDragEnd={() => {
+            // Small delay to prevent onClick from firing immediately after dropping
+            setTimeout(() => setIsDragging(false), 150);
+          }}
+          onClick={(e) => { 
+            if (isDragging) {
+              e.stopPropagation();
+              return;
+            }
+            if (isMinimized) toggleMinimize(); 
+          }}
+          style={isMinimized ? { touchAction: "none" } : {}}
           className={
             isMinimized 
-            ? "fixed bottom-20 right-4 w-28 h-40 sm:w-48 sm:h-72 z-[9999] bg-bg-main/90 backdrop-blur-md rounded-2xl shadow-2xl overflow-hidden cursor-pointer border border-white/10 transition-all duration-300 hover:scale-105 group"
-            : "fixed inset-0 z-[9999] bg-black flex flex-col overflow-hidden transition-all duration-300"
+            ? "fixed bottom-20 right-4 w-28 h-40 sm:w-48 sm:h-72 z-[9999] bg-bg-main/90 backdrop-blur-md rounded-2xl shadow-2xl overflow-hidden cursor-grab active:cursor-grabbing border border-white/10 group"
+            : "fixed inset-0 z-[9999] bg-black flex flex-col overflow-hidden transition-all duration-300 cursor-default"
           }
         >
           {!isMinimized && (
