@@ -1,0 +1,165 @@
+diff --git a/web/src/lib/shadowVaultDb.ts b/web/src/lib/shadowVaultDb.ts
+index d2056776..3a011e4e 100644
+--- a/web/src/lib/shadowVaultDb.ts
++++ b/web/src/lib/shadowVaultDb.ts
+@@ -1,41 +1,91 @@
+ import Dexie, { Table } from 'dexie';
+ import type { Message } from '@store/conversation';
++import { getSodium } from '@lib/sodiumInitializer';
++import { getMyEncryptionKeyPair } from '@utils/crypto';
+ 
+ export interface DecryptedMessageRecord {
+   id: string;
+   conversationId: string;
+-  content: string; // The decrypted content
++  content: string; // ENCRYPTED Base64 string at rest
+   createdAt: string | Date;
+   senderId: string;
+   isViewOnce?: boolean;
+ }
+ 
++// --- CRYPTO ENGINE FOR IRON VAULT ---
++const getVaultKey = async () => {
++  const sodium = await getSodium();
++  const { privateKey } = await getMyEncryptionKeyPair();
++  if (!privateKey) throw new Error("Vault locked: Identity key not found in memory.");
++  // Derive a deterministic 32-byte symmetric key from the user's private key
++  return sodium.crypto_generichash(32, privateKey);
++};
++
++export const encryptVaultText = async (text: string): Promise<string> => {
++  const sodium = await getSodium();
++  const key = await getVaultKey();
++  const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NONCEBYTES);
++  
++  const cipherText = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
++    text, null, null, nonce, key
++  );
++  
++  const combined = new Uint8Array(nonce.length + cipherText.length);
++  combined.set(nonce);
++  combined.set(cipherText, nonce.length);
++  return sodium.to_base64(combined);
++};
++
++export const decryptVaultText = async (encryptedBase64: string): Promise<string | null> => {
++  try {
++    const sodium = await getSodium();
++    const key = await getVaultKey();
++    const combined = sodium.from_base64(encryptedBase64);
++    const nonceBytes = sodium.crypto_aead_xchacha20poly1305_ietf_NONCEBYTES;
++    
++    const nonce = combined.slice(0, nonceBytes);
++    const cipherText = combined.slice(nonceBytes);
++
++    const decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
++      null, cipherText, null, nonce, key
++    );
++    return sodium.to_string(decrypted);
++  } catch (e) {
++    return null; // Silent fail for corrupted/old data
++  }
++};
++// ------------------------------------
++
+ export class NyxShadowVault extends Dexie {
+   messages!: Table<DecryptedMessageRecord, string>;
+ 
+   constructor() {
+     super('nyx_shadow_vault');
+     this.version(1).stores({
+-      messages: 'id, conversationId, createdAt' 
+-      // conversationId is indexed for fast lookups per chat
++      messages: 'id, conversationId, createdAt'
+     });
+   }
+ 
+-  // Utility to safely upsert messages
+   async upsertMessages(messages: Message[]) {
+-    const records: DecryptedMessageRecord[] = messages
+-      .filter(m => m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('[')) // Only save properly decrypted text
+-      .map(m => ({
+-        id: m.id,
+-        conversationId: m.conversationId,
+-        content: m.content || '',
+-        createdAt: m.createdAt,
+-        senderId: m.senderId,
+-        isViewOnce: m.isViewOnce
+-      }));
+-
+-    if (records.length > 0) {
+-      await this.messages.bulkPut(records).catch(err => console.error("Shadow Vault Error:", err));
++    const validMessages = messages.filter(m => m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('['));
++    if (validMessages.length === 0) return;
++
++    try {
++      const records: DecryptedMessageRecord[] = [];
++      for (const m of validMessages) {
++        const encryptedContent = await encryptVaultText(m.content!);
++        records.push({
++          id: m.id,
++          conversationId: m.conversationId,
++          content: encryptedContent, // Iron Vault: Stored as cipher
++          createdAt: m.createdAt,
++          senderId: m.senderId,
++          isViewOnce: m.isViewOnce
++        });
++      }
++      await this.messages.bulkPut(records);
++    } catch (err) {
++      console.error("Iron Vault Encryption Error:", err);
+     }
+   }
+ }
+diff --git a/web/src/store/messageSearch.ts b/web/src/store/messageSearch.ts
+index 68f39d55..69151c51 100644
+--- a/web/src/store/messageSearch.ts
++++ b/web/src/store/messageSearch.ts
+@@ -1,7 +1,7 @@
+ import { createWithEqualityFn } from "zustand/traditional";
+ import { useMessageStore } from "./message";
+ import type { Message } from "./conversation";
+-import { shadowVault } from '@lib/shadowVaultDb';
++import { shadowVault, decryptVaultText } from '@lib/shadowVaultDb';
+ 
+ type State = {
+   searchResults: any[];
+@@ -30,21 +30,28 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
+     }
+ 
+     try {
+-      // ⚡ LIGHTNING FAST DEEP LOCAL SEARCH
+-      const results = await shadowVault.messages
++      // 1. Fetch raw encrypted records for this conversation
++      const rawResults = await shadowVault.messages
+         .where('conversationId')
+         .equals(conversationId)
+-        .filter(msg => {
+-          // Privacy layer: Do not return View Once media in text search
+-          if (msg.isViewOnce) return false;
+-          return msg.content.toLowerCase().includes(query.toLowerCase());
+-        })
+-        .reverse() // Show newest matching messages first
++        .reverse()
+         .sortBy('createdAt');
+         
+-      set({ searchResults: results, isSearching: false });
++      // 2. In-memory lightning decryption & filtering
++      const decryptedResults = [];
++      for (const msg of rawResults) {
++        if (msg.isViewOnce) continue; // Skip phantom media
++        
++        const plainText = await decryptVaultText(msg.content);
++        if (plainText && plainText.toLowerCase().includes(query.toLowerCase())) {
++          // Reconstruct the message object with the decrypted text for the UI
++          decryptedResults.push({ ...msg, content: plainText });
++        }
++      }
++        
++      set({ searchResults: decryptedResults, isSearching: false });
+     } catch (error) {
+-      console.error("Shadow Search failed:", error);
++      console.error("Iron Vault Search failed:", error);
+       set({ searchResults: [], isSearching: false });
+     }
+   },

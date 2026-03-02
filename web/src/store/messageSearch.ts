@@ -1,7 +1,7 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { useMessageStore } from "./message";
 import type { Message } from "./conversation";
-import { shadowVault } from '@lib/shadowVaultDb';
+import { shadowVault, decryptVaultText } from '@lib/shadowVaultDb';
 
 type State = {
   searchResults: any[];
@@ -30,21 +30,28 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
     }
 
     try {
-      // ⚡ LIGHTNING FAST DEEP LOCAL SEARCH
-      const results = await shadowVault.messages
+      // 1. Fetch raw encrypted records for this conversation
+      const rawResults = await shadowVault.messages
         .where('conversationId')
         .equals(conversationId)
-        .filter(msg => {
-          // Privacy layer: Do not return View Once media in text search
-          if (msg.isViewOnce) return false;
-          return msg.content.toLowerCase().includes(query.toLowerCase());
-        })
-        .reverse() // Show newest matching messages first
+        .reverse()
         .sortBy('createdAt');
         
-      set({ searchResults: results, isSearching: false });
+      // 2. In-memory lightning decryption & filtering
+      const decryptedResults = [];
+      for (const msg of rawResults) {
+        if (msg.isViewOnce) continue; // Skip phantom media
+        
+        const plainText = await decryptVaultText(msg.content);
+        if (plainText && plainText.toLowerCase().includes(query.toLowerCase())) {
+          // Reconstruct the message object with the decrypted text for the UI
+          decryptedResults.push({ ...msg, content: plainText });
+        }
+      }
+        
+      set({ searchResults: decryptedResults, isSearching: false });
     } catch (error) {
-      console.error("Shadow Search failed:", error);
+      console.error("Iron Vault Search failed:", error);
       set({ searchResults: [], isSearching: false });
     }
   },
