@@ -15,7 +15,7 @@ import type { Conversation } from '@store/conversation';
 
 import { toAbsoluteUrl } from '@utils/url';
 
-import { FiUsers, FiSearch, FiSettings, FiLogOut, FiUser, FiMaximize2, FiSlash, FiTrash2 } from 'react-icons/fi';
+import { FiUsers, FiSearch, FiSettings, FiLogOut, FiUser, FiMaximize2, FiSlash, FiTrash2, FiLock } from 'react-icons/fi';
 
 import CreateGroupChat from './CreateGroupChat';
 import NotificationBell from './NotificationBell';
@@ -38,6 +38,12 @@ const UserProfile = memo(() => {
     );
   }, [logout, confirmLogout]);
 
+  const handleLockVault = useCallback(() => {
+    // Clear decoy state and force reload to trigger the lock screen
+    sessionStorage.removeItem('nyx_decoy_mode');
+    window.location.reload();
+  }, []);
+
   if (!user) return null;
 
   return (
@@ -59,6 +65,14 @@ const UserProfile = memo(() => {
 
       <div className="flex items-center gap-1 flex-shrink-0">
         <NotificationBell />
+        {/* PANIC LOCK BUTTON */}
+        <button
+          onClick={handleLockVault}
+          className="p-2.5 rounded-xl text-text-secondary hover:text-accent hover:bg-white/5 active:scale-95 transition-all shadow-neumorphic-concave focus:outline-none"
+          title="Lock Vault"
+        >
+          <FiLock size={18} />
+        </button>
         <Link 
           to="/settings" 
           aria-label="Settings" 
