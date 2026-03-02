@@ -27,12 +27,17 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
   const words = useMemo(() => phrase.split(' '), [phrase]);
   const verificationWords = useMemo(() => shuffle([...words]), [words]);
 
-  const handleCopyToClipboard = () => {
-    navigator.clipboard.writeText(phrase);
-    toast.success('Recovery phrase copied to clipboard!');
+  const handleCopyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(phrase);
+      toast.success('Recovery phrase copied!');
+    } catch (err) {
+      toast.error('Failed to copy to clipboard');
+    }
   };
 
   const handleWordClick = (word: string) => {
+    if (userInput.includes(word) || userInput.length >= phrase.split(' ').length) return;
     setUserInput(prev => [...prev, word]);
   };
 
@@ -120,8 +125,8 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
         
         {showPhrase && (
            <div className="absolute top-2 right-2 flex gap-2">
-             <button onClick={() => setShowPhrase(false)} className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"><FiEyeOff size={14} /></button>
-             <button onClick={handleCopyToClipboard} className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"><FiClipboard size={14} /></button>
+             <button onClick={() => setShowPhrase(false)} aria-label="Toggle phrase visibility" className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"><FiEyeOff size={14} /></button>
+             <button onClick={handleCopyToClipboard} aria-label="Copy recovery phrase" className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"><FiClipboard size={14} /></button>
            </div>
         )}
       </div>
@@ -156,7 +161,7 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
           <button
             key={index}
             onClick={() => handleWordClick(word)}
-            disabled={userInput.includes(word) && false} // Optional: disable used words
+            disabled={userInput.includes(word) || userInput.length >= phrase.split(' ').length}
             className="
               px-3 py-2 rounded-lg 
               bg-bg-surface text-text-primary text-xs font-bold

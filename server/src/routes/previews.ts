@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { getSecureLinkPreview, resolveDns } from '../utils/secureLinkPreview.js'
+import { getSecureLinkPreview, resolveDns, validateRedirectChain } from '../utils/secureLinkPreview.js'
 import { requireAuth } from '../middleware/auth.js'
 
 const router: Router = Router()
@@ -30,6 +30,8 @@ router.get('/image', requireAuth, async (req, res, next) => {
   try {
     // 1. SSRF Protection: Ensure the target is a public, safe IP
     await resolveDns(targetUrl);
+    // 1.1 Deep SSRF Check: Validate redirect chain
+    await validateRedirectChain(targetUrl);
 
     // 2. Fetch the image safely with an AbortController (5-second timeout)
     const controller = new AbortController();

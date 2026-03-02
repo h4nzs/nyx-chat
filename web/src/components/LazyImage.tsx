@@ -150,7 +150,7 @@ export default function LazyImage({
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       clearTimeout(retryTimeout);
     };
-  }, [message.fileUrl, message.fileKey, message.fileType, message.sessionId, lastKeychainUpdate, retryCount]); // Tambah retryCount
+  }, [message.fileUrl, message.fileKey, message.fileType, message.sessionId, lastKeychainUpdate, retryCount, message.conversationId, message.isBlindAttachment]); // Tambah retryCount
 
   // --- RENDER HELPERS ---
   const renderOverlay = () => {

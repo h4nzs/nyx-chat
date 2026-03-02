@@ -39,7 +39,7 @@ router.get('/', async (req, res, next) => {
           include: { sender: true }
         },
         creator: {
-          select: { id: true }
+          select: { id: true, username: true, displayName: true, avatarUrl: true, publicKey: true, signingKey: true, encryptedProfile: true }
         }
       },
       orderBy: {
@@ -228,7 +228,7 @@ router.get('/:id', async (req, res, next) => {
             role: true
           }
         },
-        creator: { select: { id: true } }
+        creator: { select: { id: true, username: true, displayName: true, avatarUrl: true, publicKey: true, signingKey: true, encryptedProfile: true } }
       }
     })
 
