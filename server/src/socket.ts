@@ -383,9 +383,7 @@ export function registerSocket(httpServer: HttpServer) {
           
           if (participant.userId !== userId) {
              sendPushNotification(participant.userId, {
-                 title: "Encrypted Message",
-                 body: "🔒 1 New Secure Message", 
-                 conversationId: conversationId
+                 data: { conversationId, messageId: newMessage.id }
              }).catch(console.error);
           }
         });

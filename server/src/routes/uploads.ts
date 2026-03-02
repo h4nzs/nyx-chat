@@ -107,13 +107,16 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
     // [FIX] Force Content-Type to octet-stream because file is ENCRYPTED
     const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream')
 
+    // Safe logging - do not log filename
+    // console.log(`[Upload] Presigned URL generated for user ${req.user!.id}`);
+
     res.json({
       uploadUrl,
       key,
       publicUrl: `${env.r2PublicDomain}/${key}`
     })
   } catch (error) {
-    console.error('[PRESIGNED-URL-ERROR]', error)
+    console.error('[PRESIGNED-URL-ERROR] Failed to generate URL')
     next(error)
   }
 })

@@ -235,10 +235,7 @@ router.post('/', zodValidate({
     // Push Notification (JANGAN DI-AWAIT)
     const pushRecipients = participants.filter(p => p.userId !== senderId)
     if (pushRecipients.length > 0) {
-      const pushBody = 'New message' // Generic for privacy
       const payload = {
-        title: 'Encrypted Message',
-        body: pushBody,
         data: { conversationId, messageId: newMessage.id }
       }
 
