@@ -4,21 +4,16 @@ import { RedisStore } from 'rate-limit-redis'
 import { redisClient } from '../lib/redis.js'
 import { Request } from 'express';
 
-// Secure IP Extractor for Nginx / Cloudflare
+// Secure IP Extractor: Lebih aman menggunakan req.ip 
+// karena Express (app.ts) sudah diset 'trust proxy' = true
 const secureKeyGenerator = (req: Request): string => {
-  const cfIp = req.headers['cf-connecting-ip'];
-  if (cfIp) return cfIp as string;
-  
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded) {
-    return typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : forwarded[0];
-  }
-  
   return req.ip || req.socket.remoteAddress || 'unknown';
 };
 
-// Helper biar gak spam log saat development
-const skipInDev = () => env.nodeEnv === 'development'
+// Helper: Skip kalo di development ATAU kalau requestnya cuma OPTIONS (CORS Preflight)
+const skipRules = (req: Request) => {
+  return env.nodeEnv === 'development' || req.method === 'OPTIONS';
+};
 
 // 1. General Limiter: Untuk semua route API umum
 // Batas: 300 request per 15 menit per IP
@@ -27,7 +22,7 @@ export const generalLimiter = rateLimit({
   max: 300,
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  skip: skipInDev,
+  skip: skipRules,
   keyGenerator: secureKeyGenerator,
   validate: { trustProxy: false },
   message: {
@@ -39,14 +34,13 @@ export const generalLimiter = rateLimit({
 })
 
 // 2. Auth Limiter: Sangat Ketat untuk Login/Register/Restore
-// Batas: 10 request per jam per IP
-// Ini akan bikin bot nangis darah kalau mau nebak password
+// Batas: 20 request per jam per IP (Dinaikkan agar tidak mudah terblokir)
 export const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 jam
-  max: 10,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: skipInDev,
+  skip: skipRules,
   keyGenerator: secureKeyGenerator,
   validate: { trustProxy: false },
   message: {
@@ -58,10 +52,11 @@ export const authLimiter = rateLimit({
 })
 
 // 3. Upload Limiter: Mencegah spam upload file
-// Batas: 10 upload per jam
+// Batas: 20 upload per jam
 export const uploadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 20,
+  skip: skipRules,
   keyGenerator: secureKeyGenerator,
   validate: { trustProxy: false },
   message: {
@@ -79,7 +74,7 @@ export const otpLimiter = rateLimit({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  skip: skipInDev,
+  skip: skipRules,
   keyGenerator: secureKeyGenerator,
   validate: { trustProxy: false },
   message: {
