@@ -172,8 +172,8 @@ if (isProd) {
   app.use(
     /^\/(?!api\/).*/, // Apply to everything EXCEPT paths starting with /api/
     rateLimit({
-      windowMs: 15 * 60 * 1000, 
-      max: 100, 
+      windowMs: 15 * 60 * 1000,
+      max: 5000,
       standardHeaders: true,
       legacyHeaders: false,
       validate: { trustProxy: false }
@@ -226,7 +226,7 @@ app.post("/api/admin/cleanup", async (req, res) => {
 // === CSRF Protection ===
 const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
   getSecret: () => env.jwtSecret,
-  getSessionIdentifier: (req) => req.cookies?.rt || req.ip || "anonymous-api",
+  getSessionIdentifier: (req) => "api",
   cookieName: "x-csrf-token",
   cookieOptions: {
     httpOnly: true,
