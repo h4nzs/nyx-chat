@@ -10,12 +10,15 @@ interface CallStoreState {
   isReceivingCall: boolean;
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
+  isMinimized: boolean;
   
   setCallState: (state: CallState) => void;
   setIncomingCall: (from: string, isVideo: boolean, profile: any) => void;
   setOutgoingCall: (to: string, isVideo: boolean, profile: any) => void;
   setLocalStream: (stream: MediaStream | null) => void;
   setRemoteStream: (stream: MediaStream | null) => void;
+  toggleMinimize: () => void;
+  setMinimized: (minimized: boolean) => void;
   endCall: () => void;
 }
 
@@ -27,10 +30,13 @@ export const useCallStore = create<CallStoreState>((set) => ({
   isReceivingCall: false,
   localStream: null,
   remoteStream: null,
+  isMinimized: false,
 
   setCallState: (state) => set({ callState: state }),
   setLocalStream: (stream) => set({ localStream: stream }),
   setRemoteStream: (stream) => set({ remoteStream: stream }),
+  toggleMinimize: () => set((state) => ({ isMinimized: !state.isMinimized })),
+  setMinimized: (minimized) => set({ isMinimized: minimized }),
   
   setIncomingCall: (from, isVideo, profile) => set({
     callState: 'ringing',
@@ -38,6 +44,7 @@ export const useCallStore = create<CallStoreState>((set) => ({
     isVideoCall: isVideo,
     remoteUserProfile: profile,
     isReceivingCall: true,
+    isMinimized: false,
   }),
 
   setOutgoingCall: (to, isVideo, profile) => set({
@@ -46,6 +53,7 @@ export const useCallStore = create<CallStoreState>((set) => ({
     isVideoCall: isVideo,
     remoteUserProfile: profile,
     isReceivingCall: false,
+    isMinimized: false,
   }),
 
   endCall: () => set({
@@ -56,5 +64,6 @@ export const useCallStore = create<CallStoreState>((set) => ({
     isReceivingCall: false,
     localStream: null,
     remoteStream: null,
+    isMinimized: false,
   }),
 }));
