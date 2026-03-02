@@ -50,14 +50,17 @@ router.get('/search', async (req, res, next) => {
 router.get('/me', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const user = await prisma.user.findUnique({
+    // \U0001f493 THE PULSE: Update lastActiveAt
+    const user = await prisma.user.update({
       where: { id: req.user.id },
+      data: { lastActiveAt: new Date() },
       select: {
         id: true,
         encryptedProfile: true,
         isVerified: true,
         hasCompletedOnboarding: true,
-        role: true
+        role: true,
+        autoDestructDays: true
       }
     })
     res.json(user)
@@ -70,22 +73,28 @@ router.get('/me', async (req, res, next) => {
 router.put('/me',
   zodValidate({
     body: z.object({
-      encryptedProfile: z.string().min(1)
+      encryptedProfile: z.string().min(1).optional(),
+      autoDestructDays: z.number().nullable().optional() // New field
     })
   }),
   async (req, res, next) => {
     try {
       const userId = req.user!.id
-      const { encryptedProfile } = req.body
+      const { encryptedProfile, autoDestructDays } = req.body
+
+      const dataToUpdate: any = {}
+      if (encryptedProfile !== undefined) dataToUpdate.encryptedProfile = encryptedProfile;
+      if (autoDestructDays !== undefined) dataToUpdate.autoDestructDays = autoDestructDays;
 
       const updatedUser = await prisma.user.update({
         where: { id: userId },
-        data: { encryptedProfile },
+        data: dataToUpdate,
         select: {
           id: true,
           encryptedProfile: true,
           isVerified: true,
-          hasCompletedOnboarding: true
+          hasCompletedOnboarding: true,
+          autoDestructDays: true
         }
       })
 

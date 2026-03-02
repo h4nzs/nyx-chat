@@ -40,6 +40,29 @@ export const startSystemSweeper = () => {
       if (deletedSessionKeys.count > 0) {
         console.log(`[Cron] Berhasil menghapus ${deletedSessionKeys.count} kunci sesi kadaluarsa/usang.`);
       }
+
+      // 3. 💀 DEAD MAN'S SWITCH (Auto-Destruct Accounts)
+      const usersWithSwitch = await prisma.user.findMany({
+        where: { autoDestructDays: { not: null } },
+        select: { id: true, lastActiveAt: true, autoDestructDays: true }
+      });
+
+      let nukedCount = 0;
+      for (const u of usersWithSwitch) {
+        if (!u.autoDestructDays) continue;
+        const deadline = new Date(u.lastActiveAt);
+        deadline.setDate(deadline.getDate() + u.autoDestructDays);
+        
+        if (now > deadline) {
+           console.log(`[Cron] 💀 DEAD MAN'S SWITCH TRIGGERED for User ${u.id}. Erasing all traces...`);
+           await prisma.user.delete({ where: { id: u.id } }); // Cascade deletes messages, conversations, keys.
+           nukedCount++;
+        }
+      }
+      if (nukedCount > 0) {
+         console.log(`[Cron] Auto-destructed ${nukedCount} dormant accounts.`);
+      }
+
     } catch (error) {
       console.error('[Cron] Gagal melakukan pembersihan database:', error);
     }

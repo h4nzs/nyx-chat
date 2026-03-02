@@ -17,6 +17,7 @@ import { IoFingerPrint } from 'react-icons/io5';
 import ReportBugModal from '../components/ReportBugModal';
 import { api } from '@lib/api';
 import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@lib/keychainDb';
+import { executeLocalWipe } from '@lib/nukeProtocol';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useProfileStore } from '@store/profile';
 import { generateProfileKey, encryptProfile, minePoW, getRecoveryPhrase } from '@lib/crypto-worker-proxy';
@@ -167,10 +168,10 @@ export default function SettingsPage() {
         });
 
         // 3. Nuke Local
-        await emergencyLogout();
+        await executeLocalWipe();
         
         toast.success("Account obliterated.");
-        navigate('/register');
+        window.location.replace('/');
     } catch (error: any) {
         setIsDeleting(false);
         const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
@@ -401,8 +402,7 @@ export default function SettingsPage() {
       "Emergency Eject",
       "WARNING: This will log you out of ALL devices and permanently delete your local history and keys from this browser. This action cannot be undone.",
       async () => {
-        await emergencyLogout();
-        navigate('/login');
+        await executeLocalWipe();
       }
     );
   };
@@ -688,6 +688,40 @@ export default function SettingsPage() {
                  >
                    Save
                  </button>
+              </div>
+            </div>
+
+            {/* DEAD MAN'S SWITCH */}
+            <div className="pt-4 border-t border-white/5 space-y-3 mt-4">
+              <div>
+                <h4 className="text-sm font-bold text-text-primary flex items-center gap-2">
+                  <span className="text-red-500">💀</span> Dead Man's Switch
+                </h4>
+                <p className="text-xs text-text-secondary mt-1">
+                  Automatically destroy your account and all associated messages if you do not open the app for a set period.
+                </p>
+              </div>
+              <div className="flex gap-2 items-center">
+                 <select
+                   value={profile?.autoDestructDays || ''}
+                   onChange={async (e) => {
+                     const val = e.target.value;
+                     const days = val === '' ? null : parseInt(val, 10);
+                     try {
+                        const { api } = await import('@lib/api');
+                        await api('/api/users/me', { method: 'PUT', body: JSON.stringify({ autoDestructDays: days }) });
+                        // Update local store via bootstrap or manual update
+                        useAuthStore.getState().bootstrap(true);
+                        toast.success(days ? `Auto-destruct set to ${days} days` : 'Auto-destruct disabled');
+                     } catch (err) { toast.error("Failed to update setting"); }
+                   }}
+                   className="bg-bg-main border border-white/10 rounded-lg px-4 py-2 text-sm text-text-primary focus:ring-accent flex-1 outline-none"
+                 >
+                   <option value="">Disabled</option>
+                   <option value="7">7 Days</option>
+                   <option value="14">14 Days</option>
+                   <option value="30">30 Days</option>
+                 </select>
               </div>
             </div>
             </div>
