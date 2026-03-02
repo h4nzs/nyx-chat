@@ -29,8 +29,8 @@ export default defineConfig({
           name: 'Nyx Chat',
           short_name: 'Nyx',
           description: 'Secure, lightweight messaging app.',
-          theme_color: '#ffffff', // Sesuaikan tema terang/gelap
-          background_color: '#ffffff',
+          theme_color: '#1a1a1a', // Sesuaikan tema terang/gelap
+          background_color: '#050505',
           display: 'standalone', // Hapus browser UI (Address bar)
           orientation: 'portrait',
           start_url: '/',
