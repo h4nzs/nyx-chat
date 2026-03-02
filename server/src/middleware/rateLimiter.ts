@@ -2,6 +2,20 @@ import rateLimit from 'express-rate-limit'
 import { env } from '../config.js'
 import { RedisStore } from 'rate-limit-redis'
 import { redisClient } from '../lib/redis.js'
+import { Request } from 'express';
+
+// Secure IP Extractor for Nginx / Cloudflare
+const secureKeyGenerator = (req: Request): string => {
+  const cfIp = req.headers['cf-connecting-ip'];
+  if (cfIp) return cfIp as string;
+  
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    return typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : forwarded[0];
+  }
+  
+  return req.ip || req.socket.remoteAddress || 'unknown';
+};
 
 // Helper biar gak spam log saat development
 const skipInDev = () => env.nodeEnv === 'development'
@@ -14,7 +28,8 @@ export const generalLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers
   skip: skipInDev,
-  validate: { trustProxy: true },
+  keyGenerator: secureKeyGenerator,
+  validate: { trustProxy: false },
   message: {
     error: 'Too many requests, please try again later.'
   },
@@ -32,7 +47,8 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipInDev,
-  validate: { trustProxy: true },
+  keyGenerator: secureKeyGenerator,
+  validate: { trustProxy: false },
   message: {
     error: 'Too many login attempts. Please try again after an hour.'
   },
@@ -46,7 +62,8 @@ export const authLimiter = rateLimit({
 export const uploadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 20,
-  validate: { trustProxy: true },
+  keyGenerator: secureKeyGenerator,
+  validate: { trustProxy: false },
   message: {
     error: 'Upload limit reached. Please wait a while.'
   },
@@ -63,7 +80,8 @@ export const otpLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipInDev,
-  validate: { trustProxy: true },
+  keyGenerator: secureKeyGenerator,
+  validate: { trustProxy: false },
   message: {
     error: 'Too many OTP verification attempts. Please try again later.'
   },
