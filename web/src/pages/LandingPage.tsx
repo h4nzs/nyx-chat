@@ -7,6 +7,7 @@ import {
 import { motion, useMotionValue, useTransform, useInView } from 'framer-motion';
 import { useState, useRef, useEffect, ReactNode } from 'react';
 import { useThemeStore } from '@store/theme';
+import SEO from '../components/SEO';
 
 // --- Animation Variants ---
 const containerVariants = {
@@ -147,10 +148,6 @@ const comparisonData = [
   { feature: "E2E Encryption", wa: "Default", tg: "Secret Chat Only", nyx: "Always On", isWin: true },
   { feature: "Local Footprint", wa: "SQL Database", tg: "Cloud Cache", nyx: "ZERO (Browser)", isWin: true },
 ];
-
-import SEO from '../components/SEO';
-
-// ...
 
 export default function LandingPage() {
   const { theme } = useThemeStore();
