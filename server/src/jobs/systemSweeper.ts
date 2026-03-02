@@ -4,7 +4,7 @@ import { prisma } from '../lib/prisma.js';
 // Jadwalkan untuk jalan setiap jam 3 pagi (server time) tiap hari
 export const startSystemSweeper = () => {
   console.log('🧹 System Sweeper Job scheduled (Daily at 03:00)...');
-  
+
   cron.schedule('0 3 * * *', async () => {
     console.log('[Cron] Memulai pembersihan database harian...');
     const now = new Date();
@@ -36,11 +36,10 @@ export const startSystemSweeper = () => {
           ]
         }
       });
-      
+
       if (deletedSessionKeys.count > 0) {
         console.log(`[Cron] Berhasil menghapus ${deletedSessionKeys.count} kunci sesi kadaluarsa/usang.`);
       }
-
     } catch (error) {
       console.error('[Cron] Gagal melakukan pembersihan database:', error);
     }

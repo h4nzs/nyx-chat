@@ -24,6 +24,7 @@ import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
 import { useConnectionStore } from "./connection";
 import { getSodium } from "@lib/sodiumInitializer";
+import { shadowVault } from '@lib/shadowVaultDb';
 
 /**
  * Logika Dekripsi Terpusat (Single Source of Truth)
@@ -138,20 +139,22 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
     }
 
     // [FIX] PREVENT RE-DECRYPTION LOOP
-    // If content doesn't look like JSON, it's likely already plaintext.
-    if (typeof contentToDecrypt === 'string' && !contentToDecrypt.trim().startsWith('{')) {
-        return decryptedMsg;
-    }
-    
-    // Check if it's a valid encryption payload (contains specific keys)
-    try {
-        if (contentToDecrypt.includes('"header"') || contentToDecrypt.includes('"ciphertext"') || contentToDecrypt.includes('"dr"')) {
-            // It looks like a payload, proceed to decrypt
-        } else {
-            // Probably just a JSON message (like file metadata) that is already decrypted
-            return decryptedMsg;
+    const isLikelyEncrypted = (str: string) => {
+        const trimmed = str.trim();
+        // 1. Check for JSON payload containing encryption markers
+        if (trimmed.startsWith('{') && (trimmed.includes('"header"') || trimmed.includes('"ciphertext"') || trimmed.includes('"dr"'))) {
+            return true;
         }
-    } catch {
+        // 2. Check for legacy/base64 encoded ciphertexts
+        // A valid base64 string shouldn't contain spaces and typically matches this regex
+        const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+        if (base64Regex.test(trimmed) && trimmed.length > 20) { // arbitrary min length for a real ciphertext
+            return true;
+        }
+        return false;
+    };
+
+    if (!isLikelyEncrypted(contentToDecrypt)) {
         return decryptedMsg;
     }
 
@@ -294,8 +297,14 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
       console.warn(`[Decrypt] Failed for msg ${decryptedMsg.id}:`, result?.error);
-      decryptedMsg.content = 'waiting_for_key'; 
-      decryptedMsg.type = 'SYSTEM'; 
+      const errMsg = result?.error?.message || '';
+      if (errMsg.includes('waiting for key') || errMsg.includes('Missing sender')) {
+          decryptedMsg.content = 'waiting_for_key';
+      } else {
+          decryptedMsg.content = '[Decryption Failed: Key out of sync]';
+          decryptedMsg.error = true;
+      }
+      decryptedMsg.type = 'SYSTEM';
     }
 
     // 6. Dekripsi Replied Message
@@ -380,6 +389,7 @@ type Actions = {
   uploadFile: (conversationId: string, file: File) => Promise<void>;
   loadMessagesForConversation: (id: string) => Promise<void>;
   loadPreviousMessages: (conversationId: string) => Promise<void>;
+  loadMessageContext: (messageId: string) => Promise<void>;
   addOptimisticMessage: (conversationId: string, message: Message) => void;
   addIncomingMessage: (conversationId: string, message: Message) => Promise<Message>;
   replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => void;
@@ -461,6 +471,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   sendMessage: async (conversationId, data, tempId?: number) => {
     const { user, hasRestoredKeys } = useAuthStore.getState();
     if (!user) return;
+
+    // FAKE SEND FOR DECOY
+    if (sessionStorage.getItem('nyx_decoy_mode') === 'true') {
+        const actualTempId = tempId !== undefined ? tempId : Date.now();
+        const msg = {
+            id: `temp_${actualTempId}`, tempId: actualTempId, optimistic: true,
+            content: data.content, senderId: user.id, sender: user,
+            createdAt: new Date().toISOString(), conversationId, status: 'SENT'
+        } as Message;
+        get().addOptimisticMessage(conversationId, msg);
+        return;
+    }
 
     if (!hasRestoredKeys) {
       toast.error("You must restore your keys from your recovery phrase before you can send messages.");
@@ -690,6 +712,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         if (res.ok && res.msg) {
           await removeFromQueue(tempId);
           get().replaceOptimisticMessage(conversationId, tempId, { ...res.msg, status: 'SENT' });
+          
+          const msgId = res.msg.id;
+          import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
+              const mk = await retrieveMessageKeySecurely(`temp_${tempId}`);
+              if (mk) {
+                  await storeMessageKeySecurely(msgId, mk);
+                  await deleteMessageKeySecurely(`temp_${tempId}`);
+              }
+          }).catch(console.error);
         } else {
           console.error(`[Queue] Failed to send queued message ${tempId}:`, res.error);
           await updateQueueAttempt(tempId, attempt + 1);
@@ -812,6 +843,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   loadMessagesForConversation: async (id) => {
+    // THE DISGUISE
+    if (sessionStorage.getItem('nyx_decoy_mode') === 'true') {
+       set(state => ({
+          messages: { ...state.messages, [id]: [{ id: 'msg-1', content: 'Welcome to NYX. No active chats found.', senderId: 'bot-1', createdAt: new Date().toISOString(), conversationId: id, type: 'SYSTEM' } as Message] },
+          hasMore: { ...state.hasMore, [id]: false },
+          hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
+       }));
+       return;
+    }
+
     const { hasRestoredKeys } = useAuthStore.getState();
     if (get().hasLoadedHistory[id]) return;
 
@@ -835,6 +876,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const existingMessages = state.messages[id] || [];
         const allMessages = processMessagesAndReactions(processedMessages, existingMessages);
         
+        shadowVault.upsertMessages(allMessages); // Archive to shadow vault
+
         return {
           messages: { ...state.messages, [id]: allMessages },
           hasMore: { ...state.hasMore, [id]: fetchedMessages.length >= 50 },
@@ -860,6 +903,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const existingMessages = state.messages[conversationId] || [];
         const allMessages = processMessagesAndReactions(decryptedItems, existingMessages);
 
+        shadowVault.upsertMessages(allMessages); // Archive to shadow vault
+
         const newState: any = { messages: { ...state.messages, [conversationId]: allMessages } };
 
         if (decryptedItems.length < 50) {
@@ -875,7 +920,43 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     }
   },
 
+  loadMessageContext: async (messageId: string) => {
+    const state = get();
+    try {
+      // Show loading state if we want to handle it globally, but for now we just fetch
+      const res = await api<{ items: Message[], conversationId: string }>(`/api/messages/context/${messageId}`);
+      const fetchedMessages = res.items || [];
+      const convoId = res.conversationId;
+
+      if (!convoId) return;
+
+      const processedMessages: Message[] = [];
+      for (const message of fetchedMessages) {
+        processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
+      }
+
+      set(state => {
+        const existingMessages = state.messages[convoId] || [];
+        // Merge logic: Combine, remove duplicates by ID, then sort
+        const combined = [...existingMessages, ...processedMessages];
+        const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
+        
+        // Separate reactions and normal messages
+        const finalMessages = processMessagesAndReactions(uniqueMessages, []);
+
+        return {
+          messages: { ...state.messages, [convoId]: finalMessages },
+          // If we jump back, we might still have older messages to fetch later
+          hasMore: { ...state.hasMore, [convoId]: true } 
+        };
+      });
+    } catch (error) {
+      console.error(`Failed to load context for message ${messageId}`, error);
+    }
+  },
+
   addOptimisticMessage: (conversationId, message) => {
+    shadowVault.upsertMessages([message]); // Archive to shadow vault
     set(state => {
       const currentMessages = state.messages[conversationId] || [];
       if (currentMessages.some(m => m.id === message.id || (m.tempId && message.tempId && m.tempId === message.tempId))) {
@@ -937,6 +1018,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               set(state => {
                 const currentMessages = state.messages[conversationId] || [];
                 if (currentMessages.some(m => m.id === message.id)) return state;
+                shadowVault.upsertMessages([decrypted]); // Archive to shadow vault
                 return { messages: { ...state.messages, [conversationId]: [...currentMessages, decrypted] } };
               });
           }
@@ -945,11 +1027,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       return decrypted;
   },
 
-  replaceOptimisticMessage: (conversationId, tempId, newMessage) => set(state => {
-    return {
-      messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => (m.tempId && String(m.tempId) === String(tempId)) ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m) }
-    };
-  }),
+  replaceOptimisticMessage: (conversationId, tempId, newMessage) => {
+    set(state => {
+      const updatedMessages = (state.messages[conversationId] || []).map(m => (m.tempId && String(m.tempId) === String(tempId)) ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m);
+      const msg = updatedMessages.find(m => m.id === newMessage.id);
+      if (msg) shadowVault.upsertMessages([msg]); // Archive to shadow vault
+      return {
+        messages: { ...state.messages, [conversationId]: updatedMessages }
+      };
+    })
+  },
   removeMessage: (conversationId, messageId) => set(state => {
     const messages = state.messages[conversationId] || [];
     
@@ -976,7 +1063,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
     };
   }),
-  updateMessage: (conversationId, messageId, updates) => set(state => ({ messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, ...updates } : m) } })),
+  updateMessage: (conversationId, messageId, updates) => {
+    set(state => {
+      const updatedMessages = (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, ...updates } : m);
+      const updatedMsg = updatedMessages.find(m => m.id === messageId);
+      if (updatedMsg) shadowVault.upsertMessages([updatedMsg]); // Archive to shadow vault
+      return { messages: { ...state.messages, [conversationId]: updatedMessages } };
+    })
+  },
   
   addLocalReaction: (conversationId, messageId, reaction: any) => set(state => ({
     messages: {

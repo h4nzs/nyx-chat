@@ -25,18 +25,22 @@ export default function RestorePage() {
     try {
       const trimmedPhrase = phrase.trim().toLowerCase();
       const timestamp = Date.now();
-      
-      // 1. Generate keys & Sign Payload locally
+
+      // 1. Fetch Server-side Nonce Challenge
+      const challengeRes = await api<{ nonce: string }>(`/api/auth/recover/challenge?identifier=${encodeURIComponent(identifier)}`, { method: 'GET' });
+      const nonce = challengeRes.nonce;
+
+      // 2. Generate keys & Sign Payload locally
       const {
         encryptedPrivateKeys,
         signatureB64
-      } = await recoverAccountWithSignature(trimmedPhrase, password, identifier, timestamp);
+      } = await recoverAccountWithSignature(trimmedPhrase, password, identifier, timestamp, nonce);
 
       if (!encryptedPrivateKeys || !signatureB64) {
         throw new Error("Failed to generate recovery payload.");
       }
 
-      // 2. Send Cryptographic Proof to Server
+      // 3. Send Cryptographic Proof to Server
       const res = await api<{ accessToken: string }>('/api/auth/recover', {
         method: 'POST',
         body: JSON.stringify({
@@ -44,10 +48,10 @@ export default function RestorePage() {
           newPassword: password,
           newEncryptedKeys: encryptedPrivateKeys,
           signature: signatureB64,
-          timestamp
+          timestamp,
+          nonce
         })
       });
-
       // 3. Save to local storage & finalize login
       await saveEncryptedKeys(encryptedPrivateKeys);
       useAuthStore.getState().setHasRestoredKeys(true);
@@ -62,7 +66,7 @@ export default function RestorePage() {
       // Actually, api/auth/recover returns accessToken. We should set it.
       if (res.accessToken) {
           useAuthStore.getState().setAccessToken(res.accessToken);
-          await useAuthStore.getState().bootstrap(); // This fetches user profile
+          await useAuthStore.getState().bootstrap(true); // Force fetch user profile
       }
 
       toast.success('Account successfully recovered! Welcome back.');

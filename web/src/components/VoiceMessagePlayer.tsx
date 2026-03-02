@@ -1,36 +1,36 @@
-import { useState, useRef, useEffect } from 'react';
-import { FiPlay, FiPause, FiDownload, FiAlertTriangle } from 'react-icons/fi';
-import { motion } from 'framer-motion';
+import { useEffect, useRef, useState, memo } from 'react';
+import WaveSurfer from 'wavesurfer.js';
+import { FiPlay, FiPause, FiAlertTriangle } from 'react-icons/fi';
 import { Message } from '@store/conversation';
-import { decryptFile, decryptMessage } from '@utils/crypto';
+import { decryptFile } from '@utils/crypto';
 import { toAbsoluteUrl } from '@utils/url';
-import { useKeychainStore } from '@store/keychain';
-import { useConversationStore } from '@store/conversation';
 import { Spinner } from './Spinner';
+import { useKeychainStore } from '@store/keychain';
 
 interface VoiceMessagePlayerProps {
   message: Message;
 }
 
-export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps) {
-  const audioRef = useRef<HTMLAudioElement>(null);
+const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const wavesurferRef = useRef<WaveSurfer | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
-  const [isLoaded, setIsLoaded] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  
   const [audioSrc, setAudioSrc] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
 
-  const duration = message.duration || 0;
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
-
+  // 1. Decrypt audio and create ObjectURL (same logic as before)
   useEffect(() => {
     let objectUrl: string | null = null;
     let isMounted = true;
 
     const handleDecryption = async () => {
-      // [FIX] key is already decrypted by store
       const rawFileKey = message.fileKey;
 
       if (!message.fileUrl) {
@@ -38,12 +38,10 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
         return;
       }
       
-      // If we don't have the key yet, check if message is still pending decryption
       if (!rawFileKey) {
          if (message.content === 'waiting_for_key' || message.content?.startsWith('[')) {
              if (isMounted) setError(message.content);
          } else {
-             // Store hasn't finished processing JSON metadata yet?
              if (isMounted) setIsLoading(true); 
          }
          return;
@@ -60,21 +58,15 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
           throw new Error("File URL is invalid.");
         }
         
-        // 1. Fetch the encrypted file
         const response = await fetch(absoluteUrl);
         if (!response.ok) {
-          if (response.status === 404) {
-            throw new Error("File not found on server.");
-          }
+          if (response.status === 404) throw new Error("File not found on server.");
           throw new Error(`Failed to fetch voice file: ${response.statusText}`);
         }
         const encryptedBlob = await response.blob();
-
-        // 2. Decrypt the file blob using the raw key
         const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, 'audio/webm');
         
         if (isMounted) {
-          // 3. Create a playable URL
           objectUrl = URL.createObjectURL(decryptedBlob);
           setAudioSrc(objectUrl);
         }
@@ -91,7 +83,6 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
     } else if (message.fileUrl) {
       const absoluteUrl = toAbsoluteUrl(message.fileUrl);
       if (absoluteUrl) {
-        // For optimistic messages with blob URLs
         setAudioSrc(absoluteUrl);
       } else {
         setError("Invalid audio file URL.");
@@ -100,54 +91,80 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
 
     return () => {
       isMounted = false;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [message, lastKeychainUpdate]);
 
+  // 2. Initialize WaveSurfer once we have the audioSrc
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
+    if (!containerRef.current || !audioSrc) return;
 
-    const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
-    const handleCanPlay = () => setIsLoaded(true);
-    const handleEnded = () => {
+    const ws = WaveSurfer.create({
+      container: containerRef.current,
+      waveColor: '#4f46e5', // Brand accent color
+      progressColor: '#818cf8', // Lighter accent for played portion
+      cursorColor: 'transparent',
+      barWidth: 2,
+      barGap: 2,
+      barRadius: 2,
+      height: 32,
+      url: audioSrc,
+    });
+
+    wavesurferRef.current = ws;
+
+    ws.on('ready', () => {
+      setDuration(ws.getDuration());
+      setIsReady(true);
+    });
+
+    ws.on('audioprocess', () => {
+      setCurrentTime(ws.getCurrentTime());
+    });
+
+    ws.on('interaction', () => {
+      setCurrentTime(ws.getCurrentTime());
+    });
+
+    // CRITICAL FIX: Let WaveSurfer dictate the React state, not the other way around.
+    ws.on('play', () => setIsPlaying(true));
+    ws.on('pause', () => setIsPlaying(false));
+    
+    ws.on('finish', () => {
       setIsPlaying(false);
       setCurrentTime(0);
-    };
-
-    audio.addEventListener('timeupdate', handleTimeUpdate);
-    audio.addEventListener('canplay', handleCanPlay);
-    audio.addEventListener('ended', handleEnded);
+      ws.seekTo(0); // Reset visual cursor to beginning
+    });
 
     return () => {
-      audio.removeEventListener('timeupdate', handleTimeUpdate);
-      audio.removeEventListener('canplay', handleCanPlay);
-      audio.removeEventListener('ended', handleEnded);
+      ws.destroy();
     };
   }, [audioSrc]);
 
-  const togglePlay = () => {
-    if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play();
+  const togglePlay = async () => {
+    if (wavesurferRef.current) {
+      try {
+        if (wavesurferRef.current.isPlaying()) {
+          wavesurferRef.current.pause();
+        } else {
+          await wavesurferRef.current.play();
+        }
+      } catch (e) {
+        console.error("Playback failed:", e);
       }
-      setIsPlaying(!isPlaying);
     }
   };
 
-  const formatTime = (timeInSeconds: number) => {
-    const minutes = Math.floor(timeInSeconds / 60);
-    const seconds = Math.floor(timeInSeconds % 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const formatTime = (time: number) => {
+    if (isNaN(time)) return '0:00';
+    const mins = Math.floor(time / 60);
+    const secs = Math.floor(time % 60);
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-3 w-full max-w-[250px] h-[60px]">
+      <div className="flex items-center gap-3 w-full max-w-[280px] h-[60px] bg-bg-main/50 p-2 rounded-2xl border border-white/5">
         <Spinner size="sm" />
         <span className="text-sm text-text-secondary">Decrypting...</span>
       </div>
@@ -156,44 +173,35 @@ export default function VoiceMessagePlayer({ message }: VoiceMessagePlayerProps)
 
   if (error) {
     return (
-      <div className="flex items-center gap-2 w-full max-w-[250px] p-2 bg-destructive/10 rounded-lg">
+      <div className="flex items-center gap-2 w-full max-w-[280px] p-3 bg-destructive/10 rounded-2xl border border-destructive/20">
         <FiAlertTriangle className="text-destructive flex-shrink-0" />
-        <p className="text-xs text-destructive italic">{error}</p>
+        <p className="text-xs text-destructive italic line-clamp-2">{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-3 w-full max-w-[250px] p-1">
-      {audioSrc && <audio ref={audioRef} src={audioSrc} preload="metadata" />}
+    <div className="flex items-center gap-3 w-[240px] sm:w-[280px] bg-bg-main/50 p-2 rounded-2xl border border-white/5 shadow-inner">
       <button 
         onClick={togglePlay} 
-        disabled={!isLoaded}
-        className="p-3 rounded-full bg-bg-surface text-accent shadow-neumorphic-convex active:shadow-neumorphic-pressed disabled:opacity-50 transition-all"
-        aria-label={isPlaying ? 'Pause voice message' : 'Play voice message'}
+        disabled={!isReady}
+        className="w-10 h-10 flex-shrink-0 rounded-full bg-accent text-white flex items-center justify-center disabled:opacity-50 hover:bg-indigo-600 transition-colors shadow-md active:scale-95"
       >
-        <motion.div
-          key={isPlaying ? 'pause' : 'play'}
-          initial={{ opacity: 0, scale: 0.5 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.2 }}
-        >
-          {isPlaying ? <FiPause size={18} /> : <FiPlay size={18} className="ml-0.5" />}
-        </motion.div>
+        {isPlaying ? <FiPause size={18} /> : <FiPlay size={18} className="ml-1" />}
       </button>
-      <div className="flex-1 flex flex-col justify-center gap-1.5">
-        <div className="w-full h-1.5 bg-black/20 shadow-neumorphic-concave rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-accent rounded-full relative"
-            style={{ width: `${progress}%` }}
-          >
-            <div className="w-3 h-3 bg-white rounded-full absolute top-1/2 right-0 -translate-y-1/2 translate-x-1/2 shadow-lg" />
-          </div>
+      
+      <div className="flex-1 flex flex-col justify-center overflow-hidden cursor-pointer">
+        {/* Waveform Container */}
+        <div ref={containerRef} className="w-full relative z-10" />
+        
+        {/* Timers */}
+        <div className="text-[10px] text-text-secondary mt-1 flex justify-between font-mono font-medium">
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(message.duration || duration)}</span>
         </div>
-        <span className="text-xs text-text-secondary/80 font-mono self-end">
-          {formatTime(isPlaying ? currentTime : duration)}
-        </span>
       </div>
     </div>
   );
-}
+};
+
+export default memo(VoiceMessagePlayer);

@@ -125,6 +125,13 @@ export async function deleteGroupStates(conversationId: string): Promise<void> {
   await tx.done;
 }
 
+export async function deleteGroupSenderState(conversationId: string): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction([GROUP_SENDER_STATES_STORE], 'readwrite');
+  await tx.objectStore(GROUP_SENDER_STATES_STORE).delete(conversationId);
+  await tx.done;
+}
+
 /**
  * Stores a pending X3DH header for a conversation.
  * Used when a session is created but no message has been sent yet.
@@ -360,6 +367,11 @@ export async function clearAllKeys(): Promise<void> {
   await tx.done;
 }
 
+export interface VaultEntry {
+  key: any;
+  value: any;
+}
+
 /**
  * Mengekspor seluruh isi brankas kunci menjadi string JSON.
  * Aman karena setiap nilainya sudah terenkripsi oleh Master Seed.
@@ -369,17 +381,18 @@ export async function exportDatabaseToJson(): Promise<string> {
   const stores = [
     SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
     PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
-    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME
+    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME,
+    GROUP_SENDER_STATES_STORE, GROUP_RECEIVER_STATES_STORE
   ];
   
-  const exportData: Record<string, any[]> = {};
+  const exportData: Record<string, VaultEntry[]> = {};
 
   for (const storeName of stores) {
     if (!db.objectStoreNames.contains(storeName)) continue;
     
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
-    const items = [];
+    const items: VaultEntry[] = [];
     let cursor = await store.openCursor();
     while (cursor) {
       items.push({ key: cursor.key, value: cursor.value });
@@ -388,7 +401,13 @@ export async function exportDatabaseToJson(): Promise<string> {
     exportData[storeName] = items;
   }
   
-  return JSON.stringify(exportData);
+  return JSON.stringify(exportData, (key, value) => {
+    // Custom replacer to preserve Uint8Array
+    if (value instanceof Uint8Array) {
+      return { __type: 'Uint8Array', data: Array.from(value) };
+    }
+    return value;
+  });
 }
 
 /**
@@ -396,9 +415,15 @@ export async function exportDatabaseToJson(): Promise<string> {
  */
 export async function importDatabaseFromJson(jsonString: string): Promise<void> {
   const db = await getDb();
-  let importData;
+  let importData: Record<string, VaultEntry[]>;
   try {
-      importData = JSON.parse(jsonString);
+      importData = JSON.parse(jsonString, (key, value) => {
+        // Custom reviver to restore Uint8Array
+        if (value && typeof value === 'object' && value.__type === 'Uint8Array') {
+          return new Uint8Array(value.data);
+        }
+        return value;
+      });
   } catch (e) {
       throw new Error("Invalid vault file format.");
   }
@@ -406,16 +431,17 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
   const stores = [
     SESSION_KEYS_STORE_NAME, GROUP_KEYS_STORE_NAME, OTPK_STORE_NAME, 
     PENDING_HEADERS_STORE_NAME, RATCHET_SESSIONS_STORE_NAME, 
-    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME
+    SKIPPED_KEYS_STORE_NAME, MESSAGE_KEYS_STORE_NAME, PROFILE_KEYS_STORE_NAME,
+    GROUP_SENDER_STATES_STORE, GROUP_RECEIVER_STATES_STORE
   ];
   
   const availableStores = stores.filter(s => db.objectStoreNames.contains(s));
   const tx = db.transaction(availableStores, 'readwrite');
   
   for (const storeName of availableStores) {
+    const store = tx.objectStore(storeName);
+    await store.clear(); // Selalu bersihkan brankas lama, bahkan jika importData[storeName] tidak ada
     if (importData[storeName]) {
-      const store = tx.objectStore(storeName);
-      await store.clear(); // Bersihkan brankas lama
       for (const item of importData[storeName]) {
         await store.put(item.value, item.key);
       }

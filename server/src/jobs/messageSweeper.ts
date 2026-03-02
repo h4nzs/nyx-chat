@@ -5,7 +5,7 @@ import { getIo } from '../socket.js';
 // Jalanin fungsi ini setiap 1 menit (* * * * *)
 export const startMessageSweeper = () => {
   console.log('🧹 Message Sweeper Job started...');
-  
+
   cron.schedule('* * * * *', async () => {
     try {
       const now = new Date();
@@ -15,11 +15,11 @@ export const startMessageSweeper = () => {
       while (true) {
         // 1. Cari pesan yang waktunya udah kelewat (Batching)
         const expiredMessages = await prisma.message.findMany({
-          where: { 
-            expiresAt: { 
+          where: {
+            expiresAt: {
               not: null,
-              lte: now 
-            } 
+              lte: now
+            }
           },
           select: { id: true, conversationId: true },
           take: BATCH_SIZE
@@ -28,7 +28,7 @@ export const startMessageSweeper = () => {
         if (expiredMessages.length === 0) break; // Selesai
 
         const messageIds = expiredMessages.map(m => m.id);
-        
+
         console.log(`🔥 Sweeping batch of ${messageIds.length} expired messages...`);
 
         // 3. HAPUS PERMANEN DARI DATABASE!
@@ -40,7 +40,7 @@ export const startMessageSweeper = () => {
         const io = getIo();
         if (io) {
           const messagesByConvo: Record<string, string[]> = {};
-          
+
           expiredMessages.forEach(m => {
             if (!messagesByConvo[m.conversationId]) {
               messagesByConvo[m.conversationId] = [];
@@ -52,16 +52,16 @@ export const startMessageSweeper = () => {
             io.to(convoId).emit('messages:expired', { messageIds: ids });
           });
         }
-        
+
         processedCount += expiredMessages.length;
         // Optional: Small delay to let event loop breathe if heavily loaded
         await new Promise(r => setTimeout(r, 50));
       }
-      
+
       if (processedCount > 0) console.log(`✅ Total swept: ${processedCount}`);
 
     } catch (error) {
       console.error('❌ Message Sweeper Error:', error);
     }
-  });
+  }, { noOverlap: true });
 };

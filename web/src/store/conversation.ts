@@ -46,6 +46,8 @@ export type Message = {
   deletedAt?: string | Date | null;
   expiresAt?: string | null; // New: Disappearing messages
   isBlindAttachment?: boolean; // New: Flag for Blind Attachments (raw key in fileKey)
+  isViewOnce?: boolean;
+  isViewed?: boolean;
 };
 
 export type Participant = {
@@ -182,6 +184,18 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   loadConversations: async () => {
+    // THE DISGUISE
+    if (sessionStorage.getItem('nyx_decoy_mode') === 'true') {
+      const dummyConvo = {
+         id: 'decoy-1', isGroup: false, unreadCount: 0,
+         participants: [{ id: 'bot-1', username: 'system_bot', displayName: 'NYX Service', avatarUrl: null }],
+         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+         lastMessage: { id: 'msg-1', content: 'Welcome to NYX. No active chats found.', senderId: 'bot-1', createdAt: new Date().toISOString(), conversationId: 'decoy-1', type: 'SYSTEM' }
+      };
+      set({ conversations: [dummyConvo as any], loading: false, initialLoadCompleted: true });
+      return;
+    }
+
     let shouldProceed = false;
     set(state => {
       if (state.loading) return state;
@@ -347,13 +361,24 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     });
   },
 
-  updateConversation: (conversationId, updates) => {
-    set(state => ({
-      conversations: state.conversations.map(c => 
-        c.id === conversationId ? { ...c, ...updates } : c
-      )
-    }));
-  },
+  updateConversation: (id, data) => set((state) => {
+    const oldConv = state.conversations.find((c) => c.id === id);
+    
+    // Check for membership changes in groups to trigger Key Rotation
+    if (oldConv && oldConv.isGroup && data.participants) {
+      const oldIds = oldConv.participants.map(p => p.id).sort().join(',');
+      const newIds = data.participants.map(p => p.id).sort().join(',');
+      if (oldIds !== newIds) {
+        import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(id));
+      }
+    }
+
+    return {
+      conversations: state.conversations.map((c) =>
+        c.id === id ? { ...c, ...data } : c
+      ),
+    };
+  }),
 
   updateParticipantDetails: (user) => {
     // Destructure role to exclude it, preventing conflict with Participant role type

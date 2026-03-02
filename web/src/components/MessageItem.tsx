@@ -3,27 +3,20 @@ import type { Message, Conversation, Participant, MessageStatus } from "@store/c
 import { useAuthStore } from "@store/auth";
 import { useMessageInputStore } from "@store/messageInput";
 import { getSocket } from "@lib/socket";
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { api } from "@lib/api";
-import ReactionPopover from "./Reactions";
 import { toAbsoluteUrl } from "@utils/url";
-import LazyImage from "./LazyImage";
-import FileAttachment from "./FileAttachment";
 import { useModalStore } from '@store/modal';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
-import LinkPreviewCard from './LinkPreviewCard';
-import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock } from 'react-icons/fi';
+import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock, FiInfo } from 'react-icons/fi';
 import { getUserColor } from '@utils/color';
 import { FaCheck, FaCheckDouble } from 'react-icons/fa';
-import VoiceMessagePlayer from './VoiceMessagePlayer';
-import { decryptMessage } from "@utils/crypto";
-import { useKeychainStore } from "@store/keychain";
 import { useMessageStore } from '@store/message';
 import toast from 'react-hot-toast';
-import MarkdownMessage from './MarkdownMessage';
-import MessageBubble from "./MessageBubble"; // Import the external component
+import MessageBubble from "./MessageBubble";
 import { useUserProfile } from '@hooks/useUserProfile';
+import SwipeableItem from "./SwipeableItem";
+import { useContextMenuStore } from "../store/contextMenu";
 
 const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
   const meId = useAuthStore((s) => s.user?.id);
@@ -31,7 +24,6 @@ const MessageStatusIcon = ({ message, participants }: { message: Message; partic
   
   if (message.senderId !== meId) return null;
   
-  // Prioritize explicit status field
   if (message.status === 'FAILED' || message.error) {
     return (
       <button onClick={() => retrySendMessage(message)} title="Failed to send. Click to retry.">
@@ -88,13 +80,16 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
   const meId = useAuthStore((s) => s.user?.id);
   const setReplyingTo = useMessageInputStore(state => state.setReplyingTo);
   const showConfirm = useModalStore(state => state.showConfirm);
-  const { removeMessage, addOptimisticMessage } = useMessageStore(state => ({
-    removeMessage: state.removeMessage,
-    addOptimisticMessage: state.addOptimisticMessage,
-  }));
+  const removeMessage = useMessageStore(state => state.removeMessage);
+  const addOptimisticMessage = useMessageStore(state => state.addOptimisticMessage);
+  const sendReaction = useMessageStore(state => state.sendReaction);
+  const removeLocalReaction = useMessageStore(state => state.removeLocalReaction);
+  const user = useAuthStore((s) => s.user);
+
   const profile = useUserProfile(message.sender as any);
   const mine = message.senderId === meId;
   const ref = useRef<HTMLDivElement>(null);
+  const openMenu = useContextMenuStore(s => s.openMenu);
 
   useEffect(() => {
     if (!ref.current || mine) return;
@@ -130,13 +125,8 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
 
   const handleDelete = () => {
     showConfirm('Delete Message', 'Are you sure you want to permanently delete this message?', () => {
-      // Optimistically remove the message from the UI
       removeMessage(message.conversationId, message.id);
-      
-      // Prepare Query Params for Blind Attachment Deletion
       let query = '';
-      
-      // Try to get real R2 URL from JSON content first (because fileUrl might be a Blob)
       let targetUrl = message.fileUrl;
       try {
           if (message.content && message.content.startsWith('{')) {
@@ -147,18 +137,15 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
 
       if (targetUrl && !targetUrl.startsWith('blob:')) {
           try {
-              // Extract key from URL (e.g. https://pub.r2.../attachments/key.ext -> attachments/key.ext)
               const url = new URL(targetUrl);
-              const key = url.pathname.substring(1); // Remove leading slash
+              const key = url.pathname.substring(1);
               if (key) query = `?r2Key=${encodeURIComponent(key)}`;
           } catch (e) {
               console.error("Failed to parse file URL for deletion:", e);
           }
       }
 
-      // Call the API to delete the message from the server
       api(`/api/messages/${message.id}${query}`, { method: 'DELETE' }).catch((error) => {
-        // If the API call fails, revert the change by re-adding the message
         console.error("Failed to delete message:", error);
         toast.error("Failed to delete message.");
         addOptimisticMessage(message.conversationId, message);
@@ -174,80 +161,95 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     );
   }
 
+  const reactToMessage = async (emoji: string) => {
+    if (!user) return;
+    const userReaction = message.reactions?.find(r => r.userId === user.id);
+    
+    if (userReaction?.emoji === emoji) {
+      removeLocalReaction(message.conversationId, message.id, userReaction.id);
+      try {
+        if ((userReaction as any).isMessage) {
+            await api(`/api/messages/${userReaction.id}`, { method: 'DELETE' });
+        } else {
+            await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
+        }
+      } catch (e) {
+        console.error("Failed to remove reaction:", e);
+      }
+      return;
+    }
+
+    if (userReaction) {
+        removeLocalReaction(message.conversationId, message.id, userReaction.id);
+        const deletePromise = (userReaction as any).isMessage
+            ? api(`/api/messages/${userReaction.id}`, { method: 'DELETE' })
+            : api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
+        deletePromise.catch(console.error);
+    }
+
+    try {
+        await sendReaction(message.conversationId, message.id, emoji);
+    } catch (e) {
+        console.error("Failed to send reaction:", e);
+    }
+  };
+
+  const handleContextMenu = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    openMenu(e, [
+      { label: 'Reply', icon: <FiCornerUpLeft />, onClick: () => setReplyingTo(message) },
+      { label: 'Copy Text', icon: <FiCopy />, onClick: () => navigator.clipboard.writeText(message.content || '') },
+      { label: 'Security Info', icon: <FiShield />, onClick: () => toast('End-to-End Encrypted via Signal Protocol', { icon: '🔒' }) },
+      { label: 'Copy Message ID', icon: <FiInfo />, onClick: () => navigator.clipboard.writeText(message.id) },
+      ...(mine && !message.optimistic ? [{ label: 'Delete', icon: <FiTrash2 />, destructive: true, onClick: handleDelete }] : [])
+    ], [
+      { emoji: '👍', onClick: () => reactToMessage('👍') },
+      { emoji: '❤️', onClick: () => reactToMessage('❤️') },
+      { emoji: '😂', onClick: () => reactToMessage('😂') },
+      { emoji: '😮', onClick: () => reactToMessage('😮') },
+      { emoji: '😢', onClick: () => reactToMessage('😢') },
+    ]);
+  };
+
   return (
-    <motion.div ref={ref} id={message.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }} className={clsx('group flex items-end gap-2', isFirstInSequence ? 'mt-3' : 'mt-1', mine ? 'justify-end' : 'justify-start', isHighlighted && 'bg-accent/10 rounded-lg p-1 -mx-1')}>
-      {!mine && (
-        <div className="w-8 flex-shrink-0 mb-1 self-end">
-          {isLastInSequence && (
-            <img 
-              src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
-              alt="Avatar" 
-              className="w-8 h-8 rounded-full bg-secondary object-cover shadow-sm cursor-pointer hover:scale-105 transition-transform" 
-              // Note: Avatar click handler is usually handled by parent or could be passed down. 
-              // For simplicity, we can leave it visual or add onClick if needed.
-            />
-          )}
-        </div>
-      )}
-      
-      <div className={`flex items-end gap-2 ${mine ? 'flex-row-reverse' : 'flex-row'}`}>
-        <div className={clsx("flex flex-col max-w-[85%] sm:max-w-[70%]", mine ? "items-end" : "items-start")}>
-          {!mine && isGroup && profile.name && isFirstInSequence && (
-            <p className="text-[10px] font-bold mb-1 ml-1 user-color-name cursor-pointer hover:underline uppercase tracking-wide" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>
-              {profile.name}
-            </p>
+    <motion.div ref={ref} id={message.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }} className={clsx('group flex flex-col', isFirstInSequence ? 'mt-3' : 'mt-1', mine ? 'items-end' : 'items-start', isHighlighted && 'bg-accent/10 rounded-lg p-1 -mx-1')}>
+      <SwipeableItem 
+        leftAction={{ icon: <FiCornerUpLeft size={20} />, color: 'bg-blue-500/80', onAction: () => setReplyingTo(message) }}
+        rightAction={{ icon: <FiInfo size={20} />, color: 'bg-secondary/80', onAction: () => toast('Message ID: ' + message.id, { icon: 'ℹ️' }) }}
+      >
+        <div onContextMenu={handleContextMenu} className={`flex items-end gap-2 w-full select-none ${mine ? 'flex-row-reverse justify-start' : 'flex-row justify-start'}`}>
+          {!mine && (
+            <div className="w-8 flex-shrink-0 mb-1 self-end">
+              {isLastInSequence && (
+                <img 
+                  src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
+                  alt="Avatar" 
+                  className="w-8 h-8 rounded-full bg-secondary object-cover shadow-sm cursor-pointer hover:scale-105 transition-transform pointer-events-auto" 
+                />
+              )}
+            </div>
           )}
           
-          <MessageBubble 
-            message={message} 
-            isOwn={mine} 
-            onImageClick={onImageClick}
-            isLastInSequence={isLastInSequence}
-          />
-          
-          <ReactionsDisplay reactions={message.reactions} />
+          <div className={clsx("flex flex-col max-w-[85%] sm:max-w-[70%]", mine ? "items-end" : "items-start")}>
+            {!mine && isGroup && profile.name && isFirstInSequence && (
+              <p className="text-[10px] font-bold mb-1 ml-1 user-color-name cursor-pointer hover:underline uppercase tracking-wide pointer-events-auto" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>
+                {profile.name}
+              </p>
+            )}
+            
+            <div className="pointer-events-auto w-full">
+              <MessageBubble 
+                message={message} 
+                isOwn={mine} 
+                onImageClick={onImageClick}
+                isLastInSequence={isLastInSequence}
+              />
+            </div>
+            
+            <ReactionsDisplay reactions={message.reactions} />
+          </div>
         </div>
-
-        {/* Dropdown Menu (Three dots / Actions) */}
-        <div className="opacity-0 group-hover:opacity-100 transition-opacity self-center mb-2">
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger asChild><button className="p-1.5 rounded-full hover:bg-secondary"><svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-text-secondary" viewBox="0 0 20 20" fill="currentColor"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 12a2 2 0 110-4 2 2 0 010 4zm0-6a2 2 0 110-4 2 2 0 010 4z" /></svg></button></DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content 
-                sideOffset={5} 
-                align="center" 
-                className="
-                  z-50 min-w-[180px] p-2
-                  rounded-xl bg-bg-main
-                  shadow-[8px_8px_20px_rgba(0,0,0,0.15),-8px_-8px_20px_rgba(255,255,255,1)]
-                  dark:shadow-[8px_8px_20px_rgba(0,0,0,0.5),-8px_-8px_20px_rgba(255,255,255,0.05)]
-                  border border-white/40 dark:border-white/5
-                  border-b-white/10 dark:border-b-black/50
-                "
-              >
-                <DropdownMenu.Item onSelect={() => setReplyingTo(message)} className="group flex items-center gap-3 px-3 py-2.5 mb-1 rounded-lg text-sm font-bold text-text-secondary outline-none cursor-pointer transition-all duration-200 data-[highlighted]:text-accent data-[highlighted]:shadow-[inset_3px_3px_6px_rgba(0,0,0,0.1),inset_-3px_-3px_6px_rgba(255,255,255,0.8)] dark:data-[highlighted]:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.5),inset_-2px_-2px_5px_rgba(255,255,255,0.05)]">
-                  <FiCornerUpLeft className="opacity-70 group-data-[highlighted]:scale-110 transition-transform" />
-                  <span>Reply</span>
-                </DropdownMenu.Item>
-                
-                <ReactionPopover message={message}>
-                  <div className="group flex items-center gap-3 px-3 py-2.5 mb-1 rounded-lg text-sm font-bold text-text-secondary outline-none cursor-pointer transition-all duration-200 hover:text-accent hover:shadow-[inset_3px_3px_6px_rgba(0,0,0,0.1),inset_-3px_-3px_6px_rgba(255,255,255,0.8)] dark:hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.5),inset_-2px_-2px_5px_rgba(255,255,255,0.05)]">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 opacity-70 group-hover:scale-110 transition-transform" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 100-2 1 1 0 000 2zm7-1a1 1 0 11-2 0 1 1 0 012 0zm-.464 5.535a.75.75 0 01.028.022l.028.027a.75.75 0 01.027.028l.027.028a.75.75 0 01.022.028l.022.028a.75.75 0 01.016.023l.016.023a.75.75 0 01.01.016l.01.016c.004.005.007.01.01.015l.004.005a.75.75 0 01.005.004l.005.004a.75.75 0 01.002.002l.002.002a.75.75 0 010 .004c0 .001 0 .002 0 .002a.75.75 0 01-.004 0l-.002-.002a.75.75 0 01-.005-.004l-.005-.004a.75.75 0 01-.01-.015l-.01-.016a.75.75 0 01-.016-.023l-.016-.023a.75.T5 0 01-.022-.028l-.022-.028a.75.75 0 01-.027-.028l-.027-.028a.75.75 0 01-.028-.022l-.028-.027a.75.75 0 01-.022-.028l-.022-.028a.75.75 0 01-.016-.023l-.016-.023a.75.75 0 01-.01-.016l-.01-.016a.75.75 0 01-.005-.004l-.005-.004a.75.75 0 01-.002-.002l-.002-.002a.75.75 0 010-.004c.09.34.26.65.49.93a.75.75 0 01-1.06 1.06 5.25 5.25 0 00-1.5 3.75.75.75 0 01-1.5 0 6.75 6.75 0 011.94-4.71.75.75 0 011.06-1.06z" clipRule="evenodd" /></svg>
-                    <span>React</span>
-                  </div>
-                </ReactionPopover>
-
-                {mine && !message.optimistic && (
-                  <DropdownMenu.Item onSelect={handleDelete} className="group flex items-center gap-3 px-3 py-2.5 mb-1 rounded-lg text-sm font-bold text-destructive outline-none cursor-pointer transition-all duration-200 data-[highlighted]:text-destructive data-[highlighted]:shadow-[inset_3px_3px_6px_rgba(0,0,0,0.1),inset_-3px_-3px_6px_rgba(255,255,255,0.8)] dark:data-[highlighted]:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.5),inset_-2px_-2px_5px_rgba(255,255,255,0.05)]">
-                    <FiTrash2 className="opacity-70 group-data-[highlighted]:scale-110 transition-transform" />
-                    <span>Delete</span>
-                  </DropdownMenu.Item>
-                )}
-              </DropdownMenu.Content>
-            </DropdownMenu.Portal>
-          </DropdownMenu.Root>
-        </div>
-      </div>
+      </SwipeableItem>
     </motion.div>
   );
 };

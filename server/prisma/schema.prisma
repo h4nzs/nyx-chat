@@ -130,6 +130,8 @@ model Message {
   statuses            MessageStatus[]
   linkPreview         Json?
   expiresAt           DateTime?
+  isViewOnce          Boolean         @default(false)
+  isViewed            Boolean         @default(false)
 
   repliedToId         String?         @map("replied_to_id")
   repliedTo           Message?        @relation("Replies", fields: [repliedToId], references: [id], onDelete: SetNull, onUpdate: NoAction)

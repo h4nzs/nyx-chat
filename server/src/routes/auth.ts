@@ -263,22 +263,44 @@ router.post('/refresh', async (req, res, next) => {
 })
 
 // === ZERO-KNOWLEDGE ACCOUNT RECOVERY ===
+router.get('/recover/challenge', authLimiter, async (req, res, next) => {
+  try {
+    const { identifier } = req.query;
+    if (!identifier || typeof identifier !== 'string') {
+      throw new ApiError(400, "Identifier is required.");
+    }
+    const nonce = crypto.randomBytes(32).toString('hex');
+    await redisClient.setEx(`recover_nonce:${identifier}`, 300, nonce); // 5 mins expiry
+    res.json({ nonce });
+  } catch (e) {
+    next(e);
+  }
+});
+
 router.post('/recover', authLimiter, zodValidate({
   body: z.object({
     identifier: z.string().min(10), // usernameHash
     newPassword: z.string().min(8),
     newEncryptedKeys: z.string(),
     signature: z.string(),
-    timestamp: z.number()
+    timestamp: z.number(),
+    nonce: z.string()
   })
 }), async (req, res, next) => {
   try {
-    const { identifier: usernameHash, newPassword, newEncryptedKeys, signature, timestamp } = req.body;
+    const { identifier: usernameHash, newPassword, newEncryptedKeys, signature, timestamp, nonce } = req.body;
 
     const now = Date.now();
     if (Math.abs(now - timestamp) > 5 * 60 * 1000) {
        throw new ApiError(400, "Recovery request expired.");
     }
+
+    // Verify and consume server-side nonce
+    const cachedNonce = await redisClient.get(`recover_nonce:${usernameHash}`);
+    if (!cachedNonce || cachedNonce !== nonce) {
+       throw new ApiError(401, "Invalid or expired recovery challenge. Please try again.");
+    }
+    await redisClient.del(`recover_nonce:${usernameHash}`); // One-time use replay protection
 
     // Match by Hash
     const user = await prisma.user.findUnique({
@@ -289,8 +311,8 @@ router.post('/recover', authLimiter, zodValidate({
     const { getSodium } = await import('../lib/sodium.js');
     const sodium = await getSodium();
     
-    // Message: HASH:TIMESTAMP
-    const messageString = `${usernameHash}:${timestamp}`;
+    // Canonicalize and concatenate full recovery payload
+    const messageString = `${usernameHash}:${timestamp}:${nonce}:${newPassword}:${newEncryptedKeys}`;
     const messageBytes = Buffer.from(messageString, 'utf-8');
     const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
     const publicKeyBytes = sodium.from_base64(user.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -301,19 +323,20 @@ router.post('/recover', authLimiter, zodValidate({
     }
 
     const passwordHash = await hashPassword(newPassword);
-    
-    await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
 
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: { 
-        passwordHash, 
-        encryptedPrivateKey: newEncryptedKeys 
-      }
-    });
+    const [updatedUser] = await prisma.$transaction([
+        prisma.user.update({
+          where: { id: user.id },
+          data: {
+            passwordHash,
+            encryptedPrivateKey: newEncryptedKeys
+          }
+        }),
+        prisma.refreshToken.deleteMany({ where: { userId: user.id } }),
+        prisma.authenticator.deleteMany({ where: { userId: user.id } })
+    ]);
 
-    const tokens = await issueTokens(updatedUser, req);
-    setAuthCookies(res, tokens);
+    const tokens = await issueTokens(updatedUser, req);    setAuthCookies(res, tokens);
 
     res.json({ message: "Account recovered successfully.", accessToken: tokens.access });
   } catch (e) {

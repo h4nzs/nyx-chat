@@ -1,10 +1,14 @@
 
 import { useState, useEffect } from 'react';
 import { useModalStore } from '@store/modal';
+import { verifyDecoyPin } from '@lib/biometricUnlock';
+import { useKeychainStore } from '@store/keychain';
 
 export default function PasswordPromptModal() {
   const { isPasswordPromptOpen, onPasswordSubmit, hidePasswordPrompt } = useModalStore();
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleCancel = () => {
     onPasswordSubmit(null);
@@ -27,11 +31,34 @@ export default function PasswordPromptModal() {
     return null;
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onPasswordSubmit(password);
-    setPassword('');
-    hidePasswordPrompt();
+    setIsLoading(true);
+    setError('');
+    try {
+      // 1. Check if it's the Decoy PIN
+      const isDecoy = await verifyDecoyPin(password);
+      
+      if (isDecoy) {
+          // --- DECOY VAULT TRIGGERED ---
+          sessionStorage.setItem('nyx_decoy_mode', 'true');
+          onPasswordSubmit('DECOY_MODE_ACTIVATED'); // Dummy string to bypass null check
+          setPassword('');
+          hidePasswordPrompt();
+          return;
+      }
+
+      // 2. Normal Unlock Flow
+      sessionStorage.removeItem('nyx_decoy_mode');
+      onPasswordSubmit(password);
+      setPassword('');
+      hidePasswordPrompt();
+    } catch (e) {
+      setError('An error occurred');
+    } finally {
+      setIsLoading(false);
+      setPassword('');
+    }
   };
 
   return (

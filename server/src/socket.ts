@@ -208,6 +208,21 @@ export function registerSocket(httpServer: HttpServer) {
          }
       });
 
+      // MIGRATION GUEST RECEIVER
+      socket.on('migration:join', (roomId: string) => {
+        if (typeof roomId === 'string' && roomId.startsWith('mig_') && roomId.length > 20) {
+          socket.join(roomId);
+        } else {
+          socket.emit("error", { message: "Invalid migration room" });
+        }
+      });
+
+      socket.on('migration:ack', (data: { roomId: string, success: boolean }) => {
+        if (data && data.roomId) {
+           socket.to(data.roomId).emit('migration:ack', data);
+        }
+      });
+
       socket.on("disconnect", () => {
       });
 
@@ -334,7 +349,7 @@ export function registerSocket(httpServer: HttpServer) {
          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
       }
 
-      const { conversationId, content, sessionId, tempId, expiresAt } = message;
+      const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce } = message as any;
 
       if (!content || typeof content !== 'string' || content.length > 10000) {
         return callback?.({ ok: false, error: "Invalid message content." });
@@ -355,7 +370,8 @@ export function registerSocket(httpServer: HttpServer) {
               senderId: userId, 
               content, 
               sessionId,
-              expiresAt: expiresAt ? new Date(expiresAt) : null // Save expiration
+              expiresAt: expiresAt ? new Date(expiresAt) : null, // Save expiration
+              isViewOnce: isViewOnce === true
           },
           include: { sender: { select: { id: true, encryptedProfile: true } } }
         });
@@ -520,16 +536,73 @@ export function registerSocket(httpServer: HttpServer) {
       });
     });
 
-    // === DEVICE MIGRATION TUNNEL ===
-    socket.on('migration:join', (roomId: string) => {
-      socket.join(roomId);
+    // === WEBRTC SIGNALING (P2P CALLS) ===
+    socket.on('call:request', (data: { to: string, isVideo: boolean, callerProfile: any }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('call:incoming', { from: userId, isVideo: data.isVideo, callerProfile: data.callerProfile });
     });
 
-    socket.on('migration:start', (data: { roomId: string, totalChunks: number, sealedKey: string, iv: string }) => {
+    socket.on('call:accept', (data: { to: string }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('call:accepted', { from: userId });
+    });
+
+    socket.on('call:reject', (data: { to: string, reason?: string }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('call:rejected', { from: userId, reason: data.reason || 'declined' });
+    });
+
+    socket.on('call:end', (data: { to: string }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('call:ended', { from: userId });
+    });
+
+    socket.on('webrtc:offer', (data: { to: string, offer: RTCSessionDescriptionInit }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('webrtc:offer', { from: userId, offer: data.offer });
+    });
+
+    socket.on('webrtc:answer', (data: { to: string, answer: RTCSessionDescriptionInit }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('webrtc:answer', { from: userId, answer: data.answer });
+    });
+
+    socket.on('webrtc:ice-candidate', (data: { to: string, candidate: RTCIceCandidateInit }) => {
+      if (!data || !data.to) return;
+      socket.to(data.to).emit('webrtc:ice-candidate', { from: userId, candidate: data.candidate });
+    });
+
+    // === DEVICE MIGRATION TUNNEL ===
+    socket.on('migration:join', (roomId: string) => {
+      // Allow logged-in user to join a migration room (just in case they are the receiver somehow)
+      if (typeof roomId === 'string' && roomId.startsWith('mig_') && roomId.length > 20) {
+        socket.join(roomId);
+      } else {
+        socket.emit("error", { message: "Invalid migration room" });
+      }
+    });
+
+    socket.on('migration:start', async (data: { roomId: string, totalChunks: number, sealedKey: string, iv: string }) => {
+      if (!data || !data.roomId || typeof data.roomId !== 'string' || !data.roomId.startsWith('mig_')) {
+        socket.emit("error", { message: "Invalid migration room payload" });
+        return;
+      }
+      
+      // Mark ownership of this room to the current authenticated user
+      await redisClient.setEx(`migration_owner:${data.roomId}`, 3600, userId);
       socket.to(data.roomId).emit('migration:start', data);
     });
 
-    socket.on('migration:chunk', (data: { roomId: string, chunkIndex: number, chunk: any }) => {
+    socket.on('migration:chunk', async (data: { roomId: string, chunkIndex: number, chunk: any }) => {
+      if (!data || !data.roomId || typeof data.roomId !== 'string') return;
+      
+      // Verify ownership
+      const ownerId = await redisClient.get(`migration_owner:${data.roomId}`);
+      if (ownerId !== userId) {
+        socket.emit("error", { message: "Permission denied for this migration room" });
+        return;
+      }
+      
       socket.to(data.roomId).emit('migration:chunk', data);
     });
 

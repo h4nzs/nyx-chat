@@ -335,19 +335,12 @@ export async function ensureGroupSession(conversationId: string, participants: P
 
       // 1. Generate NEW Sender Key (Chain Key)
       const { senderKeyB64 } = await groupInitSenderKey();
-      
-      // 2. Save Initial Sender State
-      await saveGroupSenderState({
-          conversationId,
-          CK: senderKeyB64,
-          N: 0
-      });
 
       const myId = useAuthStore.getState().user?.id;
       const otherParticipants = participants.filter(p => p.id !== myId);
       const missingKeys: string[] = [];
 
-      // 3. Encrypt Sender Key for EACH participant (Fan-out)
+      // 2. Encrypt Sender Key for EACH participant (Fan-out)
       const distributionKeys = await Promise.all(
         otherParticipants.map(async (p) => {
           if (!p.publicKey) {
@@ -367,6 +360,13 @@ export async function ensureGroupSession(conversationId: string, participants: P
           };
         })
       );
+
+      // 3. Save Initial Sender State ONLY after successful encryption fan-out
+      await saveGroupSenderState({
+          conversationId,
+          CK: senderKeyB64,
+          N: 0
+      });
 
       return distributionKeys.filter(Boolean);
     } finally {
@@ -472,13 +472,20 @@ async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0) {
 
 const XCHACHA20_NONCE_BYTES = 24;
 
+export interface DrHeader {
+  dh: string;
+  pn: number;
+  n: number;
+  epk?: string;
+}
+
 export async function encryptMessage(
   text: string,
   conversationId: string,
   isGroup: boolean = false,
   existingSession?: { sessionId: string; key: Uint8Array },
   messageId?: string
-): Promise<{ ciphertext: string; sessionId?: string; drHeader?: any; mk?: Uint8Array }> {
+): Promise<{ ciphertext: string; sessionId?: string; drHeader?: DrHeader; mk?: Uint8Array }> {
   const sodium = await getSodiumLib();
   const { worker_crypto_secretbox_xchacha20poly1305_easy, worker_dr_ratchet_encrypt, groupRatchetEncrypt } = await getWorkerProxy();
 
@@ -603,7 +610,7 @@ export async function decryptMessage(
         const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
         const sender = conversation?.participants.find(p => p.id === senderId);
         
-        const keyToUse = sender?.signingKey || sender?.publicKey;
+        const keyToUse = sender?.signingKey;
         if (!keyToUse) {
              return { status: 'error', error: new Error('Missing sender signing key') };
         }
@@ -634,9 +641,9 @@ export async function decryptMessage(
         
         return { status: 'success', value: sodium.to_string(result.plaintext) };
         
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(`Group Decryption failed for convo ${conversationId}:`, e);
-      return { status: 'error', error: new Error(e.message || 'Failed to decrypt group message') };
+      return { status: 'error', error: e instanceof Error ? e : new Error('Failed to decrypt group message') };
     }
   } else {
     // DOUBLE RATCHET & LEGACY FALLBACK
@@ -674,7 +681,9 @@ export async function decryptMessage(
 
       const drHeader = payload.dr;
       const actualCipher = payload.ciphertext;
-      const headerKey = `${conversationId}_${drHeader.dh}_${drHeader.n}`;
+      // Prefer epk if present, otherwise fallback to dh
+      const dhKey = drHeader.epk || drHeader.dh;
+      const headerKey = `${conversationId}_${dhKey}_${drHeader.n}`;
 
       const skippedMkStr = await retrieveSkippedMessageKeySecurely(headerKey);
       if (skippedMkStr) {
@@ -709,15 +718,16 @@ export async function decryptMessage(
       }
 
       for (const sk of result.skippedKeys) {
-          const hKey = `${conversationId}_${sk.dh}_${sk.n}`;
+          const skDhKey = sk.epk || sk.dh;
+          const hKey = `${conversationId}_${skDhKey}_${sk.n}`;
           await storeSkippedMessageKeySecurely(hKey, sk.mk);
       }
 
       return { status: 'success', value: sodium.to_string(result.plaintext) };
 
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(`DR Decryption failed for convo ${conversationId}:`, e);
-      return { status: 'error', error: new Error('Failed to decrypt message') };
+      return { status: 'error', error: e instanceof Error ? e : new Error('Failed to decrypt message') };
     }
   }
 }
@@ -915,9 +925,13 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     
     // Use the NEW handler for Sender Key
     await handleGroupKeyDistribution(conversationId, encryptedKey, senderId);
-    
-  } else if (sessionId) {
-    let newSessionKey: Uint8Array | undefined;
+
+    // Trigger reprocessing of pending messages
+    import('@store/message').then(({ useMessageStore }) => {
+        useMessageStore.getState().reDecryptPendingMessages(conversationId);
+    });
+
+    } else if (sessionId) {    let newSessionKey: Uint8Array | undefined;
 
     if (encryptedKey.startsWith('{') && encryptedKey.includes('"x3dh":true')) {
         try {
@@ -939,17 +953,17 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
             }
         } catch (e) {
             console.error("X3DH derivation failed, falling back to legacy decrypt:", e);
-            if (encryptedKey.length > 20) {
+            if (encryptedKey.length > 20 && !encryptedKey.trim().startsWith('{')) {
                 const { publicKey, privateKey } = await getMyEncryptionKeyPair();
                 newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
             } else {
-                console.warn("[Crypto] Skipping decryption for invalid/placeholder key.");
+                console.warn("[Crypto] Skipping decryption for invalid/placeholder or JSON key.");
                 return;
             }
         }
     } else {
-        if (!encryptedKey || encryptedKey.length < 20) {
-             console.warn("[Crypto] Received empty or short session key. Ignoring placeholder.");
+        if (!encryptedKey || encryptedKey.length < 20 || encryptedKey.trim().startsWith('{')) {
+             console.warn("[Crypto] Received empty, short, or JSON session key where base64 was expected. Ignoring.");
              return;
         }
 
@@ -1004,4 +1018,14 @@ export async function decryptFile(encryptedBlob: Blob, keyB64: string, originalT
 export async function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicKey: Uint8Array): Promise<string> {
   const { generateSafetyNumber } = await getWorkerProxy();
   return generateSafetyNumber(myPublicKey, theirPublicKey);
+}
+
+export async function forceRotateGroupSenderKey(conversationId: string) {
+    try {
+        const { deleteGroupSenderState } = await import('../lib/keychainDb');
+        await deleteGroupSenderState(conversationId);
+        console.log(`[Crypto] Group Sender Key for ${conversationId} wiped. Forced rotation on next message.`);
+    } catch (e) {
+        console.error('Failed to rotate group key:', e);
+    }
 }

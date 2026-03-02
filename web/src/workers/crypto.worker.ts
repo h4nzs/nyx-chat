@@ -616,7 +616,7 @@ self.onmessage = async (event: MessageEvent) => {
         break;
       }
       case 'recoverAccountWithSignature': {
-        const { phrase, newPassword, identifier, timestamp } = payload;
+        const { phrase, newPassword, identifier, timestamp, nonce } = payload;
         const masterSeedHex = bip39.mnemonicToEntropy(phrase);
         const masterSeed = sodium.from_hex(masterSeedHex);
 
@@ -636,8 +636,8 @@ self.onmessage = async (event: MessageEvent) => {
             masterSeed: masterSeed
           }, newPassword);
 
-          // BUAT DIGITAL SIGNATURE
-          const messageString = `${identifier}:${timestamp}`;
+          // BUAT DIGITAL SIGNATURE (Full Payload with Nonce)
+          const messageString = `${identifier}:${timestamp}:${nonce}:${newPassword}:${encryptedPrivateKeys}`;
           const messageBytes = new TextEncoder().encode(messageString);
           const signature = sodium.crypto_sign_detached(messageBytes, signingKeyPair.privateKey);
 
@@ -1077,7 +1077,10 @@ self.onmessage = async (event: MessageEvent) => {
                       const [newCKr, mk] = await kdfChain(state.CKr);
                       sodium.memzero(state.CKr);
                       state.CKr = newCKr;
-                      skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
+                      // When storing skipped keys from a previous chain, state.DHr holds the previous public key.
+                      // At this point, we only know its DH value, we don't have its EPK context because we are moving PAST it.
+                      // The main logic in crypto.ts will use .epk || .dh, so if epk is undefined it just falls back to dh.
+                      skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk), epk: header.epk });
                       state.Nr += 1;
                    }
                 }
@@ -1118,7 +1121,7 @@ self.onmessage = async (event: MessageEvent) => {
                 const [newCKr, mk] = await kdfChain(state.CKr);
                 sodium.memzero(state.CKr);
                 state.CKr = newCKr;
-                skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
+                skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk), epk: header.epk });
                 state.Nr += 1;
             }
             

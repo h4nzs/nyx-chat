@@ -62,6 +62,52 @@ router.get('/:conversationId', async (req, res, next) => {
   }
 })
 
+// GET Context (Surrounding Messages)
+router.get('/context/:id', requireAuth, async (req, res, next) => {
+  try {
+    const targetId = req.params.id;
+
+    // Get the target message first to find its timestamp and conversationId
+    const targetMsg = await prisma.message.findUnique({
+      where: { id: targetId },
+      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+    });
+
+    if (!targetMsg) {
+      throw new ApiError(404, 'Message not found');
+    }
+
+    // Verify participation
+    const participation = await prisma.participant.findUnique({
+      where: { userId_conversationId: { userId: req.user!.id, conversationId: targetMsg.conversationId } }
+    });
+    if (!participation) throw new ApiError(403, 'Not a participant');
+
+    // Fetch older messages (before target)
+    const older = await prisma.message.findMany({
+      where: { conversationId: targetMsg.conversationId, createdAt: { lt: targetMsg.createdAt } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+    });
+
+    // Fetch newer messages (after target)
+    const newer = await prisma.message.findMany({
+      where: { conversationId: targetMsg.conversationId, createdAt: { gt: targetMsg.createdAt } },
+      orderBy: { createdAt: 'asc' },
+      take: 20,
+      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+    });
+
+    // Combine and sort chronologically
+    const allMessages = [...older.reverse(), targetMsg, ...newer];
+
+    res.json({ items: allMessages, conversationId: targetMsg.conversationId });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // SEND Message
 router.post('/', zodValidate({
   body: z.object({
@@ -71,7 +117,8 @@ router.post('/', zodValidate({
     sessionId: z.string().optional().nullable(),
     repliedToId: z.string().optional().nullable(),
     tempId: z.union([z.string(), z.number()]).optional(),
-    expiresIn: z.number().optional().nullable()
+    expiresIn: z.number().optional().nullable(),
+    isViewOnce: z.boolean().optional()
   }).refine(data => data.content, {
     message: "Message must contain content"
   })
@@ -79,7 +126,7 @@ router.post('/', zodValidate({
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const senderId = req.user.id
-    const { conversationId, content, sessionId, repliedToId, tempId, expiresIn } = req.body
+    const { conversationId, content, sessionId, repliedToId, tempId, expiresIn, isViewOnce } = req.body
 
     // 1. Ambil Participants
     const participants = await prisma.participant.findMany({
@@ -158,6 +205,7 @@ router.post('/', zodValidate({
           sessionId,
           repliedToId,
           expiresAt, // Store expiration time
+          isViewOnce: isViewOnce === true,
           statuses: {
             createMany: { data: statusData as any } // createMany lebih cepat dari nested create
           }
@@ -244,5 +292,30 @@ router.delete('/:id', async (req, res, next) => {
     next(error)
   }
 })
+
+// VIEW ONCE Message
+router.put('/:id/viewed', async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const messageId = req.params.id;
+    const userId = req.user.id;
+
+    const message = await prisma.message.findUnique({ where: { id: messageId }, include: { conversation: true } });
+    if (!message || !message.isViewOnce || message.senderId === userId) return res.status(400).json({ error: 'Invalid operation' });
+
+    const updated = await prisma.message.update({
+      where: { id: messageId },
+      data: { isViewed: true }
+    });
+
+    // Notify sender and receiver
+    const io = getIo();
+    io.to(message.conversationId).emit('message:viewed', { messageId, conversationId: message.conversationId });
+
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
 
 export default router

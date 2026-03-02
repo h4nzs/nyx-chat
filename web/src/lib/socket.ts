@@ -151,6 +151,10 @@ export function getSocket() {
       });
     });
 
+    socket.on("message:viewed", ({ messageId, conversationId }) => {
+      useMessageStore.getState().updateMessage(conversationId, messageId, { isViewed: true });
+    });
+
     socket.on("presence:init", (onlineUserIds) => setOnlineUsers(onlineUserIds));
     socket.on("presence:user_joined", (userId) => userJoined(userId));
     socket.on("presence:user_left", (userId) => userLeft(userId));

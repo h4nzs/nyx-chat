@@ -19,7 +19,7 @@ router.get('/search', async (req, res, next) => {
     }
 
     // q adalah usernameHash yang dikirim client
-    
+
     // SANDBOX CHECK
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { isVerified: true } });
     const limit = user?.isVerified ? 20 : 3;
@@ -75,10 +75,11 @@ router.put('/me',
   }),
   async (req, res, next) => {
     try {
+      const userId = req.user!.id
       const { encryptedProfile } = req.body
 
       const updatedUser = await prisma.user.update({
-        where: { id: req.user!.id },
+        where: { id: userId },
         data: { encryptedProfile },
         select: {
           id: true,
@@ -88,7 +89,24 @@ router.put('/me',
         }
       })
 
-      getIo().emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
+      // Notify the user themselves (all their active devices)
+      getIo().to(userId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
+
+      // Notify contacts
+      const conversations = await prisma.conversation.findMany({
+        where: { participants: { some: { userId } } },
+        include: { participants: { select: { userId: true } } }
+      })
+
+      const recipients = new Set<string>()
+      conversations.forEach(c => c.participants.forEach(p => {
+        if (p.userId !== userId) recipients.add(p.userId)
+      }))
+
+      recipients.forEach(recipientId => {
+        getIo().to(recipientId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
+      })
+
       res.json(updatedUser)
     } catch (error) {
       next(error)
@@ -209,7 +227,7 @@ router.get('/me/blocked', async (req, res, next) => {
 })
 
 // DELETE Account (Self-Destruct)
-router.delete('/me', 
+router.delete('/me',
   zodValidate({
     body: z.object({
       password: z.string().min(1),
@@ -225,16 +243,31 @@ router.delete('/me',
       // 1. Re-verify Password (Security Check)
       const user = await prisma.user.findUnique({ where: { id: userId } })
       if (!user) throw new ApiError(404, 'User not found')
-      
+
       const isPasswordValid = await import('../utils/password.js').then(m => m.verifyPassword(password, user.passwordHash))
       if (!isPasswordValid) throw new ApiError(401, 'Invalid password. Account deletion aborted.')
 
       // 2. Cleanup Storage (R2)
       // Since we don't store file keys in DB, we rely on the client to tell us what to delete.
-      if (fileKeys && fileKeys.length > 0) {
+      if (fileKeys && Array.isArray(fileKeys) && fileKeys.length > 0) {
          try {
-             const { deleteR2Files } = await import('../utils/r2.js')
-             await deleteR2Files(fileKeys)
+             // VALIDATION: Ensure the user is only deleting their OWN files.
+             // Our R2 object keys always start with: `${targetFolder}/${userId}-...`
+             const validKeys = fileKeys.filter(key => {
+                 if (typeof key !== 'string') return false;
+                 // Split by folder, e.g., "images/cl123456-abcdef.png" -> ["images", "cl123456-abcdef.png"]
+                 const parts = key.split('/');
+                 if (parts.length < 2) return false;
+                 const filename = parts[parts.length - 1];
+                 return filename.startsWith(`${userId}-`);
+             });
+
+             if (validKeys.length > 0) {
+                 const { deleteR2Files } = await import('../utils/r2.js')
+                 await deleteR2Files(validKeys)
+             } else {
+                 console.warn(`User ${userId} attempted to delete invalid or unauthorized R2 keys.`);
+             }
          } catch (e) {
              console.error("Failed to cleanup R2 files:", e)
              // Continue deletion anyway

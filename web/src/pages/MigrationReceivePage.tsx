@@ -17,11 +17,16 @@ export default function MigrationReceivePage() {
   
   const keysRef = useRef<{ publicKey: Uint8Array, privateKey: Uint8Array } | null>(null);
   const chunksRef = useRef<ArrayBuffer[]>([]);
-  const metaRef = useRef<{ totalChunks: number, sealedKey: string, iv: string } | null>(null);
+  const metaRef = useRef<{ roomId: string, totalChunks: number, sealedKey: string, iv: string } | null>(null);
+  const migrationStartedRef = useRef(false);
 
   useEffect(() => {
+    let isMounted = true;
+    
     const init = async () => {
       const sodium = await getSodium();
+      if (!isMounted) return;
+      
       const keypair = sodium.crypto_box_keypair();
       keysRef.current = keypair;
       
@@ -38,6 +43,7 @@ export default function MigrationReceivePage() {
       socket.on('migration:start', (data) => {
         metaRef.current = data;
         chunksRef.current = new Array(data.totalChunks);
+        migrationStartedRef.current = false;
         setStatus('receiving');
         toast.loading('Connection established. Receiving data...', { id: 'mig' });
       });
@@ -48,7 +54,8 @@ export default function MigrationReceivePage() {
         const total = metaRef.current?.totalChunks || 1;
         setProgress(Math.round((receivedCount / total) * 100));
 
-        if (receivedCount === total) {
+        if (receivedCount === total && !migrationStartedRef.current) {
+          migrationStartedRef.current = true;
           setStatus('decrypting');
           toast.loading('Data received. Decrypting vault...', { id: 'mig' });
           await processMigration(sodium);
@@ -58,6 +65,7 @@ export default function MigrationReceivePage() {
     init();
     
     return () => {
+      isMounted = false;
       const socket = getSocket();
       socket.off('migration:start');
       socket.off('migration:chunk');
@@ -94,13 +102,23 @@ export default function MigrationReceivePage() {
       // 5. Import to IDB
       await importDatabaseFromJson(jsonString);
       
+      const socket = getSocket();
+      socket.emit('migration:ack', { roomId: metaRef.current!.roomId, success: true });
+
       setStatus('success');
       toast.success('Migration Complete! Welcome back.', { id: 'mig' });
       setTimeout(() => window.location.href = '/', 2000); // Hard reload to clear RAM
     } catch (e) {
       console.error(e);
       toast.error('Decryption failed. Data might be corrupted.', { id: 'mig' });
+      
+      const socket = getSocket();
+      if (metaRef.current?.roomId) {
+         socket.emit('migration:ack', { roomId: metaRef.current.roomId, success: false });
+      }
+
       setStatus('waiting');
+      migrationStartedRef.current = false;
     }
   };
 

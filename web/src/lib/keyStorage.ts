@@ -32,9 +32,6 @@ export const getEncryptedKeys = async (): Promise<string | undefined> => {
   }
 };
 
-/**
- * Menyimpan kunci auto-unlock perangkat ke IndexedDB
- */
 export const saveDeviceAutoUnlockKey = async (key: string) => {
   try {
     await set(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, key);
@@ -44,9 +41,6 @@ export const saveDeviceAutoUnlockKey = async (key: string) => {
   }
 };
 
-/**
- * Mengambil kunci auto-unlock perangkat dari IndexedDB
- */
 export const getDeviceAutoUnlockKey = async (): Promise<string | undefined> => {
   try {
     return await get<string>(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);

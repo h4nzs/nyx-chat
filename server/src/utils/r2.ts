@@ -40,8 +40,8 @@ export const deleteR2File = async (key: string) => {
 
 // Hapus BANYAK file sekaligus (Batch Delete)
 export const deleteR2Files = async (keys: string[]) => {
-  if (keys.length === 0) return;
-  
+  if (keys.length === 0) return
+
   const command = new DeleteObjectsCommand({
     Bucket: env.r2BucketName,
     Delete: {

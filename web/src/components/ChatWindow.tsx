@@ -18,12 +18,14 @@ import Lightbox from "./Lightbox";
 import GroupInfoPanel from './GroupInfoPanel';
 import clsx from "clsx";
 import { useVerificationStore } from '@store/verification';
-import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers } from 'react-icons/fi';
+import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers, FiPhone, FiVideo } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import MessageInput from './MessageInput';
 import MessageSkeleton from './MessageSkeleton';
 import { useUserProfile } from '@hooks/useUserProfile';
+import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
+import { startCall } from '@lib/webrtc';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -53,7 +55,8 @@ const NewConversationBanner = () => (
 );
 
 const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conversation: Conversation; onBack: () => void; onInfoToggle: () => void; onMenuClick: () => void; }) => {
-  const meId = useAuthStore((s) => s.user?.id);
+  const user = useAuthStore((s) => s.user);
+  const meId = user?.id;
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
   const { openProfileModal, openChatInfoModal } = useModalStore(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal }));
   const { verifiedStatus } = useVerificationStore();
@@ -78,6 +81,18 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
       return `${conversation.participants.length} members`;
     }
     return isOnline ? "Online" : "Offline";
+  };
+
+  const handleVoiceCall = () => {
+    if (peerUser) {
+      startCall(peerUser.id, false, user);
+    }
+  };
+
+  const handleVideoCall = () => {
+    if (peerUser) {
+      startCall(peerUser.id, true, user);
+    }
   };
 
   return (
@@ -134,7 +149,23 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
       </div>
 
       {/* Action Module */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 md:gap-3">
+        {!conversation.isGroup && (
+          <>
+            <button 
+              onClick={handleVoiceCall} 
+              className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-main text-text-secondary shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all duration-200"
+            >
+              <FiPhone size={16} />
+            </button>
+            <button 
+              onClick={handleVideoCall} 
+              className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-main text-text-secondary shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all duration-200"
+            >
+              <FiVideo size={16} />
+            </button>
+          </>
+        )}
         <SearchMessages conversationId={conversation.id} />
         <button 
           onClick={openChatInfoModal} 
@@ -162,11 +193,21 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const meId = useAuthStore((s) => s.user?.id);
   const { conversation, messages, isLoading, error, actions, isFetchingMore } = useConversation(id);
   const loadMessagesForConversation = useMessageStore(s => s.loadMessagesForConversation);
+  const loadMessageContext = useMessageStore(s => s.loadMessageContext);
+  const openConversation = useConversationStore(state => state.openConversation);
   
+  useEdgeSwipe(() => {
+    if (window.innerWidth < 768) {
+      openConversation(null);
+    }
+  });
+
   const { highlightedMessageId, setHighlightedMessageId } = useMessageSearchStore(state => ({
     highlightedMessageId: state.highlightedMessageId,
     setHighlightedMessageId: state.setHighlightedMessageId,
   }));
+  const clearSearch = useMessageSearchStore(s => s.clearSearch);
+
   const { handleStopRecording } = useMessageInputStore(state => ({
     handleStopRecording: state.handleStopRecording,
   }));
@@ -184,14 +225,38 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);
 
   useEffect(() => {
-    if (highlightedMessageId && virtuosoRef.current && messages.length > 0) {
-      const index = messages.findIndex(m => m.id === highlightedMessageId);
-      if (index !== -1) {
-        virtuosoRef.current.scrollToIndex({ index, align: 'center', behavior: 'smooth' });
-        setTimeout(() => setHighlightedMessageId(null), 2000);
+    if (!highlightedMessageId) return;
+
+    const handleJump = async () => {
+      // 1. Check if the message is already rendered in the DOM
+      let el = document.getElementById(`msg-${highlightedMessageId}`);
+      
+      // 2. If not in DOM, we need to fetch its context from the server
+      if (!el) {
+        await loadMessageContext(highlightedMessageId);
+        // Wait for React to re-render the new messages
+        await new Promise(resolve => setTimeout(resolve, 300));
+        el = document.getElementById(`msg-${highlightedMessageId}`);
       }
-    }
-  }, [highlightedMessageId, messages, setHighlightedMessageId]);
+
+      // 3. Scroll and Highlight
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        
+        // Add a temporary highlight class
+        el.classList.add('ring-2', 'ring-accent', 'ring-offset-2', 'ring-offset-bg-main', 'scale-[1.02]', 'transition-all', 'duration-500', 'z-10');
+        
+        setTimeout(() => {
+          el?.classList.remove('ring-2', 'ring-accent', 'ring-offset-2', 'ring-offset-bg-main', 'scale-[1.02]', 'z-10');
+        }, 2000);
+      }
+      
+      // Clear the highlight state so it can be triggered again later
+      useMessageSearchStore.getState().setHighlightedMessageId(null);
+    };
+
+    handleJump();
+  }, [highlightedMessageId, messages, loadMessageContext, setHighlightedMessageId]);
 
   const typingUsersInThisConvo = typingIndicators.filter(i => i.conversationId === id && i.id !== meId && i.isTyping);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);

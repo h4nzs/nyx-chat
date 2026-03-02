@@ -113,14 +113,12 @@ router.post('/', async (req, res, next) => {
 
       if (existingConversation) return res.status(200).json(existingConversation)
         
-      // SANDBOX DM LIMIT (Only for NEW conversations)
+      // SANDBOX DM LIMIT CHECK (Only for NEW conversations)
       if (!isVerified) {
           const today = new Date().toISOString().split('T')[0];
           const key = `sandbox:newchat:${creatorId}:${today}`;
-          const count = await redisClient.incr(key);
-          if (count === 1) await redisClient.expire(key, 86400); // 24h
-          
-          if (count > 3) {
+          const currentCount = await redisClient.get(key);
+          if (currentCount && parseInt(currentCount as string, 10) >= 3) {
               throw new ApiError(429, 'SANDBOX_NEW_CHAT_LIMIT: Max 3 new conversations per day.');
           }
       }
@@ -172,6 +170,13 @@ router.post('/', async (req, res, next) => {
 
       return conversation
     })
+
+    // SANDBOX DM LIMIT INCREMENT (Atomic after success)
+    if (!isVerified && !isGroup) {
+        const today = new Date().toISOString().split('T')[0];
+        const key = `sandbox:newchat:${creatorId}:${today}`;
+        await redisClient.multi().incr(key).expire(key, 86400).exec();
+    }
 
     const transformedConversation = {
       ...newConversation,

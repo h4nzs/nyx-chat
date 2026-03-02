@@ -22,7 +22,7 @@ import { useProfileStore } from '@store/profile';
 import { generateProfileKey, encryptProfile, minePoW, getRecoveryPhrase } from '@lib/crypto-worker-proxy';
 import ModalBase from '../components/ui/ModalBase';
 import { useSettingsStore } from '@store/settings';
-import { setupBiometricUnlock } from '@lib/biometricUnlock';
+import { setupBiometricUnlock, setupDecoyPin } from '@lib/biometricUnlock';
 import { getDeviceAutoUnlockKey, getEncryptedKeys } from '@lib/keyStorage';
 import { useMessageStore } from '@store/message';
 
@@ -136,6 +136,7 @@ export default function SettingsPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [miningStatus, setMiningStatus] = useState<'idle' | 'mining' | 'verifying'>('idle');
   const [hasBioVault, setHasBioVault] = useState(false);
+  const [decoyPin, setDecoyPin] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vaultInputRef = useRef<HTMLInputElement>(null);
@@ -220,7 +221,7 @@ export default function SettingsPage() {
     e.preventDefault();
     setIsLoading(true);
     try {
-      let currentAvatarUrl = profile.avatarUrl;
+      let currentAvatarUrl = profile?.avatarUrl;
 
       if (avatarFile) {
         currentAvatarUrl = await updateAvatar(avatarFile);
@@ -445,7 +446,7 @@ export default function SettingsPage() {
                     bg-bg-main p-2
                   ">
                     <img
-                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
+                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${profile?.name || 'Anonymous'}`}
                       alt="ID"
                       className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
                     />
@@ -653,6 +654,40 @@ export default function SettingsPage() {
                 </div>
                 <div className={`w-2 h-2 rounded-full shadow-[0_0_5px] ${hasBioVault ? 'bg-green-500 shadow-green-500' : 'bg-gray-500 shadow-transparent'}`}></div>
               </button>
+
+            {/* DECOY VAULT SETTINGS */}
+            <div className="pt-4 border-t border-white/5 space-y-3 mt-4">
+              <div>
+                <h4 className="text-sm font-bold text-text-primary flex items-center gap-2">
+                  <FiShield className="text-accent" /> Decoy Vault (Panic PIN)
+                </h4>
+                <p className="text-xs text-text-secondary mt-1">
+                  Set a fake PIN. Entering this at the lock screen will unlock a blank "amnesia" version of the app.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                 <input 
+                   type="password" 
+                   value={decoyPin} 
+                   onChange={e => setDecoyPin(e.target.value)} 
+                   placeholder="Enter fake PIN" 
+                   className="bg-bg-main border border-white/10 rounded-lg px-4 py-2 text-sm text-text-primary focus:ring-accent flex-1 outline-none" 
+                   maxLength={8} 
+                 />
+                 <button 
+                   type="button"
+                   onClick={async () => { 
+                     if(decoyPin.length < 4) { toast.error("PIN too short"); return; }
+                     await setupDecoyPin(decoyPin); 
+                     toast.success('Decoy PIN saved!'); 
+                     setDecoyPin(''); 
+                   }} 
+                   className="px-4 py-2 bg-accent/20 text-accent rounded-lg text-sm font-bold hover:bg-accent hover:text-white transition-colors"
+                 >
+                   Save
+                 </button>
+              </div>
+            </div>
             </div>
           </ControlModule>
         </div>

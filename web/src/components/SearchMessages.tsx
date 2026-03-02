@@ -11,12 +11,14 @@ export default function SearchMessages({ conversationId }: SearchMessagesProps) 
   const {
     searchQuery,
     searchResults,
+    isSearching,
     searchMessages,
     clearSearch,
     setHighlightedMessageId,
   } = useMessageSearchStore(state => ({
     searchQuery: state.searchQuery,
     searchResults: state.searchResults,
+    isSearching: state.isSearching,
     searchMessages: state.searchMessages,
     clearSearch: state.clearSearch,
     setHighlightedMessageId: state.setHighlightedMessageId,
@@ -62,7 +64,13 @@ export default function SearchMessages({ conversationId }: SearchMessagesProps) 
               className="w-full bg-transparent p-3 rounded-lg text-sm text-text-primary placeholder-text-secondary focus:outline-none focus:ring-2 focus:ring-accent shadow-neumorphic-concave"
             />
           </form>
-          <div className="max-h-80 overflow-y-auto">
+          <div className="max-h-80 overflow-y-auto relative">
+            {isSearching && (
+              <div className="absolute top-0 left-0 w-full h-1 bg-accent/20 overflow-hidden">
+                 <div className="h-full bg-accent w-1/3 animate-pulse rounded-full"></div>
+              </div>
+            )}
+            
             {searchResults.length > 0 ? (
               searchResults.map((msg) => (
                 <div
@@ -75,7 +83,7 @@ export default function SearchMessages({ conversationId }: SearchMessagesProps) 
                 </div>
               ))
             ) : (
-              searchQuery && <p className="p-4 text-sm text-text-secondary text-center">No results found.</p>
+              searchQuery && !isSearching && <p className="p-4 text-sm text-text-secondary text-center">No results found.</p>
             )}
           </div>
         </div>

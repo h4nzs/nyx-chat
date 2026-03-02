@@ -17,8 +17,15 @@ const disallowedRanges = [
 ]
 
 // Custom DNS resolver to prevent SSRF
-async function resolveDns (url: string): Promise<string> {
-  const hostname = new URL(url).hostname
+export async function resolveDns (urlOrHostname: string): Promise<string> {
+  let hostname = urlOrHostname;
+  try {
+    // If it's a full URL, extract the hostname
+    hostname = new URL(urlOrHostname).hostname;
+  } catch (e) {
+    // If new URL() throws, it means it's already a plain hostname (e.g. from link-preview-js)
+  }
+
   // Validate hostname format to prevent injection
   if (!/^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(hostname) && !/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
      // Allow simple hostnames or IPs if they are valid, but be strict about weird chars
@@ -49,13 +56,13 @@ async function validateRedirectChain(initialUrl: string): Promise<string> {
     // We catch errors here to handle network failures gracefully during validation
     try {
       const res = await fetch(currentUrl, { method: 'HEAD', redirect: 'manual' })
-      
+
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get('location')
         if (!location) {
            return currentUrl // Redirect without location, treat as final
         }
-        
+
         // Resolve relative URLs
         currentUrl = new URL(location, currentUrl).toString()
         redirectCount++
@@ -89,7 +96,7 @@ export async function getSecureLinkPreview (url: string): Promise<LinkPreview> {
     // We disable following redirects here because we already found the final one
     const preview = await getLinkPreview(safeUrl, {
       timeout: 5000,
-      followRedirects: 'manual', 
+      followRedirects: 'manual',
       handleRedirects: (baseURL: string, forwardedURL: string) => {
         // Since we pre-validated the chain, we shouldn't encounter new redirects here.
         // If we do, it means the server changed behavior between HEAD and GET.
@@ -98,11 +105,11 @@ export async function getSecureLinkPreview (url: string): Promise<LinkPreview> {
         // Returning true usually implies "continue".
         // The library expects a function that returns a boolean or promise<boolean> to continue?
         // Wait, checking docs/types: handleRedirects?: (baseURL: string, forwardedURL: string) => boolean;
-        
-        // Actually, looking at common usage, if followRedirects is manual, 
-        // the library might expect US to do the fetching? 
+
+        // Actually, looking at common usage, if followRedirects is manual,
+        // the library might expect US to do the fetching?
         // No, 'manual' in link-preview-js means "I will tell you if you should follow this redirect".
-        
+
         // Let's check the error message implication: "no handleRedirects function is provided".
         // Providing a simple function that returns false (stop redirects) is safest since we fetched the final URL.
         return false;

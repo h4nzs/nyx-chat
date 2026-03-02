@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Message } from '@store/conversation';
-import { decryptFile, decryptMessage } from '@utils/crypto';
+import { decryptFile } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
-import { useConversationStore } from '@store/conversation';
+import { useMessageStore } from '@store/message';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
 
@@ -18,23 +18,28 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
   const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
 
-  // Close on escape key
+  const handleClose = () => {
+    if (message.isViewOnce && !message.isViewed) {
+      useMessageStore.getState().updateMessage(message.conversationId, message.id, { isViewed: true });
+      import('@lib/api').then(({ authFetch }) => {
+        authFetch(`/api/messages/${message.id}/viewed`, { method: 'PUT' }).catch(console.error);
+      });
+    }
+    onClose();
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
+      if (e.key === 'Escape') handleClose();
     };
     window.addEventListener('keydown', handleKeyDown);
-    // Lock scroll when open
     document.body.style.overflow = 'hidden';
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = 'unset';
     };
-  }, [onClose]);
+  }, [handleClose]);
 
-  // Decryption logic
   useEffect(() => {
     let objectUrl: string | null = null;
     let isMounted = true;
@@ -45,78 +50,35 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
         return;
       }
 
+      const rawFileKey = message.fileKey;
+
+      if (!rawFileKey && message.content !== 'waiting_for_key') {
+        if (isMounted) setIsLoading(true);
+        return;
+      } else if (!rawFileKey) {
+        if (isMounted) {
+          setError("Waiting for key...");
+          setIsLoading(false);
+        }
+        return;
+      }
+
       if (isMounted) {
         setIsLoading(true);
         setError(null);
       }
 
       try {
-        // Cek apakah file terenkripsi
-        const isEncrypted = message.fileType?.includes('encrypted=true') || message.fileKey;
-
-        if (!isEncrypted) {
-          const absoluteUrl = toAbsoluteUrl(message.fileUrl);
-          if (isMounted) {
-            if (absoluteUrl) {
-              setDecryptedUrl(absoluteUrl);
-            } else {
-              throw new Error("Invalid image URL.");
-            }
-          }
-          return;
-        }
-
-        // Ambil kunci file yang terenkripsi
-        const encryptedFileKey = message.fileKey || message.content;
-
-        if (!encryptedFileKey || encryptedFileKey === 'waiting_for_key' || encryptedFileKey.startsWith('[')) {
-          if (isMounted) {
-            setError(encryptedFileKey || "File key not available yet.");
-            setIsLoading(false);
-          }
-          return;
-        }
-
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
-        if (!absoluteUrl) {
-          throw new Error("File URL is invalid.");
-        }
+        if (!absoluteUrl) throw new Error("File URL is invalid.");
 
         const response = await fetch(absoluteUrl);
         if (!response.ok) {
-          if (response.status === 404) {
-            throw new Error("File not found on server.");
-          }
+          if (response.status === 404) throw new Error("File not found on server.");
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         const encryptedBlob = await response.blob();
 
-        // Dekripsi kunci file terlebih dahulu
-        const conversation = useConversationStore.getState().conversations.find(c => c.id === message.conversationId);
-        const isGroup = conversation?.isGroup || false;
-
-        const keyResult = await decryptMessage(
-          encryptedFileKey,
-          message.conversationId,
-          isGroup,
-          message.sessionId
-        );
-
-        if (keyResult.status === 'pending') {
-          if (isMounted) {
-            setError(keyResult.reason || "Waiting for key...");
-            setIsLoading(false);
-          }
-          return;
-        }
-
-        if (keyResult.status === 'error') {
-          throw keyResult.error || new Error("Failed to decrypt file key.");
-        }
-
-        const rawFileKey = keyResult.value;
-
-        // Dekripsi file blob
         const originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
         const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
 
@@ -136,20 +98,21 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
 
     return () => {
       isMounted = false;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [message, lastKeychainUpdate]);
+
+  const isVideo = message.fileType?.startsWith('video/');
+  const isAudio = message.fileType?.startsWith('audio/');
 
   const content = (
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 backdrop-blur-xl animate-fade-in p-4 md:p-8"
-      onClick={onClose}
+      onClick={handleClose}
     >
       <button
         className="absolute top-4 right-4 text-white text-3xl hover:opacity-80 transition-opacity z-10"
-        onClick={onClose}
+        onClick={handleClose}
       >
         &times;
       </button>
@@ -158,24 +121,23 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
         {error && !isLoading && (
           <div className="text-white text-center p-4 bg-destructive/50 rounded-lg">
             <p>{error}</p>
-            <button
-              className="mt-2 px-4 py-2 bg-accent rounded-lg"
-              onClick={() => window.location.reload()}
-            >
-              Refresh Page
-            </button>
           </div>
         )}
         {!isLoading && !error && decryptedUrl && (
-          <img
-            src={decryptedUrl}
-            alt={message.fileName || "Lightbox view"}
-            className="object-contain max-w-full max-h-[90vh] select-none shadow-2xl rounded-lg"
-            onError={() => {
-              setError("Failed to load image.");
-              setIsLoading(false);
-            }}
-          />
+          isVideo ? (
+            <video src={decryptedUrl} autoPlay controls playsInline className="max-w-full max-h-[90vh] shadow-2xl rounded-lg outline-none bg-black" onEnded={handleClose} />
+          ) : isAudio ? (
+             <div className="bg-bg-surface p-8 rounded-3xl flex flex-col items-center justify-center gap-6 border border-white/10 shadow-2xl min-w-[280px]">
+                <div className="w-24 h-24 bg-accent/20 rounded-full flex items-center justify-center relative">
+                   <div className="absolute inset-0 rounded-full border-4 border-accent animate-ping opacity-50"></div>
+                   <span className="text-4xl text-accent">🎵</span>
+                </div>
+                <audio src={decryptedUrl} autoPlay controls className="w-full outline-none" onEnded={handleClose} />
+                <p className="text-xs text-text-secondary uppercase tracking-widest font-mono">View Once Audio</p>
+             </div>
+          ) : (
+            <img src={decryptedUrl} alt={message.fileName || "Lightbox view"} className="object-contain max-w-full max-h-[90vh] select-none shadow-2xl rounded-lg" onError={() => { setError("Failed to load media."); setIsLoading(false); }} />
+          )
         )}
       </div>
     </div>

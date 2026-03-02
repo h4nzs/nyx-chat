@@ -10,7 +10,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 router.post('/smart-reply', requireAuth, generalLimiter, async (req, res) => {
   try {
     const { message } = req.body;
-    
+
     if (!message || message.trim() === '') {
       return res.status(400).json({ error: 'Message is required' });
     }
@@ -22,16 +22,16 @@ router.post('/smart-reply', requireAuth, generalLimiter, async (req, res) => {
         responseMimeType: "application/json",
       }
     });
-    
+
     // Strict Prompt Engineering for JSON Array output
     const prompt = `You are a chat AI. Based on this message: "${message}"
 Create 3 short casual reply options (max 3 words per reply) in the same language.
 Output must be a JSON array of strings.`;
 
     const result = await model.generateContent(prompt);
-    
+
     let replies: string[] = [];
-    
+
     try {
       replies = JSON.parse(result.response.text());
     } catch (parseError) {
@@ -42,7 +42,7 @@ Output must be a JSON array of strings.`;
 
     // Return to frontend
     res.json({ replies });
-    
+
   } catch (error) {
     console.error('AI Error:', error);
     res.status(500).json({ error: 'Failed to generate smart replies' });

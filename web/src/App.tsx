@@ -28,6 +28,10 @@ import PasswordPromptModal from './components/PasswordPromptModal';
 import ChatInfoModal from './components/ChatInfoModal';
 import DynamicIsland from './components/DynamicIsland';
 import CommandPalette from './components/CommandPalette';
+import ContextMenu from './components/ContextMenu';
+import CallOverlay from './components/CallOverlay';
+import SystemInitModal from './components/SystemInitModal';
+import PrivacyCloak from './components/PrivacyCloak';
 import { Spinner } from './components/Spinner';
 
 // Stores & Hooks
@@ -39,6 +43,7 @@ import { useGlobalShortcut } from './hooks/useGlobalShortcut';
 
 // Libs & Utils
 import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
+import { initWebRTCListeners } from './lib/webrtc';
 
 // Initialize socket instance once
 getSocket();
@@ -130,6 +135,10 @@ const AppContent = () => {
 
   // --- Lifecycle & Effects ---
 
+  const isDeviceFlow = useCallback((pathname: string) => {
+      return pathname.startsWith('/link-device') || pathname.startsWith('/migrate-receive');
+  }, []);
+
   // 1. Bootstrap Auth
   useEffect(() => {
     bootstrap();
@@ -137,15 +146,23 @@ const AppContent = () => {
 
   // 2. Manage Socket Connection
   useEffect(() => {
-    if (location.pathname.startsWith('/link-device')) {
+    if (isDeviceFlow(location.pathname)) {
       return;
     }
     if (user) {
-      connectSocket();
+      const token = useAuthStore.getState().accessToken;
+      if (token) {
+        connectSocket();
+        const socket = getSocket();
+        // Safely attach WebRTC listeners immediately to the socket instance
+        import('./lib/webrtc').then(({ initWebRTCListeners }) => {
+          initWebRTCListeners(socket);
+        });
+      }
     } else {
       disconnectSocket();
     }
-  }, [user, location.pathname]);
+  }, [user, location.pathname, isDeviceFlow]);
 
   // 3. (Reserved for future use)
 
@@ -161,7 +178,7 @@ const AppContent = () => {
   // 5. Visibility Change Handler
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (location.pathname.startsWith('/link-device')) {
+      if (isDeviceFlow(location.pathname)) {
         return;
       }
 
@@ -221,6 +238,8 @@ const AppContent = () => {
         }}
       />
 
+      <PrivacyCloak />
+
       {/* Global Modals & UI Elements */}
       <CommandPalette />
       <ConfirmModal />
@@ -228,6 +247,9 @@ const AppContent = () => {
       <PasswordPromptModal />
       <ChatInfoModal />
       <DynamicIsland />
+      <ContextMenu />
+      <CallOverlay />
+      <SystemInitModal />
 
       <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
         <Suspense fallback={<LoadingScreen />}>
