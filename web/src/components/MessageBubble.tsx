@@ -125,12 +125,6 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
         </span>
       ) : (
         <>
-          {isVoiceMessage && message.fileUrl && (
-            <div className="p-2 w-[250px]">
-              <VoiceMessagePlayer message={message} />
-            </div>
-          )}
-          
           {message.isViewOnce && message.fileUrl ? (
             <div className="p-3 bg-black/20 rounded-xl flex items-center justify-center min-w-[160px] my-1 mx-2 border border-white/5">
               {message.isViewed ? (
@@ -152,6 +146,12 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
             </div>
           ) : (
             <>
+              {isVoiceMessage && message.fileUrl && (
+                <div className="p-2 w-[250px]">
+                  <VoiceMessagePlayer message={message} />
+                </div>
+              )}
+              
               {message.fileUrl && isImage && (
                 <button onClick={() => onImageClick?.(message)} className="block w-full">
                   <LazyImage 
