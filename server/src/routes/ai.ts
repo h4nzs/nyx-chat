@@ -47,8 +47,9 @@ Output must be a JSON array of strings.`;
       if (replies.length === 0) {
         throw new Error("Parsed array contained no valid string replies");
       }
-    } catch (parseError: any) {
-      console.error('Failed to parse Gemini JSON:', parseError.message || 'Unknown error');
+    } catch (parseError: unknown) {
+      const errorMessage = parseError instanceof Error ? parseError.message : 'Unknown error';
+      console.error('Failed to parse Gemini JSON:', errorMessage);
       // Manual fallback
       replies = ["Ok", "Got it", "Thanks"]; 
     }

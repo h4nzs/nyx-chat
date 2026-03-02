@@ -50,6 +50,7 @@ model User {
   blockedBy    BlockedUser[] @relation("Blocked") 
 
   @@index([createdAt])
+  @@index([autoDestructDays, lastActiveAt])
 }
 
 model OneTimePreKey {

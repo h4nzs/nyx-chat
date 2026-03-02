@@ -55,8 +55,12 @@ export const startSystemSweeper = () => {
         
         if (now > deadline) {
            console.log(`[Cron] 💀 DEAD MAN'S SWITCH TRIGGERED for User ${u.id}. Erasing all traces...`);
-           await prisma.user.delete({ where: { id: u.id } }); // Cascade deletes messages, conversations, keys.
-           nukedCount++;
+           try {
+             await prisma.user.delete({ where: { id: u.id } }); // Cascade deletes messages, conversations, keys.
+             nukedCount++;
+           } catch (err) {
+             console.error('[Cron] Failed to delete user:', u.id);
+           }
         }
       }
       if (nukedCount > 0) {

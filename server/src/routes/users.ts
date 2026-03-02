@@ -74,13 +74,20 @@ router.put('/me',
   zodValidate({
     body: z.object({
       encryptedProfile: z.string().min(1).optional(),
-      autoDestructDays: z.number().nullable().optional() // New field
+      autoDestructDays: z.number().int().min(1).nullable().optional() // New field
+    }).refine(data => data.encryptedProfile !== undefined || data.autoDestructDays !== undefined, {
+      message: "Body cannot be empty"
     })
   }),
   async (req, res, next) => {
     try {
       const userId = req.user!.id
       const { encryptedProfile, autoDestructDays } = req.body
+
+      const existingUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { encryptedProfile: true }
+      });
 
       const dataToUpdate: any = {}
       if (encryptedProfile !== undefined) dataToUpdate.encryptedProfile = encryptedProfile;
@@ -98,23 +105,26 @@ router.put('/me',
         }
       })
 
-      // Notify the user themselves (all their active devices)
-      getIo().to(userId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
+      // If encryptedProfile was updated, notify the user and their contacts
+      if (encryptedProfile !== undefined && (!existingUser || encryptedProfile !== existingUser.encryptedProfile)) {
+        // Notify the user themselves (all their active devices)
+        getIo().to(userId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
 
-      // Notify contacts
-      const conversations = await prisma.conversation.findMany({
-        where: { participants: { some: { userId } } },
-        include: { participants: { select: { userId: true } } }
-      })
+        // Notify contacts
+        const conversations = await prisma.conversation.findMany({
+          where: { participants: { some: { userId } } },
+          include: { participants: { select: { userId: true } } }
+        })
 
-      const recipients = new Set<string>()
-      conversations.forEach(c => c.participants.forEach(p => {
-        if (p.userId !== userId) recipients.add(p.userId)
-      }))
+        const recipients = new Set<string>()
+        conversations.forEach(c => c.participants.forEach(p => {
+          if (p.userId !== userId) recipients.add(p.userId)
+        }))
 
-      recipients.forEach(recipientId => {
-        getIo().to(recipientId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
-      })
+        recipients.forEach(recipientId => {
+          getIo().to(recipientId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
+        })
+      }
 
       res.json(updatedUser)
     } catch (error) {

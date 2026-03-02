@@ -122,7 +122,7 @@ router.post('/', async (req, res, next) => {
               await redisClient.expire(key, 86400); // Expire in 24 hours
           }
           if (count > 3) {
-              await redisClient.decr(key); // Rollback increment
+              try { await redisClient.decr(key); } catch (e) { /* ignore */ } // Rollback increment
               throw new ApiError(429, 'SANDBOX_NEW_CHAT_LIMIT: Max 3 new conversations per day.');
           }
       }
@@ -181,7 +181,7 @@ router.post('/', async (req, res, next) => {
       if (!isVerified && !isGroup) {
         const today = new Date().toISOString().split('T')[0];
         const key = `sandbox:newchat:${creatorId}:${today}`;
-        await redisClient.decr(key);
+        try { await redisClient.decr(key); } catch (e) { /* ignore */ }
       }
       throw dbError;
     }
