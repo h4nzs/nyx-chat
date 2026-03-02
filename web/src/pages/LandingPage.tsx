@@ -148,6 +148,10 @@ const comparisonData = [
   { feature: "Local Footprint", wa: "SQL Database", tg: "Cloud Cache", nyx: "ZERO (Browser)", isWin: true },
 ];
 
+import SEO from '../components/SEO';
+
+// ...
+
 export default function LandingPage() {
   const { theme } = useThemeStore();
   const [grainOpacity, setGrainOpacity] = useState(0.05);
@@ -168,6 +172,8 @@ export default function LandingPage() {
                           radial-gradient(circle at 90% 80%, rgba(0,0,0,${grainOpacity * 0.8}), transparent 20%)`,
       }}
     >
+      <SEO title="NYX" description="NYX is a secure, end-to-end encrypted messaging app featuring a stunning Neumorphic design. Chat privately without tracking." canonicalUrl="/" />
+      
       {/* Grain texture overlay */}
       <div
         className="fixed inset-0 pointer-events-none z-0"

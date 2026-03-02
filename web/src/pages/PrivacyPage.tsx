@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiCpu, FiGlobe } from 'react-icons/fi';
 import { motion } from 'framer-motion';
+import SEO from '../components/SEO';
 
 const Section = ({ title, icon: Icon, children, id }: { title: string; icon: any; children: React.ReactNode; id: string }) => (
   <section id={id} className="mb-12 scroll-mt-24">
@@ -28,6 +29,7 @@ export default function PrivacyPage() {
 
   return (
     <div className="min-h-screen bg-bg-main text-text-primary font-sans selection:bg-accent selection:text-white">
+      <SEO title="Privacy Policy" description="Read about our Zero-Knowledge architecture and how NYX protects your data." canonicalUrl="/privacy" />
       {/* Header */}
       <header className="sticky top-0 z-50 bg-bg-main/80 backdrop-blur-md border-b border-white/5">
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">

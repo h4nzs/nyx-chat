@@ -1,9 +1,14 @@
 import { Link } from 'react-router-dom';
 import { FiChevronLeft, FiHelpCircle } from 'react-icons/fi';
 
+import SEO from '../components/SEO';
+
+// ...
+
 export default function HelpPage() {
   return (
     <div className="h-screen w-screen flex flex-col items-center justify-center bg-bg-main text-text-primary p-4">
+      <SEO title="Help & FAQ" description="Get help with NYX E2EE chat, account recovery, and security features." canonicalUrl="/help" />
       <div className="w-full max-w-2xl card-neumorphic p-8 overflow-y-auto max-h-[90vh]">
         <div className="flex items-center gap-4 mb-6 pb-4 border-b border-border">
           <Link to="/settings" aria-label="Back to Settings" className="touch-target p-2.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">

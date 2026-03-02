@@ -11,6 +11,7 @@ import { startRegistration, platformAuthenticatorIsAvailable } from '@simpleweba
 import { api } from "@lib/api";
 import { FiShield, FiSkipForward } from "react-icons/fi";
 import { IoFingerPrint } from "react-icons/io5";
+import SEO from '../components/SEO';
 
 export default function Register() {
   const [error, setError] = useState("");
@@ -175,6 +176,7 @@ export default function Register() {
   // STEP 1: REGISTER FORM
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-stone-900">
+      <SEO title="Register" description="Create a new anonymous, end-to-end encrypted account on NYX. No tracking, no ads." canonicalUrl="/register" />
       {/* Left Panel - Concrete Security Panel */}
       <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
            style={{

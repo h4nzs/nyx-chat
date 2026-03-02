@@ -11,6 +11,7 @@ import { connectSocket } from "@lib/socket";
 import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } from "@lib/keyStorage";
 import { unlockWithBiometric } from "@lib/biometricUnlock";
 import toast from "react-hot-toast";
+import SEO from '../components/SEO';
 
 export default function Login() {
   const [error, setError] = useState("");
@@ -156,13 +157,13 @@ export default function Login() {
         return;
       }
 
-      // Error umum
       setError("Biometric login failed. Please use password or try again.");
     }
   }
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-stone-900">
+      <SEO title="Login" description="Sign in to your NYX secure enclave to access your E2EE chats." canonicalUrl="/login" />
       {/* Left Panel - Concrete Security Panel */}
       <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
            style={{
