@@ -106,29 +106,46 @@ export async function unlockWithBiometric(options: any): Promise<{ authResp: any
 
 import { getSodium } from './sodiumInitializer';
 
-// --- DECOY VAULT LOGIC (ADDED) ---
+// --- DECOY VAULT LOGIC (USING WEBCRYPTO PBKDF2) ---
+
+const hashDecoyPin = async (pin: string, salt: Uint8Array): Promise<Uint8Array> => {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", enc.encode(pin), { name: "PBKDF2" }, false, ["deriveBits"]
+  );
+  
+  // Extract a raw ArrayBuffer that WebCrypto is guaranteed to accept
+  const saltBuffer = new Uint8Array(salt).buffer;
+
+  const hashBuffer = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt: saltBuffer, iterations: 100000, hash: "SHA-256" },
+    keyMaterial, 256
+  );
+  return new Uint8Array(hashBuffer);
+};
+
 export const setupDecoyPin = async (pin: string) => {
   const sodium = await getSodium();
-  const salt = sodium.randombytes_buf(16);
-  const hash = sodium.crypto_pwhash(
-    sodium.crypto_pwhash_BYTES_MAX, pin, salt,
-    sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE, sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE, sodium.crypto_pwhash_ALG_ARGON2ID13
-  );
-  localStorage.setItem('decoy_pin_hash', sodium.to_hex(hash));
-  localStorage.setItem('decoy_pin_salt', sodium.to_hex(salt));
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  
+  const hash = await hashDecoyPin(pin, salt);
+  
+  localStorage.setItem('decoy_pin_hash', sodium.to_base64(hash));
+  localStorage.setItem('decoy_pin_salt', sodium.to_base64(salt));
 };
 
 export const verifyDecoyPin = async (pin: string): Promise<boolean> => {
-  const decoyHashHex = localStorage.getItem('decoy_pin_hash');
-  const decoySaltHex = localStorage.getItem('decoy_pin_salt');
-  if (decoyHashHex && decoySaltHex) {
+  const hashB64 = localStorage.getItem('decoy_pin_hash');
+  const saltB64 = localStorage.getItem('decoy_pin_salt');
+  
+  if (hashB64 && saltB64) {
     const sodium = await getSodium();
-    const salt = sodium.from_hex(decoySaltHex);
-    const expectedHash = sodium.from_hex(decoyHashHex);
-    const hash = sodium.crypto_pwhash(
-      sodium.crypto_pwhash_BYTES_MAX, pin, salt,
-      sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE, sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE, sodium.crypto_pwhash_ALG_ARGON2ID13
-    );
+    const salt = sodium.from_base64(saltB64);
+    const expectedHash = sodium.from_base64(hashB64);
+    
+    const hash = await hashDecoyPin(pin, salt);
+    
+    // Constant-time comparison using sodium
     return sodium.memcmp(hash, expectedHash);
   }
   return false;
