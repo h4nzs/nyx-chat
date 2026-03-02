@@ -88,7 +88,7 @@ export default function CallOverlay() {
     try {
       const newMode = facingMode === 'user' ? 'environment' : 'user';
       // Request new camera
-      const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { exact: newMode } } });
+      const newStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: newMode } });
       const newVideoTrack = newStream.getVideoTracks()[0];
 
       // Call WebRTC helper to send the new track to the peer
@@ -115,8 +115,9 @@ export default function CallOverlay() {
     const videoEl = remoteVideoRef.current || remoteAudioRef.current; // Use the active ref
     if (!videoEl) return;
 
-    if (!('setSinkId' in videoEl)) {
-      toast('Speaker toggle not supported on this browser/device', { icon: '⚠️' });
+    const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (!('setSinkId' in videoEl) || isMobile) {
+      toast('Audio output is managed by your physical device buttons on mobile OS.', { icon: '📱' });
       return;
     }
 
@@ -154,11 +155,7 @@ export default function CallOverlay() {
         if (originalVideoTrackRef.current) {
           await replaceVideoTrack(originalVideoTrackRef.current);
           if (localVideoRef.current) {
-            const stream = localVideoRef.current.srcObject as MediaStream;
-            if (stream) {
-              stream.getVideoTracks().forEach(t => t.stop()); // Stop old screen track in local preview
-              localVideoRef.current.srcObject = new MediaStream([originalVideoTrackRef.current, ...stream.getAudioTracks()]);
-            }
+            localVideoRef.current.srcObject = new MediaStream([originalVideoTrackRef.current]);
           }
         }
         setIsScreenSharing(false);
@@ -170,11 +167,11 @@ export default function CallOverlay() {
         const screenTrack = displayStream.getVideoTracks()[0];
         screenTrackRef.current = screenTrack;
 
-        // Save the current camera track so we can revert later
+        // Save the current camera track WITHOUT stopping or cloning it
         if (localVideoRef.current) {
             const currentStream = localVideoRef.current.srcObject as MediaStream;
             if (currentStream && currentStream.getVideoTracks().length > 0) {
-                originalVideoTrackRef.current = currentStream.getVideoTracks()[0].clone(); // Clone to keep it alive
+                originalVideoTrackRef.current = currentStream.getVideoTracks()[0];
             }
         }
 
@@ -183,9 +180,7 @@ export default function CallOverlay() {
 
         // Show screen track on local preview
         if (localVideoRef.current) {
-            const stream = localVideoRef.current.srcObject as MediaStream;
-            if (stream) stream.getVideoTracks().forEach(t => t.stop()); // Stop camera on local preview
-            localVideoRef.current.srcObject = new MediaStream([screenTrack, ...(stream?.getAudioTracks() || [])]);
+            localVideoRef.current.srcObject = new MediaStream([screenTrack]);
         }
 
         setIsScreenSharing(true);
@@ -198,8 +193,7 @@ export default function CallOverlay() {
             if (originalVideoTrackRef.current) {
                 await replaceVideoTrack(originalVideoTrackRef.current);
                 if (localVideoRef.current) {
-                    const stream = localVideoRef.current.srcObject as MediaStream;
-                    localVideoRef.current.srcObject = new MediaStream([originalVideoTrackRef.current, ...(stream?.getAudioTracks() || [])]);
+                    localVideoRef.current.srcObject = new MediaStream([originalVideoTrackRef.current]);
                 }
             }
         };
@@ -320,7 +314,7 @@ export default function CallOverlay() {
                   ref={remoteVideoRef} 
                   autoPlay 
                   playsInline 
-                  className="absolute inset-0 w-full h-full object-cover"
+                  className="absolute inset-0 w-full h-full object-contain bg-black"
                 />
                 {!isMinimized && (
                   <div className="absolute bottom-24 right-4 w-32 h-48 md:w-48 md:h-72 bg-gray-900 rounded-xl overflow-hidden shadow-2xl border border-white/20 z-10">
