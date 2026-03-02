@@ -18,9 +18,35 @@ export default function CallOverlay() {
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const ringtoneRef = useRef<HTMLAudioElement | null>(null);
 
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+
+  useEffect(() => {
+    // Initialize audio only once
+    if (!ringtoneRef.current) {
+      ringtoneRef.current = new Audio('/sounds/ringing.mp3');
+      ringtoneRef.current.loop = true;
+    }
+
+    const audio = ringtoneRef.current;
+
+    const isRinging = callState === 'calling' || callState === 'ringing';
+
+    if (isRinging) {
+      audio.play().catch(e => console.error("Audio play blocked by browser:", e));
+    } else {
+      audio.pause();
+      audio.currentTime = 0;
+    }
+
+    // Cleanup on unmount
+    return () => {
+      audio.pause();
+      audio.currentTime = 0;
+    };
+  }, [callState]);
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
