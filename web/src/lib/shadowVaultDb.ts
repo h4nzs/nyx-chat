@@ -24,7 +24,7 @@ const getVaultKey = async () => {
 export const encryptVaultText = async (text: string): Promise<string> => {
   const sodium = await getSodium();
   const key = await getVaultKey();
-  const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NONCEBYTES);
+  const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
   
   const cipherText = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
     text, null, null, nonce, key
@@ -41,7 +41,7 @@ export const decryptVaultText = async (encryptedBase64: string): Promise<string 
     const sodium = await getSodium();
     const key = await getVaultKey();
     const combined = sodium.from_base64(encryptedBase64);
-    const nonceBytes = sodium.crypto_aead_xchacha20poly1305_ietf_NONCEBYTES;
+    const nonceBytes = sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
     
     const nonce = combined.slice(0, nonceBytes);
     const cipherText = combined.slice(nonceBytes);
