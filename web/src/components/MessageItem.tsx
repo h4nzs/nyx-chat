@@ -212,7 +212,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
   };
 
   return (
-    <motion.div ref={ref} id={message.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }} className={clsx('group flex flex-col', isFirstInSequence ? 'mt-3' : 'mt-1', mine ? 'items-end' : 'items-start', isHighlighted && 'bg-accent/10 rounded-lg p-1 -mx-1')}>
+    <motion.div ref={ref} id={`msg-${message.id}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }} className={clsx('group flex flex-col', isFirstInSequence ? 'mt-3' : 'mt-1', mine ? 'items-end' : 'items-start', isHighlighted && 'bg-accent/10 rounded-lg p-1 -mx-1')}>
       <SwipeableItem 
         leftAction={{ icon: <FiCornerUpLeft size={20} />, color: 'bg-blue-500/80', onAction: () => setReplyingTo(message) }}
         rightAction={{ icon: <FiInfo size={20} />, color: 'bg-secondary/80', onAction: () => toast('Message ID: ' + message.id, { icon: 'ℹ️' }) }}

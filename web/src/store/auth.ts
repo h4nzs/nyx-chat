@@ -149,8 +149,19 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           }
         });
 
-        useModalStore.getState().showPasswordPrompt(async (password) => {
+        useModalStore.getState().showPasswordPrompt(async (result) => {
           cleanup();
+          if (!result) { reject(new Error("Password not provided.")); return; }
+          if (result.mode === 'decoy') {
+             // Let the interceptor in App.tsx / login handler manage the decoy state
+             resolve({
+                 encryption: new Uint8Array(32),
+                 signing: new Uint8Array(64),
+                 signedPreKey: new Uint8Array(32)
+             } as RetrievedKeys); 
+             return;
+          }
+          const password = result.password;
           if (!password) { reject(new Error("Password not provided.")); return; }
 
           try {

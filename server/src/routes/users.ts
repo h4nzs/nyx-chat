@@ -50,14 +50,17 @@ router.get('/search', async (req, res, next) => {
 router.get('/me', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const user = await prisma.user.findUnique({
+    // \U0001f493 THE PULSE: Update lastActiveAt
+    const user = await prisma.user.update({
       where: { id: req.user.id },
+      data: { lastActiveAt: new Date() },
       select: {
         id: true,
         encryptedProfile: true,
         isVerified: true,
         hasCompletedOnboarding: true,
-        role: true
+        role: true,
+        autoDestructDays: true
       }
     })
     res.json(user)
@@ -70,42 +73,58 @@ router.get('/me', async (req, res, next) => {
 router.put('/me',
   zodValidate({
     body: z.object({
-      encryptedProfile: z.string().min(1)
+      encryptedProfile: z.string().min(1).optional(),
+      autoDestructDays: z.number().int().min(1).nullable().optional() // New field
+    }).refine(data => data.encryptedProfile !== undefined || data.autoDestructDays !== undefined, {
+      message: "Body cannot be empty"
     })
   }),
   async (req, res, next) => {
     try {
       const userId = req.user!.id
-      const { encryptedProfile } = req.body
+      const { encryptedProfile, autoDestructDays } = req.body
+
+      const existingUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { encryptedProfile: true }
+      });
+
+      const dataToUpdate: any = {}
+      if (encryptedProfile !== undefined) dataToUpdate.encryptedProfile = encryptedProfile;
+      if (autoDestructDays !== undefined) dataToUpdate.autoDestructDays = autoDestructDays;
 
       const updatedUser = await prisma.user.update({
         where: { id: userId },
-        data: { encryptedProfile },
+        data: dataToUpdate,
         select: {
           id: true,
           encryptedProfile: true,
           isVerified: true,
-          hasCompletedOnboarding: true
+          hasCompletedOnboarding: true,
+          autoDestructDays: true
         }
       })
 
-      // Notify the user themselves (all their active devices)
-      getIo().to(userId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
+      // If encryptedProfile was updated, notify the user and their contacts
+      if (encryptedProfile !== undefined && (!existingUser || encryptedProfile !== existingUser.encryptedProfile)) {
+        // Notify the user themselves (all their active devices)
+        getIo().to(userId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
 
-      // Notify contacts
-      const conversations = await prisma.conversation.findMany({
-        where: { participants: { some: { userId } } },
-        include: { participants: { select: { userId: true } } }
-      })
+        // Notify contacts
+        const conversations = await prisma.conversation.findMany({
+          where: { participants: { some: { userId } } },
+          include: { participants: { select: { userId: true } } }
+        })
 
-      const recipients = new Set<string>()
-      conversations.forEach(c => c.participants.forEach(p => {
-        if (p.userId !== userId) recipients.add(p.userId)
-      }))
+        const recipients = new Set<string>()
+        conversations.forEach(c => c.participants.forEach(p => {
+          if (p.userId !== userId) recipients.add(p.userId)
+        }))
 
-      recipients.forEach(recipientId => {
-        getIo().to(recipientId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
-      })
+        recipients.forEach(recipientId => {
+          getIo().to(recipientId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
+        })
+      }
 
       res.json(updatedUser)
     } catch (error) {
@@ -231,7 +250,7 @@ router.delete('/me',
   zodValidate({
     body: z.object({
       password: z.string().min(1),
-      fileKeys: z.array(z.string()).optional() // Client provides keys to delete (Zero-Knowledge cleanup)
+      fileKeys: z.array(z.string()).max(1000).optional() // Client provides keys to delete (Zero-Knowledge cleanup)
     })
   }),
   async (req, res, next) => {

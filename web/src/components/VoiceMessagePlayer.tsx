@@ -93,7 +93,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
       isMounted = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [message, lastKeychainUpdate]);
+  }, [message.fileUrl, message.fileKey, message.fileType, message.content, lastKeychainUpdate]);
 
   // 2. Initialize WaveSurfer once we have the audioSrc
   useEffect(() => {

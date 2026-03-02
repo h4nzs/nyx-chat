@@ -441,9 +441,13 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
   for (const storeName of availableStores) {
     const store = tx.objectStore(storeName);
     await store.clear(); // Selalu bersihkan brankas lama, bahkan jika importData[storeName] tidak ada
-    if (importData[storeName]) {
+    if (importData && importData[storeName]) {
       for (const item of importData[storeName]) {
-        await store.put(item.value, item.key);
+        if (storeName === GROUP_SENDER_STATES_STORE || storeName === GROUP_RECEIVER_STATES_STORE) {
+           await store.put(item.value);
+        } else {
+           await store.put(item.value, item.key);
+        }
       }
     }
   }

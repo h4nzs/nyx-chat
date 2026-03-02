@@ -8,6 +8,33 @@ const ICE_SERVERS = {
 let peerConnection: RTCPeerConnection | null = null;
 let localMediaStream: MediaStream | null = null;
 
+export const replaceVideoTrack = async (newVideoTrack: MediaStreamTrack) => {
+  if (!peerConnection) return;
+  const sender = peerConnection.getSenders().find(s => s.track?.kind === 'video');
+  if (sender) {
+    await sender.replaceTrack(newVideoTrack);
+  }
+};
+
+export const getNetworkQuality = async (): Promise<'Good' | 'Fair' | 'Poor'> => {
+  if (!peerConnection) return 'Good';
+  try {
+    const stats = await peerConnection.getStats();
+    let rtt = 0;
+    stats.forEach(report => {
+      if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+        rtt = report.currentRoundTripTime || 0;
+      }
+    });
+    // RTT is in seconds. > 0.5s (500ms) is Poor. > 0.2s (200ms) is Fair.
+    if (rtt > 0.5) return 'Poor';
+    if (rtt > 0.2) return 'Fair';
+    return 'Good';
+  } catch (e) {
+    return 'Good';
+  }
+};
+
 export const cleanupCall = () => {
   if (localMediaStream) {
     localMediaStream.getTracks().forEach((track) => track.stop());

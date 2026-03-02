@@ -6,6 +6,7 @@ export type DecryptedProfile = {
   name: string;
   description?: string | null;
   avatarUrl?: string | null;
+  autoDestructDays?: number | null; // Added field
 };
 
 type ProfileState = {

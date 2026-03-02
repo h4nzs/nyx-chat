@@ -20,7 +20,9 @@ export default function KeyManagementPage() {
   const { showConfirm, showPasswordPrompt } = useModalStore();
 
   const handleShowRecovery = () => {
-    showPasswordPrompt(async (password) => {
+    showPasswordPrompt(async (result) => {
+      if (!result || result.mode === 'decoy') return;
+      const password = result.password;
       if (!password) return;
 
       setIsProcessing(true);
@@ -49,7 +51,9 @@ export default function KeyManagementPage() {
       "INITIATE KEY ROTATION?",
       "WARNING: DESTRUCTIVE ACTION. Previous message history will become undecryptable. This action is irreversible.",
       () => {
-        showPasswordPrompt(async (password) => {
+        showPasswordPrompt(async (result) => {
+          if (!result || result.mode === 'decoy') return;
+          const password = result.password;
           if (!password) return;
           setIsProcessing(true);
           try {

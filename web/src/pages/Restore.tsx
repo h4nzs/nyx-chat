@@ -66,7 +66,11 @@ export default function RestorePage() {
       // Actually, api/auth/recover returns accessToken. We should set it.
       if (res.accessToken) {
           useAuthStore.getState().setAccessToken(res.accessToken);
-          await useAuthStore.getState().bootstrap(true); // Force fetch user profile
+          try {
+            await useAuthStore.getState().bootstrap(true); // Force fetch user profile
+          } catch (err) {
+            console.error(err);
+          }
       }
 
       toast.success('Account successfully recovered! Welcome back.');

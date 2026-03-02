@@ -14,19 +14,29 @@ interface LinkPreviewProps {
 const LinkPreviewCard = ({ preview }: LinkPreviewProps) => {
   const [proxiedImage, setProxiedImage] = useState<string | null>(null);
   const [hasError, setHasError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const token = useAuthStore(s => s.accessToken);
 
   useEffect(() => {
-    if (!preview.image) return;
+    if (!preview.image) {
+        setIsLoading(false);
+        return;
+    }
 
     let isMounted = true;
     let objectUrl: string | null = null;
 
     const fetchImage = async () => {
+      setIsLoading(true);
+      setHasError(false);
       try {
         const baseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, "").replace(/\/$/, "");
+        const headers: Record<string, string> = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        }
         const res = await fetch(`${baseUrl}/api/previews/image?url=${encodeURIComponent(preview.image)}`, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers
         });
         
         if (res.ok && isMounted) {
@@ -39,6 +49,8 @@ const LinkPreviewCard = ({ preview }: LinkPreviewProps) => {
       } catch (e) {
         console.error('Failed to proxy image:', e);
         if (isMounted) setHasError(true);
+      } finally {
+          if (isMounted) setIsLoading(false);
       }
     };
 
@@ -46,7 +58,10 @@ const LinkPreviewCard = ({ preview }: LinkPreviewProps) => {
 
     return () => {
       isMounted = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl) {
+          URL.revokeObjectURL(objectUrl);
+      }
+      setProxiedImage(null);
     };
   }, [preview.image, token]);
 
@@ -61,11 +76,11 @@ const LinkPreviewCard = ({ preview }: LinkPreviewProps) => {
     >
       {preview.image && !hasError && (
         <div className="w-full h-32 bg-black/20 dark:bg-white/5 rounded-t-lg flex items-center justify-center overflow-hidden">
-           {proxiedImage ? (
-              <img src={proxiedImage} alt={preview.title} className="w-full h-full object-cover" />
-           ) : (
+           {isLoading ? (
               <span className="animate-pulse w-6 h-6 rounded-full border-2 border-accent border-t-transparent" />
-           )}
+           ) : proxiedImage ? (
+              <img src={proxiedImage} alt={preview.title} className="w-full h-full object-cover" />
+           ) : null}
         </div>
       )}
       <div className="p-2">

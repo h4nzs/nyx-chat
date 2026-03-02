@@ -369,7 +369,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const oldIds = oldConv.participants.map(p => p.id).sort().join(',');
       const newIds = data.participants.map(p => p.id).sort().join(',');
       if (oldIds !== newIds) {
-        import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(id));
+        import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(id)).catch(console.error);
       }
     }
 

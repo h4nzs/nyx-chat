@@ -147,7 +147,7 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
         }
         // 2. Check for legacy/base64 encoded ciphertexts
         // A valid base64 string shouldn't contain spaces and typically matches this regex
-        const base64Regex = /^[A-Za-z0-9+/]+={0,2}$/;
+        const base64Regex = /^[A-Za-z0-9+/_-]+={0,2}$/;
         if (base64Regex.test(trimmed) && trimmed.length > 20) { // arbitrary min length for a real ciphertext
             return true;
         }
@@ -943,6 +943,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         
         // Separate reactions and normal messages
         const finalMessages = processMessagesAndReactions(uniqueMessages, []);
+
+        shadowVault.upsertMessages(finalMessages);
 
         return {
           messages: { ...state.messages, [convoId]: finalMessages },

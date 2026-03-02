@@ -42,12 +42,15 @@ model User {
   preKeyBundle         PreKeyBundle?
   oneTimePreKeys       OneTimePreKey[]
   sessionKeys          SessionKey[]
+  lastActiveAt       DateTime  @default(now())
+  autoDestructDays   Int?
 
   // Relasi Blocking
   blockedUsers BlockedUser[] @relation("Blocker") 
   blockedBy    BlockedUser[] @relation("Blocked") 
 
   @@index([createdAt])
+  @@index([autoDestructDays, lastActiveAt])
 }
 
 model OneTimePreKey {
