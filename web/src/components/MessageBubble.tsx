@@ -3,7 +3,7 @@ import { Message, MessageStatus } from "@store/conversation";
 import { useAuthStore } from "@store/auth";
 import classNames from "classnames";
 import { FaCheck, FaCheckDouble } from "react-icons/fa";
-import { FiClock, FiEyeOff, FiCamera, FiVideo } from "react-icons/fi";
+import { FiClock, FiEyeOff, FiCamera, FiVideo, FiMic } from "react-icons/fi";
 import FileAttachment from "./FileAttachment";
 import LinkPreviewCard from "./LinkPreviewCard";
 import LazyImage from "./LazyImage";
@@ -143,7 +143,9 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
                   onClick={() => onImageClick?.(message)} 
                   className="flex items-center gap-2 text-accent hover:text-indigo-400 hover:scale-105 active:scale-95 transition-all"
                 >
-                  {message.fileType?.startsWith('video/') ? <FiVideo size={20} /> : <FiCamera size={20} />}
+                  {message.fileType?.startsWith('video/') ? <FiVideo size={20} /> : 
+                   message.fileType?.startsWith('audio/') ? <FiMic size={20} /> : 
+                   <FiCamera size={20} />}
                   <span className="text-sm font-bold tracking-wider uppercase">View Once</span>
                 </button>
               )}

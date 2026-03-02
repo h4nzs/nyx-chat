@@ -199,9 +199,13 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           mimeType: file.type,
       };
 
-      await get().sendMessage(conversationId, {
+      const { sendMessage: coreSendMessage } = useMessageStore.getState();
+      await coreSendMessage(conversationId, {
           content: JSON.stringify(metadata),
-      }, tempId); // Reuse tempId to link optimistic message
+          repliedTo: replyingTo || undefined,
+          expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
+          isViewOnce
+      }, tempId);
       
       updateActivity(activityId, { progress: 100, fileName: 'Done!' });
       setTimeout(() => removeActivity(activityId), 1000); 
@@ -219,7 +223,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: 'Processing Voice...', progress: 0 };
     const activityId = addActivity(activity);
-    const { replyingTo, expiresIn } = get();
+    const { replyingTo, expiresIn, isViewOnce } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     if (!me) {
@@ -253,9 +257,10 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       duration,
       expiresAt,
       repliedTo: replyingTo || undefined,
+      isViewOnce,
     };
     addOptimisticMessage(conversationId, optimisticMessage);
-    set({ replyingTo: null });
+    set({ replyingTo: null, isViewOnce: false });
 
     try {
       updateActivity(activityId, { progress: 20, fileName: 'Encrypting voice...' });
@@ -303,8 +308,12 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           duration
       };
 
-      await get().sendMessage(conversationId, {
-          content: JSON.stringify(metadata)
+      const { sendMessage: coreSendMessage } = useMessageStore.getState();
+      await coreSendMessage(conversationId, {
+          content: JSON.stringify(metadata),
+          repliedTo: replyingTo || undefined,
+          expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
+          isViewOnce
       }, tempId);
       
       updateActivity(activityId, { progress: 100, fileName: 'Sent!' });
