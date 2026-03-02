@@ -44,12 +44,13 @@ export default function ContextMenu() {
     };
     
     // Slight delay to prevent immediate closure if the trigger click propagated
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       document.addEventListener('mousedown', handleClickOutside);
       document.addEventListener('touchstart', handleClickOutside);
     }, 10);
 
     return () => {
+      clearTimeout(timer);
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('touchstart', handleClickOutside);
     };

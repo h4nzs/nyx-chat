@@ -103,11 +103,12 @@ export default function Login() {
              // Jika PRF gagal/belum setup, user harus input password manual untuk dekripsi
              const hasKeys = await getEncryptedKeys();
              if (hasKeys) {
-                useModalStore.getState().showPasswordPrompt(async (password) => {
+                useModalStore.getState().showPasswordPrompt(async (result) => {
+                    if (!result || result.mode === 'decoy') return; // Decoy mode handled globally or skip
+                    const password = result.password;
                     if (!password) return;
                     try {
-                        const encryptedKeys = await getEncryptedKeys();
-                        const result = await retrievePrivateKeys(encryptedKeys!, password);
+                        const encryptedKeys = await getEncryptedKeys();                        const result = await retrievePrivateKeys(encryptedKeys!, password);
                         if (result.success) {
                             const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } = await import("@lib/keyStorage");
                             await saveDeviceAutoUnlockKey(password);

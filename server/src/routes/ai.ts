@@ -33,9 +33,22 @@ Output must be a JSON array of strings.`;
     let replies: string[] = [];
 
     try {
-      replies = JSON.parse(result.response.text());
-    } catch (parseError) {
-      console.error('Failed to parse Gemini JSON:', parseError);
+      let parsed = JSON.parse(result.response.text());
+      // Coerce to array if single string
+      if (typeof parsed === 'string') {
+        parsed = [parsed];
+      }
+      // Ensure array, filter to string items, and cap at 3
+      if (Array.isArray(parsed)) {
+        replies = parsed.filter(item => typeof item === 'string').slice(0, 3);
+      }
+      
+      // Fallback if empty after filtering
+      if (replies.length === 0) {
+        throw new Error("Parsed array contained no valid string replies");
+      }
+    } catch (parseError: any) {
+      console.error('Failed to parse Gemini JSON:', parseError.message || 'Unknown error');
       // Manual fallback
       replies = ["Ok", "Got it", "Thanks"]; 
     }

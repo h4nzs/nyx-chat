@@ -42,7 +42,7 @@ export default function PasswordPromptModal() {
       if (isDecoy) {
           // --- DECOY VAULT TRIGGERED ---
           sessionStorage.setItem('nyx_decoy_mode', 'true');
-          onPasswordSubmit('DECOY_MODE_ACTIVATED'); // Dummy string to bypass null check
+          onPasswordSubmit({ mode: 'decoy' }); // Use object instead of dummy string
           setPassword('');
           hidePasswordPrompt();
           return;
@@ -50,7 +50,7 @@ export default function PasswordPromptModal() {
 
       // 2. Normal Unlock Flow
       sessionStorage.removeItem('nyx_decoy_mode');
-      onPasswordSubmit(password);
+      onPasswordSubmit({ mode: 'normal', password });
       setPassword('');
       hidePasswordPrompt();
     } catch (e) {

@@ -29,6 +29,8 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
       return;
     }
 
+    const currentQuery = query; // Capture scope
+
     try {
       // 1. Fetch raw encrypted records for this conversation
       const rawResults = await shadowVault.messages
@@ -43,16 +45,21 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
         if (msg.isViewOnce) continue; // Skip phantom media
         
         const plainText = await decryptVaultText(msg.content);
-        if (plainText && plainText.toLowerCase().includes(query.toLowerCase())) {
+        if (plainText && plainText.toLowerCase().includes(currentQuery.toLowerCase())) {
           // Reconstruct the message object with the decrypted text for the UI
           decryptedResults.push({ ...msg, content: plainText });
         }
       }
         
-      set({ searchResults: decryptedResults, isSearching: false });
+      // ONLY update if the query hasn't changed while we were decrypting
+      if (get().searchQuery === currentQuery) {
+        set({ searchResults: decryptedResults, isSearching: false });
+      }
     } catch (error) {
       console.error("Iron Vault Search failed:", error);
-      set({ searchResults: [], isSearching: false });
+      if (get().searchQuery === currentQuery) {
+        set({ searchResults: [], isSearching: false });
+      }
     }
   },
 

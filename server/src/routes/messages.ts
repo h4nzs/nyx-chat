@@ -85,7 +85,7 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
 
     // Fetch older messages (before target)
     const older = await prisma.message.findMany({
-      where: { conversationId: targetMsg.conversationId, createdAt: { lt: targetMsg.createdAt } },
+      where: { conversationId: targetMsg.conversationId, createdAt: { lt: targetMsg.createdAt, gte: participation.joinedAt } },
       orderBy: { createdAt: 'desc' },
       take: 20,
       include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
@@ -93,7 +93,7 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
 
     // Fetch newer messages (after target)
     const newer = await prisma.message.findMany({
-      where: { conversationId: targetMsg.conversationId, createdAt: { gt: targetMsg.createdAt } },
+      where: { conversationId: targetMsg.conversationId, createdAt: { gt: targetMsg.createdAt, gte: participation.joinedAt } },
       orderBy: { createdAt: 'asc' },
       take: 20,
       include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
@@ -300,8 +300,12 @@ router.put('/:id/viewed', async (req, res, next) => {
     const messageId = req.params.id;
     const userId = req.user.id;
 
-    const message = await prisma.message.findUnique({ where: { id: messageId }, include: { conversation: true } });
+    const message = await prisma.message.findUnique({ where: { id: messageId }, include: { conversation: { include: { participants: true } } } });
     if (!message || !message.isViewOnce || message.senderId === userId) return res.status(400).json({ error: 'Invalid operation' });
+
+    // NEW: Check participation
+    const isParticipant = message.conversation.participants.some(p => p.userId === userId);
+    if (!isParticipant) return res.status(403).json({ error: 'Not a participant' });
 
     const updated = await prisma.message.update({
       where: { id: messageId },

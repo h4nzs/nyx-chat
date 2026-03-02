@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+export type PasswordSubmitResult = { mode: 'normal', password?: string } | { mode: 'decoy' } | null;
+
 export interface ModalState {
   isConfirmOpen: boolean;
   confirmTitle: string;
@@ -8,7 +10,7 @@ export interface ModalState {
   isChatInfoModalOpen: boolean;
   isProfileModalOpen: boolean;
   isPasswordPromptOpen: boolean;
-  onPasswordSubmit: (password: string | null) => void;
+  onPasswordSubmit: (result: PasswordSubmitResult) => void;
   profileUserId: string | null;
   showConfirm: (title: string, message: string, onConfirm: () => void) => void;
   hideConfirm: () => void;
@@ -16,7 +18,7 @@ export interface ModalState {
   closeChatInfoModal: () => void;
   openProfileModal: (userId: string) => void;
   closeProfileModal: () => void;
-  showPasswordPrompt: (callback: (password: string | null) => void) => void;
+  showPasswordPrompt: (callback: (result: PasswordSubmitResult) => void) => void;
   hidePasswordPrompt: () => void;
 }
 

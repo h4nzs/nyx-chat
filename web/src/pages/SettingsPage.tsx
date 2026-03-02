@@ -268,7 +268,9 @@ export default function SettingsPage() {
       // Jika gagal otomatis, minta user input password (DEMI KEAMANAN MAKSIMAL)
       if (!phraseToLock) {
           await new Promise<void>((resolve, reject) => {
-              useModalStore.getState().showPasswordPrompt(async (password) => {
+              useModalStore.getState().showPasswordPrompt(async (result) => {
+                  if (!result || result.mode === 'decoy') { reject(new Error("Password required to enable biometric unlock.")); return; }
+                  const password = result.password;
                   if (!password) { reject(new Error("Password required to enable biometric unlock.")); return; }
                   try {
                       const encKeys = await getEncryptedKeys();

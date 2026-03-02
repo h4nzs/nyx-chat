@@ -48,15 +48,32 @@ router.get('/image', requireAuth, async (req, res, next) => {
         throw new Error('Target is not an image');
     }
 
-    // 3. Prevent memory exhaustion: Limit to 5MB
-    const arrayBuffer = await imageRes.arrayBuffer();
-    if (arrayBuffer.byteLength > 5 * 1024 * 1024) {
-        throw new Error('Image exceeds 5MB limit');
+    // 3. Prevent memory exhaustion via streaming
+    const reader = imageRes.body?.getReader();
+    if (!reader) throw new Error('ReadableStream not supported by target');
+
+    let totalLength = 0;
+    const chunks: Uint8Array[] = [];
+    const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      if (value) {
+        totalLength += value.length;
+        if (totalLength > MAX_SIZE) {
+          throw new Error('Image exceeds 5MB limit');
+        }
+        chunks.push(value);
+      }
     }
+
+    const arrayBuffer = Buffer.concat(chunks);
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache 1 day
-    res.send(Buffer.from(arrayBuffer));
+    res.send(arrayBuffer);
 
   } catch (error) {
      console.error('Image proxy error:', error);

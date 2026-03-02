@@ -117,8 +117,12 @@ router.post('/', async (req, res, next) => {
       if (!isVerified) {
           const today = new Date().toISOString().split('T')[0];
           const key = `sandbox:newchat:${creatorId}:${today}`;
-          const currentCount = await redisClient.get(key);
-          if (currentCount && parseInt(currentCount as string, 10) >= 3) {
+          const count = await redisClient.incr(key);
+          if (count === 1) {
+              await redisClient.expire(key, 86400); // Expire in 24 hours
+          }
+          if (count > 3) {
+              await redisClient.decr(key); // Rollback increment
               throw new ApiError(429, 'SANDBOX_NEW_CHAT_LIMIT: Max 3 new conversations per day.');
           }
       }
@@ -126,56 +130,60 @@ router.post('/', async (req, res, next) => {
 
     const allUserIds = Array.from(new Set([...userIds, creatorId]))
 
-    const newConversation = await prisma.$transaction(async (tx) => {
-      const conversation = await tx.conversation.create({
-        data: {
-          title: isGroup ? title : null,
-          isGroup,
-          creatorId: isGroup ? creatorId : null,
-          participants: {
-            create: allUserIds.map((userId: string) => ({
-              user: { connect: { id: userId } },
-              role: userId === creatorId ? 'ADMIN' : 'MEMBER'
-            }))
-          }
-        },
-        include: {
-          participants: {
-            select: {
-              role: true,
-              user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }
+    let newConversation;
+    try {
+      newConversation = await prisma.$transaction(async (tx) => {
+        const conversation = await tx.conversation.create({
+          data: {
+            title: isGroup ? title : null,
+            isGroup,
+            creatorId: isGroup ? creatorId : null,
+            participants: {
+              create: allUserIds.map((userId: string) => ({
+                user: { connect: { id: userId } },
+                role: userId === creatorId ? 'ADMIN' : 'MEMBER'
+              }))
             }
           },
-          creator: true
+          include: {
+            participants: {
+              select: {
+                role: true,
+                user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }
+              }
+            },
+            creator: true
+          }
+        })
+
+        if (initialSession) {
+          const { sessionId, initialKeys, ephemeralPublicKey } = initialSession
+          if (!sessionId || !initialKeys || !ephemeralPublicKey) throw new Error('Incomplete initial session data provided.')
+          const keyRecords = initialKeys.map((ik: { userId: string; key: string; }) => ({
+            sessionId,
+            encryptedKey: ik.key,
+            userId: ik.userId,
+            conversationId: conversation.id,
+            initiatorEphemeralKey: ephemeralPublicKey,
+            isInitiator: ik.userId === creatorId
+          }))
+          await tx.sessionKey.createMany({ data: keyRecords })
+        } else if (isGroup) {
+          // Only generate server-side keys for groups if no initial session provided.
+          // For 1-on-1, we want Lazy X3DH, so we skip this.
+          await rotateAndDistributeSessionKeys(conversation.id, creatorId, tx)
         }
+
+        return conversation
       })
-
-      if (initialSession) {
-        const { sessionId, initialKeys, ephemeralPublicKey } = initialSession
-        if (!sessionId || !initialKeys || !ephemeralPublicKey) throw new Error('Incomplete initial session data provided.')
-        const keyRecords = initialKeys.map((ik: { userId: string; key: string; }) => ({
-          sessionId,
-          encryptedKey: ik.key,
-          userId: ik.userId,
-          conversationId: conversation.id,
-          initiatorEphemeralKey: ephemeralPublicKey,
-          isInitiator: ik.userId === creatorId
-        }))
-        await tx.sessionKey.createMany({ data: keyRecords })
-      } else if (isGroup) {
-        // Only generate server-side keys for groups if no initial session provided.
-        // For 1-on-1, we want Lazy X3DH, so we skip this.
-        await rotateAndDistributeSessionKeys(conversation.id, creatorId, tx)
-      }
-
-      return conversation
-    })
-
-    // SANDBOX DM LIMIT INCREMENT (Atomic after success)
-    if (!isVerified && !isGroup) {
+    } catch (dbError) {
+      // Rollback atomic counter if db fails
+      if (!isVerified && !isGroup) {
         const today = new Date().toISOString().split('T')[0];
         const key = `sandbox:newchat:${creatorId}:${today}`;
-        await redisClient.multi().incr(key).expire(key, 86400).exec();
+        await redisClient.decr(key);
+      }
+      throw dbError;
     }
 
     const transformedConversation = {

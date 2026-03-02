@@ -640,6 +640,7 @@ self.onmessage = async (event: MessageEvent) => {
           const messageString = `${identifier}:${timestamp}:${nonce}:${newPassword}:${encryptedPrivateKeys}`;
           const messageBytes = new TextEncoder().encode(messageString);
           const signature = sodium.crypto_sign_detached(messageBytes, signingKeyPair.privateKey);
+          sodium.memzero(messageBytes);
 
           result = {
             encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
@@ -1080,7 +1081,7 @@ self.onmessage = async (event: MessageEvent) => {
                       // When storing skipped keys from a previous chain, state.DHr holds the previous public key.
                       // At this point, we only know its DH value, we don't have its EPK context because we are moving PAST it.
                       // The main logic in crypto.ts will use .epk || .dh, so if epk is undefined it just falls back to dh.
-                      skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk), epk: header.epk });
+                      skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
                       state.Nr += 1;
                    }
                 }
@@ -1121,7 +1122,7 @@ self.onmessage = async (event: MessageEvent) => {
                 const [newCKr, mk] = await kdfChain(state.CKr);
                 sodium.memzero(state.CKr);
                 state.CKr = newCKr;
-                skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk), epk: header.epk });
+                skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
                 state.Nr += 1;
             }
             

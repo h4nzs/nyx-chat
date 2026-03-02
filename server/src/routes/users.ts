@@ -231,7 +231,7 @@ router.delete('/me',
   zodValidate({
     body: z.object({
       password: z.string().min(1),
-      fileKeys: z.array(z.string()).optional() // Client provides keys to delete (Zero-Knowledge cleanup)
+      fileKeys: z.array(z.string()).max(1000).optional() // Client provides keys to delete (Zero-Knowledge cleanup)
     })
   }),
   async (req, res, next) => {

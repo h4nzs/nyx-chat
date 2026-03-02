@@ -91,12 +91,14 @@ export default function CallOverlay() {
             <div className="flex gap-6">
               <button 
                 onClick={rejectCall}
+                aria-label="Reject Call"
                 className="w-14 h-14 rounded-full bg-red-500/20 text-red-500 hover:bg-red-500 hover:text-white flex items-center justify-center transition-all shadow-lg hover:shadow-red-500/50"
               >
                 <FiPhoneOff size={24} />
               </button>
               <button 
                 onClick={acceptCall}
+                aria-label={isVideoCall ? "Accept Video Call" : "Accept Audio Call"}
                 className="w-14 h-14 rounded-full bg-green-500/20 text-green-500 hover:bg-green-500 hover:text-white flex items-center justify-center transition-all shadow-lg hover:shadow-green-500/50 animate-pulse"
               >
                 {isVideoCall ? <FiVideo size={24} /> : <FiPhone size={24} />}
