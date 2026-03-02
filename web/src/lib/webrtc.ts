@@ -14,6 +14,16 @@ export const replaceVideoTrack = async (newVideoTrack: MediaStreamTrack) => {
   if (sender) {
     await sender.replaceTrack(newVideoTrack);
   }
+
+  if (localMediaStream) {
+    localMediaStream.getVideoTracks().forEach(t => {
+      t.stop();
+      localMediaStream!.removeTrack(t);
+    });
+    localMediaStream.addTrack(newVideoTrack);
+  } else {
+    localMediaStream = new MediaStream([newVideoTrack]);
+  }
 };
 
 export const getNetworkQuality = async (): Promise<'Good' | 'Fair' | 'Poor'> => {

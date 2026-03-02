@@ -119,7 +119,14 @@ router.post('/', async (req, res, next) => {
           const key = `sandbox:newchat:${creatorId}:${today}`;
           const count = await redisClient.incr(key);
           if (count === 1) {
-              await redisClient.expire(key, 86400); // Expire in 24 hours
+              try {
+                  await redisClient.expire(key, 86400); // Expire in 24 hours
+              } catch (expireError) {
+                  // Rollback if TTL fails
+                  const decrCount = await redisClient.decr(key);
+                  if (decrCount <= 0) await redisClient.del(key);
+                  throw expireError;
+              }
           }
           if (count > 3) {
               try { await redisClient.decr(key); } catch (e) { /* ignore */ } // Rollback increment
@@ -152,7 +159,9 @@ router.post('/', async (req, res, next) => {
                 user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }
               }
             },
-            creator: true
+            creator: { 
+              select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } 
+            }
           }
         })
 

@@ -76,9 +76,9 @@ export default function ContextMenu() {
           {/* Reactions Row */}
           {reactions && reactions.length > 0 && (
             <div className="flex items-center justify-between p-2 border-b border-black/5 dark:border-white/5 bg-secondary/30">
-              {reactions.map((reaction, idx) => (
+              {reactions.map((reaction) => (
                 <button
-                  key={idx}
+                  key={reaction.emoji}
                   onClick={() => {
                     reaction.onClick();
                     closeMenu();
@@ -93,9 +93,9 @@ export default function ContextMenu() {
 
           {/* Options */}
           <div className="flex flex-col py-1">
-            {options.map((option, idx) => (
+            {options.map((option) => (
               <button
-                key={idx}
+                key={option.label}
                 onClick={() => {
                   option.onClick();
                   closeMenu();

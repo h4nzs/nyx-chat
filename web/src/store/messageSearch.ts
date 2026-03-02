@@ -8,6 +8,7 @@ type State = {
   highlightedMessageId: string | null;
   searchQuery: string;
   isSearching: boolean;
+  currentSearchToken: string | null;
   
   // Actions
   searchMessages: (query: string, conversationId: string) => Promise<void>;
@@ -20,16 +21,18 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
   highlightedMessageId: null,
   searchQuery: '',
   isSearching: false,
+  currentSearchToken: null,
 
   searchMessages: async (query, conversationId) => {
-    set({ searchQuery: query, isSearching: true });
+    const token = crypto.randomUUID();
+    set({ searchQuery: query, isSearching: true, currentSearchToken: token });
     
     if (!query.trim()) {
       set({ searchResults: [], isSearching: false });
       return;
     }
 
-    const currentQuery = query; // Capture scope
+    const normalizedQuery = query.toLowerCase();
 
     try {
       // 1. Fetch raw encrypted records for this conversation
@@ -45,19 +48,19 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
         if (msg.isViewOnce) continue; // Skip phantom media
         
         const plainText = await decryptVaultText(msg.content);
-        if (plainText && plainText.toLowerCase().includes(currentQuery.toLowerCase())) {
+        if (plainText && plainText.toLowerCase().includes(normalizedQuery)) {
           // Reconstruct the message object with the decrypted text for the UI
           decryptedResults.push({ ...msg, content: plainText });
         }
       }
         
       // ONLY update if the query hasn't changed while we were decrypting
-      if (get().searchQuery === currentQuery) {
+      if (get().currentSearchToken === token) {
         set({ searchResults: decryptedResults, isSearching: false });
       }
     } catch (error) {
       console.error("Iron Vault Search failed:", error);
-      if (get().searchQuery === currentQuery) {
+      if (get().currentSearchToken === token) {
         set({ searchResults: [], isSearching: false });
       }
     }

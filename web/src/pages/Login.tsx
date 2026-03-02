@@ -108,7 +108,12 @@ export default function Login() {
                     const password = result.password;
                     if (!password) return;
                     try {
-                        const encryptedKeys = await getEncryptedKeys();                        const result = await retrievePrivateKeys(encryptedKeys!, password);
+                        const encryptedKeys = await getEncryptedKeys();
+                        if (!encryptedKeys) {
+                            toast.error('Keys not found');
+                            return;
+                        }
+                        const result = await retrievePrivateKeys(encryptedKeys, password);
                         if (result.success) {
                             const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } = await import("@lib/keyStorage");
                             await saveDeviceAutoUnlockKey(password);

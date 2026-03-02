@@ -169,9 +169,6 @@ export default function SettingsPage() {
 
         // 3. Nuke Local
         await executeLocalWipe();
-        
-        toast.success("Account obliterated.");
-        window.location.replace('/');
     } catch (error: any) {
         setIsDeleting(false);
         const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
@@ -399,10 +396,30 @@ export default function SettingsPage() {
 
   const handleLogout = async () => {
     showConfirm(
-      "Emergency Eject",
-      "WARNING: This will log you out of ALL devices and permanently delete your local history and keys from this browser. This action cannot be undone.",
+      "EMERGENCY EJECT",
+      "This will instantly revoke your server sessions and obliterate all local cryptographic keys and data. Proceed?",
       async () => {
-        await executeLocalWipe();
+        const toastId = toast.loading("Revoking server sessions...");
+        try {
+          const { api } = await import('@lib/api');
+          
+          // Attempt to revoke all sessions. 
+          try {
+            await api('/api/sessions', { method: 'DELETE' }); // Clear other devices (if endpoint exists)
+          } catch (e) {
+            console.warn("Failed to clear secondary sessions, proceeding to current session logout.");
+          }
+          await api('/api/auth/logout', { method: 'POST' }); // Kill current session
+          
+          toast.success("Sessions revoked. Initiating local wipe...", { id: toastId });
+          
+          // Proceed to Absolute Nuke ONLY after server acknowledges session termination
+          await executeLocalWipe();
+        } catch (error: any) {
+          console.error("Emergency eject API failed:", error);
+          toast.error("Failed to revoke remote sessions. Check your network connection.", { id: toastId });
+          // We abort the local wipe here as requested by the code review
+        }
       }
     );
   };

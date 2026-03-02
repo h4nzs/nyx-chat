@@ -1082,6 +1082,7 @@ self.onmessage = async (event: MessageEvent) => {
                       // At this point, we only know its DH value, we don't have its EPK context because we are moving PAST it.
                       // The main logic in crypto.ts will use .epk || .dh, so if epk is undefined it just falls back to dh.
                       skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
+                      sodium.memzero(mk);
                       state.Nr += 1;
                    }
                 }
@@ -1123,6 +1124,7 @@ self.onmessage = async (event: MessageEvent) => {
                 sodium.memzero(state.CKr);
                 state.CKr = newCKr;
                 skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
+                sodium.memzero(mk);
                 state.Nr += 1;
             }
             

@@ -118,7 +118,7 @@ const AppContent = () => {
     toasts
       .filter((t) => t.visible) // Only consider visible toasts
       .filter((_, i) => i >= MAX_TOASTS) // Get toasts beyond the limit
-      .forEach((t) => toast.dismiss(t.id)); // Dismiss them
+      .forEach((t) => { toast.dismiss(t.id); }); // Dismiss them
   }, [toasts]);
 
   useEffect(() => {
