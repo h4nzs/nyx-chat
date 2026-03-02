@@ -63,10 +63,10 @@ router.get('/:conversationId', async (req, res, next) => {
 })
 
 // GET Context (Surrounding Messages)
-router.get('/context/:id', async (req, res, next) => {
+router.get('/context/:id', requireAuth, async (req, res, next) => {
   try {
     const targetId = req.params.id;
-    
+
     // Get the target message first to find its timestamp and conversationId
     const targetMsg = await prisma.message.findUnique({
       where: { id: targetId },
