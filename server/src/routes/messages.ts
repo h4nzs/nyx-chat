@@ -70,7 +70,7 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
     // Get the target message first to find its timestamp and conversationId
     const targetMsg = await prisma.message.findUnique({
       where: { id: targetId },
-      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
     });
 
     if (!targetMsg) {
@@ -88,7 +88,7 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
       where: { conversationId: targetMsg.conversationId, createdAt: { lt: targetMsg.createdAt, gte: participation.joinedAt } },
       orderBy: { createdAt: 'desc' },
       take: 20,
-      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
     });
 
     // Fetch newer messages (after target)
@@ -96,7 +96,7 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
       where: { conversationId: targetMsg.conversationId, createdAt: { gt: targetMsg.createdAt, gte: participation.joinedAt } },
       orderBy: { createdAt: 'asc' },
       take: 20,
-      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
     });
 
     // Combine and sort chronologically

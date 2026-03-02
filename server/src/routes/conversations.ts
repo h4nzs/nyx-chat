@@ -36,10 +36,14 @@ router.get('/', async (req, res, next) => {
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          include: { sender: true }
+          include: {
+            sender: {
+              select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true }
+            }
+          }
         },
         creator: {
-          select: { id: true, username: true, displayName: true, avatarUrl: true, publicKey: true, signingKey: true, encryptedProfile: true }
+          select: { id: true, publicKey: true, signingKey: true, encryptedProfile: true }
         }
       },
       orderBy: {
@@ -228,7 +232,7 @@ router.get('/:id', async (req, res, next) => {
             role: true
           }
         },
-        creator: { select: { id: true, username: true, displayName: true, avatarUrl: true, publicKey: true, signingKey: true, encryptedProfile: true } }
+        creator: { select: { id: true, publicKey: true, signingKey: true, encryptedProfile: true } }
       }
     })
 
