@@ -349,7 +349,7 @@ export function registerSocket(httpServer: HttpServer) {
          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
       }
 
-      const { conversationId, content, sessionId, tempId, expiresAt } = message;
+      const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce } = message as any;
 
       if (!content || typeof content !== 'string' || content.length > 10000) {
         return callback?.({ ok: false, error: "Invalid message content." });
@@ -370,7 +370,8 @@ export function registerSocket(httpServer: HttpServer) {
               senderId: userId, 
               content, 
               sessionId,
-              expiresAt: expiresAt ? new Date(expiresAt) : null // Save expiration
+              expiresAt: expiresAt ? new Date(expiresAt) : null, // Save expiration
+              isViewOnce: isViewOnce === true
           },
           include: { sender: { select: { id: true, encryptedProfile: true } } }
         });

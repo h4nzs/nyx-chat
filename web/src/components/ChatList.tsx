@@ -157,7 +157,15 @@ const ConversationItem = memo(({
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }, []);
 
-  const previewText = conversation.lastMessage?.content || conversation.lastMessage?.preview || 'No messages yet';
+  const renderPreviewText = () => {
+    if (!conversation.lastMessage) return 'No messages yet';
+    if (conversation.lastMessage.isViewOnce) {
+        return conversation.lastMessage.isViewed ? '🔒 Opened' : '📸 View Once Message';
+    }
+    return conversation.lastMessage.content || conversation.lastMessage.preview || 'No messages yet';
+  };
+
+  const previewText = renderPreviewText();
 
   const handleContextMenu = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
