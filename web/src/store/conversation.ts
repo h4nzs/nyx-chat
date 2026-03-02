@@ -184,6 +184,18 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   loadConversations: async () => {
+    // THE DISGUISE
+    if (sessionStorage.getItem('nyx_decoy_mode') === 'true') {
+      const dummyConvo = {
+         id: 'decoy-1', isGroup: false, unreadCount: 0,
+         participants: [{ id: 'bot-1', username: 'system_bot', displayName: 'NYX Service', avatarUrl: null }],
+         createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+         lastMessage: { id: 'msg-1', content: 'Welcome to NYX. No active chats found.', senderId: 'bot-1', createdAt: new Date().toISOString(), conversationId: 'decoy-1', type: 'SYSTEM' }
+      };
+      set({ conversations: [dummyConvo as any], loading: false, initialLoadCompleted: true });
+      return;
+    }
+
     let shouldProceed = false;
     set(state => {
       if (state.loading) return state;

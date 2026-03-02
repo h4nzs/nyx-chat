@@ -103,3 +103,33 @@ export async function unlockWithBiometric(options: any): Promise<{ authResp: any
 
   return { authResp: asseResp, recoveryPhrase };
 }
+
+import { getSodium } from './sodiumInitializer';
+
+// --- DECOY VAULT LOGIC (ADDED) ---
+export const setupDecoyPin = async (pin: string) => {
+  const sodium = await getSodium();
+  const salt = sodium.randombytes_buf(16);
+  const hash = sodium.crypto_pwhash(
+    sodium.crypto_pwhash_BYTES_MAX, pin, salt,
+    sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE, sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE, sodium.crypto_pwhash_ALG_ARGON2ID13
+  );
+  localStorage.setItem('decoy_pin_hash', sodium.to_hex(hash));
+  localStorage.setItem('decoy_pin_salt', sodium.to_hex(salt));
+};
+
+export const verifyDecoyPin = async (pin: string): Promise<boolean> => {
+  const decoyHashHex = localStorage.getItem('decoy_pin_hash');
+  const decoySaltHex = localStorage.getItem('decoy_pin_salt');
+  if (decoyHashHex && decoySaltHex) {
+    const sodium = await getSodium();
+    const salt = sodium.from_hex(decoySaltHex);
+    const expectedHash = sodium.from_hex(decoyHashHex);
+    const hash = sodium.crypto_pwhash(
+      sodium.crypto_pwhash_BYTES_MAX, pin, salt,
+      sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE, sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE, sodium.crypto_pwhash_ALG_ARGON2ID13
+    );
+    return sodium.memcmp(hash, expectedHash);
+  }
+  return false;
+};

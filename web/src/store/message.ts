@@ -472,6 +472,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const { user, hasRestoredKeys } = useAuthStore.getState();
     if (!user) return;
 
+    // FAKE SEND FOR DECOY
+    if (sessionStorage.getItem('nyx_decoy_mode') === 'true') {
+        const actualTempId = tempId !== undefined ? tempId : Date.now();
+        const msg = {
+            id: `temp_${actualTempId}`, tempId: actualTempId, optimistic: true,
+            content: data.content, senderId: user.id, sender: user,
+            createdAt: new Date().toISOString(), conversationId, status: 'SENT'
+        } as Message;
+        get().addOptimisticMessage(conversationId, msg);
+        return;
+    }
+
     if (!hasRestoredKeys) {
       toast.error("You must restore your keys from your recovery phrase before you can send messages.");
       return;
@@ -831,6 +843,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   loadMessagesForConversation: async (id) => {
+    // THE DISGUISE
+    if (sessionStorage.getItem('nyx_decoy_mode') === 'true') {
+       set(state => ({
+          messages: { ...state.messages, [id]: [{ id: 'msg-1', content: 'Welcome to NYX. No active chats found.', senderId: 'bot-1', createdAt: new Date().toISOString(), conversationId: id, type: 'SYSTEM' } as Message] },
+          hasMore: { ...state.hasMore, [id]: false },
+          hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
+       }));
+       return;
+    }
+
     const { hasRestoredKeys } = useAuthStore.getState();
     if (get().hasLoadedHistory[id]) return;
 
