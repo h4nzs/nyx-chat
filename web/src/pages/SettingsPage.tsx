@@ -405,7 +405,7 @@ export default function SettingsPage() {
           
           // Attempt to revoke all sessions. 
           try {
-            await api('/api/auth/logout-all', { method: 'DELETE' }); // Clear other devices (if endpoint exists)
+            await api('/api/auth/logout-all', { method: 'POST' }); // Clear other devices (if endpoint exists)
           } catch (e) {
             console.warn("Failed to clear secondary sessions, proceeding to current session logout.");
           }
