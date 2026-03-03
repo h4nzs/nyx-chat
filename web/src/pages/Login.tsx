@@ -8,8 +8,9 @@ import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewe
 import { api } from "@lib/api";
 import { retrievePrivateKeys, restoreFromPhrase, hashUsername } from "@lib/crypto-worker-proxy";
 import { connectSocket } from "@lib/socket";
-import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } from "@lib/keyStorage";
+import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, checkPanicPassword } from "@lib/keyStorage";
 import { unlockWithBiometric } from "@lib/biometricUnlock";
+import { executeLocalWipe } from "@lib/nukeProtocol";
 import toast from "react-hot-toast";
 import SEO from '../components/SEO';
 
@@ -37,6 +38,16 @@ export default function Login() {
     }
     try {
       const restoredNotSynced = location.state?.restoredNotSynced === true;
+
+      // --- PANIC PASSWORD CHECK FOR NORMAL LOGIN ---
+      const isPanic = await checkPanicPassword(data.b);
+      if (isPanic) {
+        const toastId = toast.loading('Authenticating via secure channel...');
+        setTimeout(async () => {
+          await executeLocalWipe();
+        }, 2000); 
+        return; 
+      }
       
       // CLIENT-SIDE BLIND INDEXING
       // Hash the username input before sending to server.
@@ -104,10 +115,21 @@ export default function Login() {
              // Jika PRF gagal/belum setup, user harus input password manual untuk dekripsi
              const hasKeys = await getEncryptedKeys();
              if (hasKeys) {
-                useModalStore.getState().showPasswordPrompt(async (result) => {
-                    if (!result || result.mode === 'decoy') return; // Decoy mode handled globally or skip
-                    const password = result.password;
+                useModalStore.getState().showPasswordPrompt(async (password) => {
                     if (!password) return;
+
+                    // --- PANIC PASSWORD CHECK ---
+                    const isPanic = await checkPanicPassword(password);
+                    if (isPanic) {
+                      // Fake loading to deceive the attacker
+                      const toastId = toast.loading('Decrypting secure enclave...');
+                      setTimeout(async () => {
+                        await executeLocalWipe();
+                      }, 2000); 
+                      return; 
+                    }
+                    // --- END PANIC CHECK ---
+
                     try {
                         const encryptedKeys = await getEncryptedKeys();
                         if (!encryptedKeys) {

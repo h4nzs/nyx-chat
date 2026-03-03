@@ -23,8 +23,8 @@ import { useProfileStore } from '@store/profile';
 import { generateProfileKey, encryptProfile, minePoW, getRecoveryPhrase } from '@lib/crypto-worker-proxy';
 import ModalBase from '../components/ui/ModalBase';
 import { useSettingsStore } from '@store/settings';
-import { setupBiometricUnlock, setupDecoyPin } from '@lib/biometricUnlock';
-import { getDeviceAutoUnlockKey, getEncryptedKeys } from '@lib/keyStorage';
+import { setupBiometricUnlock } from '@lib/biometricUnlock';
+import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib/keyStorage';
 import { useMessageStore } from '@store/message';
 
 /* --- MICRO-COMPONENTS --- */
@@ -137,7 +137,7 @@ export default function SettingsPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [miningStatus, setMiningStatus] = useState<'idle' | 'mining' | 'verifying'>('idle');
   const [hasBioVault, setHasBioVault] = useState(false);
-  const [decoyPin, setDecoyPin] = useState('');
+  const [panicPass, setPanicPass] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vaultInputRef = useRef<HTMLInputElement>(null);
@@ -169,6 +169,9 @@ export default function SettingsPage() {
 
         // 3. Nuke Local
         await executeLocalWipe();
+        
+        toast.success("Account obliterated.");
+        window.location.replace('/');
     } catch (error: any) {
         setIsDeleting(false);
         const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
@@ -266,9 +269,7 @@ export default function SettingsPage() {
       // Jika gagal otomatis, minta user input password (DEMI KEAMANAN MAKSIMAL)
       if (!phraseToLock) {
           await new Promise<void>((resolve, reject) => {
-              useModalStore.getState().showPasswordPrompt(async (result) => {
-                  if (!result || result.mode === 'decoy') { reject(new Error("Password required to enable biometric unlock.")); return; }
-                  const password = result.password;
+              useModalStore.getState().showPasswordPrompt(async (password) => {
                   if (!password) { reject(new Error("Password required to enable biometric unlock.")); return; }
                   try {
                       const encKeys = await getEncryptedKeys();
@@ -405,7 +406,7 @@ export default function SettingsPage() {
           
           // Attempt to revoke all sessions. 
           try {
-            await api('/api/auth/logout-all', { method: 'POST' }); // Clear other devices (if endpoint exists)
+            await api('/api/sessions', { method: 'DELETE' }); // Clear other devices (if endpoint exists)
           } catch (e) {
             console.warn("Failed to clear secondary sessions, proceeding to current session logout.");
           }
@@ -674,36 +675,34 @@ export default function SettingsPage() {
                 <div className={`w-2 h-2 rounded-full shadow-[0_0_5px] ${hasBioVault ? 'bg-green-500 shadow-green-500' : 'bg-gray-500 shadow-transparent'}`}></div>
               </button>
 
-            {/* DECOY VAULT SETTINGS */}
+            {/* PANIC PASSWORD */}
             <div className="pt-4 border-t border-white/5 space-y-3 mt-4">
               <div>
                 <h4 className="text-sm font-bold text-text-primary flex items-center gap-2">
-                  <FiShield className="text-accent" /> Decoy Vault (Panic PIN)
+                  <FiShield className="text-red-500" /> Panic Password
                 </h4>
                 <p className="text-xs text-text-secondary mt-1">
-                  Set a fake PIN. Entering this at the lock screen will unlock a blank "amnesia" version of the app.
+                  If forced to unlock your device, entering this password on the login screen will silently obliterate all local data.
                 </p>
               </div>
               <div className="flex gap-2">
                  <input 
                    type="password" 
-                   value={decoyPin} 
-                   onChange={e => setDecoyPin(e.target.value)} 
-                   placeholder="Enter fake PIN" 
-                   className="bg-bg-main border border-white/10 rounded-lg px-4 py-2 text-sm text-text-primary focus:ring-accent flex-1 outline-none" 
-                   maxLength={8} 
+                   value={panicPass} 
+                   onChange={e => setPanicPass(e.target.value)} 
+                   placeholder="Enter Panic Password" 
+                   className="bg-bg-main border border-white/10 rounded-lg px-4 py-2 text-sm text-text-primary focus:ring-red-500/50 flex-1 outline-none" 
                  />
                  <button 
                    type="button"
                    onClick={async () => { 
-                     if(decoyPin.length < 4) { toast.error("PIN too short"); return; }
-                     await setupDecoyPin(decoyPin); 
-                     toast.success('Decoy PIN saved!'); 
-                     setDecoyPin(''); 
+                     await setPanicPassword(panicPass); 
+                     toast.success('Panic Password updated.'); 
+                     setPanicPass(''); 
                    }} 
-                   className="px-4 py-2 bg-accent/20 text-accent rounded-lg text-sm font-bold hover:bg-accent hover:text-white transition-colors"
+                   className="px-4 py-2 bg-red-500/20 text-red-500 rounded-lg text-sm font-bold hover:bg-red-500 hover:text-white transition-colors"
                  >
-                   Save
+                   Set
                  </button>
               </div>
             </div>

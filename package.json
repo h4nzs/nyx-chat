@@ -15,6 +15,10 @@
       "tar": ">=7.5.8",
       "bn.js": ">=5.2.3",
       "qs": ">=6.14.2"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "puppeteer",
+      "supabase"
+    ]
   }
 }

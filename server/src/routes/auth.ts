@@ -246,7 +246,7 @@ router.post('/refresh', async (req, res, next) => {
       }
     })
     if (!user) throw new ApiError(401, 'User not found')
-    
+
     if (user.bannedAt) {
       throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
     }
