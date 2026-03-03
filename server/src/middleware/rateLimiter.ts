@@ -29,6 +29,7 @@ export const generalLimiter = rateLimit({
     error: 'Too many requests, please try again later.'
   },
   store: new RedisStore({
+    prefix: 'rl:general:',
     sendCommand: (...args: string[]) => redisClient.sendCommand(args)
   })
 })
@@ -47,6 +48,7 @@ export const authLimiter = rateLimit({
     error: 'Too many login attempts. Please try again after an hour.'
   },
   store: new RedisStore({
+    prefix: 'rl:auth:',
     sendCommand: (...args: string[]) => redisClient.sendCommand(args)
   })
 })
@@ -63,6 +65,7 @@ export const uploadLimiter = rateLimit({
     error: 'Upload limit reached. Please wait a while.'
   },
   store: new RedisStore({
+    prefix: 'rl:upload:',
     sendCommand: (...args: string[]) => redisClient.sendCommand(args)
   })
 })
@@ -81,6 +84,7 @@ export const otpLimiter = rateLimit({
     error: 'Too many OTP verification attempts. Please try again later.'
   },
   store: new RedisStore({
+    prefix: 'rl:otp:',
     sendCommand: (...args: string[]) => redisClient.sendCommand(args)
   })
 })
