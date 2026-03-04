@@ -1,0 +1,37 @@
+version: 2
+updates:
+  # Maintain dependencies for the Frontend (Web)
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+    open-pull-requests-limit: 5
+    groups:
+      frontend-updates:
+        patterns:
+          - "*" # Group all frontend updates into one PR
+        exclude-patterns:
+          - "libsodium-wrappers" # Never auto-update core crypto
+
+  # Maintain dependencies for the Backend (Server)
+  - package-ecosystem: "npm"
+    directory: "/server"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+    open-pull-requests-limit: 5
+    groups:
+      backend-updates:
+        patterns:
+          - "*" # Group all backend updates into one PR
+        exclude-patterns:
+          - "libsodium-wrappers" # Never auto-update core crypto
+          - "prisma" # Manually handle Prisma major updates
+          - "@prisma/*"
+
+  # Maintain GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
