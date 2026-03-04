@@ -7,25 +7,26 @@
   --breakpoint-xl: 1280px;
   --breakpoint-2xl: 1920px;
 
-  /* Colors */
-  --color-border: hsl(var(--border) / <alpha-value>);
-  --color-ring: hsl(var(--ring) / <alpha-value>);
-  --color-background: hsl(var(--bg-main) / <alpha-value>);
-  --color-foreground: hsl(var(--text-primary) / <alpha-value>);
+  /* Colors - In v4, we reference the variables directly. 
+     Tailwind v4 handles opacity automatically when using variables that resolve to colors. */
+  --color-border: hsl(var(--border));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--bg-main));
+  --color-foreground: hsl(var(--text-primary));
 
-  --color-primary: hsl(var(--primary) / <alpha-value>);
-  --color-primary-foreground: hsl(var(--primary-foreground) / <alpha-value>);
-  --color-secondary: hsl(var(--secondary) / <alpha-value>);
-  --color-secondary-foreground: hsl(var(--secondary-foreground) / <alpha-value>);
-  --color-destructive: hsl(var(--destructive) / <alpha-value>);
-  --color-destructive-foreground: hsl(var(--destructive-foreground) / <alpha-value>);
-  --color-accent: hsl(var(--accent) / <alpha-value>);
-  --color-accent-foreground: hsl(var(--accent-foreground) / <alpha-value>);
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
 
-  --color-bg-main: hsl(var(--bg-main) / <alpha-value>);
-  --color-bg-surface: hsl(var(--bg-surface) / <alpha-value>);
-  --color-text-primary: hsl(var(--text-primary) / <alpha-value>);
-  --color-text-secondary: hsl(var(--text-secondary) / <alpha-value>);
+  --color-bg-main: hsl(var(--bg-main));
+  --color-bg-surface: hsl(var(--bg-surface));
+  --color-text-primary: hsl(var(--text-primary));
+  --color-text-secondary: hsl(var(--text-secondary));
 
   --color-neu-base: #e0e5ec;
   --color-neu-dark: #1a1b1e;
@@ -189,7 +190,7 @@
   }
   .light[data-accent='blue'] {
     --accent: 217 91% 60%;
-    --accent-foreground: 222 47% 11%; /* FIX: Dark text for better contrast */
+    --accent-foreground: 222 47% 11%;
   }
 
   /* Green */
@@ -209,7 +210,7 @@
   }
   .light[data-accent='purple'] {
     --accent: 262 80% 64%;
-    --accent-foreground: 222 47% 11%; /* FIX: Dark text for better contrast */
+    --accent-foreground: 222 47% 11%;
   }
 
   /* Orange */
@@ -219,7 +220,7 @@
   }
   .light[data-accent='orange'] {
     --accent: 25 95% 53%;
-    --accent-foreground: 222 47% 11%; /* Dark text for light mode orange */
+    --accent-foreground: 222 47% 11%;
   }
 
   /* Red */

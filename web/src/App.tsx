@@ -183,7 +183,6 @@ const AppContent = () => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(theme);
-    root.style.setProperty('--color-accent', `var(--accent-${accent})`);
     root.dataset.accent = accent;
   }, [theme, accent]);
 
