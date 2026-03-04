@@ -13,6 +13,7 @@ import { usePresenceStore } from "@store/presence";
 import useDynamicIslandStore from "@store/dynamicIsland";
 import { toAbsoluteUrl } from "@utils/url";
 import { useModalStore } from "@store/modal";
+import { useShallow } from 'zustand/react/shallow';
 import SearchMessages from './SearchMessages';
 import Lightbox from "./Lightbox";
 import GroupInfoPanel from './GroupInfoPanel';
@@ -58,7 +59,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const user = useAuthStore((s) => s.user);
   const meId = user?.id;
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
-  const { openProfileModal, openChatInfoModal } = useModalStore(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal }));
+  const { openProfileModal, openChatInfoModal } = useModalStore(useShallow(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal })));
   const { verifiedStatus } = useVerificationStore();
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;

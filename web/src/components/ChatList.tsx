@@ -9,6 +9,7 @@ import { useUserProfile } from '@hooks/useUserProfile';
 import { useModalStore } from '@store/modal';
 import { useCommandPaletteStore } from '@store/commandPalette';
 import { useAuthStore } from '@store/auth';
+import { useShallow } from 'zustand/react/shallow';
 
 import type { User } from '@store/auth';
 import type { Conversation } from '@store/conversation';
@@ -26,8 +27,8 @@ import { useContextMenuStore } from '../store/contextMenu';
 // --- Sub-components ---
 
 const UserProfile = memo(() => {
-  const { user, logout } = useAuthStore(state => ({ user: state.user, logout: state.logout }));
-  const { showConfirm: confirmLogout } = useModalStore(state => ({ showConfirm: state.showConfirm }));
+  const { user, logout } = useAuthStore(useShallow(state => ({ user: state.user, logout: state.logout })));
+  const { showConfirm: confirmLogout } = useModalStore(useShallow(state => ({ showConfirm: state.showConfirm })));
   const profile = useUserProfile(user);
 
   const handleLogout = useCallback(() => {

@@ -461,7 +461,8 @@ router.post('/:id/read', async (req, res, next) => {
   }
 })
 
-// GET media for a conversation
+// GET media for a conversation (LEGACY - Disabled due to Blind Attachments)
+/*
 router.get('/:id/media', requireAuth, async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
@@ -497,6 +498,7 @@ router.get('/:id/media', requireAuth, async (req, res, next) => {
     next(error)
   }
 })
+*/
 
 // Record key rotation event
 router.post('/:id/key-rotation', async (req, res, next) => {

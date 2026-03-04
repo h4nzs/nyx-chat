@@ -1,22 +1,23 @@
-import { createRequire } from 'module'
+import { PrismaClient } from '@prisma/client';
+import { Pool } from 'pg';
+import { PrismaPg } from '@prisma/adapter-pg';
 
-// Import type saja agar TypeScript tidak error, tapi tidak dieksekusi saat runtime
-import type { PrismaClient as PrismaClientType } from '@prisma/client'
+const connectionString = process.env.DATABASE_URL;
 
-const require = createRequire(import.meta.url)
-
-// Gunakan require untuk mengambil PrismaClient (Bypass ESM restriction)
-const { PrismaClient } = require('@prisma/client')
-
-// Deklarasi Global Type
-declare global {
-  var prisma: PrismaClientType | undefined
+if (!connectionString) {
+  throw new Error('DATABASE_URL is not defined in the environment variables.');
 }
 
-const prisma = global.prisma || new PrismaClient()
+// Setup the PostgreSQL connection pool
+const pool = new Pool({ connectionString });
 
-if (process.env.NODE_ENV !== 'production') {
-  global.prisma = prisma
-}
+// Instantiate the Prisma adapter
+const adapter = new PrismaPg(pool);
 
-export { prisma }
+// Pass the adapter to the PrismaClient
+export const prisma = new PrismaClient({
+  adapter,
+  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+});
+
+export default prisma;

@@ -42,7 +42,7 @@ vi.mock('@lib/sodiumInitializer', () => ({
 describe('useAuthStore', () => {
   beforeEach(() => {
     // Reset the store and mocks before each test
-    useAuthStore.setState({ user: null, isBootstrapping: true }, true);
+    useAuthStore.setState({ user: null, isBootstrapping: true });
     localStorage.clear();
     vi.clearAllMocks();
   });

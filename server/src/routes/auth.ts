@@ -480,7 +480,7 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) => 
       rpName,
       rpID,
       userID: new Uint8Array(Buffer.from(req.user.id)),
-      userName: user?.name || "Anonymous User", 
+      userName: user?.usernameHash || "Anonymous User", 
       attestationType: 'none',
       excludeCredentials,
       authenticatorSelection: {
