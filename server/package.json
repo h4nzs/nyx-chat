@@ -30,7 +30,7 @@
     "argon2": "^0.44.0",
     "cookie": "^1.1.1",
     "cookie-parser": "^1.4.6",
-    "cors": "^2.8.5",
+    "cors": "^2.8.6",
     "csrf-csrf": "^4.0.3",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
@@ -48,7 +48,7 @@
     "rate-limit-redis": "^4.3.1",
     "redis": "^5.11.0",
     "resend": "^6.9.3",
-    "socket.io": "^4.7.5",
+    "socket.io": "^4.8.3",
     "supabase": "^2.76.16",
     "ua-parser-js": "^2.0.9",
     "web-push": "^3.6.7",
@@ -79,8 +79,8 @@
     "jest": "^30.2.0",
     "prisma": "^7.4.2",
     "prisma-erd-generator": "^2.4.2",
-    "supertest": "^7.0.0",
-    "tsx": "^4.20.5",
+    "supertest": "^7.2.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.4.5"
   }
 }
