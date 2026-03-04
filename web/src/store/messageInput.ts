@@ -17,11 +17,13 @@ type State = {
   expiresIn: number | null;
   isViewOnce: boolean;
   stagedFiles: File[];
+  isHD: boolean;
 
   // Actions
   setReplyingTo: (message: Message | null) => void;
   setExpiresIn: (seconds: number | null) => void;
   setIsViewOnce: (value: boolean) => void;
+  setIsHD: (value: boolean) => void;
   fetchTypingLinkPreview: (text: string) => void;
   clearTypingLinkPreview: () => void;
   addStagedFiles: (files: File[]) => void;
@@ -61,10 +63,12 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   expiresIn: null,
   isViewOnce: false,
   stagedFiles: [],
+  isHD: false,
 
   setReplyingTo: (message) => set({ replyingTo: message }),
   setExpiresIn: (seconds) => set({ expiresIn: seconds }),
   setIsViewOnce: (value) => set({ isViewOnce: value }),
+  setIsHD: (value) => set({ isHD: value }),
   addStagedFiles: (files) => set((state) => ({ stagedFiles: [...state.stagedFiles, ...files] })),
   removeStagedFile: (index) => set((state) => ({ stagedFiles: state.stagedFiles.filter((_, i) => i !== index) })),
   clearStagedFiles: () => set({ stagedFiles: [] }),
@@ -112,7 +116,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Processing ${file.name}...`, progress: 0 };
     const activityId = addActivity(activity);
-    const { replyingTo, expiresIn, isViewOnce } = get();
+    const { replyingTo, expiresIn, isViewOnce, isHD } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     if (!me) {
@@ -150,13 +154,13 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       isViewOnce,
     };
     addOptimisticMessage(conversationId, optimisticMessage);
-    set({ replyingTo: null, isViewOnce: false });
+    set({ replyingTo: null, isViewOnce: false, isHD: false });
 
     try {
       let fileToProcess = file;
       if (file.type.startsWith('image/')) {
         updateActivity(activityId, { progress: 10, fileName: `Compressing ${file.name}...` });
-        try { fileToProcess = await compressImage(file); } catch (e) {}
+        try { fileToProcess = await compressImage(file, isHD); } catch (e) {}
       }
 
       updateActivity(activityId, { progress: 25, fileName: `Encrypting ${file.name}...` });

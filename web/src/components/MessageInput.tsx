@@ -97,11 +97,13 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const { 
     typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, 
     expiresIn, setExpiresIn, isViewOnce, setIsViewOnce,
-    stagedFiles, addStagedFiles, removeStagedFile, clearStagedFiles 
+    stagedFiles, addStagedFiles, removeStagedFile, clearStagedFiles,
+    isHD, setIsHD
   } = useMessageInputStore(useShallow(s => ({
     typingLinkPreview: s.typingLinkPreview, fetchTypingLinkPreview: s.fetchTypingLinkPreview, clearTypingLinkPreview: s.clearTypingLinkPreview, 
     expiresIn: s.expiresIn, setExpiresIn: s.setExpiresIn, isViewOnce: s.isViewOnce, setIsViewOnce: s.setIsViewOnce,
-    stagedFiles: s.stagedFiles, addStagedFiles: s.addStagedFiles, removeStagedFile: s.removeStagedFile, clearStagedFiles: s.clearStagedFiles
+    stagedFiles: s.stagedFiles, addStagedFiles: s.addStagedFiles, removeStagedFile: s.removeStagedFile, clearStagedFiles: s.clearStagedFiles,
+    isHD: s.isHD, setIsHD: s.setIsHD
   })));
   const { status: connectionStatus } = useConnectionStore(useShallow(s => ({ status: s.status })));
   const blockedUserIds = useAuthStore(state => state.blockedUserIds);
@@ -198,6 +200,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
     if (hasText) {
       onSend({ content: text });
       setText('');
+      setIsHD(false);
     }
     
     clearTypingLinkPreview();
@@ -380,6 +383,13 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
             <span>View Once</span>
           </button>
           <button
+            onClick={() => { setIsHD(!isHD); setShowPlusMenu(false); }}
+            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary font-bold"
+          >
+            <span className={isHD ? "text-accent" : "text-text-secondary"}>HD</span>
+            <span>{isHD ? "HD Quality: ON" : "Standard Quality"}</span>
+          </button>
+          <button
             onClick={() => { setShowEmojiPicker(true); setShowPlusMenu(false); }}
             className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
           >
@@ -482,6 +492,18 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               )}
             >
               <FiEye size={18} />
+            </button>
+            <button 
+              type="button" 
+              onClick={() => setIsHD(!isHD)} 
+              disabled={isInputDisabled}
+              aria-label="Toggle HD Quality"
+              className={clsx(
+                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center justify-center",
+                isHD ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent"
+              )}
+            >
+              HD
             </button>
             <button 
               type="button" 

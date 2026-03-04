@@ -26,15 +26,18 @@ export function isAudioFile(filename: string): boolean {
   return ["mp3", "wav", "ogg"].includes(ext)
 }
 
-export async function compressImage(file: File): Promise<File> {
+export async function compressImage(file: File, isHD: boolean = false): Promise<File> {
   // Skip kalau bukan gambar
   if (!file.type.startsWith('image/')) return file;
-  // Skip kalau file kecil (< 1MB)
-  if (file.size < 1024 * 1024) return file;
+  
+  // If HD mode is enabled, only compress absurdly large files (e.g., > 10MB)
+  if (isHD && file.size < 10 * 1024 * 1024) return file;
+  // If Standard mode, skip if already small (< 1MB)
+  if (!isHD && file.size < 1024 * 1024) return file;
 
   const options = {
-    maxSizeMB: 1,          // Target maksimal 1MB
-    maxWidthOrHeight: 1920, // Resize kalau resolusi kegedean (4K turun ke FHD)
+    maxSizeMB: isHD ? 10 : 1,          // Target maksimal: HD 10MB, Std 1MB
+    maxWidthOrHeight: isHD ? 4000 : 1920, // Resize kalau resolusi kegedean (HD 4K, Std FHD)
     useWebWorker: true,    // Biar UI gak nge-freeze
   };
 
