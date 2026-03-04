@@ -166,7 +166,7 @@ const ConversationItem = memo(({
   const isPinnedByMe = Boolean(conversation.participants?.some(p => p.id === meId && p.isPinned));
   const openMenu = useContextMenuStore(s => s.openMenu);
   
-  const cloakClass = privacyCloak ? "blur-[6px] opacity-70 hover:blur-none hover:opacity-100 active:blur-none active:opacity-100 transition-all duration-300 select-none" : "";
+  const cloakClass = privacyCloak ? "blur-[6px] opacity-70 group-hover:blur-none group-hover:opacity-100 group-active:blur-none group-active:opacity-100 transition-all duration-300 select-none" : "";
 
   const avatarSrc = conversation.isGroup 
     ? (conversation.avatarUrl ? `${toAbsoluteUrl(conversation.avatarUrl)}?t=${conversation.lastUpdated}` : `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`)

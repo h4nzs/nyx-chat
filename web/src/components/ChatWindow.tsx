@@ -27,6 +27,7 @@ import MessageSkeleton from './MessageSkeleton';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
 import { startCall } from '@lib/webrtc';
+import { useSettingsStore } from '@store/settings';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -61,6 +62,9 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
   const { openProfileModal, openChatInfoModal } = useModalStore(useShallow(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal })));
   const { verifiedStatus } = useVerificationStore();
+  const privacyCloak = useSettingsStore(s => s.privacyCloak);
+  
+  const cloakClass = privacyCloak ? "blur-[6px] opacity-70 group-hover:blur-none group-hover:opacity-100 group-active:blur-none group-active:opacity-100 transition-all duration-300 select-none" : "";
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
   const peerProfile = useUserProfile(peerUser as any);
@@ -131,7 +135,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
                 <img
                   src={toAbsoluteUrl(avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${title}`}
                   alt="ID"
-                  className="w-full h-full rounded-full object-cover"
+                  className={clsx("w-full h-full rounded-full object-cover", cloakClass)}
                 />
              </div>
              {isOnline && <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-bg-surface shadow-sm"></div>}
@@ -139,7 +143,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
           
           <div className="text-left">
             <div className="flex items-center gap-2">
-              <p className="font-bold text-text-primary text-sm group-hover:text-accent transition-colors">{title}</p>
+              <p className={clsx("font-bold text-text-primary text-sm group-hover:text-accent transition-colors", cloakClass)}>{title}</p>
               {isConvVerified && <FiShield className="text-accent w-3 h-3" />}
             </div>
             <p className="text-xs text-text-secondary opacity-70">
