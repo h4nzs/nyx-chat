@@ -2,9 +2,12 @@
 import { useState, useEffect } from 'react';
 import { useModalStore } from '@store/modal';
 import { useKeychainStore } from '@store/keychain';
+import { useShallow } from 'zustand/react/shallow';
 
 export default function PasswordPromptModal() {
-  const { isPasswordPromptOpen, onPasswordSubmit, hidePasswordPrompt } = useModalStore();
+  const { isPasswordPromptOpen, onPasswordSubmit, hidePasswordPrompt } = useModalStore(useShallow(s => ({
+    isPasswordPromptOpen: s.isPasswordPromptOpen, onPasswordSubmit: s.onPasswordSubmit, hidePasswordPrompt: s.hidePasswordPrompt
+  })));
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');

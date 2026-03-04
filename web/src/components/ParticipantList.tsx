@@ -5,12 +5,15 @@ import { useState } from "react";
 import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import { useModalStore } from '@store/modal';
+import { useShallow } from 'zustand/react/shallow';
 import { useUserProfile } from "@hooks/useUserProfile";
 import { DecryptedProfile } from "@store/profile";
 
 const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: { conversationId: string, participant: Participant, profile: DecryptedProfile, amIAdmin: boolean }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const { user, blockUser, unblockUser, blockedUserIds } = useAuthStore();
+  const { user, blockUser, unblockUser, blockedUserIds } = useAuthStore(useShallow(s => ({
+    user: s.user, blockUser: s.blockUser, unblockUser: s.unblockUser, blockedUserIds: s.blockedUserIds
+  })));
   const showConfirm = useModalStore(s => s.showConfirm);
 
   if (user?.id === participant.id) {

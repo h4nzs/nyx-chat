@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/auth";
+import { useShallow } from 'zustand/react/shallow';
 import AuthForm from "../components/AuthForm";
 import RecoveryPhraseModal from "@components/RecoveryPhraseModal";
 import { Turnstile } from '@marsidev/react-turnstile';
@@ -22,7 +23,7 @@ export default function Register() {
   const [isVerifyingBio, setIsVerifyingBio] = useState(false);
 
   const navigate = useNavigate();
-  const { registerAndGeneratePhrase } = useAuthStore();
+  const { registerAndGeneratePhrase } = useAuthStore(useShallow(s => ({ registerAndGeneratePhrase: s.registerAndGeneratePhrase })));
 
   useEffect(() => {
     platformAuthenticatorIsAvailable().then(setIsBiometricsSupported);

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { useSettingsStore } from '../store/settings';
+import { useShallow } from 'zustand/react/shallow';
 
 interface SmartReplyProps {
   lastMessage: string | null;
@@ -9,7 +10,7 @@ interface SmartReplyProps {
 }
 
 export default function SmartReply({ lastMessage, isFromMe, onSelectReply }: SmartReplyProps) {
-  const { enableSmartReply } = useSettingsStore();
+  const { enableSmartReply } = useSettingsStore(useShallow(s => ({ enableSmartReply: s.enableSmartReply })));
   const [replies, setReplies] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
 

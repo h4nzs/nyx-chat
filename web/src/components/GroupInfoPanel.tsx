@@ -20,7 +20,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
   const { conversation } = useConversationStore(useShallow(state => ({
     conversation: state.conversations.find(c => c.id === conversationId),
   })));
-  const { user } = useAuthStore();
+  const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
 
   const [isEditing, setIsEditing] = useState(false);
   const [isAddParticipantModalOpen, setIsAddParticipantModalOpen] = useState(false);

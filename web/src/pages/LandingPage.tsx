@@ -7,6 +7,7 @@ import {
 import { motion, useMotionValue, useTransform, useInView } from 'framer-motion';
 import { useState, useRef, useEffect, ReactNode } from 'react';
 import { useThemeStore } from '@store/theme';
+import { useShallow } from 'zustand/react/shallow';
 import SEO from '../components/SEO';
 
 // --- Animation Variants ---
@@ -150,7 +151,7 @@ const comparisonData = [
 ];
 
 export default function LandingPage() {
-  const { theme } = useThemeStore();
+  const { theme } = useThemeStore(useShallow(s => ({ theme: s.theme })));
   const [grainOpacity, setGrainOpacity] = useState(0.05);
 
   useEffect(() => {

@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useContextMenuStore } from '../store/contextMenu';
+import { useShallow } from 'zustand/react/shallow';
 import clsx from 'clsx';
 
 export default function ContextMenu() {
-  const { isOpen, x, y, options, reactions, closeMenu } = useContextMenuStore();
+  const { isOpen, x, y, options, reactions, closeMenu } = useContextMenuStore(useShallow(s => ({
+    isOpen: s.isOpen, x: s.x, y: s.y, options: s.options, reactions: s.reactions, closeMenu: s.closeMenu
+  })));
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
 

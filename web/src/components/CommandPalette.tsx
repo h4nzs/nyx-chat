@@ -1,11 +1,14 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useCommandPaletteStore, Command } from '@store/commandPalette';
+import { useShallow } from 'zustand/react/shallow';
 import { FiSearch, FiTerminal, FiChevronRight } from 'react-icons/fi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useGlobalEscape } from '../hooks/useGlobalEscape';
 
 export default function CommandPalette() {
-  const { isOpen, close, commands } = useCommandPaletteStore();
+  const { isOpen, close, commands } = useCommandPaletteStore(useShallow(s => ({
+    isOpen: s.isOpen, close: s.close, commands: s.commands
+  })));
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);

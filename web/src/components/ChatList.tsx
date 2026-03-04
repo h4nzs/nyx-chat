@@ -350,7 +350,9 @@ export default function ChatList() {
 
   const [showGroupModal, setShowGroupModal] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
-  const { addCommands, removeCommands } = useCommandPaletteStore();
+  const { addCommands, removeCommands } = useCommandPaletteStore(useShallow(s => ({
+    addCommands: s.addCommands, removeCommands: s.removeCommands
+  })));
 
   const openCreateGroupModal = useCallback(() => setShowGroupModal(true), []);
 

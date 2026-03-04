@@ -94,8 +94,10 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const timerMenuRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   
-  const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, expiresIn, setExpiresIn, isViewOnce, setIsViewOnce } = useMessageInputStore();
-  const { status: connectionStatus } = useConnectionStore();
+  const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, expiresIn, setExpiresIn, isViewOnce, setIsViewOnce } = useMessageInputStore(useShallow(s => ({
+    typingLinkPreview: s.typingLinkPreview, fetchTypingLinkPreview: s.fetchTypingLinkPreview, clearTypingLinkPreview: s.clearTypingLinkPreview, expiresIn: s.expiresIn, setExpiresIn: s.setExpiresIn, isViewOnce: s.isViewOnce, setIsViewOnce: s.setIsViewOnce
+  })));
+  const { status: connectionStatus } = useConnectionStore(useShallow(s => ({ status: s.status })));
   const blockedUserIds = useAuthStore(state => state.blockedUserIds);
   const user = useAuthStore(state => state.user);
   const messages = useMessageStore(state => state.messages[conversation.id] || []);

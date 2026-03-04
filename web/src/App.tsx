@@ -89,8 +89,8 @@ const PageWrapper = ({ children, noScroll = false }: { children: React.ReactNode
 );
 
 const AppContent = () => {
-  const { theme, accent } = useThemeStore();
-  const { bootstrap, logout, user } = useAuthStore();
+  const { theme, accent } = useThemeStore(useShallow(s => ({ theme: s.theme, accent: s.accent })));
+  const { bootstrap, logout, user } = useAuthStore(useShallow(s => ({ bootstrap: s.bootstrap, logout: s.logout, user: s.user })));
   const openCommandPalette = useCommandPaletteStore(s => s.open);
   const { addCommands, removeCommands } = useCommandPaletteStore(useShallow(s => ({
     addCommands: s.addCommands,

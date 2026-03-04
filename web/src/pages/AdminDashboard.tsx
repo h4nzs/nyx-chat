@@ -3,6 +3,7 @@ import { authFetch } from '@lib/api';
 import toast from 'react-hot-toast';
 import BanUserModal from '@components/BanUserModal';
 import { useModalStore } from '@store/modal';
+import { useShallow } from 'zustand/react/shallow';
 import { FiRefreshCw, FiUnlock, FiAlertTriangle } from 'react-icons/fi';
 import { useAuthStore } from '@store/auth';
 import { useNavigate } from 'react-router-dom';
@@ -16,12 +17,12 @@ interface BannedUser {
 }
 
 export default function AdminDashboard() {
-  const { user } = useAuthStore();
+  const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
   const navigate = useNavigate();
   const [metrics, setMetrics] = useState<any>(null);
   const [bannedUsers, setBannedUsers] = useState<BannedUser[]>([]);
   const [isBanModalOpen, setIsBanModalOpen] = useState(false);
-  const { showConfirm } = useModalStore();
+  const { showConfirm } = useModalStore(useShallow(s => ({ showConfirm: s.showConfirm })));
 
   // --- Data Loading Functions ---
   // Defined before useEffect to be available inside it

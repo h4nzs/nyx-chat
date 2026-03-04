@@ -2,6 +2,7 @@ import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@store/auth';
 import { useModalStore } from '@store/modal';
+import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'react-hot-toast';
 import { Spinner } from '../components/Spinner';
 import { toAbsoluteUrl } from '@utils/url';
@@ -111,11 +112,17 @@ const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout, emergencyLogout, setUser } = useAuthStore();
+  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout, emergencyLogout, setUser } = useAuthStore(useShallow(s => ({
+    user: s.user, updateProfile: s.updateProfile, updateAvatar: s.updateAvatar, sendReadReceipts: s.sendReadReceipts, setReadReceipts: s.setReadReceipts, logout: s.logout, emergencyLogout: s.emergencyLogout, setUser: s.setUser
+  })));
   const profile = useUserProfile(user);
-  const { theme, toggleTheme, accent, setAccent } = useThemeStore();
-  const { showConfirm } = useModalStore();
-  const { enableSmartReply, setEnableSmartReply } = useSettingsStore();
+  const { theme, toggleTheme, accent, setAccent } = useThemeStore(useShallow(s => ({
+    theme: s.theme, toggleTheme: s.toggleTheme, accent: s.accent, setAccent: s.setAccent
+  })));
+  const { showConfirm } = useModalStore(useShallow(s => ({ showConfirm: s.showConfirm })));
+  const { enableSmartReply, setEnableSmartReply } = useSettingsStore(useShallow(s => ({
+    enableSmartReply: s.enableSmartReply, setEnableSmartReply: s.setEnableSmartReply
+  })));
 
   const { 
     isSubscribed, 

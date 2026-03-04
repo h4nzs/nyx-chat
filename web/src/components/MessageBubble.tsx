@@ -8,6 +8,7 @@ import FileAttachment from "./FileAttachment";
 import LinkPreviewCard from "./LinkPreviewCard";
 import LazyImage from "./LazyImage";
 import { useMessageStore } from "@store/message";
+import { useShallow } from 'zustand/react/shallow';
 import { formatTime } from "@utils/date";
 import MarkdownMessage from "./MarkdownMessage";
 import VoiceMessagePlayer from "./VoiceMessagePlayer";
@@ -43,7 +44,7 @@ interface Props {
 }
 
 export default function MessageBubble({ message, isOwn, onImageClick, isLastInSequence = true, participants = [] }: Props) {
-  const { user } = useAuthStore();
+  const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
   const [timeLeft, setTimeLeft] = useState<string | null>(null);
 
   useEffect(() => {

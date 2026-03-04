@@ -18,7 +18,9 @@ export default function KeyManagementPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [recoveryPhrase, setRecoveryPhrase] = useState('');
-  const { showConfirm, showPasswordPrompt } = useModalStore();
+  const { showConfirm, showPasswordPrompt } = useModalStore(useShallow(s => ({
+    showConfirm: s.showConfirm, showPasswordPrompt: s.showPasswordPrompt
+  })));
 
   const handleShowRecovery = () => {
     showPasswordPrompt(async (password) => {

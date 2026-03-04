@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import ModalBase from './ui/ModalBase';
 import { useAuthStore } from '@store/auth';
+import { useShallow } from 'zustand/react/shallow';
 import { api } from '@lib/api';
 import { FiKey, FiShield, FiSmile, FiCoffee } from 'react-icons/fi'; // Tambah FiCoffee
 
@@ -23,7 +24,7 @@ const TourStep = ({ icon, title, children }: { icon: React.ReactNode, title: str
 
 export default function OnboardingTour({ isOpen, onClose }: OnboardingTourProps) {
   const [currentStep, setCurrentStep] = useState(0);
-  const { setUser } = useAuthStore();
+  const { setUser } = useAuthStore(useShallow(s => ({ setUser: s.setUser })));
 
   const handleNext = () => setCurrentStep(prev => prev + 1);
   const handlePrev = () => setCurrentStep(prev => prev - 1);
