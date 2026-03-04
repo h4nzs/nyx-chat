@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2 } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import clsx from 'clsx';
+import toast from 'react-hot-toast';
 import { useShallow } from 'zustand/react/shallow';
 import { useMessageInputStore } from '@store/messageInput';
 import { useConnectionStore } from '@store/connection';
@@ -176,7 +177,37 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
 
   const handleLocalFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      addStagedFiles(Array.from(e.target.files));
+      const selectedFiles = Array.from(e.target.files);
+      const validFiles: File[] = [];
+      const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB matching server limits
+      const MAX_FILES_PER_MESSAGE = 10;
+      
+      const restrictedExtensions = ['.exe', '.sh', '.bat', '.cmd', '.msi', '.vbs', '.js', '.ts', '.html', '.php', '.phtml', '.php5', '.py', '.rb', '.pl', '.jar', '.com', '.scr', '.cpl', '.msc'];
+
+      if (stagedFiles.length + selectedFiles.length > MAX_FILES_PER_MESSAGE) {
+        toast.error(`You can only send up to ${MAX_FILES_PER_MESSAGE} files at once.`);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+
+      for (const file of selectedFiles) {
+        if (file.size > MAX_FILE_SIZE) {
+           toast.error(`"${file.name}" is too large (Max: 100MB)`);
+           continue;
+        }
+
+        const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+        if (restrictedExtensions.includes(ext)) {
+           toast.error(`"${file.name}" has a restricted file type and cannot be sent.`);
+           continue;
+        }
+
+        validFiles.push(file);
+      }
+
+      if (validFiles.length > 0) {
+        addStagedFiles(validFiles);
+      }
     }
     if (fileInputRef.current) fileInputRef.current.value = ''; // Reset input to allow selecting the same file again
   };
