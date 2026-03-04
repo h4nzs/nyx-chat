@@ -3,6 +3,7 @@ import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import { toAbsoluteUrl } from '@utils/url';
 import { useConversationStore } from '@store/conversation';
+import { useShallow } from 'zustand/react/shallow';
 import { hashUsername } from '@lib/crypto-worker-proxy';
 import ModalBase from './ui/ModalBase';
 
@@ -23,9 +24,9 @@ const AddParticipantModal = ({ conversationId, onClose }: {
   const [isLoading, setIsLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
 
-  const { conversation } = useConversationStore(state => ({
+  const { conversation } = useConversationStore(useShallow(state => ({
     conversation: state.conversations.find(c => c.id === conversationId),
-  }));
+  })));
 
   const existingParticipantIds = conversation?.participants.map(p => p.id) || [];
 

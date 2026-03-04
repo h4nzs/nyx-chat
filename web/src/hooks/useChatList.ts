@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useConversationStore } from '@store/conversation';
 import { usePresenceStore } from '@store/presence';
 import { useAuthStore, type User } from '@store/auth';
+import { useShallow } from 'zustand/react/shallow';
 import { authFetch } from '@lib/api';
 import { debounce } from 'lodash';
 import { hashUsername } from '@lib/crypto-worker-proxy';
@@ -21,7 +22,7 @@ export function useChatList() {
       deleteGroup,
       deleteConversation,
       togglePinConversation,
-    } = useConversationStore(state => ({
+    } = useConversationStore(useShallow(state => ({
       conversations: state.conversations,
       error: state.error,
       loading: state.loading,
@@ -31,15 +32,15 @@ export function useChatList() {
       deleteGroup: state.deleteGroup,
       deleteConversation: state.deleteConversation,
       togglePinConversation: state.togglePinConversation,
-    }));
+    })));
 
     const onlineUsers = usePresenceStore(state => state.onlineUsers);
     const meId = useAuthStore(state => state.user?.id);
-    const { blockUser, unblockUser, blockedUserIds } = useAuthStore(state => ({
+    const { blockUser, unblockUser, blockedUserIds } = useAuthStore(useShallow(state => ({
       blockUser: state.blockUser,
       unblockUser: state.unblockUser,
       blockedUserIds: state.blockedUserIds,
-    }));
+    })));
   
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState<User[]>([]);

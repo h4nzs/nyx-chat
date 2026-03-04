@@ -1,14 +1,15 @@
 import { useModalStore } from '@store/modal';
+import { useShallow } from 'zustand/react/shallow';
 import ModalBase from './ui/ModalBase';
 
 const ConfirmModal = () => {
-  const { isConfirmOpen, confirmTitle, confirmMessage, onConfirm, hideConfirm } = useModalStore(state => ({
+  const { isConfirmOpen, confirmTitle, confirmMessage, onConfirm, hideConfirm } = useModalStore(useShallow(state => ({
     isConfirmOpen: state.isConfirmOpen,
     confirmTitle: state.confirmTitle,
     confirmMessage: state.confirmMessage,
     onConfirm: state.onConfirm,
     hideConfirm: state.hideConfirm,
-  }));
+  })));
 
   return (
     <ModalBase

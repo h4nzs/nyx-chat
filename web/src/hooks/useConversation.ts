@@ -1,6 +1,7 @@
 import { useConversationStore } from '@store/conversation';
 import { useMessageStore } from '@store/message';
 import { useMessageInputStore } from '@store/messageInput';
+import { useShallow } from 'zustand/react/shallow';
 import { useMemo } from 'react';
 import type { Message } from '@store/conversation';
 
@@ -9,19 +10,19 @@ export function useConversation(conversationId: string) {
     state.conversations.find(c => c.id === conversationId)
   );
   
-  const { messages, hasMore, isFetchingMore, loadPreviousMessages, loadMessagesForConversation } = useMessageStore(state => ({
+  const { messages, hasMore, isFetchingMore, loadPreviousMessages, loadMessagesForConversation } = useMessageStore(useShallow(state => ({
     messages: state.messages[conversationId] || [],
     hasMore: state.hasMore[conversationId],
     isFetchingMore: state.isFetchingMore[conversationId],
     loadPreviousMessages: state.loadPreviousMessages,
     loadMessagesForConversation: state.loadMessagesForConversation,
-  }));
+  })));
 
-  const { sendMessage, uploadFile, retrySendMessage } = useMessageInputStore(state => ({
+  const { sendMessage, uploadFile, retrySendMessage } = useMessageInputStore(useShallow(state => ({
     sendMessage: state.sendMessage,
     uploadFile: state.uploadFile,
     retrySendMessage: state.retrySendMessage,
-  }));
+  })));
 
   const actions = useMemo(() => ({
     loadPrevious: () => loadPreviousMessages(conversationId),

@@ -4,6 +4,7 @@ import GroupInfoPanel from '@components/GroupInfoPanel';
 import UserInfoPanel from '@components/UserInfoPanel';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useOrientation } from '@hooks/useOrientation';
@@ -25,7 +26,7 @@ export default function Chat() {
     toggleSidebar,
     loading,
     initialLoadCompleted,
-  } = useConversationStore(state => ({
+  } = useConversationStore(useShallow(state => ({
     activeId: state.activeId,
     openConversation: state.openConversation,
     loadConversations: state.loadConversations,
@@ -34,7 +35,7 @@ export default function Chat() {
     toggleSidebar: state.toggleSidebar,
     loading: state.loading,
     initialLoadCompleted: state.initialLoadCompleted,
-  }));
+  })));
 
   const user = useAuthStore(state => state.user);
   const { isLandscape } = useOrientation();

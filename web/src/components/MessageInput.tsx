@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import clsx from 'clsx';
+import { useShallow } from 'zustand/react/shallow';
 import { useMessageInputStore } from '@store/messageInput';
 import { useConnectionStore } from '@store/connection';
 import { useAuthStore } from '@store/auth';
@@ -39,10 +40,10 @@ const DURATIONS = [
 ];
 
 const ReplyPreview = () => {
-  const { replyingTo, setReplyingTo } = useMessageInputStore(state => ({
+  const { replyingTo, setReplyingTo } = useMessageInputStore(useShallow(state => ({
     replyingTo: state.replyingTo,
     setReplyingTo: state.setReplyingTo,
-  }));
+  })));
 
   const profile = useUserProfile(replyingTo?.sender as any);
 

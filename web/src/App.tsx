@@ -40,6 +40,7 @@ import { useThemeStore } from './store/theme';
 import { useCommandPaletteStore } from './store/commandPalette';
 import { useConversationStore } from './store/conversation';
 import { useGlobalShortcut } from './hooks/useGlobalShortcut';
+import { useShallow } from 'zustand/react/shallow';
 
 // Libs & Utils
 import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
@@ -57,10 +58,10 @@ const LoadingScreen = () => (
 );
 
 const Home = () => {
-  const { conversations, loading } = useConversationStore(state => ({
+  const { conversations, loading } = useConversationStore(useShallow(state => ({
     conversations: state.conversations,
     loading: state.loading,
-  }));
+  })));
 
   if (loading) {
     return <LoadingScreen />;
@@ -91,10 +92,10 @@ const AppContent = () => {
   const { theme, accent } = useThemeStore();
   const { bootstrap, logout, user } = useAuthStore();
   const openCommandPalette = useCommandPaletteStore(s => s.open);
-  const { addCommands, removeCommands } = useCommandPaletteStore(s => ({
+  const { addCommands, removeCommands } = useCommandPaletteStore(useShallow(s => ({
     addCommands: s.addCommands,
     removeCommands: s.removeCommands,
-  }));
+  })));
   const navigate = useNavigate();
   const location = useLocation();
 

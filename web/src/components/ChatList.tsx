@@ -337,16 +337,16 @@ export default function ChatList() {
     blockedUserIds,
     blockUser,
     unblockUser
-  } = useAuthStore(state => ({
+  } = useAuthStore(useShallow(state => ({
     blockedUserIds: state.blockedUserIds,
     blockUser: state.blockUser,
     unblockUser: state.unblockUser
-  }));
+  })));
 
-  const { showConfirm, openProfileModal } = useModalStore(state => ({
+  const { showConfirm, openProfileModal } = useModalStore(useShallow(state => ({
     showConfirm: state.showConfirm,
     openProfileModal: state.openProfileModal,
-  }));
+  })));
 
   const [showGroupModal, setShowGroupModal] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);

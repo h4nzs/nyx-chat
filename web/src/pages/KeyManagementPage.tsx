@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { FiKey, FiShield, FiRefreshCw, FiChevronLeft, FiAlertTriangle } from 'react-icons/fi';
 import { useState } from 'react';
 import { useAuthStore, setupAndUploadPreKeyBundle } from '@store/auth';
+import { useShallow } from 'zustand/react/shallow';
 import toast from 'react-hot-toast';
 import { Spinner } from '@components/Spinner';
 import { useModalStore } from '@store/modal';
@@ -11,9 +12,9 @@ import { getRecoveryPhrase, generateNewKeys } from '@lib/crypto-worker-proxy';
 import { getEncryptedKeys, saveEncryptedKeys } from '@lib/keyStorage';
 
 export default function KeyManagementPage() {
-  const { logout } = useAuthStore(state => ({ 
+  const { logout } = useAuthStore(useShallow(state => ({ 
     logout: state.logout,
-  }));
+  })));
   const [isProcessing, setIsProcessing] = useState(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [recoveryPhrase, setRecoveryPhrase] = useState('');

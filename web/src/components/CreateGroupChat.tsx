@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useConversationStore, type Conversation } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
+import { useShallow } from 'zustand/react/shallow';
 import { authFetch } from '@lib/api';
 import { toAbsoluteUrl } from '@utils/url';
 import { getSocket } from '@lib/socket';
@@ -23,10 +24,10 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
   const [userList, setUserList] = useState<UserSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const me = useAuthStore(s => s.user);
-  const { addOrUpdateConversation, openConversation } = useConversationStore(state => ({
+  const { addOrUpdateConversation, openConversation } = useConversationStore(useShallow(state => ({
     addOrUpdateConversation: state.addOrUpdateConversation,
     openConversation: state.openConversation,
-  }));
+  })));
 
   useEffect(() => {
     if (searchQuery.trim() === '') {

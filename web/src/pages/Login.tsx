@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore, type User } from "../store/auth";
+import { useShallow } from 'zustand/react/shallow';
 import { useModalStore } from "../store/modal";
 import AuthForm from "../components/AuthForm";
 import { IoFingerPrint } from "react-icons/io5";
@@ -20,9 +21,9 @@ export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const { login } = useAuthStore(s => ({
+  const { login } = useAuthStore(useShallow(s => ({
     login: s.login,
-  }));
+  })));
 
   useEffect(() => {
     // Cek ketersediaan hardware biometric
