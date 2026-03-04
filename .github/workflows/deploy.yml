@@ -110,7 +110,7 @@ jobs:
             
             # Jalankan generate pakai binary lokal yang baru diinstall
             echo "🔧 Generating Prisma Client..."
-            pnpm prisma generate
+            npx prisma generate
 
             # --- DEPLOY FRONTEND TO NGINX ---
             echo "🎨 Deploying Frontend to Nginx..."
