@@ -196,6 +196,11 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
 
   const handleContextMenu = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
+    
+    // BLACK OPS: Temporarily store this specific message's reaction handler globally
+    // so the expanded EmojiPicker in ContextMenu can access it.
+    (window as any).currentReactionHandler = reactToMessage;
+
     openMenu(e, [
       { label: 'Reply', icon: <FiCornerUpLeft />, onClick: () => setReplyingTo(message) },
       { label: 'Copy Text', icon: <FiCopy />, onClick: () => navigator.clipboard.writeText(message.content || '') },
