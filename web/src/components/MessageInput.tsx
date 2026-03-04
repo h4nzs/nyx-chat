@@ -94,8 +94,14 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const timerMenuRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   
-  const { typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, expiresIn, setExpiresIn, isViewOnce, setIsViewOnce } = useMessageInputStore(useShallow(s => ({
-    typingLinkPreview: s.typingLinkPreview, fetchTypingLinkPreview: s.fetchTypingLinkPreview, clearTypingLinkPreview: s.clearTypingLinkPreview, expiresIn: s.expiresIn, setExpiresIn: s.setExpiresIn, isViewOnce: s.isViewOnce, setIsViewOnce: s.setIsViewOnce
+  const { 
+    typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, 
+    expiresIn, setExpiresIn, isViewOnce, setIsViewOnce,
+    stagedFiles, addStagedFiles, removeStagedFile, clearStagedFiles 
+  } = useMessageInputStore(useShallow(s => ({
+    typingLinkPreview: s.typingLinkPreview, fetchTypingLinkPreview: s.fetchTypingLinkPreview, clearTypingLinkPreview: s.clearTypingLinkPreview, 
+    expiresIn: s.expiresIn, setExpiresIn: s.setExpiresIn, isViewOnce: s.isViewOnce, setIsViewOnce: s.setIsViewOnce,
+    stagedFiles: s.stagedFiles, addStagedFiles: s.addStagedFiles, removeStagedFile: s.removeStagedFile, clearStagedFiles: s.clearStagedFiles
   })));
   const { status: connectionStatus } = useConnectionStore(useShallow(s => ({ status: s.status })));
   const blockedUserIds = useAuthStore(state => state.blockedUserIds);
@@ -166,13 +172,38 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
     setShowPlusMenu(false); // Close plus menu if open
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleLocalFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      addStagedFiles(Array.from(e.target.files));
+    }
+    if (fileInputRef.current) fileInputRef.current.value = ''; // Reset input to allow selecting the same file again
+  };
+
+  const hasContentToSend = hasText || stagedFiles.length > 0;
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hasText || !isConnected) return;
+    if (!hasContentToSend || !isConnected) return;
     triggerSendFeedback();
-    onSend({ content: text });
-    setText('');
+    
+    // 1. Process Staged Files
+    if (stagedFiles.length > 0) {
+       for (const file of stagedFiles) {
+          useMessageInputStore.getState().uploadFile(conversation.id, file);
+       }
+       clearStagedFiles();
+    }
+
+    // 2. Process Text
+    if (hasText) {
+      onSend({ content: text });
+      setText('');
+    }
+    
     clearTypingLinkPreview();
+    setShowEmojiPicker(false);
+    setShowPlusMenu(false);
+    setShowTimerMenu(false);
   };
 
   const handleSmartReplySelect = (reply: string) => {
@@ -253,6 +284,39 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
             <div className="mb-2">
                 <LinkPreviewCard preview={typingLinkPreview} />
             </div>
+            )}
+            
+            {/* STAGED FILES CAROUSEL */}
+            {stagedFiles.length > 0 && (
+                <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mb-2 p-3 bg-bg-surface backdrop-blur-md rounded-2xl shadow-neumorphic-convex border border-white/5 flex gap-3 overflow-x-auto scrollbar-hide"
+                >
+                    {stagedFiles.map((file, idx) => {
+                        const isImage = file.type.startsWith('image/');
+                        const url = isImage ? URL.createObjectURL(file) : null;
+                        return (
+                            <div key={idx} className="relative w-20 h-20 flex-shrink-0 rounded-xl shadow-neumorphic-concave overflow-hidden border border-white/5 group bg-bg-main">
+                                {isImage ? (
+                                    <img src={url!} alt="preview" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                                ) : (
+                                    <div className="w-full h-full flex flex-col items-center justify-center text-text-secondary">
+                                        <FiPaperclip size={20} />
+                                        <span className="text-[8px] mt-1 px-1 truncate w-full text-center">{file.name}</span>
+                                    </div>
+                                )}
+                                <button 
+                                    type="button"
+                                    onClick={() => removeStagedFile(idx)} 
+                                    className="absolute top-1 right-1 bg-black/60 hover:bg-red-500 text-white p-1 rounded-full backdrop-blur-md transition-colors"
+                                >
+                                    <FiX size={12} />
+                                </button>
+                            </div>
+                        );
+                    })}
+                </motion.div>
             )}
         </div>
       </div>
@@ -452,7 +516,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
             </button>
           </div>
 
-          <input type="file" ref={fileInputRef} className="hidden" onChange={onFileChange} disabled={isInputDisabled} />
+          <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleLocalFileChange} disabled={isInputDisabled} />
 
           {/* Main Transmission Slot */}
           <div className="flex-1 relative group">
@@ -472,7 +536,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
           </div>
 
           {/* Send / Mic Button */}
-          {hasText ? (
+          {hasContentToSend ? (
              <button
               type="submit"
               disabled={isInputDisabled}
@@ -483,7 +547,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
                 hover:-translate-y-0.5 active:translate-y-0 transition-all
               "
              >
-               <FiSend size={18} className={hasText ? 'translate-x-0.5' : ''} />
+               <FiSend size={18} className={hasContentToSend ? 'translate-x-0.5' : ''} />
              </button>
           ) : (
              <button

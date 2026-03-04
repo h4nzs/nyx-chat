@@ -16,6 +16,7 @@ type State = {
   typingLinkPreview: any | null;
   expiresIn: number | null;
   isViewOnce: boolean;
+  stagedFiles: File[];
 
   // Actions
   setReplyingTo: (message: Message | null) => void;
@@ -23,6 +24,9 @@ type State = {
   setIsViewOnce: (value: boolean) => void;
   fetchTypingLinkPreview: (text: string) => void;
   clearTypingLinkPreview: () => void;
+  addStagedFiles: (files: File[]) => void;
+  removeStagedFile: (index: number) => void;
+  clearStagedFiles: () => void;
   sendMessage: (conversationId: string, data: { content: string }, tempId?: number) => Promise<void>;
   uploadFile: (conversationId: string, file: File) => Promise<void>;
   handleStopRecording: (conversationId: string, blob: Blob, duration: number) => Promise<void>;
@@ -56,10 +60,14 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   typingLinkPreview: null,
   expiresIn: null,
   isViewOnce: false,
+  stagedFiles: [],
 
   setReplyingTo: (message) => set({ replyingTo: message }),
   setExpiresIn: (seconds) => set({ expiresIn: seconds }),
   setIsViewOnce: (value) => set({ isViewOnce: value }),
+  addStagedFiles: (files) => set((state) => ({ stagedFiles: [...state.stagedFiles, ...files] })),
+  removeStagedFile: (index) => set((state) => ({ stagedFiles: state.stagedFiles.filter((_, i) => i !== index) })),
+  clearStagedFiles: () => set({ stagedFiles: [] }),
 
   fetchTypingLinkPreview: async (text) => {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
