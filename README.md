@@ -1,6 +1,6 @@
 # NYX: The Zero-Knowledge Messenger
 
-![Version](https://img.shields.io/badge/version-1.2.0--alpha-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.2.1-alpha-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-AGPLv3-red?style=for-the-badge)
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
@@ -32,7 +32,7 @@ NYX runs its cryptographic engine entirely inside a dedicated **Web Worker** usi
 * **Message Encryption:** Double Ratchet Algorithm for Perfect Forward Secrecy (PFS) and Post-Compromise Security (PCS).
 * **Primitives:**
 * **Cipher:** XChaCha20-Poly1305 (IETF) via `libsodium`.
-* **Hashing:** SHA-256 & BLAKE2b.
+* **Hashing:** SHA-256 & Argon2.
 * **KDF:** HKDF (HMAC-based Key Derivation Function).
 * **Signatures:** Ed25519.
 

@@ -16,19 +16,21 @@ import type { Conversation } from '@store/conversation';
 
 import { toAbsoluteUrl } from '@utils/url';
 
-import { FiUsers, FiSearch, FiSettings, FiLogOut, FiUser, FiMaximize2, FiSlash, FiTrash2, FiLock } from 'react-icons/fi';
+import { FiUsers, FiSearch, FiSettings, FiLogOut, FiUser, FiMaximize2, FiSlash, FiTrash2, FiEye, FiEyeOff } from 'react-icons/fi';
 
 import CreateGroupChat from './CreateGroupChat';
 import NotificationBell from './NotificationBell';
 import { Spinner } from './Spinner';
 import SwipeableItem from './SwipeableItem';
 import { useContextMenuStore } from '../store/contextMenu';
+import { useSettingsStore } from '@store/settings';
 
 // --- Sub-components ---
 
 const UserProfile = memo(() => {
   const { user, logout } = useAuthStore(useShallow(state => ({ user: state.user, logout: state.logout })));
   const { showConfirm: confirmLogout } = useModalStore(useShallow(state => ({ showConfirm: state.showConfirm })));
+  const { privacyCloak, setPrivacyCloak } = useSettingsStore(useShallow(s => ({ privacyCloak: s.privacyCloak, setPrivacyCloak: s.setPrivacyCloak })));
   const profile = useUserProfile(user);
 
   const handleLogout = useCallback(() => {
@@ -66,13 +68,16 @@ const UserProfile = memo(() => {
 
       <div className="flex items-center gap-1 flex-shrink-0">
         <NotificationBell />
-        {/* PANIC LOCK BUTTON */}
+        {/* PRIVACY CLOAK BUTTON */}
         <button
-          onClick={handleLockVault}
-          className="p-2.5 rounded-xl text-text-secondary hover:text-accent hover:bg-white/5 active:scale-95 transition-all shadow-neumorphic-concave focus:outline-none"
-          title="Lock Vault"
+          onClick={() => setPrivacyCloak(!privacyCloak)}
+          className={clsx(
+            "p-2.5 rounded-xl transition-all shadow-neumorphic-concave focus:outline-none",
+            privacyCloak ? "text-accent bg-white/5" : "text-text-secondary hover:text-accent hover:bg-white/5"
+          )}
+          title="Toggle Privacy Cloak"
         >
-          <FiLock size={18} />
+          {privacyCloak ? <FiEyeOff size={18} /> : <FiEye size={18} />}
         </button>
         <Link 
           to="/settings" 
@@ -138,7 +143,8 @@ const ConversationItem = memo(({
   onClick, 
   onUserClick, 
   onMenuSelect, 
-  onTogglePin 
+  onTogglePin,
+  privacyCloak
 }: {
   conversation: Conversation;
   meId?: string;
@@ -151,6 +157,7 @@ const ConversationItem = memo(({
   onUserClick: (userId: string) => void;
   onMenuSelect: (action: 'deleteGroup' | 'deleteChat') => void;
   onTogglePin: (id: string) => void;
+  privacyCloak: boolean;
 }) => {
   const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
   const peerProfile = useUserProfile(peerUser as any);
@@ -158,6 +165,8 @@ const ConversationItem = memo(({
   const isUnread = conversation.unreadCount > 0;
   const isPinnedByMe = Boolean(conversation.participants?.some(p => p.id === meId && p.isPinned));
   const openMenu = useContextMenuStore(s => s.openMenu);
+  
+  const cloakClass = privacyCloak ? "blur-[6px] opacity-70 hover:blur-none hover:opacity-100 active:blur-none active:opacity-100 transition-all duration-300 select-none" : "";
 
   const avatarSrc = conversation.isGroup 
     ? (conversation.avatarUrl ? `${toAbsoluteUrl(conversation.avatarUrl)}?t=${conversation.lastUpdated}` : `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`)
@@ -238,7 +247,8 @@ const ConversationItem = memo(({
                 alt="Avatar"
                 className={clsx(
                   "w-12 h-12 rounded-full object-cover border-2 transition-all pointer-events-none",
-                  isActive ? "border-bg-surface shadow-inner" : "border-bg-main shadow-sm"
+                  isActive ? "border-bg-surface shadow-inner" : "border-bg-main shadow-sm",
+                  cloakClass
                 )}
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
@@ -266,7 +276,8 @@ const ConversationItem = memo(({
                 )}
                 <p className={clsx(
                   "text-sm font-bold truncate transition-colors",
-                  isActive ? 'text-accent' : 'text-text-primary'
+                  isActive ? 'text-accent' : 'text-text-primary',
+                  cloakClass
                 )}>
                   {title}
                 </p>
@@ -279,12 +290,13 @@ const ConversationItem = memo(({
             </div>
             
             <div className="flex justify-between items-center">
-              <p className={clsx(
+              <div className={clsx(
                 "text-xs truncate max-w-[85%]",
-                isUnread ? 'font-bold text-text-primary' : 'text-text-secondary opacity-80'
+                isUnread ? 'font-bold text-text-primary' : 'text-text-secondary opacity-80',
+                cloakClass
               )}>
                 {previewText}
-              </p>
+              </div>
               {isUnread && (
                 <span className="
                   flex items-center justify-center min-w-[1.25rem] h-5 px-1.5
@@ -306,7 +318,8 @@ const ConversationItem = memo(({
     prev.isActive === next.isActive &&
     prev.isOnline === next.isOnline &&
     prev.isBlocked === next.isBlocked &&
-    prev.meId === next.meId
+    prev.meId === next.meId &&
+    prev.privacyCloak === next.privacyCloak
   );
 });
 
@@ -353,6 +366,7 @@ export default function ChatList() {
   const { addCommands, removeCommands } = useCommandPaletteStore(useShallow(s => ({
     addCommands: s.addCommands, removeCommands: s.removeCommands
   })));
+  const privacyCloak = useSettingsStore(s => s.privacyCloak);
 
   const openCreateGroupModal = useCallback(() => setShowGroupModal(true), []);
 
@@ -386,9 +400,10 @@ export default function ChatList() {
            else deleteConversation(c.id);
         }}
         onTogglePin={togglePinConversation}
+        privacyCloak={privacyCloak}
       />
     );
-  }, [meId, presence, blockedUserIds, activeId, handleConversationClick, openProfileModal, deleteGroup, deleteConversation, togglePinConversation, blockUser, unblockUser]);
+  }, [meId, presence, blockedUserIds, activeId, handleConversationClick, openProfileModal, deleteGroup, deleteConversation, togglePinConversation, blockUser, unblockUser, privacyCloak]);
 
   return (
     <div className="

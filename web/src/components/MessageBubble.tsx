@@ -14,6 +14,7 @@ import MarkdownMessage from "./MarkdownMessage";
 import VoiceMessagePlayer from "./VoiceMessagePlayer";
 import clsx from 'clsx'; 
 import { useUserProfile } from '@hooks/useUserProfile';
+import { useSettingsStore } from '@store/settings';
 
 const ReplyQuote = ({ message }: { message: Message }) => {
   const profile = useUserProfile(message.sender as any);
@@ -45,7 +46,10 @@ interface Props {
 
 export default function MessageBubble({ message, isOwn, onImageClick, isLastInSequence = true, participants = [] }: Props) {
   const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
+  const privacyCloak = useSettingsStore(s => s.privacyCloak);
   const [timeLeft, setTimeLeft] = useState<string | null>(null);
+
+  const cloakClass = privacyCloak ? "blur-[6px] opacity-75 hover:blur-none hover:opacity-100 active:blur-none active:opacity-100 transition-all duration-300 select-none" : "";
 
   useEffect(() => {
     if (!message.expiresAt || message.deletedAt) {
@@ -120,72 +124,74 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
     <div className={bubbleClasses}>
       {message.repliedTo && <ReplyQuote message={message.repliedTo} />}
       
-      {isDeleted ? (
-        <span className="flex items-center gap-2 opacity-60">
-          🚫 Message deleted
-        </span>
-      ) : (
-        <>
-          {message.isViewOnce && message.fileUrl ? (
-            <div className="p-3 bg-black/20 rounded-xl flex items-center justify-center min-w-[160px] my-1 mx-2 border border-white/5">
-              {message.isViewed ? (
-                <div className="flex items-center gap-2 text-text-secondary/50 italic select-none">
-                  <FiEyeOff size={18} />
-                  <span className="text-sm font-medium">Opened</span>
-                </div>
-              ) : (
-                <button 
-                  onClick={() => onImageClick?.(message)} 
-                  className="flex items-center gap-2 text-accent hover:text-indigo-400 hover:scale-105 active:scale-95 transition-all"
-                >
-                  {message.fileType?.startsWith('video/') ? <FiVideo size={20} /> : 
-                   message.fileType?.startsWith('audio/') ? <FiMic size={20} /> : 
-                   <FiCamera size={20} />}
-                  <span className="text-sm font-bold tracking-wider uppercase">View Once</span>
-                </button>
-              )}
-            </div>
-          ) : (
-            <>
-              {isVoiceMessage && message.fileUrl && (
-                <div className="p-2 w-[250px]">
-                  <VoiceMessagePlayer message={message} />
-                </div>
-              )}
-              
-              {message.fileUrl && isImage && (
-                <button onClick={() => onImageClick?.(message)} className="block w-full">
-                  <LazyImage 
-                    message={message} 
-                    alt={message.fileName || 'Image attachment'} 
-                    className="rounded-lg max-h-80 w-full object-cover cursor-pointer hover:opacity-95" 
-                  />
-                </button>
-              )}
-              
-              {message.fileUrl && !isImage && !isVoiceMessage && (
-                <FileAttachment message={message} isOwn={isOwn} />
-              )}
-            </>
-          )}
-          
-          {!message.fileUrl && (
-            isPlaceholder ? (
-              <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
-            ) : (
-              <div className={classNames("text-base whitespace-pre-wrap break-words", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
-                <MarkdownMessage content={content} />
+      <div className={cloakClass}>
+        {isDeleted ? (
+          <span className="flex items-center gap-2 opacity-60">
+            🚫 Message deleted
+          </span>
+        ) : (
+          <>
+            {message.isViewOnce && message.fileUrl ? (
+              <div className="p-3 bg-black/20 rounded-xl flex items-center justify-center min-w-[160px] my-1 mx-2 border border-white/5">
+                {message.isViewed ? (
+                  <div className="flex items-center gap-2 text-text-secondary/50 italic select-none">
+                    <FiEyeOff size={18} />
+                    <span className="text-sm font-medium">Opened</span>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => onImageClick?.(message)} 
+                    className="flex items-center gap-2 text-accent hover:text-indigo-400 hover:scale-105 active:scale-95 transition-all"
+                  >
+                    {message.fileType?.startsWith('video/') ? <FiVideo size={20} /> : 
+                     message.fileType?.startsWith('audio/') ? <FiMic size={20} /> : 
+                     <FiCamera size={20} />}
+                    <span className="text-sm font-bold tracking-wider uppercase">View Once</span>
+                  </button>
+                )}
               </div>
-            )
-          )}
+            ) : (
+              <>
+                {isVoiceMessage && message.fileUrl && (
+                  <div className="p-2 w-[250px]">
+                    <VoiceMessagePlayer message={message} />
+                  </div>
+                )}
+                
+                {message.fileUrl && isImage && (
+                  <button onClick={() => onImageClick?.(message)} className="block w-full">
+                    <LazyImage 
+                      message={message} 
+                      alt={message.fileName || 'Image attachment'} 
+                      className="rounded-lg max-h-80 w-full object-cover cursor-pointer hover:opacity-95" 
+                    />
+                  </button>
+                )}
+                
+                {message.fileUrl && !isImage && !isVoiceMessage && (
+                  <FileAttachment message={message} isOwn={isOwn} />
+                )}
+              </>
+            )}
+            
+            {!message.fileUrl && (
+              isPlaceholder ? (
+                <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
+              ) : (
+                <div className={classNames("text-base whitespace-pre-wrap break-words", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
+                  <MarkdownMessage content={content} />
+                </div>
+              )
+            )}
 
-          {message.linkPreview && !message.fileUrl && (
-            <div className="mt-2">
-              <LinkPreviewCard preview={message.linkPreview} />
-            </div>
-          )}
-        </>
-      )}
+            {message.linkPreview && !message.fileUrl && (
+              <div className="mt-2">
+                <LinkPreviewCard preview={message.linkPreview} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Metadata Footer */}
       <div className={clsx("text-xs mt-1.5 flex items-center gap-1.5 select-none", {
