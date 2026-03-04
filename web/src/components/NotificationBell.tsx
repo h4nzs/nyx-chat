@@ -1,15 +1,16 @@
 import * as Popover from '@radix-ui/react-popover';
 import { FiBell } from 'react-icons/fi';
 import useNotificationStore from '@store/notification';
+import { useShallow } from 'zustand/react/shallow';
 import NotificationPopover from './NotificationPopover';
 import { useEffect, useRef } from 'react';
 import { motion, useAnimationControls } from 'framer-motion';
 
 const NotificationBell = () => {
-  const { unreadCount, markAllAsRead } = useNotificationStore(state => ({
+  const { unreadCount, markAllAsRead } = useNotificationStore(useShallow(state => ({
     unreadCount: state.unreadCount,
     markAllAsRead: state.markAllAsRead,
-  }));
+  })));
   const controls = useAnimationControls();
   const prevUnreadCount = useRef(unreadCount);
 

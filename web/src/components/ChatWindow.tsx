@@ -203,15 +203,15 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     }
   });
 
-  const { highlightedMessageId, setHighlightedMessageId } = useMessageSearchStore(state => ({
+  const { highlightedMessageId, setHighlightedMessageId } = useMessageSearchStore(useShallow(state => ({
     highlightedMessageId: state.highlightedMessageId,
     setHighlightedMessageId: state.setHighlightedMessageId,
-  }));
+  })));
   const clearSearch = useMessageSearchStore(s => s.clearSearch);
 
-  const { handleStopRecording } = useMessageInputStore(state => ({
+  const { handleStopRecording } = useMessageInputStore(useShallow(state => ({
     handleStopRecording: state.handleStopRecording,
-  }));
+  })));
   
   const typingIndicators = usePresenceStore(state => state.typingIndicators);
   const virtuosoRef = useRef<any>(null);
