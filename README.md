@@ -1,5 +1,12 @@
 # NYX: The Zero-Knowledge Messenger
 
+![Version](https://img.shields.io/badge/version-1.2.0--alpha-blue?style=for-the-badge)
+![License](https://img.shields.io/badge/License-AGPLv3-red?style=for-the-badge)
+![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Tailwind](https://img.shields.io/badge/Tailwind_v4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)
+![pnpm](https://img.shields.io/badge/pnpm-F69220?style=for-the-badge&logo=pnpm&logoColor=white)
+
 > **"Privacy is not a feature. It's the architecture."**
 
 NYX is a radical experiment in **Pure Anonymity** and **Zero-Knowledge Architecture**. Unlike traditional messengers, NYX **does not require** a phone number, email address, or any Personally Identifiable Information (PII). It decouples your digital identity from your physical one, operating under a strict "Trust No One" (TNO) model where the server is mathematically incapable of reading your messages or knowing who you are.
