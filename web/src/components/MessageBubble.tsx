@@ -48,6 +48,12 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
   const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
   const privacyCloak = useSettingsStore(s => s.privacyCloak);
   const [timeLeft, setTimeLeft] = useState<string | null>(null);
+  const [isTextExpanded, setIsTextExpanded] = useState(false);
+
+  const content = message.content || '';
+  // Trigger Read More if > 800 chars OR > 12 lines
+  const isLongMessage = content.length > 800 || content.split('\n').length > 12;
+  const isPlaceholder = content === 'waiting_for_key' || content.startsWith('[') || content === 'Decryption failed';
 
   const cloakClass = privacyCloak ? "blur-[6px] opacity-75 hover:blur-none hover:opacity-100 active:blur-none active:opacity-100 transition-all duration-300 select-none" : "";
 
@@ -99,8 +105,6 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
     return <FaCheck size={14} className="text-white/70" />;
   };
 
-  const content = message.content || '';
-  const isPlaceholder = content === 'waiting_for_key' || content.startsWith('[') || content === 'Decryption failed';
   const isImage = message.fileType?.startsWith('image/');
   const isVoiceMessage = message.fileType?.startsWith('audio/webm');
   const isDeleted = !!message.deletedAt;
@@ -178,12 +182,29 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
               isPlaceholder ? (
                 <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
               ) : (
-                <div className={classNames("text-base whitespace-pre-wrap break-words", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
-                  <MarkdownMessage content={content} />
+                <div className={classNames("text-base break-words w-full", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
+                  <div 
+                    className={classNames("relative overflow-hidden transition-all duration-300", {
+                      "max-h-[250px]": isLongMessage && !isTextExpanded,
+                      "max-h-none": !isLongMessage || isTextExpanded
+                    })}
+                    style={isLongMessage && !isTextExpanded ? { maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)' } : {}}
+                  >
+                    <MarkdownMessage content={content} isOwn={isOwn} />
+                  </div>                  {isLongMessage && (
+                    <button
+                      onClick={() => setIsTextExpanded(!isTextExpanded)}
+                      className={classNames("mt-2 text-xs font-bold uppercase tracking-wider block active:scale-95 transition-all", {
+                        "text-white/80 hover:text-white": isOwn,
+                        "text-accent hover:text-indigo-400": !isOwn
+                      })}
+                    >
+                      {isTextExpanded ? "Show Less" : "Read More"}
+                    </button>
+                  )}
                 </div>
               )
             )}
-
             {message.linkPreview && !message.fileUrl && (
               <div className="mt-2">
                 <LinkPreviewCard preview={message.linkPreview} />

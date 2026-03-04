@@ -5,9 +5,10 @@ import rehypeSanitize from 'rehype-sanitize';
 
 interface MarkdownMessageProps {
   content: string;
+  isOwn?: boolean;
 }
 
-const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content }) => {
+const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content, isOwn = false }) => {
   return (
     <div className="markdown-content whitespace-pre-wrap">
       <ReactMarkdown
@@ -34,7 +35,7 @@ const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content }) => {
                 {...props} 
                 target="_blank" 
                 rel="noreferrer" 
-                className="text-accent hover:underline cursor-pointer"
+                className={isOwn ? "text-white underline font-medium hover:text-white/80" : "text-accent hover:underline cursor-pointer"}
                 onClick={(e) => e.stopPropagation()} 
               />
             );
