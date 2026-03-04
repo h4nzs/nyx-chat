@@ -220,7 +220,8 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
     if (!isConnected) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorderRef.current = new MediaRecorder(stream);
+      const options = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 64000 };
+      mediaRecorderRef.current = new MediaRecorder(stream, options);
       audioChunksRef.current = [];
       shouldSendVoiceRef.current = true;
 
