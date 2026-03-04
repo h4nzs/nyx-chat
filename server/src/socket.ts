@@ -5,7 +5,7 @@ import { prisma } from "./lib/prisma.js";
 import { verifyJwt, signAccessToken, newJti, refreshExpiryDate } from "./utils/jwt.js";
 import { sendPushNotification } from "./utils/sendPushNotification.js";
 import { redisClient } from "./lib/redis.js"; // Client untuk data aplikasi (Presence, dll)
-import { Message } from "@prisma/client";
+import type { Message } from "@prisma/client";
 import { AuthPayload } from "./types/auth.js";
 import cookie from "cookie"; 
 import crypto from "crypto";

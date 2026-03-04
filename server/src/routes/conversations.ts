@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
-import { Prisma } from '@prisma/client'
+import pkg from '@prisma/client'
+const { Prisma } = pkg
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
 import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
