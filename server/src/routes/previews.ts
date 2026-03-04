@@ -37,12 +37,16 @@ router.get('/image', requireAuth, async (req, res, next) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    const imageRes = await fetch(targetUrl, { 
-      signal: controller.signal,
-      redirect: 'manual', // <--- CRITICAL FIX
-      headers: { 'User-Agent': 'NYX-Preview-Bot/1.0', 'Accept': 'image/*' }
-    });
-    clearTimeout(timeoutId);
+    let imageRes;
+    try {
+      imageRes = await fetch(targetUrl, { 
+        signal: controller.signal,
+        redirect: 'manual', // <--- CRITICAL FIX
+        headers: { 'User-Agent': 'NYX-Preview-Bot/1.0', 'Accept': 'image/*' }
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (imageRes.status >= 300 && imageRes.status < 400) {
       throw new Error('Redirects are not allowed for security reasons (SSRF protection).');

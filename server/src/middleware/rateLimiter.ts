@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit'
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
 import { env } from '../config.js'
 import { RedisStore } from 'rate-limit-redis'
 import { redisClient } from '../lib/redis.js'
@@ -7,7 +7,7 @@ import { Request } from 'express';
 // Secure IP Extractor: Lebih aman menggunakan req.ip 
 // karena Express (app.ts) sudah diset 'trust proxy' = true
 const secureKeyGenerator = (req: Request): string => {
-  return req.ip || req.socket.remoteAddress || 'unknown';
+  return (req.headers['cf-connecting-ip'] as string) || req.ip || 'unknown';
 };
 
 // Helper: Skip kalo di development ATAU kalau requestnya cuma OPTIONS (CORS Preflight)

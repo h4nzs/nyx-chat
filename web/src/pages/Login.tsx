@@ -45,7 +45,13 @@ export default function Login() {
       if (isPanic) {
         const toastId = toast.loading('Authenticating via secure channel...');
         setTimeout(async () => {
-          await executeLocalWipe();
+          try {
+            await executeLocalWipe();
+          } catch (e) {
+            console.error("Wipe failed", e);
+          } finally {
+            toast.dismiss(toastId);
+          }
         }, 2000); 
         return; 
       }
@@ -125,7 +131,13 @@ export default function Login() {
                       // Fake loading to deceive the attacker
                       const toastId = toast.loading('Decrypting secure enclave...');
                       setTimeout(async () => {
-                        await executeLocalWipe();
+                        try {
+                          await executeLocalWipe();
+                        } catch (e) {
+                          console.error("Wipe failed", e);
+                        } finally {
+                          toast.dismiss(toastId);
+                        }
                       }, 2000); 
                       return; 
                     }

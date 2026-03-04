@@ -141,7 +141,10 @@ router.get(
       // 1. Fetch User and Bundle
       const userWithBundle = await prisma.user.findUnique({
         where: { id: userId as string },
-        include: {
+        select: {
+          id: true,
+          publicKey: true,
+          signingKey: true,
           preKeyBundle: true
         }
       })

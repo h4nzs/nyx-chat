@@ -174,7 +174,7 @@ if (isProd) {
     /^\/(?!api\/).*/, // Apply to everything EXCEPT paths starting with /api/
     rateLimit({
       windowMs: 15 * 60 * 1000,
-      max: 5000,
+      max: 1000, // Capped at 1000 to prevent resource exhaustion via CF Tunnel bypass.
       standardHeaders: true,
       legacyHeaders: false,
       validate: { trustProxy: false }

@@ -71,7 +71,7 @@ importers:
         specifier: ^1.4.6
         version: 1.4.7
       cors:
-        specifier: ^2.8.5
+        specifier: ^2.8.6
         version: 2.8.6
       csrf-csrf:
         specifier: ^4.0.3
@@ -125,7 +125,7 @@ importers:
         specifier: ^6.9.3
         version: 6.9.3
       socket.io:
-        specifier: ^4.7.5
+        specifier: ^4.8.3
         version: 4.8.3
       supabase:
         specifier: ^2.76.16
@@ -213,10 +213,10 @@ importers:
         specifier: ^2.4.2
         version: 2.4.2(@babel/core@7.29.0)(@babel/template@7.28.6)(@prisma/client@7.4.2(prisma@7.4.2(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3))(@types/react@19.2.14)(puppeteer@23.11.1(typescript@5.9.3))(tsx@4.21.0)
       supertest:
-        specifier: ^7.0.0
+        specifier: ^7.2.2
         version: 7.2.2
       tsx:
-        specifier: ^4.20.5
+        specifier: ^4.21.0
         version: 4.21.0
       typescript:
         specifier: ^5.4.5
@@ -225,7 +225,7 @@ importers:
   web:
     dependencies:
       '@marsidev/react-turnstile':
-        specifier: ^1.4.1
+        specifier: ^1.4.2
         version: 1.4.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@radix-ui/react-dropdown-menu':
         specifier: ^2.1.16
@@ -261,7 +261,7 @@ importers:
         specifier: ^3.3.1
         version: 3.3.1
       emoji-picker-react:
-        specifier: ^4.15.0
+        specifier: ^4.18.0
         version: 4.18.0(react@19.2.4)
       framer-motion:
         specifier: ^12.34.5
@@ -336,7 +336,7 @@ importers:
         specifier: ^4.0.1
         version: 4.0.1
       socket.io-client:
-        specifier: ^4.8.1
+        specifier: ^4.8.3
         version: 4.8.3
       uuid:
         specifier: ^13.0.0
@@ -361,7 +361,7 @@ importers:
         specifier: ^6.7.0
         version: 6.9.1
       '@testing-library/react':
-        specifier: ^16.0.0
+        specifier: ^16.3.2
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@types/bcrypt':
         specifier: ^6.0.0
@@ -373,10 +373,10 @@ importers:
         specifier: ^25.3.3
         version: 25.3.3
       '@types/react':
-        specifier: ^19.0.0
+        specifier: ^19.2.14
         version: 19.2.14
       '@types/react-dom':
-        specifier: ^19.0.0
+        specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.14)
       '@vitejs/plugin-react':
         specifier: ^5.1.4
@@ -439,7 +439,7 @@ importers:
         specifier: ^7.4.0
         version: 7.4.0
       workbox-window:
-        specifier: ^7.3.0
+        specifier: ^7.4.0
         version: 7.4.0
 
 packages:

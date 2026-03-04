@@ -59,7 +59,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const user = useAuthStore((s) => s.user);
   const meId = user?.id;
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
-  const { openProfileModal, openChatInfoModal } = useModalStore(useShallow(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal })));
+  const { openProfileModal, openChatInfoModal } = useModalStore(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal }));
   const { verifiedStatus } = useVerificationStore();
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
@@ -209,9 +209,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   })));
   const clearSearch = useMessageSearchStore(s => s.clearSearch);
 
-  const { handleStopRecording } = useMessageInputStore(useShallow(state => ({
-    handleStopRecording: state.handleStopRecording,
-  })));
+  const handleStopRecording = useMessageInputStore(state => state.handleStopRecording);
   
   const typingIndicators = usePresenceStore(state => state.typingIndicators);
   const virtuosoRef = useRef<any>(null);
