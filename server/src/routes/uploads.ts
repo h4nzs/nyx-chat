@@ -138,12 +138,12 @@ router.post(
       if (!fileUrl) throw new ApiError(400, 'Missing fileUrl.')
 
       const participant = await prisma.participant.findFirst({
-        where: { userId: req.user.id, conversationId: groupId }
+        where: { userId: req.user.id, conversationId: groupId as string }
       })
       if (!participant || participant.role !== 'ADMIN') throw new ApiError(403, 'Forbidden: Only admin can change group avatar')
 
       const oldGroup = await prisma.conversation.findUnique({
-        where: { id: groupId },
+        where: { id: groupId as string },
         select: { avatarUrl: true }
       })
 
@@ -152,22 +152,20 @@ router.post(
       }
 
       const updatedConversation = await prisma.conversation.update({
-        where: { id: groupId },
+        where: { id: groupId as string },
         data: { avatarUrl: fileUrl },
         include: {
           participants: {
-            select: {
-              user: { select: { id: true, encryptedProfile: true, publicKey: true } },
-              role: true
+            include: {
+              user: { select: { id: true, encryptedProfile: true, publicKey: true } }
             }
-          },
-          creator: { select: { id: true } }
+          }
         }
       })
 
       const transformedConversation = {
         ...updatedConversation,
-        participants: updatedConversation.participants.map(p => ({ ...p.user, role: p.role }))
+        participants: updatedConversation.participants.map((p: any) => ({ ...p.user, role: p.role }))
       }
 
       getIo().to(groupId).emit('conversation:updated', {

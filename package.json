@@ -24,9 +24,8 @@
       "lodash": ">=4.17.23"
     },
     "onlyBuiltDependencies": [
-      "@prisma/engines",
-      "prisma",
-      "supabase"
+      "supabase",
+      "unrs-resolver"
     ]
   }
 }

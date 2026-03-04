@@ -15,7 +15,7 @@ if (!connectionString) {
 const pool = new Pool({ connectionString });
 
 // Instantiate the Prisma adapter
-const adapter = new PrismaPg(pool);
+const adapter = new PrismaPg(pool as any);
 
 // Pass the adapter to the PrismaClient
 export const prisma = new PrismaClient({

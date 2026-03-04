@@ -3,6 +3,7 @@ import cookieParser from "cookie-parser";
 import logger from "morgan";
 import cors from "cors";
 import helmet from "helmet";
+import mime from "mime";
 import { rateLimit } from "express-rate-limit";
 import { doubleCsrf } from "csrf-csrf";
 import { env } from "./config.js";
@@ -261,7 +262,7 @@ app.use("/uploads",
   express.static(uploadsPath, {
     index: false, 
     setHeaders: (res, filePath) => {
-      const mimeType = express.static.mime.lookup(filePath);
+      const mimeType = mime.getType(filePath);
       if (mimeType && !mimeType.startsWith('image/') && !mimeType.startsWith('video/') && !mimeType.startsWith('audio/')) {
         res.setHeader('Content-Disposition', 'attachment');
       }

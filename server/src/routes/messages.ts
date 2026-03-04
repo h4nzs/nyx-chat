@@ -69,7 +69,7 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
 
     // Get the target message first to find its timestamp and conversationId
     const targetMsg = await prisma.message.findUnique({
-      where: { id: targetId },
+      where: { id: targetId as string },
       include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
     });
 

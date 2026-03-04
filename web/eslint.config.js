@@ -1,23 +1,46 @@
-import globals from "globals";
-import pluginJs from "@eslint/js";
-import tseslint from "typescript-eslint";
-import pluginReactConfig from "eslint-plugin-react/configs/recommended.js";
+import tsParser from '@typescript-eslint/parser';
+import tsPlugin from '@typescript-eslint/eslint-plugin';
+import reactPlugin from 'eslint-plugin-react';
 
 export default [
-  { files: ["**/*.{js,mjs,cjs,ts,jsx,tsx}"] },
-  { languageOptions: { globals: globals.browser } },
-  pluginJs.configs.recommended,
-  ...tseslint.configs.recommended,
   {
-    ...pluginReactConfig,
-    settings: { react: { version: "detect" } },
-    rules: {
-      ...pluginReactConfig.rules,
-      "react/react-in-jsx-scope": "off",
-      "@typescript-eslint/no-explicit-any": "warn",
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'public/**']
+  },
+  {
+    files: ['**/*.ts', '**/*.tsx'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        ecmaFeatures: {
+          jsx: true
+        }
+      },
+      globals: {
+        document: 'readonly',
+        window: 'readonly',
+        console: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        crypto: 'readonly'
+      }
     },
-  },
-  {
-    ignores: ["dist/", "dev-dist/", "public/", "node_modules/", ".eslintrc.cjs", "vite.config.ts", "postcss.config.js", "tailwind.config.ts"],
-  },
+    plugins: {
+      '@typescript-eslint': tsPlugin,
+      'react': reactPlugin
+    },
+    settings: {
+      react: {
+        version: 'detect'
+      }
+    },
+    rules: {
+      ...tsPlugin.configs.recommended.rules,
+      ...reactPlugin.configs.recommended.rules,
+      'react/react-in-jsx-scope': 'off', // Not needed in React 17+
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-explicit-any': 'warn'
+    }
+  }
 ];
