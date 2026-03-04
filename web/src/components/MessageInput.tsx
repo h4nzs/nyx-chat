@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye } from 'react-icons/fi';
+import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2 } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import clsx from 'clsx';
 import { useShallow } from 'zustand/react/shallow';
@@ -110,6 +110,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const shouldSendVoiceRef = useRef<boolean>(true);
 
   // Permissions & Logic
   const isOneToOne = !conversation.isGroup;
@@ -187,11 +188,14 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorderRef.current = new MediaRecorder(stream);
       audioChunksRef.current = [];
+      shouldSendVoiceRef.current = true;
 
       mediaRecorderRef.current.ondataavailable = (event) => audioChunksRef.current.push(event.data);
       mediaRecorderRef.current.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        onVoiceSend(audioBlob, recordingTimeRef.current);
+        if (shouldSendVoiceRef.current) {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          onVoiceSend(audioBlob, recordingTimeRef.current);
+        }
         stream.getTracks().forEach(track => track.stop());
         setRecordingTime(0);
         recordingTimeRef.current = 0;
@@ -213,6 +217,16 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
 
   const handleStopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
+      shouldSendVoiceRef.current = true;
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
+    }
+  };
+
+  const handleCancelRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      shouldSendVoiceRef.current = false;
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
@@ -327,24 +341,35 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
         </div>
       ) : isRecording ? (
         // Voice Recording Mode
-        <div className="flex items-center gap-4 animate-fade-in p-4">
+        <div className="flex items-center gap-2 md:gap-4 animate-fade-in p-2 md:p-4 w-full">
+          <button 
+            onClick={handleCancelRecording} 
+            className="
+              p-3 rounded-full text-text-secondary 
+              hover:text-red-500 hover:bg-red-500/10 transition-all flex-shrink-0
+            "
+            title="Cancel Recording"
+          >
+             <FiTrash2 size={20} />
+          </button>
+          <div className="flex-1 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark rounded-full h-12 flex items-center px-4 md:px-6 gap-3 min-w-0">
+             <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_red] flex-shrink-0"></div>
+             <span className="font-mono text-sm md:text-lg text-text-primary tracking-widest flex-shrink-0">
+                {new Date(recordingTime * 1000).toISOString().substr(14, 5)}
+             </span>
+             <span className="hidden md:inline text-xs text-text-secondary uppercase tracking-wider ml-auto truncate">Recording Audio Feed...</span>
+          </div>
           <button 
             onClick={handleStopRecording} 
             className="
-              p-3 rounded-full bg-red-500 text-white 
-              shadow-[0_0_15px_rgba(239,68,68,0.5)]
-              hover:scale-110 active:scale-95 transition-all
+              p-3 rounded-full bg-accent text-white 
+              shadow-[0_0_15px_rgba(var(--accent),0.5)]
+              hover:scale-110 active:scale-95 transition-all flex-shrink-0
             "
+            title="Send Voice Message"
           >
-             <FiSquare fill="currentColor" size={20} />
+             <FiSend size={20} />
           </button>
-          <div className="flex-1 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark rounded-full h-12 flex items-center px-6 gap-3">
-             <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_red]"></div>
-             <span className="font-mono text-lg text-text-primary tracking-widest">
-                {new Date(recordingTime * 1000).toISOString().substr(14, 5)}
-             </span>
-             <span className="text-xs text-text-secondary uppercase tracking-wider ml-auto">Recording Audio Feed...</span>
-          </div>
         </div>
       ) : (
         // Text Input Mode - TRENCH DESIGN
