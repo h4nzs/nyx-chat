@@ -43,46 +43,20 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
     const allowedFolders = ['avatars', 'attachments', 'groups']
     const targetFolder = allowedFolders.includes(folder) ? folder : 'misc'
 
-    const allowedTypes = [
-      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
-      'application/pdf', 'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-powerpoint',
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/plain',
-      'video/mp4', 'video/quicktime', 'video/x-msvideo',
-      'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/mp3',
-      'application/zip', 'application/x-rar-compressed',
-      'application/octet-stream'
-    ]
-
-    if (!allowedTypes.includes(fileType)) {
-      return res.status(400).json({ error: `File type not allowed: ${fileType}` })
+    // ZERO-KNOWLEDGE PROTOCOL ENFORCEMENT
+    // The server must only accept encrypted binary blobs. 
+    // Allowing specific mime-types leaks metadata about the communication patterns.
+    if (fileType !== 'application/octet-stream') {
+      return res.status(400).json({ error: "Protocol violation: Only encrypted 'application/octet-stream' payloads are permitted." })
     }
 
     const fileSize = req.body.fileSize ? parseInt(req.body.fileSize, 10) : 0
     if (fileSize > 0) {
-      const avatarMaxSize = 5 * 1024 * 1024
-      const imageMaxSize = 15 * 1024 * 1024
-      const videoMaxSize = 100 * 1024 * 1024
-      const documentMaxSize = 50 * 1024 * 1024
-
-      let maxSize: number
-      if (targetFolder === 'avatars') {
-        maxSize = avatarMaxSize
-      } else if (fileType.startsWith('image/')) {
-        maxSize = imageMaxSize
-      } else if (fileType.startsWith('video/')) {
-        maxSize = videoMaxSize
-      } else if (fileType.startsWith('audio/')) {
-        maxSize = videoMaxSize
-      } else if (fileType.startsWith('application/') || fileType === 'text/plain') {
-        maxSize = documentMaxSize
-      } else {
-        maxSize = documentMaxSize
-      }
+      // Unified Zero-Knowledge Limits (in Bytes) based purely on destination folder
+      const AVATAR_LIMIT = 5 * 1024 * 1024;      // 5 MB for avatars
+      const ATTACHMENT_LIMIT = 100 * 1024 * 1024; // 100 MB max for chat attachments (HD Images, Videos, Files)
+      
+      const maxSize = (targetFolder === 'avatars' || targetFolder === 'groups') ? AVATAR_LIMIT : ATTACHMENT_LIMIT;
 
       // Encryption Overhead Buffer (IV + Auth Tag + Margin)
       // AES-GCM adds ~28 bytes. We add 1KB to be safe.
@@ -90,9 +64,9 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
       const allowedMax = maxSize + ENCRYPTION_OVERHEAD;
 
       if (fileSize > allowedMax) {
-        const allowedMaxMB = (allowedMax / (1024 * 1024)).toFixed(2)
+        const allowedMaxMB = (maxSize / (1024 * 1024)).toFixed(0)
         return res.status(400).json({
-          error: `File too large. Maximum size for this file type is ${allowedMaxMB}MB (including encryption overhead).`
+          error: `Payload too large. Maximum size for ${targetFolder} is ${allowedMaxMB}MB.`
         })
       }
     }
