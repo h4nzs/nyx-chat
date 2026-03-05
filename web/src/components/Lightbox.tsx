@@ -136,7 +136,12 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
                 <p className="text-xs text-text-secondary uppercase tracking-widest font-mono">View Once Audio</p>
              </div>
           ) : (
-            <img src={decryptedUrl} alt={message.fileName || "Lightbox view"} className="object-contain max-w-full max-h-[90vh] select-none shadow-2xl rounded-lg" onError={() => { setError("Failed to load media."); setIsLoading(false); }} />
+            <img 
+              src={decryptedUrl} 
+              alt={message.fileName || "Lightbox view"} 
+              className={`object-contain max-w-full max-h-[90vh] select-none shadow-2xl rounded-lg ${message.fileType === 'image/svg+xml' ? 'bg-white/5 p-4' : ''}`} 
+              onError={() => { setError("Failed to load media."); setIsLoading(false); }} 
+            />
           )
         )}
       </div>
