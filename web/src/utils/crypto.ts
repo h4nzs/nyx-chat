@@ -633,6 +633,27 @@ export async function decryptMessage(
         const payload = JSON.parse(cipher);
         const { header, ciphertext, signature } = payload;
         
+        // 1. CHECK SKIPPED KEYS FIRST
+        const existingSkippedIndex = receiverState.skippedKeys?.findIndex(k => k.n === header.n);
+        if (existingSkippedIndex !== undefined && existingSkippedIndex !== -1) {
+            const skippedKeyObj = receiverState.skippedKeys[existingSkippedIndex];
+            const mk = sodium.from_base64(skippedKeyObj.mk, sodium.base64_variants.URLSAFE_NO_PADDING);
+            const ciphertextBytes = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
+            const nonce = ciphertextBytes.slice(0, 24);
+            const ctext = ciphertextBytes.slice(24);
+            const decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
+            
+            // Remove the used key to prevent replay attacks
+            const newSkippedKeys = [...receiverState.skippedKeys];
+            newSkippedKeys.splice(existingSkippedIndex, 1);
+            await saveGroupReceiverState({ ...receiverState, skippedKeys: newSkippedKeys });
+
+            if (messageId) {
+                await storeMessageKeySecurely(messageId, mk);
+            }
+            return { status: 'success', value: sodium.to_string(decrypted) };
+        }
+
         const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
         const sender = conversation?.participants.find(p => p.id === senderId);
         

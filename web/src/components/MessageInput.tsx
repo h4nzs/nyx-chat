@@ -466,6 +466,13 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
             <span>{isHD ? "HD Quality: ON" : "Standard Quality"}</span>
           </button>
           <button
+            onClick={() => { setIsVoiceAnonymized(!isVoiceAnonymized); setShowPlusMenu(false); }}
+            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary font-bold"
+          >
+            <FiCpu size={18} className={isVoiceAnonymized ? "text-red-500" : "text-text-secondary"} />
+            <span className={isVoiceAnonymized ? "text-red-500" : ""}>{isVoiceAnonymized ? "Anon Voice: ON" : "Anon Voice: OFF"}</span>
+          </button>
+          <button
             onClick={() => { setShowEmojiPicker(true); setShowPlusMenu(false); }}
             className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
           >
