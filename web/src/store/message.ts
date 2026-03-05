@@ -438,7 +438,7 @@ type Actions = {
   processOfflineQueue: () => Promise<void>;
   reset: () => void;
   resendPendingMessages: () => void;
-  sendMessage: (conversationId: string, data: Partial<Message>, tempId?: number) => Promise<void>;
+  sendMessage: (conversationId: string, data: Partial<Message>, tempId?: number, isSilent?: boolean) => Promise<void>;
 };
 
 const initialState: State = {
@@ -498,7 +498,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }, timestamp);
   },
 
-  sendMessage: async (conversationId, data, tempId?: number) => {
+  sendMessage: async (conversationId, data, tempId?: number, isSilent = false) => {
     const { user, hasRestoredKeys } = useAuthStore.getState();
     if (!user) return;
 
@@ -510,7 +510,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             content: data.content, senderId: user.id, sender: user,
             createdAt: new Date().toISOString(), conversationId, status: 'SENT'
         } as Message;
-        get().addOptimisticMessage(conversationId, msg);
+        if (!isSilent) {
+            get().addOptimisticMessage(conversationId, msg);
+        }
         return;
     }
 
@@ -541,7 +543,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const actualTempId = tempId !== undefined ? tempId : Date.now();
     const isReactionPayload = !!parseReaction(data.content);
 
-    if (!isReactionPayload) {
+    if (!isReactionPayload && !isSilent) {
         const optimisticMessage: Message = {
             ...data,
             id: `temp_${actualTempId}`,

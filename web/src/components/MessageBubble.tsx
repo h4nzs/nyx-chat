@@ -163,11 +163,11 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
                 )}
                 
                 {message.fileUrl && isImage && (
-                  <button onClick={() => onImageClick?.(message)} className="block w-full">
+                  <button onClick={() => onImageClick?.(message)} className="block w-full min-w-[200px] sm:min-w-[250px] relative">
                     <LazyImage 
                       message={message} 
                       alt={message.fileName || 'Image attachment'} 
-                      className="rounded-lg max-h-80 w-full object-cover cursor-pointer hover:opacity-95" 
+                      className="rounded-lg max-h-[350px] w-full object-cover cursor-pointer hover:opacity-95" 
                     />
                   </button>
                 )}

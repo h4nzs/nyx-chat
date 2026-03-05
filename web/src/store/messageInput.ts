@@ -34,7 +34,7 @@ type State = {
   addStagedFiles: (files: File[]) => void;
   removeStagedFile: (index: number) => void;
   clearStagedFiles: () => void;
-  sendMessage: (conversationId: string, data: { content: string }, tempId?: number) => Promise<void>;
+  sendMessage: (conversationId: string, data: { content: string }, tempId?: number, isSilent?: boolean) => Promise<void>;
   uploadFile: (conversationId: string, file: File) => Promise<void>;
   handleStopRecording: (conversationId: string, blob: Blob, duration: number) => Promise<void>;
   retrySendMessage: (message: Message) => void;
@@ -76,7 +76,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   setEditingMessage: (message) => set({ editingMessage: message }),
   sendEdit: async (conversationId, messageId, newText) => {
       const payload = { type: 'edit', targetMessageId: messageId, text: newText };
-      await get().sendMessage(conversationId, { content: JSON.stringify(payload) });
+      await get().sendMessage(conversationId, { content: JSON.stringify(payload) }, undefined, true);
       set({ editingMessage: null });
       // Optimistically apply local edit immediately
       useMessageStore.getState().updateMessage(conversationId, messageId, { content: newText, isEdited: true });
@@ -109,7 +109,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
   clearTypingLinkPreview: () => set({ typingLinkPreview: null }),
 
-  sendMessage: async (conversationId, data, tempId?: number) => {
+  sendMessage: async (conversationId, data, tempId?: number, isSilent = false) => {
     const { sendMessage: coreSendMessage } = useMessageStore.getState();
     const { replyingTo, expiresIn, isViewOnce } = get();
 
@@ -122,7 +122,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
       isViewOnce,
       // Pass original content. message.ts handles encryption.
-    }, tempId);
+    }, tempId, isSilent);
 
     // Clear Input State
     set({ replyingTo: null, isViewOnce: false });
