@@ -370,6 +370,7 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
   for (const msg of decryptedItems) {
     const reactionPayload = parseReaction(msg.content);
     const editPayload = parseEdit(msg.content);
+    const silentPayload = parseSilent(msg.content);
 
     if (reactionPayload) {
         reactions.push({
@@ -386,6 +387,10 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
            targetMessageId: editPayload.targetMessageId, text: editPayload.text, timestamp: new Date(msg.createdAt).getTime()
         });
     } else {
+      if (silentPayload) {
+          msg.content = silentPayload.text;
+          msg.isSilent = true;
+      }
       chatMessages.push(msg);
     }
   }

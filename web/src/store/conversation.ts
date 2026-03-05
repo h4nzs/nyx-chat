@@ -93,12 +93,15 @@ const sortConversations = (list: Conversation[], currentUserId: string | undefin
 
 const withPreview = (msg: Message): Message => {
   if (msg.content) {
-    // Check for Reaction Payload
-    if (msg.content.trim().startsWith('{') && msg.content.includes('"type":"reaction"')) {
+    // Check for Reaction or Silent Payload
+    if (msg.content.trim().startsWith('{')) {
        try {
          const payload = JSON.parse(msg.content);
          if (payload.type === 'reaction') {
             return { ...msg, preview: `Reacted ${payload.emoji || ''}` };
+         }
+         if (payload.type === 'silent' && typeof payload.text === 'string') {
+            return { ...msg, preview: payload.text, content: payload.text, isSilent: true };
          }
        } catch {}
     }
