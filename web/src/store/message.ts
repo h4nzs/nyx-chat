@@ -441,6 +441,9 @@ type Actions = {
   sendMessage: (conversationId: string, data: Partial<Message>, tempId?: number, isSilent?: boolean) => Promise<void>;
 };
 
+let tempIdCounter = 0;
+const generateTempId = () => Date.now() * 1000 + (++tempIdCounter) + Math.floor(Math.random() * 1000);
+
 const initialState: State = {
   messages: {},
   isFetchingMore: {},
@@ -540,7 +543,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
     }
 
-    const actualTempId = tempId !== undefined ? tempId : Date.now();
+    const actualTempId = tempId !== undefined ? tempId : generateTempId();
     const isReactionPayload = !!parseReaction(data.content);
 
     if (!isReactionPayload && !isSilent) {
@@ -1076,7 +1079,22 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
   replaceOptimisticMessage: (conversationId, tempId, newMessage) => {
     set(state => {
-      const updatedMessages = (state.messages[conversationId] || []).map(m => (m.tempId && String(m.tempId) === String(tempId)) ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m);
+      const updatedMessages = (state.messages[conversationId] || []).map(m => {
+        if (m.tempId && String(m.tempId) === String(tempId)) {
+          return {
+            ...m,
+            ...newMessage,
+            content: m.content, // ALWAYS PRESERVE LOCAL PLAINTEXT
+            fileUrl: m.fileUrl, // Preserve local blob URL
+            fileName: m.fileName,
+            fileType: m.fileType,
+            fileSize: m.fileSize,
+            tempId: undefined,
+            optimistic: false
+          };
+        }
+        return m;
+      });
       const msg = updatedMessages.find(m => m.id === newMessage.id);
       if (msg) shadowVault.upsertMessages([msg]); // Archive to shadow vault
       return {

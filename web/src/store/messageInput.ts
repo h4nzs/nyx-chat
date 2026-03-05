@@ -62,6 +62,9 @@ const ensureGroupSessionIfNeeded = async (conversationId: string): Promise<boole
   return true;
 };
 
+let tempIdCounter = 0;
+const generateTempId = () => Date.now() * 1000 + (++tempIdCounter) + Math.floor(Math.random() * 1000);
+
 export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   replyingTo: null,
   typingLinkPreview: null,
@@ -149,7 +152,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
     const isGroup = conversation.isGroup;
 
-    const tempId = Date.now();
+    const tempId = generateTempId();
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
     // Optimistic UI (We keep this here to have access to File blob for preview)

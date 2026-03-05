@@ -479,7 +479,33 @@ export interface DrHeader {
   epk?: string;
 }
 
+const encryptionLocks = new Map<string, Promise<void>>();
+
 export async function encryptMessage(
+  text: string,
+  conversationId: string,
+  isGroup: boolean = false,
+  existingSession?: { sessionId: string; key: Uint8Array },
+  messageId?: string
+): Promise<{ ciphertext: string; sessionId?: string; drHeader?: DrHeader; mk?: Uint8Array }> {
+  // MUTEX LOCK to prevent concurrent ratchet state overwrites when sending messages rapidly
+  let previousLock = encryptionLocks.get(conversationId) || Promise.resolve();
+  let release: () => void;
+  const currentLock = new Promise<void>(resolve => { release = resolve; });
+  encryptionLocks.set(conversationId, currentLock);
+
+  try {
+    await previousLock;
+    return await doEncryptMessage(text, conversationId, isGroup, existingSession, messageId);
+  } finally {
+    release!();
+    if (encryptionLocks.get(conversationId) === currentLock) {
+      encryptionLocks.delete(conversationId);
+    }
+  }
+}
+
+async function doEncryptMessage(
   text: string,
   conversationId: string,
   isGroup: boolean = false,
