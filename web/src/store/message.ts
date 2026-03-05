@@ -558,8 +558,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const actualTempId = tempId !== undefined ? tempId : generateTempId();
     const isReactionPayload = !!parseReaction(data.content);
+    const silentPayload = parseSilent(data.content);
 
     if (!isReactionPayload && !isSilent) {
+        let optimisticContent = data.content;
+        let isOptimisticSilent = false;
+        
+        if (silentPayload) {
+            optimisticContent = silentPayload.text;
+            isOptimisticSilent = true;
+        }
+
         const optimisticMessage: Message = {
             ...data,
             id: `temp_${actualTempId}`,
@@ -573,15 +582,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${actualTempId}`, id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
             status: 'SENDING', 
             repliedTo: data.repliedTo,
+            content: optimisticContent,
+            isSilent: isOptimisticSilent || data.isSilent
         };
 
-        if (data.content) {
-            optimisticMessage.preview = data.content;
+        if (optimisticContent) {
+            optimisticMessage.preview = optimisticContent;
         }
 
         get().addOptimisticMessage(conversationId, optimisticMessage);
         
-        let lastMsgPreview = data.content;
+        let lastMsgPreview = optimisticContent;
         try {
            if (lastMsgPreview?.startsWith('{') && lastMsgPreview.includes('"type":"file"')) {
                lastMsgPreview = '📎 Sent a file';
