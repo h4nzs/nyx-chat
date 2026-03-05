@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2, FiEdit2 } from 'react-icons/fi';
+import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2, FiEdit2, FiCpu } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
@@ -110,18 +110,21 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const timerMenuRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   
   const { 
     typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, 
     expiresIn, setExpiresIn, isViewOnce, setIsViewOnce,
     stagedFiles, addStagedFiles, removeStagedFile, clearStagedFiles,
     isHD, setIsHD,
+    isVoiceAnonymized, setIsVoiceAnonymized,
     editingMessage, setEditingMessage, sendEdit
   } = useMessageInputStore(useShallow(s => ({
     typingLinkPreview: s.typingLinkPreview, fetchTypingLinkPreview: s.fetchTypingLinkPreview, clearTypingLinkPreview: s.clearTypingLinkPreview, 
     expiresIn: s.expiresIn, setExpiresIn: s.setExpiresIn, isViewOnce: s.isViewOnce, setIsViewOnce: s.setIsViewOnce,
     stagedFiles: s.stagedFiles, addStagedFiles: s.addStagedFiles, removeStagedFile: s.removeStagedFile, clearStagedFiles: s.clearStagedFiles,
     isHD: s.isHD, setIsHD: s.setIsHD,
+    isVoiceAnonymized: s.isVoiceAnonymized, setIsVoiceAnonymized: s.setIsVoiceAnonymized,
     editingMessage: s.editingMessage, setEditingMessage: s.setEditingMessage, sendEdit: s.sendEdit
   })));
   const { status: connectionStatus } = useConnectionStore(useShallow(s => ({ status: s.status })));
@@ -262,6 +265,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
       onSend({ content: text });
       setText('');
       setIsHD(false);
+      setIsVoiceAnonymized(false);
     }
     
     clearTypingLinkPreview();
@@ -315,6 +319,10 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
     if (mediaRecorderRef.current && isRecording) {
       shouldSendVoiceRef.current = true;
       mediaRecorderRef.current.stop();
+      if (audioContextRef.current) {
+          audioContextRef.current.close().catch(()=>{});
+          audioContextRef.current = null;
+      }
       setIsRecording(false);
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
     }
@@ -324,6 +332,10 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
     if (mediaRecorderRef.current && isRecording) {
       shouldSendVoiceRef.current = false;
       mediaRecorderRef.current.stop();
+      if (audioContextRef.current) {
+          audioContextRef.current.close().catch(()=>{});
+          audioContextRef.current = null;
+      }
       setIsRecording(false);
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
     }
@@ -568,6 +580,18 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
               )}
             >
               HD
+            </button>
+            <button 
+              type="button" 
+              onClick={() => setIsVoiceAnonymized(!isVoiceAnonymized)} 
+              disabled={isInputDisabled}
+              aria-label="Toggle Anonymous Voice"
+              className={clsx(
+                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center gap-1 justify-center",
+                isVoiceAnonymized ? "text-red-500 bg-red-500/10 shadow-[inset_2px_2px_4px_rgba(0,0,0,0.4)]" : "text-text-secondary hover:text-red-400"
+              )}
+            >
+              <FiCpu size={14} /> ANON
             </button>
             <button 
               type="button" 

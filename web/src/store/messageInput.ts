@@ -18,6 +18,7 @@ type State = {
   isViewOnce: boolean;
   stagedFiles: File[];
   isHD: boolean;
+  isVoiceAnonymized: boolean;
   editingMessage: Message | null;
 
   // Actions
@@ -27,6 +28,7 @@ type State = {
   setExpiresIn: (seconds: number | null) => void;
   setIsViewOnce: (value: boolean) => void;
   setIsHD: (value: boolean) => void;
+  setIsVoiceAnonymized: (value: boolean) => void;
   fetchTypingLinkPreview: (text: string) => void;
   clearTypingLinkPreview: () => void;
   addStagedFiles: (files: File[]) => void;
@@ -67,6 +69,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   isViewOnce: false,
   stagedFiles: [],
   isHD: false,
+  isVoiceAnonymized: false,
   editingMessage: null,
 
   setReplyingTo: (message) => set({ replyingTo: message }),
@@ -81,6 +84,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   setExpiresIn: (seconds) => set({ expiresIn: seconds }),
   setIsViewOnce: (value) => set({ isViewOnce: value }),
   setIsHD: (value) => set({ isHD: value }),
+  setIsVoiceAnonymized: (value) => set({ isVoiceAnonymized: value }),
   addStagedFiles: (files) => set((state) => ({ stagedFiles: [...state.stagedFiles, ...files] })),
   removeStagedFile: (index) => set((state) => ({ stagedFiles: state.stagedFiles.filter((_, i) => i !== index) })),
   clearStagedFiles: () => set({ stagedFiles: [] }),
