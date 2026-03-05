@@ -90,6 +90,18 @@ function getDb(): Promise<IDBPDatabase> {
   return dbCache.get(userId)!;
 }
 
+export async function closeDatabaseConnection() {
+  const savedUser = localStorage.getItem("user");
+  const user = savedUser ? JSON.parse(savedUser) : null;
+  const userId = user?.id;
+  
+  if (userId && dbCache.has(userId)) {
+    const db = await dbCache.get(userId)!;
+    db.close();
+    dbCache.delete(userId);
+  }
+}
+
 // ... existing helpers ...
 
 export async function getGroupSenderState(conversationId: string): Promise<GroupSenderState | null> {

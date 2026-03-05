@@ -202,7 +202,16 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     // so the expanded EmojiPicker in ContextMenu can access it.
     (window as any).currentReactionHandler = reactToMessage;
 
-    const isEditable = mine && !message.optimistic && !message.fileUrl && !message.type && !message.content?.startsWith('{') && !message.content?.startsWith('[');
+    // Limit edit window to 5 minutes (300,000 ms)
+    const isWithinEditWindow = (Date.now() - new Date(message.createdAt).getTime()) < 5 * 60 * 1000;
+    
+    const isEditable = mine && 
+                       !message.optimistic && 
+                       !message.fileUrl && 
+                       !message.type && 
+                       !message.content?.startsWith('{') && 
+                       !message.content?.startsWith('[') &&
+                       isWithinEditWindow;
 
     openMenu(e, [
       { label: 'Reply', icon: <FiCornerUpLeft />, onClick: () => setReplyingTo(message) },
