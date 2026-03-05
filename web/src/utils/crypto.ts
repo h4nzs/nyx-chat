@@ -576,11 +576,37 @@ async function doEncryptMessage(
   }
 }
 
+const decryptionLocks = new Map<string, Promise<void>>();
+
 export async function decryptMessage(
   cipher: string,
   conversationId: string,
   isGroup: boolean,
   sessionId: string | null | undefined, // In group, this might be senderId
+  messageId?: string
+): Promise<DecryptResult> {
+  // MUTEX LOCK to prevent concurrent ratchet state overwrites when receiving messages rapidly
+  let previousLock = decryptionLocks.get(conversationId) || Promise.resolve();
+  let release: () => void;
+  const currentLock = new Promise<void>(resolve => { release = resolve; });
+  decryptionLocks.set(conversationId, currentLock);
+
+  try {
+    await previousLock;
+    return await doDecryptMessage(cipher, conversationId, isGroup, sessionId, messageId);
+  } finally {
+    release!();
+    if (decryptionLocks.get(conversationId) === currentLock) {
+      decryptionLocks.delete(conversationId);
+    }
+  }
+}
+
+async function doDecryptMessage(
+  cipher: string,
+  conversationId: string,
+  isGroup: boolean,
+  sessionId: string | null | undefined,
   messageId?: string
 ): Promise<DecryptResult> {
   if (!cipher) return { status: 'success', value: '' };
