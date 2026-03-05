@@ -120,6 +120,12 @@ export default function Login() {
         
         if (!autoUnlockSuccess) {
              // Jika PRF gagal/belum setup, user harus input password manual untuk dekripsi
+             if (localStorage.getItem('nyx_bio_vault') && !recoveryPhrase) {
+                console.warn("Biometric PRF key derivation failed or mismatched.");
+                toast.error("Biometric key invalid or corrupted. Please enter password manually.");
+                localStorage.removeItem('nyx_bio_vault'); 
+             }
+             
              const hasKeys = await getEncryptedKeys();
              if (hasKeys) {
                 useModalStore.getState().showPasswordPrompt(async (password) => {
@@ -178,21 +184,64 @@ export default function Login() {
       console.error("Biometric login error:", err);
 
       // Tangani berbagai jenis error WebAuthn
-      if (err.name === 'NotAllowedError') {
+      if (err.name === 'NotAllowedError' || err.message?.includes('cancelled')) {
         setError("Biometric authentication was cancelled or timed out.");
         return;
-      } else if (err.name === 'SecurityError') {
+      } 
+      
+      toast.error("Biometric unlock failed. Falling back to password.");
+      
+      if (err.name === 'SecurityError') {
         setError("Biometric authentication is not available due to security settings.");
-        return;
       } else if (err.name === 'AbortError') {
         setError("Biometric authentication was aborted.");
-        return;
       } else if (err.name === 'InvalidStateError') {
         setError("Device is locked or already authenticated. Please try again later.");
-        return;
+      } else {
+        setError("Biometric login failed. Please use password or try again.");
       }
+      
+      // Fallback: Show password prompt if keys exist
+      const hasKeys = await getEncryptedKeys();
+      if (hasKeys) {
+         useModalStore.getState().showPasswordPrompt(async (password) => {
+            if (!password) return;
 
-      setError("Biometric login failed. Please use password or try again.");
+            const isPanic = await checkPanicPassword(password);
+            if (isPanic) {
+              const toastId = toast.loading('Decrypting secure enclave...');
+              setTimeout(async () => {
+                try {
+                  await executeLocalWipe();
+                } catch (e) {
+                  console.error("Wipe failed", e);
+                } finally {
+                  toast.dismiss(toastId);
+                }
+              }, 2000); 
+              return; 
+            }
+
+            try {
+                const encryptedKeys = await getEncryptedKeys();
+                if (!encryptedKeys) return;
+                const result = await retrievePrivateKeys(encryptedKeys, password);
+                if (result.success) {
+                    const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } = await import("@lib/keyStorage");
+                    await saveDeviceAutoUnlockKey(password);
+                    await setDeviceAutoUnlockReady(true);
+                    useAuthStore.getState().setDecryptedKeys(result.keys);
+                    await useAuthStore.getState().loadBlockedUsers();
+                    connectSocket();
+                    navigate("/chat");
+                } else {
+                    toast.error("Password salah. Gagal mendekripsi kunci.");
+                }
+            } catch (e) {
+                toast.error("Terjadi kesalahan saat dekripsi.");
+            }
+         });
+      }
     }
   }
 
