@@ -306,8 +306,41 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
     if (!isConnected) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let finalStream = stream;
+
+      if (isVoiceAnonymized) {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          const audioCtx = new AudioContextClass();
+          audioContextRef.current = audioCtx;
+          const source = audioCtx.createMediaStreamSource(stream);
+
+          // 1. Lowpass Filter (Muffles the voice, removes identifying high frequencies)
+          const filter = audioCtx.createBiquadFilter();
+          filter.type = 'lowpass';
+          filter.frequency.value = 800; // Hz
+
+          // 2. Ring Modulator (Robotic/Dalek vibration)
+          const oscillator = audioCtx.createOscillator();
+          oscillator.type = 'sine';
+          oscillator.frequency.value = 40; // 40Hz vibration
+
+          const ringModulator = audioCtx.createGain();
+          ringModulator.gain.value = 0;
+
+          // Wire it up: oscillator modulates the gain, source goes through the gain, then through filter
+          oscillator.connect(ringModulator.gain);
+          source.connect(ringModulator);
+          ringModulator.connect(filter);
+
+          const destination = audioCtx.createMediaStreamDestination();
+          filter.connect(destination);
+          
+          oscillator.start();
+          finalStream = destination.stream;
+      }
+
       const options = { mimeType: 'audio/webm;codecs=opus', audioBitsPerSecond: 64000 };
-      mediaRecorderRef.current = new MediaRecorder(stream, options);
+      mediaRecorderRef.current = new MediaRecorder(finalStream, options);
       audioChunksRef.current = [];
       shouldSendVoiceRef.current = true;
 
