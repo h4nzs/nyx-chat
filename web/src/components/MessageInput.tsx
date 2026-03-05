@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2, FiEdit2, FiCpu } from 'react-icons/fi';
+import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2, FiEdit2, FiCpu, FiVolumeX } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
@@ -106,11 +106,22 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showTimerMenu, setShowTimerMenu] = useState(false); // Timer Menu State
   const [showPlusMenu, setShowPlusMenu] = useState(false); // Mobile Plus Menu State
+  const [showSilentMenu, setShowSilentMenu] = useState(false); // Silent Drop Menu State
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
   const timerMenuRef = useRef<HTMLDivElement>(null);
   const plusMenuRef = useRef<HTMLDivElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const sendButtonRef = useRef<HTMLButtonElement>(null);
+  const longPressTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleSendTouchStart = () => {
+    longPressTimerRef.current = setTimeout(() => setShowSilentMenu(true), 500);
+  };
+  const handleSendTouchEnd = () => {
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+  };
   
   const { 
     typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, 
@@ -180,6 +191,9 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
       if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
         setShowPlusMenu(false);
       }
+      if (sendButtonRef.current && !sendButtonRef.current.contains(event.target as Node)) {
+        setShowSilentMenu(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -241,10 +255,13 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
 
   const hasContentToSend = hasText || stagedFiles.length > 0;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent, forceSilent = false) => {
+    if (e) e.preventDefault();
     if (!hasContentToSend || !isConnected) return;
-    triggerSendFeedback();
+    
+    // Only trigger feedback if not forcing silent
+    if (!forceSilent) triggerSendFeedback();
+    setShowSilentMenu(false);
     
     if (editingMessage) {
         await sendEdit(conversation.id, editingMessage.id, text);
@@ -262,7 +279,11 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
 
     // 2. Process Text
     if (hasText) {
-      onSend({ content: text });
+      let finalContent = text;
+      if (forceSilent) {
+          finalContent = JSON.stringify({ type: 'silent', text: text });
+      }
+      onSend({ content: finalContent });
       setText('');
       setIsHD(false);
       setIsVoiceAnonymized(false);
@@ -653,34 +674,64 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
           </div>
 
           {/* Send / Mic Button */}
-          {hasContentToSend ? (
-             <button
-              type="submit"
-              disabled={isInputDisabled}
-              aria-label="Send message"
-              className="
-                p-3 rounded-xl bg-accent text-white
-                shadow-neu-flat dark:shadow-neu-flat-dark
-                hover:-translate-y-0.5 active:translate-y-0 transition-all
-              "
-             >
-               <FiSend size={18} className={hasContentToSend ? 'translate-x-0.5' : ''} />
-             </button>
-          ) : (
-             <button
-              type="button"
-              onClick={handleStartRecording}
-              disabled={isInputDisabled}
-              aria-label="Record voice message"
-              className="
-                p-3 rounded-xl text-text-secondary
-                shadow-neu-icon dark:shadow-neu-icon-dark
-                hover:text-red-500 active:scale-95 transition-all
-              "
-             >
-               <FiMic size={18} />
-             </button>
-          )}
+          <div className="relative">
+            <AnimatePresence>
+               {showSilentMenu && (
+                  <motion.div 
+                     initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                     animate={{ opacity: 1, y: 0, scale: 1 }}
+                     exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                     className="absolute bottom-full right-0 mb-2 p-2 bg-bg-surface backdrop-blur-xl border border-white/10 rounded-xl shadow-neumorphic-convex z-50 whitespace-nowrap"
+                  >
+                     <button 
+                       type="button"
+                       onClick={(e) => {
+                           e.preventDefault();
+                           e.stopPropagation();
+                           handleSubmit(undefined, true);
+                       }}
+                       className="flex items-center gap-2 px-3 py-2 text-sm font-bold text-text-primary hover:bg-white/5 rounded-lg transition-colors w-full"
+                     >
+                       <FiVolumeX className="text-accent" size={16} /> Send without sound
+                     </button>
+                  </motion.div>
+               )}
+            </AnimatePresence>
+            {hasContentToSend ? (
+               <button
+                ref={sendButtonRef}
+                type="submit"
+                onMouseDown={handleSendTouchStart}
+                onMouseUp={handleSendTouchEnd}
+                onMouseLeave={handleSendTouchEnd}
+                onTouchStart={handleSendTouchStart}
+                onTouchEnd={handleSendTouchEnd}
+                disabled={isInputDisabled}
+                aria-label="Send message"
+                className="
+                  p-3 rounded-xl bg-accent text-white
+                  shadow-neu-flat dark:shadow-neu-flat-dark
+                  hover:-translate-y-0.5 active:translate-y-0 transition-all
+                "
+               >
+                 <FiSend size={18} className={hasContentToSend ? 'translate-x-0.5' : ''} />
+               </button>
+            ) : (
+               <button
+                type="button"
+                onClick={handleStartRecording}
+                disabled={isInputDisabled}
+                aria-label="Record voice message"
+                className="
+                  p-3 rounded-xl text-text-secondary
+                  shadow-neu-icon dark:shadow-neu-icon-dark
+                  hover:text-red-500 active:scale-95 transition-all
+                "
+               >
+                 <FiMic size={18} />
+               </button>
+            )}
+          </div>
 
         </form>
       )}

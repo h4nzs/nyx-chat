@@ -115,7 +115,9 @@ export function getSocket() {
         // The store handles decryption, reaction parsing, and optimistic replacement internally.
         const decryptedMessage = await addIncomingMessage(newMessage.conversationId, newMessage);
           
-        triggerReceiveFeedback();
+        if (!decryptedMessage.isSilent) {
+           triggerReceiveFeedback();
+        }
 
         // Update notification/preview using decrypted content
         // TODO: Trigger Desktop/Push Notification here using decryptedMessage.content or decryptedMessage.fileName

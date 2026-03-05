@@ -348,6 +348,19 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
   return null;
 }
 
+function parseSilent(content: string | null | undefined): { text: string } | null {
+  if (!content) return null;
+  try {
+    const trimmed = content.trim();
+    if (!trimmed.startsWith('{') || !trimmed.includes('"type":"silent"')) return null;
+    const payload = JSON.parse(trimmed);
+    if (payload.type === 'silent' && typeof payload.text === 'string') {
+      return payload;
+    }
+  } catch (e) {}
+  return null;
+}
+
 // Helper to separate messages and reactions
 function processMessagesAndReactions(decryptedItems: Message[], existingMessages: Message[] = []) {
   const chatMessages: Message[] = [];
@@ -1031,6 +1044,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       
       const reactionPayload = parseReaction(decrypted.content);
       const editPayload = parseEdit(decrypted.content);
+      const silentPayload = parseSilent(decrypted.content);
+
+      if (silentPayload) {
+          decrypted.content = silentPayload.text;
+          decrypted.isSilent = true;
+      }
       
       if (reactionPayload) {
           const reaction = {

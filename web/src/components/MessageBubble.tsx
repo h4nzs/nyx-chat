@@ -3,7 +3,7 @@ import { Message, MessageStatus } from "@store/conversation";
 import { useAuthStore } from "@store/auth";
 import classNames from "classnames";
 import { FaCheck, FaCheckDouble } from "react-icons/fa";
-import { FiClock, FiEyeOff, FiCamera, FiVideo, FiMic, FiEye } from "react-icons/fi";
+import { FiClock, FiEyeOff, FiCamera, FiVideo, FiMic, FiEye, FiVolumeX } from "react-icons/fi";
 import FileAttachment from "./FileAttachment";
 import LinkPreviewCard from "./LinkPreviewCard";
 import LazyImage from "./LazyImage";
@@ -222,6 +222,7 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
         "text-text-secondary/80": !isOwn && (!isImage || message.content)
       })}>
         {message.isViewOnce && <FiEye size={12} className="opacity-70" />}
+        {message.isSilent && <FiVolumeX size={12} className="opacity-60 text-text-secondary" title="Sent Silently" />}
         {timeLeft && (
           <span className="flex items-center gap-1 text-[9px] font-bold text-red-500 bg-red-500/10 px-1 rounded animate-pulse mr-1">
             <FiClock size={10} /> {timeLeft}

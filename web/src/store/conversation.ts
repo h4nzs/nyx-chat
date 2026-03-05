@@ -49,6 +49,7 @@ export type Message = {
   isViewOnce?: boolean;
   isViewed?: boolean;
   isEdited?: boolean;
+  isSilent?: boolean; // New: Message was sent without sound
 };
 
 export type Participant = {
