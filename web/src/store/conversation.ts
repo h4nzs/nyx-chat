@@ -48,6 +48,7 @@ export type Message = {
   isBlindAttachment?: boolean; // New: Flag for Blind Attachments (raw key in fileKey)
   isViewOnce?: boolean;
   isViewed?: boolean;
+  isEdited?: boolean;
 };
 
 export type Participant = {

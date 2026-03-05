@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2 } from 'react-icons/fi';
+import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2, FiEdit2 } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
@@ -39,6 +39,22 @@ const DURATIONS = [
   { label: '1h', value: 3600 },
   { label: '24h', value: 86400 },
 ];
+
+const EditPreview = () => {
+  const { editingMessage, setEditingMessage } = useMessageInputStore(useShallow(s => ({ editingMessage: s.editingMessage, setEditingMessage: s.setEditingMessage })));
+  if (!editingMessage) return null;
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="px-4 pb-2">
+      <div className="relative flex items-center justify-between bg-bg-main rounded-t-xl p-3 border-b border-accent/20 shadow-neumorphic-concave">
+        <div className="flex flex-col border-l-2 border-accent pl-3">
+          <span className="text-[10px] font-mono uppercase tracking-widest text-accent flex items-center gap-1"><FiEdit2 size={10}/> Editing Message</span>
+          <span className="text-xs text-text-secondary truncate max-w-[200px]">{editingMessage.content}</span>
+        </div>
+        <button onClick={() => setEditingMessage(null)} className="p-1 rounded-full hover:bg-red-500/10 hover:text-red-500 transition-colors"><FiX size={14} /></button>
+      </div>
+    </motion.div>
+  );
+};
 
 const ReplyPreview = () => {
   const { replyingTo, setReplyingTo } = useMessageInputStore(useShallow(state => ({
@@ -99,12 +115,14 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
     typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, 
     expiresIn, setExpiresIn, isViewOnce, setIsViewOnce,
     stagedFiles, addStagedFiles, removeStagedFile, clearStagedFiles,
-    isHD, setIsHD
+    isHD, setIsHD,
+    editingMessage, setEditingMessage, sendEdit
   } = useMessageInputStore(useShallow(s => ({
     typingLinkPreview: s.typingLinkPreview, fetchTypingLinkPreview: s.fetchTypingLinkPreview, clearTypingLinkPreview: s.clearTypingLinkPreview, 
     expiresIn: s.expiresIn, setExpiresIn: s.setExpiresIn, isViewOnce: s.isViewOnce, setIsViewOnce: s.setIsViewOnce,
     stagedFiles: s.stagedFiles, addStagedFiles: s.addStagedFiles, removeStagedFile: s.removeStagedFile, clearStagedFiles: s.clearStagedFiles,
-    isHD: s.isHD, setIsHD: s.setIsHD
+    isHD: s.isHD, setIsHD: s.setIsHD,
+    editingMessage: s.editingMessage, setEditingMessage: s.setEditingMessage, sendEdit: s.sendEdit
   })));
   const { status: connectionStatus } = useConnectionStore(useShallow(s => ({ status: s.status })));
   const blockedUserIds = useAuthStore(state => state.blockedUserIds);
@@ -134,6 +152,12 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const isLastMessageFromOther = absoluteLastMessage?.senderId !== user?.id;
   const isValidTextMessage = absoluteLastMessage && !absoluteLastMessage.fileUrl && !absoluteLastMessage.imageUrl && absoluteLastMessage.content;
   const lastDecryptedText = (isLastMessageFromOther && isValidTextMessage) ? (absoluteLastMessage.content || null) : null;
+
+  useEffect(() => {
+    if (editingMessage && editingMessage.content) {
+        setText(editingMessage.content);
+    }
+  }, [editingMessage]);
 
   // Debounced Link Preview
   const debouncedFetchPreview = useCallback(
@@ -218,6 +242,12 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
     e.preventDefault();
     if (!hasContentToSend || !isConnected) return;
     triggerSendFeedback();
+    
+    if (editingMessage) {
+        await sendEdit(conversation.id, editingMessage.id, text);
+        setText('');
+        return;
+    }
     
     // 1. Process Staged Files
     if (stagedFiles.length > 0) {
@@ -309,12 +339,14 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
       {/* Previews Stack */}
       <div className="absolute bottom-full left-0 w-full">
         <SmartReply 
-            lastMessage={lastDecryptedText} 
-            isFromMe={!isLastMessageFromOther}
-            onSelectReply={handleSmartReplySelect} 
+          lastMessage={lastDecryptedText} 
+          isFromMe={!isLastMessageFromOther} 
+          onSelectReply={handleSmartReplySelect} 
         />
         <div className="px-4">
+            <EditPreview />
             <ReplyPreview />
+
             {typingLinkPreview && (
             <div className="mb-2">
                 <LinkPreviewCard preview={typingLinkPreview} />

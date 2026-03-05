@@ -8,7 +8,7 @@ import { toAbsoluteUrl } from "@utils/url";
 import { useModalStore } from '@store/modal';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
-import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock, FiInfo } from 'react-icons/fi';
+import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock, FiInfo, FiEdit2 } from 'react-icons/fi';
 import { getUserColor } from '@utils/color';
 import { FaCheck, FaCheckDouble } from 'react-icons/fa';
 import { useMessageStore } from '@store/message';
@@ -79,6 +79,7 @@ interface MessageItemProps {
 const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageClick, isFirstInSequence, isLastInSequence }: MessageItemProps) => {
   const meId = useAuthStore((s) => s.user?.id);
   const setReplyingTo = useMessageInputStore(state => state.setReplyingTo);
+  const setEditingMessage = useMessageInputStore(state => state.setEditingMessage);
   const showConfirm = useModalStore(state => state.showConfirm);
   const removeMessage = useMessageStore(state => state.removeMessage);
   const addOptimisticMessage = useMessageStore(state => state.addOptimisticMessage);
@@ -201,8 +202,11 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     // so the expanded EmojiPicker in ContextMenu can access it.
     (window as any).currentReactionHandler = reactToMessage;
 
+    const isEditable = mine && !message.optimistic && !message.fileUrl && !message.type && !message.content?.startsWith('{') && !message.content?.startsWith('[');
+
     openMenu(e, [
       { label: 'Reply', icon: <FiCornerUpLeft />, onClick: () => setReplyingTo(message) },
+      ...(isEditable ? [{ label: 'Edit', icon: <FiEdit2 />, onClick: () => setEditingMessage(message) }] : []),
       { label: 'Copy Text', icon: <FiCopy />, onClick: () => navigator.clipboard.writeText(message.content || '') },
       { label: 'Security Info', icon: <FiShield />, onClick: () => toast('End-to-End Encrypted via Signal Protocol', { icon: '🔒' }) },
       { label: 'Copy Message ID', icon: <FiInfo />, onClick: () => navigator.clipboard.writeText(message.id) },

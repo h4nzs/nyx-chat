@@ -165,10 +165,10 @@ export default function Login() {
                             connectSocket();
                             navigate("/chat");
                         } else {
-                            toast.error("Password salah. Gagal mendekripsi kunci.");
+                            toast.error("Wrong password. Failed to decrypt key.");
                         }
                     } catch (e) {
-                        toast.error("Terjadi kesalahan saat dekripsi.");
+                        toast.error("Something went wrong when decrypting.");
                     }
                 });
                 return;

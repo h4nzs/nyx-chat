@@ -335,13 +335,29 @@ function parseReaction(content: string | null | undefined): { targetMessageId: s
   return null;
 }
 
+function parseEdit(content: string | null | undefined): { targetMessageId: string, text: string } | null {
+  if (!content) return null;
+  try {
+    const trimmed = content.trim();
+    if (!trimmed.startsWith('{') || !trimmed.includes('"type":"edit"')) return null;
+    const payload = JSON.parse(trimmed);
+    if (payload.type === 'edit' && payload.targetMessageId && payload.text) {
+      return payload;
+    }
+  } catch (e) {}
+  return null;
+}
+
 // Helper to separate messages and reactions
 function processMessagesAndReactions(decryptedItems: Message[], existingMessages: Message[] = []) {
   const chatMessages: Message[] = [];
   const reactions: any[] = [];
+  const edits: any[] = [];
 
   for (const msg of decryptedItems) {
     const reactionPayload = parseReaction(msg.content);
+    const editPayload = parseEdit(msg.content);
+
     if (reactionPayload) {
         reactions.push({
           id: msg.id,
@@ -351,6 +367,10 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
           createdAt: msg.createdAt,
           user: msg.sender,
           isMessage: true
+        });
+    } else if (editPayload) {
+        edits.push({
+           targetMessageId: editPayload.targetMessageId, text: editPayload.text, timestamp: new Date(msg.createdAt).getTime()
         });
     } else {
       chatMessages.push(msg);
@@ -367,6 +387,16 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
         target.reactions = [...existingReactions, reaction];
       }
     }
+  }
+
+  // APPLY EDITS (Sort by timestamp so latest edit wins)
+  edits.sort((a, b) => a.timestamp - b.timestamp);
+  for (const edit of edits) {
+     const target = messageMap.get(edit.targetMessageId);
+     if (target) {
+        target.content = edit.text;
+        target.isEdited = true;
+     }
   }
 
   return Array.from(messageMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
@@ -995,6 +1025,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
       
       const reactionPayload = parseReaction(decrypted.content);
+      const editPayload = parseEdit(decrypted.content);
       
       if (reactionPayload) {
           const reaction = {
@@ -1013,6 +1044,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           } else {
               get().addLocalReaction(conversationId, reaction.messageId, reaction);
           }
+      } else if (editPayload) {
+          set(state => {
+              const currentMessages = state.messages[conversationId] || [];
+              const updatedMessages = currentMessages.map(m => 
+                  m.id === editPayload.targetMessageId ? { ...m, content: editPayload.text, isEdited: true } : m
+              );
+              // Also update vault
+              const editedMsg = updatedMessages.find(m => m.id === editPayload.targetMessageId);
+              if (editedMsg) shadowVault.upsertMessages([editedMsg]);
+              
+              return { messages: { ...state.messages, [conversationId]: updatedMessages } };
+          });
       } else {
           if (message.tempId && currentUser && message.senderId === currentUser.id) {
               get().replaceOptimisticMessage(conversationId, message.tempId, decrypted);

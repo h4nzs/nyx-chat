@@ -18,9 +18,12 @@ type State = {
   isViewOnce: boolean;
   stagedFiles: File[];
   isHD: boolean;
+  editingMessage: Message | null;
 
   // Actions
   setReplyingTo: (message: Message | null) => void;
+  setEditingMessage: (message: Message | null) => void;
+  sendEdit: (conversationId: string, messageId: string, newText: string) => Promise<void>;
   setExpiresIn: (seconds: number | null) => void;
   setIsViewOnce: (value: boolean) => void;
   setIsHD: (value: boolean) => void;
@@ -64,8 +67,17 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   isViewOnce: false,
   stagedFiles: [],
   isHD: false,
+  editingMessage: null,
 
   setReplyingTo: (message) => set({ replyingTo: message }),
+  setEditingMessage: (message) => set({ editingMessage: message }),
+  sendEdit: async (conversationId, messageId, newText) => {
+      const payload = { type: 'edit', targetMessageId: messageId, text: newText };
+      await get().sendMessage(conversationId, { content: JSON.stringify(payload) });
+      set({ editingMessage: null });
+      // Optimistically apply local edit immediately
+      useMessageStore.getState().updateMessage(conversationId, messageId, { content: newText, isEdited: true });
+  },
   setExpiresIn: (seconds) => set({ expiresIn: seconds }),
   setIsViewOnce: (value) => set({ isViewOnce: value }),
   setIsHD: (value) => set({ isHD: value }),
