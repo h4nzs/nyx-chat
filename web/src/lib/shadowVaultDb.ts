@@ -88,6 +88,22 @@ export class NyxShadowVault extends Dexie {
       console.error("Iron Vault Encryption Error:", err);
     }
   }
+
+  async deleteMessage(id: string) {
+    try {
+      await this.messages.delete(id);
+    } catch (e) {
+      console.error("Failed to delete message from vault", e);
+    }
+  }
+
+  async deleteConversationMessages(conversationId: string) {
+    try {
+      await this.messages.where('conversationId').equals(conversationId).delete();
+    } catch (e) {
+      console.error("Failed to delete conversation messages from vault", e);
+    }
+  }
 }
 
 export const shadowVault = new NyxShadowVault();
