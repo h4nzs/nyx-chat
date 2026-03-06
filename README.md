@@ -142,7 +142,12 @@ This guarantees that NYX remains free and open-source for the community. However
 If you are a corporation, startup, or enterprise looking to integrate NYX into a proprietary product without the AGPL-3.0 obligations, you must acquire a Commercial License.
 👉 **[Read the Commercial Licensing Guide here](COMMERCIAL.md)**.
 
-## ™️ Trademark Policy
-The "NYX" name, logo, and related brand assets are strictly the property of the project maintainer. 
+## 🦉 Branding & Anti-Impersonation Policy
 
-While the source code is available under the AGPL-3.0 license, **this license does NOT grant you the right to use the NYX name, logo, or brand identity for your own derived works or deployments.** If you choose to fork, modify, or host your own instance of this software, you **must** rebrand it, change the name, and replace all logos to avoid confusing users.
+While the term "NYX" may be used broadly in various contexts, the **specific visual identity, custom logos (including the owl insignia), and the direct reputation of this specific repository** are the intellectual property of the core maintainer.
+
+The AGPL-3.0 license grants you the freedom to use, modify, and distribute the source code. However, it **does not** grant you the right to impersonate this official project. 
+
+If you fork this repository to create your own SaaS, enterprise tool, or public deployment, you must:
+1. **Change the visual identity:** Replace all official logos, icons, and specific graphic assets found in `web/public/`.
+2. **Prevent confusion:** Clearly state that your deployment is a modified fork and is *not* affiliated with or officially endorsed by the original NYX Command repository.
