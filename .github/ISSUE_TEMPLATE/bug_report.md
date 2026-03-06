@@ -1,9 +1,10 @@
 ---
-name: Bug Report 🐛
+name: "Bug Report \U0001F41B"
 about: Report a vulnerability, crash, or malfunction in the NYX matrix.
 title: "[BUG] - "
-labels: bug, needs triage
+labels: bug
 assignees: ''
+
 ---
 
 ## 🚨 Incident Report
