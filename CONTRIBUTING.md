@@ -2,6 +2,11 @@
 
 First off, thank you for considering contributing to NYX! Building a mathematically secure, zero-knowledge messenger is a massive undertaking, and we need elite operatives to audit and improve the fortress.
 
+## ⚖️ Legal Checkpoint: The CLA
+Before you start writing code, please note that **NYX operates under a Dual-Licensing model.** To accept your Pull Request, we require you to sign our **Contributor License Agreement (CLA)**. This ensures that you grant us the right to distribute your code commercially, while you still retain ownership of your original work. 
+
+*You do not need to sign anything manually right now. When you open your first Pull Request, a bot (@cla-assistant) will automatically comment on your PR asking you to digitally sign the agreement by clicking a button.*
+
 ## 🛑 STRICT RULES OF ENGAGEMENT (MUST READ)
 
 Before you write any code, understand our architectural boundaries:

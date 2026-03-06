@@ -141,3 +141,8 @@ This guarantees that NYX remains free and open-source for the community. However
 **🏢 Building a Closed-Source SaaS?**
 If you are a corporation, startup, or enterprise looking to integrate NYX into a proprietary product without the AGPL-3.0 obligations, you must acquire a Commercial License.
 👉 **[Read the Commercial Licensing Guide here](COMMERCIAL.md)**.
+
+## ™️ Trademark Policy
+The "NYX" name, logo, and related brand assets are strictly the property of the project maintainer. 
+
+While the source code is available under the AGPL-3.0 license, **this license does NOT grant you the right to use the NYX name, logo, or brand identity for your own derived works or deployments.** If you choose to fork, modify, or host your own instance of this software, you **must** rebrand it, change the name, and replace all logos to avoid confusing users.

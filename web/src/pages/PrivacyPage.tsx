@@ -1,18 +1,17 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiCpu, FiGlobe } from 'react-icons/fi';
-import { motion } from 'framer-motion';
+import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiCpu, FiGlobe, FiAlertTriangle } from 'react-icons/fi';
 import SEO from '../components/SEO';
 
 const Section = ({ title, icon: Icon, children, id }: { title: string; icon: any; children: React.ReactNode; id: string }) => (
   <section id={id} className="mb-12 scroll-mt-24">
     <div className="flex items-center gap-3 mb-6">
-      <div className="p-2 rounded-lg bg-accent/10 text-accent">
+      <div className="p-2 rounded-lg bg-accent/10 text-accent shadow-neumorphic-concave">
         <Icon size={24} />
       </div>
-      <h2 className="text-2xl font-bold text-text-primary">{title}</h2>
+      <h2 className="text-2xl font-bold text-text-primary tracking-tight">{title}</h2>
     </div>
-    <div className="prose dark:prose-invert max-w-none text-text-secondary">
+    <div className="prose dark:prose-invert max-w-none text-text-secondary leading-relaxed">
       {children}
     </div>
   </section>
@@ -29,41 +28,43 @@ export default function PrivacyPage() {
 
   return (
     <div className="min-h-screen bg-bg-main text-text-primary font-sans selection:bg-accent selection:text-white">
-      <SEO title="Privacy Policy" description="Read about our Zero-Knowledge architecture and how NYX protects your data." canonicalUrl="/privacy" />
+      <SEO title="Legal & Privacy | NYX" description="Read about our Zero-Knowledge architecture, commercial licensing, and how NYX protects your data." canonicalUrl="/privacy" />
+      
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-bg-main/80 backdrop-blur-md border-b border-white/5">
+      <header className="sticky top-0 z-50 bg-bg-surface/80 backdrop-blur-xl border-b border-white/5 shadow-sm">
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
           <button 
             onClick={() => navigate(-1)} 
-            className="flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors text-sm font-medium"
+            className="flex items-center gap-2 text-text-secondary hover:text-accent transition-colors text-sm font-bold tracking-wide uppercase"
           >
-            <FiArrowLeft /> Back to App
+            <FiArrowLeft size={16} /> Back to Hub
           </button>
-          <div className="font-mono text-xs text-text-secondary uppercase tracking-widest">
-            Legal & Compliance
+          <div className="font-mono text-[10px] text-text-secondary uppercase tracking-[0.2em] flex items-center gap-2">
+            <FiShield className="text-accent" /> Legal & Compliance
           </div>
         </div>
       </header>
 
       <main className="max-w-5xl mx-auto px-6 py-12 flex flex-col md:flex-row gap-12">
         {/* Sidebar Nav */}
-        <aside className="md:w-64 flex-shrink-0">
-          <nav className="sticky top-24 space-y-1">
+        <aside className="md:w-64 flex-shrink-0 hidden md:block">
+          <nav className="sticky top-28 space-y-2">
             {[
               { id: 'privacy', label: 'Privacy Policy' },
               { id: 'terms', label: 'Terms of Service' },
+              { id: 'licensing', label: 'Software Licensing' },
               { id: 'cookies', label: 'Cookie Policy' },
-              { id: 'ai', label: 'AI & Smart Features' },
+              { id: 'ai', label: 'AI & Telemetry' },
               { id: 'security', label: 'Security Architecture' },
             ].map((item) => (
               <button
                 key={item.id}
                 onClick={() => scrollTo(item.id)}
                 className={`
-                  w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-all
+                  w-full text-left px-4 py-3 rounded-xl text-sm font-bold transition-all duration-300
                   ${activeSection === item.id 
-                    ? 'bg-accent text-white shadow-lg' 
-                    : 'text-text-secondary hover:bg-bg-surface hover:text-text-primary'}
+                    ? 'bg-accent/10 border border-accent/20 text-accent shadow-inner' 
+                    : 'text-text-secondary hover:bg-white/5 hover:text-text-primary border border-transparent'}
                 `}
               >
                 {item.label}
@@ -74,144 +75,150 @@ export default function PrivacyPage() {
 
         {/* Content */}
         <div className="flex-1 min-w-0">
-          <div className="mb-12">
-            <h1 className="text-4xl font-black mb-4 tracking-tight">Legal & Privacy Center</h1>
-            <p className="text-lg text-text-secondary">
-              Transparency about how we handle your data, secure your messages, and comply with global standards.
+          <div className="mb-16">
+            <h1 className="text-4xl sm:text-5xl font-black mb-4 tracking-tighter bg-gradient-to-r from-white to-text-secondary bg-clip-text text-transparent">Legal & Privacy Center</h1>
+            <p className="text-lg text-text-secondary max-w-2xl">
+              Absolute transparency regarding our Zero-Knowledge data handling, cryptographic protocols, and software licensing terms.
             </p>
-            <div className="mt-4 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-green-500/10 text-green-500 text-xs font-bold border border-green-500/20">
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-              Last Updated: February 24, 2026
+            <div className="mt-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent/10 text-accent text-xs font-mono font-bold border border-accent/20">
+              <span className="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[0_0_8px_rgba(var(--color-accent),0.8)]"></span>
+              Last Updated: March 2026
             </div>
           </div>
 
           <Section id="privacy" title="Privacy Policy" icon={FiLock}>
-            <p>
-              At NYX, we prioritize your privacy above all else. Our architecture is designed to minimize the data we know about you.
+            <p className="text-lg text-text-primary font-medium mb-4">
+              Our core directive: If we don't have your data, no one can demand it from us.
             </p>
-            <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">1. Data We Collect</h3>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Blind Identity:</strong> We do not store your real username. We only store a cryptographic hash (`usernameHash`) to allow login. We cannot reverse this hash to find your real handle.</li>
-              <li><strong>Encrypted Profile:</strong> Your display name, bio, and avatar are <strong>End-to-End Encrypted</strong>. To our servers, your profile is just a random blob of ciphertext. Only your contacts can decrypt it.</li>
-              <li><strong>Cryptographic Keys:</strong> Public keys (Identity Keys, Signed Pre-keys) are stored on our servers to enable others to start encrypted chats with you. Your <strong>Private Keys</strong> are stored as an encrypted blob that <strong>only you</strong> can decrypt with your password.</li>
-              <li><strong>Connection Data:</strong> IP addresses are hashed (SHA-256) before storage. User Agent strings are temporarily logged for security purposes (Refresh Tokens) to prevent abuse.</li>
-              <li><strong>Messages:</strong> Your messages are <strong>End-to-End Encrypted (E2EE)</strong>. Our servers only relay encrypted blobs ("ciphertext"). We cannot read, analyze, or modify your messages. Messages are stored on your device (IndexedDB) and temporarily in our database until delivered.</li>
+            <h3 className="text-lg font-bold text-text-primary mt-8 mb-3 border-b border-white/5 pb-2">1. Data Minimization & Cryptography</h3>
+            <ul className="list-disc pl-5 space-y-3">
+              <li><strong>Blind Identity Protocol:</strong> We do not store your raw username, email, or phone number. We utilize client-side Argon2id hashing. The server only stores a cryptographic hash (`usernameHash`), rendering your identity mathematically irreversible to us.</li>
+              <li><strong>Encrypted Metadata:</strong> Your display name, bio, and avatar are symmetrically encrypted on your device. To our infrastructure, your profile is an opaque blob of ciphertext.</li>
+              <li><strong>E2EE Communication:</strong> All direct messages, voice notes, and file attachments are End-to-End Encrypted using the Signal Protocol (Double Ratchet). We act solely as a blind relay network.</li>
             </ul>
 
-            <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">2. Third-Party Processors</h3>
-            <p>We use trusted third-party services for specific infrastructure needs:</p>
+            <h3 className="text-lg font-bold text-text-primary mt-8 mb-3 border-b border-white/5 pb-2">2. Ephemeral Network Logging</h3>
+            <p>To maintain network integrity and prevent DDoS/Botnet attacks, we temporarily process:</p>
             <ul className="list-disc pl-5 space-y-2 mt-2">
-              <li><strong>Cloudflare:</strong> For DDoS protection, CDN, encrypted storage (R2), and Turnstile (CAPTCHA) verification.</li>
-              <li><strong>Google Gemini:</strong> For the optional "Smart Reply" feature (see AI section).</li>
+              <li>IP addresses (irreversibly hashed upon connection).</li>
+              <li>WebSocket connection timestamps (swept automatically from Redis).</li>
+              <li>Encrypted offline message queues (automatically purged upon successful delivery to the recipient).</li>
             </ul>
           </Section>
 
           <Section id="terms" title="Terms of Service" icon={FiGlobe}>
-            <p>By using NYX, you agree to the following terms:</p>
-            <ul className="list-disc pl-5 space-y-2 mt-4">
-              <li><strong>Trust Tiers:</strong> New accounts start in "Sandbox Mode" with rate limits to prevent spam. You can unlock full access by verifying your humanity via Biometrics or Proof of Work.</li>
-              <li><strong>Acceptable Use:</strong> You agree not to use NYX for illegal activities, harassment, spamming, or distributing malware.</li>
-              <li><strong>Account Security:</strong> You are responsible for keeping your password and recovery phrase safe. Because we do not store your raw password or private keys, <strong>we cannot recover your account if you lose both your password and recovery phrase.</strong></li>
-              <li><strong>Termination:</strong> We reserve the right to ban accounts that violate these terms or abuse the service API (e.g., botting).</li>
-              <li><strong>Disclaimer:</strong> The service is provided "as is". While we strive for maximum security, no system is 100% invulnerable.</li>
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-5 mb-6">
+              <h4 className="flex items-center gap-2 text-red-400 font-bold mb-2">
+                <FiAlertTriangle /> Critical Disclaimer of Liability
+              </h4>
+              <p className="text-sm text-red-200/80 m-0">
+                NYX is provided "AS IS", without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>
+              </p>
+            </div>
+            
+            <ul className="list-disc pl-5 space-y-4">
+              <li><strong>Trust-Tier Gating:</strong> To protect the network, unverified accounts are placed in a restricted "Sandbox Mode". Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.</li>
+              <li><strong>Zero-Tolerance Abuse Policy:</strong> You agree not to utilize the NYX network for illicit activities, automated API abuse (botting), or distributing malware. Violations will result in immediate network bans.</li>
             </ul>
           </Section>
 
-          <Section id="cookies" title="Cookie Policy" icon={FiDatabase}>
-            <p>We use cookies strictly for authentication and security.</p>
+          <Section id="licensing" title="Software Licensing & Enterprise" icon={FiShield}>
+            <p>
+              The NYX source code is proudly open-source and fiercely protected under the <strong>GNU Affero General Public License v3.0 (AGPL-3.0)</strong>.
+            </p>
+            <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">The AGPL-3.0 Constraint</h3>
+            <p>
+              If you modify the NYX codebase and allow users to interact with it over a network (e.g., hosting it as a SaaS), you are legally obligated to release your modified source code to the public. <strong>Closed-source SaaS deployments of NYX under this license are strictly prohibited and constitute copyright infringement.</strong>
+            </p>
             
-            <div className="overflow-hidden rounded-xl border border-white/10 mt-6">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-bg-surface text-text-primary">
+            <div className="bg-bg-surface border border-white/10 rounded-xl p-5 mt-6">
+              <h4 className="font-bold text-text-primary mb-2">Commercial Dual-Licensing</h4>
+              <p className="text-sm mb-4">
+                For corporations, enterprises, or startups wishing to integrate NYX into a proprietary, closed-source product without the AGPL obligations, we offer a Commercial License.
+              </p>
+              <a href="https://github.com/h4nzs/chat-lite" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs font-bold bg-white text-black px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors">
+                Contact Command for Enterprise Pricing
+              </a>
+            </div>
+          </Section>
+
+          <Section id="cookies" title="Cookie & Storage Policy" icon={FiDatabase}>
+            <p className="mb-4">We do not use tracking, advertising, or third-party analytics cookies. Local storage is used strictly for cryptographic persistence and authentication.</p>
+            
+            <div className="overflow-x-auto rounded-xl border border-white/5 shadow-sm">
+              <table className="w-full text-left text-sm whitespace-nowrap">
+                <thead className="bg-black/20 text-text-secondary text-xs uppercase tracking-wider">
                   <tr>
-                    <th className="p-4 font-bold">Name</th>
+                    <th className="p-4 font-bold">Storage Type</th>
+                    <th className="p-4 font-bold">Item</th>
                     <th className="p-4 font-bold">Purpose</th>
-                    <th className="p-4 font-bold">Type</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5">
-                  <tr>
-                    <td className="p-4 font-mono text-accent">at</td>
-                    <td className="p-4">Access Token (Short-lived authentication)</td>
-                    <td className="p-4">Essential / HttpOnly</td>
+                <tbody className="divide-y divide-white/5 text-text-secondary">
+                  <tr className="hover:bg-white/5 transition-colors">
+                    <td className="p-4"><span className="px-2 py-1 rounded bg-blue-500/10 text-blue-400 text-xs">HttpOnly Cookie</span></td>
+                    <td className="p-4 font-mono text-accent">at / rt / csrf</td>
+                    <td className="p-4">Secure authentication & session persistence.</td>
                   </tr>
-                  <tr>
-                    <td className="p-4 font-mono text-accent">rt</td>
-                    <td className="p-4">Refresh Token (Session persistence)</td>
-                    <td className="p-4">Essential / HttpOnly</td>
+                  <tr className="hover:bg-white/5 transition-colors">
+                    <td className="p-4"><span className="px-2 py-1 rounded bg-purple-500/10 text-purple-400 text-xs">IndexedDB</span></td>
+                    <td className="p-4 font-mono text-accent">nyx_vault / keys</td>
+                    <td className="p-4">Local storage of your encrypted Private Keys.</td>
                   </tr>
-                  <tr>
-                    <td className="p-4 font-mono text-accent">x-csrf-token</td>
-                    <td className="p-4">Protects against Cross-Site Request Forgery attacks</td>
-                    <td className="p-4">Security</td>
-                  </tr>
-                  <tr>
-                    <td className="p-4 font-mono text-accent">webauthn_challenge</td>
-                    <td className="p-4">Temporary challenge for Biometric login</td>
-                    <td className="p-4">Security</td>
+                  <tr className="hover:bg-white/5 transition-colors">
+                    <td className="p-4"><span className="px-2 py-1 rounded bg-purple-500/10 text-purple-400 text-xs">IndexedDB</span></td>
+                    <td className="p-4 font-mono text-accent">shadow_vault</td>
+                    <td className="p-4">Local storage of your E2EE chat history.</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </Section>
 
-          <Section id="ai" title="AI & Smart Features" icon={FiCpu}>
-            <p>
-              NYX includes an experimental <strong>Smart Reply</strong> feature powered by Google Gemini.
-            </p>
-            <div className="bg-accent/5 border-l-4 border-accent p-4 rounded-r-lg mt-4">
-              <h4 className="font-bold text-accent mb-1">Privacy Guarantee</h4>
-              <p className="text-sm">
-                This feature is <strong>Opt-In</strong> (disabled by default). When enabled:
-              </p>
-              <ul className="list-disc pl-5 space-y-1 mt-2 text-sm">
-                <li>Your incoming message text is decrypted on your device.</li>
-                <li>The text is sent securely to Google Gemini via our server proxy for analysis.</li>
-                <li>Our server <strong>does not store</strong> this text; it is strictly a pass-through.</li>
-                <li>Google processes the text to generate reply suggestions and discards it (per their API terms for ephemeral processing).</li>
-              </ul>
-            </div>
+          <Section id="ai" title="AI & Telemetry" icon={FiCpu}>
+            <p>NYX operates with <strong>Zero Telemetry</strong>. We do not track your clicks, screen time, or feature usage.</p>
+            
+            <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">Smart Reply (Optional AI)</h3>
+            <p>We provide an experimental "Smart Reply" feature utilizing the Google Gemini API. This feature is <strong>strictly Opt-In</strong>.</p>
+            <ul className="list-disc pl-5 space-y-2 mt-2">
+              <li>Messages are decrypted locally before being sent to the AI.</li>
+              <li>The NYX Server acts as a blind proxy; it does not log the prompt or the AI's response.</li>
+              <li>Data processed by the Gemini API is ephemeral and is not used to train foundational AI models, per Google's enterprise API terms.</li>
+            </ul>
           </Section>
 
           <Section id="security" title="Security Architecture" icon={FiShield}>
-            <p>
-              We are transparent about our security model.
-            </p>
-            <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">Encryption Protocol</h3>
-            <p>
-              We implement the <strong>Signal Protocol</strong> (X3DH + Double Ratchet) using <code>libsodium</code>.
-            </p>
-            <ul className="list-disc pl-5 space-y-2 mt-2">
-              <li><strong>Keys:</strong> Curve25519 for Identity and Pre-keys.</li>
-              <li><strong>Cipher:</strong> XChaCha20-Poly1305 for message encryption.</li>
-              <li><strong>Hash:</strong> Argon2id for password hashing and key derivation.</li>
-            </ul>
-
-            <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">Key Storage & Backups</h3>
-            <p>
-              Your private keys are encrypted with your password and stored in <strong>IndexedDB</strong> within your browser. 
-              A backup copy of your <strong>Identity Keys</strong> (also encrypted) is stored on our server to facilitate login across devices.
-            </p>
-            <p className="mt-2">
-              However, your <strong>Chat History</strong> and <strong>Message Keys</strong> are stored <strong>exclusively on your device</strong>. 
-              We provide a <strong>"NYX Vault"</strong> feature that allows you to export your entire cryptographic state into a single encrypted file (`.nyxvault`) for safekeeping. 
-              You are the sole custodian of your data.
-            </p>
-
-            <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">Zero-Knowledge Architecture</h3>
-            <ul className="list-disc pl-5 space-y-2 mt-2">
-              <li><strong>Account Recovery:</strong> If you forget your password, you can reset it using your 24-word Recovery Phrase. This process uses a <strong>Cryptographic Signature</strong> to prove your identity to our server without ever revealing the phrase itself.</li>
-              <li><strong>Device Migration:</strong> Transferring data to a new device is done via a direct <strong>Encrypted Tunnel</strong> (relay). The data is encrypted on your old device and decrypted on the new one. Our server blindly relays the chunks and cannot see the content.</li>
-            </ul>
+            <p>Our cryptographic implementations are open for audit.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
+              <div className="bg-bg-surface p-4 rounded-xl border border-white/5">
+                <h4 className="font-bold text-text-primary mb-1">Signal Protocol</h4>
+                <p className="text-xs text-text-secondary">X3DH key agreement and Double Ratchet forward/backward secrecy via libsodium (XChaCha20-Poly1305).</p>
+              </div>
+              <div className="bg-bg-surface p-4 rounded-xl border border-white/5">
+                <h4 className="font-bold text-text-primary mb-1">WebAuthn PRF</h4>
+                <p className="text-xs text-text-secondary">Passwordless biometric vault decryption leveraging hardware secure enclaves (Secure Enclave/TPM).</p>
+              </div>
+              <div className="bg-bg-surface p-4 rounded-xl border border-white/5">
+                <h4 className="font-bold text-text-primary mb-1">Volatile Memory</h4>
+                <p className="text-xs text-text-secondary">Cryptographic keys are wiped from RAM (`sodium.memzero`) immediately after decryption cycles.</p>
+              </div>
+              <div className="bg-bg-surface p-4 rounded-xl border border-white/5">
+                <h4 className="font-bold text-text-primary mb-1">Peer-to-Peer Migration</h4>
+                <p className="text-xs text-text-secondary">Device migration uses an encrypted WebSocket tunnel. The server relays chunks blindly without key access.</p>
+              </div>
+            </div>
           </Section>
 
         </div>
       </main>
 
-      <footer className="border-t border-white/5 py-12 bg-bg-surface">
-        <div className="max-w-5xl mx-auto px-6 text-center text-text-secondary text-sm">
-          <p>&copy; {new Date().getFullYear()} NYX Secure Messenger. All rights reserved.</p>
-          <p className="mt-2 opacity-50">Built with privacy as a fundamental right, not a feature.</p>
+      <footer className="border-t border-white/5 py-12 bg-black/20">
+        <div className="max-w-5xl mx-auto px-6 text-center">
+          <div className="inline-flex items-center gap-2 text-text-secondary font-mono text-xs uppercase tracking-widest mb-4">
+            <FiShield /> Military-Grade Privacy
+          </div>
+          <p className="text-text-secondary text-sm">&copy; {new Date().getFullYear()} NYX. All rights reserved under AGPL-3.0.</p>
+          <p className="mt-2 text-xs opacity-50 font-mono">"In an era of total surveillance, obfuscation is the only true liberty."</p>
         </div>
       </footer>
     </div>
