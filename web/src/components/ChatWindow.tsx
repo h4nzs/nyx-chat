@@ -237,14 +237,22 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);
 
   const handleBulkDelete = () => {
-    if (!conversation) return;
+    if (!conversation || !messages || !meId) return;
+    
+    const selectedMessages = messages.filter(m => selectedMessageIds.includes(m.id));
+    const allMine = selectedMessages.every(m => m.senderId === meId);
+    
+    const confirmMessage = allMine 
+      ? `Permanently delete ${selectedMessageIds.length} messages for everyone?` 
+      : `Delete ${selectedMessageIds.length} messages? This will only remove them from your device. Messages from others will remain on their devices.`;
+
     showConfirm(
-      'Delete Messages', 
-      `Delete ${selectedMessageIds.length} messages? This action only removes them from your device.`,
+      'Bulk Deletion', 
+      confirmMessage,
       async () => {
           await removeMessages(conversation.id, selectedMessageIds);
-          clearMessageSelection();
-          toast.success(`${selectedMessageIds.length} messages deleted`);
+          // clearMessageSelection is already handled inside removeMessages now
+          toast.success(`${selectedMessageIds.length} messages processed`);
       }
     );
   };

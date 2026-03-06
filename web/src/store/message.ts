@@ -492,15 +492,54 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   clearMessageSelection: () => set({ selectedMessageIds: [] }),
 
   removeMessages: async (conversationId, messageIds) => {
-    // 1. Delete all from local vault & Keychain
+    const { user } = useAuthStore.getState();
+    const currentMessages = get().messages[conversationId] || [];
+    const selectedMessages = currentMessages.filter(m => messageIds.includes(m.id));
+    
+    // Check if all selected messages are mine
+    const allMine = user && selectedMessages.every(m => m.senderId === user.id);
+
+    // 1. Delete from Server (only if all are mine)
+    if (allMine) {
+        selectedMessages.forEach(message => {
+            let query = '';
+            let targetUrl = message.fileUrl;
+            try {
+                if (message.content && message.content.startsWith('{')) {
+                    const metadata = JSON.parse(message.content);
+                    if (metadata.url) targetUrl = metadata.url;
+                }
+            } catch (e) {}
+
+            if (targetUrl && !targetUrl.startsWith('blob:')) {
+                try {
+                    const url = new URL(targetUrl);
+                    const key = url.pathname.substring(1);
+                    if (key) query = `?r2Key=${encodeURIComponent(key)}`;
+                } catch (e) {
+                    console.error("Failed to parse file URL for deletion:", e);
+                }
+            }
+
+            api(`/api/messages/${message.id}${query}`, { method: 'DELETE' }).catch((error) => {
+                console.error(`Failed to delete message ${message.id} from server:`, error);
+            });
+        });
+    }
+
+    // 2. Delete all from local vault & Keychain (Always)
     for (const id of messageIds) {
         shadowVault.deleteMessage(id).catch(console.error);
         import('@utils/crypto').then(m => m.deleteMessageKeySecurely(id)).catch(console.error);
     }
-    // 2. Remove from active state
+
+    // 3. Remove from active state
     set(state => {
         const current = state.messages[conversationId] || [];
-        return { messages: { ...state.messages, [conversationId]: current.filter(m => !messageIds.includes(m.id)) } };
+        return { 
+          messages: { ...state.messages, [conversationId]: current.filter(m => !messageIds.includes(m.id)) },
+          selectedMessageIds: [] // Clear selection after deletion
+        };
     });
   },
 
