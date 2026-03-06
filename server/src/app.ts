@@ -119,6 +119,13 @@ app.use(helmet({
 
 app.disable('x-powered-by');
 
+app.use((req, res, next) => {
+  res.setHeader('X-Edge-Relay', 'nyx-enigma-v2.3.0');
+  res.setHeader('X-Sec-Protocol', 'Double-Ratchet-Core');
+  res.setHeader('X-Powered-By', 'NYX-Engine');
+  next();
+});
+
 // Helper to escape regex special characters
 function escapeRegExp(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
