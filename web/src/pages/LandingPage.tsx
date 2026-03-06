@@ -206,7 +206,7 @@ export default function LandingPage() {
             <div className="lg:col-span-7">
               <motion.div initial="hidden" animate="visible" variants={containerVariants}>
                 <motion.div variants={itemVariants} className="inline-block mb-4 px-4 py-1 rounded-full bg-bg-main shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.1)] text-accent text-xs md:text-sm font-bold tracking-wider uppercase">
-                  v1.0 • E2EE Encrypted • Anonymous
+                  v2.3.0 • E2EE Encrypted • Anonymous
                 </motion.div>
                 <motion.h1 variants={itemVariants} className="text-5xl md:text-7xl font-black tracking-tighter leading-none mb-6">
                   PRIVATE<br />
@@ -221,7 +221,7 @@ export default function LandingPage() {
                   <Link to="/register" className="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] transition-all flex items-center">
                     GET STARTED <FiArrowRight className="ml-2" />
                   </Link>
-                  <a href="https://github.com/h4nzs/chat-lite" target="_blank" rel="noopener noreferrer" className="px-8 py-4 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all flex items-center">
+                  <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" className="px-8 py-4 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all flex items-center">
                     <FiGithub className="mr-2" />
                     SOURCE CODE
                   </a>
@@ -411,42 +411,42 @@ export default function LandingPage() {
 
         {/* Footer */}
         <footer className="py-12 border-t border-white/5 bg-bg-main relative overflow-hidden">
-  {/* Tactical Background Glow */}
-  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-md h-[1px] bg-gradient-to-r from-transparent via-accent/50 to-transparent"></div>
-  
-  <div className="max-w-6xl mx-auto px-6 text-center text-text-secondary flex flex-col items-center">
-    {/* Insignia & Brand */}
-    <div className="flex items-center justify-center gap-3 mb-4">
-      <img
-        src="/pwa-512x512.png"
-        alt="NYX Command"
-        className="w-6 h-6 grayscale hover:grayscale-0 transition-all duration-300"
-      />
-      <span className="text-sm font-black tracking-[0.3em] text-text-primary uppercase">NYX</span>
-    </div>
+          {/* Tactical Background Glow */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-md h-[1px] bg-gradient-to-r from-transparent via-accent/50 to-transparent"></div>
 
-    {/* Copyright & Core License */}
-    <p className="text-sm font-medium mb-3">
-      &copy; {new Date().getFullYear()} NYX Project. Open Source under <span className="font-bold text-white">AGPL-3.0</span>.
-    </p>
+          <div className="max-w-6xl mx-auto px-6 text-center text-text-secondary flex flex-col items-center">
+            {/* Insignia & Brand */}
+            <div className="flex items-center justify-center gap-3 mb-4">
+              <img
+                src="/pwa-512x512.png"
+                alt="NYX Command"
+                className="w-6 h-6 grayscale hover:grayscale-0 transition-all duration-300"
+              />
+              <span className="text-sm font-black tracking-[0.3em] text-text-primary uppercase">NYX</span>
+            </div>
 
-    {/* Intelligence Links */}
-    <div className="flex flex-wrap justify-center items-center gap-3 text-xs font-bold mt-1 mb-8">
-      <a href="/privacy" className="hover:text-accent transition-colors tracking-wide">Legal & Privacy</a>
-      <span className="text-white/10">•</span>
-      <a href="https://github.com/h4nzs/chat-lite" target="_blank" rel="noopener noreferrer" className="hover:text-accent transition-colors tracking-wide">Source Code</a>
-      <span className="text-white/10">•</span>
-      <a href="https://github.com/h4nzs/chat-lite/blob/main/COMMERCIAL.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-white transition-colors tracking-wide">Commercial Licensing</a>
-    </div>
+            {/* Copyright & Core License */}
+            <p className="text-sm font-medium mb-3">
+              &copy; {new Date().getFullYear()} NYX Project. Open Source under <span className="font-bold text-white">AGPL-3.0</span>.
+            </p>
 
-    {/* Disclaimer Hukum (The Shield) */}
-    <p className="text-[10px] text-text-secondary/40 max-w-3xl mx-auto leading-relaxed font-mono">
-      WhatsApp is a registered trademark of Meta Platforms, Inc. Telegram is a registered trademark of Telegram FZ-LLC. 
-      NYX is an independent open-source project and is not affiliated with, endorsed by, or sponsored by these corporate entities. 
-      Any architectural comparisons are made strictly for informational and cryptographic review purposes based on public technical documentation available as of {new Date().getFullYear()}.
-    </p>
-  </div>
-</footer>
+            {/* Intelligence Links */}
+            <div className="flex flex-wrap justify-center items-center gap-3 text-xs font-bold mt-1 mb-8">
+              <a href="/privacy" className="hover:text-accent transition-colors tracking-wide">Legal & Privacy</a>
+              <span className="text-white/10">•</span>
+              <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" className="hover:text-accent transition-colors tracking-wide">Source Code</a>
+              <span className="text-white/10">•</span>
+              <a href="https://github.com/h4nzs/nyx-chat/blob/main/COMMERCIAL.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-white transition-colors tracking-wide">Commercial Licensing</a>
+            </div>
+
+            {/* Disclaimer Hukum (The Shield) */}
+            <p className="text-[10px] text-text-secondary/40 max-w-3xl mx-auto leading-relaxed font-mono">
+              WhatsApp is a registered trademark of Meta Platforms, Inc. Telegram is a registered trademark of Telegram FZ-LLC. 
+              NYX is an independent open-source project and is not affiliated with, endorsed by, or sponsored by these corporate entities. 
+              Any architectural comparisons are made strictly for informational and cryptographic review purposes based on public technical documentation available as of {new Date().getFullYear()}.
+            </p>
+          </div>
+        </footer>
       </div>
     </div>
   );
