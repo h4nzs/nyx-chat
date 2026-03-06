@@ -33,6 +33,9 @@ import {
   GroupSenderState,
   GroupReceiverState
 } from '@lib/keychainDb';
+
+export { deleteConversationKeychain, deleteRatchetSession, deleteSessionKeys };
+
 import { 
   emitSessionKeyFulfillment, 
   emitSessionKeyRequest, 
