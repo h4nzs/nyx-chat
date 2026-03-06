@@ -1,5 +1,11 @@
 # NYX: The Zero-Knowledge Messenger
 
+<p align="center">
+  <img src="./web/public/nyx.png" width="250" alt="NYX Logo">
+</p>
+
+<h1 align="center">NYX - Zero-Knowledge Messenger</h1>
+
 ![Version](https://img.shields.io/badge/version-2.3.0--alpha-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-AGPLv3-red?style=for-the-badge)
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
