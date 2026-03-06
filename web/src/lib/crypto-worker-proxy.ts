@@ -1,4 +1,7 @@
 // web/src/lib/crypto-worker-proxy.ts
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import CryptoWorker from '../workers/crypto.worker.ts?worker';
 import { v4 as uuidv4 } from 'uuid';
 

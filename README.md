@@ -3,7 +3,6 @@
 <p align="center">
   <img src="./web/public/nyx.png" width="250" alt="NYX Logo">
 </p>
-
 <h1 align="center">NYX - Zero-Knowledge Messenger</h1>
 
 ![Version](https://img.shields.io/badge/version-2.3.0--alpha-blue?style=for-the-badge)
@@ -133,8 +132,12 @@ Please check the `CONTRIBUTING.md` and use the provided PR templates.
 
 ## ⚖️ License & Commercial Use
 
-NYX is licensed under the **GNU AGPLv3 License**.
+NYX is distributed under the **[AGPL-3.0 License](LICENSE)**.
+
+This guarantees that NYX remains free and open-source for the community. However, network use (SaaS) of this software requires you to open-source your entire project.
 
 **What this means:** You are free to use, modify, and distribute this software. However, if you modify NYX and run it as a public service (SaaS), you **must** release your modified source code to your users under the same AGPLv3 license.
 
-**Dual Licensing:** If you are a corporation looking to use NYX's engine in a closed-source, proprietary, or commercial product without triggering the AGPLv3 copyleft provisions, you must obtain a commercial license. Contact the repository owner for enterprise licensing.
+**🏢 Building a Closed-Source SaaS?**
+If you are a corporation, startup, or enterprise looking to integrate NYX into a proprietary product without the AGPL-3.0 obligations, you must acquire a Commercial License.
+👉 **[Read the Commercial Licensing Guide here](COMMERCIAL.md)**.

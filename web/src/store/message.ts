@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, apiUpload, authFetch } from "@lib/api"; // Added authFetch
 import { getSocket, emitSessionKeyRequest, emitGroupKeyDistribution } from "@lib/socket";

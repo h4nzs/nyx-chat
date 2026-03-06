@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 // web/src/workers/crypto.worker.ts
 import { Buffer } from 'buffer/';
 (self as any).Buffer = Buffer;
