@@ -22,6 +22,7 @@ import { useVerificationStore } from '@store/verification';
 import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers, FiPhone, FiVideo, FiX, FiTrash2 } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import MessageInput from './MessageInput';
 import MessageSkeleton from './MessageSkeleton';
 import { useUserProfile } from '@hooks/useUserProfile';
@@ -235,14 +236,17 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
   const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
     if (!conversation) return;
-    const confirm = await showConfirm('Delete Messages', `Delete ${selectedMessageIds.length} messages? This action only removes them from your device.`);
-    if (confirm) {
-        await removeMessages(conversation.id, selectedMessageIds);
-        clearMessageSelection();
-        toast.success(`${selectedMessageIds.length} messages deleted`);
-    }
+    showConfirm(
+      'Delete Messages', 
+      `Delete ${selectedMessageIds.length} messages? This action only removes them from your device.`,
+      async () => {
+          await removeMessages(conversation.id, selectedMessageIds);
+          clearMessageSelection();
+          toast.success(`${selectedMessageIds.length} messages deleted`);
+      }
+    );
   };
 
   useEffect(() => {
