@@ -441,7 +441,7 @@ type Actions = {
   loadMessageContext: (messageId: string) => Promise<void>;
   addOptimisticMessage: (conversationId: string, message: Message) => void;
   addIncomingMessage: (conversationId: string, message: Message) => Promise<Message>;
-  replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => void;
+  replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => Promise<void>;
   removeMessage: (conversationId: string, messageId: string) => void;
   removeMessages: (conversationId: string, messageIds: string[]) => Promise<void>;
   updateMessage: (conversationId: string, messageId: string, updates: Partial<Message>) => void;
@@ -1166,6 +1166,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       } else {
           decrypted = await decryptMessageObject(message);
       }
+
+      // THE SHIELD: Prevent overwriting valid local data with decryption failures
+      if (decrypted.error || decrypted.content === 'waiting_for_key' || decrypted.content?.startsWith('[')) {
+          const existing = await shadowVault.getMessage(decrypted.id);
+          if (existing && !existing.isDeletedLocal && existing.content && !existing.content.startsWith('[')) {
+              console.warn(`[Shield] Prevented overwriting valid local message ${decrypted.id} with failure.`);
+              return existing;
+          }
+      }
       
       const reactionPayload = parseReaction(decrypted.content);
       const editPayload = parseEdit(decrypted.content);
@@ -1221,7 +1230,25 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       return decrypted;
   },
 
-  replaceOptimisticMessage: (conversationId, tempId, newMessage) => {
+  replaceOptimisticMessage: async (conversationId, tempId, newMessage) => {
+    // THE SHIELD: Check if the user already deleted this message while it was sending
+    const tempIdStr = `temp_${tempId}`;
+    const existingTombstone = await shadowVault.getMessage(tempIdStr);
+    
+    if (existingTombstone && existingTombstone.isDeletedLocal) {
+        // Message was deleted optimistically. Just remove tempId from state and save a tombstone for realId.
+        await shadowVault.deleteMessage(tempIdStr);
+        await shadowVault.upsertMessages([{ ...newMessage, id: newMessage.id!, conversationId, isDeletedLocal: true, content: null, fileUrl: undefined } as Message]);
+        
+        set(state => ({
+            messages: {
+                ...state.messages,
+                [conversationId]: (state.messages[conversationId] || []).filter(m => String(m.tempId) !== String(tempId))
+            }
+        }));
+        return; 
+    }
+
     set(state => {
       const updatedMessages = (state.messages[conversationId] || []).map(m => {
         if (m.tempId && String(m.tempId) === String(tempId)) {

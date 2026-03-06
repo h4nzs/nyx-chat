@@ -103,6 +103,12 @@ export function getSocket() {
 
     // --- Application-specific Listeners ---
     socket.on("message:new", async (newMessage) => {
+      const meId = useAuthStore.getState().user?.id;
+      // THE SHIELD: Block echoes. Never process messages we sent ourselves from the socket!
+      if (meId && newMessage.senderId === meId) {
+        return;
+      }
+
       const convExists = useConversationStore.getState().conversations.some(c => c.id === newMessage.conversationId);
       if (!convExists) {
         return;
