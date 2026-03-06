@@ -427,6 +427,7 @@ type State = {
   hasMore: Record<string, boolean>;
   typingLinkPreview: any | null;
   hasLoadedHistory: Record<string, boolean>;
+  selectedMessageIds: string[];
 };
 
 type Actions = {
@@ -442,6 +443,7 @@ type Actions = {
   addIncomingMessage: (conversationId: string, message: Message) => Promise<Message>;
   replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => void;
   removeMessage: (conversationId: string, messageId: string) => void;
+  removeMessages: (conversationId: string, messageIds: string[]) => Promise<void>;
   updateMessage: (conversationId: string, messageId: string, updates: Partial<Message>) => void;
   addLocalReaction: (conversationId: string, messageId: string, reaction: any) => void;
   removeLocalReaction: (conversationId: string, messageId: string, reactionId: string) => void;
@@ -457,6 +459,8 @@ type Actions = {
   reset: () => void;
   resendPendingMessages: () => void;
   sendMessage: (conversationId: string, data: Partial<Message>, tempId?: number, isSilent?: boolean) => Promise<void>;
+  toggleMessageSelection: (id: string) => void;
+  clearMessageSelection: () => void;
 };
 
 let tempIdCounter = 0;
@@ -469,6 +473,7 @@ const initialState: State = {
   hasLoadedHistory: {},
   replyingTo: null,
   typingLinkPreview: null,
+  selectedMessageIds: [],
 };
 
 export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) => ({
@@ -476,6 +481,27 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
   reset: () => {
     set(initialState);
+  },
+
+  toggleMessageSelection: (id) => set(state => ({
+      selectedMessageIds: state.selectedMessageIds.includes(id)
+          ? state.selectedMessageIds.filter(x => x !== id)
+          : [...state.selectedMessageIds, id]
+  })),
+
+  clearMessageSelection: () => set({ selectedMessageIds: [] }),
+
+  removeMessages: async (conversationId, messageIds) => {
+    // 1. Delete all from local vault & Keychain
+    for (const id of messageIds) {
+        shadowVault.deleteMessage(id).catch(console.error);
+        import('@utils/crypto').then(m => m.deleteMessageKeySecurely(id)).catch(console.error);
+    }
+    // 2. Remove from active state
+    set(state => {
+        const current = state.messages[conversationId] || [];
+        return { messages: { ...state.messages, [conversationId]: current.filter(m => !messageIds.includes(m.id)) } };
+    });
   },
 
   setReplyingTo: (message: Message | null) => set({ replyingTo: message }),

@@ -19,7 +19,7 @@ import Lightbox from "./Lightbox";
 import GroupInfoPanel from './GroupInfoPanel';
 import clsx from "clsx";
 import { useVerificationStore } from '@store/verification';
-import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers, FiPhone, FiVideo } from 'react-icons/fi';
+import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers, FiPhone, FiVideo, FiX, FiTrash2 } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import MessageInput from './MessageInput';
@@ -197,9 +197,16 @@ const ChatSpinner = () => (
 export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClick: () => void }) {
   const meId = useAuthStore((s) => s.user?.id);
   const { conversation, messages, isLoading, error, actions, isFetchingMore } = useConversation(id);
-  const loadMessagesForConversation = useMessageStore(s => s.loadMessagesForConversation);
+  const { loadMessagesForConversation, selectedMessageIds, clearMessageSelection, removeMessages } = useMessageStore(useShallow(s => ({
+      loadMessagesForConversation: s.loadMessagesForConversation,
+      selectedMessageIds: s.selectedMessageIds,
+      clearMessageSelection: s.clearMessageSelection,
+      removeMessages: s.removeMessages
+  })));
+  const isSelectionMode = selectedMessageIds.length > 0;
   const loadMessageContext = useMessageStore(s => s.loadMessageContext);
   const openConversation = useConversationStore(state => state.openConversation);
+  const showConfirm = useModalStore(s => s.showConfirm);
   
   useEdgeSwipe(() => {
     if (window.innerWidth < 768) {
@@ -223,9 +230,20 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
   useEffect(() => {
     if (id) loadMessagesForConversation(id);
-  }, [id, loadMessagesForConversation]);
+    clearMessageSelection();
+  }, [id, loadMessagesForConversation, clearMessageSelection]);
 
   const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);
+
+  const handleBulkDelete = async () => {
+    if (!conversation) return;
+    const confirm = await showConfirm('Delete Messages', `Delete ${selectedMessageIds.length} messages? This action only removes them from your device.`);
+    if (confirm) {
+        await removeMessages(conversation.id, selectedMessageIds);
+        clearMessageSelection();
+        toast.success(`${selectedMessageIds.length} messages deleted`);
+    }
+  };
 
   useEffect(() => {
     if (!highlightedMessageId) return;
@@ -342,12 +360,30 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
           return (
             <>
-              <ChatHeader 
-                conversation={conversation} 
-                onBack={() => navigate('/chat')} 
-                onInfoToggle={() => setIsGroupInfoOpen(true)} 
-                onMenuClick={onMenuClick} 
-              />
+              {isSelectionMode ? (
+                  <div className="h-16 flex items-center justify-between px-4 bg-accent/10 border-b border-white/5 backdrop-blur-md z-30">
+                      <div className="flex items-center gap-4">
+                          <button onClick={clearMessageSelection} className="p-2 hover:bg-white/10 rounded-full transition-colors text-text-secondary hover:text-white">
+                              <FiX size={20} />
+                          </button>
+                          <span className="font-bold text-lg text-accent tracking-wide">{selectedMessageIds.length} Selected</span>
+                      </div>
+                      <button 
+                          onClick={handleBulkDelete} 
+                          className="p-2 text-red-500 hover:bg-red-500/20 rounded-full transition-all active:scale-95 shadow-neumorphic-concave"
+                          title="Delete Selected"
+                      >
+                          <FiTrash2 size={20} />
+                      </button>
+                  </div>
+              ) : (
+                  <ChatHeader 
+                    conversation={conversation} 
+                    onBack={() => navigate('/chat')} 
+                    onInfoToggle={() => setIsGroupInfoOpen(true)} 
+                    onMenuClick={onMenuClick} 
+                  />
+              )}
               
               {messages.length === 0 && <NewConversationBanner />}
 

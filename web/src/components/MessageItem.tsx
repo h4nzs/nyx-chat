@@ -8,10 +8,11 @@ import { toAbsoluteUrl } from "@utils/url";
 import { useModalStore } from '@store/modal';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
-import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock, FiInfo, FiEdit2 } from 'react-icons/fi';
+import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock, FiInfo, FiEdit2, FiCheckSquare, FiCheck } from 'react-icons/fi';
 import { getUserColor } from '@utils/color';
 import { FaCheck, FaCheckDouble } from 'react-icons/fa';
 import { useMessageStore } from '@store/message';
+import { useShallow } from 'zustand/react/shallow';
 import toast from 'react-hot-toast';
 import MessageBubble from "./MessageBubble";
 import { useUserProfile } from '@hooks/useUserProfile';
@@ -81,11 +82,18 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
   const setReplyingTo = useMessageInputStore(state => state.setReplyingTo);
   const setEditingMessage = useMessageInputStore(state => state.setEditingMessage);
   const showConfirm = useModalStore(state => state.showConfirm);
-  const removeMessage = useMessageStore(state => state.removeMessage);
-  const addOptimisticMessage = useMessageStore(state => state.addOptimisticMessage);
-  const sendReaction = useMessageStore(state => state.sendReaction);
-  const removeLocalReaction = useMessageStore(state => state.removeLocalReaction);
+  const { selectedMessageIds, toggleMessageSelection, removeMessage, addOptimisticMessage, sendReaction, removeLocalReaction } = useMessageStore(useShallow(s => ({
+      selectedMessageIds: s.selectedMessageIds,
+      toggleMessageSelection: s.toggleMessageSelection,
+      removeMessage: s.removeMessage,
+      addOptimisticMessage: s.addOptimisticMessage,
+      sendReaction: s.sendReaction,
+      removeLocalReaction: s.removeLocalReaction
+  })));
   const user = useAuthStore((s) => s.user);
+
+  const isSelectionMode = selectedMessageIds.length > 0;
+  const isSelected = selectedMessageIds.includes(message.id);
 
   const profile = useUserProfile(message.sender as any);
   const mine = message.senderId === meId;
@@ -154,6 +162,14 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     });
   };
 
+  const handleClick = (e: React.MouseEvent) => {
+    if (isSelectionMode) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleMessageSelection(message.id);
+    }
+  };
+
   if (message.content === "[This message was deleted]") {
     return (
       <div ref={ref} className={`flex items-center p-2 ${mine ? 'justify-end' : 'justify-start'}`}>
@@ -197,6 +213,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
 
   const handleContextMenu = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
+    if (isSelectionMode) return;
     
     // BLACK OPS: Temporarily store this specific message's reaction handler globally
     // so the expanded EmojiPicker in ContextMenu can access it.
@@ -215,6 +232,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
 
     openMenu(e, [
       { label: 'Reply', icon: <FiCornerUpLeft />, onClick: () => setReplyingTo(message) },
+      { label: 'Select', icon: <FiCheckSquare />, onClick: () => toggleMessageSelection(message.id) },
       ...(isEditable ? [{ label: 'Edit', icon: <FiEdit2 />, onClick: () => setEditingMessage(message) }] : []),
       { label: 'Copy Text', icon: <FiCopy />, onClick: () => navigator.clipboard.writeText(message.content || '') },
       { label: 'Security Info', icon: <FiShield />, onClick: () => toast('End-to-End Encrypted via Signal Protocol', { icon: '🔒' }) },
@@ -235,7 +253,17 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
         leftAction={{ icon: <FiCornerUpLeft size={20} />, color: 'bg-blue-500/80', onAction: () => setReplyingTo(message) }}
         rightAction={{ icon: <FiInfo size={20} />, color: 'bg-secondary/80', onAction: () => toast('Message ID: ' + message.id, { icon: 'ℹ️' }) }}
       >
-        <div onContextMenu={handleContextMenu} className={`flex items-end gap-2 w-full select-none ${mine ? 'flex-row-reverse justify-start' : 'flex-row justify-start'}`}>
+        <div onContextMenu={handleContextMenu} onClick={handleClick} className={`flex items-end gap-2 w-full select-none ${mine ? 'flex-row-reverse justify-start' : 'flex-row justify-start'}`}>
+          {isSelectionMode && (
+              <div className="flex items-center justify-center px-2 cursor-pointer z-10 transition-all">
+                <div className={clsx(
+                    "w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors shadow-sm", 
+                    isSelected ? "bg-accent border-accent" : "border-text-secondary/50 bg-black/20"
+                )}>
+                    {isSelected && <FiCheck size={14} className="text-white" />}
+                </div>
+              </div>
+          )}
           {!mine && (
             <div className="w-8 flex-shrink-0 mb-1 self-end">
               {isLastInSequence && (
