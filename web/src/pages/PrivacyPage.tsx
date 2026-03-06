@@ -136,7 +136,7 @@ export default function PrivacyPage() {
               <p className="text-sm mb-4">
                 For corporations, enterprises, or startups wishing to integrate NYX into a proprietary, closed-source product without the AGPL obligations, we offer a Commercial License.
               </p>
-              <a href="https://github.com/h4nzs/chat-lite" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs font-bold bg-white text-black px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors">
+              <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs font-bold bg-white text-black px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors">
                 Contact Command for Enterprise Pricing
               </a>
             </div>

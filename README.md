@@ -142,6 +142,8 @@ This guarantees that NYX remains free and open-source for the community. However
 If you are a corporation, startup, or enterprise looking to integrate NYX into a proprietary product without the AGPL-3.0 obligations, you must acquire a Commercial License.
 👉 **[Read the Commercial Licensing Guide here](COMMERCIAL.md)**.
 
+---
+
 ## 🦉 Branding & Anti-Impersonation Policy
 
 While the term "NYX" may be used broadly in various contexts, the **specific visual identity, custom logos (including the owl insignia), and the direct reputation of this specific repository** are the intellectual property of the core maintainer.

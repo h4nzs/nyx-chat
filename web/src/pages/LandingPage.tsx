@@ -410,24 +410,43 @@ export default function LandingPage() {
         </section>
 
         {/* Footer */}
-        <footer className="py-8">
-          <div className="max-w-6xl mx-auto px-4 text-center text-text-secondary">
-            <div className="flex justify-center items-center mb-2">
-              <img
-                src="/pwa-512x512.png"
-                alt="NYX Logo"
-                className="w-6 h-6 mr-2"
-              />
-              <p className="text-sm mt-4">&copy; {new Date().getFullYear()} NYX Project. Open Source (MIT).</p>
-              {/* TAMBAHAN DISCLAIMER HUKUM */}
-              <p className="text-xs text-text-secondary/50 mt-8 max-w-2xl mx-auto">
-              WhatsApp is a registered trademark of Meta Platforms, Inc. Telegram is a registered trademark of Telegram FZ-LLC. 
-              NYX is an independent open-source project and is not affiliated with, endorsed by, or sponsored by these companies.
-              Comparisons are made for informational purposes based on public technical documentation available as of {new Date().getFullYear()}.
-              </p>
-            </div>
-          </div>
-        </footer>
+        <footer className="py-12 border-t border-white/5 bg-bg-main relative overflow-hidden">
+  {/* Tactical Background Glow */}
+  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-md h-[1px] bg-gradient-to-r from-transparent via-accent/50 to-transparent"></div>
+  
+  <div className="max-w-6xl mx-auto px-6 text-center text-text-secondary flex flex-col items-center">
+    {/* Insignia & Brand */}
+    <div className="flex items-center justify-center gap-3 mb-4">
+      <img
+        src="/pwa-512x512.png"
+        alt="NYX Command"
+        className="w-6 h-6 grayscale hover:grayscale-0 transition-all duration-300"
+      />
+      <span className="text-sm font-black tracking-[0.3em] text-text-primary uppercase">NYX</span>
+    </div>
+
+    {/* Copyright & Core License */}
+    <p className="text-sm font-medium mb-3">
+      &copy; {new Date().getFullYear()} NYX Project. Open Source under <span className="font-bold text-white">AGPL-3.0</span>.
+    </p>
+
+    {/* Intelligence Links */}
+    <div className="flex flex-wrap justify-center items-center gap-3 text-xs font-bold mt-1 mb-8">
+      <a href="/privacy" className="hover:text-accent transition-colors tracking-wide">Legal & Privacy</a>
+      <span className="text-white/10">•</span>
+      <a href="https://github.com/h4nzs/chat-lite" target="_blank" rel="noopener noreferrer" className="hover:text-accent transition-colors tracking-wide">Source Code</a>
+      <span className="text-white/10">•</span>
+      <a href="https://github.com/h4nzs/chat-lite/blob/main/COMMERCIAL.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-white transition-colors tracking-wide">Commercial Licensing</a>
+    </div>
+
+    {/* Disclaimer Hukum (The Shield) */}
+    <p className="text-[10px] text-text-secondary/40 max-w-3xl mx-auto leading-relaxed font-mono">
+      WhatsApp is a registered trademark of Meta Platforms, Inc. Telegram is a registered trademark of Telegram FZ-LLC. 
+      NYX is an independent open-source project and is not affiliated with, endorsed by, or sponsored by these corporate entities. 
+      Any architectural comparisons are made strictly for informational and cryptographic review purposes based on public technical documentation available as of {new Date().getFullYear()}.
+    </p>
+  </div>
+</footer>
       </div>
     </div>
   );
