@@ -50,6 +50,7 @@ export type Message = {
   isViewed?: boolean;
   isEdited?: boolean;
   isSilent?: boolean; // New: Message was sent without sound
+  isDeletedLocal?: boolean; // New: Tombstone flag for local deletions
 };
 
 export type Participant = {

@@ -527,11 +527,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         });
     }
 
-    // 2. Delete all from local vault & Keychain (Always)
+    // 2. TOMBSTONE in local vault & Wipe MK (Always)
+    const tombstones: Message[] = [];
     for (const id of messageIds) {
-        shadowVault.deleteMessage(id).catch(console.error);
+        const existing = selectedMessages.find(m => m.id === id);
+        if (existing) {
+            // Soft delete: Keep record but strip content
+            tombstones.push({ ...existing, content: null, fileUrl: undefined, isDeletedLocal: true });
+        } else {
+            tombstones.push({ id, conversationId, isDeletedLocal: true, createdAt: new Date().toISOString(), senderId: 'unknown' } as Message);
+        }
         import('@utils/crypto').then(m => m.deleteMessageKeySecurely(id)).catch(console.error);
     }
+    shadowVault.upsertMessages(tombstones).catch(console.error);
 
     // 3. Remove from active state
     set(state => {
@@ -982,33 +990,42 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
        return;
     }
 
-    const { hasRestoredKeys } = useAuthStore.getState();
     if (get().hasLoadedHistory[id]) return;
 
-    if (hasRestoredKeys) {
-      try {
-        const conversation = useConversationStore.getState().conversations.find(c => c.id === id);
-      } catch (sessionError) {
-        console.error("Failed to establish session, decryption may fail:", sessionError);
-      }
-    }
-    
     try {
       set(state => ({ hasMore: { ...state.hasMore, [id]: true }, isFetchingMore: { ...state.isFetchingMore, [id]: false } }));
+      
+      // 1. Load from local vault (including tombstones)
+      const localMessages = await shadowVault.getMessagesByConversation(id);
+      const localMap = new Map(localMessages.map(m => [m.id, m]));
+
+      // 2. Fetch from server
       const res = await api<{ items: Message[] }>(`/api/messages/${id}`);
       const fetchedMessages = res.items || [];
       const processedMessages: Message[] = [];
+      
       for (const message of fetchedMessages) {
-        processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
+        if (localMap.has(message.id)) {
+            // Already in vault (either decrypted or tombstoned)
+            processedMessages.push(localMap.get(message.id)!);
+        } else {
+            // Not in vault, decrypt it
+            processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
+        }
       }
+
       set(state => {
         const existingMessages = state.messages[id] || [];
         const allMessages = processMessagesAndReactions(processedMessages, existingMessages);
         
-        shadowVault.upsertMessages(allMessages); // Archive to shadow vault
+        // Update vault with everything we just processed (if not already there)
+        shadowVault.upsertMessages(allMessages); 
+
+        // 3. Filter out tombstones for the UI
+        const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
 
         return {
-          messages: { ...state.messages, [id]: allMessages },
+          messages: { ...state.messages, [id]: visibleMessages },
           hasMore: { ...state.hasMore, [id]: fetchedMessages.length >= 50 },
           hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
         };
@@ -1026,17 +1043,33 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: true } }));
     try {
       const res = await api<{ items: Message[] }>(`/api/messages/${conversationId}?cursor=${oldestMessage.id}`);
-      const decryptedItems = await Promise.all((res.items || []).map(m => decryptMessageObject(m, undefined, 0, { skipRetries: true })));
+      const fetchedItems = res.items || [];
+      
+      // Load local cache to skip decryption
+      const localMessages = await shadowVault.getMessagesByConversation(conversationId);
+      const localMap = new Map(localMessages.map(m => [m.id, m]));
+
+      const processedItems: Message[] = [];
+      for (const m of fetchedItems) {
+          if (localMap.has(m.id)) {
+              processedItems.push(localMap.get(m.id)!);
+          } else {
+              processedItems.push(await decryptMessageObject(m, undefined, 0, { skipRetries: true }));
+          }
+      }
       
       set(state => {
         const existingMessages = state.messages[conversationId] || [];
-        const allMessages = processMessagesAndReactions(decryptedItems, existingMessages);
+        const allMessages = processMessagesAndReactions(processedItems, existingMessages);
 
         shadowVault.upsertMessages(allMessages); // Archive to shadow vault
 
-        const newState: any = { messages: { ...state.messages, [conversationId]: allMessages } };
+        // Filter out tombstones for UI
+        const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
 
-        if (decryptedItems.length < 50) {
+        const newState: any = { messages: { ...state.messages, [conversationId]: visibleMessages } };
+
+        if (fetchedItems.length < 50) {
             newState.hasMore = { ...state.hasMore, [conversationId]: false };
         }
         
@@ -1059,9 +1092,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       if (!convoId) return;
 
+      // Load local cache
+      const localMessages = await shadowVault.getMessagesByConversation(convoId);
+      const localMap = new Map(localMessages.map(m => [m.id, m]));
+
       const processedMessages: Message[] = [];
       for (const message of fetchedMessages) {
-        processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
+          if (localMap.has(message.id)) {
+              processedMessages.push(localMap.get(message.id)!);
+          } else {
+              processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
+          }
       }
 
       set(state => {
@@ -1075,8 +1116,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
         shadowVault.upsertMessages(finalMessages);
 
+        // Filter out tombstones
+        const visibleMessages = finalMessages.filter(m => !m.isDeletedLocal);
+
         return {
-          messages: { ...state.messages, [convoId]: finalMessages },
+          messages: { ...state.messages, [convoId]: visibleMessages },
           // If we jump back, we might still have older messages to fetch later
           hasMore: { ...state.hasMore, [convoId]: true } 
         };
@@ -1203,19 +1247,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     })
   },
   removeMessage: (conversationId, messageId) => {
-    // 1. DELETE FROM LOCAL STORAGE (Async cleanup)
-    shadowVault.deleteMessage(messageId).catch(console.error);
-    import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(console.error);
-
+    // 1. TOMBSTONE in local storage (Async cleanup)
     set(state => {
       const messages = state.messages[conversationId] || [];
-      
       const messageToRemove = messages.find(m => m.id === messageId);
-      if (messageToRemove?.fileUrl?.startsWith('blob:')) {
-        URL.revokeObjectURL(messageToRemove.fileUrl);
+      
+      if (messageToRemove) {
+          if (messageToRemove.fileUrl?.startsWith('blob:')) {
+            URL.revokeObjectURL(messageToRemove.fileUrl);
+          }
+          // Soft delete: Keep record in IDB but strip content
+          shadowVault.upsertMessages([{ ...messageToRemove, content: null, fileUrl: undefined, isDeletedLocal: true }]).catch(console.error);
+      } else {
+          shadowVault.upsertMessages([{ id: messageId, conversationId, isDeletedLocal: true, createdAt: new Date().toISOString(), senderId: 'unknown' } as Message]).catch(console.error);
       }
-      const filteredMessages = messages.filter(m => m.id !== messageId);
 
+      import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(console.error);
+
+      const filteredMessages = messages.filter(m => m.id !== messageId);
       const updatedMessages = filteredMessages.map(m => {
           if (m.reactions && m.reactions.some(r => r.id === messageId)) {
               return {

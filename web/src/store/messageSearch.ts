@@ -45,7 +45,7 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
       // 2. In-memory lightning decryption & filtering
       const decryptedResults = [];
       for (const msg of rawResults) {
-        if (msg.isViewOnce) continue; // Skip phantom media
+        if (msg.isViewOnce || msg.isDeletedLocal || !msg.content) continue; // Skip phantom media and tombstones
         
         const plainText = await decryptVaultText(msg.content);
         if (plainText && plainText.toLowerCase().includes(normalizedQuery)) {
