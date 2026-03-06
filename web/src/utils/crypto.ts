@@ -27,6 +27,9 @@ import {
   getGroupReceiverState,
   saveGroupReceiverState,
   deleteGroupStates,
+  deleteConversationKeychain,
+  deleteRatchetSession,
+  deleteSessionKeys,
   GroupSenderState,
   GroupReceiverState
 } from '@lib/keychainDb';

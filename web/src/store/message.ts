@@ -1137,37 +1137,52 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       };
     })
   },
-  removeMessage: (conversationId, messageId) => set(state => {
-    const messages = state.messages[conversationId] || [];
-    
-    const messageToRemove = messages.find(m => m.id === messageId);
-    if (messageToRemove?.fileUrl?.startsWith('blob:')) {
-      URL.revokeObjectURL(messageToRemove.fileUrl);
-    }
-    const filteredMessages = messages.filter(m => m.id !== messageId);
+  removeMessage: (conversationId, messageId) => {
+    // 1. DELETE FROM LOCAL STORAGE (Async cleanup)
+    shadowVault.deleteMessage(messageId).catch(console.error);
+    import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(console.error);
 
-    const updatedMessages = filteredMessages.map(m => {
-        if (m.reactions && m.reactions.some(r => r.id === messageId)) {
-            return {
-                ...m,
-                reactions: m.reactions.filter(r => r.id !== messageId)
-            };
-        }
-        return m;
-    });
-
-    return {
-      messages: {
-          ...state.messages,
-          [conversationId]: updatedMessages,
+    set(state => {
+      const messages = state.messages[conversationId] || [];
+      
+      const messageToRemove = messages.find(m => m.id === messageId);
+      if (messageToRemove?.fileUrl?.startsWith('blob:')) {
+        URL.revokeObjectURL(messageToRemove.fileUrl);
       }
-    };
-  }),
+      const filteredMessages = messages.filter(m => m.id !== messageId);
+
+      const updatedMessages = filteredMessages.map(m => {
+          if (m.reactions && m.reactions.some(r => r.id === messageId)) {
+              return {
+                  ...m,
+                  reactions: m.reactions.filter(r => r.id !== messageId)
+              };
+          }
+          return m;
+      });
+
+      return {
+        messages: {
+            ...state.messages,
+            [conversationId]: updatedMessages,
+        }
+      };
+    });
+  },
   updateMessage: (conversationId, messageId, updates) => {
     set(state => {
       const updatedMessages = (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, ...updates } : m);
       const updatedMsg = updatedMessages.find(m => m.id === messageId);
-      if (updatedMsg) shadowVault.upsertMessages([updatedMsg]); // Archive to shadow vault
+      
+      if (updatedMsg) {
+        // [FIX] If message is view-once and has been viewed, delete it from vault
+        if (updatedMsg.isViewOnce && updatedMsg.isViewed) {
+            shadowVault.deleteMessage(messageId).catch(console.error);
+            import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(console.error);
+        } else {
+            shadowVault.upsertMessages([updatedMsg]); // Archive to shadow vault
+        }
+      }
       return { messages: { ...state.messages, [conversationId]: updatedMessages } };
     })
   },
@@ -1227,11 +1242,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     return { messages: newMessages };
   }),
 
-  clearMessagesForConversation: (conversationId) => set(state => {
-    const newMessages = { ...state.messages };
-    delete newMessages[conversationId];
-    return { messages: newMessages };
-  }),
+  clearMessagesForConversation: (conversationId) => {
+    // 1. DELETE FROM LOCAL STORAGE
+    shadowVault.deleteConversationMessages(conversationId).catch(console.error);
+    import('@utils/crypto').then(m => m.deleteConversationKeychain(conversationId)).catch(console.error);
+
+    set(state => {
+      const newMessages = { ...state.messages };
+      delete newMessages[conversationId];
+      return { messages: newMessages };
+    });
+  },
+
 
   retrySendMessage: (message: Message) => {
     const { conversationId, tempId, preview, fileUrl, fileName, fileType, fileSize, repliedToId } = message;
