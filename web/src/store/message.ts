@@ -464,6 +464,7 @@ type Actions = {
   sendMessage: (conversationId: string, data: Partial<Message>, tempId?: number, isSilent?: boolean) => Promise<void>;
   toggleMessageSelection: (id: string) => void;
   clearMessageSelection: () => void;
+  repairSecureSession: (conversationId: string, isGroup: boolean) => Promise<void>;
 };
 
 let tempIdCounter = 0;
@@ -493,6 +494,25 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   })),
 
   clearMessageSelection: () => set({ selectedMessageIds: [] }),
+
+  repairSecureSession: async (conversationId, isGroup) => {
+    try {
+      if (isGroup) {
+        const { forceRotateGroupSenderKey, rotateGroupKey } = await import('@utils/crypto');
+        await forceRotateGroupSenderKey(conversationId);
+        await rotateGroupKey(conversationId, 'periodic_rotation');
+      } else {
+        const { deleteRatchetSession } = await import('@utils/crypto');
+        await deleteRatchetSession(conversationId);
+        // Optional: Send a silent system message to trigger the X3DH on the other side automatically
+        get().sendMessage(conversationId, { content: "🔄 Secure session restarted.", isSilent: true });
+      }
+      toast.success("Secure session state reset. Next message will negotiate new keys.");
+    } catch (error) {
+      console.error("Failed to repair session:", error);
+      toast.error("Failed to repair session.");
+    }
+  },
 
   removeMessages: async (conversationId, messageIds) => {
     const { user } = useAuthStore.getState();

@@ -116,9 +116,11 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
   }, [message.id, message.conversationId, mine, meId, message.statuses]);
 
   if (message.type === 'SYSTEM' || message.content?.startsWith('🔒')) {
-    const isError = message.content?.includes('Error') || message.content?.includes('Unreadable');
+    const isError = message.content?.includes('Error') || message.content?.includes('Unreadable') || message.content?.includes('Key out of sync');
+    const isDesyncError = message.content?.includes('Key out of sync');
+
     return (
-      <div className="flex justify-center items-center my-3 opacity-80">
+      <div className="flex justify-center items-center my-3 opacity-80 flex-col gap-1">
         <div className={clsx(
           "text-xs px-3 py-1.5 rounded-full flex items-center gap-2 shadow-sm border",
           isError 
@@ -128,6 +130,14 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
           <FiShield size={12} className={isError ? "text-red-500" : "text-yellow-500"} />
           <span>{message.content}</span>
         </div>
+        {isDesyncError && (
+            <button 
+                onClick={() => useMessageStore.getState().repairSecureSession(message.conversationId, isGroup)}
+                className="text-[10px] text-blue-500 hover:underline font-medium bg-blue-500/10 px-2 py-1 rounded-md"
+            >
+                Repair Session
+            </button>
+        )}
       </div>
     );
   }
