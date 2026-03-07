@@ -1263,6 +1263,37 @@ self.onmessage = async (event: MessageEvent) => {
         if (mk) sodium.memzero(mk);
         break;
       }
+      case 'group_decrypt_skipped': {
+        const { mk, headerN, ciphertext, signature, senderSigningPublicKey } = payload;
+        const mkBytes = b64ToBytes(mk);
+        const ciphertextBytes = new Uint8Array(ciphertext);
+        const signatureBytes = b64ToBytes(signature);
+        const signingPublicKeyBytes = new Uint8Array(senderSigningPublicKey);
+
+        if (!mkBytes) throw new Error("Invalid skipped message key");
+        if (!signatureBytes) throw new Error("Missing signature");
+
+        // 1. Verify Signature (Anti-Spoofing)
+        // Must match the signature format in group_ratchet_encrypt: 4-byte BE N + Ciphertext
+        const dataToVerify = new Uint8Array(4 + ciphertextBytes.length);
+        new DataView(dataToVerify.buffer).setUint32(0, headerN, false);
+        dataToVerify.set(ciphertextBytes, 4);
+
+        const isValid = sodium.crypto_sign_verify_detached(signatureBytes, dataToVerify, signingPublicKeyBytes);
+        if (!isValid) throw new Error("Invalid group message signature (skipped key). Potential spoofing detected!");
+
+        // 2. Decrypt
+        const nonce = ciphertextBytes.slice(0, 24);
+        const ctext = ciphertextBytes.slice(24);
+        const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mkBytes);
+
+        result = {
+           plaintext
+        };
+
+        sodium.memzero(mkBytes);
+        break;
+      }
       default:
         self.postMessage({ type: 'error', id, error: `Unknown worker command: ${type}` });
         return;

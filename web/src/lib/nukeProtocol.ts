@@ -6,7 +6,21 @@ export const executeLocalWipe = async () => {
     await closeDatabaseConnection();
 
     // 1. Obliterate all known IndexedDB Vaults
-    let databases = ['nyx_keychain', 'nyx_offline_queue', 'nyx_shadow_vault'];
+    let databases = ['nyx_offline_queue', 'nyx_shadow_vault'];
+    
+    // Get correct keychain DB name from local storage if available
+    try {
+        const savedUser = localStorage.getItem("user");
+        if (savedUser) {
+            const user = JSON.parse(savedUser);
+            if (user?.id) {
+                databases.push(`keychain-db-${user.id}`);
+            }
+        }
+    } catch (e) {}
+
+    // Fallback: Hardcoded legacy name just in case
+    databases.push('nyx_keychain');
     
     // Try to get dynamic list if supported by browser
     if (window.indexedDB && window.indexedDB.databases) {
