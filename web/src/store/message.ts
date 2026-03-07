@@ -504,8 +504,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       } else {
         const { deleteRatchetSession } = await import('@utils/crypto');
         await deleteRatchetSession(conversationId);
-        // Optional: Send a silent system message to trigger the X3DH on the other side automatically
-        get().sendMessage(conversationId, { content: "🔄 Secure session restarted.", isSilent: true });
+        // Send a silent system message to trigger the X3DH on the other side automatically,
+        // and mark it as type 'SYSTEM' so it renders as a center placeholder.
+        get().sendMessage(conversationId, { content: "🔄 Secure session restarted.", isSilent: true, type: 'SYSTEM' });
       }
       toast.success("Secure session state reset. Next message will negotiate new keys.");
     } catch (error) {
