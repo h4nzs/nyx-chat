@@ -49,50 +49,56 @@ self.addEventListener('push', (event: PushEvent) => {
            const autoUnlockKey = await idb.get('nyx_device_auto_unlock_key');
 
            if (encryptedKeys && autoUnlockKey) {
-              const sodium = await import('libsodium-wrappers').then(s => { s.default.ready; return s.default; });
-              const { argon2id } = await import('hash-wasm');
+           const sodiumModule = await import('libsodium-wrappers');
+           await sodiumModule.default.ready;
+           const sodium = sodiumModule.default;
 
-              // 1. Parse the Vault Format: "saltB64.JSON_String"
-              const parts = encryptedKeys.split('.');
-              if (parts.length === 2) {
-                  const salt = sodium.from_base64(parts[0], sodium.base64_variants.URLSAFE_NO_PADDING);
-                  const encryptedString = parts[1];
+           const { argon2id } = await import('hash-wasm');
 
-                  // 2. Derive Key matching crypto.worker.ts EXACTLY
-                  const kek = await argon2id({
-                      password: autoUnlockKey,
-                      salt,
-                      parallelism: 1,
-                      iterations: 3,
-                      memorySize: 32768,
-                      hashLength: 32,
-                      outputType: 'binary'
-                  });
+           // 1. Parse the Vault Format: "saltB64.JSON_String"
+           const parts = encryptedKeys.split('.');
+           if (parts.length === 2) {
+               const salt = sodium.from_base64(parts[0], sodium.base64_variants.URLSAFE_NO_PADDING);
+               const encryptedString = parts[1];
 
-                  // 3. Decrypt the Private Keys using WebCrypto AES-GCM
-                  const cryptoKey = await crypto.subtle.importKey(
-                      'raw',
-                      kek as BufferSource,
-                      { name: 'AES-GCM' },
-                      false,
-                      ['decrypt']
-                  );
+               // 2. Derive Key matching crypto.worker.ts EXACTLY
+               const kek = await argon2id({
+                   password: autoUnlockKey,
+                   salt,
+                   parallelism: 1,
+                   iterations: 3,
+                   memorySize: 32768,
+                   hashLength: 32,
+                   outputType: 'binary'
+               });
 
-                  const parsedData = JSON.parse(encryptedString);
-                  const iv = new Uint8Array(parsedData.iv);
-                  const ciphertext = new Uint8Array(parsedData.data);
+               // 3. Decrypt the Private Keys using WebCrypto AES-GCM
+               const cryptoKey = await crypto.subtle.importKey(
+                   'raw',
+                   kek as BufferSource,
+                   { name: 'AES-GCM' },
+                   false,
+                   ['decrypt']
+               );
 
-                  const decryptedContent = await crypto.subtle.decrypt(
-                      { name: 'AES-GCM', iv },
-                      cryptoKey,
-                      ciphertext
-                  );
+               const parsedData = JSON.parse(encryptedString);
+               const iv = new Uint8Array(parsedData.iv);
+               const ciphertext = new Uint8Array(parsedData.data);
 
-                  const keysJson = new TextDecoder().decode(decryptedContent);
-                  const keys = JSON.parse(keysJson);
+               const decryptedContent = await crypto.subtle.decrypt(
+                   { name: 'AES-GCM', iv },
+                   cryptoKey,
+                   ciphertext
+               );
 
-                  // 4. Extract the Encryption Private Key & Compute Public Key
-                  const privateKey = sodium.from_base64(keys.encryption, sodium.base64_variants.URLSAFE_NO_PADDING);
+               const decryptedString = new TextDecoder().decode(decryptedContent);
+               const parsedOnce = JSON.parse(decryptedString);
+               // Handle the double-stringified payload from crypto.worker.ts
+               const keys = typeof parsedOnce === 'string' ? JSON.parse(parsedOnce) : parsedOnce;
+
+               // 4. Extract the Encryption Private Key & Compute Public Key
+               const privateKey = sodium.from_base64(keys.encryption, sodium.base64_variants.URLSAFE_NO_PADDING);
+
                   const publicKey = sodium.crypto_scalarmult_base(privateKey);
 
                   // 5. Open the Push Notification Sealed Box
