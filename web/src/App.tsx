@@ -102,6 +102,26 @@ const AppContent = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // --- Service Worker SPA Routing ---
+  useEffect(() => {
+    const handleSwMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'PWA_ROUTER_NAVIGATE') {
+        console.log('[App] Received navigation command from SW:', event.data.url);
+        navigate(event.data.url);
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    }
+
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+      }
+    };
+  }, [navigate]);
+
   // --- Shortcuts & Commands ---
   
   const settingsAction = useCallback(() => navigate('/settings'), [navigate]);

@@ -168,22 +168,20 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
 
   const conversationId = event.notification.data?.conversationId;
-  // Sesuaikan routing frontend kamu
   const targetUrl = conversationId ? `/chat/${conversationId}` : '/';
 
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clientList) => {
       for (const client of clientList) {
         if (client.url.includes(self.location.origin) && 'focus' in client) {
-          return client.focus().then((focusedClient) => {
-            if ('navigate' in focusedClient) {
-              return focusedClient.navigate(targetUrl);
-            }
-          });
+          const focusedClient = await client.focus();
+          // Send a message to the active client to handle SPA routing natively
+          focusedClient?.postMessage({ type: 'PWA_ROUTER_NAVIGATE', url: targetUrl });
+          return; // Explicitly return nothing (void)
         }
       }
       if (self.clients.openWindow) {
-        return self.clients.openWindow(targetUrl);
+        await self.clients.openWindow(targetUrl);
       }
     })
   );
