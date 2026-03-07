@@ -448,13 +448,20 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     set(state => {
       const conversation = state.conversations.find(c => c.id === conversationId);
       if (!conversation) return state;
+      
+      const meId = useAuthStore.getState().user?.id;
+      const isMine = message.senderId === meId;
+      
+      // Don't increment unread if the message is from the current user
+      const shouldIncrementUnread = !isMine && state.activeId !== conversationId;
+      
       const updatedConversation = {
         ...conversation,
         lastMessage: withPreview(message),
-        unreadCount: state.activeId === conversationId ? 0 : (conversation.unreadCount || 0) + 1,
+        unreadCount: state.activeId === conversationId ? 0 : (shouldIncrementUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
       };
       const otherConversations = state.conversations.filter(c => c.id !== conversationId);
-      return { conversations: sortConversations([updatedConversation, ...otherConversations], useAuthStore.getState().user?.id) };
+      return { conversations: sortConversations([updatedConversation, ...otherConversations], meId) };
     });
   },
 

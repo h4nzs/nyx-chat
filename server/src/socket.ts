@@ -34,6 +34,7 @@ interface MessageSendPayload {
   tempId: number;
   expiresAt?: string; // New field for Disappearing Messages
   pushPayloads?: Record<string, string>; // { userId: encryptedPushPayload }
+  repliedToId?: string; // New field for Replies
 }
 
 interface PushSubscribePayload {
@@ -353,7 +354,7 @@ export function registerSocket(httpServer: HttpServer) {
          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
       }
 
-      const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads } = message as any;
+      const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId } = message as any;
 
       if (!content || typeof content !== 'string' || content.length > 10000) {
         return callback?.({ ok: false, error: "Invalid message content." });
@@ -374,10 +375,14 @@ export function registerSocket(httpServer: HttpServer) {
               senderId: userId, 
               content, 
               sessionId,
+              repliedToId,
               expiresAt: expiresAt ? new Date(expiresAt) : null, // Save expiration
               isViewOnce: isViewOnce === true
           },
-          include: { sender: { select: { id: true, encryptedProfile: true } } }
+          include: { 
+              sender: { select: { id: true, encryptedProfile: true } },
+              repliedTo: true
+          }
         });
         
         const finalMessage = { ...newMessage, tempId };
@@ -429,6 +434,12 @@ export function registerSocket(httpServer: HttpServer) {
           where: { messageId_userId: { messageId, userId } },
           update: { status: 'READ' },
           create: { messageId, userId, status: 'READ' },
+        });
+        
+        // Fix Unread Count Reappearing: Update the participant's last read message
+        await prisma.participant.update({
+          where: { userId_conversationId: { userId, conversationId } },
+          data: { lastReadMsgId: messageId }
         });
         
         // Fetch full message metadata only if needed for broadcast

@@ -190,7 +190,7 @@ const ConversationItem = memo(({
             </span>
         );
     }
-    return conversation.lastMessage.content || conversation.lastMessage.preview || 'No messages yet';
+    return conversation.lastMessage.preview || conversation.lastMessage.content || 'No messages yet';
   };
 
   const previewText = renderPreviewText();

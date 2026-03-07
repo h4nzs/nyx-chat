@@ -1339,6 +1339,32 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 shadowVault.upsertMessages([decrypted]); // Archive to shadow vault
                 return { messages: { ...state.messages, [conversationId]: [...currentMessages, decrypted] } };
               });
+              
+              // --- DYNAMIC ISLAND NOTIFICATION ---
+              const isViewingChat = window.location.pathname.includes(`/chat/${decrypted.conversationId}`);
+              if (!isViewingChat && !decrypted.isSilent && decrypted.senderId !== currentUser?.id) {
+                  import('@store/dynamicIsland').then(({ default: useDynamicIslandStore }) => {
+                      const sender = decrypted.sender as any;
+                      const senderName = sender?.name || sender?.decryptedProfile?.name || 'Someone'; 
+                      let snippet = decrypted.content || 'New secure message';
+                      if (decrypted.fileUrl || decrypted.isBlindAttachment) snippet = 'Sent an attachment 📎';
+                      if (decrypted.content && decrypted.content.startsWith('🔒')) snippet = 'System message';
+
+                      useDynamicIslandStore.getState().addActivity({
+                          type: 'notification',
+                          sender: sender || { name: senderName },
+                          message: snippet,
+                          link: `/chat/${decrypted.conversationId}`
+                      } as any, 4000);
+                  }).catch(console.error);
+              }
+
+              // --- CHAT LIST PREVIEW UPDATE ---
+              if (!decrypted.isSilent) {
+                  import('@store/conversation').then(m => {
+                      m.useConversationStore.getState().updateConversationLastMessage(conversationId, decrypted);
+                  }).catch(console.error);
+              }
           }
       }
       

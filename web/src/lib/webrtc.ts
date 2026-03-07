@@ -122,9 +122,25 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: any
     
     useCallStore.getState().setOutgoingCall(to, isVideo, callerProfile, callKey);
 
+    // --- FIX: Find the correct Conversation ID ---
+    const { useConversationStore } = await import('../store/conversation');
+    const { user: currentUser } = (await import('../store/auth')).useAuthStore.getState();
+
+    const conversations = useConversationStore.getState().conversations;
+    const conversation = conversations.find(c =>
+      !c.isGroup &&
+      c.participants.some((p: any) => p.userId === to || p.id === to) &&
+      c.participants.some((p: any) => p.userId === currentUser?.id || p.id === currentUser?.id)
+    );
+
+    if (!conversation) {
+      throw new Error("Cannot start E2EE call: No active 1-on-1 conversation found with this user.");
+    }
+    // --- END FIX ---
+
     // 1. Send Key via Ratcheted Double-Ratchet Channel (Silent Message)
     const { useMessageStore } = await import('../store/message');
-    await useMessageStore.getState().sendMessage(to, { 
+    await useMessageStore.getState().sendMessage(conversation.id, { 
        content: JSON.stringify({ type: 'CALL_INIT', key: callKey }), 
        isSilent: true 
     });
@@ -143,6 +159,7 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: any
     getSocket()?.emit('webrtc:secure_signal', { to, type: 'request', payload: encryptedPayload });
   } catch (err) {
     console.error('Failed to start call', err);
+    import('react-hot-toast').then(m => m.default.error('Failed to start E2EE call.'));
     cleanupCall();
   }
 };
