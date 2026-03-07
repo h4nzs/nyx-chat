@@ -107,9 +107,20 @@ export function getSocket() {
     // --- Application-specific Listeners ---
     socket.on("message:new", async (newMessage) => {
       const meId = useAuthStore.getState().user?.id;
-      // THE SHIELD: Block echoes. Never process messages we sent ourselves from the socket!
+      
+      // THE SHIELD: Intelligent Echo Cancellation
+      // Only block messages from ourselves IF they match a pending optimistic update on this device.
+      // This allows messages from our *other* devices to pass through and be synced.
       if (meId && newMessage.senderId === meId) {
-        return;
+        const isOptimisticEcho = useMessageStore.getState().messages[newMessage.conversationId]?.some(
+            m => m.tempId && String(m.tempId) === String(newMessage.tempId)
+        );
+        
+        if (isOptimisticEcho) {
+            // It's an echo of a message we just sent from this tab. Ignore it.
+            return;
+        }
+        // If no match, it's a sync from another device (or a re-send we lost track of). Process it.
       }
 
       const convExists = useConversationStore.getState().conversations.some(c => c.id === newMessage.conversationId);

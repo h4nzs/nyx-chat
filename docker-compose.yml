@@ -48,7 +48,7 @@ services:
     depends_on:
       - server
     ports:
-      - "80:80" # Akses aplikasi di http://localhost
+      - "3000" # Akses aplikasi di http://localhost
     networks:
       - chat-net
     # Konfigurasi reverse proxy sederhana via docker labels atau nginx config tambahan
