@@ -170,10 +170,13 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     }
   };
 
-  if (message.content === "[This message was deleted]") {
+  if (message.isDeletedLocal || message.content === "[This message was deleted]") {
     return (
       <div ref={ref} className={`flex items-center p-2 ${mine ? 'justify-end' : 'justify-start'}`}>
-        <p className="text-xs italic text-text-secondary">This message was deleted</p>
+        <div className="flex items-center gap-2 text-xs italic text-text-secondary bg-bg-surface px-3 py-1.5 rounded-xl border border-white/5 shadow-sm">
+           <FiTrash2 size={12} />
+           <span>This message was deleted</span>
+        </div>
       </div>
     );
   }

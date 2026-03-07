@@ -1024,11 +1024,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         // Update vault with everything we just processed (if not already there)
         shadowVault.upsertMessages(allMessages); 
 
-        // 3. Filter out tombstones for the UI
-        const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
+        // [UI UPDATE] Keep tombstones in the UI state so we can render "Message Deleted" bubbles
+        // const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
 
         return {
-          messages: { ...state.messages, [id]: visibleMessages },
+          messages: { ...state.messages, [id]: allMessages },
           hasMore: { ...state.hasMore, [id]: fetchedMessages.length >= 50 },
           hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
         };
@@ -1067,10 +1067,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
         shadowVault.upsertMessages(allMessages); // Archive to shadow vault
 
-        // Filter out tombstones for UI
-        const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
+        // [UI UPDATE] Keep tombstones visible
+        // const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
 
-        const newState: any = { messages: { ...state.messages, [conversationId]: visibleMessages } };
+        const newState: any = { messages: { ...state.messages, [conversationId]: allMessages } };
 
         if (fetchedItems.length < 50) {
             newState.hasMore = { ...state.hasMore, [conversationId]: false };
@@ -1119,11 +1119,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
         shadowVault.upsertMessages(finalMessages);
 
-        // Filter out tombstones
-        const visibleMessages = finalMessages.filter(m => !m.isDeletedLocal);
+        // [UI UPDATE] Keep tombstones visible
+        // const visibleMessages = finalMessages.filter(m => !m.isDeletedLocal);
 
         return {
-          messages: { ...state.messages, [convoId]: visibleMessages },
+          messages: { ...state.messages, [convoId]: finalMessages },
           // If we jump back, we might still have older messages to fetch later
           hasMore: { ...state.hasMore, [convoId]: true } 
         };
@@ -1294,8 +1294,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(console.error);
 
-      const filteredMessages = messages.filter(m => m.id !== messageId);
-      const updatedMessages = filteredMessages.map(m => {
+      // [UI UPDATE] Replace with Tombstone instead of filtering out
+      const updatedMessages = messages.map(m => {
+          if (m.id === messageId) {
+              return { ...m, content: null, fileUrl: undefined, isDeletedLocal: true, reactions: [] };
+          }
+          // Also remove reactions pointing to this message
           if (m.reactions && m.reactions.some(r => r.id === messageId)) {
               return {
                   ...m,
