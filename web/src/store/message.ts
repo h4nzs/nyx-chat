@@ -792,11 +792,47 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           ciphertext = payloadJson;
       }
       
+      let pushPayloads: Record<string, string> = {};
+      try {
+        const { getSodium } = await import('@lib/sodiumInitializer');
+        const sodium = await getSodium();
+        const myProfile = useAuthStore.getState().user as any;
+        const myName = myProfile?.decryptedProfile?.name || myProfile?.name || 'Someone';
+
+        // Prepare the basic push content
+        let pushBody = "Sent a secure message";
+        if (data.fileUrl) pushBody = "Sent a file";
+        else if (data.content && !data.content.startsWith('{')) {
+           pushBody = data.content.substring(0, 50) + (data.content.length > 50 ? '...' : '');
+        }
+
+        const pushData = JSON.stringify({ title: myName, body: pushBody, conversationId });
+
+        // Encrypt for each recipient
+        for (const p of conversation.participants as any[]) {
+           const targetUserId = p.userId || p.id;
+           const targetPublicKey = p.user?.publicKey || p.publicKey;
+           
+           if (targetUserId !== user.id && targetPublicKey) {
+               try {
+                   const recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                   const sealed = sodium.crypto_box_seal(pushData, recipientPubBytes);
+                   pushPayloads[targetUserId] = sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
+               } catch (e) {
+                   console.error(`Failed to seal push for ${targetUserId}`, e);
+               }
+           }
+        }
+      } catch (e) {
+        console.error("Failed to generate push payloads", e);
+      }
+
       const payload = {
           ...data,
           content: ciphertext,
           sessionId: undefined, // [PHASE 3 FIX] No session ID needed for group anymore, or managed by logic
-          fileKey: undefined, fileName: undefined, fileType: undefined, fileSize: undefined
+          fileKey: undefined, fileName: undefined, fileType: undefined, fileSize: undefined,
+          pushPayloads: Object.keys(pushPayloads).length > 0 ? pushPayloads : undefined
       };
 
       const socket = getSocket();

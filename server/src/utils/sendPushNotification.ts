@@ -2,7 +2,7 @@ import webpush from 'web-push'
 import { prisma } from '../lib/prisma.js'
 import { env } from '../config.js'
 
-export async function sendPushNotification (userId: string, payload: object) {
+export async function sendPushNotification (userId: string, payload: any) {
   if (!env.vapidPublicKey || !env.vapidPrivateKey) {
     return // Jangan lakukan apa-apa jika VAPID keys tidak ada
   }
@@ -14,9 +14,11 @@ export async function sendPushNotification (userId: string, payload: object) {
     const safePayload = {
       title: "New Secure Message",
       body: "You received a new encrypted message.",
+      type: payload.type || 'GENERIC_MESSAGE',
       data: {
         conversationId: payload['data']?.conversationId,
-        messageId: payload['data']?.messageId
+        messageId: payload['data']?.messageId,
+        encryptedPushPayload: payload['data']?.encryptedPushPayload
       }
     };
     const payloadString = JSON.stringify(safePayload);

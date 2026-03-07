@@ -33,6 +33,7 @@ interface MessageSendPayload {
   sessionId?: string;
   tempId: number;
   expiresAt?: string; // New field for Disappearing Messages
+  pushPayloads?: Record<string, string>; // { userId: encryptedPushPayload }
 }
 
 interface PushSubscribePayload {
@@ -352,7 +353,7 @@ export function registerSocket(httpServer: HttpServer) {
          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
       }
 
-      const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce } = message as any;
+      const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads } = message as any;
 
       if (!content || typeof content !== 'string' || content.length > 10000) {
         return callback?.({ ok: false, error: "Invalid message content." });
@@ -385,8 +386,10 @@ export function registerSocket(httpServer: HttpServer) {
           io.to(participant.userId).emit('message:new', finalMessage);
           
           if (participant.userId !== userId) {
+             const encryptedPushPayload = pushPayloads ? pushPayloads[participant.userId] : null;
              sendPushNotification(participant.userId, {
-                 data: { conversationId, messageId: newMessage.id }
+                 type: encryptedPushPayload ? 'ENCRYPTED_MESSAGE' : 'GENERIC_MESSAGE',
+                 data: { conversationId, messageId: newMessage.id, encryptedPushPayload }
              }).catch(console.error);
           }
         });
