@@ -115,7 +115,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     return () => observer.disconnect();
   }, [message.id, message.conversationId, mine, meId, message.statuses]);
 
-  if (message.type === 'SYSTEM' || message.content?.startsWith('🔒')) {
+  if (message.type === 'SYSTEM' || message.content?.startsWith('🔒') || message.content?.startsWith('🔄')) {
     const isError = message.content?.includes('Error') || message.content?.includes('Unreadable') || message.content?.includes('Key out of sync');
     const isDesyncError = message.content?.includes('Key out of sync');
 
@@ -127,7 +127,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
             ? "bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400" 
             : "bg-bg-surface text-text-secondary border-white/5"
         )}>
-          <FiShield size={12} className={isError ? "text-red-500" : "text-yellow-500"} />
+          {isError ? <FiShield size={12} className="text-red-500" /> : <FiRefreshCw size={12} className="text-blue-500" />}
           <span>{message.content}</span>
         </div>
         {isDesyncError && (

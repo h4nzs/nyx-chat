@@ -922,26 +922,38 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       get().updateMessage(conversationId, `temp_${tempId}`, { status: 'SENDING', error: false });
 
-      socket.emit("message:send", data, async (res: { ok: boolean, msg?: Message, error?: string }) => {
-        if (res.ok && res.msg) {
-          await removeFromQueue(tempId);
-          get().replaceOptimisticMessage(conversationId, tempId, { ...res.msg, status: 'SENT' });
-          
-          const msgId = res.msg.id;
-          import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
-              const mk = await retrieveMessageKeySecurely(`temp_${tempId}`);
-              if (mk) {
-                  await storeMessageKeySecurely(msgId, mk);
-                  await deleteMessageKeySecurely(`temp_${tempId}`);
-              }
-          }).catch(console.error);
-        } else {
-          console.error(`[Queue] Failed to send queued message ${tempId}:`, res.error);
-          await updateQueueAttempt(tempId, attempt + 1);
-        }
+      // Wrap emit in a Promise to strictly wait for server ACK
+      await new Promise<void>((resolve) => {
+        // Guard timeout: if server doesn't respond in 5 seconds, increment attempt and move on
+        const timeoutId = setTimeout(() => {
+          console.error(`[Queue] Timeout waiting for ACK for message ${tempId}`);
+          updateQueueAttempt(tempId, attempt + 1).then(() => resolve());
+        }, 5000);
+
+        socket.emit("message:send", data, async (res: { ok: boolean, msg?: Message, error?: string }) => {
+          clearTimeout(timeoutId);
+          if (res.ok && res.msg) {
+            await removeFromQueue(tempId);
+            get().replaceOptimisticMessage(conversationId, tempId, { ...res.msg, status: 'SENT' });
+            
+            const msgId = res.msg.id;
+            import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
+                const mk = await retrieveMessageKeySecurely(`temp_${tempId}`);
+                if (mk) {
+                    await storeMessageKeySecurely(msgId, mk);
+                    await deleteMessageKeySecurely(`temp_${tempId}`);
+                }
+            }).catch(console.error);
+          } else {
+            console.error(`[Queue] Failed to send queued message ${tempId}:`, res.error);
+            await updateQueueAttempt(tempId, attempt + 1);
+          }
+          resolve(); // Unblock the loop to process the next message
+        });
       });
 
-      await new Promise(r => setTimeout(r, 200)); 
+      // Add a small delay between successful sends to not overwhelm the server
+      await new Promise(r => setTimeout(r, 100));
     }
   },
 
@@ -1083,8 +1095,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       
       for (const message of fetchedMessages) {
         if (localMap.has(message.id)) {
-            // Already in vault (either decrypted or tombstoned)
-            processedMessages.push(localMap.get(message.id)!);
+            // ZK-Safe Merge: Keep local decrypted content and hydrated sender (avatar/name),
+            // but update dynamic metadata from the fresh server fetch.
+            const localMsg = localMap.get(message.id)!;
+            processedMessages.push({
+                ...localMsg,
+                statuses: message.statuses,
+                reactions: message.reactions,
+                isEdited: message.isEdited
+            });
         } else {
             // Not in vault, decrypt it
             processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
@@ -1129,7 +1148,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const processedItems: Message[] = [];
       for (const m of fetchedItems) {
           if (localMap.has(m.id)) {
-              processedItems.push(localMap.get(m.id)!);
+              const localMsg = localMap.get(m.id)!;
+              processedItems.push({
+                  ...localMsg,
+                  statuses: m.statuses,
+                  reactions: m.reactions,
+                  isEdited: m.isEdited
+              });
           } else {
               processedItems.push(await decryptMessageObject(m, undefined, 0, { skipRetries: true }));
           }
@@ -1176,7 +1201,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const processedMessages: Message[] = [];
       for (const message of fetchedMessages) {
           if (localMap.has(message.id)) {
-              processedMessages.push(localMap.get(message.id)!);
+              const localMsg = localMap.get(message.id)!;
+              processedMessages.push({
+                  ...localMsg,
+                  statuses: message.statuses,
+                  reactions: message.reactions,
+                  isEdited: message.isEdited
+              });
           } else {
               processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
           }

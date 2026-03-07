@@ -121,6 +121,29 @@ self.addEventListener('push', (event: PushEvent) => {
         }
       }
 
+      // --- VISIBILITY CHECK ---
+      // Prevent OS notification if the user is actively viewing this specific chat
+      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      let isFocusedOnChat = false;
+
+      for (const client of clientList) {
+        // Check if the tab is in the foreground
+        if (client.visibilityState === 'visible') {
+          const clientUrl = new URL(client.url);
+          // Check if the user is on this exact conversation page
+          if (conversationId && clientUrl.pathname.includes(`/chat/${conversationId}`)) {
+            isFocusedOnChat = true;
+            break;
+          }
+        }
+      }
+
+      if (isFocusedOnChat) {
+        console.log('[SW] User is active in this chat. Suppressing OS notification.');
+        return; // Abort showing notification
+      }
+      // --- END VISIBILITY CHECK ---
+
       const options: any = {
         body,
         icon: '/nyx.png', 
