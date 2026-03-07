@@ -52,42 +52,63 @@ self.addEventListener('push', (event: PushEvent) => {
               const sodium = await import('libsodium-wrappers').then(s => { s.default.ready; return s.default; });
               const { argon2id } = await import('hash-wasm');
 
-              // Reproduce KDF logic to unlock private keys (simplified for SW)
-              const salt = sodium.from_string("nyx_salt");
-              const masterSeed = await argon2id({
-                  password: autoUnlockKey,
-                  salt,
-                  parallelism: 1,
-                  iterations: 2,
-                  memorySize: 65536,
-                  hashLength: 32,
-                  outputType: 'binary'
-              });
+              // 1. Parse the Vault Format: "saltB64.JSON_String"
+              const parts = encryptedKeys.split('.');
+              if (parts.length === 2) {
+                  const salt = sodium.from_base64(parts[0], sodium.base64_variants.URLSAFE_NO_PADDING);
+                  const encryptedString = parts[1];
 
-              // Decrypt the identity key pair
-              const encryptedKeysBytes = sodium.from_base64(encryptedKeys, sodium.base64_variants.URLSAFE_NO_PADDING);
-              const nonce = encryptedKeysBytes.slice(0, 24);
-              const ctext = encryptedKeysBytes.slice(24);
-              
-              const decryptedKeysBytes = sodium.crypto_secretbox_open_easy(ctext, nonce, masterSeed);
-              const keysJson = sodium.to_string(decryptedKeysBytes);
-              const keys = JSON.parse(keysJson);
-              
-              const privateKey = sodium.from_base64(keys.identityKeyPair.privateKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-              const publicKey = sodium.from_base64(keys.identityKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-              
-              // Open the Sealed Box
-              const sealedPayloadBytes = sodium.from_base64(data.data.encryptedPushPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
-              const decryptedPushBytes = sodium.crypto_box_seal_open(sealedPayloadBytes, publicKey, privateKey);
-              
-              const decryptedPayload = JSON.parse(sodium.to_string(decryptedPushBytes));
-              
-              title = decryptedPayload.title || title;
-              body = decryptedPayload.body || body;
-              conversationId = decryptedPayload.conversationId || conversationId;
-              
-              sodium.memzero(masterSeed);
-              sodium.memzero(privateKey);
+                  // 2. Derive Key matching crypto.worker.ts EXACTLY
+                  const kek = await argon2id({
+                      password: autoUnlockKey,
+                      salt,
+                      parallelism: 1,
+                      iterations: 3,
+                      memorySize: 32768,
+                      hashLength: 32,
+                      outputType: 'binary'
+                  });
+
+                  // 3. Decrypt the Private Keys using WebCrypto AES-GCM
+                  const cryptoKey = await crypto.subtle.importKey(
+                      'raw',
+                      kek as BufferSource,
+                      { name: 'AES-GCM' },
+                      false,
+                      ['decrypt']
+                  );
+
+                  const parsedData = JSON.parse(encryptedString);
+                  const iv = new Uint8Array(parsedData.iv);
+                  const ciphertext = new Uint8Array(parsedData.data);
+
+                  const decryptedContent = await crypto.subtle.decrypt(
+                      { name: 'AES-GCM', iv },
+                      cryptoKey,
+                      ciphertext
+                  );
+
+                  const keysJson = new TextDecoder().decode(decryptedContent);
+                  const keys = JSON.parse(keysJson);
+
+                  // 4. Extract the Encryption Private Key & Compute Public Key
+                  const privateKey = sodium.from_base64(keys.encryption, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  const publicKey = sodium.crypto_scalarmult_base(privateKey);
+
+                  // 5. Open the Push Notification Sealed Box
+                  const sealedPayloadBytes = sodium.from_base64(data.data.encryptedPushPayload, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  const decryptedPushBytes = sodium.crypto_box_seal_open(sealedPayloadBytes, publicKey, privateKey);
+                  
+                  const decryptedPayload = JSON.parse(sodium.to_string(decryptedPushBytes));
+                  
+                  title = decryptedPayload.title || title;
+                  body = decryptedPayload.body || body;
+                  conversationId = decryptedPayload.conversationId || conversationId;
+
+                  // Cleanup memory
+                  sodium.memzero(kek);
+                  sodium.memzero(privateKey);
+              }
            }
         } catch (cryptoError) {
            console.error("[SW] Push decryption failed, falling back to generic payload:", cryptoError);
