@@ -150,7 +150,7 @@ export default function LazyImage({
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       clearTimeout(retryTimeout);
     };
-  }, [message.fileUrl, message.fileKey, message.fileType, message.sessionId, lastKeychainUpdate, retryCount]); // Tambah retryCount
+  }, [message.fileUrl, message.fileKey, message.fileType, message.sessionId, lastKeychainUpdate, retryCount, message.conversationId, message.isBlindAttachment, conversations]); // Tambah retryCount
 
   // --- RENDER HELPERS ---
   const renderOverlay = () => {
@@ -186,14 +186,14 @@ export default function LazyImage({
   };
 
   return (
-    <div className={`relative overflow-hidden bg-gray-100 dark:bg-gray-800 rounded-lg ${className || ''}`}>
+    <div className={`relative overflow-hidden bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center min-w-[200px] min-h-[150px] ${className || ''}`}>
       {renderOverlay()}
       {imageUrl ? (
         <img
           ref={imgRef}
           src={imageUrl}
           alt={alt || "Message attachment"}
-          className={`w-full h-full object-cover transition-opacity duration-300 ${decryptionStatus === 'succeeded' ? 'opacity-100' : 'opacity-0'}`}
+          className={`w-full h-full transition-opacity duration-300 ${decryptionStatus === 'succeeded' ? 'opacity-100' : 'opacity-0'} ${message.fileType === 'image/svg+xml' ? 'object-contain bg-white/5 p-2' : 'object-cover'}`}
           {...props}
         />
       ) : (

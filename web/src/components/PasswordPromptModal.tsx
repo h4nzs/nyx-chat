@@ -1,11 +1,13 @@
 
 import { useState, useEffect } from 'react';
 import { useModalStore } from '@store/modal';
-import { verifyDecoyPin } from '@lib/biometricUnlock';
 import { useKeychainStore } from '@store/keychain';
+import { useShallow } from 'zustand/react/shallow';
 
 export default function PasswordPromptModal() {
-  const { isPasswordPromptOpen, onPasswordSubmit, hidePasswordPrompt } = useModalStore();
+  const { isPasswordPromptOpen, onPasswordSubmit, hidePasswordPrompt } = useModalStore(useShallow(s => ({
+    isPasswordPromptOpen: s.isPasswordPromptOpen, onPasswordSubmit: s.onPasswordSubmit, hidePasswordPrompt: s.hidePasswordPrompt
+  })));
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -36,21 +38,7 @@ export default function PasswordPromptModal() {
     setIsLoading(true);
     setError('');
     try {
-      // 1. Check if it's the Decoy PIN
-      const isDecoy = await verifyDecoyPin(password);
-      
-      if (isDecoy) {
-          // --- DECOY VAULT TRIGGERED ---
-          sessionStorage.setItem('nyx_decoy_mode', 'true');
-          onPasswordSubmit({ mode: 'decoy' }); // Use object instead of dummy string
-          setPassword('');
-          hidePasswordPrompt();
-          return;
-      }
-
-      // 2. Normal Unlock Flow
-      sessionStorage.removeItem('nyx_decoy_mode');
-      onPasswordSubmit({ mode: 'normal', password });
+      onPasswordSubmit(password);
       setPassword('');
       hidePasswordPrompt();
     } catch (e) {

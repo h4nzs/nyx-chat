@@ -3,16 +3,18 @@ import { Message, MessageStatus } from "@store/conversation";
 import { useAuthStore } from "@store/auth";
 import classNames from "classnames";
 import { FaCheck, FaCheckDouble } from "react-icons/fa";
-import { FiClock, FiEyeOff, FiCamera, FiVideo, FiMic } from "react-icons/fi";
+import { FiClock, FiEyeOff, FiCamera, FiVideo, FiMic, FiEye, FiVolumeX } from "react-icons/fi";
 import FileAttachment from "./FileAttachment";
 import LinkPreviewCard from "./LinkPreviewCard";
 import LazyImage from "./LazyImage";
 import { useMessageStore } from "@store/message";
+import { useShallow } from 'zustand/react/shallow';
 import { formatTime } from "@utils/date";
 import MarkdownMessage from "./MarkdownMessage";
 import VoiceMessagePlayer from "./VoiceMessagePlayer";
 import clsx from 'clsx'; 
 import { useUserProfile } from '@hooks/useUserProfile';
+import { useSettingsStore } from '@store/settings';
 
 const ReplyQuote = ({ message }: { message: Message }) => {
   const profile = useUserProfile(message.sender as any);
@@ -43,8 +45,17 @@ interface Props {
 }
 
 export default function MessageBubble({ message, isOwn, onImageClick, isLastInSequence = true, participants = [] }: Props) {
-  const { user } = useAuthStore();
+  const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
+  const privacyCloak = useSettingsStore(s => s.privacyCloak);
   const [timeLeft, setTimeLeft] = useState<string | null>(null);
+  const [isTextExpanded, setIsTextExpanded] = useState(false);
+
+  const content = message.content || '';
+  // Trigger Read More if > 800 chars OR > 12 lines
+  const isLongMessage = content.length > 800 || content.split('\n').length > 12;
+  const isPlaceholder = content === 'waiting_for_key' || content.startsWith('[') || content === 'Decryption failed';
+
+  const cloakClass = privacyCloak ? "blur-[6px] opacity-75 hover:blur-none hover:opacity-100 active:blur-none active:opacity-100 transition-all duration-300 select-none" : "";
 
   useEffect(() => {
     if (!message.expiresAt || message.deletedAt) {
@@ -94,8 +105,6 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
     return <FaCheck size={14} className="text-white/70" />;
   };
 
-  const content = message.content || '';
-  const isPlaceholder = content === 'waiting_for_key' || content.startsWith('[') || content === 'Decryption failed';
   const isImage = message.fileType?.startsWith('image/');
   const isVoiceMessage = message.fileType?.startsWith('audio/webm');
   const isDeleted = !!message.deletedAt;
@@ -119,72 +128,91 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
     <div className={bubbleClasses}>
       {message.repliedTo && <ReplyQuote message={message.repliedTo} />}
       
-      {isDeleted ? (
-        <span className="flex items-center gap-2 opacity-60">
-          🚫 Message deleted
-        </span>
-      ) : (
-        <>
-          {message.isViewOnce && message.fileUrl ? (
-            <div className="p-3 bg-black/20 rounded-xl flex items-center justify-center min-w-[160px] my-1 mx-2 border border-white/5">
-              {message.isViewed ? (
-                <div className="flex items-center gap-2 text-text-secondary/50 italic select-none">
-                  <FiEyeOff size={18} />
-                  <span className="text-sm font-medium">Opened</span>
-                </div>
-              ) : (
-                <button 
-                  onClick={() => onImageClick?.(message)} 
-                  className="flex items-center gap-2 text-accent hover:text-indigo-400 hover:scale-105 active:scale-95 transition-all"
-                >
-                  {message.fileType?.startsWith('video/') ? <FiVideo size={20} /> : 
-                   message.fileType?.startsWith('audio/') ? <FiMic size={20} /> : 
-                   <FiCamera size={20} />}
-                  <span className="text-sm font-bold tracking-wider uppercase">View Once</span>
-                </button>
-              )}
-            </div>
-          ) : (
-            <>
-              {isVoiceMessage && message.fileUrl && (
-                <div className="p-2 w-[250px]">
-                  <VoiceMessagePlayer message={message} />
-                </div>
-              )}
-              
-              {message.fileUrl && isImage && (
-                <button onClick={() => onImageClick?.(message)} className="block w-full">
-                  <LazyImage 
-                    message={message} 
-                    alt={message.fileName || 'Image attachment'} 
-                    className="rounded-lg max-h-80 w-full object-cover cursor-pointer hover:opacity-95" 
-                  />
-                </button>
-              )}
-              
-              {message.fileUrl && !isImage && !isVoiceMessage && (
-                <FileAttachment message={message} isOwn={isOwn} />
-              )}
-            </>
-          )}
-          
-          {!message.fileUrl && (
-            isPlaceholder ? (
-              <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
-            ) : (
-              <div className={classNames("text-base whitespace-pre-wrap break-words", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
-                <MarkdownMessage content={content} />
+      <div className={cloakClass}>
+        {isDeleted ? (
+          <span className="flex items-center gap-2 opacity-60">
+            🚫 Message deleted
+          </span>
+        ) : (
+          <>
+            {message.isViewOnce && message.fileUrl ? (
+              <div className="p-3 bg-black/20 rounded-xl flex items-center justify-center min-w-[160px] my-1 mx-2 border border-white/5">
+                {message.isViewed ? (
+                  <div className="flex items-center gap-2 text-text-secondary/50 italic select-none">
+                    <FiEyeOff size={18} />
+                    <span className="text-sm font-medium">Opened</span>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={() => onImageClick?.(message)} 
+                    className="flex items-center gap-2 text-accent hover:text-indigo-400 hover:scale-105 active:scale-95 transition-all"
+                  >
+                    {message.fileType?.startsWith('video/') ? <FiVideo size={20} /> : 
+                     message.fileType?.startsWith('audio/') ? <FiMic size={20} /> : 
+                     <FiCamera size={20} />}
+                    <span className="text-sm font-bold tracking-wider uppercase">View Once</span>
+                  </button>
+                )}
               </div>
-            )
-          )}
-
-          {message.linkPreview && !message.fileUrl && (
-            <div className="mt-2">
-              <LinkPreviewCard preview={message.linkPreview} />
-            </div>
-          )}
-        </>
-      )}
+            ) : (
+              <>
+                {isVoiceMessage && message.fileUrl && (
+                  <div className="p-2 w-[250px]">
+                    <VoiceMessagePlayer message={message} />
+                  </div>
+                )}
+                
+                {message.fileUrl && isImage && (
+                  <button onClick={() => onImageClick?.(message)} className="block w-full min-w-[200px] sm:min-w-[250px] relative">
+                    <LazyImage 
+                      message={message} 
+                      alt={message.fileName || 'Image attachment'} 
+                      className="rounded-lg max-h-[350px] w-full object-cover cursor-pointer hover:opacity-95" 
+                    />
+                  </button>
+                )}
+                
+                {message.fileUrl && !isImage && !isVoiceMessage && (
+                  <FileAttachment message={message} isOwn={isOwn} />
+                )}
+              </>
+            )}
+            
+            {!message.fileUrl && (
+              isPlaceholder ? (
+                <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
+              ) : (
+                <div className={classNames("text-base break-words w-full", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
+                  <div 
+                    className={classNames("relative overflow-hidden transition-all duration-300", {
+                      "max-h-[250px]": isLongMessage && !isTextExpanded,
+                      "max-h-none": !isLongMessage || isTextExpanded
+                    })}
+                    style={isLongMessage && !isTextExpanded ? { maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)' } : {}}
+                  >
+                    <MarkdownMessage content={content} isOwn={isOwn} />
+                  </div>                  {isLongMessage && (
+                    <button
+                      onClick={() => setIsTextExpanded(!isTextExpanded)}
+                      className={classNames("mt-2 text-xs font-bold uppercase tracking-wider block active:scale-95 transition-all", {
+                        "text-white/80 hover:text-white": isOwn,
+                        "text-accent hover:text-indigo-400": !isOwn
+                      })}
+                    >
+                      {isTextExpanded ? "Show Less" : "Read More"}
+                    </button>
+                  )}
+                </div>
+              )
+            )}
+            {message.linkPreview && !message.fileUrl && (
+              <div className="mt-2">
+                <LinkPreviewCard preview={message.linkPreview} />
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Metadata Footer */}
       <div className={clsx("text-xs mt-1.5 flex items-center gap-1.5 select-none", {
@@ -193,12 +221,15 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
         "text-white/80": isOwn && (!isImage || message.content), // Fix contrast for own messages
         "text-text-secondary/80": !isOwn && (!isImage || message.content)
       })}>
+        {message.isViewOnce && <FiEye size={12} className="opacity-70" />}
+        {message.isSilent && <FiVolumeX size={12} className="opacity-60 text-text-secondary" title="Sent Silently" />}
         {timeLeft && (
           <span className="flex items-center gap-1 text-[9px] font-bold text-red-500 bg-red-500/10 px-1 rounded animate-pulse mr-1">
             <FiClock size={10} /> {timeLeft}
           </span>
         )}
         <span className="text-[10px] font-medium tracking-wide opacity-90">{formatTime(message.createdAt)}</span>
+        {message.isEdited && <span className="opacity-70 italic text-[10px]">(edited)</span>}
         {isOwn && !isDeleted && getStatusIcon()}
       </div>
     </div>

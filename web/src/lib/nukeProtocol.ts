@@ -1,9 +1,28 @@
+import { closeDatabaseConnection } from './keychainDb';
+
 export const executeLocalWipe = async () => {
   try {
+    // 0. Close active connections to release the file lock
+    await closeDatabaseConnection();
+
     // 1. Obliterate all known IndexedDB Vaults
-    const databases = ['nyx_keychain', 'nyx_offline_queue', 'nyx_shadow_vault'];
+    let databases = ['nyx_keychain', 'nyx_offline_queue', 'nyx_shadow_vault'];
+    
+    // Try to get dynamic list if supported by browser
+    if (window.indexedDB && window.indexedDB.databases) {
+        try {
+            const dbs = await window.indexedDB.databases();
+            const names = dbs.map(db => db.name).filter((n): n is string => !!n);
+            if (names.length > 0) databases = names;
+        } catch (e) {}
+    }
+
     for (const db of databases) {
-      indexedDB.deleteDatabase(db);
+      const req = indexedDB.deleteDatabase(db);
+      req.onblocked = () => {
+          console.warn(`[Nuke] Database ${db} is blocked. Closing page to force release.`);
+          window.location.reload();
+      };
     }
 
     // 2. Wipe Local & Session Storage completely

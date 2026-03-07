@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
@@ -69,8 +72,8 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
 
     // Get the target message first to find its timestamp and conversationId
     const targetMsg = await prisma.message.findUnique({
-      where: { id: targetId },
-      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+      where: { id: targetId as string },
+      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
     });
 
     if (!targetMsg) {
@@ -88,7 +91,7 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
       where: { conversationId: targetMsg.conversationId, createdAt: { lt: targetMsg.createdAt, gte: participation.joinedAt } },
       orderBy: { createdAt: 'desc' },
       take: 20,
-      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
     });
 
     // Fetch newer messages (after target)
@@ -96,7 +99,7 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
       where: { conversationId: targetMsg.conversationId, createdAt: { gt: targetMsg.createdAt, gte: participation.joinedAt } },
       orderBy: { createdAt: 'asc' },
       take: 20,
-      include: { sender: { select: { id: true, username: true, displayName: true, avatarUrl: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
     });
 
     // Combine and sort chronologically
@@ -235,10 +238,7 @@ router.post('/', zodValidate({
     // Push Notification (JANGAN DI-AWAIT)
     const pushRecipients = participants.filter(p => p.userId !== senderId)
     if (pushRecipients.length > 0) {
-      const pushBody = 'New message' // Generic for privacy
       const payload = {
-        title: 'Encrypted Message',
-        body: pushBody,
         data: { conversationId, messageId: newMessage.id }
       }
 

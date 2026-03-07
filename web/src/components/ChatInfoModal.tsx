@@ -1,5 +1,6 @@
 import ModalBase from './ui/ModalBase';
 import { useModalStore } from '@store/modal';
+import { useShallow } from 'zustand/react/shallow';
 import { FiKey, FiAlertTriangle, FiZap, FiLock, FiHelpCircle } from 'react-icons/fi';
 
 const InfoSection = ({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) => (
@@ -13,7 +14,9 @@ const InfoSection = ({ icon, title, children }: { icon: React.ReactNode; title: 
 );
 
 export default function ChatInfoModal() {
-  const { isChatInfoModalOpen, closeChatInfoModal } = useModalStore();
+  const { isChatInfoModalOpen, closeChatInfoModal } = useModalStore(useShallow(s => ({
+    isChatInfoModalOpen: s.isChatInfoModalOpen, closeChatInfoModal: s.closeChatInfoModal
+  })));
 
   return (
     <ModalBase

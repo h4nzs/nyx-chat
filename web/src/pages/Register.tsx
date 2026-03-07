@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/auth";
+import { useShallow } from 'zustand/react/shallow';
 import AuthForm from "../components/AuthForm";
 import RecoveryPhraseModal from "@components/RecoveryPhraseModal";
 import { Turnstile } from '@marsidev/react-turnstile';
@@ -11,6 +12,7 @@ import { startRegistration, platformAuthenticatorIsAvailable } from '@simpleweba
 import { api } from "@lib/api";
 import { FiShield, FiSkipForward } from "react-icons/fi";
 import { IoFingerPrint } from "react-icons/io5";
+import SEO from '../components/SEO';
 
 export default function Register() {
   const [error, setError] = useState("");
@@ -21,7 +23,7 @@ export default function Register() {
   const [isVerifyingBio, setIsVerifyingBio] = useState(false);
 
   const navigate = useNavigate();
-  const { registerAndGeneratePhrase } = useAuthStore();
+  const { registerAndGeneratePhrase } = useAuthStore(useShallow(s => ({ registerAndGeneratePhrase: s.registerAndGeneratePhrase })));
 
   useEffect(() => {
     platformAuthenticatorIsAvailable().then(setIsBiometricsSupported);
@@ -175,6 +177,7 @@ export default function Register() {
   // STEP 1: REGISTER FORM
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-stone-900">
+      <SEO title="Register" description="Create a new anonymous, end-to-end encrypted account on NYX. No tracking, no ads." canonicalUrl="/register" />
       {/* Left Panel - Concrete Security Panel */}
       <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
            style={{

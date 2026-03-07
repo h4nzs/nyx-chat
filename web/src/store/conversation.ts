@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api";
 import { useMessageStore, decryptMessageObject } from "./message";
@@ -48,6 +51,9 @@ export type Message = {
   isBlindAttachment?: boolean; // New: Flag for Blind Attachments (raw key in fileKey)
   isViewOnce?: boolean;
   isViewed?: boolean;
+  isEdited?: boolean;
+  isSilent?: boolean; // New: Message was sent without sound
+  isDeletedLocal?: boolean; // New: Tombstone flag for local deletions
 };
 
 export type Participant = {
@@ -91,12 +97,15 @@ const sortConversations = (list: Conversation[], currentUserId: string | undefin
 
 const withPreview = (msg: Message): Message => {
   if (msg.content) {
-    // Check for Reaction Payload
-    if (msg.content.trim().startsWith('{') && msg.content.includes('"type":"reaction"')) {
+    // Check for Reaction or Silent Payload
+    if (msg.content.trim().startsWith('{')) {
        try {
          const payload = JSON.parse(msg.content);
          if (payload.type === 'reaction') {
             return { ...msg, preview: `Reacted ${payload.emoji || ''}` };
+         }
+         if (payload.type === 'silent' && typeof payload.text === 'string') {
+            return { ...msg, preview: payload.text, content: payload.text, isSilent: true };
          }
        } catch {}
     }
@@ -369,7 +378,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const oldIds = oldConv.participants.map(p => p.id).sort().join(',');
       const newIds = data.participants.map(p => p.id).sort().join(',');
       if (oldIds !== newIds) {
-        import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(id)).catch(console.error);
+        import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(id)).catch(() => { console.warn('Key rotation deferred'); });
       }
     }
 

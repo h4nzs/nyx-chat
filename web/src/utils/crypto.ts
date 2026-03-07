@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { authFetch } from '@lib/api';
 import { useAuthStore } from '@store/auth';
 import { useMessageStore } from '@store/message';
@@ -27,9 +30,15 @@ import {
   getGroupReceiverState,
   saveGroupReceiverState,
   deleteGroupStates,
+  deleteConversationKeychain,
+  deleteRatchetSession,
+  deleteSessionKeys,
   GroupSenderState,
   GroupReceiverState
 } from '@lib/keychainDb';
+
+export { deleteConversationKeychain, deleteRatchetSession, deleteSessionKeys };
+
 import { 
   emitSessionKeyFulfillment, 
   emitSessionKeyRequest, 
@@ -479,7 +488,33 @@ export interface DrHeader {
   epk?: string;
 }
 
+const encryptionLocks = new Map<string, Promise<void>>();
+
 export async function encryptMessage(
+  text: string,
+  conversationId: string,
+  isGroup: boolean = false,
+  existingSession?: { sessionId: string; key: Uint8Array },
+  messageId?: string
+): Promise<{ ciphertext: string; sessionId?: string; drHeader?: DrHeader; mk?: Uint8Array }> {
+  // MUTEX LOCK to prevent concurrent ratchet state overwrites when sending messages rapidly
+  let previousLock = encryptionLocks.get(conversationId) || Promise.resolve();
+  let release: () => void;
+  const currentLock = new Promise<void>(resolve => { release = resolve; });
+  encryptionLocks.set(conversationId, currentLock);
+
+  try {
+    await previousLock;
+    return await doEncryptMessage(text, conversationId, isGroup, existingSession, messageId);
+  } finally {
+    release!();
+    if (encryptionLocks.get(conversationId) === currentLock) {
+      encryptionLocks.delete(conversationId);
+    }
+  }
+}
+
+async function doEncryptMessage(
   text: string,
   conversationId: string,
   isGroup: boolean = false,
@@ -550,11 +585,37 @@ export async function encryptMessage(
   }
 }
 
+const decryptionLocks = new Map<string, Promise<void>>();
+
 export async function decryptMessage(
   cipher: string,
   conversationId: string,
   isGroup: boolean,
   sessionId: string | null | undefined, // In group, this might be senderId
+  messageId?: string
+): Promise<DecryptResult> {
+  // MUTEX LOCK to prevent concurrent ratchet state overwrites when receiving messages rapidly
+  let previousLock = decryptionLocks.get(conversationId) || Promise.resolve();
+  let release: () => void;
+  const currentLock = new Promise<void>(resolve => { release = resolve; });
+  decryptionLocks.set(conversationId, currentLock);
+
+  try {
+    await previousLock;
+    return await doDecryptMessage(cipher, conversationId, isGroup, sessionId, messageId);
+  } finally {
+    release!();
+    if (decryptionLocks.get(conversationId) === currentLock) {
+      decryptionLocks.delete(conversationId);
+    }
+  }
+}
+
+async function doDecryptMessage(
+  cipher: string,
+  conversationId: string,
+  isGroup: boolean,
+  sessionId: string | null | undefined,
   messageId?: string
 ): Promise<DecryptResult> {
   if (!cipher) return { status: 'success', value: '' };
@@ -607,6 +668,27 @@ export async function decryptMessage(
         const payload = JSON.parse(cipher);
         const { header, ciphertext, signature } = payload;
         
+        // 1. CHECK SKIPPED KEYS FIRST
+        const existingSkippedIndex = receiverState.skippedKeys?.findIndex(k => k.n === header.n);
+        if (existingSkippedIndex !== undefined && existingSkippedIndex !== -1) {
+            const skippedKeyObj = receiverState.skippedKeys[existingSkippedIndex];
+            const mk = sodium.from_base64(skippedKeyObj.mk, sodium.base64_variants.URLSAFE_NO_PADDING);
+            const ciphertextBytes = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
+            const nonce = ciphertextBytes.slice(0, 24);
+            const ctext = ciphertextBytes.slice(24);
+            const decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
+            
+            // Remove the used key to prevent replay attacks
+            const newSkippedKeys = [...receiverState.skippedKeys];
+            newSkippedKeys.splice(existingSkippedIndex, 1);
+            await saveGroupReceiverState({ ...receiverState, skippedKeys: newSkippedKeys });
+
+            if (messageId) {
+                await storeMessageKeySecurely(messageId, mk);
+            }
+            return { status: 'success', value: sodium.to_string(decrypted) };
+        }
+
         const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
         const sender = conversation?.participants.find(p => p.id === senderId);
         

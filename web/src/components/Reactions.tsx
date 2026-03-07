@@ -1,6 +1,7 @@
 import * as Popover from '@radix-ui/react-popover';
 import { useAuthStore } from '@store/auth';
 import { useMessageStore } from '@store/message';
+import { useShallow } from 'zustand/react/shallow';
 import type { Message } from '@store/conversation';
 import { api } from '@lib/api';
 
@@ -13,10 +14,10 @@ const COMMON_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
 
 export default function ReactionPopover({ message, children }: ReactionPopoverProps) {
   const me = useAuthStore((s) => s.user);
-  const { sendReaction, removeLocalReaction } = useMessageStore(s => ({ 
+  const { sendReaction, removeLocalReaction } = useMessageStore(useShallow(s => ({ 
     sendReaction: s.sendReaction, 
     removeLocalReaction: s.removeLocalReaction 
-  }));
+  })));
 
   const handleSelectReaction = async (emoji: string) => {
     if (!me) return;

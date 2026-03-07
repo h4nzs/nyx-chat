@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch, handleApiError } from "@lib/api";
 import { encryptMessage, ensureGroupSession, encryptFile } from "@utils/crypto";
@@ -16,14 +19,25 @@ type State = {
   typingLinkPreview: any | null;
   expiresIn: number | null;
   isViewOnce: boolean;
+  stagedFiles: File[];
+  isHD: boolean;
+  isVoiceAnonymized: boolean;
+  editingMessage: Message | null;
 
   // Actions
   setReplyingTo: (message: Message | null) => void;
+  setEditingMessage: (message: Message | null) => void;
+  sendEdit: (conversationId: string, messageId: string, newText: string) => Promise<void>;
   setExpiresIn: (seconds: number | null) => void;
   setIsViewOnce: (value: boolean) => void;
+  setIsHD: (value: boolean) => void;
+  setIsVoiceAnonymized: (value: boolean) => void;
   fetchTypingLinkPreview: (text: string) => void;
   clearTypingLinkPreview: () => void;
-  sendMessage: (conversationId: string, data: { content: string }, tempId?: number) => Promise<void>;
+  addStagedFiles: (files: File[]) => void;
+  removeStagedFile: (index: number) => void;
+  clearStagedFiles: () => void;
+  sendMessage: (conversationId: string, data: { content: string }, tempId?: number, isSilent?: boolean) => Promise<void>;
   uploadFile: (conversationId: string, file: File) => Promise<void>;
   handleStopRecording: (conversationId: string, blob: Blob, duration: number) => Promise<void>;
   retrySendMessage: (message: Message) => void;
@@ -51,15 +65,35 @@ const ensureGroupSessionIfNeeded = async (conversationId: string): Promise<boole
   return true;
 };
 
+let tempIdCounter = 0;
+const generateTempId = () => Date.now() * 1000 + (++tempIdCounter) + Math.floor(Math.random() * 1000);
+
 export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   replyingTo: null,
   typingLinkPreview: null,
   expiresIn: null,
   isViewOnce: false,
+  stagedFiles: [],
+  isHD: false,
+  isVoiceAnonymized: false,
+  editingMessage: null,
 
   setReplyingTo: (message) => set({ replyingTo: message }),
+  setEditingMessage: (message) => set({ editingMessage: message }),
+  sendEdit: async (conversationId, messageId, newText) => {
+      const payload = { type: 'edit', targetMessageId: messageId, text: newText };
+      await get().sendMessage(conversationId, { content: JSON.stringify(payload) }, undefined, true);
+      set({ editingMessage: null });
+      // Optimistically apply local edit immediately
+      useMessageStore.getState().updateMessage(conversationId, messageId, { content: newText, isEdited: true });
+  },
   setExpiresIn: (seconds) => set({ expiresIn: seconds }),
   setIsViewOnce: (value) => set({ isViewOnce: value }),
+  setIsHD: (value) => set({ isHD: value }),
+  setIsVoiceAnonymized: (value) => set({ isVoiceAnonymized: value }),
+  addStagedFiles: (files) => set((state) => ({ stagedFiles: [...state.stagedFiles, ...files] })),
+  removeStagedFile: (index) => set((state) => ({ stagedFiles: state.stagedFiles.filter((_, i) => i !== index) })),
+  clearStagedFiles: () => set({ stagedFiles: [] }),
 
   fetchTypingLinkPreview: async (text) => {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -81,7 +115,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
   clearTypingLinkPreview: () => set({ typingLinkPreview: null }),
 
-  sendMessage: async (conversationId, data, tempId?: number) => {
+  sendMessage: async (conversationId, data, tempId?: number, isSilent = false) => {
     const { sendMessage: coreSendMessage } = useMessageStore.getState();
     const { replyingTo, expiresIn, isViewOnce } = get();
 
@@ -94,7 +128,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
       isViewOnce,
       // Pass original content. message.ts handles encryption.
-    }, tempId);
+    }, tempId, isSilent);
 
     // Clear Input State
     set({ replyingTo: null, isViewOnce: false });
@@ -104,7 +138,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
     const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Processing ${file.name}...`, progress: 0 };
     const activityId = addActivity(activity);
-    const { replyingTo, expiresIn, isViewOnce } = get();
+    const { replyingTo, expiresIn, isViewOnce, isHD } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     if (!me) {
@@ -121,7 +155,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
     const isGroup = conversation.isGroup;
 
-    const tempId = Date.now();
+    const tempId = generateTempId();
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
     // Optimistic UI (We keep this here to have access to File blob for preview)
@@ -142,13 +176,13 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       isViewOnce,
     };
     addOptimisticMessage(conversationId, optimisticMessage);
-    set({ replyingTo: null, isViewOnce: false });
+    set({ replyingTo: null, isViewOnce: false, isHD: false });
 
     try {
       let fileToProcess = file;
       if (file.type.startsWith('image/')) {
         updateActivity(activityId, { progress: 10, fileName: `Compressing ${file.name}...` });
-        try { fileToProcess = await compressImage(file); } catch (e) {}
+        try { fileToProcess = await compressImage(file, isHD); } catch (e) {}
       }
 
       updateActivity(activityId, { progress: 25, fileName: `Encrypting ${file.name}...` });

@@ -43,7 +43,7 @@ export async function resolveDns (urlOrHostname: string): Promise<string> {
 }
 
 // Helper to manually follow redirects and validate each step
-async function validateRedirectChain(initialUrl: string): Promise<string> {
+export async function validateRedirectChain(initialUrl: string): Promise<string> {
   let currentUrl = initialUrl
   let redirectCount = 0
   const maxRedirects = 5

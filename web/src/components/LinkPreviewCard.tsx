@@ -47,7 +47,7 @@ const LinkPreviewCard = ({ preview }: LinkPreviewProps) => {
           if (isMounted) setHasError(true);
         }
       } catch (e) {
-        console.error('Failed to proxy image:', e);
+        console.error('Failed to proxy image request.');
         if (isMounted) setHasError(true);
       } finally {
           if (isMounted) setIsLoading(false);

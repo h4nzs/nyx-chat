@@ -33,14 +33,15 @@ Output must be a JSON array of strings.`;
     let replies: string[] = [];
 
     try {
-      let parsed = JSON.parse(result.response.text());
+      const parsedUnknown: unknown = JSON.parse(result.response.text());
+      
       // Coerce to array if single string
-      if (typeof parsed === 'string') {
-        parsed = [parsed];
-      }
+      if (typeof parsedUnknown === 'string') {
+        replies = [parsedUnknown];
+      } 
       // Ensure array, filter to string items, and cap at 3
-      if (Array.isArray(parsed)) {
-        replies = parsed.filter(item => typeof item === 'string').slice(0, 3);
+      else if (Array.isArray(parsedUnknown)) {
+        replies = parsedUnknown.filter(item => typeof item === 'string').slice(0, 3);
       }
       
       // Fallback if empty after filtering
@@ -48,8 +49,7 @@ Output must be a JSON array of strings.`;
         throw new Error("Parsed array contained no valid string replies");
       }
     } catch (parseError: unknown) {
-      const errorMessage = parseError instanceof Error ? parseError.message : 'Unknown error';
-      console.error('Failed to parse Gemini JSON:', errorMessage);
+      console.error('PARSE_ERROR_GEMINI'); // Sanitized error marker
       // Manual fallback
       replies = ["Ok", "Got it", "Thanks"]; 
     }

@@ -13,19 +13,22 @@ import { usePresenceStore } from "@store/presence";
 import useDynamicIslandStore from "@store/dynamicIsland";
 import { toAbsoluteUrl } from "@utils/url";
 import { useModalStore } from "@store/modal";
+import { useShallow } from 'zustand/react/shallow';
 import SearchMessages from './SearchMessages';
 import Lightbox from "./Lightbox";
 import GroupInfoPanel from './GroupInfoPanel';
 import clsx from "clsx";
 import { useVerificationStore } from '@store/verification';
-import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers, FiPhone, FiVideo } from 'react-icons/fi';
+import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers, FiPhone, FiVideo, FiX, FiTrash2 } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import MessageInput from './MessageInput';
 import MessageSkeleton from './MessageSkeleton';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
 import { startCall } from '@lib/webrtc';
+import { useSettingsStore } from '@store/settings';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -58,8 +61,11 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const user = useAuthStore((s) => s.user);
   const meId = user?.id;
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
-  const { openProfileModal, openChatInfoModal } = useModalStore(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal }));
+  const { openProfileModal, openChatInfoModal } = useModalStore(useShallow(s => ({ openProfileModal: s.openProfileModal, openChatInfoModal: s.openChatInfoModal })));
   const { verifiedStatus } = useVerificationStore();
+  const privacyCloak = useSettingsStore(s => s.privacyCloak);
+  
+  const cloakClass = privacyCloak ? "blur-[6px] opacity-70 group-hover:blur-none group-hover:opacity-100 group-active:blur-none group-active:opacity-100 transition-all duration-300 select-none" : "";
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
   const peerProfile = useUserProfile(peerUser as any);
@@ -130,7 +136,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
                 <img
                   src={toAbsoluteUrl(avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${title}`}
                   alt="ID"
-                  className="w-full h-full rounded-full object-cover"
+                  className={clsx("w-full h-full rounded-full object-cover", cloakClass)}
                 />
              </div>
              {isOnline && <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-bg-surface shadow-sm"></div>}
@@ -138,7 +144,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
           
           <div className="text-left">
             <div className="flex items-center gap-2">
-              <p className="font-bold text-text-primary text-sm group-hover:text-accent transition-colors">{title}</p>
+              <p className={clsx("font-bold text-text-primary text-sm group-hover:text-accent transition-colors", cloakClass)}>{title}</p>
               {isConvVerified && <FiShield className="text-accent w-3 h-3" />}
             </div>
             <p className="text-xs text-text-secondary opacity-70">
@@ -192,9 +198,16 @@ const ChatSpinner = () => (
 export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClick: () => void }) {
   const meId = useAuthStore((s) => s.user?.id);
   const { conversation, messages, isLoading, error, actions, isFetchingMore } = useConversation(id);
-  const loadMessagesForConversation = useMessageStore(s => s.loadMessagesForConversation);
+  const { loadMessagesForConversation, selectedMessageIds, clearMessageSelection, removeMessages } = useMessageStore(useShallow(s => ({
+      loadMessagesForConversation: s.loadMessagesForConversation,
+      selectedMessageIds: s.selectedMessageIds,
+      clearMessageSelection: s.clearMessageSelection,
+      removeMessages: s.removeMessages
+  })));
+  const isSelectionMode = selectedMessageIds.length > 0;
   const loadMessageContext = useMessageStore(s => s.loadMessageContext);
   const openConversation = useConversationStore(state => state.openConversation);
+  const showConfirm = useModalStore(s => s.showConfirm);
   
   useEdgeSwipe(() => {
     if (window.innerWidth < 768) {
@@ -202,15 +215,13 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     }
   });
 
-  const { highlightedMessageId, setHighlightedMessageId } = useMessageSearchStore(state => ({
+  const { highlightedMessageId, setHighlightedMessageId } = useMessageSearchStore(useShallow(state => ({
     highlightedMessageId: state.highlightedMessageId,
     setHighlightedMessageId: state.setHighlightedMessageId,
-  }));
+  })));
   const clearSearch = useMessageSearchStore(s => s.clearSearch);
 
-  const { handleStopRecording } = useMessageInputStore(state => ({
-    handleStopRecording: state.handleStopRecording,
-  }));
+  const handleStopRecording = useMessageInputStore(state => state.handleStopRecording);
   
   const typingIndicators = usePresenceStore(state => state.typingIndicators);
   const virtuosoRef = useRef<any>(null);
@@ -220,9 +231,31 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
   useEffect(() => {
     if (id) loadMessagesForConversation(id);
-  }, [id, loadMessagesForConversation]);
+    clearMessageSelection();
+  }, [id, loadMessagesForConversation, clearMessageSelection]);
 
   const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);
+
+  const handleBulkDelete = () => {
+    if (!conversation || !messages || !meId) return;
+    
+    const selectedMessages = messages.filter(m => selectedMessageIds.includes(m.id));
+    const allMine = selectedMessages.every(m => m.senderId === meId);
+    
+    const confirmMessage = allMine 
+      ? `Permanently delete ${selectedMessageIds.length} messages for everyone?` 
+      : `Delete ${selectedMessageIds.length} messages? This will only remove them from your device. Messages from others will remain on their devices.`;
+
+    showConfirm(
+      'Bulk Deletion', 
+      confirmMessage,
+      async () => {
+          await removeMessages(conversation.id, selectedMessageIds);
+          // clearMessageSelection is already handled inside removeMessages now
+          toast.success(`${selectedMessageIds.length} messages processed`);
+      }
+    );
+  };
 
   useEffect(() => {
     if (!highlightedMessageId) return;
@@ -339,12 +372,30 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
           return (
             <>
-              <ChatHeader 
-                conversation={conversation} 
-                onBack={() => navigate('/chat')} 
-                onInfoToggle={() => setIsGroupInfoOpen(true)} 
-                onMenuClick={onMenuClick} 
-              />
+              {isSelectionMode ? (
+                  <div className="h-16 flex items-center justify-between px-4 bg-accent/10 border-b border-white/5 backdrop-blur-md z-30">
+                      <div className="flex items-center gap-4">
+                          <button onClick={clearMessageSelection} className="p-2 hover:bg-white/10 rounded-full transition-colors text-text-secondary hover:text-white">
+                              <FiX size={20} />
+                          </button>
+                          <span className="font-bold text-lg text-accent tracking-wide">{selectedMessageIds.length} Selected</span>
+                      </div>
+                      <button 
+                          onClick={handleBulkDelete} 
+                          className="p-2 text-red-500 hover:bg-red-500/20 rounded-full transition-all active:scale-95 shadow-neumorphic-concave"
+                          title="Delete Selected"
+                      >
+                          <FiTrash2 size={20} />
+                      </button>
+                  </div>
+              ) : (
+                  <ChatHeader 
+                    conversation={conversation} 
+                    onBack={() => navigate('/chat')} 
+                    onInfoToggle={() => setIsGroupInfoOpen(true)} 
+                    onMenuClick={onMenuClick} 
+                  />
+              )}
               
               {messages.length === 0 && <NewConversationBanner />}
 

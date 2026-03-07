@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import sodium from 'libsodium-wrappers'
 import crypto from 'crypto'
 
@@ -38,7 +41,7 @@ export async function reEncryptMasterKeyForClient (privateKey: Uint8Array, chall
   await sodium.ready
 
   // Derive a temporary, single-use key from the challenge
-  const tempKey = sodium.crypto_generichash(sodium.crypto_secretbox_KEYBYTES, challenge)
+  const tempKey = sodium.crypto_generichash(sodium.crypto_secretbox_KEYBYTES, challenge, null)
   const nonce = sodium.randombytes_buf(sodium.crypto_secretbox_NONCEBYTES)
 
   const ciphertext = sodium.crypto_secretbox_easy(privateKey, nonce, tempKey)

@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.3.0] - 2026-03-07
+
+This release introduces the **"Tactical UX & Advanced Operations"** upgrade. It significantly elevates the user experience, media handling, and functional messaging capabilities while maintaining strict adherence to Zero-Knowledge and E2EE protocols.
+
+### Advanced Messaging & E2EE Capabilities
+
+* **E2EE Message Editing:** Users can now edit sent messages. Edits are transmitted securely as specialized encrypted JSON payloads (`{"type":"edit"}`) that retroactively overwrite the local IndexedDB state and append an `(edited)` label. The server remains completely blind to the edits.
+* **Silent Drop (Ghost Messaging):** Long-pressing the send button reveals a "Send without sound" option. This feature uses a masked payload (`{"type":"silent"}`) to instruct the recipient's application to suppress ringtones and push notifications, allowing for discreet message delivery.
+* **Expanded Tactical Reactions:** Upgraded the static reaction menu. Clicking the new "More" (`+`) button reveals a full Emoji Picker. This utilizes an isolated global event hijacking technique to map the dynamic emoji back to the specific E2EE message safely.
+* **Tombstone Protocol (Ghost Placeholder Fix):** Fixed a critical E2EE synchronization bug where locally deleted messages would reappear as "Decryption failed" upon reload. Implemented a soft-delete tombstone pattern (`isDeletedLocal: true`) in the local vault to safely ignore server re-fetches.
+* **Crypto Mutex Serialization:** Resolved a Double Ratchet race condition when bulk-sending files. Implemented a Promise-based Mutex queue (`acquireSendLock`) to strictly serialize concurrent E2EE operations, preventing Ratchet Counter (N) collisions.
+
+### Media Handling & Staging
+
+* **Media Staging Carousel:** Completely overhauled the file attachment flow. Selected files are now intercepted and held in a staging area (a horizontal carousel) above the text input. Users can review, cancel individual files, and add text before executing the final upload.
+* **Dynamic HD Image Upload:** Added an "HD" toggle for media. Standard images undergo aggressive client-side compression (1MB/1080p limit), but enabling HD dynamically bypasses this constraint to allow high-fidelity image uploads (up to 10MB/4K).
+* **Native Voice Note Compression:** Optimized the client-side `MediaRecorder`. Voice notes are now forced into the `audio/webm;codecs=opus` codec with a strictly throttled 16kbps bitrate, cutting audio file sizes by up to 80% with zero external dependencies.
+* **SVG Structure Preserver:** Fixed a rendering bug where E2EE decrypted SVG blobs would collapse to zero dimensions in the Chat UI by enforcing structural aspect ratios and container constraints.
+
+### Privacy & Security UX
+
+* **Voice Anonymizer (Real-Time Distortion):** Introduced an "ANON" mode for Voice Notes. When toggled, it intercepts the microphone stream via the native Web Audio API, applying a real-time Ring Modulator (40Hz) and Lowpass Filter (800Hz) to deeply scramble and disguise the user's voice *before* encryption.
+* **Privacy Cloak:** Added a tactical sensor toggle (Eye icon) in the main header. Activating it instantly applies a CSS blur and opacity filter over all chat list contents and message bubbles, physically protecting the screen from shoulder-surfers.
+* **Biometric Identity Normalization:** Fixed WebAuthn initialization where authenticator prompts displayed random hex arrays. Normalized the User ID buffer for a cleaner OS-level biometric prompt and improved fallback routing when PRF keys desynchronize.
+
+### Functional UX
+
+* **Tactical Sweep (Bulk Delete):** Introduced a bulk selection mode. Users can enter "Select" mode via the context menu, tap checkboxes next to multiple messages, and execute a mass-deletion from their local IndexedDB via a dedicated tactical header.
+* **Smart Message Truncation:** Extremely long text messages are now elegantly truncated to a maximum height. Instead of raw string slicing (which breaks Markdown), it utilizes CSS `mask-image` fade-out gradients and a "Read More / Show Less" toggle.
+
 ## [2.2.0] - 2026-02-26
 
 This release introduces the "Pure Anonymity" architecture, completely decoupling the application from email and phone numbers. It establishes NYX as a Trust-Tier system with Zero-Knowledge principles at its core.

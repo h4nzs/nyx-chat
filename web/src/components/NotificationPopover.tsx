@@ -1,5 +1,6 @@
 import useNotificationStore from '@store/notification';
 import { Link } from 'react-router-dom';
+import { useShallow } from 'zustand/react/shallow';
 import { FiBell } from 'react-icons/fi';
 
 const NotificationItem = ({ notification }: { notification: any }) => {
@@ -42,10 +43,10 @@ const NotificationItem = ({ notification }: { notification: any }) => {
 };
 
 const NotificationPopover = () => {
-  const { notifications, clearNotifications } = useNotificationStore(state => ({
+  const { notifications, clearNotifications } = useNotificationStore(useShallow(state => ({
     notifications: state.notifications,
     clearNotifications: state.clearNotifications,
-  }));
+  })));
 
   return (
     <div className="

@@ -1,15 +1,24 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, Suspense } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useContextMenuStore } from '../store/contextMenu';
+import { useShallow } from 'zustand/react/shallow';
 import clsx from 'clsx';
+import { FiPlus, FiChevronLeft } from 'react-icons/fi';
+import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+import { useThemeStore } from '@store/theme';
 
 export default function ContextMenu() {
-  const { isOpen, x, y, options, reactions, closeMenu } = useContextMenuStore();
+  const { isOpen, x, y, options, reactions, closeMenu } = useContextMenuStore(useShallow(s => ({
+    isOpen: s.isOpen, x: s.x, y: s.y, options: s.options, reactions: s.reactions, closeMenu: s.closeMenu
+  })));
+  const theme = useThemeStore(s => s.theme);
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [showAllEmojis, setShowAllEmojis] = useState(false);
 
   useEffect(() => {
     if (isOpen && menuRef.current) {
+      setShowAllEmojis(false); // Reset to quick reactions
       const menuWidth = menuRef.current.offsetWidth;
       const menuHeight = menuRef.current.offsetHeight;
       const windowWidth = window.innerWidth;
@@ -73,45 +82,94 @@ export default function ContextMenu() {
                      dark:shadow-[0_8px_32px_rgba(0,0,0,0.5)]
                      overflow-hidden"
         >
-          {/* Reactions Row */}
-          {reactions && reactions.length > 0 && (
-            <div className="flex items-center justify-between p-2 border-b border-black/5 dark:border-white/5 bg-secondary/30">
-              {reactions.map((reaction, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => {
-                    reaction.onClick();
-                    closeMenu();
-                  }}
-                  className="p-2 rounded-full hover:bg-accent/20 hover:scale-110 active:scale-95 transition-all text-xl"
-                >
-                  {reaction.emoji}
-                </button>
-              ))}
-            </div>
-          )}
+          {showAllEmojis ? (
+            /* EXPANDED EMOJI PICKER */
+            <motion.div 
+               initial={{ height: 0, opacity: 0 }} 
+               animate={{ height: 'auto', opacity: 1 }} 
+               className="flex flex-col"
+            >
+               <div className="flex items-center p-2 border-b border-white/10 bg-secondary/30">
+                  <button 
+                     onClick={() => setShowAllEmojis(false)}
+                     className="p-2 rounded-full hover:bg-white/10 text-text-secondary transition-colors"
+                  >
+                     <FiChevronLeft size={18} />
+                  </button>
+                  <span className="text-xs font-bold text-text-secondary uppercase tracking-wider ml-2">All Reactions</span>
+               </div>
+               <div className="p-1">
+                 <Suspense fallback={<div className="w-[300px] h-[400px] flex items-center justify-center text-text-secondary">Loading...</div>}>
+                   <EmojiPicker 
+                      onEmojiClick={(emojiData: EmojiClickData) => {
+                         if (typeof (window as any).currentReactionHandler === 'function') {
+                            (window as any).currentReactionHandler(emojiData.emoji);
+                         }
+                         closeMenu();
+                      }}
+                      theme={theme as any}
+                      lazyLoadEmojis={true}
+                      searchDisabled={false}
+                      skinTonesDisabled={true}
+                      width={300}
+                      height={400}
+                   />
+                 </Suspense>
+               </div>
+            </motion.div>
+          ) : (
+            /* DEFAULT QUICK REACTIONS & OPTIONS */
+            <>
+              {/* Reactions Row */}
+              {reactions && reactions.length > 0 && (
+                <div className="flex items-center justify-between p-2 border-b border-black/5 dark:border-white/5 bg-secondary/30">
+                  {reactions.map((reaction) => (
+                    <button
+                      key={reaction.emoji}
+                      onClick={() => {
+                        reaction.onClick();
+                        closeMenu();
+                      }}
+                      className="p-2 rounded-full hover:bg-accent/20 hover:scale-110 active:scale-95 transition-all text-xl"
+                    >
+                      {reaction.emoji}
+                    </button>
+                  ))}
+                  
+                  {/* EXPAND BUTTON */}
+                  <button
+                    onClick={() => setShowAllEmojis(true)}
+                    className="p-2.5 rounded-full hover:bg-white/10 hover:scale-110 active:scale-95 transition-all text-text-secondary shadow-neumorphic-convex-sm flex items-center justify-center ml-1 bg-white/5"
+                    title="More Reactions"
+                  >
+                    <FiPlus size={16} />
+                  </button>
+                </div>
+              )}
 
-          {/* Options */}
-          <div className="flex flex-col py-1">
-            {options.map((option, idx) => (
-              <button
-                key={idx}
-                onClick={() => {
-                  option.onClick();
-                  closeMenu();
-                }}
-                className={clsx(
-                  "flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors",
-                  option.destructive
-                    ? "text-red-500 hover:bg-red-500/10"
-                    : "text-text-primary hover:bg-white/10 dark:hover:bg-white/5"
-                )}
-              >
-                {option.icon && <span className="opacity-80">{option.icon}</span>}
-                <span>{option.label}</span>
-              </button>
-            ))}
-          </div>
+              {/* Options */}
+              <div className="flex flex-col py-1">
+                {options.map((option) => (
+                  <button
+                    key={option.label}
+                    onClick={() => {
+                      option.onClick();
+                      closeMenu();
+                    }}
+                    className={clsx(
+                      "flex items-center gap-3 px-4 py-2.5 text-sm font-semibold transition-colors",
+                      option.destructive
+                        ? "text-red-500 hover:bg-red-500/10"
+                        : "text-text-primary hover:bg-white/10 dark:hover:bg-white/5"
+                    )}
+                  >
+                    {option.icon && <span className="opacity-80">{option.icon}</span>}
+                    <span>{option.label}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </motion.div>
       )}
     </AnimatePresence>

@@ -1,11 +1,29 @@
 // web/src/lib/keyStorage.ts
 import { get, set, del } from 'idb-keyval';
 import { clearAllKeys as clearSessionKeys } from './keychainDb';
+import { sha256 } from 'hash-wasm';
 
 const STORAGE_KEYS = {
   ENCRYPTED_KEYS: 'nyx_encrypted_keys',
   DEVICE_AUTO_UNLOCK_KEY: 'nyx_device_auto_unlock_key',
   DEVICE_AUTO_UNLOCK_READY: 'nyx_device_auto_unlock_ready',
+  PANIC_HASH: 'nyx_panic_hash',
+};
+
+export const setPanicPassword = async (password: string) => {
+  if (!password) {
+    localStorage.removeItem(STORAGE_KEYS.PANIC_HASH);
+    return;
+  }
+  const hash = await sha256(password);
+  localStorage.setItem(STORAGE_KEYS.PANIC_HASH, hash);
+};
+
+export const checkPanicPassword = async (password: string): Promise<boolean> => {
+  const storedHash = localStorage.getItem(STORAGE_KEYS.PANIC_HASH);
+  if (!storedHash) return false;
+  const hash = await sha256(password);
+  return hash === storedHash;
 };
 
 /**

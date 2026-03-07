@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import io from "socket.io-client";
 import type { Socket } from "socket.io-client";
 import toast from "react-hot-toast";
@@ -103,6 +106,12 @@ export function getSocket() {
 
     // --- Application-specific Listeners ---
     socket.on("message:new", async (newMessage) => {
+      const meId = useAuthStore.getState().user?.id;
+      // THE SHIELD: Block echoes. Never process messages we sent ourselves from the socket!
+      if (meId && newMessage.senderId === meId) {
+        return;
+      }
+
       const convExists = useConversationStore.getState().conversations.some(c => c.id === newMessage.conversationId);
       if (!convExists) {
         return;
@@ -115,7 +124,9 @@ export function getSocket() {
         // The store handles decryption, reaction parsing, and optimistic replacement internally.
         const decryptedMessage = await addIncomingMessage(newMessage.conversationId, newMessage);
           
-        triggerReceiveFeedback();
+        if (!decryptedMessage.isSilent) {
+           triggerReceiveFeedback();
+        }
 
         // Update notification/preview using decrypted content
         // TODO: Trigger Desktop/Push Notification here using decryptedMessage.content or decryptedMessage.fileName

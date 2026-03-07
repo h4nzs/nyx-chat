@@ -2,6 +2,7 @@ import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@store/auth';
 import { useModalStore } from '@store/modal';
+import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'react-hot-toast';
 import { Spinner } from '../components/Spinner';
 import { toAbsoluteUrl } from '@utils/url';
@@ -23,8 +24,8 @@ import { useProfileStore } from '@store/profile';
 import { generateProfileKey, encryptProfile, minePoW, getRecoveryPhrase } from '@lib/crypto-worker-proxy';
 import ModalBase from '../components/ui/ModalBase';
 import { useSettingsStore } from '@store/settings';
-import { setupBiometricUnlock, setupDecoyPin } from '@lib/biometricUnlock';
-import { getDeviceAutoUnlockKey, getEncryptedKeys } from '@lib/keyStorage';
+import { setupBiometricUnlock } from '@lib/biometricUnlock';
+import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib/keyStorage';
 import { useMessageStore } from '@store/message';
 
 /* --- MICRO-COMPONENTS --- */
@@ -111,11 +112,17 @@ const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout, emergencyLogout, setUser } = useAuthStore();
+  const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout, emergencyLogout, setUser } = useAuthStore(useShallow(s => ({
+    user: s.user, updateProfile: s.updateProfile, updateAvatar: s.updateAvatar, sendReadReceipts: s.sendReadReceipts, setReadReceipts: s.setReadReceipts, logout: s.logout, emergencyLogout: s.emergencyLogout, setUser: s.setUser
+  })));
   const profile = useUserProfile(user);
-  const { theme, toggleTheme, accent, setAccent } = useThemeStore();
-  const { showConfirm } = useModalStore();
-  const { enableSmartReply, setEnableSmartReply } = useSettingsStore();
+  const { theme, toggleTheme, accent, setAccent } = useThemeStore(useShallow(s => ({
+    theme: s.theme, toggleTheme: s.toggleTheme, accent: s.accent, setAccent: s.setAccent
+  })));
+  const { showConfirm } = useModalStore(useShallow(s => ({ showConfirm: s.showConfirm })));
+  const { enableSmartReply, setEnableSmartReply } = useSettingsStore(useShallow(s => ({
+    enableSmartReply: s.enableSmartReply, setEnableSmartReply: s.setEnableSmartReply
+  })));
 
   const { 
     isSubscribed, 
@@ -137,7 +144,7 @@ export default function SettingsPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [miningStatus, setMiningStatus] = useState<'idle' | 'mining' | 'verifying'>('idle');
   const [hasBioVault, setHasBioVault] = useState(false);
-  const [decoyPin, setDecoyPin] = useState('');
+  const [panicPass, setPanicPass] = useState('');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vaultInputRef = useRef<HTMLInputElement>(null);
@@ -269,9 +276,7 @@ export default function SettingsPage() {
       // Jika gagal otomatis, minta user input password (DEMI KEAMANAN MAKSIMAL)
       if (!phraseToLock) {
           await new Promise<void>((resolve, reject) => {
-              useModalStore.getState().showPasswordPrompt(async (result) => {
-                  if (!result || result.mode === 'decoy') { reject(new Error("Password required to enable biometric unlock.")); return; }
-                  const password = result.password;
+              useModalStore.getState().showPasswordPrompt(async (password) => {
                   if (!password) { reject(new Error("Password required to enable biometric unlock.")); return; }
                   try {
                       const encKeys = await getEncryptedKeys();
@@ -399,10 +404,30 @@ export default function SettingsPage() {
 
   const handleLogout = async () => {
     showConfirm(
-      "Emergency Eject",
-      "WARNING: This will log you out of ALL devices and permanently delete your local history and keys from this browser. This action cannot be undone.",
+      "EMERGENCY EJECT",
+      "This will instantly revoke your server sessions and obliterate all local cryptographic keys and data. Proceed?",
       async () => {
-        await executeLocalWipe();
+        const toastId = toast.loading("Revoking server sessions...");
+        try {
+          const { api } = await import('@lib/api');
+          
+          // Attempt to revoke all sessions. 
+          try {
+            await api('/api/sessions', { method: 'DELETE' }); // Clear other devices (if endpoint exists)
+          } catch (e) {
+            console.warn("Failed to clear secondary sessions, proceeding to current session logout.");
+          }
+          await api('/api/auth/logout', { method: 'POST' }); // Kill current session
+          
+          toast.success("Sessions revoked. Initiating local wipe...", { id: toastId });
+          
+          // Proceed to Absolute Nuke ONLY after server acknowledges session termination
+          await executeLocalWipe();
+        } catch (error: any) {
+          console.error("Emergency eject API failed:", error);
+          toast.error("Failed to revoke remote sessions. Check your network connection.", { id: toastId });
+          // We abort the local wipe here as requested by the code review
+        }
       }
     );
   };
@@ -657,36 +682,34 @@ export default function SettingsPage() {
                 <div className={`w-2 h-2 rounded-full shadow-[0_0_5px] ${hasBioVault ? 'bg-green-500 shadow-green-500' : 'bg-gray-500 shadow-transparent'}`}></div>
               </button>
 
-            {/* DECOY VAULT SETTINGS */}
+            {/* PANIC PASSWORD */}
             <div className="pt-4 border-t border-white/5 space-y-3 mt-4">
               <div>
                 <h4 className="text-sm font-bold text-text-primary flex items-center gap-2">
-                  <FiShield className="text-accent" /> Decoy Vault (Panic PIN)
+                  <FiShield className="text-red-500" /> Panic Password
                 </h4>
                 <p className="text-xs text-text-secondary mt-1">
-                  Set a fake PIN. Entering this at the lock screen will unlock a blank "amnesia" version of the app.
+                  If forced to unlock your device, entering this password on the login screen will silently obliterate all local data.
                 </p>
               </div>
               <div className="flex gap-2">
                  <input 
                    type="password" 
-                   value={decoyPin} 
-                   onChange={e => setDecoyPin(e.target.value)} 
-                   placeholder="Enter fake PIN" 
-                   className="bg-bg-main border border-white/10 rounded-lg px-4 py-2 text-sm text-text-primary focus:ring-accent flex-1 outline-none" 
-                   maxLength={8} 
+                   value={panicPass} 
+                   onChange={e => setPanicPass(e.target.value)} 
+                   placeholder="Enter Panic Password" 
+                   className="bg-bg-main border border-white/10 rounded-lg px-4 py-2 text-sm text-text-primary focus:ring-red-500/50 flex-1 outline-none" 
                  />
                  <button 
                    type="button"
                    onClick={async () => { 
-                     if(decoyPin.length < 4) { toast.error("PIN too short"); return; }
-                     await setupDecoyPin(decoyPin); 
-                     toast.success('Decoy PIN saved!'); 
-                     setDecoyPin(''); 
+                     await setPanicPassword(panicPass); 
+                     toast.success('Panic Password updated.'); 
+                     setPanicPass(''); 
                    }} 
-                   className="px-4 py-2 bg-accent/20 text-accent rounded-lg text-sm font-bold hover:bg-accent hover:text-white transition-colors"
+                   className="px-4 py-2 bg-red-500/20 text-red-500 rounded-lg text-sm font-bold hover:bg-red-500 hover:text-white transition-colors"
                  >
-                   Save
+                   Set
                  </button>
               </div>
             </div>

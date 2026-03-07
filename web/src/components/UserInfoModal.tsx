@@ -12,6 +12,7 @@ import { useConversationStore } from '@store/conversation';
 import { useVerificationStore } from '@store/verification';
 import { useAuthStore } from '@store/auth';
 import { usePresenceStore } from '@store/presence';
+import { useShallow } from 'zustand/react/shallow';
 import ModalBase from './ui/ModalBase';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
@@ -20,9 +21,11 @@ import { useUserProfile } from '@hooks/useUserProfile';
 type ProfileUser = User & { publicKey?: string };
 
 export default function UserInfoModal() {
-  const { isProfileModalOpen, profileUserId, closeProfileModal } = useModalStore();
-  const { activeId } = useConversationStore();
-  const { verifiedStatus, setVerified } = useVerificationStore();
+  const { isProfileModalOpen, profileUserId, closeProfileModal } = useModalStore(useShallow(s => ({
+    isProfileModalOpen: s.isProfileModalOpen, profileUserId: s.profileUserId, closeProfileModal: s.closeProfileModal
+  })));
+  const { activeId } = useConversationStore(useShallow(s => ({ activeId: s.activeId })));
+  const { verifiedStatus, setVerified } = useVerificationStore(useShallow(s => ({ verifiedStatus: s.verifiedStatus, setVerified: s.setVerified })));
   const onlineUsers = usePresenceStore(s => s.onlineUsers);
   const navigate = useNavigate();
   const [user, setUser] = useState<ProfileUser | null>(null);

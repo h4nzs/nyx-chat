@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
+import { useShallow } from 'zustand/react/shallow';
 import ParticipantList from './ParticipantList';
 import EditGroupInfoModal from './EditGroupInfoModal';
 import AddParticipantModal from './AddParticipantModal';
@@ -16,10 +17,10 @@ import { uploadToR2 } from '@lib/r2'; // <--- Tambah Import ini
 import { compressImage } from '@lib/fileUtils'; // <--- Tambah Import ini
 
 const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; onClose: () => void; }) => {
-  const { conversation } = useConversationStore(state => ({
+  const { conversation } = useConversationStore(useShallow(state => ({
     conversation: state.conversations.find(c => c.id === conversationId),
-  }));
-  const { user } = useAuthStore();
+  })));
+  const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
 
   const [isEditing, setIsEditing] = useState(false);
   const [isAddParticipantModalOpen, setIsAddParticipantModalOpen] = useState(false);

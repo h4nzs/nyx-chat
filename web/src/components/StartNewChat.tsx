@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { useConversationStore } from '@store/conversation';
+import { useShallow } from 'zustand/react/shallow';
 import toast from 'react-hot-toast';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { toAbsoluteUrl } from '@utils/url';
@@ -32,10 +33,11 @@ function SearchResultItem({ u, loadingId, onStarted }: { u: SearchUser, loadingI
 export default function StartNewChat({ query, onStarted }: { query: string; onStarted: (id: string) => void }) {
   const [list, setList] = useState<SearchUser[]>([]);
   const [loadingId, setLoadingId] = useState<string | null>(null);
-  const { searchUsers, startConversation } = useConversationStore(state => ({
+  const searchIdRef = useRef(0);
+  const { searchUsers, startConversation } = useConversationStore(useShallow(state => ({
     searchUsers: state.searchUsers,
     startConversation: state.startConversation,
-  }));
+  })));
 
   useEffect(() => {
     if (!query.trim()) {
@@ -43,9 +45,12 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
       return;
     }
     const t = setTimeout(async () => {
+      const currentId = ++searchIdRef.current;
       try {
         const r = await searchUsers(query);
-        setList(r);
+        if (currentId === searchIdRef.current) {
+          setList(r);
+        }
       } catch {
         toast.error("Failed to search users.");
       }

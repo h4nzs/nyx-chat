@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, apiUpload, authFetch } from "@lib/api"; // Added authFetch
 import { getSocket, emitSessionKeyRequest, emitGroupKeyDistribution } from "@lib/socket";
@@ -335,13 +338,43 @@ function parseReaction(content: string | null | undefined): { targetMessageId: s
   return null;
 }
 
+function parseEdit(content: string | null | undefined): { targetMessageId: string, text: string } | null {
+  if (!content) return null;
+  try {
+    const trimmed = content.trim();
+    if (!trimmed.startsWith('{') || !trimmed.includes('"type":"edit"')) return null;
+    const payload = JSON.parse(trimmed);
+    if (payload.type === 'edit' && payload.targetMessageId && payload.text) {
+      return payload;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function parseSilent(content: string | null | undefined): { text: string } | null {
+  if (!content) return null;
+  try {
+    const trimmed = content.trim();
+    if (!trimmed.startsWith('{') || !trimmed.includes('"type":"silent"')) return null;
+    const payload = JSON.parse(trimmed);
+    if (payload.type === 'silent' && typeof payload.text === 'string') {
+      return payload;
+    }
+  } catch (e) {}
+  return null;
+}
+
 // Helper to separate messages and reactions
 function processMessagesAndReactions(decryptedItems: Message[], existingMessages: Message[] = []) {
   const chatMessages: Message[] = [];
   const reactions: any[] = [];
+  const edits: any[] = [];
 
   for (const msg of decryptedItems) {
     const reactionPayload = parseReaction(msg.content);
+    const editPayload = parseEdit(msg.content);
+    const silentPayload = parseSilent(msg.content);
+
     if (reactionPayload) {
         reactions.push({
           id: msg.id,
@@ -352,7 +385,15 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
           user: msg.sender,
           isMessage: true
         });
+    } else if (editPayload) {
+        edits.push({
+           targetMessageId: editPayload.targetMessageId, text: editPayload.text, timestamp: new Date(msg.createdAt).getTime()
+        });
     } else {
+      if (silentPayload) {
+          msg.content = silentPayload.text;
+          msg.isSilent = true;
+      }
       chatMessages.push(msg);
     }
   }
@@ -369,6 +410,16 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     }
   }
 
+  // APPLY EDITS (Sort by timestamp so latest edit wins)
+  edits.sort((a, b) => a.timestamp - b.timestamp);
+  for (const edit of edits) {
+     const target = messageMap.get(edit.targetMessageId);
+     if (target) {
+        target.content = edit.text;
+        target.isEdited = true;
+     }
+  }
+
   return Array.from(messageMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 }
 
@@ -379,6 +430,7 @@ type State = {
   hasMore: Record<string, boolean>;
   typingLinkPreview: any | null;
   hasLoadedHistory: Record<string, boolean>;
+  selectedMessageIds: string[];
 };
 
 type Actions = {
@@ -392,8 +444,9 @@ type Actions = {
   loadMessageContext: (messageId: string) => Promise<void>;
   addOptimisticMessage: (conversationId: string, message: Message) => void;
   addIncomingMessage: (conversationId: string, message: Message) => Promise<Message>;
-  replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => void;
+  replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => Promise<void>;
   removeMessage: (conversationId: string, messageId: string) => void;
+  removeMessages: (conversationId: string, messageIds: string[]) => Promise<void>;
   updateMessage: (conversationId: string, messageId: string, updates: Partial<Message>) => void;
   addLocalReaction: (conversationId: string, messageId: string, reaction: any) => void;
   removeLocalReaction: (conversationId: string, messageId: string, reactionId: string) => void;
@@ -408,8 +461,13 @@ type Actions = {
   processOfflineQueue: () => Promise<void>;
   reset: () => void;
   resendPendingMessages: () => void;
-  sendMessage: (conversationId: string, data: Partial<Message>, tempId?: number) => Promise<void>;
+  sendMessage: (conversationId: string, data: Partial<Message>, tempId?: number, isSilent?: boolean) => Promise<void>;
+  toggleMessageSelection: (id: string) => void;
+  clearMessageSelection: () => void;
 };
+
+let tempIdCounter = 0;
+const generateTempId = () => Date.now() * 1000 + (++tempIdCounter) + Math.floor(Math.random() * 1000);
 
 const initialState: State = {
   messages: {},
@@ -418,6 +476,7 @@ const initialState: State = {
   hasLoadedHistory: {},
   replyingTo: null,
   typingLinkPreview: null,
+  selectedMessageIds: [],
 };
 
 export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) => ({
@@ -425,6 +484,74 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
   reset: () => {
     set(initialState);
+  },
+
+  toggleMessageSelection: (id) => set(state => ({
+      selectedMessageIds: state.selectedMessageIds.includes(id)
+          ? state.selectedMessageIds.filter(x => x !== id)
+          : [...state.selectedMessageIds, id]
+  })),
+
+  clearMessageSelection: () => set({ selectedMessageIds: [] }),
+
+  removeMessages: async (conversationId, messageIds) => {
+    const { user } = useAuthStore.getState();
+    const currentMessages = get().messages[conversationId] || [];
+    const selectedMessages = currentMessages.filter(m => messageIds.includes(m.id));
+    
+    // Check if all selected messages are mine
+    const allMine = user && selectedMessages.every(m => m.senderId === user.id);
+
+    // 1. Delete from Server (only if all are mine)
+    if (allMine) {
+        selectedMessages.forEach(message => {
+            let query = '';
+            let targetUrl = message.fileUrl;
+            try {
+                if (message.content && message.content.startsWith('{')) {
+                    const metadata = JSON.parse(message.content);
+                    if (metadata.url) targetUrl = metadata.url;
+                }
+            } catch (e) {}
+
+            if (targetUrl && !targetUrl.startsWith('blob:')) {
+                try {
+                    const url = new URL(targetUrl);
+                    const key = url.pathname.substring(1);
+                    if (key) query = `?r2Key=${encodeURIComponent(key)}`;
+                } catch (e) {
+                    console.error("Failed to parse file URL for deletion:", e);
+                }
+            }
+
+            api(`/api/messages/${message.id}${query}`, { method: 'DELETE' }).catch((error) => {
+                console.error(`Failed to delete message ${message.id} from server:`, error);
+            });
+        });
+    }
+
+    // 2. TOMBSTONE in local vault & Wipe MK (Always)
+    const tombstones: Message[] = [];
+    for (const id of messageIds) {
+        const existing = selectedMessages.find(m => m.id === id);
+        if (existing) {
+            // Soft delete: Keep record but strip content
+            tombstones.push({ ...existing, content: null, fileUrl: undefined, isDeletedLocal: true });
+        } else {
+            tombstones.push({ id, conversationId, isDeletedLocal: true, createdAt: new Date().toISOString(), senderId: 'unknown' } as Message);
+        }
+        import('@utils/crypto').then(m => m.deleteMessageKeySecurely(id)).catch(console.error);
+    }
+    shadowVault.upsertMessages(tombstones).catch(console.error);
+
+    // 3. Remove from active state
+    set(state => {
+        const current = state.messages[conversationId] || [];
+        return { 
+          messages: { ...state.messages, [conversationId]: current.filter(m => !messageIds.includes(m.id)) },
+          selectedMessageIds: [] // Clear selection after deletion
+        };
+    });
   },
 
   setReplyingTo: (message: Message | null) => set({ replyingTo: message }),
@@ -468,7 +595,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }, timestamp);
   },
 
-  sendMessage: async (conversationId, data, tempId?: number) => {
+  sendMessage: async (conversationId, data, tempId?: number, isSilent = false) => {
     const { user, hasRestoredKeys } = useAuthStore.getState();
     if (!user) return;
 
@@ -480,7 +607,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             content: data.content, senderId: user.id, sender: user,
             createdAt: new Date().toISOString(), conversationId, status: 'SENT'
         } as Message;
-        get().addOptimisticMessage(conversationId, msg);
+        if (!isSilent) {
+            get().addOptimisticMessage(conversationId, msg);
+        }
         return;
     }
 
@@ -508,10 +637,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
     }
 
-    const actualTempId = tempId !== undefined ? tempId : Date.now();
+    const actualTempId = tempId !== undefined ? tempId : generateTempId();
     const isReactionPayload = !!parseReaction(data.content);
+    const silentPayload = parseSilent(data.content);
 
-    if (!isReactionPayload) {
+    if (!isReactionPayload && !isSilent) {
+        let optimisticContent = data.content;
+        let isOptimisticSilent = false;
+        
+        if (silentPayload) {
+            optimisticContent = silentPayload.text;
+            isOptimisticSilent = true;
+        }
+
         const optimisticMessage: Message = {
             ...data,
             id: `temp_${actualTempId}`,
@@ -525,15 +663,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${actualTempId}`, id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
             status: 'SENDING', 
             repliedTo: data.repliedTo,
+            content: optimisticContent,
+            isSilent: isOptimisticSilent || data.isSilent
         };
 
-        if (data.content) {
-            optimisticMessage.preview = data.content;
+        if (optimisticContent) {
+            optimisticMessage.preview = optimisticContent;
         }
 
         get().addOptimisticMessage(conversationId, optimisticMessage);
         
-        let lastMsgPreview = data.content;
+        let lastMsgPreview = optimisticContent;
         try {
            if (lastMsgPreview?.startsWith('{') && lastMsgPreview.includes('"type":"file"')) {
                lastMsgPreview = '📎 Sent a file';
@@ -853,33 +993,42 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
        return;
     }
 
-    const { hasRestoredKeys } = useAuthStore.getState();
     if (get().hasLoadedHistory[id]) return;
 
-    if (hasRestoredKeys) {
-      try {
-        const conversation = useConversationStore.getState().conversations.find(c => c.id === id);
-      } catch (sessionError) {
-        console.error("Failed to establish session, decryption may fail:", sessionError);
-      }
-    }
-    
     try {
       set(state => ({ hasMore: { ...state.hasMore, [id]: true }, isFetchingMore: { ...state.isFetchingMore, [id]: false } }));
+      
+      // 1. Load from local vault (including tombstones)
+      const localMessages = await shadowVault.getMessagesByConversation(id);
+      const localMap = new Map(localMessages.map(m => [m.id, m]));
+
+      // 2. Fetch from server
       const res = await api<{ items: Message[] }>(`/api/messages/${id}`);
       const fetchedMessages = res.items || [];
       const processedMessages: Message[] = [];
+      
       for (const message of fetchedMessages) {
-        processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
+        if (localMap.has(message.id)) {
+            // Already in vault (either decrypted or tombstoned)
+            processedMessages.push(localMap.get(message.id)!);
+        } else {
+            // Not in vault, decrypt it
+            processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
+        }
       }
+
       set(state => {
         const existingMessages = state.messages[id] || [];
         const allMessages = processMessagesAndReactions(processedMessages, existingMessages);
         
-        shadowVault.upsertMessages(allMessages); // Archive to shadow vault
+        // Update vault with everything we just processed (if not already there)
+        shadowVault.upsertMessages(allMessages); 
+
+        // 3. Filter out tombstones for the UI
+        const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
 
         return {
-          messages: { ...state.messages, [id]: allMessages },
+          messages: { ...state.messages, [id]: visibleMessages },
           hasMore: { ...state.hasMore, [id]: fetchedMessages.length >= 50 },
           hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
         };
@@ -897,17 +1046,33 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: true } }));
     try {
       const res = await api<{ items: Message[] }>(`/api/messages/${conversationId}?cursor=${oldestMessage.id}`);
-      const decryptedItems = await Promise.all((res.items || []).map(m => decryptMessageObject(m, undefined, 0, { skipRetries: true })));
+      const fetchedItems = res.items || [];
+      
+      // Load local cache to skip decryption
+      const localMessages = await shadowVault.getMessagesByConversation(conversationId);
+      const localMap = new Map(localMessages.map(m => [m.id, m]));
+
+      const processedItems: Message[] = [];
+      for (const m of fetchedItems) {
+          if (localMap.has(m.id)) {
+              processedItems.push(localMap.get(m.id)!);
+          } else {
+              processedItems.push(await decryptMessageObject(m, undefined, 0, { skipRetries: true }));
+          }
+      }
       
       set(state => {
         const existingMessages = state.messages[conversationId] || [];
-        const allMessages = processMessagesAndReactions(decryptedItems, existingMessages);
+        const allMessages = processMessagesAndReactions(processedItems, existingMessages);
 
         shadowVault.upsertMessages(allMessages); // Archive to shadow vault
 
-        const newState: any = { messages: { ...state.messages, [conversationId]: allMessages } };
+        // Filter out tombstones for UI
+        const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
 
-        if (decryptedItems.length < 50) {
+        const newState: any = { messages: { ...state.messages, [conversationId]: visibleMessages } };
+
+        if (fetchedItems.length < 50) {
             newState.hasMore = { ...state.hasMore, [conversationId]: false };
         }
         
@@ -930,9 +1095,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       if (!convoId) return;
 
+      // Load local cache
+      const localMessages = await shadowVault.getMessagesByConversation(convoId);
+      const localMap = new Map(localMessages.map(m => [m.id, m]));
+
       const processedMessages: Message[] = [];
       for (const message of fetchedMessages) {
-        processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
+          if (localMap.has(message.id)) {
+              processedMessages.push(localMap.get(message.id)!);
+          } else {
+              processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
+          }
       }
 
       set(state => {
@@ -946,8 +1119,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
         shadowVault.upsertMessages(finalMessages);
 
+        // Filter out tombstones
+        const visibleMessages = finalMessages.filter(m => !m.isDeletedLocal);
+
         return {
-          messages: { ...state.messages, [convoId]: finalMessages },
+          messages: { ...state.messages, [convoId]: visibleMessages },
           // If we jump back, we might still have older messages to fetch later
           hasMore: { ...state.hasMore, [convoId]: true } 
         };
@@ -993,8 +1169,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       } else {
           decrypted = await decryptMessageObject(message);
       }
+
+      // THE SHIELD: Prevent overwriting valid local data with decryption failures
+      if (decrypted.error || decrypted.content === 'waiting_for_key' || decrypted.content?.startsWith('[')) {
+          const existing = await shadowVault.getMessage(decrypted.id);
+          if (existing && !existing.isDeletedLocal && existing.content && !existing.content.startsWith('[')) {
+              console.warn(`[Shield] Prevented overwriting valid local message ${decrypted.id} with failure.`);
+              return existing;
+          }
+      }
       
       const reactionPayload = parseReaction(decrypted.content);
+      const editPayload = parseEdit(decrypted.content);
+      const silentPayload = parseSilent(decrypted.content);
+
+      if (silentPayload) {
+          decrypted.content = silentPayload.text;
+          decrypted.isSilent = true;
+      }
       
       if (reactionPayload) {
           const reaction = {
@@ -1013,6 +1205,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           } else {
               get().addLocalReaction(conversationId, reaction.messageId, reaction);
           }
+      } else if (editPayload) {
+          set(state => {
+              const currentMessages = state.messages[conversationId] || [];
+              const updatedMessages = currentMessages.map(m => 
+                  m.id === editPayload.targetMessageId ? { ...m, content: editPayload.text, isEdited: true } : m
+              );
+              // Also update vault
+              const editedMsg = updatedMessages.find(m => m.id === editPayload.targetMessageId);
+              if (editedMsg) shadowVault.upsertMessages([editedMsg]);
+              
+              return { messages: { ...state.messages, [conversationId]: updatedMessages } };
+          });
       } else {
           if (message.tempId && currentUser && message.senderId === currentUser.id) {
               get().replaceOptimisticMessage(conversationId, message.tempId, decrypted);
@@ -1029,9 +1233,42 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       return decrypted;
   },
 
-  replaceOptimisticMessage: (conversationId, tempId, newMessage) => {
+  replaceOptimisticMessage: async (conversationId, tempId, newMessage) => {
+    // THE SHIELD: Check if the user already deleted this message while it was sending
+    const tempIdStr = `temp_${tempId}`;
+    const existingTombstone = await shadowVault.getMessage(tempIdStr);
+    
+    if (existingTombstone && existingTombstone.isDeletedLocal) {
+        // Message was deleted optimistically. Just remove tempId from state and save a tombstone for realId.
+        await shadowVault.deleteMessage(tempIdStr);
+        await shadowVault.upsertMessages([{ ...newMessage, id: newMessage.id!, conversationId, isDeletedLocal: true, content: null, fileUrl: undefined } as Message]);
+        
+        set(state => ({
+            messages: {
+                ...state.messages,
+                [conversationId]: (state.messages[conversationId] || []).filter(m => String(m.tempId) !== String(tempId))
+            }
+        }));
+        return; 
+    }
+
     set(state => {
-      const updatedMessages = (state.messages[conversationId] || []).map(m => (m.tempId && String(m.tempId) === String(tempId)) ? { ...m, ...newMessage, tempId: undefined, optimistic: false } : m);
+      const updatedMessages = (state.messages[conversationId] || []).map(m => {
+        if (m.tempId && String(m.tempId) === String(tempId)) {
+          return {
+            ...m,
+            ...newMessage,
+            content: m.content, // ALWAYS PRESERVE LOCAL PLAINTEXT
+            fileUrl: m.fileUrl, // Preserve local blob URL
+            fileName: m.fileName,
+            fileType: m.fileType,
+            fileSize: m.fileSize,
+            tempId: undefined,
+            optimistic: false
+          };
+        }
+        return m;
+      });
       const msg = updatedMessages.find(m => m.id === newMessage.id);
       if (msg) shadowVault.upsertMessages([msg]); // Archive to shadow vault
       return {
@@ -1039,37 +1276,57 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       };
     })
   },
-  removeMessage: (conversationId, messageId) => set(state => {
-    const messages = state.messages[conversationId] || [];
-    
-    const messageToRemove = messages.find(m => m.id === messageId);
-    if (messageToRemove?.fileUrl?.startsWith('blob:')) {
-      URL.revokeObjectURL(messageToRemove.fileUrl);
-    }
-    const filteredMessages = messages.filter(m => m.id !== messageId);
-
-    const updatedMessages = filteredMessages.map(m => {
-        if (m.reactions && m.reactions.some(r => r.id === messageId)) {
-            return {
-                ...m,
-                reactions: m.reactions.filter(r => r.id !== messageId)
-            };
-        }
-        return m;
-    });
-
-    return {
-      messages: {
-          ...state.messages,
-          [conversationId]: updatedMessages,
+  removeMessage: (conversationId, messageId) => {
+    // 1. TOMBSTONE in local storage (Async cleanup)
+    set(state => {
+      const messages = state.messages[conversationId] || [];
+      const messageToRemove = messages.find(m => m.id === messageId);
+      
+      if (messageToRemove) {
+          if (messageToRemove.fileUrl?.startsWith('blob:')) {
+            URL.revokeObjectURL(messageToRemove.fileUrl);
+          }
+          // Soft delete: Keep record in IDB but strip content
+          shadowVault.upsertMessages([{ ...messageToRemove, content: null, fileUrl: undefined, isDeletedLocal: true }]).catch(console.error);
+      } else {
+          shadowVault.upsertMessages([{ id: messageId, conversationId, isDeletedLocal: true, createdAt: new Date().toISOString(), senderId: 'unknown' } as Message]).catch(console.error);
       }
-    };
-  }),
+
+      import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(console.error);
+
+      const filteredMessages = messages.filter(m => m.id !== messageId);
+      const updatedMessages = filteredMessages.map(m => {
+          if (m.reactions && m.reactions.some(r => r.id === messageId)) {
+              return {
+                  ...m,
+                  reactions: m.reactions.filter(r => r.id !== messageId)
+              };
+          }
+          return m;
+      });
+
+      return {
+        messages: {
+            ...state.messages,
+            [conversationId]: updatedMessages,
+        }
+      };
+    });
+  },
   updateMessage: (conversationId, messageId, updates) => {
     set(state => {
       const updatedMessages = (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, ...updates } : m);
       const updatedMsg = updatedMessages.find(m => m.id === messageId);
-      if (updatedMsg) shadowVault.upsertMessages([updatedMsg]); // Archive to shadow vault
+      
+      if (updatedMsg) {
+        // [FIX] If message is view-once and has been viewed, delete it from vault
+        if (updatedMsg.isViewOnce && updatedMsg.isViewed) {
+            shadowVault.deleteMessage(messageId).catch(console.error);
+            import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(console.error);
+        } else {
+            shadowVault.upsertMessages([updatedMsg]); // Archive to shadow vault
+        }
+      }
       return { messages: { ...state.messages, [conversationId]: updatedMessages } };
     })
   },
@@ -1129,11 +1386,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     return { messages: newMessages };
   }),
 
-  clearMessagesForConversation: (conversationId) => set(state => {
-    const newMessages = { ...state.messages };
-    delete newMessages[conversationId];
-    return { messages: newMessages };
-  }),
+  clearMessagesForConversation: (conversationId) => {
+    // 1. DELETE FROM LOCAL STORAGE
+    shadowVault.deleteConversationMessages(conversationId).catch(console.error);
+    import('@utils/crypto').then(m => m.deleteConversationKeychain(conversationId)).catch(console.error);
+
+    set(state => {
+      const newMessages = { ...state.messages };
+      delete newMessages[conversationId];
+      return { messages: newMessages };
+    });
+  },
+
 
   retrySendMessage: (message: Message) => {
     const { conversationId, tempId, preview, fileUrl, fileName, fileType, fileSize, repliedToId } = message;

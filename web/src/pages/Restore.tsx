@@ -69,7 +69,8 @@ export default function RestorePage() {
           try {
             await useAuthStore.getState().bootstrap(true); // Force fetch user profile
           } catch (err) {
-            console.error(err);
+            toast.error("Failed to sync profile");
+            return;
           }
       }
 

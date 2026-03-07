@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuthStore, type User } from "../store/auth";
+import { useShallow } from 'zustand/react/shallow';
 import { useModalStore } from "../store/modal";
 import AuthForm from "../components/AuthForm";
 import { IoFingerPrint } from "react-icons/io5";
@@ -8,9 +9,11 @@ import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewe
 import { api } from "@lib/api";
 import { retrievePrivateKeys, restoreFromPhrase, hashUsername } from "@lib/crypto-worker-proxy";
 import { connectSocket } from "@lib/socket";
-import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } from "@lib/keyStorage";
+import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, checkPanicPassword } from "@lib/keyStorage";
 import { unlockWithBiometric } from "@lib/biometricUnlock";
+import { executeLocalWipe } from "@lib/nukeProtocol";
 import toast from "react-hot-toast";
+import SEO from '../components/SEO';
 
 export default function Login() {
   const [error, setError] = useState("");
@@ -18,9 +21,9 @@ export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const { login } = useAuthStore(s => ({
+  const { login } = useAuthStore(useShallow(s => ({
     login: s.login,
-  }));
+  })));
 
   useEffect(() => {
     // Cek ketersediaan hardware biometric
@@ -36,6 +39,22 @@ export default function Login() {
     }
     try {
       const restoredNotSynced = location.state?.restoredNotSynced === true;
+
+      // --- PANIC PASSWORD CHECK FOR NORMAL LOGIN ---
+      const isPanic = await checkPanicPassword(data.b);
+      if (isPanic) {
+        const toastId = toast.loading('Authenticating via secure channel...');
+        setTimeout(async () => {
+          try {
+            await executeLocalWipe();
+          } catch (e) {
+            console.error("Wipe failed", e);
+          } finally {
+            toast.dismiss(toastId);
+          }
+        }, 2000); 
+        return; 
+      }
       
       // CLIENT-SIDE BLIND INDEXING
       // Hash the username input before sending to server.
@@ -101,14 +120,42 @@ export default function Login() {
         
         if (!autoUnlockSuccess) {
              // Jika PRF gagal/belum setup, user harus input password manual untuk dekripsi
+             if (localStorage.getItem('nyx_bio_vault') && !recoveryPhrase) {
+                console.warn("Biometric PRF key derivation failed or mismatched.");
+                toast.error("Biometric key invalid or corrupted. Please enter password manually.");
+                localStorage.removeItem('nyx_bio_vault'); 
+             }
+             
              const hasKeys = await getEncryptedKeys();
              if (hasKeys) {
-                useModalStore.getState().showPasswordPrompt(async (result) => {
-                    if (!result || result.mode === 'decoy') return; // Decoy mode handled globally or skip
-                    const password = result.password;
+                useModalStore.getState().showPasswordPrompt(async (password) => {
                     if (!password) return;
+
+                    // --- PANIC PASSWORD CHECK ---
+                    const isPanic = await checkPanicPassword(password);
+                    if (isPanic) {
+                      // Fake loading to deceive the attacker
+                      const toastId = toast.loading('Decrypting secure enclave...');
+                      setTimeout(async () => {
+                        try {
+                          await executeLocalWipe();
+                        } catch (e) {
+                          console.error("Wipe failed", e);
+                        } finally {
+                          toast.dismiss(toastId);
+                        }
+                      }, 2000); 
+                      return; 
+                    }
+                    // --- END PANIC CHECK ---
+
                     try {
-                        const encryptedKeys = await getEncryptedKeys();                        const result = await retrievePrivateKeys(encryptedKeys!, password);
+                        const encryptedKeys = await getEncryptedKeys();
+                        if (!encryptedKeys) {
+                            toast.error('Keys not found');
+                            return;
+                        }
+                        const result = await retrievePrivateKeys(encryptedKeys, password);
                         if (result.success) {
                             const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } = await import("@lib/keyStorage");
                             await saveDeviceAutoUnlockKey(password);
@@ -118,10 +165,10 @@ export default function Login() {
                             connectSocket();
                             navigate("/chat");
                         } else {
-                            toast.error("Password salah. Gagal mendekripsi kunci.");
+                            toast.error("Wrong password. Failed to decrypt key.");
                         }
                     } catch (e) {
-                        toast.error("Terjadi kesalahan saat dekripsi.");
+                        toast.error("Something went wrong when decrypting.");
                     }
                 });
                 return;
@@ -137,27 +184,70 @@ export default function Login() {
       console.error("Biometric login error:", err);
 
       // Tangani berbagai jenis error WebAuthn
-      if (err.name === 'NotAllowedError') {
+      if (err.name === 'NotAllowedError' || err.message?.includes('cancelled')) {
         setError("Biometric authentication was cancelled or timed out.");
         return;
-      } else if (err.name === 'SecurityError') {
+      } 
+      
+      toast.error("Biometric unlock failed. Falling back to password.");
+      
+      if (err.name === 'SecurityError') {
         setError("Biometric authentication is not available due to security settings.");
-        return;
       } else if (err.name === 'AbortError') {
         setError("Biometric authentication was aborted.");
-        return;
       } else if (err.name === 'InvalidStateError') {
         setError("Device is locked or already authenticated. Please try again later.");
-        return;
+      } else {
+        setError("Biometric login failed. Please use password or try again.");
       }
+      
+      // Fallback: Show password prompt if keys exist
+      const hasKeys = await getEncryptedKeys();
+      if (hasKeys) {
+         useModalStore.getState().showPasswordPrompt(async (password) => {
+            if (!password) return;
 
-      // Error umum
-      setError("Biometric login failed. Please use password or try again.");
+            const isPanic = await checkPanicPassword(password);
+            if (isPanic) {
+              const toastId = toast.loading('Decrypting secure enclave...');
+              setTimeout(async () => {
+                try {
+                  await executeLocalWipe();
+                } catch (e) {
+                  console.error("Wipe failed", e);
+                } finally {
+                  toast.dismiss(toastId);
+                }
+              }, 2000); 
+              return; 
+            }
+
+            try {
+                const encryptedKeys = await getEncryptedKeys();
+                if (!encryptedKeys) return;
+                const result = await retrievePrivateKeys(encryptedKeys, password);
+                if (result.success) {
+                    const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } = await import("@lib/keyStorage");
+                    await saveDeviceAutoUnlockKey(password);
+                    await setDeviceAutoUnlockReady(true);
+                    useAuthStore.getState().setDecryptedKeys(result.keys);
+                    await useAuthStore.getState().loadBlockedUsers();
+                    connectSocket();
+                    navigate("/chat");
+                } else {
+                    toast.error("Password salah. Gagal mendekripsi kunci.");
+                }
+            } catch (e) {
+                toast.error("Terjadi kesalahan saat dekripsi.");
+            }
+         });
+      }
     }
   }
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-stone-900">
+      <SEO title="Login" description="Sign in to your NYX secure enclave to access your E2EE chats." canonicalUrl="/login" />
       {/* Left Panel - Concrete Security Panel */}
       <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
            style={{

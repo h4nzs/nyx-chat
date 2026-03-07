@@ -383,7 +383,11 @@ export default function CallOverlay() {
             <div className="absolute bottom-0 left-0 right-0 p-8 flex justify-center gap-6 z-20">
               {/* Flip Camera (Only if Video Call) */}
               {isVideoCall && (
-                <button onClick={handleFlipCamera} className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all backdrop-blur-md">
+                <button 
+                  onClick={handleFlipCamera} 
+                  aria-label="Flip camera"
+                  className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all backdrop-blur-md"
+                >
                   <FiRefreshCw size={20} />
                 </button>
               )}
@@ -392,6 +396,7 @@ export default function CallOverlay() {
               {isVideoCall && !isMobile && (
                 <button 
                   onClick={handleToggleScreenShare} 
+                  aria-label={isScreenSharing ? "Stop sharing screen" : "Share screen"}
                   className={`w-12 h-12 rounded-full ${isScreenSharing ? 'bg-blue-500' : 'bg-white/10 hover:bg-white/20'} text-white flex items-center justify-center transition-all backdrop-blur-md`}
                   title={isScreenSharing ? "Stop Sharing" : "Share Screen"}
                 >
@@ -401,6 +406,7 @@ export default function CallOverlay() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); toggleMute(); }}
+                aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
                 className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isMuted ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'} backdrop-blur-md`}
               >
                 {isMuted ? <FiMicOff size={24} /> : <FiMic size={24} />}
@@ -409,6 +415,7 @@ export default function CallOverlay() {
               {isVideoCall && (
                 <button 
                   onClick={(e) => { e.stopPropagation(); toggleVideo(); }}
+                  aria-label={isVideoOff ? "Turn on camera" : "Turn off camera"}
                   className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isVideoOff ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'} backdrop-blur-md`}
                 >
                   {isVideoOff ? <FiVideoOff size={24} /> : <FiVideo size={24} />}
@@ -416,12 +423,17 @@ export default function CallOverlay() {
               )}
 
               {/* Loudspeaker Toggle */}
-              <button onClick={handleToggleSpeaker} className={`w-12 h-12 rounded-full ${isSpeakerphone ? 'bg-white/10' : 'bg-accent'} hover:bg-white/20 text-white flex items-center justify-center transition-all backdrop-blur-md`}>
+              <button 
+                onClick={handleToggleSpeaker} 
+                aria-label={isSpeakerphone ? "Switch to earpiece" : "Switch to speaker"}
+                className={`w-12 h-12 rounded-full ${isSpeakerphone ? 'bg-white/10' : 'bg-accent'} hover:bg-white/20 text-white flex items-center justify-center transition-all backdrop-blur-md`}
+              >
                 {isSpeakerphone ? <FiVolume2 size={20} /> : <FiVolumeX size={20} />}
               </button>
 
               <button 
                 onClick={(e) => { e.stopPropagation(); hangup(); }}
+                aria-label="End call"
                 className="w-14 h-14 rounded-full bg-red-500 text-white hover:bg-red-600 flex items-center justify-center transition-all shadow-[0_0_20px_rgba(239,68,68,0.4)]"
               >
                 <FiPhoneOff size={24} />

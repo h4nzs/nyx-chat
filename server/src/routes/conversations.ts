@@ -1,6 +1,10 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
-import { Prisma } from '@prisma/client'
+import pkg from '@prisma/client'
+const { Prisma } = pkg
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
 import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
@@ -36,10 +40,14 @@ router.get('/', async (req, res, next) => {
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          include: { sender: true }
+          include: {
+            sender: {
+              select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true }
+            }
+          }
         },
         creator: {
-          select: { id: true }
+          select: { id: true, publicKey: true, signingKey: true, encryptedProfile: true }
         }
       },
       orderBy: {
@@ -119,7 +127,14 @@ router.post('/', async (req, res, next) => {
           const key = `sandbox:newchat:${creatorId}:${today}`;
           const count = await redisClient.incr(key);
           if (count === 1) {
-              await redisClient.expire(key, 86400); // Expire in 24 hours
+              try {
+                  await redisClient.expire(key, 86400); // Expire in 24 hours
+              } catch (expireError) {
+                  // Rollback if TTL fails
+                  const decrCount = await redisClient.decr(key);
+                  if (decrCount <= 0) await redisClient.del(key);
+                  throw expireError;
+              }
           }
           if (count > 3) {
               try { await redisClient.decr(key); } catch (e) { /* ignore */ } // Rollback increment
@@ -152,7 +167,9 @@ router.post('/', async (req, res, next) => {
                 user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }
               }
             },
-            creator: true
+            creator: { 
+              select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } 
+            }
           }
         })
 
@@ -219,7 +236,7 @@ router.get('/:id', async (req, res, next) => {
             role: true
           }
         },
-        creator: { select: { id: true } }
+        creator: { select: { id: true, publicKey: true, signingKey: true, encryptedProfile: true } }
       }
     })
 
@@ -448,7 +465,8 @@ router.post('/:id/read', async (req, res, next) => {
   }
 })
 
-// GET media for a conversation
+// GET media for a conversation (LEGACY - Disabled due to Blind Attachments)
+/*
 router.get('/:id/media', requireAuth, async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
@@ -484,6 +502,7 @@ router.get('/:id/media', requireAuth, async (req, res, next) => {
     next(error)
   }
 })
+*/
 
 // Record key rotation event
 router.post('/:id/key-rotation', async (req, res, next) => {

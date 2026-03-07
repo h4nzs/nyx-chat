@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { getSocket } from './socket';
 import { useCallStore } from '../store/callStore';
 
@@ -13,6 +16,16 @@ export const replaceVideoTrack = async (newVideoTrack: MediaStreamTrack) => {
   const sender = peerConnection.getSenders().find(s => s.track?.kind === 'video');
   if (sender) {
     await sender.replaceTrack(newVideoTrack);
+  }
+
+  if (localMediaStream) {
+    localMediaStream.getVideoTracks().forEach(t => {
+      t.stop();
+      localMediaStream!.removeTrack(t);
+    });
+    localMediaStream.addTrack(newVideoTrack);
+  } else {
+    localMediaStream = new MediaStream([newVideoTrack]);
   }
 };
 

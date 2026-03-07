@@ -1,8 +1,12 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import express, { Express, Request, Response, NextFunction } from "express";
 import cookieParser from "cookie-parser";
 import logger from "morgan";
 import cors from "cors";
 import helmet from "helmet";
+import mime from "mime";
 import { rateLimit } from "express-rate-limit";
 import { doubleCsrf } from "csrf-csrf";
 import { env } from "./config.js";
@@ -115,6 +119,13 @@ app.use(helmet({
 
 app.disable('x-powered-by');
 
+app.use((req, res, next) => {
+  res.setHeader('X-Edge-Relay', 'nyx-enigma-v2.3.0');
+  res.setHeader('X-Sec-Protocol', 'Double-Ratchet-Core');
+  res.setHeader('X-Powered-By', 'NYX-Engine');
+  next();
+});
+
 // Helper to escape regex special characters
 function escapeRegExp(string: string) {
   return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
@@ -172,8 +183,8 @@ if (isProd) {
   app.use(
     /^\/(?!api\/).*/, // Apply to everything EXCEPT paths starting with /api/
     rateLimit({
-      windowMs: 15 * 60 * 1000, 
-      max: 100, 
+      windowMs: 15 * 60 * 1000,
+      max: 1000, // Capped at 1000 to prevent resource exhaustion via CF Tunnel bypass.
       standardHeaders: true,
       legacyHeaders: false,
       validate: { trustProxy: false }
@@ -261,7 +272,7 @@ app.use("/uploads",
   express.static(uploadsPath, {
     index: false, 
     setHeaders: (res, filePath) => {
-      const mimeType = express.static.mime.lookup(filePath);
+      const mimeType = mime.getType(filePath);
       if (mimeType && !mimeType.startsWith('image/') && !mimeType.startsWith('video/') && !mimeType.startsWith('audio/')) {
         res.setHeader('Content-Disposition', 'attachment');
       }

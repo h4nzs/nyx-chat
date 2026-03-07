@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useCallback, Suspense, lazy } from 'react';
 import { Toaster, useToasterStore, toast } from 'react-hot-toast';
@@ -40,6 +43,7 @@ import { useThemeStore } from './store/theme';
 import { useCommandPaletteStore } from './store/commandPalette';
 import { useConversationStore } from './store/conversation';
 import { useGlobalShortcut } from './hooks/useGlobalShortcut';
+import { useShallow } from 'zustand/react/shallow';
 
 // Libs & Utils
 import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
@@ -57,10 +61,10 @@ const LoadingScreen = () => (
 );
 
 const Home = () => {
-  const { conversations, loading } = useConversationStore(state => ({
+  const { conversations, loading } = useConversationStore(useShallow(state => ({
     conversations: state.conversations,
     loading: state.loading,
-  }));
+  })));
 
   if (loading) {
     return <LoadingScreen />;
@@ -88,13 +92,13 @@ const PageWrapper = ({ children, noScroll = false }: { children: React.ReactNode
 );
 
 const AppContent = () => {
-  const { theme, accent } = useThemeStore();
-  const { bootstrap, logout, user } = useAuthStore();
+  const { theme, accent } = useThemeStore(useShallow(s => ({ theme: s.theme, accent: s.accent })));
+  const { bootstrap, logout, user } = useAuthStore(useShallow(s => ({ bootstrap: s.bootstrap, logout: s.logout, user: s.user })));
   const openCommandPalette = useCommandPaletteStore(s => s.open);
-  const { addCommands, removeCommands } = useCommandPaletteStore(s => ({
+  const { addCommands, removeCommands } = useCommandPaletteStore(useShallow(s => ({
     addCommands: s.addCommands,
     removeCommands: s.removeCommands,
-  }));
+  })));
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -118,7 +122,7 @@ const AppContent = () => {
     toasts
       .filter((t) => t.visible) // Only consider visible toasts
       .filter((_, i) => i >= MAX_TOASTS) // Get toasts beyond the limit
-      .forEach((t) => toast.dismiss(t.id)); // Dismiss them
+      .forEach((t) => { toast.dismiss(t.id); }); // Dismiss them
   }, [toasts]);
 
   useEffect(() => {
@@ -182,7 +186,6 @@ const AppContent = () => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
     root.classList.add(theme);
-    root.style.setProperty('--color-accent', `var(--accent-${accent})`);
     root.dataset.accent = accent;
   }, [theme, accent]);
 

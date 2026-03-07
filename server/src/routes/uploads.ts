@@ -43,46 +43,20 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
     const allowedFolders = ['avatars', 'attachments', 'groups']
     const targetFolder = allowedFolders.includes(folder) ? folder : 'misc'
 
-    const allowedTypes = [
-      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
-      'application/pdf', 'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-powerpoint',
-      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/plain',
-      'video/mp4', 'video/quicktime', 'video/x-msvideo',
-      'audio/mpeg', 'audio/wav', 'audio/webm', 'audio/mp3',
-      'application/zip', 'application/x-rar-compressed',
-      'application/octet-stream'
-    ]
-
-    if (!allowedTypes.includes(fileType)) {
-      return res.status(400).json({ error: `File type not allowed: ${fileType}` })
+    // ZERO-KNOWLEDGE PROTOCOL ENFORCEMENT
+    // The server must only accept encrypted binary blobs. 
+    // Allowing specific mime-types leaks metadata about the communication patterns.
+    if (fileType !== 'application/octet-stream') {
+      return res.status(400).json({ error: "Protocol violation: Only encrypted 'application/octet-stream' payloads are permitted." })
     }
 
     const fileSize = req.body.fileSize ? parseInt(req.body.fileSize, 10) : 0
     if (fileSize > 0) {
-      const avatarMaxSize = 5 * 1024 * 1024
-      const imageMaxSize = 15 * 1024 * 1024
-      const videoMaxSize = 100 * 1024 * 1024
-      const documentMaxSize = 50 * 1024 * 1024
-
-      let maxSize: number
-      if (targetFolder === 'avatars') {
-        maxSize = avatarMaxSize
-      } else if (fileType.startsWith('image/')) {
-        maxSize = imageMaxSize
-      } else if (fileType.startsWith('video/')) {
-        maxSize = videoMaxSize
-      } else if (fileType.startsWith('audio/')) {
-        maxSize = videoMaxSize
-      } else if (fileType.startsWith('application/') || fileType === 'text/plain') {
-        maxSize = documentMaxSize
-      } else {
-        maxSize = documentMaxSize
-      }
+      // Unified Zero-Knowledge Limits (in Bytes) based purely on destination folder
+      const AVATAR_LIMIT = 5 * 1024 * 1024;      // 5 MB for avatars
+      const ATTACHMENT_LIMIT = 100 * 1024 * 1024; // 100 MB max for chat attachments (HD Images, Videos, Files)
+      
+      const maxSize = (targetFolder === 'avatars' || targetFolder === 'groups') ? AVATAR_LIMIT : ATTACHMENT_LIMIT;
 
       // Encryption Overhead Buffer (IV + Auth Tag + Margin)
       // AES-GCM adds ~28 bytes. We add 1KB to be safe.
@@ -90,9 +64,9 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
       const allowedMax = maxSize + ENCRYPTION_OVERHEAD;
 
       if (fileSize > allowedMax) {
-        const allowedMaxMB = (allowedMax / (1024 * 1024)).toFixed(2)
+        const allowedMaxMB = (maxSize / (1024 * 1024)).toFixed(0)
         return res.status(400).json({
-          error: `File too large. Maximum size for this file type is ${allowedMaxMB}MB (including encryption overhead).`
+          error: `Payload too large. Maximum size for ${targetFolder} is ${allowedMaxMB}MB.`
         })
       }
     }
@@ -107,13 +81,16 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
     // [FIX] Force Content-Type to octet-stream because file is ENCRYPTED
     const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream')
 
+    // Safe logging - do not log filename
+    // console.log(`[Upload] Presigned URL generated for user ${req.user!.id}`);
+
     res.json({
       uploadUrl,
       key,
       publicUrl: `${env.r2PublicDomain}/${key}`
     })
   } catch (error) {
-    console.error('[PRESIGNED-URL-ERROR]', error)
+    console.error('[PRESIGNED-URL-ERROR] Failed to generate URL')
     next(error)
   }
 })
@@ -135,12 +112,12 @@ router.post(
       if (!fileUrl) throw new ApiError(400, 'Missing fileUrl.')
 
       const participant = await prisma.participant.findFirst({
-        where: { userId: req.user.id, conversationId: groupId }
+        where: { userId: req.user.id, conversationId: groupId as string }
       })
       if (!participant || participant.role !== 'ADMIN') throw new ApiError(403, 'Forbidden: Only admin can change group avatar')
 
       const oldGroup = await prisma.conversation.findUnique({
-        where: { id: groupId },
+        where: { id: groupId as string },
         select: { avatarUrl: true }
       })
 
@@ -149,22 +126,20 @@ router.post(
       }
 
       const updatedConversation = await prisma.conversation.update({
-        where: { id: groupId },
+        where: { id: groupId as string },
         data: { avatarUrl: fileUrl },
         include: {
           participants: {
-            select: {
-              user: { select: { id: true, encryptedProfile: true, publicKey: true } },
-              role: true
+            include: {
+              user: { select: { id: true, encryptedProfile: true, publicKey: true } }
             }
-          },
-          creator: { select: { id: true } }
+          }
         }
       })
 
       const transformedConversation = {
         ...updatedConversation,
-        participants: updatedConversation.participants.map(p => ({ ...p.user, role: p.role }))
+        participants: updatedConversation.participants.map((p: any) => ({ ...p.user, role: p.role }))
       }
 
       getIo().to(groupId).emit('conversation:updated', {

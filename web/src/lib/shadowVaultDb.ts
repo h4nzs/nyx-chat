@@ -6,10 +6,11 @@ import { getMyEncryptionKeyPair } from '@utils/crypto';
 export interface DecryptedMessageRecord {
   id: string;
   conversationId: string;
-  content: string; // ENCRYPTED Base64 string at rest
+  content: string | null; // ENCRYPTED Base64 string at rest
   createdAt: string | Date;
   senderId: string;
   isViewOnce?: boolean;
+  isDeletedLocal?: boolean;
 }
 
 // --- CRYPTO ENGINE FOR IRON VAULT ---
@@ -67,25 +68,95 @@ export class NyxShadowVault extends Dexie {
   }
 
   async upsertMessages(messages: Message[]) {
-    const validMessages = messages.filter(m => m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('['));
+    // Filter messages: Allow if it has content OR it is a tombstone
+    const validMessages = messages.filter(m => (m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('[')) || m.isDeletedLocal);
     if (validMessages.length === 0) return;
 
     try {
       const records: DecryptedMessageRecord[] = [];
       for (const m of validMessages) {
-        const encryptedContent = await encryptVaultText(m.content!);
+        let encryptedContent: string | null = null;
+        if (m.content && !m.isDeletedLocal) {
+            encryptedContent = await encryptVaultText(m.content);
+        }
+        
         records.push({
           id: m.id,
           conversationId: m.conversationId,
           content: encryptedContent, // Iron Vault: Stored as cipher
           createdAt: m.createdAt,
           senderId: m.senderId,
-          isViewOnce: m.isViewOnce
+          isViewOnce: m.isViewOnce,
+          isDeletedLocal: m.isDeletedLocal
         });
       }
       await this.messages.bulkPut(records);
     } catch (err) {
       console.error("Iron Vault Encryption Error:", err);
+    }
+  }
+
+  async getMessagesByConversation(conversationId: string): Promise<Message[]> {
+    try {
+      const records = await this.messages.where('conversationId').equals(conversationId).toArray();
+      const messages: Message[] = [];
+      for (const r of records) {
+        let plainText = null;
+        if (r.content && !r.isDeletedLocal) {
+          plainText = await decryptVaultText(r.content);
+        }
+        messages.push({
+          id: r.id,
+          conversationId: r.conversationId,
+          content: plainText,
+          createdAt: r.createdAt as string,
+          senderId: r.senderId,
+          isViewOnce: r.isViewOnce,
+          isDeletedLocal: r.isDeletedLocal
+        });
+      }
+      return messages;
+    } catch (e) {
+      console.error("Vault Query Error:", e);
+      return [];
+    }
+  }
+
+  async getMessage(id: string): Promise<Message | null> {
+    try {
+      const r = await this.messages.get(id);
+      if (!r) return null;
+      let plainText = null;
+      if (r.content && !r.isDeletedLocal) {
+        plainText = await decryptVaultText(r.content);
+      }
+      return {
+        id: r.id,
+        conversationId: r.conversationId,
+        content: plainText,
+        createdAt: r.createdAt as string,
+        senderId: r.senderId,
+        isViewOnce: r.isViewOnce,
+        isDeletedLocal: r.isDeletedLocal
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async deleteMessage(id: string) {
+    try {
+      await this.messages.delete(id);
+    } catch (e) {
+      console.error("Failed to delete message from vault", e);
+    }
+  }
+
+  async deleteConversationMessages(conversationId: string) {
+    try {
+      await this.messages.where('conversationId').equals(conversationId).delete();
+    } catch (e) {
+      console.error("Failed to delete conversation messages from vault", e);
     }
   }
 }

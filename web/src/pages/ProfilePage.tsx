@@ -1,6 +1,7 @@
 import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore, type User } from '@store/auth';
+import { useShallow } from 'zustand/react/shallow';
 import { authFetch, handleApiError } from '@lib/api';
 import { toAbsoluteUrl } from '@utils/url';
 import { FiEdit2, FiShield, FiCpu, FiGlobe, FiActivity, FiKey, FiCheck, FiArrowLeft } from 'react-icons/fi';
@@ -16,7 +17,9 @@ type ProfileUser = User & {
 export default function ProfilePage() {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
-  const { user: me, updateProfile, updateAvatar } = useAuthStore();
+  const { user: me, updateProfile, updateAvatar } = useAuthStore(useShallow(s => ({
+    user: s.user, updateProfile: s.updateProfile, updateAvatar: s.updateAvatar
+  })));
   
   const [profileUser, setProfileUser] = useState<ProfileUser | null>(null);
   const profile = useUserProfile(profileUser);

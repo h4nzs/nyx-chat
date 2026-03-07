@@ -85,7 +85,7 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
 
     // For security, ensure the token being revoked belongs to the user making the request
     const token = await prisma.refreshToken.findFirst({
-      where: { jti, userId }
+      where: { jti: jti as string, userId: userId as string }
     })
 
     if (!token) {

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
@@ -140,8 +143,10 @@ router.get(
 
       // 1. Fetch User and Bundle
       const userWithBundle = await prisma.user.findUnique({
-        where: { id: userId },
+        where: { id: userId as string },
         select: {
+          id: true,
+          publicKey: true,
           signingKey: true,
           preKeyBundle: true
         }
@@ -157,7 +162,7 @@ router.get(
 
       const otpk = await prisma.$transaction(async (tx) => {
         const key = await tx.oneTimePreKey.findFirst({
-          where: { userId },
+          where: { userId: userId as string },
           orderBy: { createdAt: 'asc' }, // Use oldest first
           select: { id: true, keyId: true, publicKey: true }
         })
@@ -213,9 +218,9 @@ router.get(
 
       const keyRecord = await prisma.sessionKey.findFirst({
         where: {
-          conversationId,
-          sessionId,
-          userId
+          conversationId: conversationId as string,
+          sessionId: sessionId as string,
+          userId: userId as string
         }
       })
 
@@ -226,21 +231,21 @@ router.get(
       // Find the initiator to get their public identity key
       const initiatorRecord = await prisma.sessionKey.findFirst({
         where: {
-          conversationId,
-          sessionId,
+          conversationId: conversationId as string,
+          sessionId: sessionId as string,
           isInitiator: true
         },
         include: { user: { select: { id: true, publicKey: true } } }
       })
 
-      if (!initiatorRecord?.user?.publicKey) {
+      if (!(initiatorRecord as any)?.user?.publicKey) {
         return res.status(404).json({ error: "Initiator's public key could not be found for this session." })
       }
 
       res.json({
         encryptedKey: keyRecord.encryptedKey,
         initiatorEphemeralKey: keyRecord.initiatorEphemeralKey,
-        initiatorIdentityKey: initiatorRecord.user.publicKey
+        initiatorIdentityKey: (initiatorRecord as any).user.publicKey
       })
     } catch (e) {
       next(e)

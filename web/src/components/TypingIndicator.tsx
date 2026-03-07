@@ -1,11 +1,12 @@
 import { usePresenceStore } from '@store/presence';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
+import { useShallow } from 'zustand/react/shallow';
 
 export default function TypingIndicator({ conversationId }: { conversationId: string }) {
-  const { typingIndicators } = usePresenceStore();
-  const { conversations } = useConversationStore();
-  const { user: me } = useAuthStore();
+  const { typingIndicators } = usePresenceStore(useShallow(s => ({ typingIndicators: s.typingIndicators })));
+  const { conversations } = useConversationStore(useShallow(s => ({ conversations: s.conversations })));
+  const { user: me } = useAuthStore(useShallow(s => ({ user: s.user })));
 
   const activeConversation = conversations.find(c => c.id === conversationId);
 

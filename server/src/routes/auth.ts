@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router, Response, CookieOptions } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { hashPassword, verifyPassword } from '../utils/password.js'
@@ -246,7 +249,7 @@ router.post('/refresh', async (req, res, next) => {
       }
     })
     if (!user) throw new ApiError(401, 'User not found')
-    
+
     if (user.bannedAt) {
       throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
     }
@@ -480,7 +483,7 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) => 
       rpName,
       rpID,
       userID: new Uint8Array(Buffer.from(req.user.id)),
-      userName: user?.name || "Anonymous User", 
+      userName: user?.usernameHash || "Anonymous User", 
       attestationType: 'none',
       excludeCredentials,
       authenticatorSelection: {

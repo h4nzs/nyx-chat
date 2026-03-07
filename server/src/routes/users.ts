@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router, CookieOptions } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
@@ -89,7 +92,7 @@ router.put('/me',
         select: { encryptedProfile: true }
       });
 
-      const dataToUpdate: any = {}
+      const dataToUpdate: { encryptedProfile?: string; autoDestructDays?: number | null } = {};
       if (encryptedProfile !== undefined) dataToUpdate.encryptedProfile = encryptedProfile;
       if (autoDestructDays !== undefined) dataToUpdate.autoDestructDays = autoDestructDays;
 
@@ -117,9 +120,13 @@ router.put('/me',
         })
 
         const recipients = new Set<string>()
-        conversations.forEach(c => c.participants.forEach(p => {
-          if (p.userId !== userId) recipients.add(p.userId)
-        }))
+        for (const c of conversations) {
+          for (const p of c.participants) {
+            if (p.userId !== userId) {
+              recipients.add(p.userId);
+            }
+          }
+        }
 
         recipients.forEach(recipientId => {
           getIo().to(recipientId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })

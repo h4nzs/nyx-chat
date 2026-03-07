@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { getSecureLinkPreview, resolveDns } from '../utils/secureLinkPreview.js'
+import { getSecureLinkPreview, resolveDns, validateRedirectChain } from '../utils/secureLinkPreview.js'
 import { requireAuth } from '../middleware/auth.js'
 
 const router: Router = Router()
@@ -30,16 +30,27 @@ router.get('/image', requireAuth, async (req, res, next) => {
   try {
     // 1. SSRF Protection: Ensure the target is a public, safe IP
     await resolveDns(targetUrl);
+    // 1.1 Deep SSRF Check: Validate redirect chain
+    await validateRedirectChain(targetUrl);
 
     // 2. Fetch the image safely with an AbortController (5-second timeout)
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-    const imageRes = await fetch(targetUrl, { 
-      signal: controller.signal,
-      headers: { 'User-Agent': 'NYX-Preview-Bot/1.0', 'Accept': 'image/*' }
-    });
-    clearTimeout(timeoutId);
+    let imageRes;
+    try {
+      imageRes = await fetch(targetUrl, { 
+        signal: controller.signal,
+        redirect: 'manual', // <--- CRITICAL FIX
+        headers: { 'User-Agent': 'NYX-Preview-Bot/1.0', 'Accept': 'image/*' }
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    if (imageRes.status >= 300 && imageRes.status < 400) {
+      throw new Error('Redirects are not allowed for security reasons (SSRF protection).');
+    }
 
     if (!imageRes.ok) throw new Error(`Target responded with ${imageRes.status}`);
 

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { Server, Socket } from "socket.io";
 import type { Server as HttpServer } from "http";
 import { env } from "./config.js";
@@ -5,7 +8,7 @@ import { prisma } from "./lib/prisma.js";
 import { verifyJwt, signAccessToken, newJti, refreshExpiryDate } from "./utils/jwt.js";
 import { sendPushNotification } from "./utils/sendPushNotification.js";
 import { redisClient } from "./lib/redis.js"; // Client untuk data aplikasi (Presence, dll)
-import { Message } from "@prisma/client";
+import type { Message } from "@prisma/client";
 import { AuthPayload } from "./types/auth.js";
 import cookie from "cookie"; 
 import crypto from "crypto";
@@ -383,9 +386,7 @@ export function registerSocket(httpServer: HttpServer) {
           
           if (participant.userId !== userId) {
              sendPushNotification(participant.userId, {
-                 title: "Encrypted Message",
-                 body: "🔒 1 New Secure Message", 
-                 conversationId: conversationId
+                 data: { conversationId, messageId: newMessage.id }
              }).catch(console.error);
           }
         });
@@ -411,17 +412,28 @@ export function registerSocket(httpServer: HttpServer) {
     });
 
     socket.on('message:mark_as_read', async ({ messageId, conversationId }: MarkAsReadPayload) => {
-      if (!messageId) return;
+      if (!messageId || !socket.user) return;
+      const userId = socket.user.id;
+
       try {
+        const msg = await prisma.message.findUnique({ select: { id: true, conversationId: true }, where: { id: messageId } });
+        if (!msg || msg.conversationId !== conversationId) return;
+
+        const isParticipant = await prisma.participant.findFirst({ where: { conversationId, userId } });
+        if (!isParticipant) return;
+
         await prisma.messageStatus.upsert({
           where: { messageId_userId: { messageId, userId } },
           update: { status: 'READ' },
           create: { messageId, userId, status: 'READ' },
         });
+        
+        // Fetch full message metadata only if needed for broadcast
         const message = await prisma.message.findUnique({
           where: { id: messageId },
           select: { senderId: true, conversationId: true },
         });
+        
         if (message && message.senderId !== userId) {
           io.to(message.senderId).emit('message:status_updated', {
             messageId,
@@ -439,6 +451,15 @@ export function registerSocket(httpServer: HttpServer) {
     
     socket.on('group:request_key', async ({ conversationId }: GroupKeyRequestPayload) => {
       if (!conversationId) return;
+      
+      const isParticipant = await prisma.participant.findFirst({
+        where: { conversationId, userId: socket.user!.id }
+      });
+      if (!isParticipant) {
+        console.warn(`[Socket] Unauthorized key request from ${socket.user!.id}`);
+        return;
+      }
+
       try {
         const participants = await prisma.participant.findMany({
           where: { conversationId, userId: { not: userId } },
@@ -498,6 +519,15 @@ export function registerSocket(httpServer: HttpServer) {
 
     socket.on('session:request_key', async ({ conversationId, sessionId }: KeyRequestPayload) => {
       if (!conversationId || !sessionId) return;
+
+      const isParticipant = await prisma.participant.findFirst({
+        where: { conversationId, userId: socket.user!.id }
+      });
+      if (!isParticipant) {
+        console.warn(`[Socket] Unauthorized key request from ${socket.user!.id}`);
+        return;
+      }
+
       try {
         const participants = await prisma.participant.findMany({
           where: { conversationId, userId: { not: userId } },

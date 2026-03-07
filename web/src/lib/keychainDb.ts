@@ -1,4 +1,6 @@
-
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { openDB, IDBPDatabase } from 'idb';
 
 const SESSION_KEYS_STORE_NAME = 'session-keys';
@@ -88,6 +90,18 @@ function getDb(): Promise<IDBPDatabase> {
   }
   
   return dbCache.get(userId)!;
+}
+
+export async function closeDatabaseConnection() {
+  const savedUser = localStorage.getItem("user");
+  const user = savedUser ? JSON.parse(savedUser) : null;
+  const userId = user?.id;
+  
+  if (userId && dbCache.has(userId)) {
+    const db = await dbCache.get(userId)!;
+    db.close();
+    dbCache.delete(userId);
+  }
 }
 
 // ... existing helpers ...
@@ -317,6 +331,42 @@ export async function deleteSkippedKey(headerKey: string): Promise<void> {
 }
 
 /**
+ * Deletes the encrypted RatchetState for a conversation.
+ */
+export async function deleteRatchetSession(conversationId: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(RATCHET_SESSIONS_STORE_NAME, conversationId);
+}
+
+/**
+ * Deletes all session keys for a conversation.
+ */
+export async function deleteSessionKeys(conversationId: string): Promise<void> {
+  const db = await getDb();
+  await db.delete(SESSION_KEYS_STORE_NAME, conversationId);
+}
+
+/**
+ * Deletes all group receiver states for a conversation.
+ */
+export async function deleteGroupReceiverStates(conversationId: string): Promise<void> {
+  const db = await getDb();
+  const tx = db.transaction(GROUP_RECEIVER_STATES_STORE, 'readwrite');
+  const store = tx.objectStore(GROUP_RECEIVER_STATES_STORE);
+  
+  // Use a cursor to find all records starting with conversationId_
+  const range = IDBKeyRange.bound(conversationId + "_", conversationId + "_\uffff");
+  let cursor = await store.openCursor(range);
+  
+  while (cursor) {
+    await cursor.delete();
+    cursor = await cursor.continue();
+  }
+  
+  await tx.done;
+}
+
+/**
  * Stores an encrypted Message Key locally for history decryption.
  */
 export async function storeMessageKey(messageId: string, encryptedMk: Uint8Array): Promise<void> {
@@ -338,6 +388,20 @@ export async function getMessageKey(messageId: string): Promise<Uint8Array | nul
 export async function deleteMessageKey(messageId: string): Promise<void> {
   const db = await getDb();
   await db.delete(MESSAGE_KEYS_STORE_NAME, messageId);
+}
+
+/**
+ * Clears all data related to a conversation from the keychain.
+ */
+export async function deleteConversationKeychain(conversationId: string): Promise<void> {
+  await Promise.all([
+    deleteSessionKeys(conversationId),
+    deleteGroupKey(conversationId),
+    deleteRatchetSession(conversationId),
+    deletePendingHeader(conversationId),
+    deleteGroupSenderState(conversationId),
+    deleteGroupReceiverStates(conversationId)
+  ]);
 }
 
 export async function saveProfileKey(userId: string, keyB64: string): Promise<void> {

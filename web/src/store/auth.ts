@@ -1,3 +1,6 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { createWithEqualityFn } from "zustand/traditional";
 import { authFetch, api, apiUpload } from "@lib/api";
 import { disconnectSocket, connectSocket } from "@lib/socket";
@@ -149,19 +152,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           }
         });
 
-        useModalStore.getState().showPasswordPrompt(async (result) => {
+        useModalStore.getState().showPasswordPrompt(async (password) => {
           cleanup();
-          if (!result) { reject(new Error("Password not provided.")); return; }
-          if (result.mode === 'decoy') {
-             // Let the interceptor in App.tsx / login handler manage the decoy state
-             resolve({
-                 encryption: new Uint8Array(32),
-                 signing: new Uint8Array(64),
-                 signedPreKey: new Uint8Array(32)
-             } as RetrievedKeys); 
-             return;
-          }
-          const password = result.password;
           if (!password) { reject(new Error("Password not provided.")); return; }
 
           try {

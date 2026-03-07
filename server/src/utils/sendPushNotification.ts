@@ -11,7 +11,15 @@ export async function sendPushNotification (userId: string, payload: object) {
     const subscriptions = await prisma.pushSubscription.findMany({ where: { userId } })
     if (subscriptions.length === 0) return
 
-    const payloadString = JSON.stringify(payload)
+    const safePayload = {
+      title: "New Secure Message",
+      body: "You received a new encrypted message.",
+      data: {
+        conversationId: payload['data']?.conversationId,
+        messageId: payload['data']?.messageId
+      }
+    };
+    const payloadString = JSON.stringify(safePayload);
 
     const notifications = subscriptions.map(sub =>
       webpush.sendNotification(
