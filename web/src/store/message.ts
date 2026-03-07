@@ -796,8 +796,22 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       try {
         const { getSodium } = await import('@lib/sodiumInitializer');
         const sodium = await getSodium();
-        const myProfile = useAuthStore.getState().user as any;
-        const myName = myProfile?.decryptedProfile?.name || myProfile?.name || 'Someone';
+        
+        const myAuthUser = useAuthStore.getState().user;
+        let myName = 'Someone';
+
+        if (myAuthUser?.encryptedProfile) {
+           try {
+              const profileStore = (await import('@store/profile')).useProfileStore.getState();
+              // We pass null for profileKey fallback internally inside decryptAndCache
+              const myDecrypted = await profileStore.decryptAndCache(myAuthUser.id, myAuthUser.encryptedProfile);
+              if (myDecrypted && myDecrypted.name !== "Encrypted User") {
+                  myName = myDecrypted.name;
+              }
+           } catch (e) {
+              console.error("Failed to decrypt own profile for push", e);
+           }
+        }
 
         // Prepare the basic push content
         let pushBody = "Sent a secure message";
