@@ -125,19 +125,18 @@ router.post('/', async (req, res, next) => {
       if (!isVerified) {
           const today = new Date().toISOString().split('T')[0];
           const key = `sandbox:newchat:${creatorId}:${today}`;
-          const count = await redisClient.incr(key);
-          if (count === 1) {
-              try {
-                  await redisClient.expire(key, 86400); // Expire in 24 hours
-              } catch (expireError) {
-                  // Rollback if TTL fails
-                  const decrCount = await redisClient.decr(key);
-                  if (decrCount <= 0) await redisClient.del(key);
-                  throw expireError;
-              }
-          }
+          
+          // Atomic INCR + EXPIRE via Lua Script
+          // Returns the new count. Sets TTL only on first increment (count == 1).
+          const count = await redisClient.eval(
+            "local c = redis.call('INCR', KEYS[1]); if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end; return c",
+            {
+              keys: [key],
+              arguments: ['86400'] // 24 hours
+            }
+          ) as number;
+
           if (count > 3) {
-              try { await redisClient.decr(key); } catch (e) { /* ignore */ } // Rollback increment
               throw new ApiError(429, 'SANDBOX_NEW_CHAT_LIMIT: Max 3 new conversations per day.');
           }
       }
