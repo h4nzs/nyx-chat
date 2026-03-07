@@ -62,13 +62,28 @@ export const cleanupCall = () => {
   useCallStore.getState().endCall();
 };
 
+const sendSecureSignal = async (to: string, type: string, payload: object = {}) => {
+  const callKey = useCallStore.getState().ephemeralCallKey;
+  if (!callKey) {
+    console.error(`Cannot send secure signal ${type}: Missing Call Key`);
+    return;
+  }
+  try {
+    const { encryptCallSignal } = await import('../utils/crypto');
+    const encryptedPayload = await encryptCallSignal(payload, callKey);
+    getSocket()?.emit('webrtc:secure_signal', { to, type, payload: encryptedPayload });
+  } catch (e) {
+    console.error(`Failed to encrypt signal ${type}`, e);
+  }
+};
+
 const createPeerConnection = (targetUserId: string) => {
   const pc = new RTCPeerConnection(ICE_SERVERS);
   peerConnection = pc;
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
-      getSocket()?.emit('webrtc:ice-candidate', { to: targetUserId, candidate: event.candidate });
+      sendSecureSignal(targetUserId, 'ice-candidate', { candidate: event.candidate });
     }
   };
 
@@ -102,11 +117,30 @@ const getMediaStream = async (video: boolean) => {
 
 export const startCall = async (to: string, isVideo: boolean, callerProfile: any) => {
   try {
-    useCallStore.getState().setOutgoingCall(to, isVideo, callerProfile);
+    const { generateCallKey, encryptCallSignal } = await import('../utils/crypto');
+    const callKey = await generateCallKey();
+    
+    useCallStore.getState().setOutgoingCall(to, isVideo, callerProfile, callKey);
+
+    // 1. Send Key via Ratcheted Double-Ratchet Channel (Silent Message)
+    const { useMessageStore } = await import('../store/message');
+    await useMessageStore.getState().sendMessage(to, { 
+       content: JSON.stringify({ type: 'CALL_INIT', key: callKey }), 
+       isSilent: true 
+    });
+
+    // Brief delay to ensure the key message hits the socket first
+    await new Promise(r => setTimeout(r, 500));
+
     const stream = await getMediaStream(isVideo);
     const pc = createPeerConnection(to);
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-    getSocket()?.emit('call:request', { to, isVideo, callerProfile });
+    
+    // 2. Encrypt the signaling metadata and send via unified event
+    const payload = { isVideo, callerProfile };
+    const encryptedPayload = await encryptCallSignal(payload, callKey);
+    
+    getSocket()?.emit('webrtc:secure_signal', { to, type: 'request', payload: encryptedPayload });
   } catch (err) {
     console.error('Failed to start call', err);
     cleanupCall();
@@ -123,7 +157,7 @@ export const acceptCall = async () => {
     const pc = createPeerConnection(remoteUserId);
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
     
-    getSocket()?.emit('call:accept', { to: remoteUserId });
+    sendSecureSignal(remoteUserId, 'accept');
     useCallStore.getState().setCallState('connected');
   } catch (err) {
     console.error('Failed to accept call', err);
@@ -133,74 +167,89 @@ export const acceptCall = async () => {
 
 export const rejectCall = () => {
   const remoteUserId = useCallStore.getState().remoteUserId;
-  if (remoteUserId) getSocket()?.emit('call:reject', { to: remoteUserId });
+  if (remoteUserId) sendSecureSignal(remoteUserId, 'reject', { reason: 'declined' });
   cleanupCall();
 };
 
 export const hangup = () => {
   const remoteUserId = useCallStore.getState().remoteUserId;
-  if (remoteUserId) getSocket()?.emit('call:end', { to: remoteUserId });
+  if (remoteUserId) sendSecureSignal(remoteUserId, 'end');
   cleanupCall();
 };
 
 export const initWebRTCListeners = (socket: any) => {
   if (!socket) return;
-  
-  // Prevent duplicates natively via socket.io instead of a global boolean
-  if (socket.listeners('call:incoming').length > 0) return;
 
-  socket.on('call:incoming', (data: { from: string, isVideo: boolean, callerProfile: any }) => {
-    const currentState = useCallStore.getState().callState;
-    if (currentState === 'idle') {
-      useCallStore.getState().setIncomingCall(data.from, data.isVideo, data.callerProfile);
-    } else {
-      socket.emit('call:reject', { to: data.from, reason: 'busy' });
+  if (socket.listeners('webrtc:secure_signal').length > 0) return;
+
+  socket.on('webrtc:secure_signal', async (data: { from: string, type: string, payload: string }) => {
+    const state = useCallStore.getState();
+    const callKey = state.ephemeralCallKey;
+
+    // For 'request', the receiver MUST have the key already (sent via ratcheted message just before)
+    if (!callKey) {
+        console.warn(`Received secure signal ${data.type} but missing call key. Dropping.`);
+        return;
     }
-  });
 
-  socket.on('call:accepted', async (data: { from: string }) => {
-    useCallStore.getState().setCallState('connected');
-    if (!peerConnection) return;
     try {
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      socket.emit('webrtc:offer', { to: data.from, offer });
-    } catch (e) {
-      console.error('Failed to create offer', e);
-      cleanupCall();
-    }
-  });
+        const { decryptCallSignal } = await import('../utils/crypto');
+        const decryptedPayload = await decryptCallSignal(data.payload, callKey);
 
-  socket.on('call:rejected', cleanupCall);
-  socket.on('call:ended', cleanupCall);
-
-  socket.on('webrtc:offer', async (data: { from: string, offer: RTCSessionDescriptionInit }) => {
-    if (!peerConnection) return;
-    try {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      socket.emit('webrtc:answer', { to: data.from, answer });
+        switch (data.type) {
+            case 'request':
+                if (state.callState === 'idle') {
+                    useCallStore.getState().setIncomingCall(data.from, decryptedPayload.isVideo, decryptedPayload.callerProfile, callKey);
+                } else {
+                    sendSecureSignal(data.from, 'reject', { reason: 'busy' });
+                }
+                break;
+            case 'accept':
+                useCallStore.getState().setCallState('connected');
+                if (!peerConnection) return;
+                try {
+                  const offer = await peerConnection.createOffer();
+                  await peerConnection.setLocalDescription(offer);
+                  sendSecureSignal(data.from, 'offer', { offer });
+                } catch (e) {
+                  console.error('Failed to create offer', e);
+                  cleanupCall();
+                }
+                break;
+            case 'reject':
+            case 'end':
+                cleanupCall();
+                break;
+            case 'offer':
+                if (!peerConnection) return;
+                try {
+                  await peerConnection.setRemoteDescription(new RTCSessionDescription(decryptedPayload.offer));
+                  const answer = await peerConnection.createAnswer();
+                  await peerConnection.setLocalDescription(answer);
+                  sendSecureSignal(data.from, 'answer', { answer });
+                } catch (e) {
+                  console.error('Failed to handle offer', e);
+                }
+                break;
+            case 'answer':
+                if (!peerConnection) return;
+                try {
+                  await peerConnection.setRemoteDescription(new RTCSessionDescription(decryptedPayload.answer));
+                } catch (e) {
+                  console.error('Failed to handle answer', e);
+                }
+                break;
+            case 'ice-candidate':
+                if (!peerConnection) return;
+                try {
+                  await peerConnection.addIceCandidate(new RTCIceCandidate(decryptedPayload.candidate));
+                } catch (e) {
+                  console.error('Failed to add ice candidate', e);
+                }
+                break;
+        }
     } catch (e) {
-      console.error('Failed to handle offer', e);
-    }
-  });
-
-  socket.on('webrtc:answer', async (data: { from: string, answer: RTCSessionDescriptionInit }) => {
-    if (!peerConnection) return;
-    try {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-    } catch (e) {
-      console.error('Failed to handle answer', e);
-    }
-  });
-
-  socket.on('webrtc:ice-candidate', async (data: { from: string, candidate: RTCIceCandidateInit }) => {
-    if (!peerConnection) return;
-    try {
-      await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-    } catch (e) {
-      console.error('Failed to add ice candidate', e);
+        console.error(`Failed to decrypt and process secure signal ${data.type}`, e);
     }
   });
 };

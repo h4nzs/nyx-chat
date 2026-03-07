@@ -351,13 +351,16 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
   return null;
 }
 
-function parseSilent(content: string | null | undefined): { text: string } | null {
+function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string } | null {
   if (!content) return null;
   try {
     const trimmed = content.trim();
-    if (!trimmed.startsWith('{') || !trimmed.includes('"type":"silent"')) return null;
+    if (!trimmed.startsWith('{')) return null;
     const payload = JSON.parse(trimmed);
-    if (payload.type === 'silent' && typeof payload.text === 'string') {
+    if (payload.type === 'silent') {
+      return payload;
+    }
+    if (payload.type === 'CALL_INIT' && typeof payload.key === 'string') {
       return payload;
     }
   } catch (e) {}
@@ -1205,7 +1208,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const silentPayload = parseSilent(decrypted.content);
 
       if (silentPayload) {
-          decrypted.content = silentPayload.text;
+          if (silentPayload.type === 'CALL_INIT' && silentPayload.key) {
+             import('@store/callStore').then(m => {
+                // ✅ CORRECT: Only store the key silently, let the socket event trigger the ringing UI
+                m.useCallStore.getState().setCallKey(silentPayload.key!);
+             });
+             return decrypted; // Stop processing, don't add to UI
+          }
+          decrypted.content = silentPayload.text || '';
           decrypted.isSilent = true;
       }
       

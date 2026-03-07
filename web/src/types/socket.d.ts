@@ -48,14 +48,8 @@ export interface ServerToClientEvents {
     force_logout: () => void;
     'user:identity_changed': (data: { userId: string; name: string }) => void;
 
-    // --- WEBRTC SIGNALING ---
-    "call:incoming": (payload: { from: string; isVideo: boolean; callerProfile: any }) => void;
-    "call:accepted": (payload: { from: string }) => void;
-    "call:rejected": (payload: { from: string; reason?: string }) => void;
-    "call:ended": (payload: { from: string }) => void;
-    "webrtc:offer": (payload: { from: string; offer: RTCSessionDescriptionInit }) => void;
-    "webrtc:answer": (payload: { from: string; answer: RTCSessionDescriptionInit }) => void;
-    "webrtc:ice-candidate": (payload: { from: string; candidate: RTCIceCandidateInit }) => void;
+    // --- WEBRTC E2EE SIGNALING ---
+    "webrtc:secure_signal": (payload: { from: string; type: string; payload: string }) => void;
 
     // --- DEVICE MIGRATION TUNNEL (SERVER -> CLIENT) ---
     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
@@ -94,14 +88,8 @@ export interface ClientToServerEvents {
     }) => void;
     "push:unsubscribe": () => void;
     
-    // --- WEBRTC SIGNALING ---
-    "call:request": (payload: { to: string; isVideo: boolean; callerProfile: any }) => void;
-    "call:accept": (payload: { to: string }) => void;
-    "call:reject": (payload: { to: string; reason?: string }) => void;
-    "call:end": (payload: { to: string }) => void;
-    "webrtc:offer": (payload: { to: string; offer: RTCSessionDescriptionInit }) => void;
-    "webrtc:answer": (payload: { to: string; answer: RTCSessionDescriptionInit }) => void;
-    "webrtc:ice-candidate": (payload: { to: string; candidate: RTCIceCandidateInit }) => void;
+    // --- WEBRTC E2EE SIGNALING ---
+    "webrtc:secure_signal": (payload: { to: string; type: string; payload: string }) => void;
     
     // --- DEVICE MIGRATION TUNNEL (CLIENT -> SERVER) ---
     "migration:join": (roomId: string) => void;

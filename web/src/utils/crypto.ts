@@ -256,7 +256,78 @@ const KEY_REQUEST_TIMEOUT_MS = 15000; // 15 seconds
 const pendingGroupSessionPromises = new Map<string, Promise<any[] | null>>();
 const groupSessionLocks = new Set<string>();
 
-// --- Dynamic Import Helpers ---
+// --- E2EE WebRTC Signaling Helpers ---
+
+export async function generateCallKey(): Promise<string> {
+  const key = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  );
+  const exported = await crypto.subtle.exportKey('raw', key);
+  const { getSodium } = await import('@lib/sodiumInitializer');
+  const sodium = await getSodium();
+  return sodium.to_base64(new Uint8Array(exported), sodium.base64_variants.URLSAFE_NO_PADDING);
+}
+
+export async function encryptCallSignal(payload: object, base64Key: string): Promise<string> {
+  const { getSodium } = await import('@lib/sodiumInitializer');
+  const sodium = await getSodium();
+  const keyBytes = sodium.from_base64(base64Key, sodium.base64_variants.URLSAFE_NO_PADDING);
+  
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt']
+  );
+
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encodedPayload = new TextEncoder().encode(JSON.stringify(payload));
+  
+  const encryptedBuf = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    cryptoKey,
+    encodedPayload
+  );
+
+  const encryptedBytes = new Uint8Array(encryptedBuf);
+  const combined = new Uint8Array(iv.length + encryptedBytes.length);
+  combined.set(iv, 0);
+  combined.set(encryptedBytes, iv.length);
+
+  return sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
+}
+
+export async function decryptCallSignal(encryptedStr: string, base64Key: string): Promise<any> {
+  const { getSodium } = await import('@lib/sodiumInitializer');
+  const sodium = await getSodium();
+  const keyBytes = sodium.from_base64(base64Key, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const combined = sodium.from_base64(encryptedStr, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+  const iv = combined.slice(0, 12);
+  const encryptedBytes = combined.slice(12);
+
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt']
+  );
+
+  const decryptedBuf = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    cryptoKey,
+    encryptedBytes
+  );
+
+  const jsonStr = new TextDecoder().decode(decryptedBuf);
+  return JSON.parse(jsonStr);
+}
+
+// --- End E2EE WebRTC Signaling Helpers ---
 async function getWorkerProxy() {
   return import('@lib/crypto-worker-proxy');
 }

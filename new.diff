@@ -1,0 +1,503 @@
+diff --git a/server/src/socket.ts b/server/src/socket.ts
+index d9d64095..5072860e 100644
+--- a/server/src/socket.ts
++++ b/server/src/socket.ts
+@@ -566,40 +566,11 @@ export function registerSocket(httpServer: HttpServer) {
+       });
+     });
+ 
+-    // === WEBRTC SIGNALING (P2P CALLS) ===
+-    socket.on('call:request', (data: { to: string, isVideo: boolean, callerProfile: any }) => {
++    // === WEBRTC E2EE SIGNALING (P2P CALLS) ===
++    socket.on('webrtc:secure_signal', (data: { to: string, type: string, payload: string }) => {
+       if (!data || !data.to) return;
+-      socket.to(data.to).emit('call:incoming', { from: userId, isVideo: data.isVideo, callerProfile: data.callerProfile });
+-    });
+-
+-    socket.on('call:accept', (data: { to: string }) => {
+-      if (!data || !data.to) return;
+-      socket.to(data.to).emit('call:accepted', { from: userId });
+-    });
+-
+-    socket.on('call:reject', (data: { to: string, reason?: string }) => {
+-      if (!data || !data.to) return;
+-      socket.to(data.to).emit('call:rejected', { from: userId, reason: data.reason || 'declined' });
+-    });
+-
+-    socket.on('call:end', (data: { to: string }) => {
+-      if (!data || !data.to) return;
+-      socket.to(data.to).emit('call:ended', { from: userId });
+-    });
+-
+-    socket.on('webrtc:offer', (data: { to: string, offer: RTCSessionDescriptionInit }) => {
+-      if (!data || !data.to) return;
+-      socket.to(data.to).emit('webrtc:offer', { from: userId, offer: data.offer });
+-    });
+-
+-    socket.on('webrtc:answer', (data: { to: string, answer: RTCSessionDescriptionInit }) => {
+-      if (!data || !data.to) return;
+-      socket.to(data.to).emit('webrtc:answer', { from: userId, answer: data.answer });
+-    });
+-
+-    socket.on('webrtc:ice-candidate', (data: { to: string, candidate: RTCIceCandidateInit }) => {
+-      if (!data || !data.to) return;
+-      socket.to(data.to).emit('webrtc:ice-candidate', { from: userId, candidate: data.candidate });
++      // Server is completely blind to the payload (contains offer/answer/ice/profile)
++      socket.to(data.to).emit('webrtc:secure_signal', { from: userId, type: data.type, payload: data.payload });
+     });
+ 
+     // === DEVICE MIGRATION TUNNEL ===
+diff --git a/web/src/lib/webrtc.ts b/web/src/lib/webrtc.ts
+index 0a5a0c98..30e7e9a6 100644
+--- a/web/src/lib/webrtc.ts
++++ b/web/src/lib/webrtc.ts
+@@ -62,13 +62,28 @@ export const cleanupCall = () => {
+   useCallStore.getState().endCall();
+ };
+ 
++const sendSecureSignal = async (to: string, type: string, payload: object = {}) => {
++  const callKey = useCallStore.getState().ephemeralCallKey;
++  if (!callKey) {
++    console.error(`Cannot send secure signal ${type}: Missing Call Key`);
++    return;
++  }
++  try {
++    const { encryptCallSignal } = await import('../utils/crypto');
++    const encryptedPayload = await encryptCallSignal(payload, callKey);
++    getSocket()?.emit('webrtc:secure_signal', { to, type, payload: encryptedPayload });
++  } catch (e) {
++    console.error(`Failed to encrypt signal ${type}`, e);
++  }
++};
++
+ const createPeerConnection = (targetUserId: string) => {
+   const pc = new RTCPeerConnection(ICE_SERVERS);
+   peerConnection = pc;
+ 
+   pc.onicecandidate = (event) => {
+     if (event.candidate) {
+-      getSocket()?.emit('webrtc:ice-candidate', { to: targetUserId, candidate: event.candidate });
++      sendSecureSignal(targetUserId, 'ice-candidate', { candidate: event.candidate });
+     }
+   };
+ 
+@@ -102,11 +117,30 @@ const getMediaStream = async (video: boolean) => {
+ 
+ export const startCall = async (to: string, isVideo: boolean, callerProfile: any) => {
+   try {
+-    useCallStore.getState().setOutgoingCall(to, isVideo, callerProfile);
++    const { generateCallKey, encryptCallSignal } = await import('../utils/crypto');
++    const callKey = await generateCallKey();
++    
++    useCallStore.getState().setOutgoingCall(to, isVideo, callerProfile, callKey);
++
++    // 1. Send Key via Ratcheted Double-Ratchet Channel (Silent Message)
++    const { useMessageStore } = await import('../store/message');
++    await useMessageStore.getState().sendMessage(to, { 
++       content: JSON.stringify({ type: 'CALL_INIT', key: callKey }), 
++       isSilent: true 
++    });
++
++    // Brief delay to ensure the key message hits the socket first
++    await new Promise(r => setTimeout(r, 500));
++
+     const stream = await getMediaStream(isVideo);
+     const pc = createPeerConnection(to);
+     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+-    getSocket()?.emit('call:request', { to, isVideo, callerProfile });
++    
++    // 2. Encrypt the signaling metadata and send via unified event
++    const payload = { isVideo, callerProfile };
++    const encryptedPayload = await encryptCallSignal(payload, callKey);
++    
++    getSocket()?.emit('webrtc:secure_signal', { to, type: 'request', payload: encryptedPayload });
+   } catch (err) {
+     console.error('Failed to start call', err);
+     cleanupCall();
+@@ -123,7 +157,7 @@ export const acceptCall = async () => {
+     const pc = createPeerConnection(remoteUserId);
+     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+     
+-    getSocket()?.emit('call:accept', { to: remoteUserId });
++    sendSecureSignal(remoteUserId, 'accept');
+     useCallStore.getState().setCallState('connected');
+   } catch (err) {
+     console.error('Failed to accept call', err);
+@@ -133,74 +167,89 @@ export const acceptCall = async () => {
+ 
+ export const rejectCall = () => {
+   const remoteUserId = useCallStore.getState().remoteUserId;
+-  if (remoteUserId) getSocket()?.emit('call:reject', { to: remoteUserId });
++  if (remoteUserId) sendSecureSignal(remoteUserId, 'reject', { reason: 'declined' });
+   cleanupCall();
+ };
+ 
+ export const hangup = () => {
+   const remoteUserId = useCallStore.getState().remoteUserId;
+-  if (remoteUserId) getSocket()?.emit('call:end', { to: remoteUserId });
++  if (remoteUserId) sendSecureSignal(remoteUserId, 'end');
+   cleanupCall();
+ };
+ 
+ export const initWebRTCListeners = (socket: any) => {
+   if (!socket) return;
+-  
+-  // Prevent duplicates natively via socket.io instead of a global boolean
+-  if (socket.listeners('call:incoming').length > 0) return;
+-
+-  socket.on('call:incoming', (data: { from: string, isVideo: boolean, callerProfile: any }) => {
+-    const currentState = useCallStore.getState().callState;
+-    if (currentState === 'idle') {
+-      useCallStore.getState().setIncomingCall(data.from, data.isVideo, data.callerProfile);
+-    } else {
+-      socket.emit('call:reject', { to: data.from, reason: 'busy' });
+-    }
+-  });
+-
+-  socket.on('call:accepted', async (data: { from: string }) => {
+-    useCallStore.getState().setCallState('connected');
+-    if (!peerConnection) return;
+-    try {
+-      const offer = await peerConnection.createOffer();
+-      await peerConnection.setLocalDescription(offer);
+-      socket.emit('webrtc:offer', { to: data.from, offer });
+-    } catch (e) {
+-      console.error('Failed to create offer', e);
+-      cleanupCall();
+-    }
+-  });
+ 
+-  socket.on('call:rejected', cleanupCall);
+-  socket.on('call:ended', cleanupCall);
++  if (socket.listeners('webrtc:secure_signal').length > 0) return;
+ 
+-  socket.on('webrtc:offer', async (data: { from: string, offer: RTCSessionDescriptionInit }) => {
+-    if (!peerConnection) return;
+-    try {
+-      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+-      const answer = await peerConnection.createAnswer();
+-      await peerConnection.setLocalDescription(answer);
+-      socket.emit('webrtc:answer', { to: data.from, answer });
+-    } catch (e) {
+-      console.error('Failed to handle offer', e);
+-    }
+-  });
++  socket.on('webrtc:secure_signal', async (data: { from: string, type: string, payload: string }) => {
++    const state = useCallStore.getState();
++    const callKey = state.ephemeralCallKey;
+ 
+-  socket.on('webrtc:answer', async (data: { from: string, answer: RTCSessionDescriptionInit }) => {
+-    if (!peerConnection) return;
+-    try {
+-      await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+-    } catch (e) {
+-      console.error('Failed to handle answer', e);
++    // For 'request', the receiver MUST have the key already (sent via ratcheted message just before)
++    if (!callKey) {
++        console.warn(`Received secure signal ${data.type} but missing call key. Dropping.`);
++        return;
+     }
+-  });
+ 
+-  socket.on('webrtc:ice-candidate', async (data: { from: string, candidate: RTCIceCandidateInit }) => {
+-    if (!peerConnection) return;
+     try {
+-      await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
++        const { decryptCallSignal } = await import('../utils/crypto');
++        const decryptedPayload = await decryptCallSignal(data.payload, callKey);
++
++        switch (data.type) {
++            case 'request':
++                if (state.callState === 'idle') {
++                    useCallStore.getState().setIncomingCall(data.from, decryptedPayload.isVideo, decryptedPayload.callerProfile, callKey);
++                } else {
++                    sendSecureSignal(data.from, 'reject', { reason: 'busy' });
++                }
++                break;
++            case 'accept':
++                useCallStore.getState().setCallState('connected');
++                if (!peerConnection) return;
++                try {
++                  const offer = await peerConnection.createOffer();
++                  await peerConnection.setLocalDescription(offer);
++                  sendSecureSignal(data.from, 'offer', { offer });
++                } catch (e) {
++                  console.error('Failed to create offer', e);
++                  cleanupCall();
++                }
++                break;
++            case 'reject':
++            case 'end':
++                cleanupCall();
++                break;
++            case 'offer':
++                if (!peerConnection) return;
++                try {
++                  await peerConnection.setRemoteDescription(new RTCSessionDescription(decryptedPayload.offer));
++                  const answer = await peerConnection.createAnswer();
++                  await peerConnection.setLocalDescription(answer);
++                  sendSecureSignal(data.from, 'answer', { answer });
++                } catch (e) {
++                  console.error('Failed to handle offer', e);
++                }
++                break;
++            case 'answer':
++                if (!peerConnection) return;
++                try {
++                  await peerConnection.setRemoteDescription(new RTCSessionDescription(decryptedPayload.answer));
++                } catch (e) {
++                  console.error('Failed to handle answer', e);
++                }
++                break;
++            case 'ice-candidate':
++                if (!peerConnection) return;
++                try {
++                  await peerConnection.addIceCandidate(new RTCIceCandidate(decryptedPayload.candidate));
++                } catch (e) {
++                  console.error('Failed to add ice candidate', e);
++                }
++                break;
++        }
+     } catch (e) {
+-      console.error('Failed to add ice candidate', e);
++        console.error(`Failed to decrypt and process secure signal ${data.type}`, e);
+     }
+   });
+ };
+\ No newline at end of file
+diff --git a/web/src/store/callStore.ts b/web/src/store/callStore.ts
+index 0777001f..4a51c051 100644
+--- a/web/src/store/callStore.ts
++++ b/web/src/store/callStore.ts
+@@ -11,18 +11,19 @@ interface CallStoreState {
+   localStream: MediaStream | null;
+   remoteStream: MediaStream | null;
+   isMinimized: boolean;
+-  
++  ephemeralCallKey: string | null;
++
+   setCallState: (state: CallState) => void;
+-  setIncomingCall: (from: string, isVideo: boolean, profile: any) => void;
+-  setOutgoingCall: (to: string, isVideo: boolean, profile: any) => void;
++  setIncomingCall: (from: string, isVideo: boolean, profile: any, key?: string) => void;
++  setOutgoingCall: (to: string, isVideo: boolean, profile: any, key: string) => void;
+   setLocalStream: (stream: MediaStream | null) => void;
+   setRemoteStream: (stream: MediaStream | null) => void;
+   toggleMinimize: () => void;
+   setMinimized: (minimized: boolean) => void;
+   endCall: () => void;
+-}
++  }
+ 
+-export const useCallStore = create<CallStoreState>((set) => ({
++  export const useCallStore = create<CallStoreState>((set) => ({
+   callState: 'idle',
+   remoteUserId: null,
+   remoteUserProfile: null,
+@@ -31,29 +32,32 @@ export const useCallStore = create<CallStoreState>((set) => ({
+   localStream: null,
+   remoteStream: null,
+   isMinimized: false,
++  ephemeralCallKey: null,
+ 
+   setCallState: (state) => set({ callState: state }),
+   setLocalStream: (stream) => set({ localStream: stream }),
+   setRemoteStream: (stream) => set({ remoteStream: stream }),
+   toggleMinimize: () => set((state) => ({ isMinimized: !state.isMinimized })),
+   setMinimized: (minimized) => set({ isMinimized: minimized }),
+-  
+-  setIncomingCall: (from, isVideo, profile) => set({
++
++  setIncomingCall: (from, isVideo, profile, key) => set({
+     callState: 'ringing',
+     remoteUserId: from,
+     isVideoCall: isVideo,
+     remoteUserProfile: profile,
+     isReceivingCall: true,
+     isMinimized: false,
++    ephemeralCallKey: key || null,
+   }),
+ 
+-  setOutgoingCall: (to, isVideo, profile) => set({
++  setOutgoingCall: (to, isVideo, profile, key) => set({
+     callState: 'calling',
+     remoteUserId: to,
+     isVideoCall: isVideo,
+     remoteUserProfile: profile,
+     isReceivingCall: false,
+     isMinimized: false,
++    ephemeralCallKey: key,
+   }),
+ 
+   endCall: () => set({
+@@ -65,5 +69,6 @@ export const useCallStore = create<CallStoreState>((set) => ({
+     localStream: null,
+     remoteStream: null,
+     isMinimized: false,
++    ephemeralCallKey: null,
+   }),
+-}));
+\ No newline at end of file
++  }));
+\ No newline at end of file
+diff --git a/web/src/store/message.ts b/web/src/store/message.ts
+index 3b85c994..0e2baac6 100644
+--- a/web/src/store/message.ts
++++ b/web/src/store/message.ts
+@@ -351,13 +351,16 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
+   return null;
+ }
+ 
+-function parseSilent(content: string | null | undefined): { text: string } | null {
++function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string } | null {
+   if (!content) return null;
+   try {
+     const trimmed = content.trim();
+-    if (!trimmed.startsWith('{') || !trimmed.includes('"type":"silent"')) return null;
++    if (!trimmed.startsWith('{')) return null;
+     const payload = JSON.parse(trimmed);
+-    if (payload.type === 'silent' && typeof payload.text === 'string') {
++    if (payload.type === 'silent') {
++      return payload;
++    }
++    if (payload.type === 'CALL_INIT' && typeof payload.key === 'string') {
+       return payload;
+     }
+   } catch (e) {}
+@@ -1205,7 +1208,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+       const silentPayload = parseSilent(decrypted.content);
+ 
+       if (silentPayload) {
+-          decrypted.content = silentPayload.text;
++          if (silentPayload.type === 'CALL_INIT' && silentPayload.key) {
++             import('@store/callStore').then(m => {
++                m.useCallStore.getState().setIncomingCall(decrypted.conversationId, false, null, silentPayload.key);
++             });
++             return decrypted; // Stop processing, don't add to UI
++          }
++          decrypted.content = silentPayload.text || '';
+           decrypted.isSilent = true;
+       }
+       
+diff --git a/web/src/types/socket.d.ts b/web/src/types/socket.d.ts
+index e7e33d4f..e2dd6ce0 100644
+--- a/web/src/types/socket.d.ts
++++ b/web/src/types/socket.d.ts
+@@ -48,14 +48,8 @@ export interface ServerToClientEvents {
+     force_logout: () => void;
+     'user:identity_changed': (data: { userId: string; name: string }) => void;
+ 
+-    // --- WEBRTC SIGNALING ---
+-    "call:incoming": (payload: { from: string; isVideo: boolean; callerProfile: any }) => void;
+-    "call:accepted": (payload: { from: string }) => void;
+-    "call:rejected": (payload: { from: string; reason?: string }) => void;
+-    "call:ended": (payload: { from: string }) => void;
+-    "webrtc:offer": (payload: { from: string; offer: RTCSessionDescriptionInit }) => void;
+-    "webrtc:answer": (payload: { from: string; answer: RTCSessionDescriptionInit }) => void;
+-    "webrtc:ice-candidate": (payload: { from: string; candidate: RTCIceCandidateInit }) => void;
++    // --- WEBRTC E2EE SIGNALING ---
++    "webrtc:secure_signal": (payload: { from: string; type: string; payload: string }) => void;
+ 
+     // --- DEVICE MIGRATION TUNNEL (SERVER -> CLIENT) ---
+     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
+@@ -94,14 +88,8 @@ export interface ClientToServerEvents {
+     }) => void;
+     "push:unsubscribe": () => void;
+     
+-    // --- WEBRTC SIGNALING ---
+-    "call:request": (payload: { to: string; isVideo: boolean; callerProfile: any }) => void;
+-    "call:accept": (payload: { to: string }) => void;
+-    "call:reject": (payload: { to: string; reason?: string }) => void;
+-    "call:end": (payload: { to: string }) => void;
+-    "webrtc:offer": (payload: { to: string; offer: RTCSessionDescriptionInit }) => void;
+-    "webrtc:answer": (payload: { to: string; answer: RTCSessionDescriptionInit }) => void;
+-    "webrtc:ice-candidate": (payload: { to: string; candidate: RTCIceCandidateInit }) => void;
++    // --- WEBRTC E2EE SIGNALING ---
++    "webrtc:secure_signal": (payload: { to: string; type: string; payload: string }) => void;
+     
+     // --- DEVICE MIGRATION TUNNEL (CLIENT -> SERVER) ---
+     "migration:join": (roomId: string) => void;
+diff --git a/web/src/utils/crypto.ts b/web/src/utils/crypto.ts
+index 7369c957..1c602b21 100644
+--- a/web/src/utils/crypto.ts
++++ b/web/src/utils/crypto.ts
+@@ -256,7 +256,78 @@ const KEY_REQUEST_TIMEOUT_MS = 15000; // 15 seconds
+ const pendingGroupSessionPromises = new Map<string, Promise<any[] | null>>();
+ const groupSessionLocks = new Set<string>();
+ 
+-// --- Dynamic Import Helpers ---
++// --- E2EE WebRTC Signaling Helpers ---
++
++export async function generateCallKey(): Promise<string> {
++  const key = await crypto.subtle.generateKey(
++    { name: 'AES-GCM', length: 256 },
++    true,
++    ['encrypt', 'decrypt']
++  );
++  const exported = await crypto.subtle.exportKey('raw', key);
++  const { getSodium } = await import('@lib/sodiumInitializer');
++  const sodium = await getSodium();
++  return sodium.to_base64(new Uint8Array(exported), sodium.base64_variants.URLSAFE_NO_PADDING);
++}
++
++export async function encryptCallSignal(payload: object, base64Key: string): Promise<string> {
++  const { getSodium } = await import('@lib/sodiumInitializer');
++  const sodium = await getSodium();
++  const keyBytes = sodium.from_base64(base64Key, sodium.base64_variants.URLSAFE_NO_PADDING);
++  
++  const cryptoKey = await crypto.subtle.importKey(
++    'raw',
++    keyBytes,
++    { name: 'AES-GCM' },
++    false,
++    ['encrypt']
++  );
++
++  const iv = crypto.getRandomValues(new Uint8Array(12));
++  const encodedPayload = new TextEncoder().encode(JSON.stringify(payload));
++  
++  const encryptedBuf = await crypto.subtle.encrypt(
++    { name: 'AES-GCM', iv },
++    cryptoKey,
++    encodedPayload
++  );
++
++  const encryptedBytes = new Uint8Array(encryptedBuf);
++  const combined = new Uint8Array(iv.length + encryptedBytes.length);
++  combined.set(iv, 0);
++  combined.set(encryptedBytes, iv.length);
++
++  return sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
++}
++
++export async function decryptCallSignal(encryptedStr: string, base64Key: string): Promise<any> {
++  const { getSodium } = await import('@lib/sodiumInitializer');
++  const sodium = await getSodium();
++  const keyBytes = sodium.from_base64(base64Key, sodium.base64_variants.URLSAFE_NO_PADDING);
++  const combined = sodium.from_base64(encryptedStr, sodium.base64_variants.URLSAFE_NO_PADDING);
++
++  const iv = combined.slice(0, 12);
++  const encryptedBytes = combined.slice(12);
++
++  const cryptoKey = await crypto.subtle.importKey(
++    'raw',
++    keyBytes,
++    { name: 'AES-GCM' },
++    false,
++    ['decrypt']
++  );
++
++  const decryptedBuf = await crypto.subtle.decrypt(
++    { name: 'AES-GCM', iv },
++    cryptoKey,
++    encryptedBytes
++  );
++
++  const jsonStr = new TextDecoder().decode(decryptedBuf);
++  return JSON.parse(jsonStr);
++}
++
++// --- End E2EE WebRTC Signaling Helpers ---
+ async function getWorkerProxy() {
+   return import('@lib/crypto-worker-proxy');
+ }
