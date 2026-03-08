@@ -260,7 +260,7 @@ router.get('/turn', requireAuth, async (req, res): Promise<any> => {
       return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }); // Fallback
     }
 
-    const url = `https://api.cloudflare.com/client/v4/accounts/${env.cfAccountId}/calls/turn_keys/${env.cfTurnKeyId}/credentials`;
+    const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${env.cfTurnKeyId}/credentials/generate`;
     const response = await fetch(url, {
       method: 'POST',
       headers: {
