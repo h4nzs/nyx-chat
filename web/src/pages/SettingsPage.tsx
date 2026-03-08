@@ -452,7 +452,7 @@ export default function SettingsPage() {
         </Link>
         <div>
           <h1 className="text-4xl font-black uppercase tracking-tighter opacity-90">Control Deck</h1>
-          <p className="text-sm font-mono text-text-secondary tracking-widest uppercase">System Configuration v2.0</p>
+          <p className="text-sm font-mono text-text-secondary tracking-widest uppercase">System {__APP_VERSION__} </p>
         </div>
       </header>
 
