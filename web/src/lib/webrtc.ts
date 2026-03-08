@@ -3,7 +3,7 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { getSocket } from './socket';
 import { useCallStore } from '../store/callStore';
-import api from './api';
+import { api } from './api';
 
 let cachedIceServers: RTCIceServer[] | null = null;
 let turnCacheExp = 0;
@@ -13,9 +13,9 @@ const getDynamicIceServers = async (): Promise<RTCIceServer[]> => {
     return cachedIceServers;
   }
   try {
-    const res = await api.get('/keys/turn');
-    if (res.data && res.data.iceServers) {
-      cachedIceServers = res.data.iceServers;
+    const res = await api<{ iceServers: RTCIceServer[] }>('/api/keys/turn');
+    if (res && res.iceServers) {
+      cachedIceServers = res.iceServers;
       turnCacheExp = Date.now() + (12 * 60 * 60 * 1000); // Cache for 12 hours
       return cachedIceServers!;
     }
