@@ -6,7 +6,7 @@
     "url": "https://github.com/h4nzs/nyx-chat.git"
   },
   "name": "nyx-chat",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "scripts": {
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
