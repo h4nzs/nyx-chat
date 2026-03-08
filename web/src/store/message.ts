@@ -115,6 +115,9 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
                             }
                         } catch {}
                     }
+                    if (decryptedMsg.repliedTo) {
+                        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1, options);
+                    }
                     return decryptedMsg;
                 } catch (e) {
                     console.error("Self-decrypt failed with stored key:", e);
@@ -126,6 +129,9 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
         // Kita tidak bisa mendekripsi pesan sendiri tanpa MK lokal.
         if (decryptedMsg.content && decryptedMsg.content.trim().startsWith('{')) {
              decryptedMsg.content = "🔒 You sent this message (Encrypted)";
+        }
+        if (decryptedMsg.repliedTo) {
+            decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1, options);
         }
         return decryptedMsg;
     }
@@ -866,8 +872,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 
                 const updatedMsg = { 
                     ...res.msg, 
-                    content: existingMsg?.content || res.msg.content, // Keep decrypted text
-                    repliedTo: existingMsg?.repliedTo, // STRICTLY preserve locally decrypted reply preview
+                    content: existingMsg !== undefined ? existingMsg.content : res.msg!.content, 
+                    repliedTo: existingMsg?.repliedTo,
+                    isBlindAttachment: existingMsg?.isBlindAttachment,
                     status: 'SENT' as const
                 };
                 
@@ -951,8 +958,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             
             const updatedMsg = { 
                 ...res.msg, 
-                content: existingMsg?.content || res.msg.content, // Keep decrypted text
-                repliedTo: existingMsg?.repliedTo, // STRICTLY preserve locally decrypted reply preview
+                content: existingMsg !== undefined ? existingMsg.content : res.msg!.content, 
+                repliedTo: existingMsg?.repliedTo,
+                isBlindAttachment: existingMsg?.isBlindAttachment,
                 status: 'SENT' as const
             };
             
@@ -1301,6 +1309,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   fileName: optimistic.fileName,
                   fileSize: optimistic.fileSize,
                   fileType: optimistic.fileType,
+                  isBlindAttachment: optimistic.isBlindAttachment,
+                  repliedTo: optimistic.repliedTo,
+                  isSilent: optimistic.isSilent,
                   id: message.id,
                   createdAt: message.createdAt,
                   statuses: message.statuses
@@ -1433,11 +1444,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           return {
             ...m,
             ...newMessage,
-            content: m.content, // ALWAYS PRESERVE LOCAL PLAINTEXT
-            fileUrl: m.fileUrl, // Preserve local blob URL
-            fileName: m.fileName,
-            fileType: m.fileType,
-            fileSize: m.fileSize,
+            content: m.content !== undefined ? m.content : newMessage.content,
+            fileUrl: m.fileUrl || newMessage.fileUrl,
+            fileName: m.fileName || newMessage.fileName,
+            fileType: m.fileType || newMessage.fileType,
+            fileSize: m.fileSize || newMessage.fileSize,
+            isBlindAttachment: m.isBlindAttachment || newMessage.isBlindAttachment,
+            repliedTo: m.repliedTo || newMessage.repliedTo,
             tempId: undefined,
             optimistic: false
           };
