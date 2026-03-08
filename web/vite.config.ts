@@ -4,6 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 import { createRequire } from 'module';
+import packageJson from './package.json';
 
 // Bikin fungsi 'require' palsu karena kita di environment Module (ESM)
 const require = createRequire(import.meta.url);
@@ -80,6 +81,7 @@ export default defineConfig({
   },
   define: {
     'global.Buffer': ['buffer', 'Buffer'],
+    __APP_VERSION__: JSON.stringify(packageJson.version),
   },
   server: {
     allowedHosts: true,
