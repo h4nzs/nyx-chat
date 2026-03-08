@@ -1,5 +1,6 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
+import { deleteR2Files } from '../utils/r2.js';
 
 // Jadwalkan untuk jalan setiap jam 3 pagi (server time) tiap hari
 export const startSystemSweeper = () => {
@@ -56,10 +57,29 @@ export const startSystemSweeper = () => {
         if (now > deadline) {
            console.log(`[Cron] 💀 DEAD MAN'S SWITCH TRIGGERED for User ${u.id}. Erasing all traces...`);
            try {
+             // --- FIX: Erase user's files from R2 before deleting the account ---
+             const userMessagesWithFiles = await prisma.message.findMany({
+               where: { senderId: u.id, fileKey: { not: null } },
+               select: { fileKey: true }
+             });
+             
+             const fileKeys = userMessagesWithFiles
+               .map(m => m.fileKey)
+               .filter((k): k is string => k !== null && k !== undefined);
+             
+             if (fileKeys.length > 0) {
+               console.log(`[Cron] 🗑️ Sweeping ${fileKeys.length} orphaned files for user ${u.id}...`);
+               // Chunk deletion if necessary, AWS SDK typically accepts up to 1000 keys per request
+               for (let i = 0; i < fileKeys.length; i += 1000) {
+                  await deleteR2Files(fileKeys.slice(i, i + 1000));
+               }
+             }
+             // --- END FIX ---
+
              await prisma.user.delete({ where: { id: u.id } }); // Cascade deletes messages, conversations, keys.
              nukedCount++;
            } catch (err) {
-             console.error('[Cron] Failed to delete user:', u.id);
+             console.error('[Cron] Failed to execute Dead Man Switch for user:', u.id, err);
            }
         }
       }

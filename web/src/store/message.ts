@@ -861,7 +861,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       socket?.emit("message:send", { ...payload, conversationId, tempId: actualTempId }, async (res: { ok: boolean, msg?: Message, error?: string }) => {
         if (res.ok && res.msg) {
             if (!isReactionPayload) {
-                get().replaceOptimisticMessage(conversationId, actualTempId, { ...res.msg, status: 'SENT' });
+                // Get the existing optimistic message to preserve its decrypted text and repliedTo object
+                const existingMsg = get().messages[conversationId]?.find(m => m.id === `temp_${actualTempId}` || m.tempId === actualTempId || m.id === res.msg!.id);
+                
+                const updatedMsg = { 
+                    ...res.msg, 
+                    content: existingMsg?.content || res.msg.content, // Keep decrypted text
+                    repliedTo: existingMsg?.repliedTo, // STRICTLY preserve locally decrypted reply preview
+                    status: 'SENT' as const
+                };
+                
+                // Update UI and Vault
+                get().replaceOptimisticMessage(conversationId, actualTempId, updatedMsg);
             } else {
                 const reactionData = parseReaction(contentToEncrypt);
                 if (reactionData) {
@@ -934,7 +945,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           clearTimeout(timeoutId);
           if (res.ok && res.msg) {
             await removeFromQueue(tempId);
-            get().replaceOptimisticMessage(conversationId, tempId, { ...res.msg, status: 'SENT' });
+
+            // Get the existing optimistic message to preserve its decrypted text and repliedTo object
+            const existingMsg = get().messages[conversationId]?.find(m => m.id === `temp_${tempId}` || m.tempId === tempId || m.id === res.msg!.id);
+            
+            const updatedMsg = { 
+                ...res.msg, 
+                content: existingMsg?.content || res.msg.content, // Keep decrypted text
+                repliedTo: existingMsg?.repliedTo, // STRICTLY preserve locally decrypted reply preview
+                status: 'SENT' as const
+            };
+            
+            get().replaceOptimisticMessage(conversationId, tempId, updatedMsg);
             
             const msgId = res.msg.id;
             import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
@@ -1102,7 +1124,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 ...localMsg,
                 statuses: message.statuses,
                 reactions: message.reactions,
-                isEdited: message.isEdited
+                isEdited: message.isEdited,
+                // Ensure repliedToId is present from server if local vault missed it
+                repliedToId: message.repliedToId || localMsg.repliedToId,
+                // If local message lost the decrypted repliedTo, but server has it, we should ideally decrypt it. 
+                // For safety in ZK merge, we preserve the local one if it's valid.
+                repliedTo: localMsg.repliedTo
             });
         } else {
             // Not in vault, decrypt it
@@ -1153,7 +1180,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   ...localMsg,
                   statuses: m.statuses,
                   reactions: m.reactions,
-                  isEdited: m.isEdited
+                  isEdited: m.isEdited,
+                  // Ensure repliedToId is present from server if local vault missed it
+                  repliedToId: m.repliedToId || localMsg.repliedToId,
+                  // If local message lost the decrypted repliedTo, but server has it, we should ideally decrypt it. 
+                  // For safety in ZK merge, we preserve the local one if it's valid.
+                  repliedTo: localMsg.repliedTo
               });
           } else {
               processedItems.push(await decryptMessageObject(m, undefined, 0, { skipRetries: true }));
@@ -1206,7 +1238,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   ...localMsg,
                   statuses: message.statuses,
                   reactions: message.reactions,
-                  isEdited: message.isEdited
+                  isEdited: message.isEdited,
+                  // Ensure repliedToId is present from server if local vault missed it
+                  repliedToId: message.repliedToId || localMsg.repliedToId,
+                  // If local message lost the decrypted repliedTo, but server has it, we should ideally decrypt it. 
+                  // For safety in ZK merge, we preserve the local one if it's valid.
+                  repliedTo: localMsg.repliedTo
               });
           } else {
               processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
