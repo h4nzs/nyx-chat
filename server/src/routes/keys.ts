@@ -271,17 +271,12 @@ router.get('/turn', requireAuth, async (req, res): Promise<any> => {
     });
 
     const data: any = await response.json();
-    console.log("[TURN CF Response]:", JSON.stringify(data, null, 2));
-    // --- KUNCI PERBAIKAN DI SINI ---
-    // Cek langsung objek iceServers, hiraukan parameter success/result
+
     if (data.iceServers) {
       const payload = { 
-          iceServers: [
-              data.iceServers, // Objek TURN Anycast Cloudflare
-              { urls: 'stun:stun.l.google.com:19302' } // Fallback
-          ] 
+          iceServers: [ data.iceServers ]
       };
-      console.log("[SENDING TO FRONTEND]: Sukses ngirim Cloudflare TURN!");
+      console.log("[SENDING TO FRONTEND]: Success sending Cloudflare TURN!");
       return res.json(payload);
     }
 
