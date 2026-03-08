@@ -402,6 +402,10 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
       if (silentPayload) {
           msg.content = silentPayload.text;
           msg.isSilent = true;
+          // [FIX] Filter out signaling messages (like CALL_INIT) that have no text content
+          if (!msg.content) {
+              continue; 
+          }
       }
       chatMessages.push(msg);
     }
