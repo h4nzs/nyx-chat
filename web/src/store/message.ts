@@ -674,8 +674,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const actualTempId = tempId !== undefined ? tempId : generateTempId();
     const isReactionPayload = !!parseReaction(data.content);
     const silentPayload = parseSilent(data.content);
+    
+    // [FIX] Detect CALL_INIT and force silence to prevent empty bubble
+    const isCallInit = silentPayload?.type === 'CALL_INIT';
+    const shouldBeSilent = isSilent || isCallInit;
 
-    if (!isReactionPayload && !isSilent) {
+    if (!isReactionPayload && !shouldBeSilent) {
         let optimisticContent = data.content;
         let isOptimisticSilent = false;
         
@@ -1342,6 +1346,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       if (silentPayload) {
           if (silentPayload.type === 'CALL_INIT' && silentPayload.key) {
+             // [FIX] Cleanup optimistic UI if it was mistakenly added
+             if (message.tempId) {
+                 const tempIdStr = `temp_${message.tempId}`;
+                 set(state => ({
+                     messages: {
+                         ...state.messages,
+                         [conversationId]: (state.messages[conversationId] || []).filter(m => m.id !== tempIdStr)
+                     }
+                 }));
+             }
+
              import('@store/callStore').then(m => {
                 // ✅ CORRECT: Only store the key silently, let the socket event trigger the ringing UI
                 m.useCallStore.getState().setCallKey(silentPayload.key!);
