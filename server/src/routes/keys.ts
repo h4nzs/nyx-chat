@@ -271,6 +271,8 @@ router.get('/turn', requireAuth, async (req, res): Promise<any> => {
     });
 
     const data: any = await response.json();
+    console.log("[TURN CF Request Body]:", { account: env.cfAccountId, key: env.cfTurnKeyId });
+    console.log("[TURN CF Response]:", JSON.stringify(data, null, 2));
     if (data.success && data.result) {
       // CF returns a single object for iceServers, RTCPeerConnection expects an array
       return res.json({ 
