@@ -96,7 +96,7 @@ const sendSecureSignal = async (to: string, type: string, payload: object = {}) 
 };
 
 const createPeerConnection = (targetUserId: string, iceServers: RTCIceServer[]) => {
-  const pc = new RTCPeerConnection({ iceServers });
+  const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: 'relay' });
   peerConnection = pc;
 
   pc.onicecandidate = (event) => {
