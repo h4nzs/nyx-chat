@@ -1,7 +1,6 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 import { getIo } from '../socket.js';
-import { deleteR2Files } from '../utils/r2.js';
 
 // Jalanin fungsi ini setiap 1 menit (* * * * *)
 export const startMessageSweeper = () => {
@@ -22,7 +21,7 @@ export const startMessageSweeper = () => {
               lte: now
             }
           },
-          select: { id: true, conversationId: true, fileKey: true },
+          select: { id: true, conversationId: true },
           take: BATCH_SIZE
         });
 
@@ -31,21 +30,6 @@ export const startMessageSweeper = () => {
         const messageIds = expiredMessages.map(m => m.id);
 
         console.log(`🔥 Sweeping batch of ${messageIds.length} expired messages...`);
-
-        // 2. HAPUS FILE MEDIA DARI CLOUDFLARE R2 TERLEBIH DAHULU
-        const fileKeysToDelete = expiredMessages
-          .map(m => m.fileKey)
-          .filter((key): key is string => key !== null && key !== undefined);
-
-        if (fileKeysToDelete.length > 0) {
-          console.log(`🗑️ Deleting ${fileKeysToDelete.length} orphaned files from R2...`);
-          try {
-            await deleteR2Files(fileKeysToDelete);
-          } catch (s3Err) {
-            console.error('❌ Failed to delete files from R2:', s3Err);
-            // Continue execution so database rows are still cleaned up even if R2 fails
-          }
-        }
 
         // 3. HAPUS PERMANEN DARI DATABASE!
         await prisma.message.deleteMany({

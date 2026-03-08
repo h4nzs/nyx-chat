@@ -12,16 +12,29 @@ export const s3Client = new S3Client({
   forcePathStyle: true
 })
 
-// Generate URL upload yang valid selama 5 menit
-export const getPresignedUploadUrl = async (key: string, contentType: string) => {
-  const command = new PutObjectCommand({
+// Generate URL upload yang valid selama 5 menit (default)
+// urlTtl: Berapa lama LINK upload valid (detik)
+// deleteAt: Kapan FILE harus dianggap kadaluarsa (untuk Lifecycle Rules / Metadata)
+export const getPresignedUploadUrl = async (key: string, contentType: string, urlTtl: number = 300, deleteAt?: Date) => {
+  const commandInput: any = {
     Bucket: env.r2BucketName,
     Key: key,
     ContentType: contentType
-  })
+  };
+
+  // Jika ada jadwal penghapusan (Disappearing Messages / Cleanup)
+  // Kita pasang Header 'Expires' dan Custom Metadata 'delete-at'
+  if (deleteAt) {
+    commandInput.Expires = deleteAt;
+    commandInput.Metadata = {
+      'delete-at': deleteAt.toISOString()
+    };
+  }
+
+  const command = new PutObjectCommand(commandInput)
 
   const url = await getSignedUrl(s3Client, command, {
-    expiresIn: 300,
+    expiresIn: urlTtl, 
     signableHeaders: new Set(['content-type'])
   })
 

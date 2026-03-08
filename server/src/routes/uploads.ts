@@ -76,10 +76,24 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
       return res.status(400).json({ error: 'File extension not found in filename' })
     }
 
+    // urlTtl: How long the UPLOAD LINK works (default 5 mins)
+    const urlTtl = req.body.urlTtl ? parseInt(req.body.urlTtl, 10) : 300;
+
+    // fileRetention: How long the FILE lives before expiration (optional, seconds)
+    // Used for Disappearing Messages or temporary transfers
+    let deleteAt: Date | undefined;
+    const fileRetention = req.body.fileRetention ? parseInt(req.body.fileRetention, 10) : 0;
+    
+    if (fileRetention > 0) {
+      deleteAt = new Date();
+      deleteAt.setSeconds(deleteAt.getSeconds() + fileRetention);
+    }
+
     const key = `${targetFolder}/${req.user!.id}-${nanoid()}.${ext}`
 
     // [FIX] Force Content-Type to octet-stream because file is ENCRYPTED
-    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream')
+    // We pass both urlTtl (link expiry) and deleteAt (file metadata expiry)
+    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream', urlTtl, deleteAt)
 
     // Safe logging - do not log filename
     // console.log(`[Upload] Presigned URL generated for user ${req.user!.id}`);
