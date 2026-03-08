@@ -49,4 +49,8 @@ export const env = {
   r2PublicDomain: process.env.R2_PUBLIC_DOMAIN || "",
   discordReportWebhookUrl: process.env.DISCORD_REPORT_WEBHOOK_URL,
   appVersion: pkg.version,
+
+  cfAccountId: process.env.CF_ACCOUNT_ID || '',
+  cfTurnKeyId: process.env.CF_TURN_KEY_ID || '',
+  cfTurnApiToken: process.env.CF_TURN_API_TOKEN || '',
 }

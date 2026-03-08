@@ -3,9 +3,27 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { getSocket } from './socket';
 import { useCallStore } from '../store/callStore';
+import api from './api';
 
-const ICE_SERVERS = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+let cachedIceServers: RTCIceServer[] | null = null;
+let turnCacheExp = 0;
+
+const getDynamicIceServers = async (): Promise<RTCIceServer[]> => {
+  if (cachedIceServers && Date.now() < turnCacheExp) {
+    return cachedIceServers;
+  }
+  try {
+    const res = await api.get('/keys/turn');
+    if (res.data && res.data.iceServers) {
+      cachedIceServers = res.data.iceServers;
+      turnCacheExp = Date.now() + (12 * 60 * 60 * 1000); // Cache for 12 hours
+      return cachedIceServers!;
+    }
+    throw new Error("Invalid format");
+  } catch (err) {
+    console.error('Failed to get TURN servers:', err);
+    return [{ urls: 'stun:stun.l.google.com:19302' }];
+  }
 };
 
 let peerConnection: RTCPeerConnection | null = null;
@@ -77,8 +95,8 @@ const sendSecureSignal = async (to: string, type: string, payload: object = {}) 
   }
 };
 
-const createPeerConnection = (targetUserId: string) => {
-  const pc = new RTCPeerConnection(ICE_SERVERS);
+const createPeerConnection = (targetUserId: string, iceServers: RTCIceServer[]) => {
+  const pc = new RTCPeerConnection({ iceServers });
   peerConnection = pc;
 
   pc.onicecandidate = (event) => {
@@ -149,7 +167,8 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: any
     await new Promise(r => setTimeout(r, 500));
 
     const stream = await getMediaStream(isVideo);
-    const pc = createPeerConnection(to);
+    const iceServers = await getDynamicIceServers();
+    const pc = createPeerConnection(to, iceServers);
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
     
     // 2. Encrypt the signaling metadata and send via unified event
@@ -171,7 +190,8 @@ export const acceptCall = async () => {
   
   try {
     const stream = await getMediaStream(state.isVideoCall);
-    const pc = createPeerConnection(remoteUserId);
+    const iceServers = await getDynamicIceServers();
+    const pc = createPeerConnection(remoteUserId, iceServers);
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
     
     sendSecureSignal(remoteUserId, 'accept');
