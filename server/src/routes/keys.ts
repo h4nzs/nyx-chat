@@ -271,19 +271,21 @@ router.get('/turn', requireAuth, async (req, res): Promise<any> => {
     });
 
     const data: any = await response.json();
-    console.log("[TURN CF Request Body]:", { account: env.cfAccountId, key: env.cfTurnKeyId });
     console.log("[TURN CF Response]:", JSON.stringify(data, null, 2));
-    if (data.success && data.result) {
-      // CF returns a single object for iceServers, RTCPeerConnection expects an array
-      return res.json({ 
+    // --- KUNCI PERBAIKAN DI SINI ---
+    // Cek langsung objek iceServers, hiraukan parameter success/result
+    if (data.iceServers) {
+      const payload = { 
           iceServers: [
-              data.result.iceServers,
-              { urls: 'stun:stun.l.google.com:19302' } // Fallback STUN
+              data.iceServers, // Objek TURN Anycast Cloudflare
+              { urls: 'stun:stun.l.google.com:19302' } // Fallback
           ] 
-      });
+      };
+      console.log("[SENDING TO FRONTEND]: Sukses ngirim Cloudflare TURN!");
+      return res.json(payload);
     }
-    return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
 
+    return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
   } catch (error) {
     console.error('[TURN] Failed to fetch credentials:', error);
     return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
