@@ -208,6 +208,19 @@ export function getSocket() {
     socket.on("conversation:updated", (updates) => conversationStore.updateConversation(updates.id, updates));
     socket.on("conversation:deleted", ({ id }) => conversationStore.removeConversation(id));
 
+    socket.on('group:participants_changed', (data: { conversationId: string }) => {
+        // Force key rotation on the next message sent
+        useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
+        // Also reload conversation details to get the new participant list
+        useConversationStore.getState().loadConversations();
+    });
+
+    socket.on('session:request_key', async (data: { conversationId: string, requesterId: string }) => {
+        // Someone failed to decrypt our message, they need our sender key.
+        // By marking rotation needed, our next message will force a fresh key distribution to them.
+        useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
+    });
+
     socket.on("conversation:participants_added", ({ conversationId, newParticipants }) => {
       useConversationStore.getState().addParticipants(conversationId, newParticipants);
     });
@@ -288,8 +301,14 @@ export function disconnectSocket() {
   if (socket?.connected) socket.disconnect();
 }
 
-export function emitSessionKeyRequest(conversationId: string, sessionId: string) {
-  getSocket()?.emit('session:request_key', { conversationId, sessionId });
+export function emitSessionKeyRequest(conversationId: string, sessionId: string, targetId?: string) {
+  const meId = useAuthStore.getState().user?.id;
+  getSocket()?.emit('session:request_key', { 
+      conversationId, 
+      sessionId, 
+      targetId,
+      requesterId: meId
+  });
 }
 
 export function emitSessionKeyFulfillment(payload: { requesterId: string; conversationId: string; sessionId: string; encryptedKey: string; }) {

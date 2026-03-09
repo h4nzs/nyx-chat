@@ -80,6 +80,7 @@ export type Conversation = {
   unreadCount: number;
   lastUpdated?: number;
   keyRotationPending?: boolean;
+  requiresKeyRotation?: boolean;
 };
 
 // --- Helper Functions ---
@@ -148,6 +149,7 @@ type Actions = {
   removeParticipant: (conversationId: string, userId: string) => void;
   updateParticipantRole: (conversationId: string, userId: string, role: "ADMIN" | "MEMBER") => void;
   updateConversationLastMessage: (conversationId: string, message: Message) => void;
+  markKeyRotationNeeded: (conversationId: string, needed: boolean) => void;
   togglePinConversation: (conversationId: string) => Promise<void>;
   resyncState: () => Promise<void>;
   clearError: () => void;
@@ -173,6 +175,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   reset: () => {
     set(initialState);
   },
+
+  markKeyRotationNeeded: (id, needed) => set(s => ({ 
+    conversations: s.conversations.map(c => c.id === id ? { ...c, requiresKeyRotation: needed } : c) 
+  })),
 
   searchUsers: async (query) => {
     try {

@@ -47,6 +47,8 @@ export interface ServerToClientEvents {
     }) => void;
     force_logout: () => void;
     'user:identity_changed': (data: { userId: string; name: string }) => void;
+    "group:participants_changed": (payload: { conversationId: string }) => void;
+    "session:request_key": (payload: { conversationId: string; requesterId: string; sessionId: string }) => void;
 
     // --- WEBRTC E2EE SIGNALING ---
     "webrtc:secure_signal": (payload: { from: string; type: string; payload: string }) => void;
@@ -65,7 +67,12 @@ export interface ClientToServerEvents {
     "typing:start": (payload: { conversationId: string }) => void;
     "typing:stop": (payload: { conversationId: string }) => void;
     "conversation:join": (conversationId: string) => void;
-    "session:request_key": (payload: { conversationId: string; sessionId: string }) => void;
+    "session:request_key": (payload: { 
+        conversationId: string; 
+        sessionId: string; 
+        targetId?: string;
+        requesterId?: string;
+    }) => void;
     "session:fulfill_response": (payload: {
         requesterId: string;
         conversationId: string;

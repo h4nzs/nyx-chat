@@ -387,7 +387,7 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
 
 // --- Group Key Management & Recovery ---
 
-export async function ensureGroupSession(conversationId: string, participants: Participant[]): Promise<any[] | null> {
+export async function ensureGroupSession(conversationId: string, participants: Participant[], forceRotate: boolean = false): Promise<any[] | null> {
   const pending = pendingGroupSessionPromises.get(conversationId);
   if (pending) return pending;
 
@@ -396,7 +396,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
       const interval = setInterval(() => {
         if (!groupSessionLocks.has(conversationId)) {
           clearInterval(interval);
-          ensureGroupSession(conversationId, participants).then(resolve);
+          ensureGroupSession(conversationId, participants, forceRotate).then(resolve);
         }
       }, 10);
     });
@@ -407,6 +407,12 @@ export async function ensureGroupSession(conversationId: string, participants: P
   const promise = (async () => {
     try {
       // PHASE 2: Sender Key Protocol
+      if (forceRotate) {
+          const { deleteGroupSenderState } = await import('@lib/keychainDb');
+          await deleteGroupSenderState(conversationId);
+          console.log(`[Crypto] Forced rotation for group ${conversationId}`);
+      }
+
       const existingSenderState = await getGroupSenderState(conversationId);
       if (existingSenderState) return null; // We already have a sender key for this group
 

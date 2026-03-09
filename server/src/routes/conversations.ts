@@ -311,6 +311,7 @@ router.post('/:id/participants', async (req, res, next) => {
     })
 
     getIo().to(conversationId).emit('conversation:participants_added', { conversationId, newParticipants })
+    getIo().to(conversationId).emit('group:participants_changed', { conversationId })
     newParticipants.forEach(p => {
       if (conversation) getIo().to(p.userId).emit('conversation:new', conversation)
     })
@@ -356,6 +357,7 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
 
     await prisma.participant.delete({ where: { userId_conversationId: { userId: userToRemoveId, conversationId } } })
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId, userId: userToRemoveId })
+    getIo().to(conversationId).emit('group:participants_changed', { conversationId })
     getIo().to(userToRemoveId).emit('conversation:deleted', { id: conversationId })
     await rotateAndDistributeSessionKeys(conversationId, req.user.id)
     res.status(204).send()
@@ -381,6 +383,7 @@ router.delete('/:id/leave', async (req, res, next) => {
 
     await prisma.participant.delete({ where: { userId_conversationId: { userId, conversationId } } })
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId, userId })
+    getIo().to(conversationId).emit('group:participants_changed', { conversationId })
     getIo().to(userId).emit('conversation:deleted', { id: conversationId })
 
     const remainingAdmin = await prisma.participant.findFirst({

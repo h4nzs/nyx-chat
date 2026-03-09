@@ -53,7 +53,11 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
     if (currentUser && decryptedMsg.senderId === currentUser.id) {
         // Coba ambil Message Key dari brankas lokal (MK Vault) - Works for BOTH Group & 1-on-1 now!
         const { retrieveMessageKeySecurely } = await import('@utils/crypto');
-        const mk = await retrieveMessageKeySecurely(decryptedMsg.id);
+        let mk = await retrieveMessageKeySecurely(decryptedMsg.id);
+        // Fallback: If not found by real ID, check if we have it under its tempId
+        if (!mk && decryptedMsg.tempId) {
+            mk = await retrieveMessageKeySecurely(`temp_${decryptedMsg.tempId}`);
+        }
         
         if (mk) {
             // Kita punya kuncinya! Dekripsi langsung secara statis.
@@ -659,12 +663,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       return;
     }
     const isGroup = conversation.isGroup;
+    const forceRotate = conversation.requiresKeyRotation === true;
 
     if (isGroup && useConnectionStore.getState().status === 'connected') {
       try {
-        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
+        // Pass forceRotate if we suspect new members or requested by another peer
+        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, forceRotate);
         if (distributionKeys && distributionKeys.length > 0) {
           emitGroupKeyDistribution(conversationId, distributionKeys);
+          if (forceRotate) {
+              useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
+          }
+          // Wait a tiny bit to ensure the socket emits the keys before the actual message
+          await new Promise(r => setTimeout(r, 300)); 
         }
       } catch (e) {
         console.error("Failed to ensure group session", e);
@@ -1337,6 +1348,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           if (existing && !existing.isDeletedLocal && existing.content && !existing.content.startsWith('[')) {
               console.warn(`[Shield] Prevented overwriting valid local message ${decrypted.id} with failure.`);
               return existing;
+          }
+          
+          // Request the missing group sender key if we are a new member and failed to decrypt
+          const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+          const isGroup = conversation?.isGroup || false;
+          
+          if (isGroup && (decrypted.content === 'waiting_for_key' || decrypted.error)) {
+              // Targeted Request directly to the sender
+              emitSessionKeyRequest(conversationId, decrypted.senderId, decrypted.senderId);
           }
       }
       

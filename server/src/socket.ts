@@ -531,8 +531,22 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
-    socket.on('session:request_key', async ({ conversationId, sessionId }: KeyRequestPayload) => {
-      if (!conversationId || !sessionId) return;
+    socket.on('session:request_key', async (data: any) => {
+      const { conversationId, sessionId, targetId } = data;
+      if (!conversationId) return;
+
+      // [NEW] Targeted Key Request (Auto-Heal Relay)
+      if (targetId) {
+          io.to(targetId).emit('session:request_key', {
+              conversationId,
+              requesterId: userId,
+              sessionId
+          });
+          return;
+      }
+
+      // Legacy/Broadcast Fallback
+      if (!sessionId) return;
 
       const isParticipant = await prisma.participant.findFirst({
         where: { conversationId, userId: socket.user!.id }
