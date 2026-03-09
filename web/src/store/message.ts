@@ -35,33 +35,46 @@ function enrichMessagesWithSenderProfile(conversationId: string, messages: Messa
     const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
     if (!conv) return messages;
     
-    // BUG 2: Check Profile Store for real decrypted names that might be missing from the conversation object
     const participantsMap = new Map(conv.participants.map(p => [(p as any).userId || p.id, p]));
     const cachedProfiles = useProfileStore.getState().profiles;
     
     return messages.map(m => {
         const pInfo = participantsMap.get(m.senderId);
         
-        // Dynamic fallback to decrypted profile store (RAM Cache)
-        // We look for any key that starts with the userId (composite cache keys)
+        // Dynamic search in RAM cache (Profile Store)
         const profileKey = Object.keys(cachedProfiles).find(k => k.startsWith(m.senderId));
         const globalProfile = profileKey ? cachedProfiles[profileKey] : null;
 
-        let resolvedName = globalProfile?.name || pInfo?.name;
-        let resolvedUsername = globalProfile?.username || pInfo?.username;
-        let resolvedAvatar = globalProfile?.avatarUrl || pInfo?.avatarUrl;
+        const resolvedName = globalProfile?.name || pInfo?.name;
+        const resolvedUsername = globalProfile?.username || pInfo?.username;
+        const resolvedAvatar = globalProfile?.avatarUrl || pInfo?.avatarUrl;
+        const encryptedProfile = pInfo?.encryptedProfile || (m.sender as any)?.encryptedProfile;
 
+        // If we found any real name, apply it and preserve metadata
         if (resolvedName && resolvedName !== 'Unknown' && resolvedName !== 'Encrypted User') {
             return {
                 ...m,
                 sender: { 
-                    ...(m.sender || { id: m.senderId }), 
+                    id: m.senderId, 
                     name: resolvedName, 
                     username: resolvedUsername, 
-                    avatarUrl: resolvedAvatar 
+                    avatarUrl: resolvedAvatar,
+                    encryptedProfile
                 }
             };
         }
+        
+        // Ensure encryptedProfile is at least present for the UI hook to attempt decryption
+        if (encryptedProfile && !(m.sender as any)?.encryptedProfile) {
+            return {
+                ...m,
+                sender: {
+                    ...(m.sender || { id: m.senderId }),
+                    encryptedProfile
+                }
+            };
+        }
+
         return m;
     });
 }
@@ -726,9 +739,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const isReactionPayload = !!parseReaction(data.content);
     const silentPayload = parseSilent(data.content);
     
-    // [FIX] Detect CALL_INIT and force silence to prevent empty bubble
+    // [FIX] Detect CALL_INIT or GHOST_SYNC and force silence to prevent empty bubble
     const isCallInit = silentPayload?.type === 'CALL_INIT';
-    const shouldBeSilent = isSilent || isCallInit;
+    const isGhostSync = silentPayload?.type === 'GHOST_SYNC';
+    const shouldBeSilent = isSilent || isCallInit || isGhostSync;
 
     if (!isReactionPayload && !shouldBeSilent) {
         let optimisticContent = data.content;
@@ -1416,6 +1430,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const silentPayload = parseSilent(decrypted.content);
 
       if (silentPayload) {
+          decrypted.isSilent = true; // [FIX] Set early to suppress sound in socket.ts
+
           if (silentPayload.type === 'CALL_INIT' && silentPayload.key) {
              // [FIX] Cleanup optimistic UI if it was mistakenly added
              if (message.tempId) {
@@ -1441,7 +1457,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           }
 
           decrypted.content = silentPayload.text || '';
-          decrypted.isSilent = true;
       }
       
       if (reactionPayload) {

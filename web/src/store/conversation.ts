@@ -4,7 +4,7 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api";
 import { useMessageStore, decryptMessageObject } from "./message";
-import { getSocket, emitSessionKeyRequest } from "@lib/socket";
+import { getSocket, emitSessionKeyRequest, fireGhostSync } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
 // Removed all crypto imports
@@ -25,7 +25,13 @@ export type Message = {
   type?: 'USER' | 'SYSTEM';
   conversationId: string;
   senderId: string;
-  sender?: { id: string; encryptedProfile?: string | null };
+  sender?: { 
+    id: string; 
+    encryptedProfile?: string | null;
+    name?: string;
+    username?: string;
+    avatarUrl?: string | null;
+  };
   content?: string | null;
   imageUrl?: string | null;
   fileUrl?: string | null;
@@ -227,6 +233,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 
       const conversations = await Promise.all(rawConversations.map(async c => {
+        const participants = c.participants.map((p: any) => ({
+          ...p.user,
+          description: p.user.description,
+          role: p.role,
+          isPinned: p.isPinned  // Include the pinned status
+        }));
+
         let lastMessage = c.messages?.[0] || null;
         if (lastMessage) {
           try {
@@ -237,21 +250,49 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             }
             lastMessage.content = '[Requesting key to decrypt...]';
           }
+          
+          // Hydrate sender info for the chat list snippet
+          const pInfo = participants.find((p: any) => p.id === lastMessage!.senderId);
+          if (pInfo) {
+              lastMessage.sender = {
+                  ...(lastMessage.sender || { id: lastMessage.senderId }),
+                  ...pInfo
+              };
+          }
+
           lastMessage = withPreview(lastMessage);
         }
+
         return {
           ...c,
           lastMessage,
-          participants: c.participants.map((p: any) => ({
-            ...p.user,
-            description: p.user.description,
-            role: p.role,
-            isPinned: p.isPinned  // Include the pinned status
-          })),
+          participants
         };
       }));
 
-      set({ conversations: sortConversations(conversations, useAuthStore.getState().user?.id) });
+      // [NEW] Offline Catch-up / Diff Detection
+      // Check if group participants changed while we were offline/disconnected
+      const existingConversations = get().conversations;
+      const reconciledConversations = conversations.map(fetched => {
+          if (fetched.isGroup) {
+              const existing = existingConversations.find(e => e.id === fetched.id);
+              if (existing) {
+                  // Compare participant lists (simple ID comparison)
+                  const existingIds = existing.participants.map((p: any) => p.id).sort().join(',');
+                  const fetchedIds = fetched.participants.map((p: any) => p.id).sort().join(',');
+                  
+                  if (existingIds !== fetchedIds) {
+                      console.log(`[Ratchet] Membership change detected for group ${fetched.id} while offline. Proactive healing...`);
+                      // Trigger ghost sync from this device to settle state with new/removed members
+                      fireGhostSync(fetched.id, 2000);
+                      return { ...fetched, requiresKeyRotation: true };
+                  }
+              }
+          }
+          return fetched;
+      });
+
+      set({ conversations: sortConversations(reconciledConversations, useAuthStore.getState().user?.id) });
       useVerificationStore.getState().loadInitialStatus(conversations);
 
       const socket = getSocket();

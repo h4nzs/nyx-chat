@@ -44,7 +44,7 @@ const handleKeyRotation = async (conversationId: string) => {
   }
 };
 
-const fireGhostSync = (conversationId: string, baseDelay: number = 1000) => {
+export const fireGhostSync = (conversationId: string, baseDelay: number = 1000) => {
     const randomDelay = Math.floor(Math.random() * 2500) + baseDelay;
     setTimeout(async () => {
         try {

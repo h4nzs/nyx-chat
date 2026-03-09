@@ -11,6 +11,9 @@ export interface DecryptedMessageRecord {
   repliedTo?: string; // Encrypted JSON string of the replied message
   createdAt: string | Date;
   senderId: string;
+  senderName?: string; // Encrypted sender name
+  senderUsername?: string; // Encrypted sender username
+  senderAvatarUrl?: string; // Avatar URL (usually public/cached)
   isViewOnce?: boolean;
   isDeletedLocal?: boolean;
 }
@@ -64,7 +67,7 @@ export class NyxShadowVault extends Dexie {
 
   constructor() {
     super('nyx_shadow_vault');
-    this.version(2).stores({
+    this.version(3).stores({
       messages: 'id, conversationId, createdAt'
     });
   }
@@ -79,6 +82,8 @@ export class NyxShadowVault extends Dexie {
       for (const m of validMessages) {
         let encryptedContent: string | null = null;
         let encryptedRepliedTo: string | undefined = undefined;
+        let encryptedSenderName: string | undefined = undefined;
+        let encryptedSenderUsername: string | undefined = undefined;
 
         if (m.content && !m.isDeletedLocal) {
             encryptedContent = await encryptVaultText(m.content);
@@ -87,6 +92,14 @@ export class NyxShadowVault extends Dexie {
         if (m.repliedTo) {
              const repliedToStr = JSON.stringify(m.repliedTo);
              encryptedRepliedTo = await encryptVaultText(repliedToStr);
+        }
+
+        // Fix: Persist sender info if it was hydrated
+        if (m.sender && (m.sender as any).name && (m.sender as any).name !== 'Unknown') {
+            encryptedSenderName = await encryptVaultText((m.sender as any).name);
+            if ((m.sender as any).username) {
+                encryptedSenderUsername = await encryptVaultText((m.sender as any).username);
+            }
         }
         
         records.push({
@@ -97,6 +110,9 @@ export class NyxShadowVault extends Dexie {
           repliedTo: encryptedRepliedTo,
           createdAt: m.createdAt,
           senderId: m.senderId,
+          senderName: encryptedSenderName,
+          senderUsername: encryptedSenderUsername,
+          senderAvatarUrl: (m.sender as any)?.avatarUrl,
           isViewOnce: m.isViewOnce,
           isDeletedLocal: m.isDeletedLocal
         });
@@ -114,6 +130,8 @@ export class NyxShadowVault extends Dexie {
       for (const r of records) {
         let plainText = null;
         let decryptedRepliedTo = undefined;
+        let decryptedSenderName = undefined;
+        let decryptedSenderUsername = undefined;
 
         if (r.content && !r.isDeletedLocal) {
           plainText = await decryptVaultText(r.content);
@@ -128,6 +146,13 @@ export class NyxShadowVault extends Dexie {
             }
         }
 
+        if (r.senderName) {
+            decryptedSenderName = await decryptVaultText(r.senderName) || undefined;
+        }
+        if (r.senderUsername) {
+            decryptedSenderUsername = await decryptVaultText(r.senderUsername) || undefined;
+        }
+
         messages.push({
           id: r.id,
           conversationId: r.conversationId,
@@ -136,6 +161,12 @@ export class NyxShadowVault extends Dexie {
           repliedTo: decryptedRepliedTo,
           createdAt: r.createdAt as string,
           senderId: r.senderId,
+          sender: {
+              id: r.senderId,
+              name: decryptedSenderName,
+              username: decryptedSenderUsername,
+              avatarUrl: r.senderAvatarUrl
+          } as any,
           isViewOnce: r.isViewOnce,
           isDeletedLocal: r.isDeletedLocal
         });
@@ -153,6 +184,8 @@ export class NyxShadowVault extends Dexie {
       if (!r) return null;
       let plainText = null;
       let decryptedRepliedTo = undefined;
+      let decryptedSenderName = undefined;
+      let decryptedSenderUsername = undefined;
 
       if (r.content && !r.isDeletedLocal) {
         plainText = await decryptVaultText(r.content);
@@ -167,6 +200,13 @@ export class NyxShadowVault extends Dexie {
           }
       }
 
+      if (r.senderName) {
+          decryptedSenderName = await decryptVaultText(r.senderName) || undefined;
+      }
+      if (r.senderUsername) {
+          decryptedSenderUsername = await decryptVaultText(r.senderUsername) || undefined;
+      }
+
       return {
         id: r.id,
         conversationId: r.conversationId,
@@ -175,6 +215,12 @@ export class NyxShadowVault extends Dexie {
         repliedTo: decryptedRepliedTo,
         createdAt: r.createdAt as string,
         senderId: r.senderId,
+        sender: {
+            id: r.senderId,
+            name: decryptedSenderName,
+            username: decryptedSenderUsername,
+            avatarUrl: r.senderAvatarUrl
+        } as any,
         isViewOnce: r.isViewOnce,
         isDeletedLocal: r.isDeletedLocal
       };
