@@ -4,73 +4,108 @@ export type CallState = 'idle' | 'ringing' | 'calling' | 'connected';
 
 interface CallStoreState {
   callState: CallState;
-  remoteUserId: string | null;
-  remoteUserProfile: any | null;
+  remoteUsers: any[];
+  remoteStreams: Record<string, MediaStream>;
   isVideoCall: boolean;
   isReceivingCall: boolean;
   localStream: MediaStream | null;
-  remoteStream: MediaStream | null;
   isMinimized: boolean;
   ephemeralCallKey: string | null;
 
   setCallState: (state: CallState) => void;
   setIncomingCall: (from: string, isVideo: boolean, profile: any, key?: string) => void;
-  setOutgoingCall: (to: string, isVideo: boolean, profile: any, key: string) => void;
+  setOutgoingCall: (to: string | string[], isVideo: boolean, profile: any, key: string) => void;
   setLocalStream: (stream: MediaStream | null) => void;
-  setRemoteStream: (stream: MediaStream | null) => void;
+  addRemoteStream: (userId: string, stream: MediaStream) => void;
+  removeRemoteStream: (userId: string) => void;
+  addRemoteUser: (profile: any) => void;
+  removeRemoteUser: (userId: string) => void;
   toggleMinimize: () => void;
   setMinimized: (minimized: boolean) => void;
   endCall: () => void;
   setCallKey: (key: string) => void;
-  }
+}
 
-  export const useCallStore = create<CallStoreState>((set) => ({
+export const useCallStore = create<CallStoreState>((set) => ({
   callState: 'idle',
-  remoteUserId: null,
-  remoteUserProfile: null,
+  remoteUsers: [],
+  remoteStreams: {},
   isVideoCall: false,
   isReceivingCall: false,
   localStream: null,
-  remoteStream: null,
   isMinimized: false,
   ephemeralCallKey: null,
 
   setCallState: (state) => set({ callState: state }),
   setLocalStream: (stream) => set({ localStream: stream }),
-  setRemoteStream: (stream) => set({ remoteStream: stream }),
   toggleMinimize: () => set((state) => ({ isMinimized: !state.isMinimized })),
   setMinimized: (minimized) => set({ isMinimized: minimized }),
   setCallKey: (key) => set({ ephemeralCallKey: key }),
 
+  addRemoteStream: (userId, stream) => set((state) => ({
+    remoteStreams: { ...state.remoteStreams, [userId]: stream }
+  })),
+
+  removeRemoteStream: (userId) => set((state) => {
+    const newStreams = { ...state.remoteStreams };
+    delete newStreams[userId];
+    return { remoteStreams: newStreams };
+  }),
+
+  addRemoteUser: (profile) => set((state) => {
+    if (state.remoteUsers.some(u => u.id === profile.id)) return state;
+    return { remoteUsers: [...state.remoteUsers, profile] };
+  }),
+
+  removeRemoteUser: (userId) => set((state) => ({
+    remoteUsers: state.remoteUsers.filter(u => u.id !== userId)
+  })),
+
   setIncomingCall: (from, isVideo, profile, key) => set({
     callState: 'ringing',
-    remoteUserId: from,
+    remoteUsers: [profile || { id: from, name: 'Unknown' }],
     isVideoCall: isVideo,
-    remoteUserProfile: profile,
     isReceivingCall: true,
     isMinimized: false,
     ephemeralCallKey: key || null,
   }),
 
-  setOutgoingCall: (to, isVideo, profile, key) => set({
-    callState: 'calling',
-    remoteUserId: to,
-    isVideoCall: isVideo,
-    remoteUserProfile: profile,
-    isReceivingCall: false,
-    isMinimized: false,
-    ephemeralCallKey: key,
-  }),
+  setOutgoingCall: (to, isVideo, profile, key) => {
+    // Handle both single ID (1:1) and array of IDs (Group)
+    // If 'to' is array, 'profile' might be array or single object? 
+    // Assuming simple init for now: users added incrementally or via 'profile' arg if it's an array.
+    // Ideally 'to' implies IDs. We need profiles. 
+    // For now, we initialize with minimal profile placeholders if actual profiles aren't passed fully.
+    
+    let initialUsers: any[] = [];
+    if (Array.isArray(profile)) {
+        initialUsers = profile;
+    } else if (profile) {
+        initialUsers = [profile];
+    } else if (Array.isArray(to)) {
+        initialUsers = to.map(id => ({ id, name: 'User' }));
+    } else {
+        initialUsers = [{ id: to, name: 'User' }];
+    }
+
+    set({
+        callState: 'calling',
+        remoteUsers: initialUsers,
+        isVideoCall: isVideo,
+        isReceivingCall: false,
+        isMinimized: false,
+        ephemeralCallKey: key,
+    });
+  },
 
   endCall: () => set({
     callState: 'idle',
-    remoteUserId: null,
-    remoteUserProfile: null,
+    remoteUsers: [],
+    remoteStreams: {},
     isVideoCall: false,
     isReceivingCall: false,
     localStream: null,
-    remoteStream: null,
     isMinimized: false,
     ephemeralCallKey: null,
   }),
-  }));
+}));

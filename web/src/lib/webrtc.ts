@@ -26,15 +26,16 @@ const getDynamicIceServers = async (): Promise<RTCIceServer[]> => {
   }
 };
 
-let peerConnection: RTCPeerConnection | null = null;
+let peerConnections = new Map<string, RTCPeerConnection>();
 let localMediaStream: MediaStream | null = null;
 
 export const replaceVideoTrack = async (newVideoTrack: MediaStreamTrack) => {
-  if (!peerConnection) return;
-  const sender = peerConnection.getSenders().find(s => s.track?.kind === 'video');
-  if (sender) {
-    await sender.replaceTrack(newVideoTrack);
-  }
+  peerConnections.forEach(async (pc) => {
+      const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+      if (sender) {
+        await sender.replaceTrack(newVideoTrack);
+      }
+  });
 
   if (localMediaStream) {
     localMediaStream.getVideoTracks().forEach(t => {
@@ -48,22 +49,22 @@ export const replaceVideoTrack = async (newVideoTrack: MediaStreamTrack) => {
 };
 
 export const getNetworkQuality = async (): Promise<'Good' | 'Fair' | 'Poor'> => {
-  if (!peerConnection) return 'Good';
-  try {
-    const stats = await peerConnection.getStats();
-    let rtt = 0;
-    stats.forEach(report => {
-      if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-        rtt = report.currentRoundTripTime || 0;
-      }
-    });
-    // RTT is in seconds. > 0.5s (500ms) is Poor. > 0.2s (200ms) is Fair.
-    if (rtt > 0.5) return 'Poor';
-    if (rtt > 0.2) return 'Fair';
-    return 'Good';
-  } catch (e) {
-    return 'Good';
+  if (peerConnections.size === 0) return 'Good';
+  // Simplified: If any connection is poor, return poor.
+  for (const pc of peerConnections.values()) {
+      try {
+        const stats = await pc.getStats();
+        let rtt = 0;
+        stats.forEach(report => {
+          if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+            rtt = report.currentRoundTripTime || 0;
+          }
+        });
+        if (rtt > 0.5) return 'Poor';
+        if (rtt > 0.2) return 'Fair';
+      } catch (e) {}
   }
+  return 'Good';
 };
 
 export const cleanupCall = () => {
@@ -71,12 +72,14 @@ export const cleanupCall = () => {
     localMediaStream.getTracks().forEach((track) => track.stop());
     localMediaStream = null;
   }
-  if (peerConnection) {
-    peerConnection.ontrack = null;
-    peerConnection.onicecandidate = null;
-    peerConnection.close();
-    peerConnection = null;
-  }
+  
+  peerConnections.forEach((pc) => {
+      pc.ontrack = null;
+      pc.onicecandidate = null;
+      pc.close();
+  });
+  peerConnections.clear();
+  
   useCallStore.getState().endCall();
 };
 
@@ -97,7 +100,7 @@ const sendSecureSignal = async (to: string, type: string, payload: object = {}) 
 
 const createPeerConnection = (targetUserId: string, iceServers: RTCIceServer[]) => {
   const pc = new RTCPeerConnection({ iceServers });
-  peerConnection = pc;
+  peerConnections.set(targetUserId, pc);
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
@@ -107,9 +110,14 @@ const createPeerConnection = (targetUserId: string, iceServers: RTCIceServer[]) 
 
   pc.ontrack = (event) => {
     if (event.streams && event.streams[0]) {
-      useCallStore.getState().setRemoteStream(event.streams[0]);
+      useCallStore.getState().addRemoteStream(targetUserId, event.streams[0]);
     }
   };
+
+  // Add local tracks to this new connection
+  if (localMediaStream) {
+      localMediaStream.getTracks().forEach(track => pc.addTrack(track, localMediaStream!));
+  }
 
   return pc;
 };
@@ -145,14 +153,22 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: any
     const { user: currentUser } = (await import('../store/auth')).useAuthStore.getState();
 
     const conversations = useConversationStore.getState().conversations;
-    const conversation = conversations.find(c =>
-      !c.isGroup &&
-      c.participants.some((p: any) => p.userId === to || p.id === to) &&
-      c.participants.some((p: any) => p.userId === currentUser?.id || p.id === currentUser?.id)
-    );
+    // Modified search to support group calls? 
+    // For now, keeping logic for finding conversation. 'to' might be conversationId for groups or userId for 1:1.
+    // If 'to' is a userId, we look for 1:1. If 'to' is conversationId, we use it directly.
+    let conversation = conversations.find(c => c.id === to);
+    
+    if (!conversation) {
+        // Fallback: Try to find 1:1 by participant
+        conversation = conversations.find(c =>
+          !c.isGroup &&
+          c.participants.some((p: any) => p.userId === to || p.id === to) &&
+          c.participants.some((p: any) => p.userId === currentUser?.id || p.id === currentUser?.id)
+        );
+    }
 
     if (!conversation) {
-      throw new Error("Cannot start E2EE call: No active 1-on-1 conversation found with this user.");
+      throw new Error("Cannot start E2EE call: Conversation not found.");
     }
     // --- END FIX ---
 
@@ -166,16 +182,40 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: any
     // Brief delay to ensure the key message hits the socket first
     await new Promise(r => setTimeout(r, 500));
 
-    const stream = await getMediaStream(isVideo);
+    await getMediaStream(isVideo);
+    // In Mesh, we don't create PC immediately in startCall for everyone? 
+    // Or we initiate connections to all participants?
+    // For now, we wait for them to join (signaling 'request' or they send 'accept' after getting CALL_INIT).
+    // The current logic sends 'request' to 'to'. If 'to' is a user, it's 1:1.
+    // If 'to' is a group, we might need to iterate participants.
+    
     const iceServers = await getDynamicIceServers();
-    const pc = createPeerConnection(to, iceServers);
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
-    
-    // 2. Encrypt the signaling metadata and send via unified event
-    const payload = { isVideo, callerProfile };
-    const encryptedPayload = await encryptCallSignal(payload, callKey);
-    
-    getSocket()?.emit('webrtc:secure_signal', { to, type: 'request', payload: encryptedPayload });
+
+    if (conversation.isGroup) {
+        // For groups, we might broadcast 'request' or wait? 
+        // Simple Mesh: Send 'request' to all other participants.
+        conversation.participants.forEach(p => {
+            const pid = (p as any).userId || p.id;
+            if (pid !== currentUser?.id) {
+                 const pc = createPeerConnection(pid, iceServers);
+                 // We create offer immediately? Or send 'request' first?
+                 // Original logic sent 'request'.
+                 // We can just send 'request' to notify them to ring.
+                 // Encrypt payload
+                 encryptCallSignal({ isVideo, callerProfile }, callKey).then(enc => {
+                     getSocket()?.emit('webrtc:secure_signal', { to: pid, type: 'request', payload: enc });
+                 });
+            }
+        });
+    } else {
+        // 1:1
+        const pc = createPeerConnection(to, iceServers);
+        // 2. Encrypt the signaling metadata and send via unified event
+        const payload = { isVideo, callerProfile };
+        const encryptedPayload = await encryptCallSignal(payload, callKey);
+        getSocket()?.emit('webrtc:secure_signal', { to, type: 'request', payload: encryptedPayload });
+    }
+
   } catch (err) {
     console.error('Failed to start call', err);
     import('react-hot-toast').then(m => m.default.error('Failed to start E2EE call.'));
@@ -185,16 +225,26 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: any
 
 export const acceptCall = async () => {
   const state = useCallStore.getState();
-  const remoteUserId = state.remoteUserId;
-  if (!remoteUserId) return;
+  // In mesh, we might be accepting a call from one person, but connecting to multiple?
+  // Usually 'acceptCall' is triggered by user action.
+  // We should signal 'accept' to the callers.
+  // For now, we signal 'accept' to all known remote users (or the one who initiated).
   
+  const initiators = state.remoteUsers; 
+  if (initiators.length === 0) return;
+
   try {
-    const stream = await getMediaStream(state.isVideoCall);
+    await getMediaStream(state.isVideoCall);
     const iceServers = await getDynamicIceServers();
-    const pc = createPeerConnection(remoteUserId, iceServers);
-    stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+    // Connect to all known remote users (initiators)
+    initiators.forEach(user => {
+        if (!peerConnections.has(user.id)) {
+            createPeerConnection(user.id, iceServers);
+        }
+        sendSecureSignal(user.id, 'accept');
+    });
     
-    sendSecureSignal(remoteUserId, 'accept');
     useCallStore.getState().setCallState('connected');
   } catch (err) {
     console.error('Failed to accept call', err);
@@ -203,14 +253,14 @@ export const acceptCall = async () => {
 };
 
 export const rejectCall = () => {
-  const remoteUserId = useCallStore.getState().remoteUserId;
-  if (remoteUserId) sendSecureSignal(remoteUserId, 'reject', { reason: 'declined' });
+  const state = useCallStore.getState();
+  state.remoteUsers.forEach(u => sendSecureSignal(u.id, 'reject', { reason: 'declined' }));
   cleanupCall();
 };
 
 export const hangup = () => {
-  const remoteUserId = useCallStore.getState().remoteUserId;
-  if (remoteUserId) sendSecureSignal(remoteUserId, 'end');
+  const state = useCallStore.getState();
+  state.remoteUsers.forEach(u => sendSecureSignal(u.id, 'end'));
   cleanupCall();
 };
 
@@ -223,63 +273,88 @@ export const initWebRTCListeners = (socket: any) => {
     const state = useCallStore.getState();
     const callKey = state.ephemeralCallKey;
 
-    // For 'request', the receiver MUST have the key already (sent via ratcheted message just before)
     if (!callKey) {
-        console.warn(`Received secure signal ${data.type} but missing call key. Dropping.`);
+        // console.warn(`Received secure signal ${data.type} but missing call key. Dropping.`);
         return;
     }
 
     try {
         const { decryptCallSignal } = await import('../utils/crypto');
         const decryptedPayload = await decryptCallSignal(data.payload, callKey);
+        const iceServers = await getDynamicIceServers();
+
+        let pc = peerConnections.get(data.from);
 
         switch (data.type) {
             case 'request':
                 if (state.callState === 'idle') {
                     useCallStore.getState().setIncomingCall(data.from, decryptedPayload.isVideo, decryptedPayload.callerProfile, callKey);
                 } else {
-                    sendSecureSignal(data.from, 'reject', { reason: 'busy' });
+                    // Mesh: If already in call, we can auto-accept or merge? 
+                    // For simple MVP: Reject if busy (Classic phone behavior)
+                    // Or if it's the SAME call key (same room), we accept/add?
+                    // "Mesh Topology P2P (Group Call)" implies adding.
+                    if (state.ephemeralCallKey === callKey) {
+                         // Same call, new participant?
+                         useCallStore.getState().addRemoteUser(decryptedPayload.callerProfile || { id: data.from });
+                    } else {
+                         sendSecureSignal(data.from, 'reject', { reason: 'busy' });
+                    }
                 }
                 break;
             case 'accept':
                 useCallStore.getState().setCallState('connected');
-                if (!peerConnection) return;
+                useCallStore.getState().addRemoteUser({ id: data.from }); // Add if not present
+                
+                if (!pc) pc = createPeerConnection(data.from, iceServers);
+                
                 try {
-                  const offer = await peerConnection.createOffer();
-                  await peerConnection.setLocalDescription(offer);
+                  const offer = await pc.createOffer();
+                  await pc.setLocalDescription(offer);
                   sendSecureSignal(data.from, 'offer', { offer });
                 } catch (e) {
                   console.error('Failed to create offer', e);
-                  cleanupCall();
                 }
                 break;
             case 'reject':
             case 'end':
-                cleanupCall();
+                if (pc) {
+                    pc.close();
+                    peerConnections.delete(data.from);
+                }
+                const store = useCallStore.getState();
+                store.removeRemoteStream(data.from);
+                store.removeRemoteUser(data.from);
+                
+                // ✔️ FIX: Kalo orang terakhir keluar atau nolak, langsung end call!
+                // Pake store.remoteUsers.length karena state bawaan bisa aja stale (belum update)
+                if (useCallStore.getState().remoteUsers.length === 0) {
+                    cleanupCall();
+                }
                 break;
             case 'offer':
-                if (!peerConnection) return;
+                if (!pc) pc = createPeerConnection(data.from, iceServers);
                 try {
-                  await peerConnection.setRemoteDescription(new RTCSessionDescription(decryptedPayload.offer));
-                  const answer = await peerConnection.createAnswer();
-                  await peerConnection.setLocalDescription(answer);
+                  await pc.setRemoteDescription(new RTCSessionDescription(decryptedPayload.offer));
+                  const answer = await pc.createAnswer();
+                  await pc.setLocalDescription(answer);
                   sendSecureSignal(data.from, 'answer', { answer });
                 } catch (e) {
                   console.error('Failed to handle offer', e);
                 }
                 break;
             case 'answer':
-                if (!peerConnection) return;
+                if (!pc) return; // Should exist if we sent offer
                 try {
-                  await peerConnection.setRemoteDescription(new RTCSessionDescription(decryptedPayload.answer));
+                  await pc.setRemoteDescription(new RTCSessionDescription(decryptedPayload.answer));
                 } catch (e) {
                   console.error('Failed to handle answer', e);
                 }
                 break;
             case 'ice-candidate':
-                if (!peerConnection) return;
+                if (!pc) return;
                 try {
-                  await peerConnection.addIceCandidate(new RTCIceCandidate(decryptedPayload.candidate));
+                  await pc.addIceCandidate(new RTCIceCandidate(decryptedPayload.candidate));
                 } catch (e) {
                   console.error('Failed to add ice candidate', e);
                 }
