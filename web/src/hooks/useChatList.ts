@@ -47,16 +47,30 @@ export function useChatList() {
     const [isSearching, setIsSearching] = useState(false);
   
     const handleSearch = useCallback(debounce(async (query: string) => {
-      if (!query.trim()) {
+      const rawQuery = query.trim();
+      if (!rawQuery) {
         setSearchResults([]);
         setIsSearching(false);
         return;
       }
       setIsSearching(true);
       try {
-        const hashedQuery = await hashUsername(query.trim());
+        const hashedQuery = await hashUsername(rawQuery);
         const users = await authFetch<User[]>(`/api/users/search?q=${encodeURIComponent(hashedQuery)}`);
-        setSearchResults(users);
+        
+        // Inject optimistic query as username/name since it was an exact hash match
+        // Guard: If we already know the user locally (friend/existing chat), use their real name.
+        const knownUsers = useConversationStore.getState().conversations.flatMap(c => c.participants);
+        
+        const optimisticUsers = users.map(u => {
+            const known = knownUsers.find(k => k.id === u.id);
+            if (known?.name && known.name !== 'Unknown') {
+                return { ...u, name: known.name, username: known.username || rawQuery };
+            }
+            return { ...u, username: rawQuery, name: rawQuery };
+        });
+        
+        setSearchResults(optimisticUsers);
       } catch (err) {
         console.error("Search failed", err);
         setSearchResults([]);
@@ -73,8 +87,8 @@ export function useChatList() {
       navigate(`/chat/${id}`);
     };
   
-    const handleSelectUser = async (userId: string) => {
-      const conversationId = await startConversation(userId);
+    const handleSelectUser = async (user: User) => {
+      const conversationId = await startConversation(user.id, { name: user.name || 'Unknown', username: user.username || 'unknown' });
       navigate(`/chat/${conversationId}`);
       setSearchQuery('');
       setSearchResults([]);

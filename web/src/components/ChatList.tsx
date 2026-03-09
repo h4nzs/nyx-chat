@@ -98,29 +98,34 @@ const UserProfile = memo(() => {
   );
 });
 
-const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (id: string) => void }) => {
+const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (user: User) => void }) => {
   const profile = useUserProfile(user);
+  // Prioritize the direct user property which might contain the optimistic rawQuery
+  const displayName = user.name || profile.name;
+  const displayUsername = user.username || 'unknown';
+
   return (
     <button 
-      onClick={() => onSelect(user.id)}
+      onClick={() => onSelect(user)}
       className="
         w-[calc(100%-32px)] mx-4 mb-3 p-3 flex items-center gap-4 rounded-xl text-left
         bg-bg-main transition-all
         shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5
       "
     >
-      <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
+      <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${displayName}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-           <p className="font-bold text-sm text-text-primary">{profile.name}</p>
+           <p className="font-bold text-sm text-text-primary">{displayName}</p>
            {user.isVerified && <div className="w-2 h-2 rounded-full bg-accent" title="Verified"></div>}
         </div>
+        <p className="text-xs text-text-secondary font-mono mt-0.5">@{displayUsername}</p>
       </div>
     </button>
   );
 };
 
-const SearchResults = memo(({ results, onSelect }: { results: User[], onSelect: (userId: string) => void }) => (
+const SearchResults = memo(({ results, onSelect }: { results: User[], onSelect: (user: User) => void }) => (
   <Virtuoso
     style={{ height: '100%' }}
     data={results}

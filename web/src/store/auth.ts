@@ -60,6 +60,8 @@ export type User = {
   role?: string;
   isVerified?: boolean; // Trust Tier (WebAuthn)
   hasCompletedOnboarding?: boolean;
+  name?: string;     // Optimistic/Injected Name
+  username?: string; // Optimistic/Injected Username
 };
 
 type State = {

@@ -63,6 +63,8 @@ export type Participant = {
   signingKey?: string; // New: Ed25519 Signing Key for Sender Keys
   role: "ADMIN" | "MEMBER";
   isPinned?: boolean;
+  name?: string;     // Optimistic/Injected Name
+  username?: string; // Optimistic/Injected Username
 };
 
 export type Conversation = {
@@ -136,7 +138,7 @@ type Actions = {
   deleteConversation: (id: string) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
   toggleSidebar: () => void;
-  startConversation: (peerId: string) => Promise<string>;
+  startConversation: (peerId: string, optimisticProfile?: { name: string; username: string }) => Promise<string>;
   searchUsers: (query: string) => Promise<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>;
   addOrUpdateConversation: (conversation: Conversation) => void;
   removeConversation: (conversationId: string) => void;
@@ -297,7 +299,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
   toggleSidebar: () => set(s => ({ isSidebarOpen: !s.isSidebarOpen })),
 
-  startConversation: async (peerId: string): Promise<string> => {
+  startConversation: async (peerId: string, optimisticProfile?: { name: string; username: string }): Promise<string> => {
     const { user } = useAuthStore.getState();
     if (!user) {
       throw new Error("Cannot start a conversation: user is not authenticated.");
@@ -317,6 +319,25 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         }),
       });
       
+      // Inject Optimistic Profile (Blind Indexing Search Result)
+      if (optimisticProfile) {
+          const knownUsers = get().conversations.flatMap(c => c.participants);
+          
+          conv.participants = conv.participants.map(p => {
+              if (p.id === peerId) {
+                  // Guard: Check if we already know this user's real name from another conversation
+                  const existing = knownUsers.find(u => u.id === peerId);
+                  if (existing?.name && existing.name !== 'Unknown') {
+                      return p; // Keep the real profile data we already have
+                  }
+                  
+                  // Merge optimistic data. Server might return null/unknown initially if not friends.
+                  return { ...p, ...optimisticProfile }; 
+              }
+              return p;
+          });
+      }
+
       getSocket().emit("conversation:join", conv.id);
       get().addOrUpdateConversation(conv);
       set({ activeId: conv.id, isSidebarOpen: false });
