@@ -29,6 +29,27 @@ import { useConnectionStore } from "./connection";
 import { getSodium } from "@lib/sodiumInitializer";
 import { shadowVault } from '@lib/shadowVaultDb';
 
+function enrichMessagesWithSenderProfile(conversationId: string, messages: Message[]): Message[] {
+    const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+    if (!conv) return messages;
+    const participantsMap = new Map(conv.participants.map(p => [(p as any).userId || p.id, p]));
+    return messages.map(m => {
+        const pInfo = participantsMap.get(m.senderId);
+        if (pInfo && pInfo.name && pInfo.name !== 'Unknown') {
+            return {
+                ...m,
+                sender: { 
+                    ...(m.sender || { id: m.senderId }), 
+                    name: pInfo.name, 
+                    username: pInfo.username, 
+                    avatarUrl: pInfo.avatarUrl 
+                }
+            };
+        }
+        return m;
+    });
+}
+
 /**
  * Logika Dekripsi Terpusat (Single Source of Truth)
  * Menangani dekripsi teks biasa DAN kunci file.
@@ -1167,15 +1188,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       set(state => {
         const existingMessages = state.messages[id] || [];
         const allMessages = processMessagesAndReactions(processedMessages, existingMessages);
+        const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
         
         // Update vault with everything we just processed (if not already there)
-        shadowVault.upsertMessages(allMessages); 
+        shadowVault.upsertMessages(enrichedMessages); 
 
         // [UI UPDATE] Keep tombstones in the UI state so we can render "Message Deleted" bubbles
         // const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
 
         return {
-          messages: { ...state.messages, [id]: allMessages },
+          messages: { ...state.messages, [id]: enrichedMessages },
           hasMore: { ...state.hasMore, [id]: fetchedMessages.length >= 50 },
           hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
         };
@@ -1222,13 +1244,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       set(state => {
         const existingMessages = state.messages[conversationId] || [];
         const allMessages = processMessagesAndReactions(processedItems, existingMessages);
+        const enrichedMessages = enrichMessagesWithSenderProfile(conversationId, allMessages);
 
-        shadowVault.upsertMessages(allMessages); // Archive to shadow vault
+        shadowVault.upsertMessages(enrichedMessages); // Archive to shadow vault
 
         // [UI UPDATE] Keep tombstones visible
         // const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
 
-        const newState: any = { messages: { ...state.messages, [conversationId]: allMessages } };
+        const newState: any = { messages: { ...state.messages, [conversationId]: enrichedMessages } };
 
         if (fetchedItems.length < 50) {
             newState.hasMore = { ...state.hasMore, [conversationId]: false };
@@ -1285,14 +1308,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         
         // Separate reactions and normal messages
         const finalMessages = processMessagesAndReactions(uniqueMessages, []);
+        const enrichedMessages = enrichMessagesWithSenderProfile(convoId, finalMessages);
 
-        shadowVault.upsertMessages(finalMessages);
+        shadowVault.upsertMessages(enrichedMessages);
 
         // [UI UPDATE] Keep tombstones visible
         // const visibleMessages = finalMessages.filter(m => !m.isDeletedLocal);
 
         return {
-          messages: { ...state.messages, [convoId]: finalMessages },
+          messages: { ...state.messages, [convoId]: enrichedMessages },
           // If we jump back, we might still have older messages to fetch later
           hasMore: { ...state.hasMore, [convoId]: true } 
         };

@@ -65,6 +65,7 @@ export type Participant = {
   isPinned?: boolean;
   name?: string;     // Optimistic/Injected Name
   username?: string; // Optimistic/Injected Username
+  avatarUrl?: string | null;
 };
 
 export type Conversation = {

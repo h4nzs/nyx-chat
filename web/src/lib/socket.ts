@@ -199,6 +199,7 @@ export function getSocket() {
 
       // Jika ini adalah percakapan grup, jadwalkan rotasi kunci berkala
       if (newConversation.isGroup) {
+        useConversationStore.getState().markKeyRotationNeeded(newConversation.id, true);
         schedulePeriodicGroupKeyRotation(newConversation.id);
       }
 
@@ -223,6 +224,7 @@ export function getSocket() {
 
     socket.on("conversation:participants_added", ({ conversationId, newParticipants }) => {
       useConversationStore.getState().addParticipants(conversationId, newParticipants);
+      useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
     });
 
     socket.on("conversation:participant_removed", ({ conversationId, userId }) => {
