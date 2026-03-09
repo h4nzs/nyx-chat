@@ -44,6 +44,22 @@ const handleKeyRotation = async (conversationId: string) => {
   }
 };
 
+const fireGhostSync = (conversationId: string, baseDelay: number = 1000) => {
+    const randomDelay = Math.floor(Math.random() * 2500) + baseDelay;
+    setTimeout(async () => {
+        try {
+            const messageStore = (await import('../store/message')).useMessageStore.getState();
+            await messageStore.sendMessage(conversationId, {
+                content: JSON.stringify({ type: 'GHOST_SYNC', ts: Date.now() }),
+                isSilent: true
+            });
+            console.log(`[Ghost Sync] Fired for group ${conversationId}`);
+        } catch (e) {
+            console.error('[Ghost Sync] Failed to send', e);
+        }
+    }, randomDelay);
+};
+
 export function getSocket() {
   if (!socket) {
     // Inisialisasi awal (token mungkin masih null, tidak apa-apa)
@@ -201,6 +217,9 @@ export function getSocket() {
       if (newConversation.isGroup) {
         useConversationStore.getState().markKeyRotationNeeded(newConversation.id, true);
         schedulePeriodicGroupKeyRotation(newConversation.id);
+        // The new user fires a Ghost Sync too, but with a slightly longer base delay 
+        // to ensure they have fully joined the socket room first.
+        fireGhostSync(newConversation.id, 3000);
       }
 
       toast.success(`You've been added to "${newConversation.title || 'a new chat'}"`);
@@ -214,6 +233,9 @@ export function getSocket() {
         useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
         // Also reload conversation details to get the new participant list
         useConversationStore.getState().loadConversations();
+
+        // [NEW] GHOST SYNC: Trigger a silent message to settle ratchet state
+        fireGhostSync(data.conversationId, 1000);
     });
 
     socket.on('session:request_key', async (data: { conversationId: string, requesterId: string }) => {
@@ -225,6 +247,7 @@ export function getSocket() {
     socket.on("conversation:participants_added", ({ conversationId, newParticipants }) => {
       useConversationStore.getState().addParticipants(conversationId, newParticipants);
       useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
+      fireGhostSync(conversationId, 2000);
     });
 
     socket.on("conversation:participant_removed", ({ conversationId, userId }) => {

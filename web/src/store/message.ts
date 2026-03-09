@@ -29,20 +29,36 @@ import { useConnectionStore } from "./connection";
 import { getSodium } from "@lib/sodiumInitializer";
 import { shadowVault } from '@lib/shadowVaultDb';
 
+import { useProfileStore } from './profile';
+
 function enrichMessagesWithSenderProfile(conversationId: string, messages: Message[]): Message[] {
     const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
     if (!conv) return messages;
+    
+    // BUG 2: Check Profile Store for real decrypted names that might be missing from the conversation object
     const participantsMap = new Map(conv.participants.map(p => [(p as any).userId || p.id, p]));
+    const cachedProfiles = useProfileStore.getState().profiles;
+    
     return messages.map(m => {
         const pInfo = participantsMap.get(m.senderId);
-        if (pInfo && pInfo.name && pInfo.name !== 'Unknown') {
+        
+        // Dynamic fallback to decrypted profile store (RAM Cache)
+        // We look for any key that starts with the userId (composite cache keys)
+        const profileKey = Object.keys(cachedProfiles).find(k => k.startsWith(m.senderId));
+        const globalProfile = profileKey ? cachedProfiles[profileKey] : null;
+
+        let resolvedName = globalProfile?.name || pInfo?.name;
+        let resolvedUsername = globalProfile?.username || pInfo?.username;
+        let resolvedAvatar = globalProfile?.avatarUrl || pInfo?.avatarUrl;
+
+        if (resolvedName && resolvedName !== 'Unknown' && resolvedName !== 'Encrypted User') {
             return {
                 ...m,
                 sender: { 
                     ...(m.sender || { id: m.senderId }), 
-                    name: pInfo.name, 
-                    username: pInfo.username, 
-                    avatarUrl: pInfo.avatarUrl 
+                    name: resolvedName, 
+                    username: resolvedUsername, 
+                    avatarUrl: resolvedAvatar 
                 }
             };
         }
@@ -392,6 +408,9 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
       return payload;
     }
     if (payload.type === 'CALL_INIT' && typeof payload.key === 'string') {
+      return payload;
+    }
+    if (payload.type === 'GHOST_SYNC') {
       return payload;
     }
   } catch (e) {}
@@ -1366,6 +1385,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           decrypted = await decryptMessageObject(message);
       }
 
+      // [FIX] BUG 1: Group Ratchet Sync Delay (Race Condition)
+      // If we are in a group and decryption failed with 'waiting_for_key' or 'Key out of sync'
+      // it might be because the session:new_key event hasn't finished saving to DB yet.
+      const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+      const isGroup = conversation?.isGroup || false;
+
+      if (isGroup && (decrypted.content === 'waiting_for_key' || decrypted.error)) {
+          console.log(`[Ratchet] Decryption failed for ${message.id}. Retrying once in 500ms...`);
+          await new Promise(r => setTimeout(r, 500));
+          decrypted = await decryptMessageObject(message);
+      }
+
       // THE SHIELD: Prevent overwriting valid local data with decryption failures
       if (decrypted.error || decrypted.content === 'waiting_for_key' || decrypted.content?.startsWith('[')) {
           const existing = await shadowVault.getMessage(decrypted.id);
@@ -1373,10 +1404,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               console.warn(`[Shield] Prevented overwriting valid local message ${decrypted.id} with failure.`);
               return existing;
           }
-          
-          // Request the missing group sender key if we are a new member and failed to decrypt
-          const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-          const isGroup = conversation?.isGroup || false;
           
           if (isGroup && (decrypted.content === 'waiting_for_key' || decrypted.error)) {
               // Targeted Request directly to the sender
@@ -1407,6 +1434,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
              });
              return decrypted; // Stop processing, don't add to UI
           }
+          
+          if (silentPayload.type === 'GHOST_SYNC') {
+              console.log(`[Ghost Sync] Received sync from ${decrypted.senderId}. Settle ratchet state silently.`);
+              return decrypted; // Stop processing, don't add to UI
+          }
+
           decrypted.content = silentPayload.text || '';
           decrypted.isSilent = true;
       }
@@ -1441,39 +1474,43 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               return { messages: { ...state.messages, [conversationId]: updatedMessages } };
           });
       } else {
+          // Enrich with sender profile before adding to state
+          const [enriched] = enrichMessagesWithSenderProfile(conversationId, [decrypted]);
+          const finalDecrypted = enriched;
+
           if (message.tempId && currentUser && message.senderId === currentUser.id) {
-              get().replaceOptimisticMessage(conversationId, message.tempId, decrypted);
+              get().replaceOptimisticMessage(conversationId, message.tempId, finalDecrypted);
           } else {
               set(state => {
                 const currentMessages = state.messages[conversationId] || [];
                 if (currentMessages.some(m => m.id === message.id)) return state;
-                shadowVault.upsertMessages([decrypted]); // Archive to shadow vault
-                return { messages: { ...state.messages, [conversationId]: [...currentMessages, decrypted] } };
+                shadowVault.upsertMessages([finalDecrypted]); // Archive to shadow vault
+                return { messages: { ...state.messages, [conversationId]: [...currentMessages, finalDecrypted] } };
               });
               
               // --- DYNAMIC ISLAND NOTIFICATION ---
-              const isViewingChat = window.location.pathname.includes(`/chat/${decrypted.conversationId}`);
-              if (!isViewingChat && !decrypted.isSilent && decrypted.senderId !== currentUser?.id) {
+              const isViewingChat = window.location.pathname.includes(`/chat/${finalDecrypted.conversationId}`);
+              if (!isViewingChat && !finalDecrypted.isSilent && finalDecrypted.senderId !== currentUser?.id) {
                   import('@store/dynamicIsland').then(({ default: useDynamicIslandStore }) => {
-                      const sender = decrypted.sender as any;
+                      const sender = finalDecrypted.sender as any;
                       const senderName = sender?.name || sender?.decryptedProfile?.name || 'Someone'; 
-                      let snippet = decrypted.content || 'New secure message';
-                      if (decrypted.fileUrl || decrypted.isBlindAttachment) snippet = 'Sent an attachment 📎';
-                      if (decrypted.content && decrypted.content.startsWith('🔒')) snippet = 'System message';
+                      let snippet = finalDecrypted.content || 'New secure message';
+                      if (finalDecrypted.fileUrl || finalDecrypted.isBlindAttachment) snippet = 'Sent an attachment 📎';
+                      if (finalDecrypted.content && finalDecrypted.content.startsWith('🔒')) snippet = 'System message';
 
                       useDynamicIslandStore.getState().addActivity({
                           type: 'notification',
                           sender: sender || { name: senderName },
                           message: snippet,
-                          link: `/chat/${decrypted.conversationId}`
+                          link: `/chat/${finalDecrypted.conversationId}`
                       } as any, 4000);
                   }).catch(console.error);
               }
 
               // --- CHAT LIST PREVIEW UPDATE ---
-              if (!decrypted.isSilent) {
+              if (!finalDecrypted.isSilent) {
                   import('@store/conversation').then(m => {
-                      m.useConversationStore.getState().updateConversationLastMessage(conversationId, decrypted);
+                      m.useConversationStore.getState().updateConversationLastMessage(conversationId, finalDecrypted);
                   }).catch(console.error);
               }
           }
@@ -1696,7 +1733,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const reDecryptedMessages = await Promise.all(
       pendingMessages.map(async (msg) => {
-          return await decryptMessageObject(msg);
+          const decrypted = await decryptMessageObject(msg);
+          // Enrich each recovered message
+          const [enriched] = enrichMessagesWithSenderProfile(conversationId, [decrypted]);
+          return enriched;
       })
     );
 
