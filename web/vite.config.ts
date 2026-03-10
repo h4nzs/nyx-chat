@@ -27,6 +27,7 @@ export default defineConfig({
           // Naikkan limit ke 5 MB (5 * 1024 * 1024)
           // Defaultnya cuma 2 MB, sedangkan libsodium bikin bundle jadi besar
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, 
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,mjs,woff,woff2,ttf}'],
         },
         manifest: {
           name: 'Nyx Chat',

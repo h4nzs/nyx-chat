@@ -11,7 +11,7 @@ import { useConversationStore } from '@store/conversation';
 import { FiAlertTriangle, FiFile, FiDownload, FiMusic, FiVideo, FiImage, FiRefreshCw } from 'react-icons/fi';
 import { getSocket } from '@lib/socket';
 
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+pdfjs.GlobalWorkerOptions.workerSrc = `${import.meta.env.BASE_URL}pdf.worker.min.mjs`;
 
 function formatBytes(bytes: number, decimals = 2) {
   if (!bytes || bytes === 0) return '0 Bytes';
@@ -124,10 +124,11 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
           setDecryptedUrl(objectUrl);
           setStatus('success');
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error("Decrypt failed:", e);
         if (isMounted) {
-            setErrorMsg(e.message || "Failed to decrypt file");
+            const errorMessage = e instanceof Error ? e.message : "Failed to decrypt file";
+            setErrorMsg(errorMessage);
             setStatus('error');
         }
       }

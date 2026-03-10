@@ -1,15 +1,18 @@
-import tsParser from '@typescript-eslint/parser';
-import tsPlugin from '@typescript-eslint/eslint-plugin';
+import tseslint from 'typescript-eslint';
 import reactPlugin from 'eslint-plugin-react';
 
 export default [
   {
     ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'public/**']
   },
+  ...tseslint.configs.recommended.map(config => ({
+    ...config,
+    files: ['**/*.ts', '**/*.tsx'],
+  })),
   {
     files: ['**/*.ts', '**/*.tsx'],
     languageOptions: {
-      parser: tsParser,
+      parser: tseslint.parser,
       parserOptions: {
         ecmaVersion: 'latest',
         sourceType: 'module',
@@ -27,7 +30,6 @@ export default [
       }
     },
     plugins: {
-      '@typescript-eslint': tsPlugin,
       'react': reactPlugin
     },
     settings: {
@@ -36,7 +38,6 @@ export default [
       }
     },
     rules: {
-      ...tsPlugin.configs.recommended.rules,
       ...reactPlugin.configs.recommended.rules,
       'react/react-in-jsx-scope': 'off', // Not needed in React 17+
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],

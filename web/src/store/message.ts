@@ -878,6 +878,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       try {
         const { getSodium } = await import('@lib/sodiumInitializer');
         const sodium = await getSodium();
+        const { worker_crypto_box_seal } = await import('@lib/crypto-worker-proxy');
         
         const myAuthUser = useAuthStore.getState().user;
         let myName = 'Someone';
@@ -895,16 +896,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
            }
         }
 
-        // Prepare the basic push content
-        let pushBody = "Sent a secure message";
-        if (data.fileUrl) pushBody = "Sent a file";
-        else if (data.content && !data.content.startsWith('{')) {
-           pushBody = data.content.substring(0, 50) + (data.content.length > 50 ? '...' : '');
-        }
+        // Prepare the basic push content securely (No plaintext leaking)
+        const pushBody = data.fileUrl ? "Sent a file" : "Sent a secure message";
 
         const pushData = JSON.stringify({ title: myName, body: pushBody, conversationId });
+        const pushDataBytes = new TextEncoder().encode(pushData);
 
-        // Encrypt for each recipient
+        // Encrypt for each recipient using Web Worker
         for (const p of conversation.participants as any[]) {
            const targetUserId = p.userId || p.id;
            const targetPublicKey = p.user?.publicKey || p.publicKey;
@@ -912,7 +910,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
            if (targetUserId !== user.id && targetPublicKey) {
                try {
                    const recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-                   const sealed = sodium.crypto_box_seal(pushData, recipientPubBytes);
+                   const sealed = await worker_crypto_box_seal(pushDataBytes, recipientPubBytes);
                    pushPayloads[targetUserId] = sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
                } catch (e) {
                    console.error(`Failed to seal push for ${targetUserId}`, e);
