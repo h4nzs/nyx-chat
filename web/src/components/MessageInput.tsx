@@ -271,10 +271,17 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
     
     // 1. Process Staged Files
     if (stagedFiles.length > 0) {
-       for (const file of stagedFiles) {
-          useMessageInputStore.getState().uploadFile(conversation.id, file);
-       }
+       // Capture the files to send and immediately clear the UI state for snappy UX
+       const filesToProcess = [...stagedFiles];
        clearStagedFiles();
+       
+       // Process files sequentially in the background to prevent CPU/RAM overload
+       // (Image compression and Sodium encryption are extremely CPU-heavy)
+       (async () => {
+           for (const file of filesToProcess) {
+               await useMessageInputStore.getState().uploadFile(conversation.id, file);
+           }
+       })();
     }
 
     // 2. Process Text
