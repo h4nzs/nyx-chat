@@ -1652,17 +1652,21 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
   updateMessage: (conversationId, messageId, updates) => {
     set(state => {
-      const updatedMessages = (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, ...updates } : m);
+      let updatedMessages = (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, ...updates } : m);
       const updatedMsg = updatedMessages.find(m => m.id === messageId);
-      
+
       if (updatedMsg) {
         // [FIX] If message is view-once and has been viewed, delete its content but keep the metadata as a tombstone
+        let messageForPreview = updatedMsg;
         if (updatedMsg.isViewOnce && updatedMsg.isViewed) {
             // Delete the cryptographic material
             import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(console.error);
             // Create a tombstone version for the vault so the UI still knows it existed
             const tombstone = { ...updatedMsg, content: null, fileUrl: undefined, isDeletedLocal: true };
             shadowVault.upsertMessages([tombstone]).catch(console.error);
+            // Replace the in-memory message with the tombstone
+            updatedMessages = updatedMessages.map(m => m.id === messageId ? tombstone : m);
+            messageForPreview = tombstone;
         } else {
             shadowVault.upsertMessages([updatedMsg]); // Archive to shadow vault
         }
@@ -1671,7 +1675,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         import('@store/conversation').then(m => {
             const conv = m.useConversationStore.getState().conversations.find(c => c.id === conversationId);
             if (conv?.lastMessage?.id === messageId) {
-                m.useConversationStore.getState().updateConversationLastMessage(conversationId, updatedMsg);
+                m.useConversationStore.getState().updateConversationLastMessage(conversationId, messageForPreview);
             }
         }).catch(console.error);
       }

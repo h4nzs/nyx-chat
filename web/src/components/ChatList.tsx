@@ -337,9 +337,12 @@ const ConversationItem = memo(({
 });
 
 
+import { useNavigate } from 'react-router-dom';
+
 // --- Main Component ---
 
 export default function ChatList() {
+  const navigate = useNavigate();
   const {
     conversations,
     searchResults,
@@ -520,7 +523,7 @@ export default function ChatList() {
           onClose={() => setShowScanModal(false)} 
           onScanSuccess={(hash) => {
             setShowScanModal(false);
-            setSearchQuery(hash);
+            navigate(`/connect?u=${hash}`);
           }} 
         />
       )}

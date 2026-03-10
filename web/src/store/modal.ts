@@ -7,12 +7,13 @@ export interface ModalState {
   confirmTitle: string;
   confirmMessage: string;
   onConfirm: () => void;
+  onCancel: (() => void) | null;
   isChatInfoModalOpen: boolean;
   isProfileModalOpen: boolean;
   isPasswordPromptOpen: boolean;
   onPasswordSubmit: (password: PasswordSubmitResult) => void;
   profileUserId: string | null;
-  showConfirm: (title: string, message: string, onConfirm: () => void) => void;
+  showConfirm: (title: string, message: string, onConfirm: () => void, onCancel?: () => void) => void;
   hideConfirm: () => void;
   openChatInfoModal: () => void;
   closeChatInfoModal: () => void;
@@ -27,12 +28,13 @@ export const useModalStore = create<ModalState>()(set => ({
   confirmTitle: '',
   confirmMessage: '',
   onConfirm: () => {},
+  onCancel: null,
   isChatInfoModalOpen: false,
   isProfileModalOpen: false,
   isPasswordPromptOpen: false,
   onPasswordSubmit: () => {},
   profileUserId: null,
-  showConfirm: (title, message, onConfirm) => set({ isConfirmOpen: true, confirmTitle: title, confirmMessage: message, onConfirm }),
+  showConfirm: (title, message, onConfirm, onCancel) => set({ isConfirmOpen: true, confirmTitle: title, confirmMessage: message, onConfirm, onCancel: onCancel ?? null }),
   hideConfirm: () => set({ isConfirmOpen: false }),
   openChatInfoModal: () => set({ isChatInfoModalOpen: true }),
   closeChatInfoModal: () => set({ isChatInfoModalOpen: false }),
