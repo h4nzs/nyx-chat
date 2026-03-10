@@ -17,8 +17,11 @@ import type { Conversation } from '@store/conversation';
 import { toAbsoluteUrl } from '@utils/url';
 
 import { FiUsers, FiSearch, FiSettings, FiLogOut, FiUser, FiMaximize2, FiSlash, FiTrash2, FiEye, FiEyeOff } from 'react-icons/fi';
+import { BiQrScan } from 'react-icons/bi';
 
 import CreateGroupChat from './CreateGroupChat';
+import ScanQRModal from './ScanQRModal';
+import ShareProfileModal from './ShareProfileModal';
 import NotificationBell from './NotificationBell';
 import { Spinner } from './Spinner';
 import SwipeableItem from './SwipeableItem';
@@ -32,6 +35,8 @@ const UserProfile = memo(() => {
   const { showConfirm: confirmLogout } = useModalStore(useShallow(state => ({ showConfirm: state.showConfirm })));
   const { privacyCloak, setPrivacyCloak } = useSettingsStore(useShallow(s => ({ privacyCloak: s.privacyCloak, setPrivacyCloak: s.setPrivacyCloak })));
   const profile = useUserProfile(user);
+
+  const [showShareModal, setShowShareModal] = useState(false);
 
   const handleLogout = useCallback(() => {
     confirmLogout(
@@ -50,51 +55,54 @@ const UserProfile = memo(() => {
   if (!user) return null;
 
   return (
-    <div className="flex items-center justify-between px-6 py-6 bg-bg-main z-10">
-      <div className="flex items-center gap-3 overflow-hidden">
-        <div className="relative flex-shrink-0">
-          <img 
-            src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
-            alt="Avatar" 
-            className="w-10 h-10 rounded-full object-cover shadow-neu-flat dark:shadow-neu-flat-dark border-2 border-bg-main" 
-          />
-          <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border border-bg-surface"></div>
+    <>
+      <div className="flex items-center justify-between px-6 py-6 bg-bg-main z-10">
+        <div className="flex items-center gap-3 overflow-hidden cursor-pointer group" onClick={() => setShowShareModal(true)}>
+          <div className="relative flex-shrink-0">
+            <img 
+              src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
+              alt="Avatar" 
+              className="w-10 h-10 rounded-full object-cover shadow-neu-flat dark:shadow-neu-flat-dark border-2 border-bg-main group-hover:border-accent transition-colors" 
+            />
+            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border border-bg-surface"></div>
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-text-primary truncate group-hover:text-accent transition-colors">{profile.name}</p>
+            {user.isVerified && <span className="text-[10px] text-accent font-bold tracking-wider">VERIFIED</span>}
+          </div>
         </div>
-        <div className="min-w-0">
-          <p className="text-sm font-bold text-text-primary truncate">{profile.name}</p>
-          {user.isVerified && <span className="text-[10px] text-accent font-bold tracking-wider">VERIFIED</span>}
-        </div>
-      </div>
 
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <NotificationBell />
-        {/* PRIVACY CLOAK BUTTON */}
-        <button
-          onClick={() => setPrivacyCloak(!privacyCloak)}
-          className={clsx(
-            "p-2.5 rounded-xl transition-all shadow-neumorphic-concave focus:outline-none",
-            privacyCloak ? "text-accent bg-white/5" : "text-text-secondary hover:text-accent hover:bg-white/5"
-          )}
-          title="Toggle Privacy Cloak"
-        >
-          {privacyCloak ? <FiEyeOff size={18} /> : <FiEye size={18} />}
-        </button>
-        <Link 
-          to="/settings" 
-          aria-label="Settings" 
-          className="btn-flat p-2 rounded-full text-text-secondary hover:text-text-primary transition-all"
-        >
-          <FiSettings size={20} />
-        </Link>
-        <button 
-          onClick={handleLogout} 
-          aria-label="Logout" 
-          className="btn-flat p-2 rounded-full text-text-secondary hover:text-red-500 transition-all"
-        >
-          <FiLogOut size={20} />
-        </button>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <NotificationBell />
+          {/* PRIVACY CLOAK BUTTON */}
+          <button
+            onClick={() => setPrivacyCloak(!privacyCloak)}
+            className={clsx(
+              "p-2.5 rounded-xl transition-all shadow-neumorphic-concave focus:outline-none",
+              privacyCloak ? "text-accent bg-white/5" : "text-text-secondary hover:text-accent hover:bg-white/5"
+            )}
+            title="Toggle Privacy Cloak"
+          >
+            {privacyCloak ? <FiEyeOff size={18} /> : <FiEye size={18} />}
+          </button>
+          <Link 
+            to="/settings" 
+            aria-label="Settings" 
+            className="btn-flat p-2 rounded-full text-text-secondary hover:text-text-primary transition-all"
+          >
+            <FiSettings size={20} />
+          </Link>
+          <button 
+            onClick={handleLogout} 
+            aria-label="Logout" 
+            className="btn-flat p-2 rounded-full text-text-secondary hover:text-red-500 transition-all"
+          >
+            <FiLogOut size={20} />
+          </button>
+        </div>
       </div>
-    </div>
+      {showShareModal && <ShareProfileModal onClose={() => setShowShareModal(false)} />}
+    </>
   );
 });
 
@@ -367,6 +375,7 @@ export default function ChatList() {
   })));
 
   const [showGroupModal, setShowGroupModal] = useState(false);
+  const [showScanModal, setShowScanModal] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { addCommands, removeCommands } = useCommandPaletteStore(useShallow(s => ({
     addCommands: s.addCommands, removeCommands: s.removeCommands
@@ -438,7 +447,17 @@ export default function ChatList() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
-          <div className="absolute right-2 top-1/2 -translate-y-1/2">
+          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
+            <button 
+              onClick={() => setShowScanModal(true)} 
+              title="Scan QR Code"
+              className="
+                p-2 rounded-full text-text-secondary
+                hover:text-accent active:scale-95 transition-all
+              "
+            >
+              <BiQrScan size={18} />
+            </button>
             <button 
               onClick={openCreateGroupModal} 
               title="New Group Chat"
@@ -496,6 +515,15 @@ export default function ChatList() {
       </div>
       
       {showGroupModal && <CreateGroupChat onClose={() => setShowGroupModal(false)} />}
+      {showScanModal && (
+        <ScanQRModal 
+          onClose={() => setShowScanModal(false)} 
+          onScanSuccess={(hash) => {
+            setShowScanModal(false);
+            setSearchQuery(hash);
+          }} 
+        />
+      )}
     </div>
   );
 }

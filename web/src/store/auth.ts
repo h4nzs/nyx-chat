@@ -56,6 +56,7 @@ export async function setupAndUploadPreKeyBundle() {
 
 export type User = {
   id: string;
+  usernameHash?: string;
   encryptedProfile?: string | null;
   role?: string;
   isVerified?: boolean; // Trust Tier (WebAuthn)

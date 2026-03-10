@@ -65,6 +65,7 @@ router.get('/me', async (req, res, next) => {
       data: { lastActiveAt: new Date() },
       select: {
         id: true,
+        usernameHash: true,
         encryptedProfile: true,
         isVerified: true,
         hasCompletedOnboarding: true,
