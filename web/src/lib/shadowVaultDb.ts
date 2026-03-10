@@ -80,6 +80,9 @@ export class NyxShadowVault extends Dexie {
     try {
       const records: DecryptedMessageRecord[] = [];
       for (const m of validMessages) {
+        // [FIX] PERSISTENCE: Check if we already have a record with better profile data
+        const existing = await this.messages.get(m.id);
+        
         let encryptedContent: string | null = null;
         let encryptedRepliedTo: string | undefined = undefined;
         let encryptedSenderName: string | undefined = undefined;
@@ -92,27 +95,36 @@ export class NyxShadowVault extends Dexie {
         if (m.repliedTo) {
              const repliedToStr = JSON.stringify(m.repliedTo);
              encryptedRepliedTo = await encryptVaultText(repliedToStr);
+        } else if (existing?.repliedTo) {
+             encryptedRepliedTo = existing.repliedTo;
         }
 
-        // Fix: Persist sender info if it was hydrated
-        if (m.sender && (m.sender as any).name && (m.sender as any).name !== 'Unknown') {
-            encryptedSenderName = await encryptVaultText((m.sender as any).name);
-            if ((m.sender as any).username) {
-                encryptedSenderUsername = await encryptVaultText((m.sender as any).username);
+        // Fix: Persist sender info if it was hydrated, otherwise fallback to existing
+        const mSender = m.sender as any;
+        const hasValidName = mSender?.name && mSender.name !== 'Unknown' && mSender.name !== 'Encrypted User';
+        
+        if (hasValidName) {
+            encryptedSenderName = await encryptVaultText(mSender.name);
+            if (mSender.username) {
+                encryptedSenderUsername = await encryptVaultText(mSender.username);
             }
+        } else if (existing?.senderName) {
+            // Keep the real name we already have in the vault!
+            encryptedSenderName = existing.senderName;
+            encryptedSenderUsername = existing.senderUsername;
         }
         
         records.push({
           id: m.id,
           conversationId: m.conversationId,
           content: encryptedContent, // Iron Vault: Stored as cipher
-          repliedToId: m.repliedToId,
+          repliedToId: m.repliedToId || existing?.repliedToId,
           repliedTo: encryptedRepliedTo,
           createdAt: m.createdAt,
           senderId: m.senderId,
           senderName: encryptedSenderName,
           senderUsername: encryptedSenderUsername,
-          senderAvatarUrl: (m.sender as any)?.avatarUrl,
+          senderAvatarUrl: (hasValidName ? mSender?.avatarUrl : existing?.senderAvatarUrl) || mSender?.avatarUrl,
           isViewOnce: m.isViewOnce,
           isDeletedLocal: m.isDeletedLocal
         });

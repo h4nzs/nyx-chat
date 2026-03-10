@@ -31,6 +31,8 @@ import { shadowVault } from '@lib/shadowVaultDb';
 
 import { useProfileStore } from './profile';
 
+const incomingMessageLocks = new Map<string, Promise<void>>();
+
 function enrichMessagesWithSenderProfile(conversationId: string, messages: Message[]): Message[] {
     const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
     if (!conv) return messages;
@@ -514,6 +516,7 @@ type Actions = {
   loadMessageContext: (messageId: string) => Promise<void>;
   addOptimisticMessage: (conversationId: string, message: Message) => void;
   addIncomingMessage: (conversationId: string, message: Message) => Promise<Message>;
+  doAddIncomingMessage: (conversationId: string, message: Message) => Promise<Message>;
   replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => Promise<void>;
   removeMessage: (conversationId: string, messageId: string) => void;
   removeMessages: (conversationId: string, messageIds: string[]) => Promise<void>;
@@ -1371,6 +1374,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
   
   addIncomingMessage: async (conversationId, message) => {
+      // MUTEX LOCK to prevent concurrent processing of messages in the same conversation
+      let previousLock = incomingMessageLocks.get(conversationId) || Promise.resolve();
+      let release: () => void;
+      const currentLock = new Promise<void>(resolve => { release = resolve; });
+      incomingMessageLocks.set(conversationId, currentLock);
+
+      try {
+          await previousLock;
+          return await get().doAddIncomingMessage(conversationId, message);
+      } finally {
+          release!();
+          if (incomingMessageLocks.get(conversationId) === currentLock) {
+              incomingMessageLocks.delete(conversationId);
+          }
+      }
+  },
+
+  doAddIncomingMessage: async (conversationId, message) => {
       const currentUser = useAuthStore.getState().user;
       let decrypted = message;
 
@@ -1399,13 +1420,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           decrypted = await decryptMessageObject(message);
       }
 
-      // [FIX] BUG 1: Group Ratchet Sync Delay (Race Condition)
-      // If we are in a group and decryption failed with 'waiting_for_key' or 'Key out of sync'
-      // it might be because the session:new_key event hasn't finished saving to DB yet.
-      const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-      const isGroup = conversation?.isGroup || false;
-
-      if (isGroup && (decrypted.content === 'waiting_for_key' || decrypted.error)) {
+      // [FIX] BUG 1: Ratchet Sync Delay (Race Condition)
+      // If decryption failed with 'waiting_for_key' or 'Key out of sync'
+      // it might be because the state (X3DH or DR) hasn't finished saving to DB yet.
+      // We retry once for BOTH Group and 1-on-1.
+      if (decrypted.content === 'waiting_for_key' || decrypted.error) {
           console.log(`[Ratchet] Decryption failed for ${message.id}. Retrying once in 500ms...`);
           await new Promise(r => setTimeout(r, 500));
           decrypted = await decryptMessageObject(message);
@@ -1419,6 +1438,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               return existing;
           }
           
+          const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+          const isGroup = conversation?.isGroup || false;
+
           if (isGroup && (decrypted.content === 'waiting_for_key' || decrypted.error)) {
               // Targeted Request directly to the sender
               emitSessionKeyRequest(conversationId, decrypted.senderId, decrypted.senderId);
