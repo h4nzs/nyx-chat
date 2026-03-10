@@ -60,6 +60,8 @@ export type User = {
   role?: string;
   isVerified?: boolean; // Trust Tier (WebAuthn)
   hasCompletedOnboarding?: boolean;
+  name?: string;     // Optimistic/Injected Name
+  username?: string; // Optimistic/Injected Username
 };
 
 type State = {
@@ -105,6 +107,7 @@ type Actions = {
   unblockUser: (userId: string) => Promise<void>;
   loadBlockedUsers: () => Promise<void>;
   setDecryptedKeys: (keys: RetrievedKeys) => void;
+  silentRefresh: () => Promise<boolean>;
 };
 
 let privateKeysCache: RetrievedKeys | null = null;
@@ -518,6 +521,24 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         set({ blockedUserIds: blockedIds });
       } catch (error) {
         console.error('Failed to load blocked users:', error);
+      }
+    },
+
+    silentRefresh: async () => {
+      try {
+        const { api } = await import('@lib/api');
+        const data = await api('/api/auth/refresh', {
+          method: 'POST',
+        });
+        
+        if (data && data.accessToken) {
+          set({ accessToken: data.accessToken });
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.warn('[Auth] Silent refresh failed:', error);
+        return false;
       }
     },
   };

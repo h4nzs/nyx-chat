@@ -115,19 +115,29 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     return () => observer.disconnect();
   }, [message.id, message.conversationId, mine, meId, message.statuses]);
 
-  if (message.type === 'SYSTEM' || message.content?.startsWith('🔒')) {
-    const isError = message.content?.includes('Error') || message.content?.includes('Unreadable');
+  if (message.type === 'SYSTEM' || message.content?.startsWith('🔒') || message.content?.startsWith('🔄')) {
+    const isError = message.content?.includes('Error') || message.content?.includes('Unreadable') || message.content?.includes('Key out of sync');
+    const isDesyncError = message.content?.includes('Key out of sync');
+
     return (
-      <div className="flex justify-center items-center my-3 opacity-80">
+      <div className="flex justify-center items-center my-3 opacity-80 flex-col gap-1">
         <div className={clsx(
           "text-xs px-3 py-1.5 rounded-full flex items-center gap-2 shadow-sm border",
           isError 
             ? "bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400" 
             : "bg-bg-surface text-text-secondary border-white/5"
         )}>
-          <FiShield size={12} className={isError ? "text-red-500" : "text-yellow-500"} />
+          {isError ? <FiShield size={12} className="text-red-500" /> : <FiRefreshCw size={12} className="text-blue-500" />}
           <span>{message.content}</span>
         </div>
+        {isDesyncError && (
+            <button 
+                onClick={() => useMessageStore.getState().repairSecureSession(message.conversationId, isGroup)}
+                className="text-[10px] text-blue-500 hover:underline font-medium bg-blue-500/10 px-2 py-1 rounded-md"
+            >
+                Repair Session
+            </button>
+        )}
       </div>
     );
   }
@@ -170,10 +180,13 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     }
   };
 
-  if (message.content === "[This message was deleted]") {
+  if (message.isDeletedLocal || message.content === "[This message was deleted]") {
     return (
       <div ref={ref} className={`flex items-center p-2 ${mine ? 'justify-end' : 'justify-start'}`}>
-        <p className="text-xs italic text-text-secondary">This message was deleted</p>
+        <div className="flex items-center gap-2 text-xs italic text-text-secondary bg-bg-surface px-3 py-1.5 rounded-xl border border-white/5 shadow-sm">
+           <FiTrash2 size={12} />
+           <span>This message was deleted</span>
+        </div>
       </div>
     );
   }

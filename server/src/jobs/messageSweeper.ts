@@ -9,7 +9,7 @@ export const startMessageSweeper = () => {
   cron.schedule('* * * * *', async () => {
     try {
       const now = new Date();
-      const BATCH_SIZE = 1000;
+      const BATCH_SIZE = 100;
       let processedCount = 0;
 
       while (true) {

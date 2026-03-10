@@ -18,18 +18,40 @@ export default function MigrationSendPage() {
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const vaultDataRef = useRef<ArrayBuffer | null>(null);
 
-  // PRE-FETCHING LOGIC
+  // PRE-FETCHING LOGIC (WITH STATE FREEZING)
   useEffect(() => {
     const prefetch = async () => {
       try {
+        // --- CRITICAL FIX: FREEZE STATE ---
+        // Disconnect the socket to prevent incoming messages from advancing the Double Ratchet
+        // while we are capturing the database snapshot.
+        const socket = getSocket();
+        if (socket?.connected) {
+            socket.disconnect();
+            console.log("🔒 System Frozen: Socket disconnected to prevent Ratchet Race Condition.");
+        }
+        // --- END FIX ---
+
         const jsonString = await exportDatabaseToJson();
         vaultDataRef.current = new TextEncoder().encode(jsonString).buffer;
         setStatus('scanning');
+        
+        // We must reconnect ONLY for migration signaling, but NOT for normal message processing.
+        // Since getSocket() might re-trigger standard listeners, we connect it manually here
+        // relying on the fact that the UI layer won't render normal chat components.
+        socket.connect();
       } catch (e) {
         toast.error("Failed to read local vault.");
       }
     };
     prefetch();
+
+    return () => {
+      // Un-freeze if user leaves the page before finishing
+      if (getSocket()?.disconnected) {
+        getSocket().connect();
+      }
+    };
   }, []);
 
   // SCANNER LOGIC

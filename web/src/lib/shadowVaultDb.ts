@@ -7,8 +7,13 @@ export interface DecryptedMessageRecord {
   id: string;
   conversationId: string;
   content: string | null; // ENCRYPTED Base64 string at rest
+  repliedToId?: string;
+  repliedTo?: string; // Encrypted JSON string of the replied message
   createdAt: string | Date;
   senderId: string;
+  senderName?: string; // Encrypted sender name
+  senderUsername?: string; // Encrypted sender username
+  senderAvatarUrl?: string; // Avatar URL (usually public/cached)
   isViewOnce?: boolean;
   isDeletedLocal?: boolean;
 }
@@ -62,7 +67,7 @@ export class NyxShadowVault extends Dexie {
 
   constructor() {
     super('nyx_shadow_vault');
-    this.version(1).stores({
+    this.version(3).stores({
       messages: 'id, conversationId, createdAt'
     });
   }
@@ -75,17 +80,51 @@ export class NyxShadowVault extends Dexie {
     try {
       const records: DecryptedMessageRecord[] = [];
       for (const m of validMessages) {
+        // [FIX] PERSISTENCE: Check if we already have a record with better profile data
+        const existing = await this.messages.get(m.id);
+        
         let encryptedContent: string | null = null;
+        let encryptedRepliedTo: string | undefined = undefined;
+        let encryptedSenderName: string | undefined = undefined;
+        let encryptedSenderUsername: string | undefined = undefined;
+
         if (m.content && !m.isDeletedLocal) {
             encryptedContent = await encryptVaultText(m.content);
+        }
+        
+        if (m.repliedTo) {
+             const repliedToStr = JSON.stringify(m.repliedTo);
+             encryptedRepliedTo = await encryptVaultText(repliedToStr);
+        } else if (existing?.repliedTo) {
+             encryptedRepliedTo = existing.repliedTo;
+        }
+
+        // Fix: Persist sender info if it was hydrated, otherwise fallback to existing
+        const mSender = m.sender as any;
+        const hasValidName = mSender?.name && mSender.name !== 'Unknown' && mSender.name !== 'Encrypted User';
+        
+        if (hasValidName) {
+            encryptedSenderName = await encryptVaultText(mSender.name);
+            if (mSender.username) {
+                encryptedSenderUsername = await encryptVaultText(mSender.username);
+            }
+        } else if (existing?.senderName) {
+            // Keep the real name we already have in the vault!
+            encryptedSenderName = existing.senderName;
+            encryptedSenderUsername = existing.senderUsername;
         }
         
         records.push({
           id: m.id,
           conversationId: m.conversationId,
           content: encryptedContent, // Iron Vault: Stored as cipher
+          repliedToId: m.repliedToId || existing?.repliedToId,
+          repliedTo: encryptedRepliedTo,
           createdAt: m.createdAt,
           senderId: m.senderId,
+          senderName: encryptedSenderName,
+          senderUsername: encryptedSenderUsername,
+          senderAvatarUrl: (hasValidName ? mSender?.avatarUrl : existing?.senderAvatarUrl) || mSender?.avatarUrl,
           isViewOnce: m.isViewOnce,
           isDeletedLocal: m.isDeletedLocal
         });
@@ -102,15 +141,44 @@ export class NyxShadowVault extends Dexie {
       const messages: Message[] = [];
       for (const r of records) {
         let plainText = null;
+        let decryptedRepliedTo = undefined;
+        let decryptedSenderName = undefined;
+        let decryptedSenderUsername = undefined;
+
         if (r.content && !r.isDeletedLocal) {
           plainText = await decryptVaultText(r.content);
         }
+
+        if (r.repliedTo) {
+            const rawRepliedTo = await decryptVaultText(r.repliedTo);
+            if (rawRepliedTo) {
+                try {
+                    decryptedRepliedTo = JSON.parse(rawRepliedTo);
+                } catch {}
+            }
+        }
+
+        if (r.senderName) {
+            decryptedSenderName = await decryptVaultText(r.senderName) || undefined;
+        }
+        if (r.senderUsername) {
+            decryptedSenderUsername = await decryptVaultText(r.senderUsername) || undefined;
+        }
+
         messages.push({
           id: r.id,
           conversationId: r.conversationId,
           content: plainText,
+          repliedToId: r.repliedToId,
+          repliedTo: decryptedRepliedTo,
           createdAt: r.createdAt as string,
           senderId: r.senderId,
+          sender: {
+              id: r.senderId,
+              name: decryptedSenderName,
+              username: decryptedSenderUsername,
+              avatarUrl: r.senderAvatarUrl
+          } as any,
           isViewOnce: r.isViewOnce,
           isDeletedLocal: r.isDeletedLocal
         });
@@ -127,15 +195,44 @@ export class NyxShadowVault extends Dexie {
       const r = await this.messages.get(id);
       if (!r) return null;
       let plainText = null;
+      let decryptedRepliedTo = undefined;
+      let decryptedSenderName = undefined;
+      let decryptedSenderUsername = undefined;
+
       if (r.content && !r.isDeletedLocal) {
         plainText = await decryptVaultText(r.content);
       }
+
+      if (r.repliedTo) {
+          const rawRepliedTo = await decryptVaultText(r.repliedTo);
+          if (rawRepliedTo) {
+              try {
+                  decryptedRepliedTo = JSON.parse(rawRepliedTo);
+              } catch {}
+          }
+      }
+
+      if (r.senderName) {
+          decryptedSenderName = await decryptVaultText(r.senderName) || undefined;
+      }
+      if (r.senderUsername) {
+          decryptedSenderUsername = await decryptVaultText(r.senderUsername) || undefined;
+      }
+
       return {
         id: r.id,
         conversationId: r.conversationId,
         content: plainText,
+        repliedToId: r.repliedToId,
+        repliedTo: decryptedRepliedTo,
         createdAt: r.createdAt as string,
         senderId: r.senderId,
+        sender: {
+            id: r.senderId,
+            name: decryptedSenderName,
+            username: decryptedSenderUsername,
+            avatarUrl: r.senderAvatarUrl
+        } as any,
         isViewOnce: r.isViewOnce,
         isDeletedLocal: r.isDeletedLocal
       };

@@ -59,7 +59,7 @@ export const startSystemSweeper = () => {
              await prisma.user.delete({ where: { id: u.id } }); // Cascade deletes messages, conversations, keys.
              nukedCount++;
            } catch (err) {
-             console.error('[Cron] Failed to delete user:', u.id);
+             console.error('[Cron] Failed to execute Dead Man Switch for user:', u.id, err);
            }
         }
       }

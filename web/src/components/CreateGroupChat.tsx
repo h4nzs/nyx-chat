@@ -30,17 +30,31 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
   })));
 
   useEffect(() => {
-    if (searchQuery.trim() === '') {
+    const rawQuery = searchQuery.trim();
+    if (rawQuery === '') {
       setUserList([]);
       return;
     }
     const timer = setTimeout(async () => {
       try {
-        const hashedQuery = await hashUsername(searchQuery.trim());
+        const hashedQuery = await hashUsername(rawQuery);
         const safeQuery = encodeURIComponent(hashedQuery);
         const results = await authFetch<UserSearchResult[]>(`/api/users/search?q=${safeQuery}`);
+        
+        // Inject optimistic query as username/name since it was an exact hash match
+        // Guard: Check known users
+        const knownUsers = useConversationStore.getState().conversations.flatMap(c => c.participants);
+
+        const optimisticResults = results.map(u => {
+            const known = knownUsers.find(k => k.id === u.id);
+            if (known?.name && known.name !== 'Unknown') {
+                return { ...u, name: known.name, username: known.username || rawQuery };
+            }
+            return { ...u, username: rawQuery, name: rawQuery };
+        });
+        
         const selectedIds = selectedUsers.map(u => u.id);
-        setUserList(results.filter(u => u.id !== me?.id && !selectedIds.includes(u.id)));
+        setUserList(optimisticResults.filter(u => u.id !== me?.id && !selectedIds.includes(u.id)));
       } catch {
         // Silent fail or show toast? Silent is better for typing.
       }

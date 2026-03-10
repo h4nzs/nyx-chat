@@ -193,13 +193,19 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       const encryptedFile = new File([encryptedBlob], file.name, { type: "application/octet-stream" });
       
       // 1. Get Presigned URL
+      // [UPDATE] Calculate retention for disappearing messages / view once
+      const fileRetention = expiresIn 
+          ? expiresIn // Disappearing Message: Delete when message expires
+          : (isViewOnce ? 1209600 : 0); // View Once: Keep for 14 days max if not viewed, then purge. (Avoids forever-storage)
+
       const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
           method: 'POST',
           body: JSON.stringify({
               fileName: file.name,
               fileType: 'application/octet-stream', 
               folder: 'attachments',
-              fileSize: encryptedBlob.size 
+              fileSize: encryptedBlob.size,
+              fileRetention
           })
       });
 
@@ -302,6 +308,10 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
       updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
       
+      const fileRetention = expiresIn 
+          ? expiresIn 
+          : (isViewOnce ? 1209600 : 0);
+
       // Get Presigned
       const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
           method: 'POST',
@@ -309,7 +319,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
               fileName: "voice-message.webm",
               fileType: "application/octet-stream",
               folder: 'attachments',
-              fileSize: encryptedBlob.size
+              fileSize: encryptedBlob.size,
+              fileRetention
           })
       });
 

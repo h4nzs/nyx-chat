@@ -4,6 +4,7 @@ import { getProfileKey } from '@lib/keychainDb';
 
 export type DecryptedProfile = {
   name: string;
+  username?: string; // Added field
   description?: string | null;
   avatarUrl?: string | null;
   autoDestructDays?: number | null; // Added field

@@ -33,6 +33,8 @@ interface MessageSendPayload {
   sessionId?: string;
   tempId: number;
   expiresAt?: string; // New field for Disappearing Messages
+  pushPayloads?: Record<string, string>; // { userId: encryptedPushPayload }
+  repliedToId?: string; // New field for Replies
 }
 
 interface PushSubscribePayload {
@@ -352,7 +354,7 @@ export function registerSocket(httpServer: HttpServer) {
          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
       }
 
-      const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce } = message as any;
+      const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId } = message as any;
 
       if (!content || typeof content !== 'string' || content.length > 10000) {
         return callback?.({ ok: false, error: "Invalid message content." });
@@ -373,10 +375,14 @@ export function registerSocket(httpServer: HttpServer) {
               senderId: userId, 
               content, 
               sessionId,
+              repliedToId,
               expiresAt: expiresAt ? new Date(expiresAt) : null, // Save expiration
               isViewOnce: isViewOnce === true
           },
-          include: { sender: { select: { id: true, encryptedProfile: true } } }
+          include: { 
+              sender: { select: { id: true, encryptedProfile: true } },
+              repliedTo: true
+          }
         });
         
         const finalMessage = { ...newMessage, tempId };
@@ -385,8 +391,10 @@ export function registerSocket(httpServer: HttpServer) {
           io.to(participant.userId).emit('message:new', finalMessage);
           
           if (participant.userId !== userId) {
+             const encryptedPushPayload = pushPayloads ? pushPayloads[participant.userId] : null;
              sendPushNotification(participant.userId, {
-                 data: { conversationId, messageId: newMessage.id }
+                 type: encryptedPushPayload ? 'ENCRYPTED_MESSAGE' : 'GENERIC_MESSAGE',
+                 data: { conversationId, messageId: newMessage.id, encryptedPushPayload }
              }).catch(console.error);
           }
         });
@@ -426,6 +434,12 @@ export function registerSocket(httpServer: HttpServer) {
           where: { messageId_userId: { messageId, userId } },
           update: { status: 'READ' },
           create: { messageId, userId, status: 'READ' },
+        });
+        
+        // Fix Unread Count Reappearing: Update the participant's last read message
+        await prisma.participant.update({
+          where: { userId_conversationId: { userId, conversationId } },
+          data: { lastReadMsgId: messageId }
         });
         
         // Fetch full message metadata only if needed for broadcast
@@ -517,8 +531,22 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
-    socket.on('session:request_key', async ({ conversationId, sessionId }: KeyRequestPayload) => {
-      if (!conversationId || !sessionId) return;
+    socket.on('session:request_key', async (data: any) => {
+      const { conversationId, sessionId, targetId } = data;
+      if (!conversationId) return;
+
+      // [NEW] Targeted Key Request (Auto-Heal Relay)
+      if (targetId) {
+          io.to(targetId).emit('session:request_key', {
+              conversationId,
+              requesterId: userId,
+              sessionId
+          });
+          return;
+      }
+
+      // Legacy/Broadcast Fallback
+      if (!sessionId) return;
 
       const isParticipant = await prisma.participant.findFirst({
         where: { conversationId, userId: socket.user!.id }
@@ -566,40 +594,11 @@ export function registerSocket(httpServer: HttpServer) {
       });
     });
 
-    // === WEBRTC SIGNALING (P2P CALLS) ===
-    socket.on('call:request', (data: { to: string, isVideo: boolean, callerProfile: any }) => {
+    // === WEBRTC E2EE SIGNALING (P2P CALLS) ===
+    socket.on('webrtc:secure_signal', (data: { to: string, type: string, payload: string }) => {
       if (!data || !data.to) return;
-      socket.to(data.to).emit('call:incoming', { from: userId, isVideo: data.isVideo, callerProfile: data.callerProfile });
-    });
-
-    socket.on('call:accept', (data: { to: string }) => {
-      if (!data || !data.to) return;
-      socket.to(data.to).emit('call:accepted', { from: userId });
-    });
-
-    socket.on('call:reject', (data: { to: string, reason?: string }) => {
-      if (!data || !data.to) return;
-      socket.to(data.to).emit('call:rejected', { from: userId, reason: data.reason || 'declined' });
-    });
-
-    socket.on('call:end', (data: { to: string }) => {
-      if (!data || !data.to) return;
-      socket.to(data.to).emit('call:ended', { from: userId });
-    });
-
-    socket.on('webrtc:offer', (data: { to: string, offer: RTCSessionDescriptionInit }) => {
-      if (!data || !data.to) return;
-      socket.to(data.to).emit('webrtc:offer', { from: userId, offer: data.offer });
-    });
-
-    socket.on('webrtc:answer', (data: { to: string, answer: RTCSessionDescriptionInit }) => {
-      if (!data || !data.to) return;
-      socket.to(data.to).emit('webrtc:answer', { from: userId, answer: data.answer });
-    });
-
-    socket.on('webrtc:ice-candidate', (data: { to: string, candidate: RTCIceCandidateInit }) => {
-      if (!data || !data.to) return;
-      socket.to(data.to).emit('webrtc:ice-candidate', { from: userId, candidate: data.candidate });
+      // Server is completely blind to the payload (contains offer/answer/ice/profile)
+      socket.to(data.to).emit('webrtc:secure_signal', { from: userId, type: data.type, payload: data.payload });
     });
 
     // === DEVICE MIGRATION TUNNEL ===
@@ -634,6 +633,21 @@ export function registerSocket(httpServer: HttpServer) {
       }
       
       socket.to(data.roomId).emit('migration:chunk', data);
+    });
+
+    // === PRESENCE MANAGEMENT (AWAY/ACTIVE) ===
+    socket.on("user:away", async () => {
+      if (!userId) return;
+      // Hapus dari Redis dan langsung broadcast biar UI temennya berubah jadi Offline
+      await redisClient.sRem('online_users', userId);
+      socket.broadcast.emit("presence:user_left", userId);
+    });
+
+    socket.on("user:active", async () => {
+      if (!userId) return;
+      // Masukin lagi ke Redis dan broadcast kalau dia udah buka app-nya lagi
+      await redisClient.sAdd('online_users', userId);
+      socket.broadcast.emit("presence:user_joined", userId);
     });
 
     // Disconnect Handler (Untuk User)

@@ -256,7 +256,78 @@ const KEY_REQUEST_TIMEOUT_MS = 15000; // 15 seconds
 const pendingGroupSessionPromises = new Map<string, Promise<any[] | null>>();
 const groupSessionLocks = new Set<string>();
 
-// --- Dynamic Import Helpers ---
+// --- E2EE WebRTC Signaling Helpers ---
+
+export async function generateCallKey(): Promise<string> {
+  const key = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  );
+  const exported = await crypto.subtle.exportKey('raw', key);
+  const { getSodium } = await import('@lib/sodiumInitializer');
+  const sodium = await getSodium();
+  return sodium.to_base64(new Uint8Array(exported), sodium.base64_variants.URLSAFE_NO_PADDING);
+}
+
+export async function encryptCallSignal(payload: object, base64Key: string): Promise<string> {
+  const { getSodium } = await import('@lib/sodiumInitializer');
+  const sodium = await getSodium();
+  const keyBytes = sodium.from_base64(base64Key, sodium.base64_variants.URLSAFE_NO_PADDING);
+  
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt']
+  );
+
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encodedPayload = new TextEncoder().encode(JSON.stringify(payload));
+  
+  const encryptedBuf = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    cryptoKey,
+    encodedPayload
+  );
+
+  const encryptedBytes = new Uint8Array(encryptedBuf);
+  const combined = new Uint8Array(iv.length + encryptedBytes.length);
+  combined.set(iv, 0);
+  combined.set(encryptedBytes, iv.length);
+
+  return sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
+}
+
+export async function decryptCallSignal(encryptedStr: string, base64Key: string): Promise<any> {
+  const { getSodium } = await import('@lib/sodiumInitializer');
+  const sodium = await getSodium();
+  const keyBytes = sodium.from_base64(base64Key, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const combined = sodium.from_base64(encryptedStr, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+  const iv = combined.slice(0, 12);
+  const encryptedBytes = combined.slice(12);
+
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt']
+  );
+
+  const decryptedBuf = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    cryptoKey,
+    encryptedBytes
+  );
+
+  const jsonStr = new TextDecoder().decode(decryptedBuf);
+  return JSON.parse(jsonStr);
+}
+
+// --- End E2EE WebRTC Signaling Helpers ---
 async function getWorkerProxy() {
   return import('@lib/crypto-worker-proxy');
 }
@@ -316,7 +387,7 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
 
 // --- Group Key Management & Recovery ---
 
-export async function ensureGroupSession(conversationId: string, participants: Participant[]): Promise<any[] | null> {
+export async function ensureGroupSession(conversationId: string, participants: Participant[], forceRotate: boolean = false): Promise<any[] | null> {
   const pending = pendingGroupSessionPromises.get(conversationId);
   if (pending) return pending;
 
@@ -325,7 +396,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
       const interval = setInterval(() => {
         if (!groupSessionLocks.has(conversationId)) {
           clearInterval(interval);
-          ensureGroupSession(conversationId, participants).then(resolve);
+          ensureGroupSession(conversationId, participants, forceRotate).then(resolve);
         }
       }, 10);
     });
@@ -336,6 +407,12 @@ export async function ensureGroupSession(conversationId: string, participants: P
   const promise = (async () => {
     try {
       // PHASE 2: Sender Key Protocol
+      if (forceRotate) {
+          const { deleteGroupSenderState } = await import('@lib/keychainDb');
+          await deleteGroupSenderState(conversationId);
+          console.log(`[Crypto] Forced rotation for group ${conversationId}`);
+      }
+
       const existingSenderState = await getGroupSenderState(conversationId);
       if (existingSenderState) return null; // We already have a sender key for this group
 
@@ -409,8 +486,7 @@ export async function handleGroupKeyDistribution(
       conversationId,
       senderId,
       CK: senderKeyB64,
-      N: 0,
-      skippedKeys: []
+      N: 0
   });
 }
 
@@ -488,7 +564,27 @@ export interface DrHeader {
   epk?: string;
 }
 
-const encryptionLocks = new Map<string, Promise<void>>();
+// --- Unified Ratchet Mutex ---
+// Ensures that only one operation (Encrypt OR Decrypt) can modify 
+// the ratchet state of a conversation at any given time.
+const ratchetLocks = new Map<string, Promise<void>>();
+
+async function acquireRatchetLock(conversationId: string): Promise<() => void> {
+    let previousLock = ratchetLocks.get(conversationId) || Promise.resolve();
+    let release: () => void;
+    const currentLock = new Promise<void>(resolve => { release = resolve; });
+    ratchetLocks.set(conversationId, currentLock);
+    
+    // Wait for the previous lock to release
+    await previousLock;
+    
+    return () => {
+        release();
+        if (ratchetLocks.get(conversationId) === currentLock) {
+            ratchetLocks.delete(conversationId);
+        }
+    };
+}
 
 export async function encryptMessage(
   text: string,
@@ -497,20 +593,11 @@ export async function encryptMessage(
   existingSession?: { sessionId: string; key: Uint8Array },
   messageId?: string
 ): Promise<{ ciphertext: string; sessionId?: string; drHeader?: DrHeader; mk?: Uint8Array }> {
-  // MUTEX LOCK to prevent concurrent ratchet state overwrites when sending messages rapidly
-  let previousLock = encryptionLocks.get(conversationId) || Promise.resolve();
-  let release: () => void;
-  const currentLock = new Promise<void>(resolve => { release = resolve; });
-  encryptionLocks.set(conversationId, currentLock);
-
+  const release = await acquireRatchetLock(conversationId);
   try {
-    await previousLock;
     return await doEncryptMessage(text, conversationId, isGroup, existingSession, messageId);
   } finally {
-    release!();
-    if (encryptionLocks.get(conversationId) === currentLock) {
-      encryptionLocks.delete(conversationId);
-    }
+    release();
   }
 }
 
@@ -538,17 +625,17 @@ async function doEncryptMessage(
         signingPrivateKey
     );
     
+    // [FIX] Atomic order: save key before state
+    if (messageId && result.mk) {
+        await storeMessageKeySecurely(messageId, result.mk);
+    }
+
     // Update State
     await saveGroupSenderState({
         conversationId,
         CK: result.state.CK,
         N: result.state.N
     });
-    
-    // [FIX PERSISTENCE] Store MK for Self-Message History
-    if (messageId && result.mk) {
-        await storeMessageKeySecurely(messageId, result.mk);
-    }
     
     // Construct Payload
     const payload = JSON.stringify({
@@ -569,13 +656,13 @@ async function doEncryptMessage(
         plaintext: text
     });
 
-    await storeRatchetStateSecurely(conversationId, result.state);
-
     const mkUint8 = new Uint8Array(result.mk);
 
     if (messageId) {
        await storeMessageKeySecurely(messageId, mkUint8);
     }
+
+    await storeRatchetStateSecurely(conversationId, result.state);
 
     return { 
         ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
@@ -585,8 +672,6 @@ async function doEncryptMessage(
   }
 }
 
-const decryptionLocks = new Map<string, Promise<void>>();
-
 export async function decryptMessage(
   cipher: string,
   conversationId: string,
@@ -594,20 +679,11 @@ export async function decryptMessage(
   sessionId: string | null | undefined, // In group, this might be senderId
   messageId?: string
 ): Promise<DecryptResult> {
-  // MUTEX LOCK to prevent concurrent ratchet state overwrites when receiving messages rapidly
-  let previousLock = decryptionLocks.get(conversationId) || Promise.resolve();
-  let release: () => void;
-  const currentLock = new Promise<void>(resolve => { release = resolve; });
-  decryptionLocks.set(conversationId, currentLock);
-
+  const release = await acquireRatchetLock(conversationId);
   try {
-    await previousLock;
     return await doDecryptMessage(cipher, conversationId, isGroup, sessionId, messageId);
   } finally {
-    release!();
-    if (decryptionLocks.get(conversationId) === currentLock) {
-      decryptionLocks.delete(conversationId);
-    }
+    release();
   }
 }
 
@@ -668,38 +744,41 @@ async function doDecryptMessage(
         const payload = JSON.parse(cipher);
         const { header, ciphertext, signature } = payload;
         
-        // 1. CHECK SKIPPED KEYS FIRST
-        const existingSkippedIndex = receiverState.skippedKeys?.findIndex(k => k.n === header.n);
-        if (existingSkippedIndex !== undefined && existingSkippedIndex !== -1) {
-            const skippedKeyObj = receiverState.skippedKeys[existingSkippedIndex];
-            const mk = sodium.from_base64(skippedKeyObj.mk, sodium.base64_variants.URLSAFE_NO_PADDING);
-            const ciphertextBytes = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
-            const nonce = ciphertextBytes.slice(0, 24);
-            const ctext = ciphertextBytes.slice(24);
-            const decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
-            
-            // Remove the used key to prevent replay attacks
-            const newSkippedKeys = [...receiverState.skippedKeys];
-            newSkippedKeys.splice(existingSkippedIndex, 1);
-            await saveGroupReceiverState({ ...receiverState, skippedKeys: newSkippedKeys });
-
-            if (messageId) {
-                await storeMessageKeySecurely(messageId, mk);
-            }
-            return { status: 'success', value: sodium.to_string(decrypted) };
-        }
-
+        // --- Resolve Sender Signing Key First ---
         const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
         const sender = conversation?.participants.find(p => p.id === senderId);
-        
         const keyToUse = sender?.signingKey;
+        
         if (!keyToUse) {
              return { status: 'error', error: new Error('Missing sender signing key') };
         }
-        
+
         const senderSigningKey = sodium.from_base64(keyToUse, sodium.base64_variants.URLSAFE_NO_PADDING);
         const ciphertextBytes = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+        // 1. CHECK SKIPPED KEYS FIRST (ATOMIC)
+        const { takeGroupSkippedKey, storeGroupSkippedKey } = await import('@lib/keychainDb');
+        const skippedMkB64 = await takeGroupSkippedKey(conversationId, senderId, header.n);
         
+        if (skippedMkB64) {
+            // SECURITY FIX: Decrypt via Worker (Verifies Signature)
+            const { groupDecryptSkipped } = await getWorkerProxy();
+            const result = await groupDecryptSkipped(
+                skippedMkB64, 
+                header.n,
+                ciphertextBytes,
+                signature,
+                senderSigningKey
+            );
+            
+            if (messageId) {
+                const mkBytes = sodium.from_base64(skippedMkB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+                await storeMessageKeySecurely(messageId, mkBytes);
+            }
+            return { status: 'success', value: sodium.to_string(result.plaintext) };
+        }
+        
+        const { groupRatchetDecrypt } = await getWorkerProxy();
         const result = await groupRatchetDecrypt(
             { CK: receiverState.CK, N: receiverState.N },
             header,
@@ -708,12 +787,18 @@ async function doDecryptMessage(
             senderSigningKey
         );
         
-        // Update State
+        // 2. ATOMIC STATE UPDATE: Store gaps separately
+        for (const sk of result.skippedKeys) {
+            await storeGroupSkippedKey(conversationId, senderId, sk.n, sk.mk);
+        }
+
         await saveGroupReceiverState({
             ...receiverState,
+            id: receiverState.id, // Explicit ID preserve
+            conversationId,
+            senderId,
             CK: result.state.CK,
-            N: result.state.N,
-            skippedKeys: [...(receiverState.skippedKeys || []), ...result.skippedKeys]
+            N: result.state.N
         });
         
         // [FIX PERSISTENCE] Save Message Key for Fast Reloads
@@ -793,17 +878,20 @@ async function doDecryptMessage(
           ciphertext: combined
       });
 
-      await storeRatchetStateSecurely(conversationId, result.state);
-
-      if (messageId) {
-          await storeMessageKeySecurely(messageId, result.mk);
-      }
-
+      // [FIX] ATOMIC ORDER: Store intermediate keys (gaps) FIRST
       for (const sk of result.skippedKeys) {
           const skDhKey = sk.epk || sk.dh;
           const hKey = `${conversationId}_${skDhKey}_${sk.n}`;
           await storeSkippedMessageKeySecurely(hKey, sk.mk);
       }
+
+      // Store current message key
+      if (messageId) {
+          await storeMessageKeySecurely(messageId, result.mk);
+      }
+
+      // FINALLY, update the ratchet state to advance the chain
+      await storeRatchetStateSecurely(conversationId, result.state);
 
       return { status: 'success', value: sodium.to_string(result.plaintext) };
 

@@ -32,13 +32,27 @@ const AddParticipantModal = ({ conversationId, onClose }: {
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(async () => {
-      if (searchTerm.trim().length > 2) {
+      const rawQuery = searchTerm.trim();
+      if (rawQuery.length > 2) {
         setIsSearching(true);
         try {
-          const hashedQuery = await hashUsername(searchTerm.trim());
+          const hashedQuery = await hashUsername(rawQuery);
           const safeQuery = encodeURIComponent(hashedQuery);
           const users = await api<UserSearchResult[]>(`/api/users/search?q=${safeQuery}`);
-          setSearchResults(users.filter(u => !existingParticipantIds.includes(u.id)));
+          
+          // Inject optimistic query as username/name since it was an exact hash match
+          // Guard: Check known users
+          const knownUsers = useConversationStore.getState().conversations.flatMap(c => c.participants);
+
+          const optimisticUsers = users.map(u => {
+              const known = knownUsers.find(k => k.id === u.id);
+              if (known?.name && known.name !== 'Unknown') {
+                  return { ...u, name: known.name, username: known.username || rawQuery };
+              }
+              return { ...u, username: rawQuery, name: rawQuery };
+          });
+          
+          setSearchResults(optimisticUsers.filter(u => !existingParticipantIds.includes(u.id)));
         } catch (error) {
           console.error("Failed to search users:", error);
           setSearchResults([]);

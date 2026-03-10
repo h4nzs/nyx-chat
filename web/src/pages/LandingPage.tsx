@@ -206,7 +206,7 @@ export default function LandingPage() {
             <div className="lg:col-span-7">
               <motion.div initial="hidden" animate="visible" variants={containerVariants}>
                 <motion.div variants={itemVariants} className="inline-block mb-4 px-4 py-1 rounded-full bg-bg-main shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.1)] text-accent text-xs md:text-sm font-bold tracking-wider uppercase">
-                  v2.3.0 • E2EE Encrypted • Anonymous
+                  {__APP_VERSION__} • E2EE Encrypted • Anonymous
                 </motion.div>
                 <motion.h1 variants={itemVariants} className="text-5xl md:text-7xl font-black tracking-tighter leading-none mb-6">
                   PRIVATE<br />
@@ -419,7 +419,7 @@ export default function LandingPage() {
             <div className="flex items-center justify-center gap-3 mb-4">
               <img
                 src="/pwa-512x512.png"
-                alt="NYX Command"
+                alt="NYX"
                 className="w-6 h-6 grayscale hover:grayscale-0 transition-all duration-300"
               />
               <span className="text-sm font-black tracking-[0.3em] text-text-primary uppercase">NYX</span>

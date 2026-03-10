@@ -12,16 +12,33 @@ export const s3Client = new S3Client({
   forcePathStyle: true
 })
 
-// Generate URL upload yang valid selama 5 menit
-export const getPresignedUploadUrl = async (key: string, contentType: string) => {
-  const command = new PutObjectCommand({
+// Generate URL upload yang valid selama 5 menit (default)
+// urlTtl: Berapa lama LINK upload valid (detik)
+// deleteAt: Kapan FILE harus dianggap kadaluarsa (untuk Lifecycle Rules / Metadata)
+export const getPresignedUploadUrl = async (key: string, contentType: string, urlTtl: number = 300, deleteAt?: Date) => {
+  const commandInput: any = {
     Bucket: env.r2BucketName,
     Key: key,
-    ContentType: contentType
-  })
+    ContentType: contentType,
+    // [FIX] Ensure we don't include checksums in the signature as the frontend won't send them
+    ChecksumAlgorithm: undefined 
+  };
+
+  // Jika ada jadwal penghapusan (Disappearing Messages / Cleanup)
+  // Kita pasang Custom Metadata 'delete-at'. 
+  // NOTE: Kita tidak pakai 'Expires' header di sini karena AWS SDK akan memaksa header tersebut masuk ke signature,
+  // yang menyebabkan error 403 (CORS/Signature Mismatch) jika browser tidak mengirim header 'Expires'.
+  if (deleteAt) {
+    commandInput.Metadata = {
+      'delete-at': deleteAt.toISOString()
+    };
+  }
+
+  const command = new PutObjectCommand(commandInput)
 
   const url = await getSignedUrl(s3Client, command, {
-    expiresIn: 300,
+    expiresIn: urlTtl, 
+    // Kita hanya mengunci content-type. Header lain seperti 'host' akan diurus SDK.
     signableHeaders: new Set(['content-type'])
   })
 

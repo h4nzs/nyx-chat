@@ -44,6 +44,22 @@ const handleKeyRotation = async (conversationId: string) => {
   }
 };
 
+export const fireGhostSync = (conversationId: string, baseDelay: number = 1000) => {
+    const randomDelay = Math.floor(Math.random() * 2500) + baseDelay;
+    setTimeout(async () => {
+        try {
+            const messageStore = (await import('../store/message')).useMessageStore.getState();
+            await messageStore.sendMessage(conversationId, {
+                content: JSON.stringify({ type: 'GHOST_SYNC', ts: Date.now() }),
+                isSilent: true
+            });
+            console.log(`[Ghost Sync] Fired for group ${conversationId}`);
+        } catch (e) {
+            console.error('[Ghost Sync] Failed to send', e);
+        }
+    }, randomDelay);
+};
+
 export function getSocket() {
   if (!socket) {
     // Inisialisasi awal (token mungkin masih null, tidak apa-apa)
@@ -107,9 +123,20 @@ export function getSocket() {
     // --- Application-specific Listeners ---
     socket.on("message:new", async (newMessage) => {
       const meId = useAuthStore.getState().user?.id;
-      // THE SHIELD: Block echoes. Never process messages we sent ourselves from the socket!
+      
+      // THE SHIELD: Intelligent Echo Cancellation
+      // Only block messages from ourselves IF they match a pending optimistic update on this device.
+      // This allows messages from our *other* devices to pass through and be synced.
       if (meId && newMessage.senderId === meId) {
-        return;
+        const isOptimisticEcho = useMessageStore.getState().messages[newMessage.conversationId]?.some(
+            m => m.tempId && String(m.tempId) === String(newMessage.tempId)
+        );
+        
+        if (isOptimisticEcho) {
+            // It's an echo of a message we just sent from this tab. Ignore it.
+            return;
+        }
+        // If no match, it's a sync from another device (or a re-send we lost track of). Process it.
       }
 
       const convExists = useConversationStore.getState().conversations.some(c => c.id === newMessage.conversationId);
@@ -188,7 +215,11 @@ export function getSocket() {
 
       // Jika ini adalah percakapan grup, jadwalkan rotasi kunci berkala
       if (newConversation.isGroup) {
+        useConversationStore.getState().markKeyRotationNeeded(newConversation.id, true);
         schedulePeriodicGroupKeyRotation(newConversation.id);
+        // The new user fires a Ghost Sync too, but with a slightly longer base delay 
+        // to ensure they have fully joined the socket room first.
+        fireGhostSync(newConversation.id, 3000);
       }
 
       toast.success(`You've been added to "${newConversation.title || 'a new chat'}"`);
@@ -197,8 +228,26 @@ export function getSocket() {
     socket.on("conversation:updated", (updates) => conversationStore.updateConversation(updates.id, updates));
     socket.on("conversation:deleted", ({ id }) => conversationStore.removeConversation(id));
 
+    socket.on('group:participants_changed', (data: { conversationId: string }) => {
+        // Force key rotation on the next message sent
+        useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
+        // Also reload conversation details to get the new participant list
+        useConversationStore.getState().loadConversations();
+
+        // [NEW] GHOST SYNC: Trigger a silent message to settle ratchet state
+        fireGhostSync(data.conversationId, 1000);
+    });
+
+    socket.on('session:request_key', async (data: { conversationId: string, requesterId: string }) => {
+        // Someone failed to decrypt our message, they need our sender key.
+        // By marking rotation needed, our next message will force a fresh key distribution to them.
+        useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
+    });
+
     socket.on("conversation:participants_added", ({ conversationId, newParticipants }) => {
       useConversationStore.getState().addParticipants(conversationId, newParticipants);
+      useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
+      fireGhostSync(conversationId, 2000);
     });
 
     socket.on("conversation:participant_removed", ({ conversationId, userId }) => {
@@ -277,8 +326,14 @@ export function disconnectSocket() {
   if (socket?.connected) socket.disconnect();
 }
 
-export function emitSessionKeyRequest(conversationId: string, sessionId: string) {
-  getSocket()?.emit('session:request_key', { conversationId, sessionId });
+export function emitSessionKeyRequest(conversationId: string, sessionId: string, targetId?: string) {
+  const meId = useAuthStore.getState().user?.id;
+  getSocket()?.emit('session:request_key', { 
+      conversationId, 
+      sessionId, 
+      targetId,
+      requesterId: meId
+  });
 }
 
 export function emitSessionKeyFulfillment(payload: { requesterId: string; conversationId: string; sessionId: string; encryptedKey: string; }) {

@@ -4,7 +4,7 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api";
 import { useMessageStore, decryptMessageObject } from "./message";
-import { getSocket, emitSessionKeyRequest } from "@lib/socket";
+import { getSocket, emitSessionKeyRequest, fireGhostSync } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
 // Removed all crypto imports
@@ -25,7 +25,13 @@ export type Message = {
   type?: 'USER' | 'SYSTEM';
   conversationId: string;
   senderId: string;
-  sender?: { id: string; encryptedProfile?: string | null };
+  sender?: { 
+    id: string; 
+    encryptedProfile?: string | null;
+    name?: string;
+    username?: string;
+    avatarUrl?: string | null;
+  };
   content?: string | null;
   imageUrl?: string | null;
   fileUrl?: string | null;
@@ -63,6 +69,9 @@ export type Participant = {
   signingKey?: string; // New: Ed25519 Signing Key for Sender Keys
   role: "ADMIN" | "MEMBER";
   isPinned?: boolean;
+  name?: string;     // Optimistic/Injected Name
+  username?: string; // Optimistic/Injected Username
+  avatarUrl?: string | null;
 };
 
 export type Conversation = {
@@ -78,6 +87,7 @@ export type Conversation = {
   unreadCount: number;
   lastUpdated?: number;
   keyRotationPending?: boolean;
+  requiresKeyRotation?: boolean;
 };
 
 // --- Helper Functions ---
@@ -97,7 +107,7 @@ const sortConversations = (list: Conversation[], currentUserId: string | undefin
 
 const withPreview = (msg: Message): Message => {
   if (msg.content) {
-    // Check for Reaction or Silent Payload
+    // Check for Reaction, Silent, or Edit Payload
     if (msg.content.trim().startsWith('{')) {
        try {
          const payload = JSON.parse(msg.content);
@@ -106,6 +116,14 @@ const withPreview = (msg: Message): Message => {
          }
          if (payload.type === 'silent' && typeof payload.text === 'string') {
             return { ...msg, preview: payload.text, content: payload.text, isSilent: true };
+         }
+         if (payload.type === 'edit' && typeof payload.text === 'string') {
+            return { ...msg, preview: `✎ ${payload.text}`, content: payload.text, isEdited: true };
+         }
+         if (payload.type === 'CALL_INIT' || payload.type === 'GHOST_SYNC') {
+            // These should ideally not be last messages, but if they are (e.g. fresh convo)
+            // we return a placeholder or just null out the preview
+            return { ...msg, preview: '', isSilent: true };
          }
        } catch {}
     }
@@ -136,7 +154,7 @@ type Actions = {
   deleteConversation: (id: string) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
   toggleSidebar: () => void;
-  startConversation: (peerId: string) => Promise<string>;
+  startConversation: (peerId: string, optimisticProfile?: { name: string; username: string }) => Promise<string>;
   searchUsers: (query: string) => Promise<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>;
   addOrUpdateConversation: (conversation: Conversation) => void;
   removeConversation: (conversationId: string) => void;
@@ -146,6 +164,7 @@ type Actions = {
   removeParticipant: (conversationId: string, userId: string) => void;
   updateParticipantRole: (conversationId: string, userId: string, role: "ADMIN" | "MEMBER") => void;
   updateConversationLastMessage: (conversationId: string, message: Message) => void;
+  markKeyRotationNeeded: (conversationId: string, needed: boolean) => void;
   togglePinConversation: (conversationId: string) => Promise<void>;
   resyncState: () => Promise<void>;
   clearError: () => void;
@@ -171,6 +190,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   reset: () => {
     set(initialState);
   },
+
+  markKeyRotationNeeded: (id, needed) => set(s => ({ 
+    conversations: s.conversations.map(c => c.id === id ? { ...c, requiresKeyRotation: needed } : c) 
+  })),
 
   searchUsers: async (query) => {
     try {
@@ -218,6 +241,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 
       const conversations = await Promise.all(rawConversations.map(async c => {
+        const participants = c.participants.map((p: any) => ({
+          ...p.user,
+          description: p.user.description,
+          role: p.role,
+          isPinned: p.isPinned  // Include the pinned status
+        }));
+
         let lastMessage = c.messages?.[0] || null;
         if (lastMessage) {
           try {
@@ -228,21 +258,49 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             }
             lastMessage.content = '[Requesting key to decrypt...]';
           }
+          
+          // Hydrate sender info for the chat list snippet
+          const pInfo = participants.find((p: any) => p.id === lastMessage!.senderId);
+          if (pInfo) {
+              lastMessage.sender = {
+                  ...(lastMessage.sender || { id: lastMessage.senderId }),
+                  ...pInfo
+              };
+          }
+
           lastMessage = withPreview(lastMessage);
         }
+
         return {
           ...c,
           lastMessage,
-          participants: c.participants.map((p: any) => ({
-            ...p.user,
-            description: p.user.description,
-            role: p.role,
-            isPinned: p.isPinned  // Include the pinned status
-          })),
+          participants
         };
       }));
 
-      set({ conversations: sortConversations(conversations, useAuthStore.getState().user?.id) });
+      // [NEW] Offline Catch-up / Diff Detection
+      // Check if group participants changed while we were offline/disconnected
+      const existingConversations = get().conversations;
+      const reconciledConversations = conversations.map(fetched => {
+          if (fetched.isGroup) {
+              const existing = existingConversations.find(e => e.id === fetched.id);
+              if (existing) {
+                  // Compare participant lists (simple ID comparison)
+                  const existingIds = existing.participants.map((p: any) => p.id).sort().join(',');
+                  const fetchedIds = fetched.participants.map((p: any) => p.id).sort().join(',');
+                  
+                  if (existingIds !== fetchedIds) {
+                      console.log(`[Ratchet] Membership change detected for group ${fetched.id} while offline. Proactive healing...`);
+                      // Trigger ghost sync from this device to settle state with new/removed members
+                      fireGhostSync(fetched.id, 2000);
+                      return { ...fetched, requiresKeyRotation: true };
+                  }
+              }
+          }
+          return fetched;
+      });
+
+      set({ conversations: sortConversations(reconciledConversations, useAuthStore.getState().user?.id) });
       useVerificationStore.getState().loadInitialStatus(conversations);
 
       const socket = getSocket();
@@ -297,7 +355,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
   toggleSidebar: () => set(s => ({ isSidebarOpen: !s.isSidebarOpen })),
 
-  startConversation: async (peerId: string): Promise<string> => {
+  startConversation: async (peerId: string, optimisticProfile?: { name: string; username: string }): Promise<string> => {
     const { user } = useAuthStore.getState();
     if (!user) {
       throw new Error("Cannot start a conversation: user is not authenticated.");
@@ -317,6 +375,25 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         }),
       });
       
+      // Inject Optimistic Profile (Blind Indexing Search Result)
+      if (optimisticProfile) {
+          const knownUsers = get().conversations.flatMap(c => c.participants);
+          
+          conv.participants = conv.participants.map(p => {
+              if (p.id === peerId) {
+                  // Guard: Check if we already know this user's real name from another conversation
+                  const existing = knownUsers.find(u => u.id === peerId);
+                  if (existing?.name && existing.name !== 'Unknown') {
+                      return p; // Keep the real profile data we already have
+                  }
+                  
+                  // Merge optimistic data. Server might return null/unknown initially if not friends.
+                  return { ...p, ...optimisticProfile }; 
+              }
+              return p;
+          });
+      }
+
       getSocket().emit("conversation:join", conv.id);
       get().addOrUpdateConversation(conv);
       set({ activeId: conv.id, isSidebarOpen: false });
@@ -448,13 +525,20 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     set(state => {
       const conversation = state.conversations.find(c => c.id === conversationId);
       if (!conversation) return state;
+      
+      const meId = useAuthStore.getState().user?.id;
+      const isMine = message.senderId === meId;
+      
+      // Don't increment unread if the message is from the current user
+      const shouldIncrementUnread = !isMine && state.activeId !== conversationId;
+      
       const updatedConversation = {
         ...conversation,
         lastMessage: withPreview(message),
-        unreadCount: state.activeId === conversationId ? 0 : (conversation.unreadCount || 0) + 1,
+        unreadCount: state.activeId === conversationId ? 0 : (shouldIncrementUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
       };
       const otherConversations = state.conversations.filter(c => c.id !== conversationId);
-      return { conversations: sortConversations([updatedConversation, ...otherConversations], useAuthStore.getState().user?.id) };
+      return { conversations: sortConversations([updatedConversation, ...otherConversations], meId) };
     });
   },
 

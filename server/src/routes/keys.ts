@@ -253,4 +253,38 @@ router.get(
   }
 )
 
+router.get('/turn', requireAuth, async (req, res): Promise<any> => {
+  try {
+    const { env } = await import('../config.js');
+    if (!env.cfAccountId || !env.cfTurnKeyId || !env.cfTurnApiToken) {
+      return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }); // Fallback
+    }
+
+    const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${env.cfTurnKeyId}/credentials/generate`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${env.cfTurnApiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ttl: 86400 }) // 24 hours validity
+    });
+
+    const data: any = await response.json();
+
+    if (data.iceServers) {
+      const payload = { 
+          iceServers: [ data.iceServers ]
+      };
+      console.log("[SENDING TO FRONTEND]: Success sending Cloudflare TURN!");
+      return res.json(payload);
+    }
+
+    return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  } catch (error) {
+    console.error('[TURN] Failed to fetch credentials:', error);
+    return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  }
+});
+
 export default router

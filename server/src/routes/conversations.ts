@@ -125,19 +125,18 @@ router.post('/', async (req, res, next) => {
       if (!isVerified) {
           const today = new Date().toISOString().split('T')[0];
           const key = `sandbox:newchat:${creatorId}:${today}`;
-          const count = await redisClient.incr(key);
-          if (count === 1) {
-              try {
-                  await redisClient.expire(key, 86400); // Expire in 24 hours
-              } catch (expireError) {
-                  // Rollback if TTL fails
-                  const decrCount = await redisClient.decr(key);
-                  if (decrCount <= 0) await redisClient.del(key);
-                  throw expireError;
-              }
-          }
+          
+          // Atomic INCR + EXPIRE via Lua Script
+          // Returns the new count. Sets TTL only on first increment (count == 1).
+          const count = await redisClient.eval(
+            "local c = redis.call('INCR', KEYS[1]); if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end; return c",
+            {
+              keys: [key],
+              arguments: ['86400'] // 24 hours
+            }
+          ) as number;
+
           if (count > 3) {
-              try { await redisClient.decr(key); } catch (e) { /* ignore */ } // Rollback increment
               throw new ApiError(429, 'SANDBOX_NEW_CHAT_LIMIT: Max 3 new conversations per day.');
           }
       }
@@ -312,6 +311,7 @@ router.post('/:id/participants', async (req, res, next) => {
     })
 
     getIo().to(conversationId).emit('conversation:participants_added', { conversationId, newParticipants })
+    getIo().to(conversationId).emit('group:participants_changed', { conversationId })
     newParticipants.forEach(p => {
       if (conversation) getIo().to(p.userId).emit('conversation:new', conversation)
     })
@@ -357,6 +357,7 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
 
     await prisma.participant.delete({ where: { userId_conversationId: { userId: userToRemoveId, conversationId } } })
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId, userId: userToRemoveId })
+    getIo().to(conversationId).emit('group:participants_changed', { conversationId })
     getIo().to(userToRemoveId).emit('conversation:deleted', { id: conversationId })
     await rotateAndDistributeSessionKeys(conversationId, req.user.id)
     res.status(204).send()
@@ -382,6 +383,7 @@ router.delete('/:id/leave', async (req, res, next) => {
 
     await prisma.participant.delete({ where: { userId_conversationId: { userId, conversationId } } })
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId, userId })
+    getIo().to(conversationId).emit('group:participants_changed', { conversationId })
     getIo().to(userId).emit('conversation:deleted', { id: conversationId })
 
     const remainingAdmin = await prisma.participant.findFirst({

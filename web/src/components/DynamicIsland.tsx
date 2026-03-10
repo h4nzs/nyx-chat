@@ -14,8 +14,11 @@ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
 
   const handleClick = () => {
     if (activity.link) {
-      openConversation(activity.link);
-      navigate('/');
+      // Use client-side routing to navigate to the chat directly
+      navigate(activity.link);
+      // Optional: If openConversation is needed to set internal state
+      // const conversationId = activity.link.split('/').pop();
+      // if (conversationId) openConversation(conversationId); 
     }
     removeActivity(activity.id);
   };

@@ -6,21 +6,67 @@ import { acceptCall, rejectCall, hangup, replaceVideoTrack, getNetworkQuality } 
 import { toAbsoluteUrl } from '../utils/url';
 import toast from 'react-hot-toast';
 
+const RemoteStream = ({ userId, stream, isVideo, profile }: { userId: string, stream?: MediaStream, isVideo: boolean, profile: any }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+
+  useEffect(() => {
+    if (stream) {
+      if (isVideo && videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      if (!isVideo && audioRef.current) {
+        audioRef.current.srcObject = stream;
+      }
+    }
+  }, [stream, isVideo]);
+
+  const name = profile?.name || 'User';
+  const avatar = toAbsoluteUrl(profile?.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${name}`;
+
+  return (
+    <div className="relative w-full h-full bg-gray-900 rounded-2xl overflow-hidden shadow-xl border border-white/10 group flex items-center justify-center">
+      {isVideo ? (
+        <>
+          <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+          {!stream && (
+             <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+                <FiRefreshCw size={24} className="animate-spin text-white/50" />
+             </div>
+          )}
+        </>
+      ) : (
+        <div className="w-full h-full flex flex-col items-center justify-center bg-bg-surface">
+           <audio ref={audioRef} autoPlay playsInline />
+           <div className="relative">
+              <img src={avatar} alt={name} className="w-20 h-20 rounded-full object-cover mb-2 border-2 border-accent/30 shadow-lg" />
+              {stream && (
+                <div className="absolute -bottom-1 -right-1 bg-green-500 w-4 h-4 rounded-full border-2 border-bg-surface shadow-sm"></div>
+              )}
+           </div>
+           <span className="text-xs font-bold text-white/70 uppercase tracking-widest">{name}</span>
+        </div>
+      )}
+      <div className="absolute bottom-3 left-3 px-2 py-1 bg-black/60 backdrop-blur-md rounded-lg text-[9px] text-white/90 font-black uppercase tracking-tighter border border-white/10">
+        {name}
+      </div>
+    </div>
+  );
+};
+
 export default function CallOverlay() {
   const { 
     callState, 
-    remoteUserProfile, 
+    remoteUsers,
+    remoteStreams, 
     isVideoCall, 
     isReceivingCall,
     localStream,
-    remoteStream,
     isMinimized,
     toggleMinimize
   } = useCallStore();
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const ringtoneRef = useRef<HTMLAudioElement | null>(null);
 
   const [isMuted, setIsMuted] = useState(false);
@@ -67,17 +113,6 @@ export default function CallOverlay() {
   }, [localStream, callState]);
 
   useEffect(() => {
-    if (remoteStream) {
-      if (remoteVideoRef.current && isVideoCall) {
-        remoteVideoRef.current.srcObject = remoteStream;
-      }
-      if (remoteAudioRef.current && !isVideoCall) {
-        remoteAudioRef.current.srcObject = remoteStream;
-      }
-    }
-  }, [remoteStream, isVideoCall, callState]);
-
-  useEffect(() => {
     if (callState !== 'connected') return;
     const interval = setInterval(async () => {
       const quality = await getNetworkQuality();
@@ -117,32 +152,10 @@ export default function CallOverlay() {
 
   const handleToggleSpeaker = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    const videoEl = remoteVideoRef.current || remoteAudioRef.current; // Use the active ref
-    if (!videoEl) return;
-
-    const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (!('setSinkId' in videoEl) || isMobile) {
-      toast('Audio output is managed by your physical device buttons on mobile OS.', { icon: '📱' });
-      return;
-    }
-
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const audioOuts = devices.filter(d => d.kind === 'audiooutput');
-      if (audioOuts.length < 2) {
-        toast('No alternative audio outputs found', { icon: 'ℹ️' });
-        return;
-      }
-
-      // Toggle logic (picks the next available audio output)
-      const targetId = isSpeakerphone ? audioOuts[0].deviceId : audioOuts[audioOuts.length - 1].deviceId;
-      await (videoEl as any).setSinkId(targetId);
-      setIsSpeakerphone(!isSpeakerphone);
-      toast.success(isSpeakerphone ? 'Switched to Earpiece' : 'Switched to Speaker');
-    } catch (err) {
-      console.error("Speaker toggle error:", err);
-      toast.error("Could not switch audio output");
-    }
+    // Simplified for Mesh: We'd need to setSinkId on ALL elements. 
+    // Browser support for setSinkId is limited. 
+    // For now, we'll just show the toast.
+    toast('Audio output management is currently restricted in Group Call mode.', { icon: '📱' });
   };
 
   const handleToggleScreenShare = async (e: React.MouseEvent) => {
@@ -229,8 +242,9 @@ export default function CallOverlay() {
 
   if (callState === 'idle') return null;
 
-  const profileName = remoteUserProfile?.name || 'Unknown User';
-  const profileAvatar = toAbsoluteUrl(remoteUserProfile?.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profileName}`;
+  const mainRemoteUser = remoteUsers[0] || { id: 'unknown', name: 'Someone' };
+  const profileName = remoteUsers.length > 1 ? `Group (${remoteUsers.length})` : (mainRemoteUser.name || 'Someone');
+  const profileAvatar = toAbsoluteUrl(mainRemoteUser.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profileName}`;
 
   return (
     <AnimatePresence>
@@ -253,8 +267,8 @@ export default function CallOverlay() {
               <div className="absolute inset-0 rounded-full border-4 border-accent animate-ping opacity-50"></div>
             </div>
             
-            <h3 className="text-xl font-bold text-text-primary mb-1">{profileName}</h3>
-            <p className="text-text-secondary mb-8">
+            <h3 className="text-xl font-bold text-text-primary mb-1 tracking-tight">{profileName}</h3>
+            <p className="text-text-secondary mb-8 text-sm uppercase font-black tracking-widest opacity-60">
               Incoming {isVideoCall ? 'Video' : 'Voice'} Call...
             </p>
 
@@ -322,55 +336,60 @@ export default function CallOverlay() {
           )}
 
           {callState === 'connected' && !isMinimized && (
-            <div className={`absolute top-6 right-20 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg backdrop-blur-md transition-colors ${networkQuality === 'Poor' ? 'bg-red-500/80' : networkQuality === 'Fair' ? 'bg-yellow-500/80' : 'bg-green-500/80'} text-white z-50`}>
+            <div className={`absolute top-6 right-20 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tighter flex items-center gap-2 shadow-lg backdrop-blur-md transition-colors ${networkQuality === 'Poor' ? 'bg-red-500/80' : networkQuality === 'Fair' ? 'bg-yellow-500/80' : 'bg-green-500/80'} text-white z-50`}>
               <FiWifi /> {networkQuality}
             </div>
           )}
 
-          <div className="flex-1 relative flex items-center justify-center w-full h-full">
-            {isVideoCall ? (
-              <>
-                <video 
-                  ref={remoteVideoRef} 
-                  autoPlay 
-                  playsInline 
-                  className="absolute inset-0 w-full h-full object-contain bg-black"
-                />
-                {!isMinimized && (
-                  <div className="absolute bottom-24 right-4 w-32 h-48 md:w-48 md:h-72 bg-gray-900 rounded-xl overflow-hidden shadow-2xl border border-white/20 z-10">
-                    <video 
-                      ref={localVideoRef} 
-                      autoPlay 
-                      playsInline 
-                      muted 
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="flex flex-col items-center justify-center w-full h-full bg-bg-surface">
-                <audio ref={remoteAudioRef} autoPlay playsInline />
-                <div className="relative mb-2">
-                  <div className={`rounded-full overflow-hidden border-2 border-accent/50 z-10 relative ${isMinimized ? 'w-16 h-16' : 'w-32 h-32 mb-6'}`}>
+          <div className="flex-1 relative flex items-center justify-center w-full h-full p-4 overflow-auto">
+            {callState === 'calling' && !isMinimized && (
+               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10">
+                  <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-accent animate-pulse shadow-2xl mb-6">
                     <img src={profileAvatar} alt={profileName} className="w-full h-full object-cover" />
                   </div>
-                  {callState === 'connected' && (
-                    <>
-                      <div className="absolute inset-0 rounded-full border-2 border-accent animate-ping opacity-70"></div>
-                      <div className="absolute inset-[-10px] rounded-full border border-accent/30 animate-ping" style={{ animationDelay: '0.2s' }}></div>
-                    </>
-                  )}
-                </div>
-                {!isMinimized && (
-                  <>
-                    <h2 className="text-2xl font-bold text-white mb-2">{profileName}</h2>
-                    <p className="text-gray-400">
-                      {callState === 'calling' ? 'Calling...' : 'Connected'}
-                    </p>
-                  </>
-                )}
+                  <h2 className="text-2xl font-black text-white uppercase tracking-widest">{profileName}</h2>
+                  <p className="text-accent font-mono text-xs mt-2 animate-bounce">DIALING SECURE CHANNEL...</p>
+               </div>
+            )}
+
+            {callState === 'connected' && (
+              <div className={`
+                grid gap-4 w-full h-full max-w-6xl mx-auto
+                ${isMinimized ? 'grid-cols-1' : 
+                  remoteUsers.length <= 1 ? 'grid-cols-1' : 
+                  remoteUsers.length <= 2 ? 'grid-cols-1 md:grid-cols-2' : 
+                  'grid-cols-2 md:grid-cols-3'}
+              `}>
+                {remoteUsers.map(user => (
+                  <RemoteStream 
+                    key={user.id} 
+                    userId={user.id} 
+                    stream={remoteStreams[user.id]} 
+                    isVideo={isVideoCall} 
+                    profile={user} 
+                  />
+                ))}
               </div>
+            )}
+            
+            {/* Local Preview (Floating) */}
+            {!isMinimized && isVideoCall && (
+              <div className="absolute bottom-24 right-6 w-32 h-48 md:w-48 md:h-72 bg-gray-900 rounded-2xl overflow-hidden shadow-2xl border border-white/20 z-30">
+                <video 
+                  ref={localVideoRef} 
+                  autoPlay 
+                  playsInline 
+                  muted 
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute bottom-2 left-2 px-1.5 py-0.5 bg-black/40 backdrop-blur-md rounded text-[8px] text-white/80 font-bold uppercase">YOU</div>
+              </div>
+            )}
+
+            {!isMinimized && !isVideoCall && (
+               <div className="absolute bottom-24 right-6 w-20 h-20 bg-accent/20 rounded-full overflow-hidden border-2 border-accent/50 z-30 flex items-center justify-center backdrop-blur-md">
+                  <FiMic size={24} className="text-accent animate-pulse" />
+               </div>
             )}
             
             {/* Overlay Gradient for controls */}
@@ -380,13 +399,13 @@ export default function CallOverlay() {
           </div>
 
           {!isMinimized && (
-            <div className="absolute bottom-0 left-0 right-0 p-8 flex justify-center gap-6 z-20">
+            <div className="absolute bottom-0 left-0 right-0 p-8 flex justify-center gap-4 sm:gap-6 z-40">
               {/* Flip Camera (Only if Video Call) */}
               {isVideoCall && (
                 <button 
                   onClick={handleFlipCamera} 
                   aria-label="Flip camera"
-                  className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all backdrop-blur-md"
+                  className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all backdrop-blur-md border border-white/5"
                 >
                   <FiRefreshCw size={20} />
                 </button>
@@ -397,7 +416,7 @@ export default function CallOverlay() {
                 <button 
                   onClick={handleToggleScreenShare} 
                   aria-label={isScreenSharing ? "Stop sharing screen" : "Share screen"}
-                  className={`w-12 h-12 rounded-full ${isScreenSharing ? 'bg-blue-500' : 'bg-white/10 hover:bg-white/20'} text-white flex items-center justify-center transition-all backdrop-blur-md`}
+                  className={`w-12 h-12 rounded-full ${isScreenSharing ? 'bg-blue-500' : 'bg-white/10 hover:bg-white/20'} text-white flex items-center justify-center transition-all backdrop-blur-md border border-white/5`}
                   title={isScreenSharing ? "Stop Sharing" : "Share Screen"}
                 >
                   <FiMonitor size={20} />
@@ -407,7 +426,7 @@ export default function CallOverlay() {
               <button 
                 onClick={(e) => { e.stopPropagation(); toggleMute(); }}
                 aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
-                className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isMuted ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'} backdrop-blur-md`}
+                className={`w-14 h-14 rounded-full flex items-center justify-center transition-all shadow-lg ${isMuted ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'} backdrop-blur-md border border-white/10`}
               >
                 {isMuted ? <FiMicOff size={24} /> : <FiMic size={24} />}
               </button>
@@ -416,7 +435,7 @@ export default function CallOverlay() {
                 <button 
                   onClick={(e) => { e.stopPropagation(); toggleVideo(); }}
                   aria-label={isVideoOff ? "Turn on camera" : "Turn off camera"}
-                  className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isVideoOff ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'} backdrop-blur-md`}
+                  className={`w-14 h-14 rounded-full flex items-center justify-center transition-all shadow-lg ${isVideoOff ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'} backdrop-blur-md border border-white/10`}
                 >
                   {isVideoOff ? <FiVideoOff size={24} /> : <FiVideo size={24} />}
                 </button>
@@ -426,7 +445,7 @@ export default function CallOverlay() {
               <button 
                 onClick={handleToggleSpeaker} 
                 aria-label={isSpeakerphone ? "Switch to earpiece" : "Switch to speaker"}
-                className={`w-12 h-12 rounded-full ${isSpeakerphone ? 'bg-white/10' : 'bg-accent'} hover:bg-white/20 text-white flex items-center justify-center transition-all backdrop-blur-md`}
+                className={`w-12 h-12 rounded-full ${isSpeakerphone ? 'bg-white/10' : 'bg-accent'} hover:bg-white/20 text-white flex items-center justify-center transition-all backdrop-blur-md border border-white/5`}
               >
                 {isSpeakerphone ? <FiVolume2 size={20} /> : <FiVolumeX size={20} />}
               </button>
@@ -434,7 +453,7 @@ export default function CallOverlay() {
               <button 
                 onClick={(e) => { e.stopPropagation(); hangup(); }}
                 aria-label="End call"
-                className="w-14 h-14 rounded-full bg-red-500 text-white hover:bg-red-600 flex items-center justify-center transition-all shadow-[0_0_20px_rgba(239,68,68,0.4)]"
+                className="w-14 h-14 rounded-full bg-red-500 text-white hover:bg-red-600 flex items-center justify-center transition-all shadow-[0_0_30px_rgba(239,68,68,0.6)] border border-red-400/20"
               >
                 <FiPhoneOff size={24} />
               </button>

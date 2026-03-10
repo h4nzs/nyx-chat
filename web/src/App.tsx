@@ -93,7 +93,7 @@ const PageWrapper = ({ children, noScroll = false }: { children: React.ReactNode
 
 const AppContent = () => {
   const { theme, accent } = useThemeStore(useShallow(s => ({ theme: s.theme, accent: s.accent })));
-  const { bootstrap, logout, user } = useAuthStore(useShallow(s => ({ bootstrap: s.bootstrap, logout: s.logout, user: s.user })));
+  const { bootstrap, logout, user, isBootstrapping } = useAuthStore(useShallow(s => ({ bootstrap: s.bootstrap, logout: s.logout, user: s.user, isBootstrapping: s.isBootstrapping })));
   const openCommandPalette = useCommandPaletteStore(s => s.open);
   const { addCommands, removeCommands } = useCommandPaletteStore(useShallow(s => ({
     addCommands: s.addCommands,
@@ -101,6 +101,26 @@ const AppContent = () => {
   })));
   const navigate = useNavigate();
   const location = useLocation();
+
+  // --- Service Worker SPA Routing ---
+  useEffect(() => {
+    const handleSwMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'PWA_ROUTER_NAVIGATE') {
+        console.log('[App] Received navigation command from SW:', event.data.url);
+        navigate(event.data.url);
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    }
+
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+      }
+    };
+  }, [navigate]);
 
   // --- Shortcuts & Commands ---
   
@@ -156,7 +176,19 @@ const AppContent = () => {
 
   // 1. Bootstrap Auth
   useEffect(() => {
-    bootstrap();
+    const initAuth = async () => {
+      await bootstrap();
+      
+      const { user, accessToken, silentRefresh, logout } = useAuthStore.getState();
+      // If we think we are logged in, but we don't have an AT
+      if (user && !accessToken) {
+        const success = await silentRefresh();
+        if (!success) {
+            logout();
+        }
+      }
+    };
+    initAuth();
   }, [bootstrap]);
 
   // 2. Manage Socket Connection
@@ -191,24 +223,39 @@ const AppContent = () => {
 
   // 5. Visibility Change Handler
   useEffect(() => {
-    const handleVisibilityChange = () => {
+    const handleVisibilityChange = async () => {
       if (isDeviceFlow(location.pathname)) {
         return;
       }
 
-      if (document.visibilityState === 'visible') {
+      const socket = getSocket();
 
-        const socket = getSocket();
+      if (document.visibilityState === 'visible') {
+        const { user, accessToken, silentRefresh } = useAuthStore.getState();
+        
+        if (user && !accessToken) {
+          await silentRefresh();
+        }
+
         if (!socket?.connected) {
           if (user) {
             connectSocket();
           }
+        } else {
+          // Kalo socket-nya ternyata ga diputus sama OS, kita tembak event active manual
+          socket.emit("user:active");
         }
 
         if (user) {
           useConversationStore.getState().resyncState().catch(err => {
             console.error("❌ Error during resync:", err);
           });
+        }
+      }
+      else if (document.visibilityState === 'hidden') {
+        if (socket?.connected) {
+          // Kasih tau server kalau user lagi minimize app/pindah tab/kunci layar
+          socket.emit("user:away");
         }
       }
     };
@@ -220,7 +267,7 @@ const AppContent = () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleVisibilityChange);
     };
-  }, [user, location.pathname]);
+  }, [user, location.pathname, isDeviceFlow]);
 
   return (
     <>
@@ -270,9 +317,24 @@ const AppContent = () => {
         <Suspense fallback={<LoadingScreen />}>
           <Routes>
             {/* Public Routes */}
-            <Route path="/" element={<PageWrapper><LandingPage /></PageWrapper>} />
-            <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
-            <Route path="/register" element={<PageWrapper><Register /></PageWrapper>} />
+            <Route path="/" element={
+              isBootstrapping ? <LoadingScreen /> : 
+              user ? <Navigate to="/chat" replace /> :
+              <PageWrapper><LandingPage /></PageWrapper>
+              }
+            />
+            <Route path="/login" element={
+              isBootstrapping ? <LoadingScreen /> : 
+              user ? <Navigate to="/chat" replace /> :
+              <PageWrapper><Login /></PageWrapper>
+              }
+            />
+            <Route path="/register" element={
+              isBootstrapping ? <LoadingScreen /> : 
+              user ? <Navigate to="/chat" replace /> :
+              <PageWrapper><Register /></PageWrapper>
+              }
+            />
             <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
             <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
             <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />

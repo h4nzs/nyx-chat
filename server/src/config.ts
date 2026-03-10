@@ -1,8 +1,12 @@
 import 'dotenv/config'
+import { readFileSync } from 'fs';
+import { URL } from 'url';
 
 // Validate required environment variables
 const requiredEnvVars = ['PORT', 'CORS_ORIGIN', 'JWT_SECRET'];
 const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+const packageJsonPath = new URL('../package.json', import.meta.url);
+const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
 
 if (missingEnvVars.length > 0) {
   console.warn(`⚠️  Missing required environment variables: ${missingEnvVars.join(', ')}`);
@@ -44,4 +48,9 @@ export const env = {
   r2BucketName: process.env.R2_BUCKET_NAME || "",
   r2PublicDomain: process.env.R2_PUBLIC_DOMAIN || "",
   discordReportWebhookUrl: process.env.DISCORD_REPORT_WEBHOOK_URL,
+  appVersion: pkg.version,
+
+  cfAccountId: process.env.CF_ACCOUNT_ID || '',
+  cfTurnKeyId: process.env.CF_TURN_KEY_ID || '',
+  cfTurnApiToken: process.env.CF_TURN_API_TOKEN || '',
 }

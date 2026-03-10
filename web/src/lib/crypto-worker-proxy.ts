@@ -375,3 +375,21 @@ export async function groupRatchetDecrypt(
       mk: new Uint8Array(res.mk)
   }));
 }
+
+export async function groupDecryptSkipped(
+  mk: string,
+  headerN: number,
+  ciphertext: Uint8Array,
+  signature: string,
+  senderSigningPublicKey: Uint8Array
+): Promise<{ plaintext: Uint8Array }> {
+  return sendToWorker<{ plaintext: any }>('group_decrypt_skipped', {
+    mk,
+    headerN,
+    ciphertext: Array.from(ciphertext),
+    signature,
+    senderSigningPublicKey: Array.from(senderSigningPublicKey)
+  }).then(res => ({
+    plaintext: new Uint8Array(res.plaintext)
+  }));
+}
