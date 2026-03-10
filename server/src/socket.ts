@@ -635,6 +635,21 @@ export function registerSocket(httpServer: HttpServer) {
       socket.to(data.roomId).emit('migration:chunk', data);
     });
 
+    // === PRESENCE MANAGEMENT (AWAY/ACTIVE) ===
+    socket.on("user:away", async () => {
+      if (!userId) return;
+      // Hapus dari Redis dan langsung broadcast biar UI temennya berubah jadi Offline
+      await redisClient.sRem('online_users', userId);
+      socket.broadcast.emit("presence:user_left", userId);
+    });
+
+    socket.on("user:active", async () => {
+      if (!userId) return;
+      // Masukin lagi ke Redis dan broadcast kalau dia udah buka app-nya lagi
+      await redisClient.sAdd('online_users', userId);
+      socket.broadcast.emit("presence:user_joined", userId);
+    });
+
     // Disconnect Handler (Untuk User)
     socket.on("disconnect", async () => {
        setTimeout(async () => {

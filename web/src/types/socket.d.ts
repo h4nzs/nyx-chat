@@ -61,6 +61,8 @@ export interface ServerToClientEvents {
 
 export interface ClientToServerEvents {
     "presence:update": (payload: { userId: string; online: boolean }) => void;
+    "user:active": () => void;
+    "user:away": () => void;
     "message:send": (message: Partial<Message>, callback: (res: { ok: boolean, msg?: Message, error?: string }) => void) => void;
     "message:ack_delivered": (payload: { messageId: string; conversationId: string }) => void;
     "message:mark_as_read": (payload: { messageId: string; conversationId: string }) => void;

@@ -216,19 +216,28 @@ const AppContent = () => {
         return;
       }
 
-      if (document.visibilityState === 'visible') {
+      const socket = getSocket();
 
-        const socket = getSocket();
+      if (document.visibilityState === 'visible') {
         if (!socket?.connected) {
           if (user) {
             connectSocket();
           }
+        } else {
+          // Kalo socket-nya ternyata ga diputus sama OS, kita tembak event active manual
+          socket.emit("user:active");
         }
 
         if (user) {
           useConversationStore.getState().resyncState().catch(err => {
             console.error("❌ Error during resync:", err);
           });
+        }
+      }
+      else if (document.visibilityState === 'hidden') {
+        if (socket?.connected) {
+          // Kasih tau server kalau user lagi minimize app/pindah tab/kunci layar
+          socket.emit("user:away");
         }
       }
     };
