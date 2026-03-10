@@ -42,7 +42,9 @@ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
            <span className="text-[8px] text-white/40 font-mono">NOW</span>
         </div>
         <p className="text-xs text-white/70 truncate font-medium group-hover:text-white transition-colors">
-          {activity.message.substring(activity.message.indexOf(':') + 2)}
+          {activity.message.includes(':') 
+            ? activity.message.substring(activity.message.indexOf(':') + 2) 
+            : activity.message}
         </p>
       </div>
     </div>

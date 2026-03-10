@@ -56,12 +56,14 @@ export async function setupAndUploadPreKeyBundle() {
 
 export type User = {
   id: string;
+  usernameHash?: string;
   encryptedProfile?: string | null;
   role?: string;
   isVerified?: boolean; // Trust Tier (WebAuthn)
   hasCompletedOnboarding?: boolean;
   name?: string;     // Optimistic/Injected Name
   username?: string; // Optimistic/Injected Username
+  autoDestructDays?: number | null;
 };
 
 type State = {

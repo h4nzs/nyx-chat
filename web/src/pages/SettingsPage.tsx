@@ -716,20 +716,19 @@ export default function SettingsPage() {
 
             {/* DEAD MAN'S SWITCH */}
             <div className="pt-4 border-t border-white/5 space-y-3 mt-4">
-              <div>
-                <h4 className="text-sm font-bold text-text-primary flex items-center gap-2">
-                  <span className="text-red-500">💀</span> Dead Man's Switch
-                </h4>
-                <p className="text-xs text-text-secondary mt-1">
-                  Automatically destroy your account and all associated messages if you do not open the app for a set period.
-                </p>
-              </div>
-              <div className="flex gap-2 items-center">
-                 <select
-                   value={profile?.autoDestructDays || ''}
-                   onChange={async (e) => {
-                     const val = e.target.value;
-                     const days = val === '' ? null : parseInt(val, 10);
+             <div>
+               <h4 className="text-sm font-bold text-text-primary flex items-center gap-2">
+                 <span className="text-red-500">💀</span> Dead Man's Switch
+               </h4>
+               <p className="text-xs text-text-secondary mt-1">
+                 Automatically destroy your account and all associated messages if you do not open the app for a set period.
+               </p>
+             </div>
+             <div className="flex gap-2 items-center">
+                <select
+                  value={user?.autoDestructDays || ''}
+                  onChange={async (e) => {
+                    const val = e.target.value;                     const days = val === '' ? null : parseInt(val, 10);
                      try {
                         const { api } = await import('@lib/api');
                         await api('/api/users/me', { method: 'PUT', body: JSON.stringify({ autoDestructDays: days }) });

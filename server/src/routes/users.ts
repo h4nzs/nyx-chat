@@ -25,7 +25,13 @@ router.get('/search', async (req, res, next) => {
 
     // SANDBOX CHECK
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { isVerified: true } });
-    const limit = user?.isVerified ? 20 : 3;
+    
+    // Sandboxed users cannot search for other users to initiate new chats
+    if (!user?.isVerified) {
+        throw new ApiError(403, 'SANDBOX_SEARCH_RESTRICTION: Unverified users cannot search for other users.');
+    }
+    
+    const limit = 20;
 
     const users = await prisma.user.findMany({
       where: {
@@ -59,6 +65,7 @@ router.get('/me', async (req, res, next) => {
       data: { lastActiveAt: new Date() },
       select: {
         id: true,
+        usernameHash: true,
         encryptedProfile: true,
         isVerified: true,
         hasCompletedOnboarding: true,

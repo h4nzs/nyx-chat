@@ -1656,10 +1656,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const updatedMsg = updatedMessages.find(m => m.id === messageId);
       
       if (updatedMsg) {
-        // [FIX] If message is view-once and has been viewed, delete it from vault
+        // [FIX] If message is view-once and has been viewed, delete its content but keep the metadata as a tombstone
         if (updatedMsg.isViewOnce && updatedMsg.isViewed) {
-            shadowVault.deleteMessage(messageId).catch(console.error);
+            // Delete the cryptographic material
             import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(console.error);
+            // Create a tombstone version for the vault so the UI still knows it existed
+            const tombstone = { ...updatedMsg, content: null, fileUrl: undefined, isDeletedLocal: true };
+            shadowVault.upsertMessages([tombstone]).catch(console.error);
         } else {
             shadowVault.upsertMessages([updatedMsg]); // Archive to shadow vault
         }

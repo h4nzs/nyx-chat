@@ -398,17 +398,35 @@ router.post('/logout', async (req, res) => {
 router.get('/pow/challenge', requireAuth, async (req, res, next) => {
   try {
     const salt = crypto.randomBytes(16).toString('hex');
-    const difficulty = 4; // Target: Hash starts with '0000'
-    
+
+    // Dynamic Difficulty based on IP usage (anti-farm)
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const ipKey = `pow:ip_count:${ip}`;
+
+    // Get how many times this IP has requested PoW recently
+    const recentRequests = await redisClient.get(ipKey);
+    const count = recentRequests ? parseInt(recentRequests as string, 10) : 0;
+
+    // Base difficulty is 4 (e.g., '0000'). 
+    // Increase difficulty by 1 for every 2 requests from the same IP within a 24-hour window.
+    // Cap it at a reasonable maximum (e.g., 6, which is significantly harder and takes minutes)
+    const difficulty = Math.min(4 + Math.floor(count / 2), 6);
+
+    // Increment the IP counter and set expiry to 24 hours (86400 seconds) if it's new
+    if (count === 0) {
+      await redisClient.setEx(ipKey, 86400, '1');
+    } else {
+      await redisClient.incr(ipKey);
+    }
+
     // Store challenge in Redis (5 mins expiry)
     await redisClient.setEx(`pow:challenge:${req.user!.id}`, 300, JSON.stringify({ salt, difficulty }));
-    
+
     res.json({ salt, difficulty });
   } catch (e) {
     next(e);
   }
 });
-
 router.post('/pow/verify', 
   requireAuth, 
   zodValidate({

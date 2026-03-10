@@ -22,6 +22,7 @@ const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const MigrationReceivePage = lazy(() => import('./pages/MigrationReceivePage'));
 const MigrationSendPage = lazy(() => import('./pages/MigrationSendPage'));
+const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -352,6 +353,7 @@ const AppContent = () => {
               <Route path="/admin-console" element={<PageWrapper><AdminDashboard /></PageWrapper>} />
 
               <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
+              <Route path="/connect" element={<PageWrapper><ConnectPage /></PageWrapper>} />
             </Route>
 
             {/* Fallback */}
