@@ -136,21 +136,16 @@ export async function authFetch<T>(
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       try {
-        // Coba refresh token
-        const refreshRes = await api<{ ok: boolean }>("/api/auth/refresh", {
-          method: "POST",
-        });
+        const { useAuthStore } = await import('@store/auth');
+        const success = await useAuthStore.getState().silentRefresh();
 
-        // Jika refresh sukses, ulangi request awal
-        if (refreshRes) {
+        if (success) {
           return await api<T>(url, options);
         }
       } catch (refreshErr) {
-        // Jika refresh gagal, biarkan lanjut ke logout logic di bawah
         console.error("Token refresh failed:", refreshErr);
       }
 
-      // Jika sampai sini berarti refresh gagal/token expired permanen -> Logout
       if (onAuthFailure) await onAuthFailure();
     }
     throw err;

@@ -176,7 +176,16 @@ const AppContent = () => {
 
   // 1. Bootstrap Auth
   useEffect(() => {
-    bootstrap();
+    const initAuth = async () => {
+      await bootstrap();
+      
+      const { user, accessToken, silentRefresh } = useAuthStore.getState();
+      // If we think we are logged in, but we don't have an AT
+      if (user && !accessToken) {
+        await silentRefresh();
+      }
+    };
+    initAuth();
   }, [bootstrap]);
 
   // 2. Manage Socket Connection
@@ -211,7 +220,7 @@ const AppContent = () => {
 
   // 5. Visibility Change Handler
   useEffect(() => {
-    const handleVisibilityChange = () => {
+    const handleVisibilityChange = async () => {
       if (isDeviceFlow(location.pathname)) {
         return;
       }
@@ -219,6 +228,12 @@ const AppContent = () => {
       const socket = getSocket();
 
       if (document.visibilityState === 'visible') {
+        const { user, accessToken, silentRefresh } = useAuthStore.getState();
+        
+        if (user && !accessToken) {
+          await silentRefresh();
+        }
+
         if (!socket?.connected) {
           if (user) {
             connectSocket();
@@ -249,7 +264,7 @@ const AppContent = () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleVisibilityChange);
     };
-  }, [user, location.pathname]);
+  }, [user, location.pathname, isDeviceFlow]);
 
   return (
     <>

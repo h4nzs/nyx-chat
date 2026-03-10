@@ -107,6 +107,7 @@ type Actions = {
   unblockUser: (userId: string) => Promise<void>;
   loadBlockedUsers: () => Promise<void>;
   setDecryptedKeys: (keys: RetrievedKeys) => void;
+  silentRefresh: () => Promise<boolean>;
 };
 
 let privateKeysCache: RetrievedKeys | null = null;
@@ -520,6 +521,27 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         set({ blockedUserIds: blockedIds });
       } catch (error) {
         console.error('Failed to load blocked users:', error);
+      }
+    },
+
+    silentRefresh: async () => {
+      try {
+        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/auth/refresh`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        
+        if (!res.ok) {
+          throw new Error('Refresh failed');
+        }
+        
+        const data = await res.json();
+        set({ accessToken: data.accessToken });
+        return true;
+      } catch (error) {
+        console.warn('[Auth] Silent refresh failed, user needs to login again.');
+        get().logout();
+        return false;
       }
     },
   };
