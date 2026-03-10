@@ -93,7 +93,7 @@ const PageWrapper = ({ children, noScroll = false }: { children: React.ReactNode
 
 const AppContent = () => {
   const { theme, accent } = useThemeStore(useShallow(s => ({ theme: s.theme, accent: s.accent })));
-  const { bootstrap, logout, user } = useAuthStore(useShallow(s => ({ bootstrap: s.bootstrap, logout: s.logout, user: s.user })));
+  const { bootstrap, logout, user, isBootstrapping } = useAuthStore(useShallow(s => ({ bootstrap: s.bootstrap, logout: s.logout, user: s.user, isBootstrapping: s.isBootstrapping })));
   const openCommandPalette = useCommandPaletteStore(s => s.open);
   const { addCommands, removeCommands } = useCommandPaletteStore(useShallow(s => ({
     addCommands: s.addCommands,
@@ -317,9 +317,24 @@ const AppContent = () => {
         <Suspense fallback={<LoadingScreen />}>
           <Routes>
             {/* Public Routes */}
-            <Route path="/" element={<PageWrapper><LandingPage /></PageWrapper>} />
-            <Route path="/login" element={<PageWrapper><Login /></PageWrapper>} />
-            <Route path="/register" element={<PageWrapper><Register /></PageWrapper>} />
+            <Route path="/" element={
+              isBootstrapping ? <LoadingScreen /> : 
+              user ? <Navigate to="/chat" replace /> :
+              <PageWrapper><LandingPage /></PageWrapper>
+              }
+            />
+            <Route path="/login" element={
+              isBootstrapping ? <LoadingScreen /> : 
+              user ? <Navigate to="/chat" replace /> :
+              <PageWrapper><Login /></PageWrapper>
+              }
+            />
+            <Route path="/register" element={
+              isBootstrapping ? <LoadingScreen /> : 
+              user ? <Navigate to="/chat" replace /> :
+              <PageWrapper><Register /></PageWrapper>
+              }
+            />
             <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
             <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
             <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
