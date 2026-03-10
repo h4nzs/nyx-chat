@@ -3,11 +3,12 @@ import { useShallow } from 'zustand/react/shallow';
 import ModalBase from './ui/ModalBase';
 
 const ConfirmModal = () => {
-  const { isConfirmOpen, confirmTitle, confirmMessage, onConfirm, hideConfirm } = useModalStore(useShallow(state => ({
+  const { isConfirmOpen, confirmTitle, confirmMessage, onConfirm, onCancel, hideConfirm } = useModalStore(useShallow(state => ({
     isConfirmOpen: state.isConfirmOpen,
     confirmTitle: state.confirmTitle,
     confirmMessage: state.confirmMessage,
     onConfirm: state.onConfirm,
+    onCancel: state.onCancel,
     hideConfirm: state.hideConfirm,
   })));
 
@@ -19,7 +20,10 @@ const ConfirmModal = () => {
       footer={(
         <>
           <button
-            onClick={hideConfirm}
+            onClick={() => {
+              onCancel?.();
+              hideConfirm();
+            }}
             className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
           >
             Cancel

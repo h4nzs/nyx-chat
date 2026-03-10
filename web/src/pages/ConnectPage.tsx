@@ -66,6 +66,10 @@ export default function ConnectPage() {
                 toast.error(e.message || "Failed to start conversation.", { id: 'connect' });
                 navigate('/chat');
              }
+          },
+          () => {
+            // onCancel: return to chat list
+            navigate('/chat');
           }
         );
         

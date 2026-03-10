@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getSocket } from '@lib/socket';
 import { urlBase64ToUint8Array } from '@utils/url';
 import toast from 'react-hot-toast';
@@ -12,32 +12,28 @@ export function usePushNotifications() {
   });
   const [loading, setLoading] = useState(false);
 
-  // 1. Cek status subscription saat pertama kali load
+  const mountedRef = useRef(true);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup retry timer on unmount
   useEffect(() => {
-    if ('serviceWorker' in navigator && 'PushManager' in window) {
-      navigator.serviceWorker.ready.then(registration => {
-        registration.pushManager.getSubscription().then(subscription => {
-          const hasSub = !!subscription;
-          setIsSubscribed(hasSub);
-          
-          if (hasSub) {
-            localStorage.setItem('nyx_push_enabled', 'true');
-            // Sinkronisasi ulang dengan server
-            sendSubscriptionToSocket(subscription);
-          } else {
-            localStorage.removeItem('nyx_push_enabled');
-          }
-        });
-      });
-    }
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerRef.current = null;
+      }
+    };
   }, []);
 
-  // Helper untuk kirim ke socket
-  const sendSubscriptionToSocket = (subscription: PushSubscription) => {
+  // Helper untuk kirim ke socket (memoized with useCallback)
+  const sendSubscriptionToSocket = useCallback((subscription: PushSubscription) => {
     const socket = getSocket();
     if (!socket || !socket.connected) {
        // Coba lagi sebentar jika socket belum connect
-       setTimeout(() => {
+       retryTimerRef.current = setTimeout(() => {
+           if (!mountedRef.current) return;
            const retrySocket = getSocket();
            if (retrySocket && retrySocket.connected) {
                sendSubscriptionToSocket(subscription);
@@ -56,7 +52,28 @@ export function usePushNotifications() {
         },
       });
     }
-  };
+  }, []);
+
+  // 1. Cek status subscription saat pertama kali load
+  useEffect(() => {
+    if ('serviceWorker' in navigator && 'PushManager' in window) {
+      navigator.serviceWorker.ready.then(registration => {
+        registration.pushManager.getSubscription().then(subscription => {
+          if (!mountedRef.current) return;
+          const hasSub = !!subscription;
+          setIsSubscribed(hasSub);
+
+          if (hasSub) {
+            localStorage.setItem('nyx_push_enabled', 'true');
+            // Sinkronisasi ulang dengan server
+            sendSubscriptionToSocket(subscription);
+          } else {
+            localStorage.removeItem('nyx_push_enabled');
+          }
+        });
+      });
+    }
+  }, [sendSubscriptionToSocket]);
 
   // 2. Fungsi Subscribe (Dipanggil saat tombol diklik)
   const subscribeToPush = useCallback(async () => {
@@ -89,46 +106,56 @@ export function usePushNotifications() {
         applicationServerKey: applicationServerKey
       });
 
-      sendSubscriptionToSocket(subscription);
-      
-      setIsSubscribed(true);
-      localStorage.setItem('nyx_push_enabled', 'true');
-      toast.success('Notifications enabled!');
+      if (mountedRef.current) {
+        sendSubscriptionToSocket(subscription);
+        setIsSubscribed(true);
+        localStorage.setItem('nyx_push_enabled', 'true');
+        toast.success('Notifications enabled!');
+      }
     } catch (error: any) {
       console.error('Failed to subscribe:', error);
       toast.error('Failed to enable notifications: ' + error.message);
-      setIsSubscribed(false);
-      localStorage.removeItem('nyx_push_enabled');
+      if (mountedRef.current) {
+        setIsSubscribed(false);
+        localStorage.removeItem('nyx_push_enabled');
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }, [sendSubscriptionToSocket]);
 
   // 3. Fungsi Unsubscribe
   const unsubscribeFromPush = useCallback(async () => {
+    if (!mountedRef.current) return;
     setLoading(true);
     try {
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.getSubscription();
-      
+
       if (subscription) {
         await subscription.unsubscribe();
       }
-      
-      setIsSubscribed(false);
-      localStorage.removeItem('nyx_push_enabled');
-      
-      const socket = getSocket();
-      if (socket && socket.connected) {
-        socket.emit('push:unsubscribe');
+
+      if (mountedRef.current) {
+        setIsSubscribed(false);
+        localStorage.removeItem('nyx_push_enabled');
+
+        const socket = getSocket();
+        if (socket && socket.connected) {
+          socket.emit('push:unsubscribe');
+        }
+
+        toast.success('Notifications disabled');
       }
-      
-      toast.success('Notifications disabled');
     } catch (error) {
       console.error('Error unsubscribing', error);
       toast.error('Failed to disable notifications');
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
