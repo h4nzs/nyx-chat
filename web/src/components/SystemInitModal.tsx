@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiCheckCircle, FiXCircle, FiLoader, FiShield, FiBell, FiCamera } from 'react-icons/fi';
+import { useAuthStore } from '@store/auth';
 
 type PermStatus = 'idle' | 'loading' | 'granted' | 'denied';
 
@@ -8,11 +9,19 @@ export default function SystemInitModal() {
   const [isVisible, setIsVisible] = useState(false);
   const [notifStatus, setNotifStatus] = useState<PermStatus>('idle');
   const [mediaStatus, setMediaStatus] = useState<PermStatus>('idle');
+  
+  const user = useAuthStore(state => state.user);
 
   useEffect(() => {
+    // Only prompt for permissions if the user is actively logged in
+    if (!user) {
+      setIsVisible(false);
+      return;
+    }
+    
     const hasInit = localStorage.getItem('nyx_sys_init');
     if (!hasInit) setIsVisible(true);
-  }, []);
+  }, [user]);
 
   const close = () => {
     localStorage.setItem('nyx_sys_init', 'true');

@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSocket } from '@lib/socket';
-import { urlBase64ToUint8Array } from '@utils/url'; // Pastikan path ini benar
+import { urlBase64ToUint8Array } from '@utils/url';
 import toast from 'react-hot-toast';
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
 
 export function usePushNotifications() {
   const [permission, setPermission] = useState<NotificationPermission>(Notification.permission);
-  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [isSubscribed, setIsSubscribed] = useState(() => {
+    return localStorage.getItem('nyx_push_enabled') === 'true';
+  });
   const [loading, setLoading] = useState(false);
 
   // 1. Cek status subscription saat pertama kali load
@@ -15,10 +17,15 @@ export function usePushNotifications() {
     if ('serviceWorker' in navigator && 'PushManager' in window) {
       navigator.serviceWorker.ready.then(registration => {
         registration.pushManager.getSubscription().then(subscription => {
-          setIsSubscribed(!!subscription);
-          // Sinkronisasi ulang dengan server jika sudah subscribe di browser tapi server lupa
-          if (subscription) {
+          const hasSub = !!subscription;
+          setIsSubscribed(hasSub);
+          
+          if (hasSub) {
+            localStorage.setItem('nyx_push_enabled', 'true');
+            // Sinkronisasi ulang dengan server
             sendSubscriptionToSocket(subscription);
+          } else {
+            localStorage.removeItem('nyx_push_enabled');
           }
         });
       });
@@ -28,7 +35,16 @@ export function usePushNotifications() {
   // Helper untuk kirim ke socket
   const sendSubscriptionToSocket = (subscription: PushSubscription) => {
     const socket = getSocket();
-    if (!socket || !socket.connected) return;
+    if (!socket || !socket.connected) {
+       // Coba lagi sebentar jika socket belum connect
+       setTimeout(() => {
+           const retrySocket = getSocket();
+           if (retrySocket && retrySocket.connected) {
+               sendSubscriptionToSocket(subscription);
+           }
+       }, 2000);
+       return;
+    }
 
     const subJSON = subscription.toJSON();
     if (subJSON.endpoint && subJSON.keys?.p256dh && subJSON.keys?.auth) {
@@ -56,11 +72,7 @@ export function usePushNotifications() {
 
     setLoading(true);
     try {
-      // Register SW jika belum
       const registration = await navigator.serviceWorker.ready;
-      await navigator.serviceWorker.ready;
-
-      // Request Permission Browser
       const perm = await Notification.requestPermission();
       setPermission(perm);
 
@@ -70,23 +82,23 @@ export function usePushNotifications() {
         return;
       }
 
-      // FIX UTAMA: Konversi Key String -> Uint8Array
       const applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
 
-      // Lakukan Subscribe ke Browser Push Manager
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: applicationServerKey // Gunakan key hasil konversi
+        applicationServerKey: applicationServerKey
       });
 
-      // Kirim ke Backend via Socket
       sendSubscriptionToSocket(subscription);
       
       setIsSubscribed(true);
+      localStorage.setItem('nyx_push_enabled', 'true');
       toast.success('Notifications enabled!');
     } catch (error: any) {
       console.error('Failed to subscribe:', error);
       toast.error('Failed to enable notifications: ' + error.message);
+      setIsSubscribed(false);
+      localStorage.removeItem('nyx_push_enabled');
     } finally {
       setLoading(false);
     }
@@ -101,16 +113,17 @@ export function usePushNotifications() {
       
       if (subscription) {
         await subscription.unsubscribe();
-        setIsSubscribed(false);
-        
-        // Beritahu server via socket
-        const socket = getSocket();
-        if (socket && socket.connected) {
-          socket.emit('push:unsubscribe'); // Pastikan backend handle event ini (opsional)
-        }
-        
-        toast.success('Notifications disabled');
       }
+      
+      setIsSubscribed(false);
+      localStorage.removeItem('nyx_push_enabled');
+      
+      const socket = getSocket();
+      if (socket && socket.connected) {
+        socket.emit('push:unsubscribe');
+      }
+      
+      toast.success('Notifications disabled');
     } catch (error) {
       console.error('Error unsubscribing', error);
       toast.error('Failed to disable notifications');

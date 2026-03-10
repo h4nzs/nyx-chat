@@ -62,6 +62,7 @@ export type User = {
   hasCompletedOnboarding?: boolean;
   name?: string;     // Optimistic/Injected Name
   username?: string; // Optimistic/Injected Username
+  autoDestructDays?: number | null;
 };
 
 type State = {
