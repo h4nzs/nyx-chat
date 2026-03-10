@@ -526,21 +526,18 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
     silentRefresh: async () => {
       try {
-        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/auth/refresh`, {
+        const { api } = await import('@lib/api');
+        const data = await api('/api/auth/refresh', {
           method: 'POST',
-          credentials: 'include',
         });
         
-        if (!res.ok) {
-          throw new Error('Refresh failed');
+        if (data && data.accessToken) {
+          set({ accessToken: data.accessToken });
+          return true;
         }
-        
-        const data = await res.json();
-        set({ accessToken: data.accessToken });
-        return true;
+        return false;
       } catch (error) {
-        console.warn('[Auth] Silent refresh failed, user needs to login again.');
-        get().logout();
+        console.warn('[Auth] Silent refresh failed:', error);
         return false;
       }
     },

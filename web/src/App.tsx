@@ -179,10 +179,13 @@ const AppContent = () => {
     const initAuth = async () => {
       await bootstrap();
       
-      const { user, accessToken, silentRefresh } = useAuthStore.getState();
+      const { user, accessToken, silentRefresh, logout } = useAuthStore.getState();
       // If we think we are logged in, but we don't have an AT
       if (user && !accessToken) {
-        await silentRefresh();
+        const success = await silentRefresh();
+        if (!success) {
+            logout();
+        }
       }
     };
     initAuth();

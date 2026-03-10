@@ -141,12 +141,14 @@ export async function authFetch<T>(
 
         if (success) {
           return await api<T>(url, options);
+        } else {
+          // Only trigger failure handler if refresh actually failed
+          if (onAuthFailure) await onAuthFailure();
         }
       } catch (refreshErr) {
         console.error("Token refresh failed:", refreshErr);
+        if (onAuthFailure) await onAuthFailure();
       }
-
-      if (onAuthFailure) await onAuthFailure();
     }
     throw err;
   }
