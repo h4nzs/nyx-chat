@@ -6,7 +6,7 @@
     "url": "https://github.com/h4nzs/nyx-chat.git"
   },
   "name": "nyx-server",
-  "version": "2.4.3",
+  "version": "2.4.4",
   "description": "",
   "main": "dist/index.js",
   "type": "module",
