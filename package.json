@@ -24,7 +24,7 @@
       "basic-ftp": ">=5.2.0",
       "minimatch": ">=10.2.3",
       "serialize-javascript": ">=7.0.3",
-      "fast-xml-parser": ">=5.3.8",
+      "fast-xml-parser": "5.4.2",
       "ajv": ">=6.14.0",
       "rollup@^2.0.0": "^2.80.0",
       "rollup@^4.0.0": "^4.59.0",

@@ -168,18 +168,34 @@ self.addEventListener('notificationclick', (event: NotificationEvent) => {
   event.notification.close();
 
   const conversationId = event.notification.data?.conversationId;
-  const targetUrl = conversationId ? `/chat/${conversationId}` : '/';
+  const targetPath = conversationId ? `/chat/${conversationId}` : '/';
+  // Use absolute URL for openWindow to ensure correct behavior across browsers
+  const targetUrl = new URL(targetPath, self.location.origin).href;
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clientList) => {
+      // 1. Try to find an existing window/tab of the app
       for (const client of clientList) {
-        if (client.url.includes(self.location.origin) && 'focus' in client) {
-          const focusedClient = await client.focus();
-          // Send a message to the active client to handle SPA routing natively
-          focusedClient?.postMessage({ type: 'PWA_ROUTER_NAVIGATE', url: targetUrl });
-          return; // Explicitly return nothing (void)
+        const clientUrl = new URL(client.url);
+        
+        // If the client origin matches our origin
+        if (clientUrl.origin === self.location.origin) {
+          // Focus the window
+          if ('focus' in client) {
+            const focusedClient = await client.focus();
+            
+            // 2. Tell the SPA to navigate to the correct route internally
+            // This prevents a full page reload if the app is already open
+            focusedClient?.postMessage({ 
+              type: 'PWA_ROUTER_NAVIGATE', 
+              url: targetPath 
+            });
+            return;
+          }
         }
       }
+
+      // 3. Fallback: No existing window found, open a new one (or launch the PWA)
       if (self.clients.openWindow) {
         await self.clients.openWindow(targetUrl);
       }
