@@ -18,7 +18,9 @@ import { useSettingsStore } from '@store/settings';
 
 const ReplyQuote = ({ message }: { message: Message }) => {
   const profile = useUserProfile(message.sender as any);
-  const authorName = profile.name;
+  const currentUser = useAuthStore.getState().user;
+  const isMe = message.senderId === currentUser?.id;
+  const authorName = isMe ? 'You' : (profile.name || 'Unknown');
   let contentPreview: string;
   if (message.duration) contentPreview = 'Voice Message';
   else if (message.fileName) contentPreview = message.fileName;

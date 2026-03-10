@@ -63,10 +63,12 @@ const ReplyPreview = () => {
   })));
 
   const profile = useUserProfile(replyingTo?.sender as any);
+  const currentUser = useAuthStore(state => state.user);
 
   if (!replyingTo) return null;
 
-  const authorName = profile.name;
+  const isMe = replyingTo.senderId === currentUser?.id;
+  const authorName = isMe ? 'You' : (profile.name || 'Unknown');
   let contentPreview = '...';
   
   if (replyingTo.duration) contentPreview = '[Voice Transmission]';
