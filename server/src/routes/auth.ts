@@ -400,24 +400,30 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
     const salt = crypto.randomBytes(16).toString('hex');
 
     // Dynamic Difficulty based on IP usage (anti-farm)
-    const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    const ipKey = `pow:ip_count:${ip}`;
+    const ip = req.ip || req.socket.remoteAddress;
+    const userId = req.user?.id;
+    
+    if (!ip && !userId) {
+      throw new ApiError(400, 'Cannot determine client identifier for PoW challenge.');
+    }
+    
+    const rateKey = ip ? `pow:ip_count:${ip}` : `pow:user_count:${userId}`;
 
-    // Get how many times this IP has requested PoW recently
-    const recentRequests = await redisClient.get(ipKey);
-    const count = recentRequests ? parseInt(recentRequests as string, 10) : 0;
+    // Get how many times this IP/User has requested PoW recently
+    let count = await redisClient.incr(rateKey);
+
+    if (count === 1) {
+        // If it's the first time (INCR returns 1), set the TTL to 24 hours
+        await redisClient.expire(rateKey, 86400);
+    } else if (Number.isNaN(count) || count < 0) {
+        // Fallback for corrupted redis types
+        count = 0;
+    }
 
     // Base difficulty is 4 (e.g., '0000'). 
-    // Increase difficulty by 1 for every 2 requests from the same IP within a 24-hour window.
+    // Increase difficulty by 1 for every 2 requests from the same IP/User within a 24-hour window.
     // Cap it at a reasonable maximum (e.g., 6, which is significantly harder and takes minutes)
     const difficulty = Math.min(4 + Math.floor(count / 2), 6);
-
-    // Increment the IP counter and set expiry to 24 hours (86400 seconds) if it's new
-    if (count === 0) {
-      await redisClient.setEx(ipKey, 86400, '1');
-    } else {
-      await redisClient.incr(ipKey);
-    }
 
     // Store challenge in Redis (5 mins expiry)
     await redisClient.setEx(`pow:challenge:${req.user!.id}`, 300, JSON.stringify({ salt, difficulty }));
