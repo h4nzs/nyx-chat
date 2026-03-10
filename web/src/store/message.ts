@@ -1506,7 +1506,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               );
               // Also update vault
               const editedMsg = updatedMessages.find(m => m.id === editPayload.targetMessageId);
-              if (editedMsg) shadowVault.upsertMessages([editedMsg]);
+              if (editedMsg) {
+                  shadowVault.upsertMessages([editedMsg]);
+                  
+                  // Update conversation last message if this was it
+                  import('@store/conversation').then(m => {
+                      const conv = m.useConversationStore.getState().conversations.find(c => c.id === conversationId);
+                      if (conv?.lastMessage?.id === editPayload.targetMessageId) {
+                          m.useConversationStore.getState().updateConversationLastMessage(conversationId, editedMsg);
+                      }
+                  }).catch(console.error);
+              }
               
               return { messages: { ...state.messages, [conversationId]: updatedMessages } };
           });
@@ -1655,6 +1665,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         } else {
             shadowVault.upsertMessages([updatedMsg]); // Archive to shadow vault
         }
+
+        // Update conversation last message if this was it
+        import('@store/conversation').then(m => {
+            const conv = m.useConversationStore.getState().conversations.find(c => c.id === conversationId);
+            if (conv?.lastMessage?.id === messageId) {
+                m.useConversationStore.getState().updateConversationLastMessage(conversationId, updatedMsg);
+            }
+        }).catch(console.error);
       }
       return { messages: { ...state.messages, [conversationId]: updatedMessages } };
     })

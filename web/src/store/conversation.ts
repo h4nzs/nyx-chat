@@ -107,7 +107,7 @@ const sortConversations = (list: Conversation[], currentUserId: string | undefin
 
 const withPreview = (msg: Message): Message => {
   if (msg.content) {
-    // Check for Reaction or Silent Payload
+    // Check for Reaction, Silent, or Edit Payload
     if (msg.content.trim().startsWith('{')) {
        try {
          const payload = JSON.parse(msg.content);
@@ -116,6 +116,14 @@ const withPreview = (msg: Message): Message => {
          }
          if (payload.type === 'silent' && typeof payload.text === 'string') {
             return { ...msg, preview: payload.text, content: payload.text, isSilent: true };
+         }
+         if (payload.type === 'edit' && typeof payload.text === 'string') {
+            return { ...msg, preview: `✎ ${payload.text}`, content: payload.text, isEdited: true };
+         }
+         if (payload.type === 'CALL_INIT' || payload.type === 'GHOST_SYNC') {
+            // These should ideally not be last messages, but if they are (e.g. fresh convo)
+            // we return a placeholder or just null out the preview
+            return { ...msg, preview: '', isSilent: true };
          }
        } catch {}
     }
