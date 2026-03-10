@@ -34,6 +34,15 @@ router.post(
       const userUpdateData: any = { publicKey: identityKey }
       if (signingKey) {
         userUpdateData.signingKey = signingKey
+      } else {
+        // If not provided in request, ensure the user already has one.
+        const currentUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { signingKey: true }
+        })
+        if (!currentUser?.signingKey) {
+          throw new ApiError(400, 'Signing key is required for initial bundle upload.')
+        }
       }
 
       // Use a transaction to ensure both operations succeed or fail together
@@ -260,7 +269,7 @@ router.get('/turn', requireAuth, async (req, res): Promise<any> => {
       return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }); // Fallback
     }
 
-    const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${env.cfTurnKeyId}/credentials/generate`;
+    const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${env.cfTurnKeyId}/credentials/generate-ice-servers`;
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -274,9 +283,8 @@ router.get('/turn', requireAuth, async (req, res): Promise<any> => {
 
     if (data.iceServers) {
       const payload = { 
-          iceServers: [ data.iceServers ]
+          iceServers: data.iceServers
       };
-      console.log("[SENDING TO FRONTEND]: Success sending Cloudflare TURN!");
       return res.json(payload);
     }
 

@@ -244,10 +244,17 @@ export function registerSocket(httpServer: HttpServer) {
 
     // Update Presence
     if (!socket.recovered) {
-        await redisClient.sAdd('online_users', userId);
+        const userSocketsKey = `user:${userId}:sockets`;
+        const added = await redisClient.sAdd(userSocketsKey, socket.id);
+        const currentCount = await redisClient.sCard(userSocketsKey);
+        
+        if (added === 1 && currentCount === 1) {
+            await redisClient.sAdd('online_users', userId);
+            socket.broadcast.emit("presence:user_joined", userId);
+        }
+        
         const onlineUserIds = await redisClient.sMembers('online_users');
         socket.emit("presence:init", onlineUserIds);
-        socket.broadcast.emit("presence:user_joined", userId);
     }
 
     // --- RATE LIMITER HELPER ---
@@ -367,6 +374,18 @@ export function registerSocket(httpServer: HttpServer) {
         });
         if (!conversation || !conversation.participants.some(p => p.userId === userId)) {
           return callback?.({ ok: false, error: "Conversation not found." });
+        }
+
+        // Validate reply target belongs to the same conversation
+        if (repliedToId) {
+          const targetMessage = await prisma.message.findUnique({
+            where: { id: repliedToId },
+            select: { conversationId: true }
+          });
+          
+          if (!targetMessage || targetMessage.conversationId !== conversationId) {
+            return callback?.({ ok: false, error: "Invalid reply target." });
+          }
         }
         
         const newMessage = await prisma.message.create({
@@ -537,11 +556,29 @@ export function registerSocket(httpServer: HttpServer) {
 
       // [NEW] Targeted Key Request (Auto-Heal Relay)
       if (targetId) {
-          io.to(targetId).emit('session:request_key', {
-              conversationId,
-              requesterId: userId,
-              sessionId
-          });
+          try {
+            const participants = await prisma.participant.findMany({
+              where: {
+                conversationId,
+                userId: { in: [userId, targetId] }
+              },
+              select: { userId: true }
+            });
+
+            const participantIds = participants.map(p => p.userId);
+            if (!participantIds.includes(userId) || !participantIds.includes(targetId)) {
+              socket.emit('error', { error: 'Unauthorized key request relay' });
+              return;
+            }
+
+            io.to(targetId).emit('session:request_key', {
+                conversationId,
+                requesterId: userId,
+                sessionId
+            });
+          } catch (error) {
+            console.error("Error in targeted session:request_key:", error);
+          }
           return;
       }
 
@@ -638,23 +675,36 @@ export function registerSocket(httpServer: HttpServer) {
     // === PRESENCE MANAGEMENT (AWAY/ACTIVE) ===
     socket.on("user:away", async () => {
       if (!userId) return;
-      // Hapus dari Redis dan langsung broadcast biar UI temennya berubah jadi Offline
-      await redisClient.sRem('online_users', userId);
-      socket.broadcast.emit("presence:user_left", userId);
+      const userSocketsKey = `user:${userId}:sockets`;
+      await redisClient.sRem(userSocketsKey, socket.id);
+      
+      const remainingSockets = await redisClient.sCard(userSocketsKey);
+      if (remainingSockets === 0) {
+        await redisClient.sRem('online_users', userId);
+        socket.broadcast.emit("presence:user_left", userId);
+      }
     });
 
     socket.on("user:active", async () => {
       if (!userId) return;
-      // Masukin lagi ke Redis dan broadcast kalau dia udah buka app-nya lagi
-      await redisClient.sAdd('online_users', userId);
-      socket.broadcast.emit("presence:user_joined", userId);
+      const userSocketsKey = `user:${userId}:sockets`;
+      const added = await redisClient.sAdd(userSocketsKey, socket.id);
+      const currentCount = await redisClient.sCard(userSocketsKey);
+      
+      if (added === 1 && currentCount === 1) {
+        await redisClient.sAdd('online_users', userId);
+        socket.broadcast.emit("presence:user_joined", userId);
+      }
     });
 
     // Disconnect Handler (Untuk User)
     socket.on("disconnect", async () => {
+       const userSocketsKey = `user:${userId}:sockets`;
+       await redisClient.sRem(userSocketsKey, socket.id);
+       
        setTimeout(async () => {
-           const sockets = await io.in(userId).fetchSockets();
-           if (sockets.length === 0) {
+           const remainingSockets = await redisClient.sCard(userSocketsKey);
+           if (remainingSockets === 0) {
                await redisClient.sRem('online_users', userId);
                io.emit("presence:user_left", userId);
            }

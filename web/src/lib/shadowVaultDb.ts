@@ -13,7 +13,7 @@ export interface DecryptedMessageRecord {
   senderId: string;
   senderName?: string; // Encrypted sender name
   senderUsername?: string; // Encrypted sender username
-  senderAvatarUrl?: string; // Avatar URL (usually public/cached)
+  senderAvatarUrl?: string; // Encrypted avatar URL
   isViewOnce?: boolean;
   isDeletedLocal?: boolean;
 }
@@ -87,6 +87,7 @@ export class NyxShadowVault extends Dexie {
         let encryptedRepliedTo: string | undefined = undefined;
         let encryptedSenderName: string | undefined = undefined;
         let encryptedSenderUsername: string | undefined = undefined;
+        let encryptedSenderAvatarUrl: string | undefined = undefined;
 
         if (m.content && !m.isDeletedLocal) {
             encryptedContent = await encryptVaultText(m.content);
@@ -108,10 +109,16 @@ export class NyxShadowVault extends Dexie {
             if (mSender.username) {
                 encryptedSenderUsername = await encryptVaultText(mSender.username);
             }
+            if (mSender.avatarUrl) {
+                encryptedSenderAvatarUrl = await encryptVaultText(mSender.avatarUrl);
+            }
         } else if (existing?.senderName) {
             // Keep the real name we already have in the vault!
             encryptedSenderName = existing.senderName;
             encryptedSenderUsername = existing.senderUsername;
+            encryptedSenderAvatarUrl = existing.senderAvatarUrl;
+        } else if (mSender?.avatarUrl) {
+            encryptedSenderAvatarUrl = await encryptVaultText(mSender.avatarUrl);
         }
         
         records.push({
@@ -124,7 +131,7 @@ export class NyxShadowVault extends Dexie {
           senderId: m.senderId,
           senderName: encryptedSenderName,
           senderUsername: encryptedSenderUsername,
-          senderAvatarUrl: (hasValidName ? mSender?.avatarUrl : existing?.senderAvatarUrl) || mSender?.avatarUrl,
+          senderAvatarUrl: encryptedSenderAvatarUrl,
           isViewOnce: m.isViewOnce,
           isDeletedLocal: m.isDeletedLocal
         });
@@ -144,6 +151,7 @@ export class NyxShadowVault extends Dexie {
         let decryptedRepliedTo = undefined;
         let decryptedSenderName = undefined;
         let decryptedSenderUsername = undefined;
+        let decryptedSenderAvatarUrl = undefined;
 
         if (r.content && !r.isDeletedLocal) {
           plainText = await decryptVaultText(r.content);
@@ -164,6 +172,9 @@ export class NyxShadowVault extends Dexie {
         if (r.senderUsername) {
             decryptedSenderUsername = await decryptVaultText(r.senderUsername) || undefined;
         }
+        if (r.senderAvatarUrl) {
+            decryptedSenderAvatarUrl = await decryptVaultText(r.senderAvatarUrl) || undefined;
+        }
 
         messages.push({
           id: r.id,
@@ -177,7 +188,7 @@ export class NyxShadowVault extends Dexie {
               id: r.senderId,
               name: decryptedSenderName,
               username: decryptedSenderUsername,
-              avatarUrl: r.senderAvatarUrl
+              avatarUrl: decryptedSenderAvatarUrl
           } as any,
           isViewOnce: r.isViewOnce,
           isDeletedLocal: r.isDeletedLocal
@@ -198,6 +209,7 @@ export class NyxShadowVault extends Dexie {
       let decryptedRepliedTo = undefined;
       let decryptedSenderName = undefined;
       let decryptedSenderUsername = undefined;
+      let decryptedSenderAvatarUrl = undefined;
 
       if (r.content && !r.isDeletedLocal) {
         plainText = await decryptVaultText(r.content);
@@ -218,6 +230,9 @@ export class NyxShadowVault extends Dexie {
       if (r.senderUsername) {
           decryptedSenderUsername = await decryptVaultText(r.senderUsername) || undefined;
       }
+      if (r.senderAvatarUrl) {
+          decryptedSenderAvatarUrl = await decryptVaultText(r.senderAvatarUrl) || undefined;
+      }
 
       return {
         id: r.id,
@@ -231,7 +246,7 @@ export class NyxShadowVault extends Dexie {
             id: r.senderId,
             name: decryptedSenderName,
             username: decryptedSenderUsername,
-            avatarUrl: r.senderAvatarUrl
+            avatarUrl: decryptedSenderAvatarUrl
         } as any,
         isViewOnce: r.isViewOnce,
         isDeletedLocal: r.isDeletedLocal
