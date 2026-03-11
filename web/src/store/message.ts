@@ -981,6 +981,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         } else if (!res.ok) {
             if (!isReactionPayload) {
                 get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
+                // Show specific error for sandbox limit
+                if (res.error?.includes('SANDBOX_LIMIT_REACHED')) {
+                    toast.error("Sandbox limit reached! Verify your account to unlock unlimited messaging.");
+                } else if (res.error) {
+                    toast.error(res.error);
+                }
             } else {
                 toast.error("Failed to send reaction");
             }

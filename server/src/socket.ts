@@ -346,13 +346,30 @@ export function registerSocket(httpServer: HttpServer) {
     socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: Message, error?: string }) => void) => {
       // 1. Sandbox Rate Limit (Strict)
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
+      
+      console.log(`[MESSAGE] User ${userId} isVerified: ${user?.isVerified}`);
+      
       if (!user?.isVerified) {
-          const key = `sandbox:msg:${userId}`;
-          const count = await redisClient.incr(key);
-          if (count === 1) await redisClient.expire(key, 60);
-          
-          if (count > 5) {
-              return callback?.({ ok: false, error: "SANDBOX_LIMIT_REACHED: Max 5 messages per minute. Verify account to unlock." });
+          try {
+              const key = `sandbox:msg:${userId}`;
+              const count = await redisClient.incr(key);
+              
+              // Set expiry only on first increment
+              if (count === 1) {
+                  await redisClient.expire(key, 60);
+                  console.log(`[SANDBOX] User ${userId} sent message 1/5 (window starts)`);
+              } else {
+                  console.log(`[SANDBOX] User ${userId} sent message ${count}/5`);
+              }
+
+              if (count > 5) {
+                  console.log(`[SANDBOX] User ${userId} blocked - limit reached (${count}/5)`);
+                  return callback?.({ ok: false, error: "SANDBOX_LIMIT_REACHED: Max 5 messages per minute. Verify account to unlock." });
+              }
+          } catch (redisError) {
+              console.error(`[SANDBOX] Redis error:`, redisError);
+              // If Redis fails, still enforce the limit by blocking (fail-safe)
+              return callback?.({ ok: false, error: "Service unavailable. Try again later." });
           }
       }
 

@@ -198,9 +198,16 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   searchUsers: async (query) => {
     try {
       if (!query.trim()) return [];
-      const { hashUsername } = await import('@lib/crypto-worker-proxy');
-      const hashedQuery = await hashUsername(query.trim());
-      const safeQuery = encodeURIComponent(hashedQuery);
+      
+      // Check if query is already a usernameHash (base64url format, 40+ chars)
+      // usernameHash from Argon2id is ~43 chars of base64url (URLSAFE_NO_PADDING)
+      const isAlreadyHash = /^[A-Za-z0-9_-]{40,}$/.test(query.trim());
+      
+      const searchQuery = isAlreadyHash 
+        ? query.trim() 
+        : await import('@lib/crypto-worker-proxy').then(m => m.hashUsername(query.trim()));
+      
+      const safeQuery = encodeURIComponent(searchQuery);
       const users = await api<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>(`/api/users/search?q=${safeQuery}`);
       return users;
     } catch (error) {

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiCheckCircle, FiXCircle, FiLoader, FiShield, FiBell, FiCamera } from 'react-icons/fi';
 import { useAuthStore } from '@store/auth';
+import { useLocation } from 'react-router-dom';
 
 type PermStatus = 'idle' | 'loading' | 'granted' | 'denied';
 
@@ -9,8 +10,9 @@ export default function SystemInitModal() {
   const [isVisible, setIsVisible] = useState(false);
   const [notifStatus, setNotifStatus] = useState<PermStatus>('idle');
   const [mediaStatus, setMediaStatus] = useState<PermStatus>('idle');
-  
+
   const user = useAuthStore(state => state.user);
+  const location = useLocation();
 
   useEffect(() => {
     // Only prompt for permissions if the user is actively logged in
@@ -18,10 +20,24 @@ export default function SystemInitModal() {
       setIsVisible(false);
       return;
     }
-    
+
+    // Don't show during registration flow (user just registered, still setting up)
+    const justRegistered = sessionStorage.getItem('nyx_just_registered');
+    if (justRegistered === 'true') {
+      setIsVisible(false);
+      return;
+    }
+
+    // Don't show on public routes
+    const publicRoutes = ['/login', '/register', '/restore', '/help', '/privacy'];
+    if (publicRoutes.some(route => location.pathname.startsWith(route))) {
+      setIsVisible(false);
+      return;
+    }
+
     const hasInit = localStorage.getItem('nyx_sys_init');
     if (!hasInit) setIsVisible(true);
-  }, [user]);
+  }, [user, location]);
 
   const close = () => {
     localStorage.setItem('nyx_sys_init', 'true');
