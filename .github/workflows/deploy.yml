@@ -54,7 +54,8 @@ jobs:
         run: |
           # 1. Install dependensi produksi di GitHub Runner
           cd server
-          pnpm install --prod --no-frozen-lockfile
+          rm -rf node_modules
+          pnpm install --prod --no-frozen-lockfile --config.node-linker=hoisted
           npx prisma generate
           cd ..
 
