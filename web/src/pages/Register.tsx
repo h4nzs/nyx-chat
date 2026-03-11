@@ -58,7 +58,10 @@ export default function Register() {
 
       await saveProfileKey(result.userId, profileKeyB64);
       setRecoveryPhrase(result.phrase);
-      
+
+      // Mark that user just registered to prevent SystemInitModal from showing
+      sessionStorage.setItem('nyx_just_registered', 'true');
+
       // Move to Biometric step instead of Recovery directly
       setStep('biometric');
       toast.success("Identity initialized. Setup security.");
@@ -102,6 +105,8 @@ export default function Register() {
 
   const handleSkipBiometric = () => {
     toast('You can verify later in Settings to unlock full features.', { icon: '🔒' });
+    // Clear the just-registered flag so SystemInitModal can show on next login
+    sessionStorage.removeItem('nyx_just_registered');
     setStep('recovery');
   };
 
@@ -117,7 +122,11 @@ export default function Register() {
   // STEP 3: RECOVERY PHRASE
   if (step === 'recovery') {
     if (!recoveryPhrase) return null;
-    return <RecoveryPhraseModal phrase={recoveryPhrase} onClose={() => navigate('/chat')} />
+    return <RecoveryPhraseModal phrase={recoveryPhrase} onClose={() => {
+      // Clear the just-registered flag when user completes registration flow
+      sessionStorage.removeItem('nyx_just_registered');
+      navigate('/chat');
+    }} />
   }
 
   // STEP 2: BIOMETRIC VERIFICATION
