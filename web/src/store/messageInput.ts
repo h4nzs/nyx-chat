@@ -35,6 +35,7 @@ type State = {
   fetchTypingLinkPreview: (text: string) => void;
   clearTypingLinkPreview: () => void;
   addStagedFiles: (files: File[]) => void;
+  updateStagedFile: (index: number, newFile: File) => void;
   removeStagedFile: (index: number) => void;
   clearStagedFiles: () => void;
   sendMessage: (conversationId: string, data: { content: string }, tempId?: number, isSilent?: boolean) => Promise<void>;
@@ -92,6 +93,11 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   setIsHD: (value) => set({ isHD: value }),
   setIsVoiceAnonymized: (value) => set({ isVoiceAnonymized: value }),
   addStagedFiles: (files) => set((state) => ({ stagedFiles: [...state.stagedFiles, ...files] })),
+  updateStagedFile: (index, newFile) => set((state) => {
+    const newFiles = [...state.stagedFiles];
+    newFiles[index] = newFile;
+    return { stagedFiles: newFiles };
+  }),
   removeStagedFile: (index) => set((state) => ({ stagedFiles: state.stagedFiles.filter((_, i) => i !== index) })),
   clearStagedFiles: () => set({ stagedFiles: [] }),
 

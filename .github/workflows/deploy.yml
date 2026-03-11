@@ -43,7 +43,7 @@ jobs:
       - name: ⚙️ Build Server (Backend)
         working-directory: ./server
         run: |
-          # Generate Prisma Client (Versi 5) untuk proses build
+          # Generate Prisma Client untuk proses build
           npx prisma generate
           
           # Build TypeScript
@@ -52,15 +52,22 @@ jobs:
       # --- PHASE 4: PACKAGING ---
       - name: 🗜️ Prepare Artifacts for Deploy
         run: |
+          # 1. Install dependensi produksi di GitHub Runner
+          cd server
+          pnpm install --prod --no-frozen-lockfile
+          npx prisma generate
+          cd ..
+
           mkdir deploy_package
           
           # Copy Frontend Build
           mkdir -p deploy_package/web
           cp -r web/dist deploy_package/web/
           
-          # Copy Backend Build & Configs
+          # Copy Backend (Include node_modules & generated prisma)
           mkdir -p deploy_package/server
           cp -r server/dist deploy_package/server/
+          cp -r server/node_modules deploy_package/server/  # <--- INI KUNCINYA!
           cp server/package.json deploy_package/server/
           cp -r server/prisma deploy_package/server/
           
@@ -88,47 +95,31 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
-            echo "🚧 Starting Deployment..."
+            echo "🚧 Starting Deployment (Zero install)..."
             
-            # Cek pnpm
-            if ! command -v pnpm &> /dev/null; then
-                npm install -g pnpm
-            fi
-
-            mkdir -p /root/nyx-app
+            # Buat folder backup/app
+            mkdir -p /root/nyx-app_new
             
-            # Unzip
-            unzip -o /root/nyx-deploy.zip -d /root/nyx-app/
+            # Unzip hasil packaging dari GitHub
+            unzip -o /root/nyx-deploy.zip -d /root/nyx-app_new/
             rm /root/nyx-deploy.zip
             
-            # Setup Backend
-            echo "📦 Installing Backend Dependencies..."
-            cd /root/nyx-app/server
+            # --- SWAP FOLDER (Atomic Switch) ---
+            # Kita ganti folder lama dengan yang baru biar downtime minim
+            rm -rf /root/nyx-app_old
+            mv /root/nyx-app /root/nyx-app_old || true
+            mv /root/nyx-app_new /root/nyx-app
             
-            # Install prod dependencies
-            pnpm install --prod
-            
-            # Jalankan generate pakai binary lokal yang baru diinstall
-            echo "🔧 Generating Prisma Client..."
-            npx prisma generate
-
-            # --- DEPLOY FRONTEND TO NGINX ---
-            echo "🎨 Deploying Frontend to Nginx..."
-            # 1. Pastikan folder tujuan ada
+            # --- DEPLOY FRONTEND ---
             sudo mkdir -p /var/www/nyx-web
-            # 2. Bersihkan file lama
             sudo rm -rf /var/www/nyx-web/*
-            # 3. Copy hasil build baru dari /root/ ke /var/www/
             sudo cp -r /root/nyx-app/web/dist/* /var/www/nyx-web/
-            # 4. Reload Nginx biar refresh cache
             sudo systemctl reload nginx
-            # ---------------------------------
             
-            # Restart Apps
-            echo "🔄 Restarting Apps..."
+            # --- RESTART API ---
+            cd /root/nyx-app/server
             pm2 delete nyx-api || true
             pm2 start dist/index.js --name "nyx-api" -i max --node-args="--max-old-space-size=768"
-            pm2 delete nyx-web || true
             pm2 save
             
             echo "✅ Deployment Success!"

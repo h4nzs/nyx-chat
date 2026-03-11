@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2, FiEdit2, FiCpu, FiVolumeX } from 'react-icons/fi';
+import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2, FiEdit2, FiCpu, FiVolumeX, FiCrop } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
@@ -14,6 +14,7 @@ import SmartReply from './SmartReply';
 import { useMessageStore } from '@store/message';
 import { triggerSendFeedback } from '@utils/feedback';
 import { useUserProfile } from '@hooks/useUserProfile';
+import ImageCropperModal from './ImageCropperModal';
 
 // --- Types ---
 interface MessageInputProps {
@@ -103,7 +104,7 @@ const ReplyPreview = () => {
   );
 };
 
-export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSend, conversation }: MessageInputProps) {
+export default function MessageInput({ onSend, onTyping, onFileChange: _onFileChange, onVoiceSend, conversation }: MessageInputProps) {
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showTimerMenu, setShowTimerMenu] = useState(false); // Timer Menu State
@@ -128,14 +129,14 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const { 
     typingLinkPreview, fetchTypingLinkPreview, clearTypingLinkPreview, 
     expiresIn, setExpiresIn, isViewOnce, setIsViewOnce,
-    stagedFiles, addStagedFiles, removeStagedFile, clearStagedFiles,
+    stagedFiles, addStagedFiles, removeStagedFile, clearStagedFiles, updateStagedFile,
     isHD, setIsHD,
     isVoiceAnonymized, setIsVoiceAnonymized,
     editingMessage, setEditingMessage, sendEdit
   } = useMessageInputStore(useShallow(s => ({
     typingLinkPreview: s.typingLinkPreview, fetchTypingLinkPreview: s.fetchTypingLinkPreview, clearTypingLinkPreview: s.clearTypingLinkPreview, 
     expiresIn: s.expiresIn, setExpiresIn: s.setExpiresIn, isViewOnce: s.isViewOnce, setIsViewOnce: s.setIsViewOnce,
-    stagedFiles: s.stagedFiles, addStagedFiles: s.addStagedFiles, removeStagedFile: s.removeStagedFile, clearStagedFiles: s.clearStagedFiles,
+    stagedFiles: s.stagedFiles, addStagedFiles: s.addStagedFiles, removeStagedFile: s.removeStagedFile, clearStagedFiles: s.clearStagedFiles, updateStagedFile: s.updateStagedFile,
     isHD: s.isHD, setIsHD: s.setIsHD,
     isVoiceAnonymized: s.isVoiceAnonymized, setIsVoiceAnonymized: s.setIsVoiceAnonymized,
     editingMessage: s.editingMessage, setEditingMessage: s.setEditingMessage, sendEdit: s.sendEdit
@@ -145,6 +146,9 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
   const user = useAuthStore(state => state.user);
   const messages = useMessageStore(state => state.messages[conversation.id] || []);
   const theme = useThemeStore(state => state.theme);
+
+  // Crop State
+  const [cropTarget, setCropTarget] = useState<{ index: number, url: string, file: File } | null>(null);
 
   // Voice State
   const [isRecording, setIsRecording] = useState(false);
@@ -441,7 +445,12 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
                         return (
                             <div key={idx} className="relative w-20 h-20 flex-shrink-0 rounded-xl shadow-neumorphic-concave overflow-hidden border border-white/5 group bg-bg-main">
                                 {isImage ? (
-                                    <img src={url!} alt="preview" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                                    <>
+                                      <img src={url!} alt="preview" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                                      <button type="button" onClick={(e) => { e.preventDefault(); setCropTarget({ index: idx, url: url!, file }); }} className="absolute top-1 left-1 bg-black/60 hover:bg-accent text-white p-1 rounded-full backdrop-blur-md transition-colors z-10">
+                                        <FiCrop size={12} />
+                                      </button>
+                                    </>
                                 ) : (
                                     <div className="w-full h-full flex flex-col items-center justify-center text-text-secondary">
                                         <FiPaperclip size={20} />
@@ -776,6 +785,19 @@ export default function MessageInput({ onSend, onTyping, onFileChange, onVoiceSe
           </div>
 
         </form>
+      )}
+
+      {cropTarget && (
+        <ImageCropperModal 
+          file={cropTarget.file} 
+          url={cropTarget.url} 
+          aspect={undefined} // Free form cropping for attachments
+          onClose={() => setCropTarget(null)} 
+          onSave={(newFile) => {
+            updateStagedFile(cropTarget.index, newFile);
+            setCropTarget(null);
+          }} 
+        />
       )}
     </div>
   );

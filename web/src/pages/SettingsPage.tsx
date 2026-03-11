@@ -27,6 +27,7 @@ import { useSettingsStore } from '@store/settings';
 import { setupBiometricUnlock } from '@lib/biometricUnlock';
 import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib/keyStorage';
 import { useMessageStore } from '@store/message';
+import ImageCropperModal from '../components/ImageCropperModal';
 
 /* --- MICRO-COMPONENTS --- */
 
@@ -145,6 +146,7 @@ export default function SettingsPage() {
   const [miningStatus, setMiningStatus] = useState<'idle' | 'mining' | 'verifying'>('idle');
   const [hasBioVault, setHasBioVault] = useState(false);
   const [panicPass, setPanicPass] = useState('');
+  const [avatarCropTarget, setAvatarCropTarget] = useState<{ url: string, file: File } | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const vaultInputRef = useRef<HTMLInputElement>(null);
@@ -220,8 +222,9 @@ export default function SettingsPage() {
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setAvatarFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
+      setAvatarCropTarget({ url: URL.createObjectURL(file), file });
+      // Reset input to allow re-selecting same file
+      e.target.value = '';
     }
   };
 
@@ -1012,6 +1015,20 @@ export default function SettingsPage() {
 
       {/* MODALS */}
       {showReportModal && <ReportBugModal onClose={() => setShowReportModal(false)} />}
+      
+      {avatarCropTarget && (
+        <ImageCropperModal
+          file={avatarCropTarget.file}
+          url={avatarCropTarget.url}
+          aspect={1} // Force square for avatars
+          onClose={() => setAvatarCropTarget(null)}
+          onSave={(croppedFile) => {
+            setAvatarFile(croppedFile);
+            setPreviewUrl(URL.createObjectURL(croppedFile));
+            setAvatarCropTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }
