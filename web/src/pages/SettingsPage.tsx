@@ -473,7 +473,7 @@ export default function SettingsPage() {
                     bg-bg-main p-2
                   ">
                     <img
-                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(profile?.name || 'Anonymous')}`}
+                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(user?.id || 'anonymous')}`}
                       alt="ID"
                       className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
                     />
