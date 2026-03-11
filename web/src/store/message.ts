@@ -879,7 +879,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const { getSodium } = await import('@lib/sodiumInitializer');
         const sodium = await getSodium();
         const { worker_crypto_box_seal } = await import('@lib/crypto-worker-proxy');
-        
+
         const myAuthUser = useAuthStore.getState().user;
         let myName = 'Someone';
 
@@ -896,8 +896,23 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
            }
         }
 
-        // Prepare the basic push content securely (No plaintext leaking)
-        const pushBody = data.fileUrl ? "Sent a file" : "Sent a secure message";
+        // Prepare the push content securely
+        // For file messages, show a generic description
+        // For text messages, include the actual plaintext content
+        let pushBody: string;
+        if (data.fileUrl || data.fileName) {
+            pushBody = `Sent a file: ${data.fileName || 'Attachment'}`;
+        } else if (data.isViewOnce) {
+            pushBody = 'Sent a view-once message';
+        } else if (typeof data.content === 'string' && data.content.trim()) {
+            // Truncate long messages for push notification preview
+            const maxLength = 100;
+            pushBody = data.content.length > maxLength 
+                ? data.content.substring(0, maxLength) + '...'
+                : data.content;
+        } else {
+            pushBody = 'Sent a secure message';
+        }
 
         const pushData = JSON.stringify({ title: myName, body: pushBody, conversationId });
         const pushDataBytes = new TextEncoder().encode(pushData);
