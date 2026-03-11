@@ -24,6 +24,8 @@ export default function SystemInitModal() {
     // Don't show during registration flow (user just registered, still setting up)
     const justRegistered = sessionStorage.getItem('nyx_just_registered');
     if (justRegistered === 'true') {
+      // Clear the flag defensively - if user is logged in but flag persists, it's stale
+      sessionStorage.removeItem('nyx_just_registered');
       setIsVisible(false);
       return;
     }

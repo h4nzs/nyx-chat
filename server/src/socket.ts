@@ -346,17 +346,26 @@ export function registerSocket(httpServer: HttpServer) {
     socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: Message, error?: string }) => void) => {
       // 1. Sandbox Rate Limit (Strict)
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
-      
+
       console.log(`[MESSAGE] User ${userId} isVerified: ${user?.isVerified}`);
-      
+
       if (!user?.isVerified) {
           try {
               const key = `sandbox:msg:${userId}`;
-              const count = await redisClient.incr(key);
               
-              // Set expiry only on first increment
+              // Atomic Lua script: INCR + conditional EXPIRE in one operation
+              const luaScript = `
+                local c = redis.call("INCR", KEYS[1]);
+                if c == 1 then redis.call("EXPIRE", KEYS[1], ARGV[1]) end;
+                return c;
+              `;
+              
+              const count = await redisClient.eval(luaScript, {
+                keys: [key],
+                arguments: ['60']
+              }) as number;
+
               if (count === 1) {
-                  await redisClient.expire(key, 60);
                   console.log(`[SANDBOX] User ${userId} sent message 1/5 (window starts)`);
               } else {
                   console.log(`[SANDBOX] User ${userId} sent message ${count}/5`);
