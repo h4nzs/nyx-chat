@@ -309,10 +309,6 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     getSocket().emit("typing:stop", { conversationId: id });
   };
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files?.[0]) actions.uploadFile(e.target.files[0]);
-  };
-
   const handleVoiceSend = (blob: Blob, duration: number) => {
     handleStopRecording(id, blob, duration);
   };
@@ -445,7 +441,6 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
               <MessageInput
                 onSend={handleSendMessage}
                 onTyping={handleTyping}
-                onFileChange={handleFileChange}
                 onVoiceSend={handleVoiceSend}
                 conversation={conversation}
               />

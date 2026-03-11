@@ -14,12 +14,17 @@ import { compressImage } from "@lib/fileUtils";
 import useDynamicIslandStore, { UploadActivity } from "./dynamicIsland";
 import { uploadToR2 } from '../lib/r2';
 
+export type StagedFile = {
+  id: string;
+  file: File;
+};
+
 type State = {
   replyingTo: Message | null;
   typingLinkPreview: any | null;
   expiresIn: number | null;
   isViewOnce: boolean;
-  stagedFiles: File[];
+  stagedFiles: StagedFile[];
   isHD: boolean;
   isVoiceAnonymized: boolean;
   editingMessage: Message | null;
@@ -35,7 +40,8 @@ type State = {
   fetchTypingLinkPreview: (text: string) => void;
   clearTypingLinkPreview: () => void;
   addStagedFiles: (files: File[]) => void;
-  removeStagedFile: (index: number) => void;
+  updateStagedFile: (id: string, newFile: File) => void;
+  removeStagedFile: (id: string) => void;
   clearStagedFiles: () => void;
   sendMessage: (conversationId: string, data: { content: string }, tempId?: number, isSilent?: boolean) => Promise<void>;
   uploadFile: (conversationId: string, file: File) => Promise<void>;
@@ -91,8 +97,16 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   setIsViewOnce: (value) => set({ isViewOnce: value }),
   setIsHD: (value) => set({ isHD: value }),
   setIsVoiceAnonymized: (value) => set({ isVoiceAnonymized: value }),
-  addStagedFiles: (files) => set((state) => ({ stagedFiles: [...state.stagedFiles, ...files] })),
-  removeStagedFile: (index) => set((state) => ({ stagedFiles: state.stagedFiles.filter((_, i) => i !== index) })),
+  addStagedFiles: (files) => set((state) => ({ 
+    stagedFiles: [
+      ...state.stagedFiles, 
+      ...files.map(f => ({ id: Math.random().toString(36).substring(2, 15) + Date.now().toString(36), file: f }))
+    ] 
+  })),
+  updateStagedFile: (id, newFile) => set((state) => ({
+    stagedFiles: state.stagedFiles.map(sf => sf.id === id ? { ...sf, file: newFile } : sf)
+  })),
+  removeStagedFile: (id) => set((state) => ({ stagedFiles: state.stagedFiles.filter(sf => sf.id !== id) })),
   clearStagedFiles: () => set({ stagedFiles: [] }),
 
   fetchTypingLinkPreview: async (text) => {
