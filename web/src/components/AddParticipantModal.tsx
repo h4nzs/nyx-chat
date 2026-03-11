@@ -143,12 +143,12 @@ const AddParticipantModal = ({ conversationId, onClose }: {
               >
                 <div className="flex items-center gap-3">
                   <img
-                    src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`}
+                    src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(user.name || 'Anonymous')}`}
                     alt={user.name}
                     className="w-8 h-8 rounded-full object-cover bg-secondary"
                     onError={(e) => {
                       const target = e.target as HTMLImageElement;
-                      target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`;
+                      target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(user.name || 'Anonymous')}`;
                     }}
                   />
                   <p className="text-text-primary">{user.name} (@{user.username})</p>

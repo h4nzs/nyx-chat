@@ -153,8 +153,8 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
                     `}
                   >
                     <div className="relative">
-                      <img 
-                        src={user.avatarUrl ? toAbsoluteUrl(user.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${user.name}`} 
+                      <img
+                        src={user.avatarUrl ? toAbsoluteUrl(user.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(user.name || 'Anonymous')}`}
                         className={`w-10 h-10 rounded-full object-cover transition-all ${isSelected ? 'grayscale-0' : 'grayscale opacity-80'}`}
                         alt={user.name}
                       />

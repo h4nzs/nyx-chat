@@ -467,13 +467,13 @@ export default function SettingsPage() {
                 {/* Avatar Slot - Concave Recess */}
                 <div className="relative flex-shrink-0">
                   <div className="
-                    w-40 h-40 rounded-full 
-                    shadow-neu-pressed-light dark:shadow-neu-pressed-dark 
+                    w-40 h-40 rounded-full
+                    shadow-neu-pressed-light dark:shadow-neu-pressed-dark
                     flex items-center justify-center
                     bg-bg-main p-2
                   ">
                     <img
-                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${profile?.name || 'Anonymous'}`}
+                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(profile?.name || 'Anonymous')}`}
                       alt="ID"
                       className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
                     />

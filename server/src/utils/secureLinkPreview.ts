@@ -44,7 +44,13 @@ export async function resolveDns (urlOrHostname: string): Promise<string> {
 
 // Helper to manually follow redirects and validate each step
 export async function validateRedirectChain(initialUrl: string): Promise<string> {
-  let currentUrl = initialUrl
+  // 1. TAMBAHAN: Validasi Protokol Ketat (Hanya izinkan HTTP/HTTPS)
+  const parsedUrl = new URL(initialUrl);
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+    throw new Error('SSRF attempt blocked: Invalid URL protocol.');
+  }
+
+  let currentUrl = parsedUrl.toString()
   let redirectCount = 0
   const maxRedirects = 5
 
@@ -73,7 +79,7 @@ export async function validateRedirectChain(initialUrl: string): Promise<string>
     } catch (e) {
       // If HEAD fails (e.g. 405 Method Not Allowed), fallback to trying to preview the current URL directly
       // assuming resolveDns passed.
-      console.warn(`Redirect validation HEAD request failed for ${currentUrl}, proceeding with caution.`)
+      console.warn('Redirect validation HEAD request failed for:', currentUrl, ', proceeding with caution.')
       return currentUrl
     }
   }
@@ -118,7 +124,7 @@ export async function getSecureLinkPreview (url: string): Promise<LinkPreview> {
     })
     return preview as LinkPreview
   } catch (error) {
-    console.error(`Secure link preview failed for URL "${url}":`, error)
+    console.error('Secure link preview failed for URL:', url, ':', error)
     throw error // Re-throw the error to be handled by the caller
   }
 }

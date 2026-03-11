@@ -270,12 +270,12 @@ router.delete('/:id', async (req, res, next) => {
        // Format: folder/userId-uuid.ext
        const parts = r2Key.split('/');
        const filename = parts.length > 1 ? parts[parts.length - 1] : parts[0];
-       
+
        if (!filename.startsWith(`${userId}-`)) {
-          console.warn(`[Security] User ${userId} attempted to delete unauthorized file: ${r2Key}`);
+          console.warn('[Security] User', userId, 'attempted to delete unauthorized file:', r2Key);
        } else {
-          console.log(`[R2] Deleting blind attachment: ${r2Key}`);
-          deleteR2File(r2Key).catch(err => console.error(`[R2] Failed to delete blind file ${r2Key}:`, err))
+          console.log('[R2] Deleting blind attachment:', r2Key);
+          deleteR2File(r2Key).catch(err => console.error('[R2] Failed to delete blind file:', r2Key, ':', err))
        }
     }
 

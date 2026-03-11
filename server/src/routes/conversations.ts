@@ -393,10 +393,10 @@ router.delete('/:id/leave', async (req, res, next) => {
       try {
         await rotateAndDistributeSessionKeys(conversationId, remainingAdmin.userId)
       } catch (error) {
-        console.error(`Failed to rotate keys for ${conversationId} after user ${userId} left:`, error)
+        console.error('Failed to rotate keys for:', conversationId, 'after user', userId, 'left:', error)
       }
     } else {
-      console.warn(`Could not rotate keys for ${conversationId} after user left: no remaining admin found.`)
+      console.warn('Could not rotate keys for:', conversationId, 'after user left: no remaining admin found.')
     }
     res.status(204).send()
   } catch (error) {

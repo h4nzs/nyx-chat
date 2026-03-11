@@ -379,7 +379,7 @@ router.post('/logout', async (req, res) => {
   if (r) {
     try {
       const payload = verifyJwt(r)
-      if (typeof payload === 'object' && payload?.jti) {
+      if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
         await prisma.refreshToken.updateMany({ where: { jti: payload.jti }, data: { revokedAt: new Date() } })
       }
     } catch (e) {}
