@@ -95,31 +95,42 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
+            set -e  # Exit on any error
             echo "🚧 Starting Deployment (Zero install)..."
             
-            # Buat folder backup/app
-            mkdir -p /root/nyx-app_new
+            # 1. Bikin folder rilis unik pakai timestamp
+            RELEASE_DIR="/root/nyx-releases/release_$(date +%Y%m%d_%H%M%S)"
+            mkdir -p $RELEASE_DIR
             
-            # Unzip hasil packaging dari GitHub
-            unzip -o /root/nyx-deploy.zip -d /root/nyx-app_new/
+            # 2. Unzip diam-diam (-q) ke folder rilis tersebut
+            unzip -q -o /root/nyx-deploy.zip -d $RELEASE_DIR/
             rm /root/nyx-deploy.zip
             
-            # --- SWAP FOLDER (Atomic Switch) ---
-            # Kita ganti folder lama dengan yang baru biar downtime minim
-            rm -rf /root/nyx-app_old
-            mv /root/nyx-app /root/nyx-app_old || true
-            mv /root/nyx-app_new /root/nyx-app
+            # 3. 🛡️ ATOMIC SYMLINK SWAP (Saran CodeRabbit)
+            echo "🔄 Executing Atomic Swap..."
+            # Bikin symlink sementara yang nunjuk ke rilis baru
+            ln -sfn $RELEASE_DIR /root/nyx-app_tmp_link
+            # Timpa symlink utama secara instan (0 detik downtime)
+            mv -Tf /root/nyx-app_tmp_link /root/nyx-app
             
-            # --- DEPLOY FRONTEND ---
+            # 4. DEPLOY FRONTEND
             sudo mkdir -p /var/www/nyx-web
             sudo rm -rf /var/www/nyx-web/*
             sudo cp -r /root/nyx-app/web/dist/* /var/www/nyx-web/
             sudo systemctl reload nginx
             
-            # --- RESTART API ---
+            # 5. RESTART API
+            # Masuk lewat symlink utama, PM2 nggak bakal sadar kalau foldernya ganti
             cd /root/nyx-app/server
-            pm2 delete nyx-api || true
-            pm2 start dist/index.js --name "nyx-api" -i max --node-args="--max-old-space-size=768"
+            if pm2 describe nyx-api > /dev/null 2>&1; then
+              pm2 reload nyx-api --update-env
+            else
+              pm2 start dist/index.js --name "nyx-api" -i max --node-args="--max-old-space-size=768"
+            fi
             pm2 save
+
+            # 6. BERSIH-BERSIH DISK (Simpan 3 rilis terakhir aja)
+            echo "🧹 Cleaning up old releases..."
+            ls -dt /root/nyx-releases/* | tail -n +4 | xargs -d '\n' rm -rf || true
             
             echo "✅ Deployment Success!"

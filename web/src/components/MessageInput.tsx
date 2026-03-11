@@ -20,7 +20,6 @@ import ImageCropperModal from './ImageCropperModal';
 interface MessageInputProps {
   onSend: (data: { content: string }) => void;
   onTyping: () => void;
-  onFileChange: (e: ChangeEvent<HTMLInputElement>) => void;
   onVoiceSend: (blob: Blob, duration: number) => void;
   conversation: any; // Using any to match existing flexibility, ideally Typed
 }
@@ -104,7 +103,7 @@ const ReplyPreview = () => {
   );
 };
 
-export default function MessageInput({ onSend, onTyping, onFileChange: _onFileChange, onVoiceSend, conversation }: MessageInputProps) {
+export default function MessageInput({ onSend, onTyping, onVoiceSend, conversation }: MessageInputProps) {
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showTimerMenu, setShowTimerMenu] = useState(false); // Timer Menu State
@@ -148,7 +147,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange: _onFileCh
   const theme = useThemeStore(state => state.theme);
 
   // Crop State
-  const [cropTarget, setCropTarget] = useState<{ index: number, url: string, file: File } | null>(null);
+  const [cropTarget, setCropTarget] = useState<{ id: string, url: string, file: File } | null>(null);
 
   // Voice State
   const [isRecording, setIsRecording] = useState(false);
@@ -203,6 +202,47 @@ export default function MessageInput({ onSend, onTyping, onFileChange: _onFileCh
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // --- Preview URL Management ---
+  const [filePreviews, setFilePreviews] = useState<Map<string, string>>(new Map());
+  const previewsRef = useRef<Map<string, string>>(new Map());
+
+  // Sync effect
+  useEffect(() => {
+    const currentMap = previewsRef.current;
+    let changed = false;
+    const activeIds = new Set(stagedFiles.map(sf => sf.id));
+
+    // Remove old
+    for (const [id, url] of currentMap.entries()) {
+        if (!activeIds.has(id)) {
+            URL.revokeObjectURL(url);
+            currentMap.delete(id);
+            changed = true;
+        }
+    }
+
+    // Add new
+    stagedFiles.forEach(sf => {
+        if (sf.file.type.startsWith('image/') && !currentMap.has(sf.id)) {
+            const url = URL.createObjectURL(sf.file);
+            currentMap.set(sf.id, url);
+            changed = true;
+        }
+    });
+
+    if (changed) {
+        setFilePreviews(new Map(currentMap));
+    }
+  }, [stagedFiles]);
+
+  // Unmount cleanup
+  useEffect(() => {
+      return () => {
+          previewsRef.current.forEach(url => URL.revokeObjectURL(url));
+          previewsRef.current.clear();
+      };
   }, []);
 
   // --- Handlers ---
@@ -284,8 +324,8 @@ export default function MessageInput({ onSend, onTyping, onFileChange: _onFileCh
        // Process files sequentially in the background to prevent CPU/RAM overload
        // (Image compression and Sodium encryption are extremely CPU-heavy)
        (async () => {
-           for (const file of filesToProcess) {
-               await useMessageInputStore.getState().uploadFile(conversation.id, file);
+           for (const staged of filesToProcess) {
+               await useMessageInputStore.getState().uploadFile(conversation.id, staged.file);
            }
        })();
     }
@@ -439,27 +479,27 @@ export default function MessageInput({ onSend, onTyping, onFileChange: _onFileCh
                     animate={{ opacity: 1, y: 0 }}
                     className="mb-2 p-3 bg-bg-surface backdrop-blur-md rounded-2xl shadow-neumorphic-convex border border-white/5 flex gap-3 overflow-x-auto scrollbar-hide"
                 >
-                    {stagedFiles.map((file, idx) => {
-                        const isImage = file.type.startsWith('image/');
-                        const url = isImage ? URL.createObjectURL(file) : null;
+                    {stagedFiles.map((staged) => {
+                        const isImage = staged.file.type.startsWith('image/');
+                        const url = isImage ? filePreviews.get(staged.id) : null;
                         return (
-                            <div key={idx} className="relative w-20 h-20 flex-shrink-0 rounded-xl shadow-neumorphic-concave overflow-hidden border border-white/5 group bg-bg-main">
-                                {isImage ? (
+                            <div key={staged.id} className="relative w-20 h-20 flex-shrink-0 rounded-xl shadow-neumorphic-concave overflow-hidden border border-white/5 group bg-bg-main">
+                                {isImage && url ? (
                                     <>
-                                      <img src={url!} alt="preview" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                                      <button type="button" onClick={(e) => { e.preventDefault(); setCropTarget({ index: idx, url: url!, file }); }} className="absolute top-1 left-1 bg-black/60 hover:bg-accent text-white p-1 rounded-full backdrop-blur-md transition-colors z-10">
+                                      <img src={url} alt="preview" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                                      <button type="button" onClick={(e) => { e.preventDefault(); setCropTarget({ id: staged.id, url, file: staged.file }); }} className="absolute top-1 left-1 bg-black/60 hover:bg-accent text-white p-1 rounded-full backdrop-blur-md transition-colors z-10">
                                         <FiCrop size={12} />
                                       </button>
                                     </>
                                 ) : (
                                     <div className="w-full h-full flex flex-col items-center justify-center text-text-secondary">
                                         <FiPaperclip size={20} />
-                                        <span className="text-[8px] mt-1 px-1 truncate w-full text-center">{file.name}</span>
+                                        <span className="text-[8px] mt-1 px-1 truncate w-full text-center">{staged.file.name}</span>
                                     </div>
                                 )}
                                 <button 
                                     type="button"
-                                    onClick={() => removeStagedFile(idx)} 
+                                    onClick={() => removeStagedFile(staged.id)} 
                                     className="absolute top-1 right-1 bg-black/60 hover:bg-red-500 text-white p-1 rounded-full backdrop-blur-md transition-colors"
                                 >
                                     <FiX size={12} />
@@ -794,7 +834,7 @@ export default function MessageInput({ onSend, onTyping, onFileChange: _onFileCh
           aspect={undefined} // Free form cropping for attachments
           onClose={() => setCropTarget(null)} 
           onSave={(newFile) => {
-            updateStagedFile(cropTarget.index, newFile);
+            updateStagedFile(cropTarget.id, newFile);
             setCropTarget(null);
           }} 
         />

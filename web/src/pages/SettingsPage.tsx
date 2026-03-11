@@ -219,6 +219,15 @@ export default function SettingsPage() {
     return () => window.removeEventListener('storage', checkBioVault);
   }, []);
 
+  // Cleanup avatar crop target URL to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (avatarCropTarget?.url) {
+        URL.revokeObjectURL(avatarCropTarget.url);
+      }
+    };
+  }, [avatarCropTarget]);
+
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
