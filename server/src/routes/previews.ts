@@ -18,7 +18,7 @@ router.post('/', requireAuth, async (req, res, next) => {
       res.status(404).json({ error: 'Could not generate a preview for this link.' })
     }
   } catch (error) {
-    console.warn(`[Link Preview] Failed to fetch metadata for ${url}:`, (error as Error).message);
+    console.warn('[Link Preview] Failed to fetch metadata for:', url, ':', (error as Error).message);
     res.status(400).json({ error: 'Failed to extract link preview. Target site is protected or unreachable.' });
   }
 })
@@ -28,10 +28,7 @@ router.get('/image', requireAuth, async (req, res, next) => {
   if (!targetUrl) return res.status(400).json({ error: 'URL is required' });
 
   try {
-    // 1. SSRF Protection: Ensure the target is a public, safe IP
-    await resolveDns(targetUrl);
-    // 1.1 Deep SSRF Check: Validate redirect chain
-    await validateRedirectChain(targetUrl);
+    const safeUrl = await validateRedirectChain(targetUrl);
 
     // 2. Fetch the image safely with an AbortController (5-second timeout)
     const controller = new AbortController();
@@ -39,7 +36,7 @@ router.get('/image', requireAuth, async (req, res, next) => {
 
     let imageRes;
     try {
-      imageRes = await fetch(targetUrl, { 
+      imageRes = await fetch(safeUrl, { 
         signal: controller.signal,
         redirect: 'manual', // <--- CRITICAL FIX
         headers: { 'User-Agent': 'NYX-Preview-Bot/1.0', 'Accept': 'image/*' }

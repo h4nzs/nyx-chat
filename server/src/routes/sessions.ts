@@ -17,7 +17,7 @@ router.get('/', requireAuth, async (req, res, next) => {
     let currentJti: string | null = null
     if (req.cookies.rt) {
       const payload = verifyJwt(req.cookies.rt)
-      if (typeof payload === 'object' && payload?.jti) {
+      if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
         currentJti = payload.jti
       }
     }

@@ -1305,7 +1305,7 @@ self.onmessage = async (event: MessageEvent) => {
     self.postMessage({ success: true, id, result });
 
   } catch (error: any) {
-    console.error(`Error in crypto worker for type ${type}:`, error);
+    console.error('Error in crypto worker for type:', type, error);
     self.postMessage({ success: false, id, error: error.message || 'An unknown error occurred' });
   }
 };
