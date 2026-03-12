@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Cropper, CropperRef } from 'react-advanced-cropper';
 import 'react-advanced-cropper/dist/style.css';
+import 'react-advanced-cropper/dist/themes/compact.css';
 import { FiCheck, FiX, FiRotateCw } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 

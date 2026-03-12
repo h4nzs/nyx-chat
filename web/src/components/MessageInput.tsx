@@ -833,7 +833,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
           url={cropTarget.url} 
           onClose={() => setCropTarget(null)} 
           onSave={(newFile) => {
-            updateStagedFile(cropTarget.index, newFile);
+            updateStagedFile(cropTarget.id, newFile);
             setCropTarget(null);
           }} 
         />
