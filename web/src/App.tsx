@@ -23,6 +23,7 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const MigrationReceivePage = lazy(() => import('./pages/MigrationReceivePage'));
 const MigrationSendPage = lazy(() => import('./pages/MigrationSendPage'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -357,9 +358,9 @@ const AppContent = () => {
             </Route>
 
             {/* Fallback */}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<PageWrapper><NotFoundPage /></PageWrapper>} />
           </Routes>
-        </Suspense>
+        </Suspense>>
       </div>
     </>
   );
