@@ -58,13 +58,12 @@ jobs:
           mkdir -p deploy_package/web
           cp -r web/dist deploy_package/web/
           
-          # Copy Backend (TANPA node_modules, TAPI bawa Prisma yang udah di-generate)
+          # Copy Backend (Bawa Prisma hasil generate dari GitHub, TAPI TINGGALKAN node_modules)
           mkdir -p deploy_package/server
           cp -r server/dist deploy_package/server/
           cp server/package.json deploy_package/server/
           cp -r server/prisma deploy_package/server/
           
-          # Zip semuanya
           cd deploy_package
           zip -r ../nyx-deploy.zip .
 
@@ -79,7 +78,7 @@ jobs:
           source: "nyx-deploy.zip"
           target: "/root/"
 
-      # --- PHASE 6: EXECUTE ON VPS (INSTALL DI RILIS BARU) ---
+      # --- PHASE 6: EXECUTE ON VPS (PNPM NATIVE INSTALL) ---
       - name: 🔧 Unzip & Restart on VPS
         uses: appleboy/ssh-action@master
         with:
@@ -88,36 +87,41 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
-            set -e  # Exit on any error
-            echo "🚧 Starting Deployment (Hybrid Install)..."
+            set -e  # Exit on error
+            echo "🚧 Starting Deployment (Hybrid PNPM Mode)..."
             
-            # 1. Bikin folder rilis unik pakai timestamp
+            # 1. Pastikan PNPM terinstall di VPS
+            if ! command -v pnpm &> /dev/null; then
+                npm install -g pnpm
+            fi
+            
+            # 2. Bikin folder rilis
             RELEASE_DIR="/root/nyx-releases/release_$(date +%Y%m%d_%H%M%S)"
             mkdir -p $RELEASE_DIR
             
-            # 2. Unzip diam-diam
+            # 3. Unzip
             unzip -q -o /root/nyx-deploy.zip -d $RELEASE_DIR/
             rm /root/nyx-deploy.zip
             
-            # 3. INSTALL DEPENDENSI DI FOLDER BARU (Aman karena PM2 masih jalan di folder lama)
-            echo "📦 Installing backend dependencies..."
+            # 4. INSTALL DI VPS PAKAI PNPM (Cepat & Hemat)
+            echo "📦 Installing backend dependencies with PNPM..."
             cd $RELEASE_DIR/server
-            # Pakai NPM biar struktur foldernya solid dan ramah ESM
-            npm install --omit=dev --legacy-peer-deps --no-audit --no-fund
+            # Batasi memory node saat install biar VPS 1GB lu nggak ngos-ngosan
+            NODE_OPTIONS="--max-old-space-size=400" pnpm install --prod
             
-            # 4. 🛡️ ATOMIC SYMLINK SWAP
+            # 5. 🛡️ ATOMIC SYMLINK SWAP (Anti Downtime)
             echo "🔄 Executing Atomic Swap..."
             ln -sfn $RELEASE_DIR /root/nyx-app_tmp_link
             mv -Tf /root/nyx-app_tmp_link /root/nyx-app
             
-            # 5. DEPLOY FRONTEND
+            # 6. DEPLOY FRONTEND
             sudo mkdir -p /var/www/nyx-web
             sudo rm -rf /var/www/nyx-web/*
             sudo cp -r /root/nyx-app/web/dist/* /var/www/nyx-web/
             sudo systemctl reload nginx || true
             
-            # 6. RESTART API (HARD RESTART BIAR FRESH)
-            echo "🚀 Restarting PM2..."
+            # 7. RESTART PM2
+            echo "🚀 Restarting API..."
             cd /root/nyx-app/server
             if pm2 describe nyx-api > /dev/null 2>&1; then
               pm2 reload nyx-api --update-env
