@@ -1,5 +1,11 @@
-export default {
+/// <reference types="node" />
+import 'dotenv/config';
+import { defineConfig } from 'prisma/config';
+
+export default defineConfig({
   datasource: {
-    url: process.env.DATABASE_URL,
+    // Kalau ada DIRECT_URL di .env, CLI bakal pakai ini buat nge-push schema.
+    // Kalau nggak ada, dia baru nengok ke DATABASE_URL.
+    url: process.env.DIRECT_URL || process.env.DATABASE_URL,
   },
-};
+});

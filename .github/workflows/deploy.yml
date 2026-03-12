@@ -102,6 +102,13 @@ jobs:
             # 3. Unzip
             unzip -q -o /root/nyx-deploy.zip -d $RELEASE_DIR/
             rm /root/nyx-deploy.zip
+            echo "🔐 Restoring Server Environment Variables..."
+            if [ -f /root/nyx-app/server/.env ]; then
+                cp /root/nyx-app/server/.env $RELEASE_DIR/server/.env
+                echo "✅ .env copied successfully from previous release!"
+            else
+                echo "⚠️ WARNING: No existing .env found at /root/nyx-app/server/.env"
+            fi
             
             # 4. INSTALL DI VPS PAKAI PNPM (Cepat & Hemat)
             echo "📦 Installing backend dependencies with PNPM..."

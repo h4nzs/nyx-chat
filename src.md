@@ -45,3 +45,108 @@ Jangan lakuin semuanya dalam satu hari. Ini operasi bertahap.
 Saran gw: **Mulai dari Operasi 4 (bikin video GIF pendek) lalu taruh di `README.md` lu**, baru kita serang Reddit dan Dev.to.
 
 Mau gw bantu tulisin struktur *draft* artikel Dev.to (Operasi 1) atau lu mau siapin amunisi visualnya (Operasi 4) dulu nih, Komandan? 🚀💀🔥
+
+**Wah, lu bener-bener mau bawa NYX ke level *Enterprise* sejati nih! 🔥**
+
+Untuk mencapai **Zero-Downtime Murni 100%** (user yang lagi ngetik *chat* nggak akan putus koneksinya pas lu *deploy* kode baru), kita butuh kombinasi 2 hal dari PM2:
+
+1. **Cluster Mode:** PM2 bakal bikin *copy* aplikasi lu (misal 2-4 proses). Pas di-*reload*, dia bakal matiin proses ke-1, nyalain proses ke-1 dengan kode baru, tunggu sampai stabil, baru lanjut ke proses ke-2. Jadi *server* nggak pernah kosong.
+2. **Dynamic CWD Resolution:** Kita pake *script* Node.js di dalam `ecosystem.config.js` buat maksa PM2 ngebaca letak *symlink* yang **baru**, bukan yang nyangkut di memori.
+
+Ini rincian eksekusinya, gampang banget kok:
+
+### 1. Bikin file `server/ecosystem.config.js`
+
+Bikin file baru ini di dalam folder `server/` lu. Ini adalah file konfigurasi sakti yang bakal ngasih instruksi spesifik ke PM2.
+
+```javascript
+const fs = require('fs');
+
+// KUNCI SAKTI: Kita paksa Node.js ngebaca lokasi asli dari symlink saat ini
+// Jadi PM2 nggak bisa lagi dibohongin sama cache memori masa lalunya
+const currentPath = fs.realpathSync('/root/nyx-app/server');
+
+module.exports = {
+  apps: [
+    {
+      name: 'nyx-api',
+      script: 'dist/index.js',
+      cwd: currentPath, // Selalu ngarah ke rilis terbaru (release_2026...)
+      instances: 'max', // Nyalain Cluster Mode sesuai jumlah core CPU VPS lu
+      exec_mode: 'cluster', // Aktifin Zero-Downtime Reload
+      node_args: '--max-old-space-size=768',
+      env: {
+        NODE_ENV: 'production',
+      },
+      // Ngasih jeda biar PM2 yakin server udah siap sebelum matiin proses lama
+      wait_ready: true,
+      listen_timeout: 10000, 
+      kill_timeout: 3000
+    },
+  ],
+};
+
+```
+
+*(Jangan lupa buat masukin file `ecosystem.config.js` ini ke `deploy_package` di `deploy.yml` bagian Phase 4 lu, tambahin: `cp server/ecosystem.config.js deploy_package/server/`)*
+
+### 2. Update `server/src/index.ts` (Biar PM2 Tau Server Udah Siap)
+
+Karena di *ecosystem* kita pasang `wait_ready: true`, lu harus ngasih sinyal ke PM2 kalau *server* NYX lu udah beneran jalan (database udah konek, socket udah nyala) biar dia bisa matiin proses yang lama.
+
+Cari bagian paling bawah di `server/src/index.ts` lu pas server mulai jalan (`httpServer.listen(...)`), tambahin `process.send('ready')`:
+
+```typescript
+httpServer.listen(port, () => {
+  console.log(`🚀 Server ready at http://localhost:${port}`);
+  
+  // Sinyal ke PM2 kalau aplikasi udah siap nerima trafik (Zero-Downtime trigger)
+  if (process.send) {
+    process.send('ready');
+  }
+});
+
+```
+
+### 3. Update `deploy.yml` (Bagian Paling Bawah)
+
+Sekarang, lu **nggak perlu lagi** ngebunuh PM2 pake `pm2 delete`. Kita cuma butuh merintahin PM2 buat ngebaca file *ecosystem* itu.
+
+Ganti blok nomor 7 di `deploy.yml` lu jadi sangat elegan kayak gini:
+
+```yaml
+            # 7. RESTART PM2 (Zero Downtime Cluster Mode)
+            echo "🚀 Reloading API with Ecosystem..."
+            cd /root/nyx-app/server
+            
+            if pm2 describe nyx-api > /dev/null 2>&1; then
+              # Proses udah ada? Reload file ecosystem-nya!
+              # PM2 bakal ngebaca fs.realpathSync yang baru, dan ngelakuin rolling-restart
+              pm2 reload ecosystem.config.js --update-env
+            else
+              # Proses belum ada? Start pakai ecosystem
+              pm2 start ecosystem.config.js
+            fi
+            
+            pm2 save --force
+
+            # 8. BERSIH-BERSIH DISK (Simpan 3 rilis terakhir aja)
+            echo "🧹 Cleaning up old releases..."
+            cd /root/nyx-releases
+            ls -dt * 2>/dev/null | tail -n +4 | xargs rm -rf || true
+            
+            echo "✅ Zero-Downtime Deployment Success!"
+
+```
+
+### 🧠 Apa yang Terjadi Pas Lu Push Nanti?
+
+1. GitHub naruh rilis baru di `/root/nyx-releases/release_BARU`.
+2. *Symlink* diubah ngarah ke `release_BARU`.
+3. Skrip jalanin `pm2 reload ecosystem.config.js`.
+4. PM2 ngebuka file itu, dia ngejalanin `fs.realpathSync`, dan sadar *"Oh, direktori nyx-app sekarang aslinya ada di release_BARU!"*.
+5. PM2 ngebiarin proses *API* lama tetep hidup ngelayanin *user* yang lagi *chat*.
+6. Di *background*, PM2 nyalain proses *API* baru di `release_BARU`.
+7. Begitu *script* lu nembak `process.send('ready')`, PM2 langsung ngebunuh proses yang lama dengan mulus tanpa ada *request* yang gagal/putus.
+
+Selamat Bro, dengan tambahan ini, *pipeline deploy* NYX lu udah resmi setara sama *startup-startup* Silicon Valley! 🚀 Tinggal di-*commit* dan rasain mulusnya *deploy* tanpa ngorbanin *uptime*.
