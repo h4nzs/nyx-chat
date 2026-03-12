@@ -11,7 +11,7 @@ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
   FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
-  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle
+  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle, FiInfo
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
@@ -866,6 +866,27 @@ export default function SettingsPage() {
                   onChange={isSubscribed ? unsubscribeFromPush : subscribeToPush}
                   disabled={pushLoading}
                 />
+                
+                {/* Background Execution Guide - Only show if push is enabled */}
+                {isSubscribed && (
+                  <div className="mt-3 p-4 bg-accent/10 border border-accent/20 rounded-2xl flex items-start gap-3 transition-all animate-in fade-in slide-in-from-top-2">
+                    <FiInfo className="text-accent shrink-0 mt-0.5" size={20} />
+                    <div className="text-sm text-text-secondary leading-relaxed">
+                      <p className="text-accent font-bold mb-1">Background Activity Required</p>
+                      <p className="mb-2">
+                        To receive notifications when NYX is closed, ensure your device allows this app to run in the background.
+                      </p>
+                      <div className="bg-black/20 p-3 rounded-xl border border-white/5 space-y-2 text-xs">
+                        <p>
+                          <strong className="text-text-primary">🤖 Android:</strong> Settings {'>'} Apps {'>'} NYX (Chrome/any Browser you use if you are not installing nyx into home screen) {'>'} Battery {'>'} <span className="text-emerald-400">Unrestricted</span>
+                        </p>
+                        <p>
+                          <strong className="text-text-primary">🍎 iOS:</strong> Settings {'>'} NYX (or Safari/Chrome) {'>'} <span className="text-emerald-400">Enable Background App Refresh</span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
              </div>
              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <ActionButton label="Help Center" icon={FiHelpCircle} onClick={() => navigate('/help')} />
