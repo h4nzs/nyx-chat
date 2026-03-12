@@ -114,7 +114,7 @@ jobs:
             echo "📦 Installing backend dependencies with PNPM..."
             cd $RELEASE_DIR/server
             # Batasi memory node saat install biar VPS 1GB lu nggak ngos-ngosan
-            NODE_OPTIONS="--max-old-space-size=400" pnpm install --prod
+            NODE_OPTIONS="--max-old-space-size=512" pnpm install --prod
             npx prisma generate
             
             # 5. 🛡️ ATOMIC SYMLINK SWAP (Anti Downtime)

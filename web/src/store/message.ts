@@ -537,7 +537,7 @@ type Actions = {
   sendMessage: (conversationId: string, data: Partial<Message>, tempId?: number, isSilent?: boolean) => Promise<void>;
   toggleMessageSelection: (id: string) => void;
   clearMessageSelection: () => void;
-  repairSecureSession: (conversationId: string, isGroup: boolean) => Promise<void>;
+  repairSecureSession: (conversationId: string, isGroup: boolean, isAuto?: boolean) => Promise<void>;
 };
 
 let tempIdCounter = 0;
@@ -568,7 +568,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
   clearMessageSelection: () => set({ selectedMessageIds: [] }),
 
-  repairSecureSession: async (conversationId, isGroup) => {
+  repairSecureSession: async (conversationId, isGroup, isAuto = false) => {
     try {
       if (isGroup) {
         const { forceRotateGroupSenderKey, rotateGroupKey } = await import('@utils/crypto');
@@ -578,13 +578,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const { deleteRatchetSession } = await import('@utils/crypto');
         await deleteRatchetSession(conversationId);
         // Send a silent system message to trigger the X3DH on the other side automatically,
-        // and mark it as type 'SYSTEM' so it renders as a center placeholder.
-        get().sendMessage(conversationId, { content: "🔄 Secure session restarted.", isSilent: true, type: 'SYSTEM' });
+        // and mark it as type 'GHOST_SYNC' so it renders as a center placeholder.
+        get().sendMessage(conversationId, { content: JSON.stringify({ type: 'GHOST_SYNC' }), isSilent: true });
       }
-      toast.success("Secure session state reset. Next message will negotiate new keys.");
+      if (!isAuto) {
+          toast.success("Secure session state reset. Next message will negotiate new keys.");
+      }
     } catch (error) {
       console.error("Failed to repair session:", error);
-      toast.error("Failed to repair session.");
+      if (!isAuto) toast.error("Failed to repair session.");
     }
   },
 
@@ -1460,9 +1462,22 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
           const isGroup = conversation?.isGroup || false;
 
-          if (isGroup && (decrypted.content === 'waiting_for_key' || decrypted.error)) {
-              // Targeted Request directly to the sender
+          if (isGroup) {
+              // Group: Request missing Group Chain Key directly from sender
               emitSessionKeyRequest(conversationId, decrypted.senderId, decrypted.senderId);
+          } else {
+              // 1-on-1: SIGNAL-STYLE AUTO HEAL (Silent Renegotiation)
+              // If state is broken/missing (e.g., first message was swept), automatically resync.
+              const now = Date.now();
+              const repairKey = `last_repair_${conversationId}` as keyof Window;
+              const lastRepair = (window[repairKey] as number) || 0;
+              
+              // 15-second cooldown to prevent spamming renegotiation requests
+              if (now - lastRepair > 15000) {
+                  (window as any)[repairKey] = now;
+                  console.warn(`[Auto-Heal] Ratchet out of sync for ${conversationId}. Initiating silent repair...`);
+                  get().repairSecureSession(conversationId, false, true); // isAuto = true
+              }
           }
       }
       
