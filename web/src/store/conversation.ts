@@ -132,7 +132,7 @@ const withPreview = (msg: Message): Message => {
   if (msg.fileUrl) {
     if (msg.fileType?.startsWith('image/')) return { ...msg, preview: "📷 Image" };
     if (msg.fileType?.startsWith('video/')) return { ...msg, preview: "🎥 Video" };
-    return { ...msg, preview: `📎 ${msg.fileName || "File"}` };
+    return { ...msg, preview: `${msg.fileName || "File"}` };
   }
   return msg;
 };

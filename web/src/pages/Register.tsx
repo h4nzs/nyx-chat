@@ -104,7 +104,7 @@ export default function Register() {
   };
 
   const handleSkipBiometric = () => {
-    toast('You can verify later in Settings to unlock full features.', { icon: '🔒' });
+    toast('You can verify later in Settings to unlock full features.');
     // Clear the just-registered flag so SystemInitModal can show on next login
     sessionStorage.removeItem('nyx_just_registered');
     setStep('recovery');

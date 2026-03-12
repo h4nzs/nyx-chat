@@ -28,7 +28,7 @@ export default function MigrationSendPage() {
         const socket = getSocket();
         if (socket?.connected) {
             socket.disconnect();
-            console.log("🔒 System Frozen: Socket disconnected to prevent Ratchet Race Condition.");
+            console.log("System Frozen: Socket disconnected to prevent Ratchet Race Condition.");
         }
         // --- END FIX ---
 

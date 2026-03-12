@@ -730,7 +730,7 @@ export default function SettingsPage() {
             <div className="pt-4 border-t border-white/5 space-y-3 mt-4">
              <div>
                <h4 className="text-sm font-bold text-text-primary flex items-center gap-2">
-                 <span className="text-red-500">💀</span> Dead Man's Switch
+                 <span className="text-red-500"><FiAlertTriangle size={18} /></span> Dead Man's Switch
                </h4>
                <p className="text-xs text-text-secondary mt-1">
                  Automatically destroy your account and all associated messages if you do not open the app for a set period.

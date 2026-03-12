@@ -99,7 +99,7 @@ export async function api<T = any>(
       details = { raw: text };
     }
 
-    // 3. ✨ NEW: Handle Rate Limit (429) dengan Toast
+    // 3. Handle Rate Limit (429) dengan Toast
     if (res.status === 429) {
       toast.error(errorMessage, {
         id: 'rate-limit-error', // ID biar gak muncul duplikat toast

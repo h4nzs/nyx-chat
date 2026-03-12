@@ -16,7 +16,7 @@ import type { Conversation } from '@store/conversation';
 
 import { toAbsoluteUrl } from '@utils/url';
 
-import { FiUsers, FiSearch, FiSettings, FiLogOut, FiUser, FiMaximize2, FiSlash, FiTrash2, FiEye, FiEyeOff } from 'react-icons/fi';
+import { FiUsers, FiSearch, FiSettings, FiLogOut, FiUser, FiMaximize2, FiSlash, FiTrash2, FiEye, FiEyeOff, FiLock } from 'react-icons/fi';
 import { BiQrScan } from 'react-icons/bi';
 
 import CreateGroupChat from './CreateGroupChat';
@@ -199,7 +199,11 @@ const ConversationItem = memo(({
     if (conversation.lastMessage.isViewOnce) {
         return (
             <span className="flex items-center gap-1 text-accent text-sm font-medium">
-               {conversation.lastMessage.isViewed ? '🔒 Opened' : '📸 View Once Message'}
+               {conversation.lastMessage.isViewed ? (
+                 <span className="flex items-center gap-1"><FiLock size={12} /> Opened</span>
+               ) : (
+                 <span className="flex items-center gap-1"><FiEyeOff size={12} /> View Once Message</span>
+               )}
             </span>
         );
     }

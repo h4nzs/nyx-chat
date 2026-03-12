@@ -13,6 +13,7 @@ import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDevice
 import { unlockWithBiometric } from "@lib/biometricUnlock";
 import { executeLocalWipe } from "@lib/nukeProtocol";
 import toast from "react-hot-toast";
+import { FiLock, FiKey, FiShield } from "react-icons/fi";
 import SEO from '../components/SEO';
 
 export default function Login() {
@@ -342,15 +343,15 @@ export default function Login() {
 
           <div className="grid grid-cols-3 gap-4 mt-12">
             <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
-              <div className="text-orange-500 text-2xl mb-2">🔒</div>
+              <div className="text-orange-500 mb-2"><FiLock size={24} /></div>
               <h3 className="font-bold text-white text-sm">E2E ENCRYPTED</h3>
             </div>
             <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
-              <div className="text-orange-500 text-2xl mb-2">🔑</div>
+              <div className="text-orange-500 mb-2"><FiKey size={24} /></div>
               <h3 className="font-bold text-white text-sm">KEY OWNERSHIP</h3>
             </div>
             <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
-              <div className="text-orange-500 text-2xl mb-2">🛡️</div>
+              <div className="text-orange-500 mb-2"><FiShield size={24} /></div>
               <h3 className="font-bold text-white text-sm">PRIVACY FIRST</h3>
             </div>
           </div>

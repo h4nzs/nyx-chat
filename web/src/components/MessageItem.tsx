@@ -8,7 +8,7 @@ import { toAbsoluteUrl } from "@utils/url";
 import { useModalStore } from '@store/modal';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
-import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock, FiInfo, FiEdit2, FiCheckSquare, FiCheck } from 'react-icons/fi';
+import { FiRefreshCw, FiShield, FiCopy, FiTrash2, FiCornerUpLeft, FiClock, FiInfo, FiEdit2, FiCheckSquare, FiCheck, FiPaperclip, FiLock, FiAlertTriangle } from 'react-icons/fi';
 import { getUserColor } from '@utils/color';
 import { FaCheck, FaCheckDouble } from 'react-icons/fa';
 import { useMessageStore } from '@store/message';
@@ -115,29 +115,41 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     return () => observer.disconnect();
   }, [message.id, message.conversationId, mine, meId, message.statuses]);
 
-  if (message.type === 'SYSTEM' || message.content?.startsWith('🔒') || message.content?.startsWith('🔄')) {
+  if (message.type === 'SYSTEM' || message.content?.startsWith('You sent') || message.content?.startsWith('Secure session') || message.content?.startsWith('System')) {
+    const getSystemIcon = (text: string) => {
+      const lowerText = text.toLowerCase();
+      if (lowerText.includes('encrypt') || lowerText.includes('decrypt') || lowerText.includes('key')) return <FiLock size={12} className="text-emerald-500" />;
+      if (lowerText.includes('file') || lowerText.includes('attachment')) return <FiPaperclip size={12} className="text-blue-400" />;
+      if (lowerText.includes('restart') || lowerText.includes('sync')) return <FiRefreshCw size={12} className="text-blue-500" />;
+      if (lowerText.includes('error') || lowerText.includes('failed')) return <FiAlertTriangle size={12} className="text-red-500" />;
+      return <FiInfo size={12} className="text-text-secondary" />;
+    };
+
     const isError = message.content?.includes('Error') || message.content?.includes('Unreadable') || message.content?.includes('Key out of sync');
     const isDesyncError = message.content?.includes('Key out of sync');
 
     return (
-      <div className="flex justify-center items-center my-3 opacity-80 flex-col gap-1">
-        <div className={clsx(
-          "text-xs px-3 py-1.5 rounded-full flex items-center gap-2 shadow-sm border",
-          isError 
-            ? "bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400" 
-            : "bg-bg-surface text-text-secondary border-white/5"
-        )}>
-          {isError ? <FiShield size={12} className="text-red-500" /> : <FiRefreshCw size={12} className="text-blue-500" />}
-          <span>{message.content}</span>
+      <div className="flex justify-center my-4 w-full">
+        <div className="flex flex-col items-center gap-2">
+          <div className={clsx(
+            "flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium shadow-neu-pressed-dark border border-white/5",
+            isError 
+              ? "bg-red-500/10 text-red-500" 
+              : "bg-black/20 text-text-secondary"
+          )}>
+            {getSystemIcon(message.content || '')}
+            <span>{message.content}</span>
+          </div>
+          
+          {isDesyncError && (
+              <button 
+                  onClick={() => useMessageStore.getState().repairSecureSession(message.conversationId, isGroup)}
+                  className="text-[10px] text-blue-500 hover:text-blue-400 font-bold bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg transition-colors uppercase tracking-wide"
+              >
+                  Repair Session
+              </button>
+          )}
         </div>
-        {isDesyncError && (
-            <button 
-                onClick={() => useMessageStore.getState().repairSecureSession(message.conversationId, isGroup)}
-                className="text-[10px] text-blue-500 hover:underline font-medium bg-blue-500/10 px-2 py-1 rounded-md"
-            >
-                Repair Session
-            </button>
-        )}
       </div>
     );
   }
@@ -248,7 +260,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
       { label: 'Select', icon: <FiCheckSquare />, onClick: () => toggleMessageSelection(message.id) },
       ...(isEditable ? [{ label: 'Edit', icon: <FiEdit2 />, onClick: () => setEditingMessage(message) }] : []),
       { label: 'Copy Text', icon: <FiCopy />, onClick: () => navigator.clipboard.writeText(message.content || '') },
-      { label: 'Security Info', icon: <FiShield />, onClick: () => toast('End-to-End Encrypted via Signal Protocol', { icon: '🔒' }) },
+      { label: 'Security Info', icon: <FiShield />, onClick: () => toast('End-to-End Encrypted via Signal Protocol') },
       { label: 'Copy Message ID', icon: <FiInfo />, onClick: () => navigator.clipboard.writeText(message.id) },
       ...(mine && !message.optimistic ? [{ label: 'Delete', icon: <FiTrash2 />, destructive: true, onClick: handleDelete }] : [])
     ], [
@@ -264,7 +276,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     <motion.div ref={ref} id={`msg-${message.id}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }} className={clsx('group flex flex-col', isFirstInSequence ? 'mt-3' : 'mt-1', mine ? 'items-end' : 'items-start', isHighlighted && 'bg-accent/10 rounded-lg p-1 -mx-1')}>
       <SwipeableItem 
         leftAction={{ icon: <FiCornerUpLeft size={20} />, color: 'bg-blue-500/80', onAction: () => setReplyingTo(message) }}
-        rightAction={{ icon: <FiInfo size={20} />, color: 'bg-secondary/80', onAction: () => toast('Message ID: ' + message.id, { icon: 'ℹ️' }) }}
+        rightAction={{ icon: <FiInfo size={20} />, color: 'bg-secondary/80', onAction: () => toast('Message ID: ' + message.id) }}
       >
         <div onContextMenu={handleContextMenu} onClick={handleClick} className={`flex items-end gap-2 w-full select-none ${mine ? 'flex-row-reverse justify-start' : 'flex-row justify-start'}`}>
           {isSelectionMode && (
