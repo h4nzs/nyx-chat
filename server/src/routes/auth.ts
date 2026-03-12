@@ -254,7 +254,7 @@ router.post('/refresh', async (req, res, next) => {
       throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
     }
 
-    await prisma.refreshToken.delete({ where: { jti: payload.jti } });
+    await prisma.refreshToken.deleteMany({ where: { jti: payload.jti } });
 
     const tokens = await issueTokens(user, req)
     setAuthCookies(res, tokens)
