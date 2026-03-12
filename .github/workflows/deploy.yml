@@ -121,18 +121,25 @@ jobs:
             sudo cp -r /root/nyx-app/web/dist/* /var/www/nyx-web/
             sudo systemctl reload nginx || true
             
-            # 7. RESTART PM2
+            # 7. RESTART PM2 (Hard Restart buat nanganin Symlink)
             echo "🚀 Restarting API..."
-            cd /root/nyx-app/server
-            if pm2 describe nyx-api > /dev/null 2>&1; then
-              pm2 reload nyx-api --update-env
-            else
-              pm2 start dist/index.js --name "nyx-api" -i max --node-args="--max-old-space-size=768"
-            fi
-            pm2 save
+            
+            # Wajib bunuh proses lama biar memori PM2 soal folder 'release_lama' kehapus
+            pm2 delete nyx-api || true
+            
+            # Start ulang pake path absolute dan paksa CWD ke symlink yang baru
+            pm2 start /root/nyx-app/server/dist/index.js \
+              --name "nyx-api" \
+              -i max \
+              --node-args="--max-old-space-size=768" \
+              --cwd /root/nyx-app/server
+              
+            pm2 save --force
 
-            # 6. BERSIH-BERSIH DISK (Simpan 3 rilis terakhir aja)
+            # 8. BERSIH-BERSIH DISK (Simpan 3 rilis terakhir aja)
             echo "🧹 Cleaning up old releases..."
-            ls -dt /root/nyx-releases/* | tail -n +4 | xargs -d '\n' rm -rf || true
+            cd /root/nyx-releases
+            # Tambahin 2>/dev/null biar ga error merah kalo foldernya kosong
+            ls -dt * 2>/dev/null | tail -n +4 | xargs rm -rf || true
             
             echo "✅ Deployment Success!"
