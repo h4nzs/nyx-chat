@@ -52,23 +52,15 @@ jobs:
       # --- PHASE 4: PACKAGING ---
       - name: 🗜️ Prepare Artifacts for Deploy
         run: |
-          # 1. Install dependensi produksi di GitHub Runner
-          cd server
-          rm -rf node_modules
-          pnpm install --prod --no-frozen-lockfile --config.node-linker=hoisted
-          npx prisma generate
-          cd ..
-
           mkdir deploy_package
           
           # Copy Frontend Build
           mkdir -p deploy_package/web
           cp -r web/dist deploy_package/web/
           
-          # Copy Backend (Include node_modules & generated prisma)
+          # Copy Backend (TANPA node_modules, TAPI bawa Prisma yang udah di-generate)
           mkdir -p deploy_package/server
           cp -r server/dist deploy_package/server/
-          cp -r server/node_modules deploy_package/server/  # <--- INI KUNCINYA!
           cp server/package.json deploy_package/server/
           cp -r server/prisma deploy_package/server/
           
@@ -87,7 +79,7 @@ jobs:
           source: "nyx-deploy.zip"
           target: "/root/"
 
-      # --- PHASE 6: EXECUTE ON VPS (FIXED HERE) ---
+      # --- PHASE 6: EXECUTE ON VPS (INSTALL DI RILIS BARU) ---
       - name: 🔧 Unzip & Restart on VPS
         uses: appleboy/ssh-action@master
         with:
@@ -97,31 +89,35 @@ jobs:
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
             set -e  # Exit on any error
-            echo "🚧 Starting Deployment (Zero install)..."
+            echo "🚧 Starting Deployment (Hybrid Install)..."
             
             # 1. Bikin folder rilis unik pakai timestamp
             RELEASE_DIR="/root/nyx-releases/release_$(date +%Y%m%d_%H%M%S)"
             mkdir -p $RELEASE_DIR
             
-            # 2. Unzip diam-diam (-q) ke folder rilis tersebut
+            # 2. Unzip diam-diam
             unzip -q -o /root/nyx-deploy.zip -d $RELEASE_DIR/
             rm /root/nyx-deploy.zip
             
-            # 3. 🛡️ ATOMIC SYMLINK SWAP (Saran CodeRabbit)
+            # 3. INSTALL DEPENDENSI DI FOLDER BARU (Aman karena PM2 masih jalan di folder lama)
+            echo "📦 Installing backend dependencies..."
+            cd $RELEASE_DIR/server
+            # Pakai NPM biar struktur foldernya solid dan ramah ESM
+            npm install --omit=dev --legacy-peer-deps --no-audit --no-fund
+            
+            # 4. 🛡️ ATOMIC SYMLINK SWAP
             echo "🔄 Executing Atomic Swap..."
-            # Bikin symlink sementara yang nunjuk ke rilis baru
             ln -sfn $RELEASE_DIR /root/nyx-app_tmp_link
-            # Timpa symlink utama secara instan (0 detik downtime)
             mv -Tf /root/nyx-app_tmp_link /root/nyx-app
             
-            # 4. DEPLOY FRONTEND
+            # 5. DEPLOY FRONTEND
             sudo mkdir -p /var/www/nyx-web
             sudo rm -rf /var/www/nyx-web/*
             sudo cp -r /root/nyx-app/web/dist/* /var/www/nyx-web/
-            sudo systemctl reload nginx
+            sudo systemctl reload nginx || true
             
-            # 5. RESTART API
-            # Masuk lewat symlink utama, PM2 nggak bakal sadar kalau foldernya ganti
+            # 6. RESTART API (HARD RESTART BIAR FRESH)
+            echo "🚀 Restarting PM2..."
             cd /root/nyx-app/server
             if pm2 describe nyx-api > /dev/null 2>&1; then
               pm2 reload nyx-api --update-env
