@@ -14,7 +14,7 @@ import SmartReply from './SmartReply';
 import { useMessageStore } from '@store/message';
 import { triggerSendFeedback } from '@utils/feedback';
 import { useUserProfile } from '@hooks/useUserProfile';
-import ImageCropperModal from './ImageCropperModal';
+import AttachmentCropperModal from './AttachmentCropperModal';
 
 // --- Types ---
 interface MessageInputProps {
@@ -828,13 +828,12 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
       )}
 
       {cropTarget && (
-        <ImageCropperModal 
+        <AttachmentCropperModal 
           file={cropTarget.file} 
           url={cropTarget.url} 
-          aspect={undefined} // Free form cropping for attachments
           onClose={() => setCropTarget(null)} 
           onSave={(newFile) => {
-            updateStagedFile(cropTarget.id, newFile);
+            updateStagedFile(cropTarget.index, newFile);
             setCropTarget(null);
           }} 
         />
