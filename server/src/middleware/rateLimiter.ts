@@ -4,10 +4,13 @@ import { RedisStore } from 'rate-limit-redis'
 import { redisClient } from '../lib/redis.js'
 import { Request } from 'express';
 
-// Secure IP Extractor: Lebih aman menggunakan req.ip 
-// karena Express (app.ts) sudah diset 'trust proxy' = true
+// Secure IP Extractor: Pakai helper bawaan untuk cegah bypass IPv6
 const secureKeyGenerator = (req: Request): string => {
-  return (req.headers['cf-connecting-ip'] as string) || req.ip || 'unknown';
+  // 1. Ambil teks IP-nya dulu (dari Cloudflare atau bawaan Express)
+  const clientIp = (req.headers['cf-connecting-ip'] as string) || req.ip || 'unknown';
+  
+  // 2. Lempar teks IP (string) tersebut ke polisi library biar di-format dengan aman
+  return ipKeyGenerator(clientIp);
 };
 
 // Helper: Skip kalo di development ATAU kalau requestnya cuma OPTIONS (CORS Preflight)
