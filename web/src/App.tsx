@@ -360,7 +360,7 @@ const AppContent = () => {
             {/* Fallback */}
             <Route path="*" element={<PageWrapper><NotFoundPage /></PageWrapper>} />
           </Routes>
-        </Suspense>>
+        </Suspense>
       </div>
     </>
   );
