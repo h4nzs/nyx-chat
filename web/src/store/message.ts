@@ -170,6 +170,19 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
                                 decryptedMsg.isBlindAttachment = true;
                             }
                         } catch {}
+                    } else if (decryptedMsg.content && decryptedMsg.content.startsWith('{') && decryptedMsg.content.includes('"type":"story_reply"')) {
+                        try {
+                            const metadata = JSON.parse(decryptedMsg.content);
+                            if (metadata.type === 'story_reply') {
+                                decryptedMsg.content = metadata.text;
+                                decryptedMsg.repliedTo = {
+                                    id: 'story_mock',
+                                    senderId: metadata.storyAuthorId,
+                                    sender: { id: metadata.storyAuthorId },
+                                    content: metadata.storyText || (metadata.hasMedia ? '📷 Story' : 'Story')
+                                } as any;
+                            }
+                        } catch {}
                     }
                     if (decryptedMsg.repliedTo) {
                         decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1, options);
@@ -352,12 +365,27 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
             decryptedMsg.fileName = metadata.name;
             decryptedMsg.fileSize = metadata.size;
             decryptedMsg.fileType = metadata.mimeType;
-            decryptedMsg.content = null; 
-            decryptedMsg.isBlindAttachment = true; 
+            decryptedMsg.content = null;
+            decryptedMsg.isBlindAttachment = true;
           }
         } catch (e) { }
       }
-      
+
+      // STORY REPLY PARSING
+      if (plainText.startsWith('{') && plainText.includes('"type":"story_reply"')) {
+        try {
+          const metadata = JSON.parse(plainText);
+          if (metadata.type === 'story_reply') {
+            decryptedMsg.content = metadata.text;
+            decryptedMsg.repliedTo = {
+              id: 'story_mock',
+              senderId: metadata.storyAuthorId,
+              sender: { id: metadata.storyAuthorId },
+              content: metadata.storyText || (metadata.hasMedia ? '📷 Story' : 'Story')
+            } as any;
+          }
+        } catch (e) { }
+      }      
     } else if (result?.status === 'pending') {
       decryptedMsg.content = result.reason || 'waiting_for_key';
     } else {
@@ -795,6 +823,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         try {
            if (lastMsgPreview?.startsWith('{') && lastMsgPreview.includes('"type":"file"')) {
                lastMsgPreview = '📎 Sent a file';
+           } else if (lastMsgPreview?.startsWith('{') && lastMsgPreview.includes('"type":"story_reply"')) {
+               const meta = JSON.parse(lastMsgPreview);
+               lastMsgPreview = `Replying to story: ${meta.text}`;
            }
         } catch {}
         useConversationStore.getState().updateConversationLastMessage(conversationId, { ...optimisticMessage, content: lastMsgPreview, fileType: data.fileType, fileName: data.fileName });

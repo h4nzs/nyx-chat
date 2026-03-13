@@ -126,8 +126,17 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
     );
 
     if (conversation) {
+        const payload = {
+          type: 'story_reply',
+          text: replyText,
+          storyId: currentStory.id,
+          storyAuthorId: userId,
+          storyText: currentStory.decryptedData?.text || '',
+          hasMedia: !!currentStory.decryptedData?.mediaUrl
+        };
+        
         await useMessageStore.getState().sendMessage(conversation.id, {
-            content: `Replying to story: ${replyText}`,
+            content: JSON.stringify(payload),
         });
         toast.success("Reply sent!");
         onClose();
