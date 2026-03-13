@@ -1,22 +1,41 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import ModalBase from './ui/ModalBase';
 import { useStoryStore } from '@store/story';
-import { FiImage, FiX, FiEdit3, FiCrop } from 'react-icons/fi';
+import { FiImage, FiX, FiEdit3, FiCrop, FiLock, FiUsers } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import ImageEditorModal from './ImageEditorModal';
 import AttachmentCropperModal from './AttachmentCropperModal';
+import { useConversationStore } from '@store/conversation';
+import { useAuthStore } from '@store/auth';
 
 export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
   const [text, setText] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [privacy, setPrivacy] = useState<'ALL' | 'EXCLUDE' | 'ONLY'>('ALL');
+  const [privacyMode, setPrivacyMode] = useState<'ALL' | 'EXCLUDE' | 'ONLY'>('ALL');
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [showPrivacySettings, setShowPrivacySettings] = useState(false);
   
   const [showPaintEditor, setShowPaintEditor] = useState(false);
   const [showCropper, setShowCropper] = useState(false);
 
-  // Minimal implementation for Stage 3: Assuming 'ALL' for simplicity, 
-  // but keeping state for future expandability.
+  const conversations = useConversationStore(state => state.conversations);
+  const me = useAuthStore(state => state.user);
+  
+  const contacts = useMemo(() => {
+    const map = new Map();
+    conversations.forEach(c => {
+      if (!c.isGroup) {
+        const other = c.participants.find(p => p.id !== me?.id);
+        if (other) map.set(other.id, other);
+      }
+    });
+    return Array.from(map.values());
+  }, [conversations, me]);
+
+  const toggleUser = (id: string) => {
+    setSelectedUsers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -32,9 +51,73 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
       toast.error('Add text or media to your story');
       return;
     }
-    await useStoryStore.getState().postStory(file, text, privacy, []);
+    await useStoryStore.getState().postStory(file, text, privacyMode, selectedUsers);
     onClose();
   };
+
+  if (showPrivacySettings) {
+    return (
+      <div className="fixed inset-0 z-[150] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200">
+        <div className="bg-bg-main w-full max-w-sm rounded-3xl border border-white/10 flex flex-col max-h-[85vh] shadow-2xl overflow-hidden">
+          <div className="p-5 border-b border-white/5 flex justify-between items-center bg-black/20">
+            <div className="flex items-center gap-2">
+              <FiUsers className="text-accent" size={20} />
+              <h3 className="font-bold text-text-primary text-lg">Story Privacy</h3>
+            </div>
+            <button onClick={() => setShowPrivacySettings(false)} className="text-text-secondary hover:text-white p-1 bg-white/5 rounded-full transition-colors">
+              <FiX size={18} />
+            </button>
+          </div>
+          
+          <div className="p-2 flex flex-col overflow-y-auto custom-scrollbar">
+            <div className="p-3 space-y-4">
+              <label className="flex items-center justify-between cursor-pointer p-3 rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/5">
+                <span className="text-text-primary font-medium">All Contacts</span>
+                <input type="radio" name="privacy" checked={privacyMode === 'ALL'} onChange={() => { setPrivacyMode('ALL'); setSelectedUsers([]); }} className="accent-accent w-5 h-5" />
+              </label>
+              <label className="flex items-center justify-between cursor-pointer p-3 rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/5">
+                <span className="text-text-primary font-medium">My Contacts Except...</span>
+                <input type="radio" name="privacy" checked={privacyMode === 'EXCLUDE'} onChange={() => { setPrivacyMode('EXCLUDE'); setSelectedUsers([]); }} className="accent-accent w-5 h-5" />
+              </label>
+              <label className="flex items-center justify-between cursor-pointer p-3 rounded-xl hover:bg-white/5 transition-colors border border-transparent hover:border-white/5">
+                <span className="text-text-primary font-medium">Only Share With...</span>
+                <input type="radio" name="privacy" checked={privacyMode === 'ONLY'} onChange={() => { setPrivacyMode('ONLY'); setSelectedUsers([]); }} className="accent-accent w-5 h-5" />
+              </label>
+            </div>
+
+            {privacyMode !== 'ALL' && (
+              <div className="mt-2 border-t border-white/5 pt-4 px-3">
+                <p className="text-[11px] font-bold text-text-secondary mb-3 uppercase tracking-wider px-2">Select Contacts</p>
+                <div className="space-y-1">
+                  {contacts.map((contact: any) => (
+                    <label key={contact.id} className="flex items-center justify-between p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors group">
+                      <div className="flex items-center gap-3">
+                        <img src={contact.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${contact.name}`} alt="" className="w-9 h-9 rounded-full border border-white/10 group-hover:border-accent/50 transition-colors" />
+                        <span className="text-sm font-medium text-text-primary">{contact.name}</span>
+                      </div>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedUsers.includes(contact.id)}
+                        onChange={() => toggleUser(contact.id)}
+                        className="accent-accent rounded w-5 h-5 cursor-pointer"
+                      />
+                    </label>
+                  ))}
+                  {contacts.length === 0 && <p className="text-xs text-text-secondary text-center py-6">No active contacts found.</p>}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="p-4 border-t border-white/5 bg-black/40">
+            <button onClick={() => setShowPrivacySettings(false)} className="w-full bg-accent text-white py-3.5 rounded-2xl font-bold shadow-neu-pressed hover:scale-[1.02] active:scale-95 transition-all">
+              Save Privacy Settings
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ModalBase isOpen={true} onClose={onClose} title="Create Story">
@@ -79,21 +162,24 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
           onChange={e => setText(e.target.value)}
         />
 
-        <div className="flex justify-between items-center pt-4">
-          <select 
-            value={privacy} 
-            onChange={(e) => setPrivacy(e.target.value as any)}
-            className="bg-bg-main text-xs text-text-secondary px-3 py-2 rounded-lg border border-white/5"
+        <div className="flex flex-col pt-2">
+          <button 
+            type="button"
+            onClick={() => setShowPrivacySettings(true)}
+            className="flex items-center justify-center gap-2 text-xs bg-white/10 hover:bg-white/20 px-4 py-2 rounded-full text-text-secondary transition-colors mb-4 mx-auto backdrop-blur-md border border-white/5 shadow-sm"
           >
-            <option value="ALL">All Contacts</option>
-            <option value="EXCLUDE" disabled>Exclude... (Soon)</option>
-            <option value="ONLY" disabled>Only Share With... (Soon)</option>
-          </select>
+            <FiLock size={14} className="text-accent" />
+            <span className="font-medium">
+              {privacyMode === 'ALL' ? 'Shared with: All Contacts' : 
+               privacyMode === 'EXCLUDE' ? `Excluded: ${selectedUsers.length} contacts` : 
+               `Only sharing with: ${selectedUsers.length} contacts`}
+            </span>
+          </button>
 
           <button 
             type="submit" 
             disabled={useStoryStore.getState().isLoading}
-            className="px-6 py-2 bg-accent text-white font-bold rounded-lg hover:shadow-lg transition-all"
+            className="w-full py-3 bg-accent text-white font-bold rounded-xl shadow-[0_0_15px_rgba(var(--accent),0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all"
           >
             Post Story
           </button>

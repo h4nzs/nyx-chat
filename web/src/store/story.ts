@@ -113,40 +113,52 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       // Save our own key so we can view our own stories
       await saveStoryKey(response.id, storyKey);
       
-      // Fan-out to recipients
-      const { conversations } = useConversationStore.getState();
-      const meId = useAuthStore.getState().user?.id;
+      // FAN-OUT TARGETING LOGIC
+      const me = useAuthStore.getState().user;
+      const conversations = useConversationStore.getState().conversations;
       
-      const targetConversations = conversations.filter(c => {
-        if (c.isGroup) return false;
-        const otherParticipant = c.participants.find(p => p.id !== meId);
-        if (!otherParticipant) return false;
-
-        if (privacy === 'ALL') return true;
-        if (privacy === 'EXCLUDE') return !selectedUserIds.includes(otherParticipant.id);
-        if (privacy === 'ONLY') return selectedUserIds.includes(otherParticipant.id);
-        return false;
+      const allContacts = new Set<string>();
+      conversations.forEach(c => {
+        if (!c.isGroup) {
+          const other = c.participants.find(p => p.id !== me?.id);
+          if (other) allContacts.add(other.id);
+        }
       });
 
-      const { sendMessage } = useMessageStore.getState();
-      
+      let targets: string[] = [];
+      if (privacy === 'ALL') {
+        targets = Array.from(allContacts);
+      } else if (privacy === 'EXCLUDE') {
+        targets = Array.from(allContacts).filter(id => !selectedUserIds.includes(id));
+      } else if (privacy === 'ONLY') {
+        targets = selectedUserIds.filter(id => allContacts.has(id));
+      }
+
+      // SEND SILENT KEYS
+      const messageStore = useMessageStore.getState();
       toast.loading('Distributing keys securely...', { id: toastId });
-      for (const conv of targetConversations) {
-         try {
-           const payloadContent = JSON.stringify({ type: 'STORY_KEY', storyId: response.id, key: storyKey });
-           // Sending as SYSTEM message, intercepted by recipient's doAddIncomingMessage
-           await sendMessage(conv.id, { content: `STORY_KEY:${payloadContent}`, type: 'SYSTEM' }, undefined, true);
-         } catch (err) {
-           console.error(`Failed to send story key to conversation ${conv.id}`);
-         }
+      
+      for (const targetId of targets) {
+        const conv = conversations.find(c => !c.isGroup && c.participants.some(p => p.id === targetId));
+        if (conv) {
+          try {
+            await messageStore.sendMessage(conv.id, {
+              type: 'SYSTEM',
+              content: `STORY_KEY:${JSON.stringify({ type: 'STORY_KEY', storyId: response.id, key: storyKey })}`,
+              isSilent: true
+            }, undefined, true);
+          } catch (e) {
+            console.error(`Failed to send story key to ${targetId}`, e);
+          }
+        }
       }
 
       // Add optimistic story locally
-      const myStories = get().stories[meId!] || [];
+      const myStories = get().stories[me!.id] || [];
       set((state) => ({
         stories: {
           ...state.stories,
-          [meId!]: [...myStories, { ...response, decryptedData: payload }]
+          [me!.id]: [...myStories, { ...response, decryptedData: payload }]
         }
       }));
 
