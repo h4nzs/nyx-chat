@@ -107,10 +107,15 @@ const sortConversations = (list: Conversation[], currentUserId: string | undefin
 
 const withPreview = (msg: Message): Message => {
   if (msg.content) {
+    let contentToParse = msg.content.trim();
+    if (contentToParse.startsWith('STORY_KEY:')) {
+        return { ...msg, preview: '', isSilent: true };
+    }
+    
     // Check for Reaction, Silent, or Edit Payload
-    if (msg.content.trim().startsWith('{')) {
+    if (contentToParse.startsWith('{')) {
        try {
-         const payload = JSON.parse(msg.content);
+         const payload = JSON.parse(contentToParse);
          if (payload.type === 'reaction') {
             return { ...msg, preview: `Reacted ${payload.emoji || ''}` };
          }

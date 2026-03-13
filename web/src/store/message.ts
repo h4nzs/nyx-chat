@@ -416,7 +416,10 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
 function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string } | null {
   if (!content) return null;
   try {
-    const trimmed = content.trim();
+    let trimmed = content.trim();
+    if (trimmed.startsWith('STORY_KEY:')) {
+        trimmed = trimmed.replace('STORY_KEY:', '');
+    }
     if (!trimmed.startsWith('{')) return null;
     const payload = JSON.parse(trimmed);
     if (payload.type === 'silent') {

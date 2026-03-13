@@ -210,7 +210,10 @@ const ConversationItem = memo(function ConversationItem({
             </span>
         );
     }
-    return conversation.lastMessage.preview || conversation.lastMessage.content || 'No messages yet';
+    if (conversation.lastMessage.preview !== undefined) {
+        return conversation.lastMessage.preview || 'No messages yet';
+    }
+    return conversation.lastMessage.content || 'No messages yet';
   };
 
   const previewText = renderPreviewText();
