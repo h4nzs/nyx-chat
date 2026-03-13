@@ -11,7 +11,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - chat-net
+      - nyx-net
 
   # 2. Redis Cache
   redis:
@@ -19,7 +19,7 @@ services:
     container_name: nyx-redis
     restart: always
     networks:
-      - chat-net
+      - nyx-net
 
   # 3. Backend (API)
   server:
@@ -38,7 +38,7 @@ services:
       CLIENT_URL: ${CLIENT_URL:-http://localhost}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
     networks:
-      - chat-net
+      - nyx-net
 
   # 4. Frontend (Web + Nginx Reverse Proxy)
   web:
@@ -50,7 +50,7 @@ services:
     ports:
       - "3000" # Akses aplikasi di http://localhost
     networks:
-      - chat-net
+      - nyx-net
     # Konfigurasi reverse proxy sederhana via docker labels atau nginx config tambahan
     # Agar lebih simpel, kita akan update nginx.conf di Langkah 2 sedikit lagi di bawah
 

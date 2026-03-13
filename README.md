@@ -52,7 +52,7 @@ To prevent bot swarms without collecting phone numbers, we employ a **Proof-of-H
 
 ---
 
-## ⚡ The 2026 Tech Stack (Total Overhaul)
+## ⚡ The 2026 Tech Stack
 
 We recently underwent a nuclear dependency upgrade to ensure NYX is future-proofed for the next decade.
 
@@ -148,7 +148,7 @@ If you are a corporation, startup, or enterprise looking to integrate NYX into a
 
 While the term "NYX" may be used broadly in various contexts, the **specific visual identity, custom logos (including the owl insignia), and the direct reputation of this specific repository** are the intellectual property of the core maintainer.
 
-The AGPL-3.0 license grants you the freedom to use, modify, and distribute the source code. However, it **does not** grant you the right to impersonate this official project. 
+The AGPL-3.0 license grants you the freedom to use, modify, and distribute the source code. However, it **does not** grant you the right to impersonate this official project.
 
 If you fork this repository to create your own SaaS, enterprise tool, or public deployment, you must:
 1. **Change the visual identity:** Replace all official logos, icons, and specific graphic assets found in `web/public/`.

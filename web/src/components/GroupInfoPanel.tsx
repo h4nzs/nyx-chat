@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { uploadToR2 } from '@lib/r2'; // <--- Tambah Import ini
 import { compressImage } from '@lib/fileUtils'; // <--- Tambah Import ini
+import ImageCropperModal from './ImageCropperModal';
 
 const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; onClose: () => void; }) => {
   const { conversation } = useConversationStore(useShallow(state => ({
@@ -26,6 +27,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
   const [isAddParticipantModalOpen, setIsAddParticipantModalOpen] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('details'); 
+  const [avatarCropTarget, setAvatarCropTarget] = useState<{ url: string, file: File } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tabs = [
@@ -37,6 +39,15 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
     const timer = setTimeout(() => setIsPanelOpen(true), 10);
     return () => clearTimeout(timer);
   }, []);
+
+  // Cleanup avatar crop target URL to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (avatarCropTarget?.url) {
+        URL.revokeObjectURL(avatarCropTarget.url);
+      }
+    };
+  }, [avatarCropTarget]);
 
   const handleClose = () => {
     setIsPanelOpen(false);
@@ -51,19 +62,23 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
 
   const amIAdmin = conversation.participants.find(p => p.id === user?.id)?.role === 'ADMIN';
 
-  // --- LOGIKA UPLOAD BARU (R2) ---
-  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.[0]) return;
+    const file = e.target.files[0];
+    setAvatarCropTarget({ url: URL.createObjectURL(file), file });
+    // Reset input to allow re-selecting same file
+    e.target.value = '';
+  };
 
-    const originalFile = e.target.files[0];
+  const handleUploadCroppedAvatar = async (croppedFile: File) => {
     const toastId = toast.loading('Processing avatar...');
 
     try {
       // 1. Kompresi Gambar
-      let fileToUpload = originalFile;
+      let fileToUpload = croppedFile;
       try {
-        if (originalFile.type.startsWith('image/')) {
-           fileToUpload = await compressImage(originalFile);
+        if (croppedFile.type.startsWith('image/')) {
+           fileToUpload = await compressImage(croppedFile);
         }
       } catch (err) {
         // Fallback, do nothing, the original file will be used.
@@ -85,12 +100,13 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
       });
 
       toast.success('Avatar updated!', { id: toastId });
+      setAvatarCropTarget(null);
     } catch (error: any) {
       console.error(error);
       toast.error(`Failed to upload avatar: ${error.message || 'Unknown error'}`, { id: toastId });
+      setAvatarCropTarget(null);
     }
   };
-  // --------------------------------
 
   const handleLeaveGroup = async () => {
     const toastId = toast.loading('Leaving group...');
@@ -227,6 +243,16 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
           <AddParticipantModal
             conversationId={conversation.id}
             onClose={() => setIsAddParticipantModalOpen(false)}
+          />
+        )}
+
+        {avatarCropTarget && (
+          <ImageCropperModal
+            file={avatarCropTarget.file}
+            url={avatarCropTarget.url}
+            aspect={1} // Force square for group avatars
+            onClose={() => setAvatarCropTarget(null)}
+            onSave={handleUploadCroppedAvatar}
           />
         )}
       </div>

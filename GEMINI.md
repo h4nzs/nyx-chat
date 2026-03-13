@@ -17,7 +17,7 @@ NYX Chat Lite is a secure, zero-knowledge messaging application designed with a 
 *   `web/`: Frontend React application.
 
 **Frontend (`web`):**
-*   **Framework:** React 18 + Vite
+*   **Framework:** React 19 + Vite
 *   **Language:** TypeScript
 *   **State Management:** Zustand
 *   **Styling:** Tailwind CSS (Custom "Industrial Neumorphism" design system)
