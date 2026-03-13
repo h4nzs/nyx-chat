@@ -117,21 +117,36 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       const me = useAuthStore.getState().user;
       const conversations = useConversationStore.getState().conversations;
       
-      const allContacts = new Set<string>();
+      // Map actual userId to conversationId for O(1) lookups
+      const userToConvMap = new Map<string, string>(); 
+      
       conversations.forEach(c => {
-        if (!c.isGroup) {
-          const other = c.participants.find(p => p.id !== me?.id);
-          if (other) allContacts.add(other.id);
+        if (!c.isGroup && c.participants) {
+          const otherParticipant = c.participants.find((p: any) => {
+            const uId = p.userId || p.user?.id || p.id;
+            return uId !== me?.id;
+          });
+          
+          if (otherParticipant) {
+            const actualUserId = (otherParticipant as any).userId || (otherParticipant as any).user?.id || otherParticipant.id;
+            if (actualUserId) {
+              userToConvMap.set(actualUserId, c.id);
+            }
+          }
         }
       });
 
+      const allContacts = Array.from(userToConvMap.keys());
       let targets: string[] = [];
+      
       if (privacy === 'ALL') {
-        targets = Array.from(allContacts);
+        targets = allContacts;
       } else if (privacy === 'EXCLUDE') {
-        targets = Array.from(allContacts).filter(id => !selectedUserIds.includes(id));
+        // Exclude the user IDs checked in the UI
+        targets = allContacts.filter(id => !selectedUserIds.includes(id));
       } else if (privacy === 'ONLY') {
-        targets = selectedUserIds.filter(id => allContacts.has(id));
+        // Only include the user IDs checked in the UI
+        targets = selectedUserIds.filter(id => userToConvMap.has(id));
       }
 
       // SEND SILENT KEYS
@@ -139,16 +154,16 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       toast.loading('Distributing keys securely...', { id: toastId });
       
       for (const targetId of targets) {
-        const conv = conversations.find(c => !c.isGroup && c.participants.some(p => p.id === targetId));
-        if (conv) {
+        const convId = userToConvMap.get(targetId);
+        if (convId) {
           try {
-            await messageStore.sendMessage(conv.id, {
+            await messageStore.sendMessage(convId, {
               type: 'SYSTEM',
               content: `STORY_KEY:${JSON.stringify({ type: 'STORY_KEY', storyId: response.id, key: storyKey })}`,
               isSilent: true
             }, undefined, true);
           } catch (e) {
-            console.error(`Failed to send story key to ${targetId}`, e);
+            console.error(`[Stories] Failed to send story key to user ${targetId}`, e);
           }
         }
       }
