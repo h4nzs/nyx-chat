@@ -151,6 +151,8 @@ export function getSocket() {
         // The store handles decryption, reaction parsing, and optimistic replacement internally.
         const decryptedMessage = await addIncomingMessage(newMessage.conversationId, newMessage);
           
+        if (!decryptedMessage) return; // Message intercepted (e.g. STORY_KEY)
+
         if (!decryptedMessage.isSilent) {
            triggerReceiveFeedback();
         }

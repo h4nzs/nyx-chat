@@ -27,7 +27,7 @@ import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
 import { useConnectionStore } from "./connection";
 import { getSodium } from "@lib/sodiumInitializer";
-import { shadowVault } from '@lib/shadowVaultDb';
+import { shadowVault, saveStoryKey } from "../lib/shadowVaultDb";
 
 import { useProfileStore } from './profile';
 
@@ -515,8 +515,8 @@ type Actions = {
   loadPreviousMessages: (conversationId: string) => Promise<void>;
   loadMessageContext: (messageId: string) => Promise<void>;
   addOptimisticMessage: (conversationId: string, message: Message) => void;
-  addIncomingMessage: (conversationId: string, message: Message) => Promise<Message>;
-  doAddIncomingMessage: (conversationId: string, message: Message) => Promise<Message>;
+  addIncomingMessage: (conversationId: string, message: Message) => Promise<Message | null>;
+  doAddIncomingMessage: (conversationId: string, message: Message) => Promise<Message | null>;
   replaceOptimisticMessage: (conversationId: string, tempId: number, newMessage: Partial<Message>) => Promise<void>;
   removeMessage: (conversationId: string, messageId: string) => void;
   removeMessages: (conversationId: string, messageIds: string[]) => Promise<void>;
@@ -1449,6 +1449,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           console.log(`[Ratchet] Decryption failed for ${message.id}. Retrying once in 500ms...`);
           await new Promise(r => setTimeout(r, 500));
           decrypted = await decryptMessageObject(message);
+      }
+
+      // INTERCEPT STORY KEYS
+      if ((decrypted as any).type === 'STORY_KEY' || (decrypted.content && decrypted.content.startsWith('STORY_KEY:'))) {
+          try {
+              // Expecting content format: "STORY_KEY:{storyId}:{base64Key}" or parsing from JSON
+              const payloadStr = decrypted.content ? decrypted.content.replace('STORY_KEY:', '') : '';
+              const payload = JSON.parse(payloadStr);
+              
+              if (payload.storyId && payload.key) {
+                  await saveStoryKey(payload.storyId, payload.key);
+                  console.log(`[Stories] Received and securely stored key for story ${payload.storyId}`);
+              }
+          } catch (e) {
+              console.error('[Stories] Failed to parse incoming story key message', e);
+          }
+          // Return silently, do not add this message to the chat UI
+          return null; 
       }
 
       // THE SHIELD: Prevent overwriting valid local data with decryption failures

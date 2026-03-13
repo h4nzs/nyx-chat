@@ -24,6 +24,7 @@ import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
 import aiRoutes from "./routes/ai.js";
 import adminRouter from "./routes/admin.js";
+import storiesRoutes from "./routes/stories.js";
 import webpush from "web-push";
 import { generalLimiter } from "./middleware/rateLimiter.js";
 import { reportRoutes } from "./routes/reports.js";
@@ -301,6 +302,7 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/admin", adminRouter);
 app.use("/api/sessions", sessionsRouter);
 app.use("/api/ai", aiRoutes);
+app.use("/api/stories", storiesRoutes);
 
 // === HEALTH CHECK ===
 app.get("/health", (_req: Request, res: Response) => {

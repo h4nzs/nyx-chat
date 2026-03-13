@@ -27,6 +27,7 @@ import { Spinner } from './Spinner';
 import SwipeableItem from './SwipeableItem';
 import { useContextMenuStore } from '../store/contextMenu';
 import { useSettingsStore } from '@store/settings';
+import StoryTray from './StoryTray';
 
 // --- Sub-components ---
 
@@ -440,7 +441,7 @@ export default function ChatList() {
       {/* Top Section */}
       <UserProfile />
       
-      <div className="px-6 pb-6">
+      <div className="px-6 pb-2">
         <div className="relative group">
           <div className="absolute left-4 top-1/2 -translate-y-1/2 text-text-secondary z-10 pointer-events-none">
             <FiSearch size={18} />
@@ -484,8 +485,11 @@ export default function ChatList() {
         </div>
       </div>
 
+      {/* STORY TRAY */}
+      {!searchQuery && <StoryTray />}
+
       {/* List */}
-      <div className="flex-1 overflow-y-auto min-h-0 pb-4 scrollbar-hide">
+      <div className="flex-1 overflow-y-auto min-h-0 pb-4 pt-2 scrollbar-hide">
         {isLoading && (
           <div className="flex justify-center items-center h-full">
             <Spinner />

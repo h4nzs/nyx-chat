@@ -29,6 +29,7 @@ model User {
   messages             Message[]
   participants         Participant[]
   messageStatuses      MessageStatus[]
+  stories              Story[]
   refreshTokens        RefreshToken[]
   // reactions removed
   pushSubscriptions    PushSubscription[]
@@ -258,4 +259,17 @@ model BlockedUser {
   @@unique([blockerId, blockedId]) // Mencegah duplikasi (blokir orang yang sama 2x)
   @@index([blockerId])
   @@index([blockedId])
+}
+
+model Story {
+  id               String   @id @default(uuid())
+  senderId         String
+  encryptedPayload String   @db.Text
+  createdAt        DateTime @default(now())
+  expiresAt        DateTime
+
+  sender           User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([expiresAt])
 }

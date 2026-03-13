@@ -64,11 +64,13 @@ export const decryptVaultText = async (encryptedBase64: string): Promise<string 
 
 export class NyxShadowVault extends Dexie {
   messages!: Table<DecryptedMessageRecord, string>;
+  storyKeys!: Table<{ storyId: string; key: string }, string>;
 
   constructor() {
     super('nyx_shadow_vault');
-    this.version(3).stores({
-      messages: 'id, conversationId, createdAt'
+    this.version(4).stores({
+      messages: 'id, conversationId, createdAt',
+      storyKeys: 'storyId'
     });
   }
 
@@ -274,3 +276,12 @@ export class NyxShadowVault extends Dexie {
 }
 
 export const shadowVault = new NyxShadowVault();
+
+export async function saveStoryKey(storyId: string, base64Key: string): Promise<void> {
+  await shadowVault.storyKeys.put({ storyId, key: base64Key });
+}
+
+export async function getStoryKey(storyId: string): Promise<string | null> {
+  const record = await shadowVault.storyKeys.get(storyId);
+  return record ? record.key : null;
+}
