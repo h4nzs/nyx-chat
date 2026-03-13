@@ -15,6 +15,7 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
   const [currentIndex, setCurrentIndex] = useState(0);
   const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const { user: me } = useAuthStore(state => ({ user: state.user }));
   
   // Find the actual user object from conversations to get encryptedProfile
@@ -41,7 +42,7 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
     if (!currentStory) return;
     
     // Auto advance progress
-    if (isPaused) return;
+    if (isPaused || isTyping) return;
     
     const interval = setInterval(() => {
       setProgress(p => {
@@ -59,7 +60,7 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
     }, 100);
 
     return () => clearInterval(interval);
-  }, [currentIndex, isPaused, stories.length, onClose, currentStory]);
+  }, [currentIndex, isPaused, isTyping, stories.length, onClose, currentStory]);
 
   useEffect(() => {
     // Load decrypted media if available
@@ -229,7 +230,11 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
       {!isMe && (
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent z-20">
            <form 
-             onSubmit={(e) => { e.preventDefault(); handleSendReply(); }} 
+             onSubmit={(e) => { 
+               e.preventDefault(); 
+               handleSendReply(); 
+               setIsTyping(false);
+             }} 
              className="flex items-center gap-2 max-w-lg mx-auto bg-white/10 backdrop-blur-md rounded-full px-4 py-2 border border-white/20"
            >
              <input 
@@ -237,6 +242,8 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
                placeholder="Reply..." 
                value={replyText}
                onChange={e => setReplyText(e.target.value)}
+               onFocus={() => setIsTyping(true)}
+               onBlur={() => setIsTyping(false)}
                className="flex-1 bg-transparent border-none text-white text-sm focus:outline-none placeholder:text-white/50"
              />
              <button type="submit" disabled={!replyText.trim()} className="text-white p-1 hover:text-accent disabled:opacity-50">

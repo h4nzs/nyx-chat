@@ -21,13 +21,25 @@ export default function ImageEditorModal({ file, onSave, onCancel }: { file: Fil
     if (!canvasRef.current) return;
     setIsProcessing(true);
     try {
+      // Check if user actually drew anything
+      const paths = await canvasRef.current.exportPaths();
+      if (!paths || paths.length === 0) {
+        onSave(file); // No changes made, return original
+        return;
+      }
+      
       const base64 = await canvasRef.current.exportImage('jpeg');
       const res = await fetch(base64);
       const blob = await res.blob();
       const newFile = new File([blob], `edited_${file.name}`, { type: 'image/jpeg' });
       onSave(newFile);
-    } catch (error) {
-      toast.error("Failed to save image");
+    } catch (error: any) {
+      // Fallback if library strictly throws when empty
+      if (error === 'No stroke found!' || error?.message === 'No stroke found!') {
+        onSave(file);
+      } else {
+        toast.error("Failed to save image");
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -37,15 +49,15 @@ export default function ImageEditorModal({ file, onSave, onCancel }: { file: Fil
 
   return (
     <div className="fixed inset-0 z-[120] bg-black flex flex-col">
-      <div className="flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent z-10 absolute top-0 left-0 right-0">
+      <div className="flex items-center justify-between p-4 bg-gradient-to-b from-black/80 to-transparent z-10 absolute top-0 left-0 right-0 pointer-events-auto">
         <button onClick={onCancel} className="p-2 text-white/80 hover:text-white"><FiX size={24} /></button>
         <div className="flex gap-4">
           <button onClick={() => canvasRef.current?.undo()} className="p-2 text-white/80 hover:text-white"><FiCornerUpLeft size={20} /></button>
           <button onClick={() => canvasRef.current?.redo()} className="p-2 text-white/80 hover:text-white"><FiCornerUpRight size={20} /></button>
         </div>
       </div>
-      <div className="flex-1 relative mt-16 mb-20 overflow-hidden flex items-center justify-center">
-         <ReactSketchCanvas ref={canvasRef} strokeWidth={5} strokeColor={color} backgroundImage={imageUrl} className="!border-none !bg-transparent" preserveBackgroundImageAspectRatio="xMidYMid contain" width="100%" height="100%" />
+      <div className="absolute inset-0 top-16 bottom-20 overflow-hidden touch-none cursor-crosshair">
+         <ReactSketchCanvas ref={canvasRef} strokeWidth={5} strokeColor={color} backgroundImage={imageUrl} className="!border-none !bg-transparent" preserveBackgroundImageAspectRatio="xMidYMid meet" width="100%" height="100%" style={{ pointerEvents: 'auto' }} />
       </div>
       <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/90 to-transparent flex items-center justify-between z-10">
         <div className="flex gap-2 bg-white/10 p-2 rounded-full backdrop-blur-md">
