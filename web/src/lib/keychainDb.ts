@@ -309,7 +309,7 @@ export async function getLatestSessionKey(
   
   // Use a cursor to find all records starting with conversationId_
   const range = IDBKeyRange.bound(conversationId + "_", conversationId + "_\uffff");
-  let cursor = await store.openCursor(range, 'prev');
+  const cursor = await store.openCursor(range, 'prev');
   
   if (cursor) {
       const sessionId = (cursor.key as string).split('_').pop()!;

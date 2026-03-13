@@ -140,7 +140,7 @@ export default function Register() {
           
           <h2 className="text-2xl font-black text-white mb-2 tracking-tight">TRUST LEVEL VERIFICATION</h2>
           <p className="text-stone-400 text-sm mb-8">
-            Verify you are human using your device's biometric sensor. 
+            Verify you are human using your device&apos;s biometric sensor. 
             Verified accounts get unlimited access. Unverified accounts are sandboxed.
           </p>
 
@@ -239,7 +239,7 @@ export default function Register() {
          {/* ... Visualization code ... */}
          <div className="relative z-10 text-center max-w-lg">
             <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">PURE <span className="text-teal-500">ANONYMITY</span></h2>
-            <p className="text-stone-400 mb-6">Your username is hashed on your device. We don't know who you are.</p>
+            <p className="text-stone-400 mb-6">Your username is hashed on your device. We don&apos;t know who you are.</p>
          </div>
       </div>
     </div>

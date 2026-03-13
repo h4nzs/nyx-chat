@@ -104,7 +104,7 @@ const TestimonialCard = ({ children, author, role }: { children: ReactNode; auth
       backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(255,255,255,0.1) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(0,0,0,0.1) 0%, transparent 40%)',
       backgroundBlendMode: 'overlay'
     }}>
-    <p className="text-lg italic text-text-primary mb-4">"{children}"</p>
+    <p className="text-lg italic text-text-primary mb-4">&quot;{children}&quot;</p>
     <p className="font-bold text-accent">{author}</p>
     <p className="text-sm text-text-secondary">{role}</p>
   </motion.div>
@@ -329,7 +329,7 @@ export default function LandingPage() {
                 
                 {/* New Feature: No Phone Number */}
                 <FeatureCard icon={<FiHash size={24} />} title="NO PHONE NUMBER">
-                  Sign up with just a Username. Your real identity stays safe. No one can 'save your contact' without permission.
+                  Sign up with just a Username. Your real identity stays safe. No one can &apos;save your contact&apos; without permission.
                 </FeatureCard>
 
                 {/* New Feature: Ghost App */}
@@ -382,7 +382,7 @@ export default function LandingPage() {
                   Finally, a chat app that respects my privacy without sacrificing a beautiful user experience. The fact that I control my own keys is a game-changer.
                 </TestimonialCard>
                 <TestimonialCard author="Sarah T." role="Remote Team Lead">
-                  Nyx has become essential for our team. It's simple, secure, and a pleasure to use every day.
+                  Nyx has become essential for our team. It&apos;s simple, secure, and a pleasure to use every day.
                 </TestimonialCard>
               </motion.div>
             </div>
@@ -398,7 +398,7 @@ export default function LandingPage() {
             <div className="max-w-4xl mx-auto px-4 text-center">
               <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">TAKE BACK YOUR PRIVACY.</motion.h2>
               <motion.p variants={itemVariants} className="text-lg text-text-secondary mb-8 max-w-2xl mx-auto">
-                Don't let your data become a commodity. Switch to NYX today. Free, Open Source, Forever.
+                Don&apos;t let your data become a commodity. Switch to NYX today. Free, Open Source, Forever.
               </motion.p>
               <motion.div variants={itemVariants}>
                 <Link to="/register" className="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] transition-all inline-flex items-center">

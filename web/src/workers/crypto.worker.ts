@@ -1072,7 +1072,7 @@ self.onmessage = async (event: MessageEvent) => {
         
         if (!headerDhBytes) throw new Error("Invalid header DH key");
 
-        let skippedKeys: any[] = [];
+        const skippedKeys: any[] = [];
         
         try {
             if (!state.DHr || sodium.compare(headerDhBytes, state.DHr) !== 0) {
@@ -1225,7 +1225,7 @@ self.onmessage = async (event: MessageEvent) => {
 
         let currentN = serializedState.N || 0;
         let mk: Uint8Array | null = null;
-        let skippedKeys: any[] = [];
+        const skippedKeys: any[] = [];
 
         // 2. Fast-forward ratchet if receiving out-of-order/newer messages
         while (currentN < header.n) {

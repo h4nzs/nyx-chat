@@ -570,7 +570,7 @@ export interface DrHeader {
 const ratchetLocks = new Map<string, Promise<void>>();
 
 async function acquireRatchetLock(conversationId: string): Promise<() => void> {
-    let previousLock = ratchetLocks.get(conversationId) || Promise.resolve();
+    const previousLock = ratchetLocks.get(conversationId) || Promise.resolve();
     let release: () => void;
     const currentLock = new Promise<void>(resolve => { release = resolve; });
     ratchetLocks.set(conversationId, currentLock);

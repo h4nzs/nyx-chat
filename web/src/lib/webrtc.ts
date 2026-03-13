@@ -26,7 +26,7 @@ const getDynamicIceServers = async (): Promise<RTCIceServer[]> => {
   }
 };
 
-let peerConnections = new Map<string, RTCPeerConnection>();
+const peerConnections = new Map<string, RTCPeerConnection>();
 let localMediaStream: MediaStream | null = null;
 
 export const replaceVideoTrack = async (newVideoTrack: MediaStreamTrack) => {

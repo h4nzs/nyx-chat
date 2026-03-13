@@ -292,7 +292,7 @@ export default function Login() {
 
           <div className="text-center mt-8 pt-6 border-t border-stone-700">
             <p className="text-stone-500 text-sm mb-4">
-              Don't have an account? <Link to="/register" className="font-semibold text-orange-500 hover:underline">Sign up</Link>
+              Don&apos;t have an account? <Link to="/register" className="font-semibold text-orange-500 hover:underline">Sign up</Link>
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-4">
               <Link to="/restore" className="text-sm text-orange-500 hover:underline">Restore from phrase</Link>

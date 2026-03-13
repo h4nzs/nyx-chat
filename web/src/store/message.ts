@@ -876,7 +876,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           ciphertext = payloadJson;
       }
       
-      let pushPayloads: Record<string, string> = {};
+      const pushPayloads: Record<string, string> = {};
       try {
         const { getSodium } = await import('@lib/sodiumInitializer');
         const sodium = await getSodium();
@@ -1396,7 +1396,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   
   addIncomingMessage: async (conversationId, message) => {
       // MUTEX LOCK to prevent concurrent processing of messages in the same conversation
-      let previousLock = incomingMessageLocks.get(conversationId) || Promise.resolve();
+      const previousLock = incomingMessageLocks.get(conversationId) || Promise.resolve();
       let release: () => void;
       const currentLock = new Promise<void>(resolve => { release = resolve; });
       incomingMessageLocks.set(conversationId, currentLock);

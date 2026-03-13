@@ -38,7 +38,7 @@ export default function HelpPage() {
           <div className="border-b border-border my-6" />
 
           <section>
-            <h2 className="text-xl font-semibold text-text-primary mb-3">Why is my account "Sandboxed"?</h2>
+            <h2 className="text-xl font-semibold text-text-primary mb-3">Why is my account &quot;Sandboxed&quot;?</h2>
             <p className="mb-2">
               To prevent spam bots without collecting personal data (like phone numbers), new accounts start in <strong>Sandbox Mode</strong> with limited messaging quotas.
             </p>
@@ -52,10 +52,10 @@ export default function HelpPage() {
           <section>
             <h2 className="text-xl font-semibold text-text-primary mb-3">I forgot my password. What do I do?</h2>
              <p className="mb-2">
-              Because we don't have your email, we cannot send you a reset link. You must use your <strong>Recovery Phrase</strong>.
+              Because we don&apos;t have your email, we cannot send you a reset link. You must use your <strong>Recovery Phrase</strong>.
             </p>
             <ul className="list-disc list-inside ml-4 space-y-1">
-              <li>On the login screen, click "Restore from phrase".</li>
+              <li>On the login screen, click &quot;Restore from phrase&quot;.</li>
               <li>Enter your 24-word Recovery Phrase to prove your identity.</li>
               <li>Set a new password.</li>
             </ul>
@@ -72,7 +72,7 @@ export default function HelpPage() {
               NYX is <strong>Local-First</strong>. Messages live on your device, not the cloud. If you use NYX on multiple devices (e.g. Phone + Laptop), they act as independent clients.
             </p>
             <p>
-              We are working on a secure "Sync Protocol" for the future, but currently, history does not automatically sync between devices to ensure zero-knowledge privacy.
+              We are working on a secure &quot;Sync Protocol&quot; for the future, but currently, history does not automatically sync between devices to ensure zero-knowledge privacy.
             </p>
           </section>
 

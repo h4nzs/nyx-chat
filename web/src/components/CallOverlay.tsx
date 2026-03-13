@@ -37,7 +37,7 @@ const RemoteStream = ({ userId, stream, isVideo, profile }: { userId: string, st
         </>
       ) : (
         <div className="w-full h-full flex flex-col items-center justify-center bg-bg-surface">
-           <audio ref={audioRef} autoPlay playsInline />
+           <audio ref={audioRef} autoPlay />
            <div className="relative">
               <img src={avatar} alt={name} className="w-20 h-20 rounded-full object-cover mb-2 border-2 border-accent/30 shadow-lg" />
               {stream && (

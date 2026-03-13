@@ -30,7 +30,7 @@ import { useSettingsStore } from '@store/settings';
 
 // --- Sub-components ---
 
-const UserProfile = memo(() => {
+const UserProfile = memo(function UserProfile() {
   const { user, logout } = useAuthStore(useShallow(state => ({ user: state.user, logout: state.logout })));
   const { showConfirm: confirmLogout } = useModalStore(useShallow(state => ({ showConfirm: state.showConfirm })));
   const { privacyCloak, setPrivacyCloak } = useSettingsStore(useShallow(s => ({ privacyCloak: s.privacyCloak, setPrivacyCloak: s.setPrivacyCloak })));
@@ -133,19 +133,21 @@ const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (user: Use
   );
 };
 
-const SearchResults = memo(({ results, onSelect }: { results: User[], onSelect: (user: User) => void }) => (
-  <Virtuoso
-    style={{ height: '100%' }}
-    data={results}
-    components={{
-      Header: () => <p className="text-xs font-bold text-text-secondary px-6 mb-4 mt-2">GLOBAL SEARCH</p>,
-      EmptyPlaceholder: () => <div className="p-6 text-center text-xs text-text-secondary">No users found.</div>,
-    }}
-    itemContent={(index, user) => <SearchResultItem key={user.id} user={user} onSelect={onSelect} />}
-  />
-));
+const SearchResults = memo(function SearchResults({ results, onSelect }: { results: User[], onSelect: (user: User) => void }) {
+  return (
+    <Virtuoso
+      style={{ height: '100%' }}
+      data={results}
+      components={{
+        Header: () => <p className="text-xs font-bold text-text-secondary px-6 mb-4 mt-2">GLOBAL SEARCH</p>,
+        EmptyPlaceholder: () => <div className="p-6 text-center text-xs text-text-secondary">No users found.</div>,
+      }}
+      itemContent={(index, user) => <SearchResultItem key={user.id} user={user} onSelect={onSelect} />}
+    />
+  );
+});
 
-const ConversationItem = memo(({ 
+const ConversationItem = memo(function ConversationItem({ 
   conversation, 
   meId, 
   isOnline, 
@@ -171,7 +173,7 @@ const ConversationItem = memo(({
   onMenuSelect: (action: 'deleteGroup' | 'deleteChat') => void;
   onTogglePin: (id: string) => void;
   privacyCloak: boolean;
-}) => {
+}) {
   const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
   const peerProfile = useUserProfile(peerUser as any);
   const title = conversation.isGroup ? conversation.title : peerProfile.name || 'Conversation';
@@ -219,7 +221,10 @@ const ConversationItem = memo(({
       { label: isPinnedByMe ? 'Unpin Chat' : 'Pin Chat', icon: <FiMaximize2 />, onClick: () => onTogglePin(conversation.id) },
       ...(!conversation.isGroup ? [{ label: isBlocked ? 'Unblock User' : 'Block User', icon: <FiSlash />, onClick: () => {
          const other = conversation.participants.find(p => p.id !== meId);
-         if (other) { isBlocked ? unblockUser(other.id) : blockUser(other.id); }
+         if (other) {
+           if (isBlocked) unblockUser(other.id);
+           else blockUser(other.id);
+         }
       } }] : []),
       { label: conversation.isGroup ? 'Delete Group' : 'Delete Chat', icon: <FiTrash2 />, destructive: true, onClick: () => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat') },
     ]);

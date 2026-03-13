@@ -164,7 +164,7 @@ export default function AdminDashboard() {
                       </div>
                       <div className="text-xs text-text-secondary font-mono mb-1">ID: {user.id}</div>
                       <div className="text-xs text-text-secondary">
-                        <span className="opacity-60">Reason:</span> <span className="italic text-white/80">"{user.banReason}"</span>
+                        <span className="opacity-60">Reason:</span> <span className="italic text-white/80">&quot;{user.banReason}&quot;</span>
                       </div>
                       <div className="text-[10px] text-text-secondary mt-1 opacity-50">
                         Banned: {new Date(user.bannedAt).toLocaleString()}

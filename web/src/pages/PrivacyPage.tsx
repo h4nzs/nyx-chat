@@ -88,7 +88,7 @@ export default function PrivacyPage() {
 
           <Section id="privacy" title="Privacy Policy" icon={FiLock}>
             <p className="text-lg text-text-primary font-medium mb-4">
-              Our core directive: If we don't have your data, no one can demand it from us.
+              Our core directive: If we don&apos;t have your data, no one can demand it from us.
             </p>
             <h3 className="text-lg font-bold text-text-primary mt-8 mb-3 border-b border-white/5 pb-2">1. Data Minimization & Cryptography</h3>
             <ul className="list-disc pl-5 space-y-3">
@@ -112,12 +112,12 @@ export default function PrivacyPage() {
                 <FiAlertTriangle /> Critical Disclaimer of Liability
               </h4>
               <p className="text-sm text-red-200/80 m-0">
-                NYX is provided "AS IS", without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>
+                NYX is provided &quot;AS IS&quot;, without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>
               </p>
             </div>
             
             <ul className="list-disc pl-5 space-y-4">
-              <li><strong>Trust-Tier Gating:</strong> To protect the network, unverified accounts are placed in a restricted "Sandbox Mode". Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.</li>
+              <li><strong>Trust-Tier Gating:</strong> To protect the network, unverified accounts are placed in a restricted &quot;Sandbox Mode&quot;. Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.</li>
               <li><strong>Zero-Tolerance Abuse Policy:</strong> You agree not to utilize the NYX network for illicit activities, automated API abuse (botting), or distributing malware. Violations will result in immediate network bans.</li>
             </ul>
           </Section>
@@ -179,11 +179,11 @@ export default function PrivacyPage() {
             <p>NYX operates with <strong>Zero Telemetry</strong>. We do not track your clicks, screen time, or feature usage.</p>
             
             <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">Smart Reply (Optional AI)</h3>
-            <p>We provide an experimental "Smart Reply" feature utilizing the Google Gemini API. This feature is <strong>strictly Opt-In</strong>.</p>
+            <p>We provide an experimental &quot;Smart Reply&quot; feature utilizing the Google Gemini API. This feature is <strong>strictly Opt-In</strong>.</p>
             <ul className="list-disc pl-5 space-y-2 mt-2">
               <li>Messages are decrypted locally before being sent to the AI.</li>
-              <li>The NYX Server acts as a blind proxy; it does not log the prompt or the AI's response.</li>
-              <li>Data processed by the Gemini API is ephemeral and is not used to train foundational AI models, per Google's enterprise API terms.</li>
+              <li>The NYX Server acts as a blind proxy; it does not log the prompt or the AI&apos;s response.</li>
+              <li>Data processed by the Gemini API is ephemeral and is not used to train foundational AI models, per Google&apos;s enterprise API terms.</li>
             </ul>
           </Section>
 
@@ -218,7 +218,7 @@ export default function PrivacyPage() {
             <FiShield /> Military-Grade Privacy
           </div>
           <p className="text-text-secondary text-sm">&copy; {new Date().getFullYear()} NYX. All rights reserved under AGPL-3.0.</p>
-          <p className="mt-2 text-xs opacity-50 font-mono">"In an era of total surveillance, obfuscation is the only true liberty."</p>
+          <p className="mt-2 text-xs opacity-50 font-mono">&quot;In an era of total surveillance, obfuscation is the only true liberty.&quot;</p>
         </div>
       </footer>
     </div>
