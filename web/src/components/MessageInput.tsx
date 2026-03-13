@@ -15,6 +15,8 @@ import { useMessageStore } from '@store/message';
 import { triggerSendFeedback } from '@utils/feedback';
 import { useUserProfile } from '@hooks/useUserProfile';
 import AttachmentCropperModal from './AttachmentCropperModal';
+import ImageEditorModal from './ImageEditorModal';
+import { FiEdit3 } from 'react-icons/fi';
 
 // --- Types ---
 interface MessageInputProps {
@@ -148,6 +150,9 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
 
   // Crop State
   const [cropTarget, setCropTarget] = useState<{ id: string, url: string, file: File } | null>(null);
+  
+  // Paint State
+  const [paintTarget, setPaintTarget] = useState<{ id: string, file: File } | null>(null);
 
   // Voice State
   const [isRecording, setIsRecording] = useState(false);
@@ -487,9 +492,14 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
                                 {isImage && url ? (
                                     <>
                                       <img src={url} alt="preview" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
-                                      <button type="button" onClick={(e) => { e.preventDefault(); setCropTarget({ id: staged.id, url, file: staged.file }); }} className="absolute top-1 left-1 bg-black/60 hover:bg-accent text-white p-1 rounded-full backdrop-blur-md transition-colors z-10">
-                                        <FiCrop size={12} />
-                                      </button>
+                                      <div className="absolute top-1 left-1 flex items-center gap-1 z-10">
+                                          <button type="button" onClick={(e) => { e.preventDefault(); setPaintTarget({ id: staged.id, file: staged.file }); }} className="bg-black/60 hover:bg-accent text-white p-1 rounded-full backdrop-blur-md transition-colors">
+                                            <FiEdit3 size={12} />
+                                          </button>
+                                          <button type="button" onClick={(e) => { e.preventDefault(); setCropTarget({ id: staged.id, url, file: staged.file }); }} className="bg-black/60 hover:bg-accent text-white p-1 rounded-full backdrop-blur-md transition-colors">
+                                            <FiCrop size={12} />
+                                          </button>
+                                      </div>
                                     </>
                                 ) : (
                                     <div className="w-full h-full flex flex-col items-center justify-center text-text-secondary">
@@ -836,6 +846,17 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
             updateStagedFile(cropTarget.id, newFile);
             setCropTarget(null);
           }} 
+        />
+      )}
+
+      {paintTarget && (
+        <ImageEditorModal 
+          file={paintTarget.file}
+          onSave={(newFile) => {
+            updateStagedFile(paintTarget.id, newFile);
+            setPaintTarget(null);
+          }}
+          onCancel={() => setPaintTarget(null)}
         />
       )}
     </div>

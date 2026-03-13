@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import ModalBase from './ui/ModalBase';
 import { useStoryStore } from '@store/story';
-import { FiImage, FiX } from 'react-icons/fi';
+import { FiImage, FiX, FiEdit3, FiCrop } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import ImageEditorModal from './ImageEditorModal';
+import AttachmentCropperModal from './AttachmentCropperModal';
 
 export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
   const [text, setText] = useState('');
@@ -10,6 +12,9 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [privacy, setPrivacy] = useState<'ALL' | 'EXCLUDE' | 'ONLY'>('ALL');
   
+  const [showPaintEditor, setShowPaintEditor] = useState(false);
+  const [showCropper, setShowCropper] = useState(false);
+
   // Minimal implementation for Stage 3: Assuming 'ALL' for simplicity, 
   // but keeping state for future expandability.
 
@@ -36,11 +41,28 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
       <form onSubmit={handleSubmit} className="space-y-4">
         
         {previewUrl ? (
-          <div className="relative w-full h-48 rounded-xl overflow-hidden bg-black/20">
-             <img src={previewUrl} alt="preview" className="w-full h-full object-contain" />
-             <button type="button" onClick={() => { setFile(null); setPreviewUrl(null); }} className="absolute top-2 right-2 bg-black/50 text-white p-1 rounded-full">
-               <FiX />
-             </button>
+          <div className="relative w-full h-48 rounded-xl overflow-hidden bg-black/20 group">
+             {file?.type.startsWith('video/') ? (
+               <video src={previewUrl} className="w-full h-full object-contain" controls />
+             ) : (
+               <img src={previewUrl} alt="preview" className="w-full h-full object-contain" />
+             )}
+             
+             <div className="absolute top-2 right-2 flex items-center gap-2 opacity-100 transition-opacity">
+               {file?.type.startsWith('image/') && (
+                 <>
+                   <button type="button" onClick={() => setShowPaintEditor(true)} className="bg-black/60 hover:bg-accent text-white p-2 rounded-full backdrop-blur-md transition-colors" title="Draw">
+                     <FiEdit3 size={14} />
+                   </button>
+                   <button type="button" onClick={() => setShowCropper(true)} className="bg-black/60 hover:bg-accent text-white p-2 rounded-full backdrop-blur-md transition-colors" title="Crop">
+                     <FiCrop size={14} />
+                   </button>
+                 </>
+               )}
+               <button type="button" onClick={() => { setFile(null); setPreviewUrl(null); }} className="bg-black/60 hover:bg-red-500 text-white p-2 rounded-full backdrop-blur-md transition-colors" title="Remove">
+                 <FiX size={14} />
+               </button>
+             </div>
           </div>
         ) : (
           <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-white/10 rounded-xl hover:border-accent/50 hover:bg-accent/5 transition-all cursor-pointer">
@@ -77,6 +99,23 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </form>
+      
+      {showPaintEditor && file && previewUrl && (
+        <ImageEditorModal 
+          file={file} 
+          onSave={(f) => { setFile(f); setPreviewUrl(URL.createObjectURL(f)); setShowPaintEditor(false); }} 
+          onCancel={() => setShowPaintEditor(false)} 
+        />
+      )}
+      
+      {showCropper && file && previewUrl && (
+        <AttachmentCropperModal 
+          file={file} 
+          url={previewUrl}
+          onSave={(f) => { setFile(f); setPreviewUrl(URL.createObjectURL(f)); setShowCropper(false); }} 
+          onClose={() => setShowCropper(false)} 
+        />
+      )}
     </ModalBase>
   );
 }
