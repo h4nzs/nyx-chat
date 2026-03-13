@@ -56,6 +56,21 @@ router.get('/:id', requireAuth, async (req, res) => {
     const id = req.params.id as string;
     const story = await prisma.story.findUnique({ where: { id } });
 
+    if (!story) {
+      return res.status(404).json({ error: 'Story not found' });
+    }
+
+    if (story.expiresAt < new Date()) {
+      return res.status(410).json({ error: 'Story has expired' });
+    }
+
+    res.json(story);
+  } catch (error) {
+    console.error('[Stories] Get error:', error);
+    res.status(500).json({ error: 'Failed to fetch story' });
+  }
+});
+
 // Delete a story early
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
