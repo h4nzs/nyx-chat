@@ -968,41 +968,60 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
            }
         }
 
-        // Prepare the push content securely
-        // For file messages, show a generic description
-        // For text messages, include the actual plaintext content
-        let pushBody: string;
-        if (data.fileUrl || data.fileName) {
-            pushBody = `Sent a file: ${data.fileName || 'Attachment'}`;
-        } else if (data.isViewOnce) {
-            pushBody = 'Sent a view-once message';
-        } else if (typeof data.content === 'string' && data.content.trim()) {
-            // Truncate long messages for push notification preview
-            const maxLength = 100;
-            pushBody = data.content.length > maxLength 
-                ? data.content.substring(0, maxLength) + '...'
-                : data.content;
-        } else {
-            pushBody = 'Sent a secure message';
-        }
+        // DO NOT generate push payload for silent messages (STORY_KEY, CALL_INIT, GHOST_SYNC, etc.)
+        const silentPayload = parseSilent(data.content);
+        const isSilentMessage = data.isSilent || silentPayload !== null;
+        
+        if (!isSilentMessage) {
+            // Prepare the push content securely
+            // For file messages, show a generic description
+            // For text messages, include the actual plaintext content
+            let pushBody: string;
+            
+            // Check for story_reply type and extract the text
+            if (typeof data.content === 'string' && data.content.startsWith('{') && data.content.includes('"type":"story_reply"')) {
+                try {
+                    const metadata = JSON.parse(data.content);
+                    if (metadata.type === 'story_reply' && metadata.text) {
+                        pushBody = `📖 Story reply: ${metadata.text}`;
+                    } else {
+                        pushBody = '📖 Replied to your story';
+                    }
+                } catch (e) {
+                    pushBody = '📖 Replied to your story';
+                }
+            } else if (data.fileUrl || data.fileName) {
+                pushBody = `Sent a file: ${data.fileName || 'Attachment'}`;
+            } else if (data.isViewOnce) {
+                pushBody = 'Sent a view-once message';
+            } else if (typeof data.content === 'string' && data.content.trim()) {
+                // Truncate long messages for push notification preview
+                const maxLength = 100;
+                pushBody = data.content.length > maxLength
+                    ? data.content.substring(0, maxLength) + '...'
+                    : data.content;
+            } else {
+                pushBody = 'Sent a secure message';
+            }
 
-        const pushData = JSON.stringify({ title: myName, body: pushBody, conversationId });
-        const pushDataBytes = new TextEncoder().encode(pushData);
+            const pushData = JSON.stringify({ title: myName, body: pushBody, conversationId });
+            const pushDataBytes = new TextEncoder().encode(pushData);
 
-        // Encrypt for each recipient using Web Worker
-        for (const p of conversation.participants as any[]) {
-           const targetUserId = p.userId || p.id;
-           const targetPublicKey = p.user?.publicKey || p.publicKey;
-           
-           if (targetUserId !== user.id && targetPublicKey) {
-               try {
-                   const recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-                   const sealed = await worker_crypto_box_seal(pushDataBytes, recipientPubBytes);
-                   pushPayloads[targetUserId] = sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
-               } catch (e) {
-                   console.error(`Failed to seal push for ${targetUserId}`, e);
+            // Encrypt for each recipient using Web Worker
+            for (const p of conversation.participants as any[]) {
+               const targetUserId = p.userId || p.id;
+               const targetPublicKey = p.user?.publicKey || p.publicKey;
+
+               if (targetUserId !== user.id && targetPublicKey) {
+                   try {
+                       const recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                       const sealed = await worker_crypto_box_seal(pushDataBytes, recipientPubBytes);
+                       pushPayloads[targetUserId] = sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
+                   } catch (e) {
+                       console.error(`Failed to seal push for ${targetUserId}`, e);
+                   }
                }
-           }
+            }
         }
       } catch (e) {
         console.error("Failed to generate push payloads", e);

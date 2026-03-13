@@ -39,8 +39,30 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
     set({ isLoading: true });
     try {
       const rawStories = await api<Story[]>(`/api/stories/user/${userId}`);
-      
-      const decryptedStories = await Promise.all(rawStories.map(async (story) => {
+      const me = useAuthStore.getState().user;
+
+      // ZERO-KNOWLEDGE PRIVACY FILTER:
+      // Backend returns ALL stories (it's zero-knowledge, so it doesn't know who was excluded).
+      // We must filter client-side: only keep stories we have decryption keys for.
+      const validStories: Story[] = [];
+
+      for (const story of rawStories) {
+        // Always allow our own stories
+        if (story.senderId === me?.id) {
+          validStories.push(story);
+          continue;
+        }
+
+        // For other users' stories, ONLY keep them if we actually received the key
+        // (i.e., we were NOT excluded from viewing this story)
+        const key = await getStoryKey(story.id);
+        if (key) {
+          validStories.push(story);
+        }
+      }
+
+      // Now decrypt the filtered stories
+      const decryptedStories = await Promise.all(validStories.map(async (story) => {
         try {
           const base64Key = await getStoryKey(story.id);
           if (base64Key) {
