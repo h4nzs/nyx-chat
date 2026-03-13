@@ -450,6 +450,10 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
     }
     if (!trimmed.startsWith('{')) return null;
     const payload = JSON.parse(trimmed);
+    // DO NOT treat story_reply as silent. Let processMessagesAndReactions keep it.
+    if (payload.type === 'story_reply') {
+      return null;
+    }
     if (payload.type === 'silent') {
       return payload;
     }
@@ -790,7 +794,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     if (!isReactionPayload && !shouldBeSilent) {
         let optimisticContent = data.content;
         let isOptimisticSilent = false;
-        
+
         if (silentPayload) {
             optimisticContent = silentPayload.text;
             isOptimisticSilent = true;
@@ -807,19 +811,44 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             conversationId,
             reactions: [],
             statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${actualTempId}`, id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
-            status: 'SENDING', 
+            status: 'SENDING',
             repliedTo: data.repliedTo,
-            content: optimisticContent,
             isSilent: isOptimisticSilent || data.isSilent
         };
 
-        if (optimisticContent) {
-            optimisticMessage.preview = optimisticContent;
+        // Parse optimistic content for special message types
+        if (silentPayload) {
+            optimisticMessage.isSilent = true;
+        }
+
+        // Handle story_reply type - parse and set proper content + repliedTo
+        if (optimisticContent && typeof optimisticContent === 'string' && optimisticContent.startsWith('{') && optimisticContent.includes('"type":"story_reply"')) {
+            try {
+                const metadata = JSON.parse(optimisticContent);
+                if (metadata.type === 'story_reply') {
+                    optimisticMessage.content = metadata.text || 'Story reply';
+                    optimisticMessage.repliedTo = {
+                        id: 'story_mock',
+                        senderId: metadata.storyAuthorId,
+                        sender: { id: metadata.storyAuthorId },
+                        content: metadata.storyText || (metadata.hasMedia ? '📷 Story' : 'Story')
+                    } as any;
+                }
+            } catch (e) {
+                console.error('Failed to parse story_reply metadata:', e);
+            }
+        } else {
+            optimisticMessage.content = optimisticContent;
+        }
+
+        if (optimisticMessage.content) {
+            optimisticMessage.preview = optimisticMessage.content;
         }
 
         get().addOptimisticMessage(conversationId, optimisticMessage);
-        
-        let lastMsgPreview = optimisticContent;
+
+        // Update conversation last message with proper preview
+        let lastMsgPreview = optimisticMessage.content;
         try {
            if (lastMsgPreview?.startsWith('{') && lastMsgPreview.includes('"type":"file"')) {
                lastMsgPreview = '📎 Sent a file';

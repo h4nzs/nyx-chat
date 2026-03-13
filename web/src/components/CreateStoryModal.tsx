@@ -7,6 +7,39 @@ import ImageEditorModal from './ImageEditorModal';
 import AttachmentCropperModal from './AttachmentCropperModal';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
+import { useProfileStore } from '@store/profile';
+
+// --- Sub Component for E2EE Profile Rendering ---
+const ContactItem = ({ contact, isSelected, onToggle }: { contact: any, isSelected: boolean, onToggle: () => void }) => {
+  const profile = useProfileStore(state => {
+    const cacheKey = contact.encryptedProfile ? `${contact.id}_${contact.encryptedProfile.substring(0, 32)}` : contact.id;
+    return state.profiles[cacheKey];
+  });
+
+  useEffect(() => {
+     if (!profile && contact.encryptedProfile) {
+        useProfileStore.getState().decryptAndCache(contact.id, contact.encryptedProfile);
+     }
+  }, [contact.id, contact.encryptedProfile, profile]);
+
+  const name = profile?.name || contact.username || 'Unknown User';
+  const avatarUrl = profile?.avatarUrl || contact.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(name)}`;
+
+  return (
+    <label className="flex items-center justify-between p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors group">
+      <div className="flex items-center gap-3">
+        <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full border border-white/10 group-hover:border-accent/50 transition-colors object-cover" />
+        <span className="text-sm font-medium text-text-primary">{name}</span>
+      </div>
+      <input 
+        type="checkbox" 
+        checked={isSelected}
+        onChange={onToggle}
+        className="accent-accent rounded w-5 h-5 cursor-pointer"
+      />
+    </label>
+  );
+};
 
 export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
   const [text, setText] = useState('');
@@ -191,18 +224,12 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
                   <p className="text-[11px] font-bold text-text-secondary mb-3 uppercase tracking-wider px-2">Select Contacts</p>
                   <div className="space-y-1">
                     {contacts.map((contact: any) => (
-                      <label key={contact.id} className="flex items-center justify-between p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors group">
-                        <div className="flex items-center gap-3">
-                          <img src={contact.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${contact.name}`} alt="" className="w-9 h-9 rounded-full border border-white/10 group-hover:border-accent/50 transition-colors" />
-                          <span className="text-sm font-medium text-text-primary">{contact.name}</span>
-                        </div>
-                        <input 
-                          type="checkbox" 
-                          checked={selectedUsers.includes(contact.id)}
-                          onChange={() => toggleUser(contact.id)}
-                          className="accent-accent rounded w-5 h-5 cursor-pointer"
-                        />
-                      </label>
+                      <ContactItem 
+                        key={contact.id} 
+                        contact={contact} 
+                        isSelected={selectedUsers.includes(contact.id)} 
+                        onToggle={() => toggleUser(contact.id)} 
+                      />
                     ))}
                     {contacts.length === 0 ? <p className="text-xs text-text-secondary text-center py-6">No active contacts found.</p> : null}
                   </div>

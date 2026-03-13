@@ -27,11 +27,21 @@ export default function ImageEditorModal({ file, onSave, onCancel }: { file: Fil
         onSave(file); // No changes made, return original
         return;
       }
-      
+
       const base64 = await canvasRef.current.exportImage('jpeg');
-      const res = await fetch(base64);
-      const blob = await res.blob();
-      const newFile = new File([blob], `edited_${file.name}`, { type: 'image/jpeg' });
+      
+      // Manual Base64 to File conversion to bypass CSP connect-src restrictions
+      const arr = base64.split(',');
+      const mimeMatch = arr[0].match(/:(.*?);/);
+      const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      
+      const newFile = new File([u8arr], `edited_${file.name}`, { type: mime });
       onSave(newFile);
     } catch (error: any) {
       // Fallback if library strictly throws when empty
