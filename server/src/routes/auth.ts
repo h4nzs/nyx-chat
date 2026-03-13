@@ -375,14 +375,14 @@ router.post('/logout', async (req, res) => {
       await prisma.pushSubscription.deleteMany({ where: { endpoint } })
     } catch (e) {}
   }
-  const r = req.cookies?.rt
-  if (r) {
-    try {
-      const payload = verifyJwt(r)
-      if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
-        await prisma.refreshToken.updateMany({ where: { jti: payload.jti }, data: { revokedAt: new Date() } })
-      }
-    } catch (e) {}
+  try {
+    // CodeQL Fix: Do not branch on user-controlled data directly.
+    const payload = verifyJwt(String(req.cookies?.rt || ''))
+    if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
+      await prisma.refreshToken.updateMany({ where: { jti: payload.jti }, data: { revokedAt: new Date() } })
+    }
+  } catch (e) {
+    // Ignore invalid token safely
   }
   const isProd = env.nodeEnv === 'production'
   const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }

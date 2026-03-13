@@ -58,4 +58,4 @@ volumes:
   postgres_data:
 
 networks:
-  chat-net:
+  nyx-net:

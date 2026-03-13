@@ -49,7 +49,7 @@ export default function NotFoundPage() {
 
       {/* Footer Decoration */}
       <div className="absolute bottom-8 text-[10px] text-text-secondary/30 font-mono uppercase tracking-[0.3em]">
-        NYX Secure Protocol // End of Line
+        NYX Secure Protocol {/* End of Line */}
       </div>
     </div>
   );

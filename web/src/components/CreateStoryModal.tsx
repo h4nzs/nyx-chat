@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+  import { useState, useMemo, useEffect } from 'react';
 import ModalBase from './ui/ModalBase';
 import { useStoryStore } from '@store/story';
 import { FiImage, FiX, FiEdit3, FiCrop, FiLock, FiUsers } from 'react-icons/fi';
@@ -37,10 +37,19 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
     setSelectedUsers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
+  useEffect(() => {
+    return () => {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    };
+  }, [previewUrl]);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) {
       setFile(f);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
       setPreviewUrl(URL.createObjectURL(f));
     }
   };
@@ -54,6 +63,13 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
     await useStoryStore.getState().postStory(file, text, privacyMode, selectedUsers);
     onClose();
   };
+
+  const getSafeUrl = (url: string | null) => {
+    if (!url) return undefined;
+    if (url.startsWith('blob:') || url.startsWith('data:')) return url;
+    return undefined;
+  };
+  const safePreviewUrl = getSafeUrl(previewUrl);
 
   if (showPrivacySettings) {
     return (
@@ -123,12 +139,12 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
     <ModalBase isOpen={true} onClose={onClose} title="Create Story">
       <form onSubmit={handleSubmit} className="space-y-4">
         
-        {previewUrl ? (
+        {safePreviewUrl ? (
           <div className="relative w-full h-48 rounded-xl overflow-hidden bg-black/20 group">
              {file?.type.startsWith('video/') ? (
-               <video src={previewUrl} className="w-full h-full object-contain" controls />
+               <video src={safePreviewUrl} className="w-full h-full object-contain" controls />
              ) : (
-               <img src={previewUrl} alt="preview" className="w-full h-full object-contain" />
+               <img src={safePreviewUrl} alt="preview" className="w-full h-full object-contain" />
              )}
              
              <div className="absolute top-2 right-2 flex items-center gap-2 opacity-100 transition-opacity">
@@ -178,7 +194,7 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
 
           <button 
             type="submit" 
-            disabled={useStoryStore.getState().isLoading}
+            disabled={useStoryStore(state => state.isLoading)}
             className="w-full py-3 bg-accent text-white font-bold rounded-xl shadow-[0_0_15px_rgba(var(--accent),0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all"
           >
             Post Story

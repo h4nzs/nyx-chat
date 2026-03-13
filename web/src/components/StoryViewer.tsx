@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useStoryStore } from '@store/story';
 import { useAuthStore } from '@store/auth';
 import { useUserProfile } from '@hooks/useUserProfile';
-import { FiX, FiSend, FiChevronLeft, FiChevronRight, FiTrash2 } from 'react-icons/fi';
+import { FiX, FiSend, FiTrash2 } from 'react-icons/fi';
 import { toAbsoluteUrl } from '@utils/url';
 import { useMessageStore } from '@store/message';
 import { useConversationStore } from '@store/conversation';
@@ -31,6 +31,8 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
 
   const profile = useUserProfile(targetUser as any);
   const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
+  const mediaBlobUrlRef = useRef<string | null>(null);
+  const [replyText, setReplyText] = useState('');
 
   const currentStory = stories[currentIndex];
   const isMe = me?.id === userId;
@@ -69,7 +71,9 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
           const encryptedBlob = await res.blob();
           const decryptedBlob = await decryptFile(encryptedBlob, currentStory.decryptedData.fileKey, currentStory.decryptedData.mimeType || 'application/octet-stream');
           if (isActive) {
-            setMediaBlobUrl(URL.createObjectURL(decryptedBlob));
+            const url = URL.createObjectURL(decryptedBlob);
+            setMediaBlobUrl(url);
+            mediaBlobUrlRef.current = url;
           }
         } catch (e) {
           console.error("Failed to load story media", e);
@@ -78,12 +82,19 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
     };
     
     setMediaBlobUrl(null);
+    if (mediaBlobUrlRef.current) {
+        URL.revokeObjectURL(mediaBlobUrlRef.current);
+        mediaBlobUrlRef.current = null;
+    }
     setProgress(0);
     loadMedia();
 
     return () => {
       isActive = false;
-      if (mediaBlobUrl) URL.revokeObjectURL(mediaBlobUrl);
+      if (mediaBlobUrlRef.current) {
+        URL.revokeObjectURL(mediaBlobUrlRef.current);
+        mediaBlobUrlRef.current = null;
+      }
     };
   }, [currentIndex, currentStory]);
 
@@ -106,7 +117,6 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
     }
   };
 
-  const [replyText, setReplyText] = useState('');
   const handleSendReply = async () => {
     if (!replyText.trim() || isMe) return;
     

@@ -10,8 +10,8 @@ router.post('/', requireAuth, async (req, res) => {
     const { encryptedPayload } = req.body;
     const userId = req.user!.id;
 
-    if (!encryptedPayload) {
-      return res.status(400).json({ error: 'encryptedPayload is required' });
+    if (typeof encryptedPayload !== 'string') {
+      return res.status(400).json({ error: 'encryptedPayload must be a string' });
     }
 
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
@@ -28,27 +28,6 @@ router.post('/', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('[Stories] Create error:', error);
     res.status(500).json({ error: 'Failed to create story' });
-  }
-});
-
-// Get a specific story by ID (only if not expired)
-router.get('/:id', requireAuth, async (req, res) => {
-  try {
-    const id = req.params.id as string;
-    const story = await prisma.story.findUnique({ where: { id } });
-
-    if (!story) {
-      return res.status(404).json({ error: 'Story not found' });
-    }
-
-    if (story.expiresAt < new Date()) {
-      return res.status(410).json({ error: 'Story has expired' });
-    }
-
-    res.json(story);
-  } catch (error) {
-    console.error('[Stories] Get error:', error);
-    res.status(500).json({ error: 'Failed to fetch story' });
   }
 });
 
@@ -70,6 +49,12 @@ router.get('/user/:userId', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch active stories' });
   }
 });
+
+// Get a specific story by ID (only if not expired)
+router.get('/:id', requireAuth, async (req, res) => {
+  try {
+    const id = req.params.id as string;
+    const story = await prisma.story.findUnique({ where: { id } });
 
 // Delete a story early
 router.delete('/:id', requireAuth, async (req, res) => {

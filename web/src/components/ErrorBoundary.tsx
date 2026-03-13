@@ -54,7 +54,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               </h1>
               <div className="bg-bg-surface p-4 rounded-xl border border-red-500/10 shadow-neu-flat">
                 <p className="font-mono text-xs text-text-secondary break-all">
-                  {this.state.error?.message || "An unexpected error occurred in the React tree."}
+                  {"An unexpected error occurred in the system process."}
                 </p>
               </div>
               <p className="text-text-secondary text-sm">
@@ -79,7 +79,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
           </div>
 
           <div className="absolute bottom-8 text-[10px] text-text-secondary/30 font-mono uppercase tracking-[0.3em]">
-            NYX Secure Protocol // Critical Failure
+            {"NYX Secure Protocol // Critical Failure"}
           </div>
         </div>
       );

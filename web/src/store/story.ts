@@ -154,11 +154,14 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       }
 
       // Add optimistic story locally
-      const myStories = get().stories[me!.id] || [];
+      const currentUser = useAuthStore.getState().user;
+      if (!currentUser) return; // Prevent crash if logged out during upload
+      
+      const myStories = get().stories[currentUser.id] || [];
       set((state) => ({
         stories: {
           ...state.stories,
-          [me!.id]: [...myStories, { ...response, decryptedData: payload }]
+          [currentUser.id]: [...myStories, { ...response, decryptedData: payload }]
         }
       }));
 

@@ -60,13 +60,13 @@ export default function AttachmentCropperModal({
         </div>
         
         <div className="p-4 bg-bg-surface flex items-center justify-between gap-4 border-t border-white/5">
-          <button onClick={onClose} disabled={isProcessing} className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/20 transition-colors">
+          <button onClick={onClose} disabled={isProcessing} aria-label="Close" className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/20 transition-colors">
             <FiX size={20} />
           </button>
           <button onClick={handleRotate} disabled={isProcessing} className="flex items-center justify-center gap-2 p-3 bg-white/5 text-text-primary rounded-xl hover:bg-white/10 transition-colors flex-1 font-bold text-sm">
             <FiRotateCw size={18} /> Rotate
           </button>
-          <button onClick={handleSave} disabled={isProcessing} className="p-3 bg-accent text-white rounded-xl hover:scale-105 transition-all shadow-[0_0_15px_rgba(var(--accent),0.4)]">
+          <button onClick={handleSave} disabled={isProcessing} aria-label="Save cropped image" className="p-3 bg-accent text-white rounded-xl hover:scale-105 transition-all shadow-[0_0_15px_rgba(var(--accent),0.4)]">
             <FiCheck size={20} />
           </button>
         </div>

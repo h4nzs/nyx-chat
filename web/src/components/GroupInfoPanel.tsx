@@ -102,7 +102,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
       toast.success('Avatar updated!', { id: toastId });
       setAvatarCropTarget(null);
     } catch (error: any) {
-      console.error(error);
+      console.error('Avatar upload failed');
       toast.error(`Failed to upload avatar: ${error.message || 'Unknown error'}`, { id: toastId });
       setAvatarCropTarget(null);
     }

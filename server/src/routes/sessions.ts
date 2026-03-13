@@ -15,11 +15,14 @@ router.get('/', requireAuth, async (req, res, next) => {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
 
     let currentJti: string | null = null
-    if (req.cookies.rt) {
-      const payload = verifyJwt(req.cookies.rt)
+    try {
+      // CodeQL Fix: Do not branch on user-controlled data directly. Rely on crypto verification.
+      const payload = verifyJwt(String(req.cookies?.rt || ''))
       if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
         currentJti = payload.jti
       }
+    } catch (e) {
+      // Invalid or empty token, ignore safely
     }
 
     const sessions = await prisma.refreshToken.findMany({
