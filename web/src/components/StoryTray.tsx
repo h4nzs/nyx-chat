@@ -11,7 +11,18 @@ import { toAbsoluteUrl } from '@utils/url';
 import clsx from 'clsx';
 
 const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId: string; onClick: () => void }) {
-  const profile = useUserProfile({ id: userId } as any);
+  // Find the actual user object from conversations to get encryptedProfile
+  const user = useConversationStore(state => {
+    for (const c of state.conversations) {
+      if (!c.isGroup) {
+        const p = c.participants.find(p => p.id === userId);
+        if (p) return p;
+      }
+    }
+    return { id: userId };
+  });
+
+  const profile = useUserProfile(user as any);
   const stories = useStoryStore(state => state.stories[userId] || []);
   
   if (stories.length === 0) return null;
@@ -81,31 +92,40 @@ export default function StoryTray() {
         <div className="flex items-start gap-4">
           
           {/* Add Story Button (Self) */}
-          <button 
-            onClick={() => myStories.length > 0 ? setViewingUserId(me!.id) : setShowCreateModal(true)}
-            className="flex flex-col items-center gap-1 min-w-[70px] shrink-0 group focus:outline-none"
-          >
-            <div className={clsx(
-              "relative w-14 h-14 rounded-full p-[2px] transition-all duration-300 shadow-neu-flat dark:shadow-neu-flat-dark group-active:scale-95",
-              myStories.length > 0 ? "bg-gradient-to-tr from-text-secondary to-text-secondary/50" : "bg-transparent"
-            )}>
-               <div className="w-full h-full rounded-full border-2 border-bg-main overflow-hidden bg-bg-main relative">
-                <img 
-                  src={toAbsoluteUrl(myProfile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${myProfile.name || 'Me'}`} 
-                  alt="My Story" 
-                  className={clsx("w-full h-full object-cover transition-all", myStories.length === 0 && "opacity-80")} 
-                />
-                {myStories.length === 0 && (
-                  <div className="absolute bottom-0 right-0 bg-accent text-white rounded-full p-0.5 border-2 border-bg-main">
-                    <FiPlus size={12} />
-                  </div>
-                )}
+          <div className="relative flex flex-col items-center gap-1 min-w-[70px] shrink-0">
+            <button 
+              onClick={() => myStories.length > 0 ? setViewingUserId(me!.id) : setShowCreateModal(true)}
+              className="group focus:outline-none"
+            >
+              <div className={clsx(
+                "relative w-14 h-14 rounded-full p-[2px] transition-all duration-300 shadow-neu-flat dark:shadow-neu-flat-dark group-active:scale-95",
+                myStories.length > 0 ? "bg-gradient-to-tr from-text-secondary to-text-secondary/50" : "bg-transparent"
+              )}>
+                 <div className="w-full h-full rounded-full border-2 border-bg-main overflow-hidden bg-bg-main relative">
+                  <img 
+                    src={toAbsoluteUrl(myProfile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${myProfile.name || 'Me'}`} 
+                    alt="My Story" 
+                    className={clsx("w-full h-full object-cover transition-all", myStories.length === 0 && "opacity-80")} 
+                  />
+                </div>
               </div>
-            </div>
+            </button>
+
+            {/* Persistent Plus Button for creating NEW stories */}
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowCreateModal(true);
+              }}
+              className="absolute top-9 right-1 bg-accent text-white rounded-full p-[3px] border-[3px] border-bg-main z-10 hover:scale-110 transition-transform shadow-sm cursor-pointer"
+            >
+              <FiPlus size={12} strokeWidth={3} />
+            </button>
+
             <span className="text-[10px] font-medium text-text-primary truncate w-full text-center">
               Your Story
             </span>
-          </button>
+          </div>
 
           {/* Friends' Stories */}
           {usersWithStories.map(userId => (

@@ -428,6 +428,9 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
     if (payload.type === 'GHOST_SYNC') {
       return payload;
     }
+    if (payload.type === 'STORY_KEY') {
+      return payload;
+    }
   } catch (e) {}
   return null;
 }
@@ -459,6 +462,10 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
         });
     } else {
       if (silentPayload) {
+          if (silentPayload.type === 'STORY_KEY') {
+              // Ignore this message in the UI completely
+              continue;
+          }
           msg.content = silentPayload.text;
           msg.isSilent = true;
           // [FIX] Filter out signaling messages (like CALL_INIT) that have no text content

@@ -16,7 +16,20 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
   const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const { user: me } = useAuthStore(state => ({ user: state.user }));
-  const profile = useUserProfile({ id: userId } as any);
+  
+  // Find the actual user object from conversations to get encryptedProfile
+  const targetUser = useConversationStore(state => {
+    if (userId === me?.id) return me;
+    for (const c of state.conversations) {
+      if (!c.isGroup) {
+        const p = c.participants.find(p => p.id === userId);
+        if (p) return p;
+      }
+    }
+    return { id: userId };
+  });
+
+  const profile = useUserProfile(targetUser as any);
   const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
 
   const currentStory = stories[currentIndex];
@@ -182,8 +195,16 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
             ) : null}
 
             {currentStory.decryptedData.text && (
-              <div className="absolute inset-0 flex items-center justify-center p-8 z-0">
-                <h2 className="text-white text-3xl font-black text-center drop-shadow-lg leading-snug">
+              <div className={
+                currentStory.decryptedData.mediaUrl
+                  ? "absolute bottom-16 left-0 right-0 p-6 flex justify-center items-end bg-gradient-to-t from-black/80 via-black/40 to-transparent z-10 pt-16"
+                  : "absolute inset-0 flex items-center justify-center p-8 z-0"
+              }>
+                <h2 className={
+                  currentStory.decryptedData.mediaUrl
+                    ? "text-white text-base md:text-lg font-medium text-center drop-shadow-md leading-relaxed mb-2"
+                    : "text-white text-3xl font-black text-center drop-shadow-lg leading-snug"
+                }>
                   {currentStory.decryptedData.text}
                 </h2>
               </div>
