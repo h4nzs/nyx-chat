@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import tailwindcss from '@tailwindcss/vite';
@@ -135,11 +135,21 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'ui-vendor': ['framer-motion', 'react-icons', 'clsx', 'classnames'],
-          'crypto-vendor': ['libsodium-wrappers', 'bip39', '@simplewebauthn/browser'],
-          'utils-vendor': ['lodash', 'uuid', 'axios', 'zustand'],
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
+              return 'react-vendor';
+            }
+            if (id.includes('framer-motion') || id.includes('react-icons') || id.includes('clsx') || id.includes('classnames')) {
+              return 'ui-vendor';
+            }
+            if (id.includes('libsodium-wrappers') || id.includes('bip39') || id.includes('@simplewebauthn/browser')) {
+              return 'crypto-vendor';
+            }
+            if (id.includes('lodash') || id.includes('uuid') || id.includes('axios') || id.includes('zustand')) {
+              return 'utils-vendor';
+            }
+          }
         }
       }
     },

@@ -3,8 +3,7 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
-import pkg from '@prisma/client'
-const { Prisma } = pkg
+import { Prisma } from '@prisma/client';
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
 import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'

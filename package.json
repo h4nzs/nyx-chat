@@ -37,8 +37,13 @@
       "undici": ">=7.24.0"
     },
     "onlyBuiltDependencies": [
-      "supabase",
-      "unrs-resolver"
+      "@prisma/engines",
+      "prisma",
+      "argon2",
+      "esbuild",
+      "unrs-resolver",
+      "puppeteer",
+      "supabase"
     ]
   }
 }
