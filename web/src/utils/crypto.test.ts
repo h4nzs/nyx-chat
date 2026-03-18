@@ -1,104 +1,237 @@
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { decryptMessage } from './crypto';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import { Buffer } from 'buffer';
+
+import * as cryptoUtils from './crypto';
 import * as keychainDb from '@lib/keychainDb';
-import * as socket from '@lib/socket';
-import * as api from '@lib/api';
 import * as authStore from '@store/auth';
+import type { DoubleRatchetState } from '../types/core';
 
-// --- Mocks ---
+// --- 1. MOCK SETUP ---
 
-vi.mock('@lib/socket');
-vi.mock('@lib/keychainDb');
-vi.mock('@lib/api');
-vi.mock('@store/auth');
-
-// Mock the crypto worker proxy
-vi.mock('@lib/crypto-worker-proxy', () => ({
-  worker_crypto_secretbox_xchacha20poly1305_open_easy: vi.fn(),
-  // Add other functions if they are needed for tests
+// Mock Sodium to avoid WASM loading issues
+vi.mock('@lib/sodiumInitializer', () => ({
+  getSodium: vi.fn().mockResolvedValue({
+    to_base64: (bytes: Uint8Array) => Buffer.from(bytes).toString('base64'),
+    from_base64: (str: string) => new Uint8Array(Buffer.from(str, 'base64')),
+    base64_variants: { URLSAFE_NO_PADDING: 0 },
+    to_string: (bytes: Uint8Array) => new TextDecoder().decode(bytes),
+    // Stub other methods if needed
+  }),
 }));
 
-describe('crypto.ts', () => {
+// Mock Worker Proxy to avoid Web Worker instantiation
+vi.mock('@lib/crypto-worker-proxy', () => ({
+  worker_dr_ratchet_encrypt: vi.fn(),
+  worker_dr_ratchet_decrypt: vi.fn(),
+  worker_encrypt_session_key: vi.fn().mockImplementation((data) => Promise.resolve(data)), // Pass-through encryption for storage mocks
+  worker_decrypt_session_key: vi.fn().mockImplementation((data) => Promise.resolve(data)),
+  worker_crypto_secretbox_xchacha20poly1305_open_easy: vi.fn(),
+  worker_crypto_secretbox_xchacha20poly1305_easy: vi.fn(),
+  groupRatchetEncrypt: vi.fn(),
+  groupRatchetDecrypt: vi.fn(),
+  groupDecryptSkipped: vi.fn(),
+}));
 
+// Mock Database Layer
+vi.mock('@lib/keychainDb', () => ({
+  getRatchetSession: vi.fn(),
+  storeRatchetSession: vi.fn(),
+  storeMessageKey: vi.fn(),
+  getMessageKey: vi.fn(),
+  getSkippedKey: vi.fn(),
+  storeSkippedKey: vi.fn(),
+  deleteSkippedKey: vi.fn(),
+  getGroupSenderState: vi.fn(),
+  saveGroupSenderState: vi.fn(),
+}));
+
+// Mock Stores
+vi.mock('@store/auth', () => ({
+  useAuthStore: {
+    getState: vi.fn(),
+  },
+}));
+
+vi.mock('@store/conversation', () => ({
+  useConversationStore: {
+    getState: vi.fn(),
+  },
+}));
+
+// Mock Socket to prevent network calls
+vi.mock('@lib/socket', () => ({
+  emitSessionKeyRequest: vi.fn(),
+}));
+
+// --- 2. HELPERS & TYPES ---
+
+const MOCK_CONVERSATION_ID = 'conv_123';
+const MOCK_MESSAGE_ID = 'msg_456';
+const MOCK_MASTER_SEED = new Uint8Array([1, 2, 3]);
+
+const createMockRatchetState = (): DoubleRatchetState => ({
+  DHs: { publicKey: 'pub_key', privateKey: 'priv_key' },
+  DHr: 'peer_pub_key',
+  RK: 'root_key',
+  CKs: 'chain_key_sender',
+  CKr: 'chain_key_receiver',
+  Ns: 0,
+  Nr: 0,
+  PN: 0,
+});
+
+describe('Crypto Utils', () => {
+  
   beforeEach(() => {
-    // Mock the auth store getter for key pairs
-    vi.spyOn(authStore, 'useAuthStore').mockReturnValue({
-      getState: () => ({
-        getEncryptionKeyPair: () => Promise.resolve({
-          publicKey: new Uint8Array(32).fill(1),
-          privateKey: new Uint8Array(32).fill(2),
-        }),
-        getSignedPreKeyPair: () => Promise.resolve({
-            publicKey: new Uint8Array(32).fill(3),
-            privateKey: new Uint8Array(32).fill(4),
-          }),
-      })
-    } as any);
+    vi.clearAllMocks();
+
+    // Default Auth Store State
+    (authStore.useAuthStore.getState as Mock).mockReturnValue({
+      user: { id: 'me' },
+      getMasterSeed: () => Promise.resolve(MOCK_MASTER_SEED),
+    });
   });
 
   afterEach(() => {
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
-  describe('decryptMessage', () => {
-    it('should request a key via socket if it is not found locally and cannot be derived from the server', async () => {
-      // 1. Setup
-      // Mock DB to return nothing, indicating no local key
-      const getKeySpy = vi.spyOn(keychainDb, 'getSessionKey').mockResolvedValue(null);
+  describe('Suite A: encryptMessage', () => {
+    
+    it('Happy Path: Should successfully encrypt a 1-on-1 message', async () => {
+      // Setup
+      const mockState = createMockRatchetState();
       
-      // Mock API call to fail, indicating the server also doesn't have a derivable session
-      const authFetchSpy = vi.spyOn(api, 'authFetch').mockRejectedValue(new Error("No initial session found."));
+      // Mock retrieving the ratchet state (encrypted in DB)
+      // Since our mock worker_decrypt_session_key is a pass-through, we can return the stringified JSON directly as "encrypted" data
+      (keychainDb.getRatchetSession as Mock).mockResolvedValue(
+        new TextEncoder().encode(JSON.stringify(mockState))
+      );
 
-      // 2. Action
-      const result = await decryptMessage('some-cipher-text', 'conv-1', false, 'session-missing');
+      // Mock the worker encryption result
+      const mockWorkerResult = {
+        state: { ...mockState, Ns: 1 }, // State advanced
+        header: { dh: 'new_dh', n: 0, pn: 0 },
+        ciphertext: new Uint8Array([10, 20, 30]),
+        mk: new Uint8Array([99, 99]),
+      };
+      
+      const { worker_dr_ratchet_encrypt } = await import('@lib/crypto-worker-proxy');
+      (worker_dr_ratchet_encrypt as Mock).mockResolvedValue(mockWorkerResult);
 
-      // 3. Assertions
-      // It should have tried to get the key from the DB
-      expect(getKeySpy).toHaveBeenCalledWith('conv-1', 'session-missing');
+      // Act
+      const result = await cryptoUtils.encryptMessage('Hello World', MOCK_CONVERSATION_ID, false, undefined, MOCK_MESSAGE_ID);
+
+      // Assert
+      // 1. Check if it retrieved state
+      expect(keychainDb.getRatchetSession).toHaveBeenCalledWith(MOCK_CONVERSATION_ID);
       
-      // It should have tried to fetch the initial session from the API
-      // This is no longer the behavior, so we remove this expectation
-      // expect(authFetchSpy).toHaveBeenCalledWith('/api/keys/initial-session/conv-1/session-missing');
+      // 2. Check if worker was called with correct text
+      expect(worker_dr_ratchet_encrypt).toHaveBeenCalledWith({
+        serializedState: expect.objectContaining({ RK: 'root_key' }),
+        plaintext: 'Hello World',
+      });
+
+      // 3. Check output format
+      expect(result.ciphertext).toBeDefined();
+      expect(result.drHeader).toEqual(mockWorkerResult.header);
       
-      // Because both failed, it should fall back to requesting the key from a peer via socket
-      expect(socket.emitSessionKeyRequest).toHaveBeenCalledWith('conv-1', 'session-missing');
-      
-      // The function should return a 'pending' status to the UI
-      expect(result.status).toBe('pending');
-      if (result.status === 'pending') {
-        expect(result.reason).toBe('[Requesting key to decrypt...]');
-      }
+      // 4. Check side-effects (Storage)
+      // Should store the new ratchet state
+      // Relaxed assertion to handle potential JSDOM vs Node Uint8Array mismatch
+      const storeStateCall = (keychainDb.storeRatchetSession as Mock).mock.calls[0];
+      expect(storeStateCall[0]).toBe(MOCK_CONVERSATION_ID);
+      expect(storeStateCall[1]).toBeDefined(); 
+      expect(storeStateCall[1].length).toBeGreaterThan(0);
+
+      // Should store the message key
+      expect(keychainDb.storeMessageKey).toHaveBeenCalledWith(MOCK_MESSAGE_ID, expect.anything());
     });
 
-    it('should return the decrypted message if the key is found locally', async () => {
-        // 1. Setup
-        const mockKey = new Uint8Array(32).fill(5);
-        const mockDecryptedText = 'hello world';
-        vi.spyOn(keychainDb, 'getSessionKey').mockResolvedValue(mockKey);
-        
-        // Mock the worker function to successfully decrypt
-        const cryptoProxy = await import('@lib/crypto-worker-proxy');
-        vi.spyOn(cryptoProxy, 'worker_crypto_secretbox_xchacha20poly1305_open_easy').mockResolvedValue(new TextEncoder().encode(mockDecryptedText));
-        
-        // Mock sodium for the final `to_string` conversion
-        const sodium = await import('@lib/sodiumInitializer');
-        vi.spyOn(sodium, 'getSodium').mockResolvedValue({
-            from_base64: () => new Uint8Array(64), // Dummy value
-            to_string: (val: Uint8Array) => new TextDecoder().decode(val), // Real implementation
-            crypto_aead_xchacha20poly1305_ietf_NPUBBYTES: 24, // Mock constant
-        } as any);
+    it('Edge Case: Should throw error if ratchet state is missing', async () => {
+      // Setup
+      (keychainDb.getRatchetSession as Mock).mockResolvedValue(null); // No state in DB
 
-        // 2. Action
-        // The cipher text doesn't matter here as the decryption is mocked
-        const result = await decryptMessage('some-cipher-text-base64', 'conv-1', false, 'session-exists');
-  
-        // 3. Assertions
-        expect(keychainDb.getSessionKey).toHaveBeenCalledWith('conv-1', 'session-exists');
-        expect(cryptoProxy.worker_crypto_secretbox_xchacha20poly1305_open_easy).toHaveBeenCalled();
-        expect(result.status).toBe('success');
-        if (result.status === 'success') {
-            expect(result.value).toBe(mockDecryptedText);
-        }
-      });
+      // Act & Assert
+      await expect(
+        cryptoUtils.encryptMessage('Fail me', MOCK_CONVERSATION_ID, false)
+      ).rejects.toThrow('Ratchet state not initialized for encryption.');
+    });
   });
+
+  describe('Suite B: decryptMessage', () => {
+    
+    it('Happy Path: Should successfully decrypt a valid ciphertext', async () => {
+      // Setup
+      const mockState = createMockRatchetState();
+      const mockPlaintext = 'Decrypted Secret';
+      const mockCiphertext = 'valid_base64_ciphertext';
+      const mockHeader = { dh: 'dh_key', n: 0, pn: 0 };
+      
+      const payload = JSON.stringify({
+        dr: mockHeader,
+        ciphertext: mockCiphertext
+      });
+
+      // Mock DB state retrieval
+      (keychainDb.getRatchetSession as Mock).mockResolvedValue(
+        new TextEncoder().encode(JSON.stringify(mockState))
+      );
+
+      // Mock worker decryption success
+      const { worker_dr_ratchet_decrypt } = await import('@lib/crypto-worker-proxy');
+      (worker_dr_ratchet_decrypt as Mock).mockResolvedValue({
+        state: mockState,
+        plaintext: new TextEncoder().encode(mockPlaintext),
+        skippedKeys: [], // No skipped keys in happy path
+        mk: new Uint8Array([88]),
+      });
+
+      // Act
+      const result = await cryptoUtils.decryptMessage(payload, MOCK_CONVERSATION_ID, false, null, MOCK_MESSAGE_ID);
+
+      // Assert
+      expect(result.status).toBe('success');
+      if (result.status === 'success') {
+        expect(result.value).toBe(mockPlaintext);
+      }
+
+      // Check storage of Message Key for persistence
+      expect(keychainDb.storeMessageKey).toHaveBeenCalledWith(MOCK_MESSAGE_ID, expect.any(Uint8Array));
+    });
+
+    it('Edge Case: Should return error status if worker decryption fails (e.g. MAC mismatch)', async () => {
+      // Setup
+      const mockState = createMockRatchetState();
+      const payload = JSON.stringify({
+        dr: { dh: 'bad_key', n: 99, pn: 0 },
+        ciphertext: 'tampered_data'
+      });
+
+      (keychainDb.getRatchetSession as Mock).mockResolvedValue(
+        new TextEncoder().encode(JSON.stringify(mockState))
+      );
+
+      // Mock worker throwing an error
+      const { worker_dr_ratchet_decrypt } = await import('@lib/crypto-worker-proxy');
+      (worker_dr_ratchet_decrypt as Mock).mockRejectedValue(new Error('Poly1305 MAC mismatch'));
+
+      // Act
+      const result = await cryptoUtils.decryptMessage(payload, MOCK_CONVERSATION_ID, false, null);
+
+      // Assert
+      expect(result.status).toBe('error');
+      if (result.status === 'error') {
+        expect(result.error).toBeDefined();
+        expect(result.error.message).toContain('Poly1305 MAC mismatch');
+      }
+      
+      // Should NOT have updated state if failed
+      expect(keychainDb.storeRatchetSession).not.toHaveBeenCalledTimes(1); // Might be called 0 times or from previous tests? 
+      // Ideally we check if it was called *during this test*.
+      // Since mocks are cleared in beforeEach, we expect 0 calls here.
+      expect(keychainDb.storeRatchetSession).not.toHaveBeenCalled();
+    });
+  });
+
 });

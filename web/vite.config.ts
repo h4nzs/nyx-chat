@@ -9,7 +9,10 @@ import packageJson from './package.json';
 // Bikin fungsi 'require' palsu karena kita di environment Module (ESM)
 const require = createRequire(import.meta.url);
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const isTest = mode === 'test';
+
+  return {
   plugins: [
     tailwindcss(),
     react(),
@@ -81,7 +84,8 @@ export default defineConfig({
     exclude: ['libsodium-wrappers']
   },
   define: {
-    'global.Buffer': ['buffer', 'Buffer'],
+    // Only inject Buffer polyfill if NOT in test mode to avoid Vitest serialization crash
+    ...(isTest ? {} : { 'global.Buffer': ['buffer', 'Buffer'] }),
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },
   server: {
@@ -160,4 +164,5 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/SetupTests.ts',
   }
+};
 });
