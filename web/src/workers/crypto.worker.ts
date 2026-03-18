@@ -451,12 +451,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const keyBytes = new Uint8Array(key);
         
         // Use AEAD IETF version: message, ad, secret_nonce, public_nonce, key
-        result = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-          messageBytes, 
-          null, 
-          null, 
-          nonceBytes, 
-          keyBytes
+        result = sodium.crypto_secretbox_easy(messageBytes, nonceBytes, keyBytes
         );
         break;
       }
@@ -467,12 +462,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const keyBytes = new Uint8Array(key);
 
         // Use AEAD IETF version: secret_nonce, ciphertext, ad, public_nonce, key
-        result = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-          null,
-          ciphertextBytes,
-          null,
-          nonceBytes,
-          keyBytes
+        result = sodium.crypto_secretbox_open_easy(ciphertextBytes, nonceBytes, keyBytes
         );
         break;
       }
@@ -734,7 +724,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
         const message = new TextEncoder().encode(profileJsonString);
         // Generate random nonce (24 bytes for XChaCha20)
-        const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+        const nonce = sodium.randombytes_buf(24);
         
         const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
             message,
@@ -757,16 +747,13 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
         const combined = sodium.from_base64(encryptedProfileB64, sodium.base64_variants.URLSAFE_NO_PADDING);
         
-        const nonceBytes = sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+        const nonceBytes = 24;
         const nonce = combined.slice(0, nonceBytes);
         const ciphertext = combined.slice(nonceBytes);
         
-        const decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-            null, // secret nonce
-            ciphertext,
-            null, // additional data
-            nonce,
-            key
+        const decrypted = sodium.crypto_secretbox_open_easy(// secret nonce
+            ciphertext, // additional data
+            nonce, key
         );
         
         result = new TextDecoder().decode(decrypted);
@@ -774,7 +761,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'generateProfileKey': {
         // Generate a random 32-byte key for profile encryption
-        const key = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
+        const key = sodium.randombytes_buf(32);
         result = sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
         break;
       }
@@ -871,14 +858,9 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         let ciphertext: Uint8Array | null = null;
 
         try {
-          nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+          nonce = sodium.randombytes_buf(24);
           
-          ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-            sessionKeyBytes,
-            null,
-            null,
-            nonce,
-            storageKey
+          ciphertext = sodium.crypto_secretbox_easy(sessionKeyBytes, nonce, storageKey
           );
 
           if (!nonce || !ciphertext) throw new Error("Encryption failed");
@@ -904,16 +886,11 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         const storageKey = sodium.crypto_generichash(32, masterSeedBytes, new Uint8Array(new TextEncoder().encode("session-storage")));
         
-        const nonce = encryptedKeyBytes.slice(0, sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-        const ciphertext = encryptedKeyBytes.slice(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+        const nonce = encryptedKeyBytes.slice(0, 24);
+        const ciphertext = encryptedKeyBytes.slice(24);
 
         try {
-          result = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-            null,
-            ciphertext,
-            null,
-            nonce,
-            storageKey
+          result = sodium.crypto_secretbox_open_easy(ciphertext, nonce, storageKey
           );
         } finally {
           sodium.memzero(storageKey);
@@ -943,13 +920,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           const keyPair = sodium.crypto_box_seed_keypair(keySeed);
           
           // Encrypt private key for storage
-          const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-          const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-            keyPair.privateKey,
-            null,
-            null,
-            nonce,
-            storageKey
+          const nonce = sodium.randombytes_buf(24);
+          const ciphertext = sodium.crypto_secretbox_easy(keyPair.privateKey, nonce, storageKey
           );
           
           const combined = new Uint8Array(nonce.length + ciphertext.length);
@@ -1097,7 +1069,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         state.Ns += 1;
         
         const nonce = sodium.randombytes_buf(24);
-        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(plaintextBytes, null, null, nonce, mk);
+        const ciphertext = sodium.crypto_secretbox_easy(plaintextBytes, nonce, mk);
         
         const combined = new Uint8Array(nonce.length + ciphertext.length);
         combined.set(nonce);
@@ -1189,7 +1161,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             
             const nonce = ciphertextBytes.slice(0, 24);
             const ctext = ciphertextBytes.slice(24);
-            const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
+            const plaintext = sodium.crypto_secretbox_open_easy(ctext, nonce, mk);
             
             result = {
                state: serializeState(state),
@@ -1226,7 +1198,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         // Encrypt with Message Key
         const nonce = sodium.randombytes_buf(24);
-        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(plaintextBytes, null, null, nonce, mk);
+        const ciphertext = sodium.crypto_secretbox_easy(plaintextBytes, nonce, mk);
         
         const combined = new Uint8Array(nonce.length + ciphertext.length);
         combined.set(nonce);
@@ -1301,7 +1273,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         // 4. Decrypt
         const nonce = ciphertextBytes.slice(0, 24);
         const ctext = ciphertextBytes.slice(24);
-        const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
+        const plaintext = sodium.crypto_secretbox_open_easy(ctext, nonce, mk);
 
         result = {
            state: { CK: bytesToB64(CKBytes), N: currentN },
@@ -1337,7 +1309,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           // 2. Decrypt
           const nonce = ciphertextBytes.slice(0, 24);
           const ctext = ciphertextBytes.slice(24);
-          const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mkBytes);
+          const plaintext = sodium.crypto_secretbox_open_easy(ctext, nonce, mkBytes);
 
           result = {
              plaintext
