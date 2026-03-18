@@ -5,7 +5,6 @@
 import { Buffer } from 'buffer/';
 (self as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
-// @ts-expect-error - libsodium-wrappers has no default export in types but requires it for runtime bundler compatibility
 import sodium from 'libsodium-wrappers';
 import * as bip39 from 'bip39';
 import { argon2id } from 'hash-wasm';
