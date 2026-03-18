@@ -10,6 +10,13 @@ import * as bip39 from 'bip39';
 import { argon2id } from 'hash-wasm';
 import { v4 as uuidv4 } from 'uuid';
 import type { DoubleRatchetState } from '../types/core';
+import type { 
+  CryptoBuffer, 
+  SodiumKeyPair, 
+  GroupRatchetState, 
+  GroupRatchetHeader, 
+  DoubleRatchetHeader 
+} from '../types/crypto-common';
 
 let isReady = false;
 const B64_VARIANT = 'URLSAFE_NO_PADDING';
@@ -333,20 +340,20 @@ const KEY_LENGTH = 256;
 const IV_LENGTH = 12;
 
 export type WorkerMessage =
-  | { type: 'DERIVE_KEY'; payload: { password: string; salt: number[] | Uint8Array }; id: string }
-  | { type: 'ENCRYPT_DATA'; payload: { keyBytes: number[] | Uint8Array; data: unknown }; id: string }
-  | { type: 'DECRYPT_DATA'; payload: { keyBytes: number[] | Uint8Array; encryptedString: string }; id: string }
+  | { type: 'DERIVE_KEY'; payload: { password: string; salt: CryptoBuffer }; id: string }
+  | { type: 'ENCRYPT_DATA'; payload: { keyBytes: CryptoBuffer; data: unknown }; id: string }
+  | { type: 'DECRYPT_DATA'; payload: { keyBytes: CryptoBuffer; encryptedString: string }; id: string }
   | { type: 'registerAndGenerateKeys'; payload: { password: string }; id: string }
   | { type: 'retrievePrivateKeys'; payload: { encryptedDataStr: string; password: string }; id: string }
-  | { type: 'generateSafetyNumber'; payload: { myPublicKey: number[] | Uint8Array; theirPublicKey: number[] | Uint8Array }; id: string }
-  | { type: 'crypto_secretbox_xchacha20poly1305_easy'; payload: { message: string | number[] | Uint8Array; nonce: number[] | Uint8Array; key: number[] | Uint8Array }; id: string }
-  | { type: 'crypto_secretbox_xchacha20poly1305_open_easy'; payload: { ciphertext: number[] | Uint8Array; nonce: number[] | Uint8Array; key: number[] | Uint8Array }; id: string }
-  | { type: 'crypto_box_seal_open'; payload: { ciphertext: number[] | Uint8Array; publicKey: number[] | Uint8Array; privateKey: number[] | Uint8Array }; id: string }
-  | { type: 'x3dh_initiator'; payload: { myIdentityKey: any; theirIdentityKey: any; theirSignedPreKey: any; theirSigningKey: any; signature: any; theirOneTimePreKey?: any }; id: string }
-  | { type: 'x3dh_recipient'; payload: { myIdentityKey: any; mySignedPreKey: any; theirIdentityKey: any; theirEphemeralKey: any; myOneTimePreKey?: any }; id: string }
-  | { type: 'crypto_box_seal'; payload: { message: number[] | Uint8Array; publicKey: number[] | Uint8Array }; id: string }
+  | { type: 'generateSafetyNumber'; payload: { myPublicKey: CryptoBuffer; theirPublicKey: CryptoBuffer }; id: string }
+  | { type: 'crypto_secretbox_xchacha20poly1305_easy'; payload: { message: string | CryptoBuffer; nonce: CryptoBuffer; key: CryptoBuffer }; id: string }
+  | { type: 'crypto_secretbox_xchacha20poly1305_open_easy'; payload: { ciphertext: CryptoBuffer; nonce: CryptoBuffer; key: CryptoBuffer }; id: string }
+  | { type: 'crypto_box_seal_open'; payload: { ciphertext: CryptoBuffer; publicKey: CryptoBuffer; privateKey: CryptoBuffer }; id: string }
+  | { type: 'x3dh_initiator'; payload: { myIdentityKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirSignedPreKey: CryptoBuffer; theirSigningKey: CryptoBuffer; signature: CryptoBuffer; theirOneTimePreKey?: CryptoBuffer }; id: string }
+  | { type: 'x3dh_recipient'; payload: { myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirEphemeralKey: CryptoBuffer; myOneTimePreKey?: CryptoBuffer }; id: string }
+  | { type: 'crypto_box_seal'; payload: { message: CryptoBuffer; publicKey: CryptoBuffer }; id: string }
   | { type: 'file_encrypt'; payload: { fileBuffer: ArrayBuffer | Uint8Array }; id: string }
-  | { type: 'file_decrypt'; payload: { combinedData: ArrayBuffer | Uint8Array; keyBytes: number[] | Uint8Array }; id: string }
+  | { type: 'file_decrypt'; payload: { combinedData: ArrayBuffer | Uint8Array; keyBytes: CryptoBuffer }; id: string }
   | { type: 'getRecoveryPhrase'; payload: { encryptedDataStr: string; password: string }; id: string }
   | { type: 'restoreFromPhrase'; payload: { phrase: string; password: string }; id: string }
   | { type: 'recoverAccountWithSignature'; payload: { phrase: string; newPassword: string; identifier: string; timestamp: string; nonce: string }; id: string }
@@ -356,19 +363,19 @@ export type WorkerMessage =
   | { type: 'generateProfileKey'; payload: void; id: string }
   | { type: 'minePoW'; payload: { salt: string; difficulty: number }; id: string }
   | { type: 'generate_random_key'; payload: void; id: string }
-  | { type: 'reEncryptBundleFromMasterKey'; payload: { masterKey: any; newPassword: string }; id: string }
-  | { type: 'encrypt_session_key'; payload: { sessionKey: any; masterSeed: any }; id: string }
-  | { type: 'decrypt_session_key'; payload: { encryptedKey: any; masterSeed: any }; id: string }
-  | { type: 'generate_otpk_batch'; payload: { count: number; startId: number; masterSeed: any }; id: string }
-  | { type: 'x3dh_recipient_regenerate'; payload: { keyId: number; masterSeed: any; myIdentityKey: any; mySignedPreKey: any; theirIdentityKey: any; theirEphemeralKey: any }; id: string }
-  | { type: 'dr_init_alice'; payload: { sk: any; theirSignedPreKeyPublic: any }; id: string }
-  | { type: 'dr_init_bob'; payload: { sk: any; mySignedPreKey: any }; id: string }
-  | { type: 'dr_ratchet_encrypt'; payload: { serializedState: DoubleRatchetState; plaintext: string | Uint8Array }; id: string }
-  | { type: 'dr_ratchet_decrypt'; payload: { serializedState: DoubleRatchetState; header: { dh: string; n: number; pn: number }; ciphertext: number[] | Uint8Array }; id: string }
+  | { type: 'reEncryptBundleFromMasterKey'; payload: { masterKey: CryptoBuffer; newPassword: string }; id: string }
+  | { type: 'encrypt_session_key'; payload: { sessionKey: CryptoBuffer; masterSeed: CryptoBuffer }; id: string }
+  | { type: 'decrypt_session_key'; payload: { encryptedKey: CryptoBuffer; masterSeed: CryptoBuffer }; id: string }
+  | { type: 'generate_otpk_batch'; payload: { count: number; startId: number; masterSeed: CryptoBuffer }; id: string }
+  | { type: 'x3dh_recipient_regenerate'; payload: { keyId: number; masterSeed: CryptoBuffer; myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirEphemeralKey: CryptoBuffer }; id: string }
+  | { type: 'dr_init_alice'; payload: { sk: CryptoBuffer; theirSignedPreKeyPublic: CryptoBuffer }; id: string }
+  | { type: 'dr_init_bob'; payload: { sk: CryptoBuffer; mySignedPreKey: SodiumKeyPair }; id: string }
+  | { type: 'dr_ratchet_encrypt'; payload: { serializedState: DoubleRatchetState; plaintext: string | CryptoBuffer }; id: string }
+  | { type: 'dr_ratchet_decrypt'; payload: { serializedState: DoubleRatchetState; header: DoubleRatchetHeader; ciphertext: CryptoBuffer }; id: string }
   | { type: 'group_init_sender_key'; payload: void; id: string }
-  | { type: 'group_ratchet_encrypt'; payload: { serializedState: any; plaintext: string | Uint8Array; signingPrivateKey: any }; id: string }
-  | { type: 'group_ratchet_decrypt'; payload: { serializedState: any; header: { n: number }; ciphertext: any; signature: string; senderSigningPublicKey: any }; id: string }
-  | { type: 'group_decrypt_skipped'; payload: { mk: string; headerN: number; ciphertext: any; signature: string; senderSigningPublicKey: any }; id: string };
+  | { type: 'group_ratchet_encrypt'; payload: { serializedState: GroupRatchetState; plaintext: string | CryptoBuffer; signingPrivateKey: CryptoBuffer }; id: string }
+  | { type: 'group_ratchet_decrypt'; payload: { serializedState: GroupRatchetState; header: GroupRatchetHeader; ciphertext: CryptoBuffer; signature: string; senderSigningPublicKey: CryptoBuffer }; id: string }
+  | { type: 'group_decrypt_skipped'; payload: { mk: string; headerN: number; ciphertext: CryptoBuffer; signature: string; senderSigningPublicKey: CryptoBuffer }; id: string };
 
 self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
   const { type, payload, id } = event.data;
@@ -829,7 +836,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             encryption: encryptionKeyPair.privateKey,
             signing: signingKeyPair.privateKey,
             signedPreKey: signedPreKeyPair.privateKey,
-            masterSeed: masterKey,
+            masterSeed: masterKey instanceof Uint8Array ? masterKey : new Uint8Array(masterKey),
           }, newPassword);
 
           result = {
@@ -1040,10 +1047,9 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
            RK: new Uint8Array(skBytes),
            CKs: null, CKr: null,
            DHs: {
-             publicKey: new Uint8Array(mySignedPreKey.publicKey),
+             publicKey: new Uint8Array(mySignedPreKey.publicKey!),
              privateKey: new Uint8Array(mySignedPreKey.privateKey)
-           },
-           DHr: null, // Initialized to null to trigger DH ratchet on first receive
+           },           DHr: null, // Initialized to null to trigger DH ratchet on first receive
            Ns: 0, Nr: 0, PN: 0
         };
         

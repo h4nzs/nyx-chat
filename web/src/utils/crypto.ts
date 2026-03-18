@@ -1,3 +1,4 @@
+import type { DoubleRatchetState } from '../types/core';
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
@@ -47,7 +48,7 @@ import {
   emitGroupKeyFulfillment 
 } from '@lib/socket';
 import type { Participant } from '@store/conversation';
-import type { SerializedRatchetState } from '@lib/crypto-worker-proxy';
+
 
 // --- Secure Storage Helpers ---
 
@@ -59,7 +60,7 @@ async function getMasterSeedOrThrow(): Promise<Uint8Array> {
   return masterSeed;
 }
 
-export async function storeRatchetStateSecurely(conversationId: string, state: SerializedRatchetState) {
+export async function storeRatchetStateSecurely(conversationId: string, state: DoubleRatchetState) {
   const masterSeed = await getMasterSeedOrThrow();
   const { worker_encrypt_session_key } = await getWorkerProxy();
   const stateBytes = new TextEncoder().encode(JSON.stringify(state));
@@ -67,7 +68,7 @@ export async function storeRatchetStateSecurely(conversationId: string, state: S
   await storeRatchetSession(conversationId, encryptedState);
 }
 
-export async function retrieveRatchetStateSecurely(conversationId: string): Promise<SerializedRatchetState | null> {
+export async function retrieveRatchetStateSecurely(conversationId: string): Promise<DoubleRatchetState | null> {
   const encryptedState = await getRatchetSession(conversationId);
   if (!encryptedState) return null;
 
