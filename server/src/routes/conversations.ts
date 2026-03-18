@@ -84,7 +84,7 @@ router.get('/', async (req, res, next) => {
 router.post('/', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const { title, userIds, isGroup, initialSession } = req.body
+    const { encryptedMetadata, userIds, isGroup, initialSession } = req.body
     const creatorId = req.user.id
 
     if (!Array.isArray(userIds)) {
@@ -148,7 +148,7 @@ router.post('/', async (req, res, next) => {
       newConversation = await prisma.$transaction(async (tx) => {
         const conversation = await tx.conversation.create({
           data: {
-            title: isGroup ? title : null,
+            encryptedMetadata: isGroup ? encryptedMetadata : null,
             isGroup,
             creatorId: isGroup ? creatorId : null,
             participants: {
@@ -250,7 +250,7 @@ router.put('/:id/details', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { id } = req.params
-    const { title, description } = req.body
+    const { encryptedMetadata } = req.body
     const participant = await prisma.participant.findFirst({
       where: { conversationId: id, userId: req.user.id }
     })
@@ -258,12 +258,11 @@ router.put('/:id/details', async (req, res, next) => {
 
     const updatedConversation = await prisma.conversation.update({
       where: { id },
-      data: { title, description }
+      data: { encryptedMetadata }
     })
     getIo().to(id).emit('conversation:updated', {
       id,
-      title: updatedConversation.title,
-      description: updatedConversation.description
+      encryptedMetadata: updatedConversation.encryptedMetadata
     })
     res.json(updatedConversation)
   } catch (error) {

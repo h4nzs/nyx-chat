@@ -131,38 +131,16 @@ router.post(
       if (!participant || participant.role !== 'ADMIN') throw new ApiError(403, 'Forbidden: Only admin can change group avatar')
 
       const oldGroup = await prisma.conversation.findUnique({
-        where: { id: groupId as string },
-        select: { avatarUrl: true }
+        where: { id: groupId as string }
       })
+      if (!oldGroup) throw new ApiError(404, 'Group not found')
 
-      if (oldGroup?.avatarUrl) {
-        deleteOldFile(oldGroup.avatarUrl).catch(console.error)
-      }
-
-      const updatedConversation = await prisma.conversation.update({
-        where: { id: groupId as string },
-        data: { avatarUrl: fileUrl },
-        include: {
-          participants: {
-            include: {
-              user: { select: { id: true, encryptedProfile: true, publicKey: true } }
-            }
-          }
-        }
+      // Cukup kembalikan file URL ke klien
+      // Client akan men-generate ulang encryptedMetadata dan memanggil endpoint update.
+      res.json({
+        fileUrl,
+        fileKey: ((req as any).file)?.key
       })
-
-      const transformedConversation = {
-        ...updatedConversation,
-        participants: updatedConversation.participants.map((p: any) => ({ ...p.user, role: p.role }))
-      }
-
-      getIo().to(groupId).emit('conversation:updated', {
-        id: groupId,
-        avatarUrl: fileUrl,
-        lastUpdated: updatedConversation.updatedAt
-      })
-
-      res.json(transformedConversation)
     } catch (e) {
       next(e)
     }
