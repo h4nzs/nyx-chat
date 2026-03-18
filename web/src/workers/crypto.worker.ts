@@ -167,12 +167,12 @@ async function storePrivateKeys(keys: {
   signedPreKey: Uint8Array,
   masterSeed?: Uint8Array
 }, password: string): Promise<string> {
-  const privateKeysJson = JSON.stringify({
+  const privateKeysObj = {
     encryption: sodium.to_base64(keys.encryption, sodium.base64_variants[B64_VARIANT]),
     signing: sodium.to_base64(keys.signing, sodium.base64_variants[B64_VARIANT]),
     signedPreKey: sodium.to_base64(keys.signedPreKey, sodium.base64_variants[B64_VARIANT]),
     masterSeed: keys.masterSeed ? sodium.to_base64(keys.masterSeed, sodium.base64_variants[B64_VARIANT]) : undefined,
-  });
+  };
 
   const salt = crypto.getRandomValues(new Uint8Array(16));
   let kek: Uint8Array | null = null;
@@ -180,7 +180,7 @@ async function storePrivateKeys(keys: {
   try {
     // Directly call the internal helper functions
     kek = await _deriveKey(password, salt);
-    const encryptedData = await _encryptData(kek, privateKeysJson);
+    const encryptedData = await _encryptData(kek, privateKeysObj);
 
     // Combine salt and encrypted data
     return sodium.to_base64(salt, sodium.base64_variants[B64_VARIANT]) + '.' + encryptedData;
@@ -216,9 +216,14 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
       
       // Directly call the internal helper functions
       kek = await _deriveKey(password, salt);
-      const privateKeysJson = await _decryptData(kek, encryptedString);
+      const privateKeysRaw = await _decryptData(kek, encryptedString);
 
-      const keys = privateKeysJson as { encryption: string; signing: string; signedPreKey: string; masterSeed?: string };
+      // Handle potential double-stringified data from previous registrations
+      const privateKeysObj = typeof privateKeysRaw === 'string' 
+        ? JSON.parse(privateKeysRaw) 
+        : privateKeysRaw;
+
+      const keys = privateKeysObj as { encryption: string; signing: string; signedPreKey: string; masterSeed?: string };
       if (!keys.signedPreKey) return { success: false, reason: 'legacy_bundle' };
 
       return {
