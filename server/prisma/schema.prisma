@@ -82,9 +82,7 @@ model PreKeyBundle {
 model Conversation {
   id            String         @id @default(cuid())
   isGroup       Boolean        @default(false)
-  title         String?
-  description   String?
-  avatarUrl     String?
+  encryptedMetadata String?
   creatorId     String?
   creator       User?          @relation("CreatedConversations", fields: [creatorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   lastMessageAt DateTime?      @db.Timestamptz(6)
@@ -132,7 +130,6 @@ model Message {
   encryptedSessionKey String?
   createdAt           DateTime        @default(now())
   statuses            MessageStatus[]
-  linkPreview         Json?
   expiresAt           DateTime?
   isViewOnce          Boolean         @default(false)
   isViewed            Boolean         @default(false)
@@ -146,7 +143,6 @@ model Message {
   @@index([sessionId])
   @@index([createdAt])
   @@index([repliedToId])
-  @@index([content(ops: raw("gin_trgm_ops"))], type: Gin)
 }
 
 

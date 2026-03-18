@@ -85,5 +85,11 @@
     "supertest": "^7.2.2",
     "tsx": "^4.21.0",
     "typescript": "^5.4.5"
-  }
+  },
+  "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "prisma",
+      "argon2",
+      "supabase"
+  ]
 }

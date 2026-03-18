@@ -3,12 +3,13 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 // web/src/workers/crypto.worker.ts
 import { Buffer } from 'buffer/';
-(self as any).Buffer = Buffer;
+(self as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
 import sodium from 'libsodium-wrappers';
 import * as bip39 from 'bip39';
 import { argon2id } from 'hash-wasm';
 import { v4 as uuidv4 } from 'uuid';
+import type { DoubleRatchetState } from '../types/core';
 
 let isReady = false;
 const B64_VARIANT = 'URLSAFE_NO_PADDING';
@@ -27,7 +28,7 @@ const ARGON_CONFIG = {
 async function _hkdf(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length: number): Promise<Uint8Array> {
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
-    ikm as any,
+    ikm,
     { name: "HKDF" },
     false,
     ["deriveBits"]
@@ -37,8 +38,8 @@ async function _hkdf(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: salt as any,
-      info: info as any
+      salt: salt,
+      info: info
     },
     keyMaterial,
     length * 8
@@ -58,7 +59,7 @@ export async function kdfRoot(rootKey: Uint8Array, dhOutput: Uint8Array): Promis
 export async function kdfChain(chainKey: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
   const key = await crypto.subtle.importKey(
     "raw",
-    chainKey as any,
+    chainKey,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
@@ -81,7 +82,7 @@ async function _deriveKey(password: string, salt: Uint8Array): Promise<Uint8Arra
   });
 }
 
-async function _encryptData(keyBytes: Uint8Array, data: any): Promise<string> {
+async function _encryptData(keyBytes: Uint8Array, data: unknown): Promise<string> {
   try {
     const key = await crypto.subtle.importKey(
       'raw',
@@ -115,7 +116,7 @@ async function _encryptData(keyBytes: Uint8Array, data: any): Promise<string> {
   }
 }
 
-async function _decryptData(keyBytes: Uint8Array, encryptedString: string): Promise<any> {
+async function _decryptData(keyBytes: Uint8Array, encryptedString: string): Promise<unknown> {
   try {
     const key = await crypto.subtle.importKey(
       'raw',
@@ -125,7 +126,8 @@ async function _decryptData(keyBytes: Uint8Array, encryptedString: string): Prom
       ['decrypt']
     );
 
-    const { iv: ivArr, data: dataArr } = JSON.parse(encryptedString);
+    const parsed = JSON.parse(encryptedString) as { iv: number[], data: number[] };
+    const { iv: ivArr, data: dataArr } = parsed;
     const iv = new Uint8Array(ivArr);
     const ciphertext = new Uint8Array(dataArr);
 
@@ -228,7 +230,7 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
           masterSeed: keys.masterSeed ? sodium.from_base64(keys.masterSeed, sodium.base64_variants[B64_VARIANT]) : undefined,
         }
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Argon2id or subtle.decrypt can throw. If it's a decrypt error, it's likely a wrong password.
       console.error("Failed to retrieve private keys:", error);
       return { success: false, reason: 'incorrect_password' };
@@ -270,14 +272,25 @@ function bytesToB64(bytes: Uint8Array | null | undefined): string | null {
   return bytes ? sodium.to_base64(bytes, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
 }
 
-function deserializeState(state: any) {
+interface RuntimeDoubleRatchetState {
+  RK: Uint8Array | null;
+  CKs: Uint8Array | null;
+  CKr: Uint8Array | null;
+  DHs: { publicKey: Uint8Array; privateKey: Uint8Array } | null;
+  DHr: Uint8Array | null;
+  Ns: number;
+  Nr: number;
+  PN: number;
+}
+
+function deserializeState(state: DoubleRatchetState): RuntimeDoubleRatchetState {
   return {
     RK: b64ToBytes(state.RK),
     CKs: b64ToBytes(state.CKs),
     CKr: b64ToBytes(state.CKr),
     DHs: state.DHs ? {
-      publicKey: b64ToBytes(state.DHs.publicKey),
-      privateKey: b64ToBytes(state.DHs.privateKey)
+      publicKey: b64ToBytes(state.DHs.publicKey) as Uint8Array,
+      privateKey: b64ToBytes(state.DHs.privateKey) as Uint8Array
     } : null,
     DHr: b64ToBytes(state.DHr),
     Ns: state.Ns,
@@ -286,14 +299,14 @@ function deserializeState(state: any) {
   };
 }
 
-function serializeState(state: any) {
+function serializeState(state: RuntimeDoubleRatchetState): DoubleRatchetState {
   return {
     RK: bytesToB64(state.RK),
     CKs: bytesToB64(state.CKs),
     CKr: bytesToB64(state.CKr),
     DHs: state.DHs ? {
-      publicKey: bytesToB64(state.DHs.publicKey),
-      privateKey: bytesToB64(state.DHs.privateKey)
+      publicKey: bytesToB64(state.DHs.publicKey) as string,
+      privateKey: bytesToB64(state.DHs.privateKey) as string
     } : null,
     DHr: bytesToB64(state.DHr),
     Ns: state.Ns,
@@ -302,7 +315,7 @@ function serializeState(state: any) {
   };
 }
 
-function wipeState(state: any) {
+function wipeState(state: RuntimeDoubleRatchetState) {
   if (state.RK) sodium.memzero(state.RK);
   if (state.CKs) sodium.memzero(state.CKs);
   if (state.CKr) sodium.memzero(state.CKr);
@@ -314,7 +327,45 @@ const ALGO = 'AES-GCM';
 const KEY_LENGTH = 256;
 const IV_LENGTH = 12;
 
-self.onmessage = async (event: MessageEvent) => {
+export type WorkerMessage =
+  | { type: 'DERIVE_KEY'; payload: { password: string; salt: number[] | Uint8Array }; id: string }
+  | { type: 'ENCRYPT_DATA'; payload: { keyBytes: number[] | Uint8Array; data: unknown }; id: string }
+  | { type: 'DECRYPT_DATA'; payload: { keyBytes: number[] | Uint8Array; encryptedString: string }; id: string }
+  | { type: 'registerAndGenerateKeys'; payload: { password: string }; id: string }
+  | { type: 'retrievePrivateKeys'; payload: { encryptedDataStr: string; password: string }; id: string }
+  | { type: 'generateSafetyNumber'; payload: { myPublicKey: number[] | Uint8Array; theirPublicKey: number[] | Uint8Array }; id: string }
+  | { type: 'crypto_secretbox_xchacha20poly1305_easy'; payload: { message: string | number[] | Uint8Array; nonce: number[] | Uint8Array; key: number[] | Uint8Array }; id: string }
+  | { type: 'crypto_secretbox_xchacha20poly1305_open_easy'; payload: { ciphertext: number[] | Uint8Array; nonce: number[] | Uint8Array; key: number[] | Uint8Array }; id: string }
+  | { type: 'crypto_box_seal_open'; payload: { ciphertext: number[] | Uint8Array; publicKey: number[] | Uint8Array; privateKey: number[] | Uint8Array }; id: string }
+  | { type: 'x3dh_initiator'; payload: { myIdentityKey: any; theirIdentityKey: any; theirSignedPreKey: any; theirSigningKey: any; signature: any; theirOneTimePreKey?: any }; id: string }
+  | { type: 'x3dh_recipient'; payload: { myIdentityKey: any; mySignedPreKey: any; theirIdentityKey: any; theirEphemeralKey: any; myOneTimePreKey?: any }; id: string }
+  | { type: 'crypto_box_seal'; payload: { message: number[] | Uint8Array; publicKey: number[] | Uint8Array }; id: string }
+  | { type: 'file_encrypt'; payload: { fileBuffer: ArrayBuffer | Uint8Array }; id: string }
+  | { type: 'file_decrypt'; payload: { combinedData: ArrayBuffer | Uint8Array; keyBytes: number[] | Uint8Array }; id: string }
+  | { type: 'getRecoveryPhrase'; payload: { encryptedDataStr: string; password: string }; id: string }
+  | { type: 'restoreFromPhrase'; payload: { phrase: string; password: string }; id: string }
+  | { type: 'recoverAccountWithSignature'; payload: { phrase: string; newPassword: string; identifier: string; timestamp: string; nonce: string }; id: string }
+  | { type: 'hashUsername'; payload: { username: string }; id: string }
+  | { type: 'encryptProfile'; payload: { profileJsonString: string; profileKeyB64: string }; id: string }
+  | { type: 'decryptProfile'; payload: { encryptedProfileB64: string; profileKeyB64: string }; id: string }
+  | { type: 'generateProfileKey'; payload: void; id: string }
+  | { type: 'minePoW'; payload: { salt: string; difficulty: number }; id: string }
+  | { type: 'generate_random_key'; payload: void; id: string }
+  | { type: 'reEncryptBundleFromMasterKey'; payload: { masterKey: any; newPassword: string }; id: string }
+  | { type: 'encrypt_session_key'; payload: { sessionKey: any; masterSeed: any }; id: string }
+  | { type: 'decrypt_session_key'; payload: { encryptedKey: any; masterSeed: any }; id: string }
+  | { type: 'generate_otpk_batch'; payload: { count: number; startId: number; masterSeed: any }; id: string }
+  | { type: 'x3dh_recipient_regenerate'; payload: { keyId: number; masterSeed: any; myIdentityKey: any; mySignedPreKey: any; theirIdentityKey: any; theirEphemeralKey: any }; id: string }
+  | { type: 'dr_init_alice'; payload: { sk: any; theirSignedPreKeyPublic: any }; id: string }
+  | { type: 'dr_init_bob'; payload: { sk: any; mySignedPreKey: any }; id: string }
+  | { type: 'dr_ratchet_encrypt'; payload: { serializedState: DoubleRatchetState; plaintext: string | Uint8Array }; id: string }
+  | { type: 'dr_ratchet_decrypt'; payload: { serializedState: DoubleRatchetState; header: { dh: string; n: number; pn: number }; ciphertext: number[] | Uint8Array }; id: string }
+  | { type: 'group_init_sender_key'; payload: void; id: string }
+  | { type: 'group_ratchet_encrypt'; payload: { serializedState: any; plaintext: string | Uint8Array; signingPrivateKey: any }; id: string }
+  | { type: 'group_ratchet_decrypt'; payload: { serializedState: any; header: { n: number }; ciphertext: any; signature: string; senderSigningPublicKey: any }; id: string }
+  | { type: 'group_decrypt_skipped'; payload: { mk: string; headerN: number; ciphertext: any; signature: string; senderSigningPublicKey: any }; id: string };
+
+self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
   const { type, payload, id } = event.data;
 
   if (!isReady) {
@@ -323,7 +374,7 @@ self.onmessage = async (event: MessageEvent) => {
   }
   
   try {
-    let result: any;
+    let result: unknown;
     // The main message handler now orchestrates calls to the internal functions.
     // The recursive postMessage calls are gone.
     switch (type) {
@@ -361,7 +412,7 @@ self.onmessage = async (event: MessageEvent) => {
             masterSeed: masterSeed
           }, password);
 
-          const phrase = await bip39.entropyToMnemonic(Buffer.from(masterSeed) as any);
+          const phrase = await bip39.entropyToMnemonic(Buffer.from(masterSeed) as unknown as Uint8Array);
           
           result = {
               encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
@@ -575,7 +626,7 @@ self.onmessage = async (event: MessageEvent) => {
         const { encryptedDataStr, password } = payload;
         const resultData = await retrievePrivateKeys(encryptedDataStr, password);
         if (resultData.success && resultData.keys.masterSeed) {
-          result = await bip39.entropyToMnemonic(Buffer.from(resultData.keys.masterSeed) as any);
+          result = await bip39.entropyToMnemonic(Buffer.from(resultData.keys.masterSeed) as unknown as Uint8Array);
         } else {
           throw new Error("Failed to retrieve master seed. Incorrect password or invalid bundle.");
         }
@@ -1304,8 +1355,9 @@ self.onmessage = async (event: MessageEvent) => {
     // Post the result back to the main thread
     self.postMessage({ success: true, id, result });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error in crypto worker for type:', type, error);
-    self.postMessage({ success: false, id, error: error.message || 'An unknown error occurred' });
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    self.postMessage({ success: false, id, error: errorMessage });
   }
 };
