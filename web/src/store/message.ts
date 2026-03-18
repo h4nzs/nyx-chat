@@ -21,7 +21,7 @@ import {
 } from "@utils/crypto";
 import toast from "react-hot-toast";
 import { useAuthStore, type User } from "./auth";
-import type { Message } from "./conversation";
+import type { Message, RawServerMessage } from "./conversation";
 import useDynamicIslandStore, { UploadActivity } from './dynamicIsland';
 import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
@@ -37,7 +37,7 @@ function enrichMessagesWithSenderProfile(conversationId: string, messages: Messa
     const conv = useConversationStore.getState().conversations.find(c => c.id === conversationId);
     if (!conv) return messages;
     
-    const participantsMap = new Map(conv.participants.map(p => [(p as any).userId || p.id, p]));
+    const participantsMap = new Map(conv.participants.map(p => [('userId' in p ? (p as unknown as {userId: string}).userId : p.id) || p.id, p]));
     const cachedProfiles = useProfileStore.getState().profiles;
     
     return messages.map(m => {
@@ -50,7 +50,7 @@ function enrichMessagesWithSenderProfile(conversationId: string, messages: Messa
         const resolvedName = globalProfile?.name || pInfo?.name;
         const resolvedUsername = globalProfile?.username || pInfo?.username;
         const resolvedAvatar = globalProfile?.avatarUrl || pInfo?.avatarUrl;
-        const encryptedProfile = pInfo?.encryptedProfile || (m.sender as any)?.encryptedProfile;
+        const encryptedProfile = pInfo?.encryptedProfile || (m.sender?.encryptedProfile);
 
         // If we found any real name, apply it and preserve metadata
         if (resolvedName && resolvedName !== 'Unknown' && resolvedName !== 'Encrypted User') {
@@ -67,7 +67,7 @@ function enrichMessagesWithSenderProfile(conversationId: string, messages: Messa
         }
         
         // Ensure encryptedProfile is at least present for the UI hook to attempt decryption
-        if (encryptedProfile && !(m.sender as any)?.encryptedProfile) {
+        if (encryptedProfile && !(m.sender?.encryptedProfile)) {
             return {
                 ...m,
                 sender: {
@@ -85,52 +85,65 @@ function enrichMessagesWithSenderProfile(conversationId: string, messages: Messa
  * Logika Dekripsi Terpusat (Single Source of Truth)
  * Menangani dekripsi teks biasa DAN kunci file.
  */
-export async function decryptMessageObject(message: Message, seenIds = new Set<string>(), depth = 0, options: { skipRetries?: boolean } = {}): Promise<Message> {
-  // 1. Clone pesan dan tambahkan recursion guard
-  const decryptedMsg = { ...message };
+export async function decryptMessageObject(
+  rawMsg: RawServerMessage | Message,
+  seenIds = new Set<string>(),
+  depth = 0,
+  options: { skipRetries?: boolean } = {}
+): Promise<Message> {
   const currentUser = useAuthStore.getState().user;
-  
-  if (seenIds.has(decryptedMsg.id) || depth > 10) {
-    decryptedMsg.repliedTo = undefined; // Putus rantai rekursif
-    return decryptedMsg;
-  }
-  seenIds.add(decryptedMsg.id);
 
-  const conversation = useConversationStore.getState().conversations.find(c => c.id === decryptedMsg.conversationId);
+  // Base message object derived from raw payload
+  let finalMessage: Message = {
+    id: rawMsg.id,
+    tempId: rawMsg.tempId,
+    type: rawMsg.type,
+    conversationId: rawMsg.conversationId,
+    senderId: rawMsg.senderId,
+    sender: rawMsg.sender,
+    createdAt: rawMsg.createdAt,
+    content: rawMsg.content,
+    repliedToId: rawMsg.repliedToId,
+    linkPreview: rawMsg.linkPreview,
+    expiresAt: rawMsg.expiresAt,
+    isViewOnce: rawMsg.isViewOnce,
+    reactions: [],
+  };
+
+  if (seenIds.has(rawMsg.id) || depth > 10) {
+    return finalMessage;
+  }
+  seenIds.add(rawMsg.id);
+
+  const conversation = useConversationStore.getState().conversations.find(c => c.id === rawMsg.conversationId);
   const isGroup = conversation?.isGroup || false;
 
   try {
-    // [FIX #1] SELF-MESSAGE DECRYPTION (Pesan Sendiri)
-    // Jika ini pesan saya sendiri
-    if (currentUser && decryptedMsg.senderId === currentUser.id) {
-        // Coba ambil Message Key dari brankas lokal (MK Vault) - Works for BOTH Group & 1-on-1 now!
+    // 1. SELF-MESSAGE DECRYPTION
+    if (currentUser && rawMsg.senderId === currentUser.id) {
         const { retrieveMessageKeySecurely } = await import('@utils/crypto');
-        let mk = await retrieveMessageKeySecurely(decryptedMsg.id);
-        // Fallback: If not found by real ID, check if we have it under its tempId
-        if (!mk && decryptedMsg.tempId) {
-            mk = await retrieveMessageKeySecurely(`temp_${decryptedMsg.tempId}`);
+        let mk = await retrieveMessageKeySecurely(rawMsg.id);
+        if (!mk && rawMsg.tempId) {
+            mk = await retrieveMessageKeySecurely(`temp_${rawMsg.tempId}`);
         }
         
         if (mk) {
-            // Kita punya kuncinya! Dekripsi langsung secara statis.
             const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
             const sodium = await getSodium();
             
-            // [FIX] Matryoshka Parsing Loop: Peel all JSON layers (X3DH, DR) until raw ciphertext
-            let cipherTextToUse = decryptedMsg.ciphertext || decryptedMsg.content;
+            let cipherTextToUse = 'ciphertext' in rawMsg ? rawMsg.ciphertext : rawMsg.content;
             
-            // Helper to unwrap
             const unwrap = (str: string): string => {
                  if (str && typeof str === 'string' && str.trim().startsWith('{')) {
                      try {
                          const p = JSON.parse(str);
-                         if (p.ciphertext) return unwrap(p.ciphertext);
+                         if (p.ciphertext) return unwrap(p.ciphertext as string);
                      } catch {}
                  }
                  return str;
             }
             
-            cipherTextToUse = unwrap(cipherTextToUse!);
+            cipherTextToUse = unwrap(cipherTextToUse || '');
 
             if (cipherTextToUse) {
                 try {
@@ -140,7 +153,6 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
                     const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
                     let plainText = sodium.to_string(decryptedBytes);
                     
-                    // --- STRIP PROFILE KEY DARI PESAN SENDIRI ---
                     if (plainText && plainText.trim().startsWith('{')) {
                         try {
                             const parsed = JSON.parse(plainText);
@@ -155,95 +167,93 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
                         } catch (e) {}
                     }
                     
-                    decryptedMsg.content = plainText;
+                    finalMessage = { ...finalMessage, content: plainText };
                     
-                    if (decryptedMsg.content && decryptedMsg.content.startsWith('{') && decryptedMsg.content.includes('"type":"file"')) {
+                    if (finalMessage.content && finalMessage.content.startsWith('{') && finalMessage.content.includes('"type":"file"')) {
                         try {
-                            const metadata = JSON.parse(decryptedMsg.content);
+                            const metadata = JSON.parse(finalMessage.content);
                             if (metadata.type === 'file') {
-                                decryptedMsg.fileUrl = metadata.url;
-                                decryptedMsg.fileKey = metadata.key;
-                                decryptedMsg.fileName = metadata.name;
-                                decryptedMsg.fileSize = metadata.size;
-                                decryptedMsg.fileType = metadata.mimeType;
-                                decryptedMsg.content = null;
-                                decryptedMsg.isBlindAttachment = true;
+                                finalMessage = {
+                                    ...finalMessage,
+                                    fileUrl: metadata.url,
+                                    fileName: metadata.name,
+                                    fileSize: metadata.size,
+                                    fileType: metadata.mimeType,
+                                    content: null,
+                                    isBlindAttachment: true
+                                };
                             }
                         } catch {}
-                    } else if (decryptedMsg.content && decryptedMsg.content.startsWith('{') && decryptedMsg.content.includes('"type":"story_reply"')) {
+                    } else if (finalMessage.content && finalMessage.content.startsWith('{') && finalMessage.content.includes('"type":"story_reply"')) {
                         try {
-                            const metadata = JSON.parse(decryptedMsg.content);
+                            const metadata = JSON.parse(finalMessage.content);
                             if (metadata.type === 'story_reply') {
-                                decryptedMsg.content = metadata.text;
-                                decryptedMsg.repliedTo = {
-                                    id: 'story_mock',
-                                    senderId: metadata.storyAuthorId,
-                                    sender: { id: metadata.storyAuthorId },
-                                    content: metadata.storyText || (metadata.hasMedia ? '📷 Story' : 'Story')
-                                } as any;
+                                finalMessage = {
+                                    ...finalMessage,
+                                    content: metadata.text,
+                                    repliedTo: {
+                                        id: 'story_mock',
+                                        conversationId: rawMsg.conversationId,
+                                        senderId: metadata.storyAuthorId,
+                                        sender: { id: metadata.storyAuthorId },
+                                        content: metadata.storyText || (metadata.hasMedia ? '📷 Story' : 'Story'),
+                                        createdAt: new Date().toISOString(),
+                                        reactions: [],
+                                    } as unknown as Message
+                                };
                             }
                         } catch {}
                     }
-                    if (decryptedMsg.repliedTo) {
-                        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1, options);
+                    if (rawMsg.repliedTo) {
+                        finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
                     }
-                    return decryptedMsg;
+                    return finalMessage;
                 } catch (e) {
                     console.error("Self-decrypt failed with stored key:", e);
                 }
             }
         }
         
-        // Fallback jika MK tidak ada (misal clear cache tapi DB pesan masih ada)
-        // Kita tidak bisa mendekripsi pesan sendiri tanpa MK lokal.
-        if (decryptedMsg.content && decryptedMsg.content.trim().startsWith('{')) {
-             decryptedMsg.content = "🔒 You sent this message (Encrypted)";
+        if (finalMessage.content && finalMessage.content.trim().startsWith('{')) {
+             finalMessage.content = "🔒 You sent this message (Encrypted)";
         }
-        if (decryptedMsg.repliedTo) {
-            decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1, options);
+        if (rawMsg.repliedTo) {
+            finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
         }
-        return decryptedMsg;
+        return finalMessage;
     }
 
-    // 2. Tentukan Payload yang Akan Didekripsi
-    let contentToDecrypt = decryptedMsg.ciphertext;
+    let contentToDecrypt = 'ciphertext' in rawMsg ? rawMsg.ciphertext : undefined;
 
     if (!contentToDecrypt) {
-        contentToDecrypt = decryptedMsg.fileKey || decryptedMsg.content;
+        contentToDecrypt = ('fileKey' in rawMsg ? rawMsg.fileKey : undefined) || rawMsg.content;
     }
 
     if (!contentToDecrypt || contentToDecrypt === 'waiting_for_key' || contentToDecrypt === '[Requesting key to decrypt...]') {
-        return decryptedMsg;
+        return finalMessage;
     }
 
-    // [FIX] PREVENT RE-DECRYPTION LOOP
     const isLikelyEncrypted = (str: string) => {
         const trimmed = str.trim();
-        // 1. Check for JSON payload containing encryption markers
         if (trimmed.startsWith('{') && (trimmed.includes('"header"') || trimmed.includes('"ciphertext"') || trimmed.includes('"dr"'))) {
             return true;
         }
-        // 2. Check for legacy/base64 encoded ciphertexts
-        // A valid base64 string shouldn't contain spaces and typically matches this regex
         const base64Regex = /^[A-Za-z0-9+/_-]+={0,2}$/;
-        if (base64Regex.test(trimmed) && trimmed.length > 20) { // arbitrary min length for a real ciphertext
+        if (base64Regex.test(trimmed) && trimmed.length > 20) { 
             return true;
         }
         return false;
     };
 
     if (!isLikelyEncrypted(contentToDecrypt)) {
-        return decryptedMsg;
+        return finalMessage;
     }
 
-    // -------------------------------------------------------------------------
-    // FLOW BARU: X3DH HEADER DETECTION (RECEIVING - 1on1 Only)
-    // -------------------------------------------------------------------------
     if (!isGroup && contentToDecrypt.startsWith('{') && contentToDecrypt.includes('"x3dh":')) {
        try {
            const payload = JSON.parse(contentToDecrypt);
            const { retrieveMessageKeySecurely } = await import('@utils/crypto');
-           const mk = await retrieveMessageKeySecurely(message.id);
+           const mk = await retrieveMessageKeySecurely(rawMsg.id);
            
            if (mk) {
                contentToDecrypt = payload.ciphertext;
@@ -274,7 +284,7 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
                             theirRatchetPublicKey = sodium.from_base64(epk, sodium.base64_variants.URLSAFE_NO_PADDING);
                         }
                    }
-               } catch (e) { console.error("Failed to parse inner DR header for init:", e); }
+               } catch (e) {}
 
                if (!theirRatchetPublicKey) {
                    throw new Error("Cannot initialize Bob: Missing sender's ratchet key in first message.");
@@ -287,7 +297,7 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
                    theirRatchetPublicKey: theirRatchetPublicKey
                });
 
-               await storeRatchetStateSecurely(message.conversationId, newState);
+               await storeRatchetStateSecurely(rawMsg.conversationId, newState);
                contentToDecrypt = ciphertext; 
            }
        } catch (e) {
@@ -295,24 +305,19 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
        }
     }
 
-    // 3. Simpan ciphertext asli
-    decryptedMsg.ciphertext = contentToDecrypt;
-
-    // 4. Eksekusi Dekripsi dengan Retry Loop
     let result;
     let attempts = 0;
     const MAX_ATTEMPTS = options.skipRetries ? 1 : 3;
 
-    // [PHASE 3 FIX] Correct Session ID / Sender ID mapping
-    const sessionOrSenderId = isGroup ? decryptedMsg.senderId : decryptedMsg.sessionId;
+    const sessionOrSenderId = isGroup ? rawMsg.senderId : (('sessionId' in rawMsg ? rawMsg.sessionId : '') || '');
 
     while (attempts < MAX_ATTEMPTS) {
         result = await decryptMessage(
-          contentToDecrypt!, 
-          decryptedMsg.conversationId,
+          contentToDecrypt || '', 
+          rawMsg.conversationId,
           isGroup,
-          sessionOrSenderId, // Updated Argument
-          decryptedMsg.id
+          sessionOrSenderId, 
+          rawMsg.id
         );
 
         if (result.status === 'success' || result.status === 'error') {
@@ -327,11 +332,9 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
         }
     }
 
-    // 5. Proses Hasil
     if (result?.status === 'success') {
-      let plainText = result.value;
+      let plainText = result.value as string;
 
-      // --- EKSTRAKSI PROFILE KEY ---
       if (plainText && plainText.trim().startsWith('{')) {
           try {
               const parsed = JSON.parse(plainText);
@@ -339,8 +342,8 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
                   const { saveProfileKey } = await import('@lib/keychainDb');
                   const { useProfileStore } = await import('@store/profile');
                   
-                  await saveProfileKey(decryptedMsg.senderId, parsed.profileKey);
-                  useProfileStore.getState().decryptAndCache(decryptedMsg.senderId, decryptedMsg.sender?.encryptedProfile || null);
+                  await saveProfileKey(rawMsg.senderId, parsed.profileKey);
+                  useProfileStore.getState().decryptAndCache(rawMsg.senderId, rawMsg.sender?.encryptedProfile || null);
                   
                   delete parsed.profileKey;
                   
@@ -353,63 +356,68 @@ export async function decryptMessageObject(message: Message, seenIds = new Set<s
           } catch (e) {}
       }
 
-      decryptedMsg.content = plainText;
+      finalMessage = { ...finalMessage, content: plainText };
 
-      // BLIND ATTACHMENT PARSING
       if (plainText.startsWith('{') && plainText.includes('"type":"file"')) {
         try {
           const metadata = JSON.parse(plainText);
           if (metadata.type === 'file') {
-            decryptedMsg.fileUrl = metadata.url;
-            decryptedMsg.fileKey = metadata.key;
-            decryptedMsg.fileName = metadata.name;
-            decryptedMsg.fileSize = metadata.size;
-            decryptedMsg.fileType = metadata.mimeType;
-            decryptedMsg.content = null;
-            decryptedMsg.isBlindAttachment = true;
+            finalMessage = {
+                ...finalMessage,
+                fileUrl: metadata.url,
+                fileName: metadata.name,
+                fileSize: metadata.size,
+                fileType: metadata.mimeType,
+                content: null,
+                isBlindAttachment: true
+            };
           }
         } catch (e) { }
       }
 
-      // STORY REPLY PARSING
       if (plainText.startsWith('{') && plainText.includes('"type":"story_reply"')) {
         try {
           const metadata = JSON.parse(plainText);
           if (metadata.type === 'story_reply') {
-            decryptedMsg.content = metadata.text;
-            decryptedMsg.repliedTo = {
-              id: 'story_mock',
-              senderId: metadata.storyAuthorId,
-              sender: { id: metadata.storyAuthorId },
-              content: metadata.storyText || (metadata.hasMedia ? '📷 Story' : 'Story')
-            } as any;
+            finalMessage = {
+                ...finalMessage,
+                content: metadata.text,
+                repliedTo: {
+                    id: 'story_mock',
+                    conversationId: rawMsg.conversationId,
+                    senderId: metadata.storyAuthorId,
+                    sender: { id: metadata.storyAuthorId },
+                    content: metadata.storyText || (metadata.hasMedia ? '📷 Story' : 'Story'),
+                    createdAt: new Date().toISOString(),
+                    reactions: [],
+                } as unknown as Message
+            };
           }
         } catch (e) { }
       }      
     } else if (result?.status === 'pending') {
-      decryptedMsg.content = result.reason || 'waiting_for_key';
+      finalMessage.content = result.reason || 'waiting_for_key';
     } else {
-      console.warn(`[Decrypt] Failed for msg ${decryptedMsg.id}:`, result?.error);
-      const errMsg = result?.error?.message || '';
+      console.warn(`[Decrypt] Failed for msg ${rawMsg.id}:`, result?.error);
+      const errMsg = (result?.error as Error)?.message || '';
       if (errMsg.includes('waiting for key') || errMsg.includes('Missing sender')) {
-          decryptedMsg.content = 'waiting_for_key';
+          finalMessage.content = 'waiting_for_key';
       } else {
-          decryptedMsg.content = '[Decryption Failed: Key out of sync]';
-          decryptedMsg.error = true;
+          finalMessage.content = '[Decryption Failed: Key out of sync]';
+          finalMessage.error = true;
       }
-      decryptedMsg.type = 'SYSTEM';
+      finalMessage.type = 'SYSTEM';
     }
 
-    // 6. Dekripsi Replied Message
-    if (decryptedMsg.repliedTo) {
-        decryptedMsg.repliedTo = await decryptMessageObject(decryptedMsg.repliedTo, seenIds, depth + 1, options);
+    if (rawMsg.repliedTo) {
+        finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
     }
 
-    return decryptedMsg;
+    return finalMessage;
 
   } catch (e) {
     console.error("Critical error in decryptMessageObject:", e);
-    return { ...message, content: "🔒 Decryption Error", type: 'SYSTEM' };
+    return { ...finalMessage, content: "🔒 Decryption Error", type: 'SYSTEM' };
   }
 }
 
@@ -473,8 +481,10 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
 // Helper to separate messages and reactions
 function processMessagesAndReactions(decryptedItems: Message[], existingMessages: Message[] = []) {
   const chatMessages: Message[] = [];
-  const reactions: any[] = [];
-  const edits: any[] = [];
+  interface ReactionPayload { id: string; messageId: string; emoji: string; userId: string; createdAt: string; user?: unknown; isMessage: boolean; }
+  const reactions: ReactionPayload[] = [];
+  interface EditPayload { targetMessageId: string; text: string; timestamp: number; }
+  const edits: EditPayload[] = [];
 
   for (const msg of decryptedItems) {
     const reactionPayload = parseReaction(msg.content);
@@ -542,7 +552,7 @@ type State = {
   replyingTo: Message | null;
   isFetchingMore: Record<string, boolean>;
   hasMore: Record<string, boolean>;
-  typingLinkPreview: any | null;
+  typingLinkPreview: unknown | null;
   hasLoadedHistory: Record<string, boolean>;
   selectedMessageIds: string[];
 };
@@ -563,9 +573,9 @@ type Actions = {
   removeMessage: (conversationId: string, messageId: string) => void;
   removeMessages: (conversationId: string, messageIds: string[]) => Promise<void>;
   updateMessage: (conversationId: string, messageId: string, updates: Partial<Message>) => void;
-  addLocalReaction: (conversationId: string, messageId: string, reaction: any) => void;
+  addLocalReaction: (conversationId: string, messageId: string, reaction: { id: string; emoji: string; userId: string; isMessage?: boolean }) => void;
   removeLocalReaction: (conversationId: string, messageId: string, reactionId: string) => void;
-  replaceOptimisticReaction: (conversationId: string, messageId: string, tempId: string, finalReaction: any) => void;
+  replaceOptimisticReaction: (conversationId: string, messageId: string, tempId: string, finalReaction: { id: string; emoji: string; userId: string; isMessage?: boolean }) => void;
   updateSenderDetails: (user: Partial<User>) => void;
   updateMessageStatus: (conversationId: string, messageId: string, userId: string, status: string) => void;
   clearMessagesForConversation: (conversationId: string) => void;
@@ -832,7 +842,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                         senderId: metadata.storyAuthorId,
                         sender: { id: metadata.storyAuthorId },
                         content: metadata.storyText || (metadata.hasMedia ? '📷 Story' : 'Story')
-                    } as any;
+                    } as unknown as Message;
                 }
             } catch (e) {
                 console.error('Failed to parse story_reply metadata:', e);
@@ -863,14 +873,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     try {
       let ciphertext = '';
-      let x3dhHeader: any = null;
+      let x3dhHeader: Record<string, unknown> | null = null;
 
       if (!isGroup && data.content) {
           const state = await retrieveRatchetStateSecurely(conversationId);
           if (!state) {
              const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
              if (peerId) {
-                 const theirBundle = await authFetch<any>(`/api/keys/prekey-bundle/${peerId}`);
+                 const theirBundle = await authFetch<PreKeyBundle>(`/api/keys/prekey-bundle/${peerId}`);
                  const myKeyPair = await getMyEncryptionKeyPair();
                  const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
                  const sodium = await getSodium();
@@ -903,7 +913,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         try {
             const profileKey = await import('@lib/keychainDb').then(m => m.getProfileKey(user.id));
             if (profileKey) {
-                let parsedObj: any = null;
+                let parsedObj: Record<string, unknown> | null = null;
                 if (contentToEncrypt.trim().startsWith('{')) {
                     try { parsedObj = JSON.parse(contentToEncrypt); } catch (e) {}
                 }
@@ -1008,9 +1018,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             const pushDataBytes = new TextEncoder().encode(pushData);
 
             // Encrypt for each recipient using Web Worker
-            for (const p of conversation.participants as any[]) {
-               const targetUserId = p.userId || p.id;
-               const targetPublicKey = p.user?.publicKey || p.publicKey;
+            for (const p of conversation.participants as {id: string, publicKey?: string}[]) {
+               const targetUserId = ('userId' in p ? (p as any).userId : p.id);
+               const targetPublicKey = ('user' in p ? (p as any).user?.publicKey : p.publicKey);
 
                if (targetUserId !== user.id && targetPublicKey) {
                    try {
@@ -1068,8 +1078,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                         ...reactionData,
                         id: res.msg.id, 
                         userId: user.id,
-                        createdAt: res.msg.createdAt,
-                        user: user,
                         isMessage: true
                     });
                 }
@@ -1397,7 +1405,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         // [UI UPDATE] Keep tombstones visible
         // const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
 
-        const newState: any = { messages: { ...state.messages, [conversationId]: enrichedMessages } };
+        const newState: Partial<State> = { messages: { ...state.messages, [conversationId]: enrichedMessages } };
 
         if (fetchedItems.length < 50) {
             newState.hasMore = { ...state.hasMore, [conversationId]: false };
@@ -1512,7 +1520,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   ...message,
                   content: optimistic.content,
                   fileUrl: optimistic.fileUrl,
-                  fileKey: optimistic.fileKey,
+                  /* fileKey removed */
                   fileName: optimistic.fileName,
                   fileSize: optimistic.fileSize,
                   fileType: optimistic.fileType,
@@ -1581,7 +1589,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               
               // 15-second cooldown to prevent spamming renegotiation requests
               if (now - lastRepair > 15000) {
-                  (window as any)[repairKey] = now;
+                  (window as unknown as Record<string, number>)[repairKey] = now;
                   console.warn(`[Auto-Heal] Ratchet out of sync for ${conversationId}. Initiating silent repair...`);
                   get().repairSecureSession(conversationId, false, true); // isAuto = true
               }
@@ -1680,8 +1688,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               const isViewingChat = window.location.pathname.includes(`/chat/${finalDecrypted.conversationId}`);
               if (!isViewingChat && !finalDecrypted.isSilent && finalDecrypted.senderId !== currentUser?.id) {
                   import('@store/dynamicIsland').then(({ default: useDynamicIslandStore }) => {
-                      const sender = finalDecrypted.sender as any;
-                      const senderName = sender?.name || sender?.decryptedProfile?.name || 'Someone'; 
+                      const sender = finalDecrypted.sender as unknown as { encryptedProfile?: string };
+                      const senderName = (sender as any)?.name || (sender as any)?.decryptedProfile?.name || 'Someone'; 
                       let snippet = finalDecrypted.content || 'New secure message';
                       if (finalDecrypted.fileUrl || finalDecrypted.isBlindAttachment) snippet = 'Sent an attachment 📎';
                       if (finalDecrypted.content && finalDecrypted.content.startsWith('🔒')) snippet = 'System message';
@@ -1826,7 +1834,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     })
   },
   
-  addLocalReaction: (conversationId, messageId, reaction: any) => set(state => ({
+  addLocalReaction: (conversationId, messageId, reaction: { id: string; emoji: string; userId: string; isMessage?: boolean }) => set(state => ({
     messages: {
       ...state.messages,
       [conversationId]: (state.messages[conversationId] || []).map(m => {
@@ -1950,11 +1958,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
              if (payload) {
                  get().addLocalReaction(conversationId, payload.targetMessageId, {
                      id: m.id,
-                     messageId: payload.targetMessageId,
+                     
                      emoji: payload.emoji,
                      userId: m.senderId,
-                     createdAt: m.createdAt,
-                     user: m.sender,
                      isMessage: true
                  });
                  messageMap.delete(m.id);

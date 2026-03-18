@@ -31,7 +31,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
     let isMounted = true;
 
     const handleDecryption = async () => {
-      const rawFileKey = message.fileKey;
+      const rawFileKey = '';
 
       if (!message.fileUrl) {
         if (isMounted) setError("Missing file URL.");
@@ -78,7 +78,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
       }
     };
 
-    if (message.fileType?.includes('encrypted=true') || message.fileKey) {
+    if (message.fileType?.includes('encrypted=true') || message.isBlindAttachment || !message.fileUrl) {
       handleDecryption();
     } else if (message.fileUrl) {
       const absoluteUrl = toAbsoluteUrl(message.fileUrl);
@@ -93,7 +93,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
       isMounted = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [message.fileUrl, message.fileKey, message.fileType, message.content, lastKeychainUpdate]);
+  }, [message.fileUrl, message.fileType, message.content, lastKeychainUpdate]);
 
   // 2. Initialize WaveSurfer once we have the audioSrc
   useEffect(() => {

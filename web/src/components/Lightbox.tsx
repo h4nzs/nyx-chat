@@ -50,7 +50,7 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
         return;
       }
 
-      const rawFileKey = message.fileKey;
+      const rawFileKey = '';
 
       if (!rawFileKey && message.content !== 'waiting_for_key') {
         if (isMounted) setIsLoading(true);

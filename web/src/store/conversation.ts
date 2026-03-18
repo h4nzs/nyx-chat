@@ -19,6 +19,32 @@ export type MessageStatus = {
   updatedAt: string;
 };
 
+export interface RawServerMessage {
+  id: string;
+  tempId?: number;
+  type?: 'USER' | 'SYSTEM';
+  conversationId: string;
+  senderId: string;
+  sender?: { 
+    id: string; 
+    encryptedProfile?: string | null;
+    name?: string;
+    username?: string;
+    avatarUrl?: string | null;
+  };
+  ciphertext?: string | null;
+  content?: string | null; // Some legacy or raw content
+  fileKey?: string | null;
+  sessionId?: string | null;
+  encryptedSessionKey?: string | null;
+  createdAt: string;
+  repliedTo?: RawServerMessage;
+  repliedToId?: string;
+  linkPreview?: unknown;
+  expiresAt?: string | null;
+  isViewOnce?: boolean;
+}
+
 export type Message = {
   id: string;
   tempId?: number;
@@ -35,12 +61,9 @@ export type Message = {
   content?: string | null;
   imageUrl?: string | null;
   fileUrl?: string | null;
-  fileKey?: string | null;
   fileName?: string | null;
   fileType?: string;
   fileSize?: number;
-  sessionId?: string | null;
-  ciphertext?: string | null;
   createdAt: string;
   error?: boolean;
   preview?: string;
@@ -48,13 +71,13 @@ export type Message = {
   optimistic?: boolean;
   repliedTo?: Message;
   repliedToId?: string;
-  linkPreview?: any;
+  linkPreview?: unknown;
   duration?: number;
   statuses?: MessageStatus[]; // Server delivery statuses (for other users)
   status?: 'SENDING' | 'SENT' | 'FAILED'; // Local status for UI
   deletedAt?: string | Date | null;
   expiresAt?: string | null; // New: Disappearing messages
-  isBlindAttachment?: boolean; // New: Flag for Blind Attachments (raw key in fileKey)
+  isBlindAttachment?: boolean; // New: Flag for Blind Attachments
   isViewOnce?: boolean;
   isViewed?: boolean;
   isEdited?: boolean;

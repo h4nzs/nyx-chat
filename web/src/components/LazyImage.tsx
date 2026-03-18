@@ -42,7 +42,7 @@ export default function LazyImage({
       }
 
       // 2. Cek Enkripsi
-      const isEncrypted = message.fileType?.includes('encrypted') || message.fileKey;
+      const isEncrypted = message.fileType?.includes('encrypted') || message.isBlindAttachment || (!message.fileUrl && !message.imageUrl);
 
       if (!isEncrypted) {
         if (isMounted) {
@@ -54,7 +54,7 @@ export default function LazyImage({
       }
 
       // 3. Ambil Kunci
-      const encryptedFileKey = message.fileKey;
+      const encryptedFileKey = '';
       if (!encryptedFileKey) {
         if (isMounted) { setDecryptionStatus('waiting_for_key'); setError("Waiting for key..."); }
         return;
@@ -83,7 +83,7 @@ export default function LazyImage({
                 encryptedFileKey,
                 message.conversationId,
                 isGroup,
-                message.sessionId
+                /* sessionId removed */ ''
             );
 
             if (keyResult.status === 'pending') {
@@ -98,10 +98,10 @@ export default function LazyImage({
                     setError(keyResult.reason || "Key not found yet");
                     
                     const socket = getSocket();
-                    if (socket && socket.connected && message.sessionId) {
+                    if (socket && socket.connected && /* sessionId removed */ '') {
                         socket.emit('session:request_key', {
                             conversationId: message.conversationId,
-                            sessionId: message.sessionId
+                            sessionId: /* sessionId removed */ ''
                         });
                     }
 
@@ -150,7 +150,7 @@ export default function LazyImage({
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       clearTimeout(retryTimeout);
     };
-  }, [message.fileUrl, message.fileKey, message.fileType, message.sessionId, lastKeychainUpdate, retryCount, message.conversationId, message.isBlindAttachment, conversations]); // Tambah retryCount
+  }, [message.fileUrl, message.fileType, /* sessionId removed */ '', lastKeychainUpdate, retryCount, message.conversationId, message.isBlindAttachment, conversations]); // Tambah retryCount
 
   // --- RENDER HELPERS ---
   const renderOverlay = () => {

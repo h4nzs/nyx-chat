@@ -49,7 +49,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
       }
 
       // Cek apakah file terenkripsi
-      const isEncrypted = message.fileType?.includes('encrypted=true') || message.fileKey;
+      const isEncrypted = message.fileType?.includes('encrypted=true') || message.isBlindAttachment || !message.fileUrl;
       
       if (!isEncrypted) {
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
@@ -60,7 +60,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         return;
       }
 
-      if (!message.fileKey) {
+      if (!message.isBlindAttachment) {
          if(isMounted) setStatus('waiting');
          return;
       }
@@ -74,26 +74,26 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         let rawFileKey: string;
 
         if (message.isBlindAttachment) {
-             rawFileKey = message.fileKey;
+             rawFileKey = '';
         } else {
             const conversation = conversations.find(c => c.id === message.conversationId);
             const isGroup = conversation?.isGroup || false;
 
             const keyResult = await decryptMessage(
-              message.fileKey,
+              '',
               message.conversationId,
               isGroup,
-              message.sessionId
+              ''
             );
 
             if (keyResult.status === 'pending') {
                 if (isMounted) {
                     setStatus('waiting');
                     const socket = getSocket();
-                    if (socket?.connected && message.sessionId) {
+                    if (socket?.connected && /* sessionId removed */ '') {
                         socket.emit('session:request_key', {
                             conversationId: message.conversationId,
-                            sessionId: message.sessionId
+                            sessionId: /* sessionId removed */ ''
                         });
                     }
                     retryTimeout = setTimeout(() => {
