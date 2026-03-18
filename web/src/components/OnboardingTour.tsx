@@ -48,9 +48,9 @@ export default function OnboardingTour({ isOpen, onClose }: OnboardingTourProps)
     {
       icon: <FiSmile size={32} className="text-accent" />,
       title: "Welcome to Nyx!",
-      content: <p>You have entered a <strong>Zero-Knowledge</strong> zone. We don't know who you are, and we can't read your messages. Total anonymity.</p>
-    },
-    {
+      content: <p>You have entered a <strong>Zero-Knowledge</strong> zone. We don&apos;t know who you are, and we can&apos;t read your messages. Total anonymity.</p>
+      },
+      {
       icon: <FiKey size={32} className="text-accent" />,
       title: "Your Recovery Phrase",
       content: (
@@ -59,17 +59,16 @@ export default function OnboardingTour({ isOpen, onClose }: OnboardingTourProps)
           <p className="font-bold">We do not store it. If you lose it, your account is gone forever.</p>
         </>
       )
-    },
-    {
+      },
+      {
       icon: <FiShield size={32} className="text-accent" />,
       title: "Sandbox & Verification",
       content: <p>To prevent spam without using phone numbers, new accounts start in <strong>Sandbox Mode</strong>. You can unlock unlimited messaging by verifying you are human (Biometric or Proof of Work) in Settings.</p>
-    },
-    {
+      },
+      {
       icon: <FiShield size={32} className="text-accent" />,
       title: "Safety Numbers",
-      content: <p>Each conversation has a unique "Safety Number". You can compare this with your contact to verify no one is intercepting your chat.</p>
-    },
+      content: <p>Each conversation has a unique &quot;Safety Number&quot;. You can compare this with your contact to verify no one is intercepting your chat.</p>    },
     {
       // --- SLIDE BARU: Server Status & Support ---
       icon: <FiCoffee size={32} className="text-accent" />,

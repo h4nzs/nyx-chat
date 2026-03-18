@@ -145,17 +145,16 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
     const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
       return new Promise((resolve, reject) => {
-        let unsubscribe: () => void;
-        const cleanup = () => { if (unsubscribe) unsubscribe(); };
-
-        unsubscribe = useModalStore.subscribe((state) => {
+        const unsubscribe = useModalStore.subscribe((state) => {
           if (!state.isPasswordPromptOpen) {
-            cleanup();
+            unsubscribe();
             setTimeout(() => {
                reject(new Error("Password prompt closed without input."));
             }, 100);
           }
         });
+
+        const cleanup = () => unsubscribe();
 
         useModalStore.getState().showPasswordPrompt(async (password) => {
           cleanup();

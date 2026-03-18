@@ -130,7 +130,7 @@ const sortConversations = (list: Conversation[], currentUserId: string | undefin
 
 const withPreview = (msg: Message): Message => {
   if (msg.content) {
-    let contentToParse = msg.content.trim();
+    const contentToParse = msg.content.trim();
     if (contentToParse.startsWith('STORY_KEY:')) {
         return { ...msg, preview: '', isSilent: true };
     }
