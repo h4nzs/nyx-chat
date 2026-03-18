@@ -5,7 +5,8 @@
 import { Buffer } from 'buffer/';
 (self as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
-import * as sodium from 'libsodium-wrappers';
+// @ts-expect-error - libsodium-wrappers has no default export in types but requires it for runtime bundler compatibility
+import sodium from 'libsodium-wrappers';
 import * as bip39 from 'bip39';
 import { argon2id } from 'hash-wasm';
 import { v4 as uuidv4 } from 'uuid';
@@ -726,10 +727,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         // Generate random nonce (24 bytes for XChaCha20)
         const nonce = sodium.randombytes_buf(24);
         
-        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+        const ciphertext = sodium.crypto_secretbox_easy(
             message,
-            null, // no additional data
-            null, // secret nonce
             nonce,
             key
         );
@@ -751,9 +750,10 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const nonce = combined.slice(0, nonceBytes);
         const ciphertext = combined.slice(nonceBytes);
         
-        const decrypted = sodium.crypto_secretbox_open_easy(// secret nonce
-            ciphertext, // additional data
-            nonce, key
+        const decrypted = sodium.crypto_secretbox_open_easy(
+            ciphertext,
+            nonce,
+            key
         );
         
         result = new TextDecoder().decode(decrypted);
