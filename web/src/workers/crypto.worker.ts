@@ -5,7 +5,7 @@
 import { Buffer } from 'buffer/';
 (self as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
-import sodium from 'libsodium-wrappers';
+import * as sodium from 'libsodium-wrappers';
 import * as bip39 from 'bip39';
 import { argon2id } from 'hash-wasm';
 import { v4 as uuidv4 } from 'uuid';
@@ -28,7 +28,7 @@ const ARGON_CONFIG = {
 async function _hkdf(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length: number): Promise<Uint8Array> {
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
-    ikm,
+    ikm as BufferSource,
     { name: "HKDF" },
     false,
     ["deriveBits"]
@@ -38,8 +38,8 @@ async function _hkdf(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: salt,
-      info: info
+      salt: salt as BufferSource,
+      info: info as BufferSource
     },
     keyMaterial,
     length * 8
@@ -59,7 +59,7 @@ export async function kdfRoot(rootKey: Uint8Array, dhOutput: Uint8Array): Promis
 export async function kdfChain(chainKey: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
   const key = await crypto.subtle.importKey(
     "raw",
-    chainKey,
+    chainKey as BufferSource,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
@@ -218,7 +218,7 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
       kek = await _deriveKey(password, salt);
       const privateKeysJson = await _decryptData(kek, encryptedString);
 
-      const keys = JSON.parse(privateKeysJson);
+      const keys = privateKeysJson as { encryption: string; signing: string; signedPreKey: string; masterSeed?: string };
       if (!keys.signedPreKey) return { success: false, reason: 'legacy_bundle' };
 
       return {
@@ -253,7 +253,7 @@ function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicKey: Uint8Arra
       combined.set(myPublicKey, theirPublicKey.length);
     }
   
-    const hash = sodium.crypto_generichash(64, combined);
+    const hash = sodium.crypto_generichash(64, combined, null);
   
     const fingerprint = sodium.to_hex(hash.slice(0, 30));
     const chunks = fingerprint.match(/.{1,10}/g) || [];
@@ -412,7 +412,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             masterSeed: masterSeed
           }, password);
 
-          const phrase = await bip39.entropyToMnemonic(Buffer.from(masterSeed) as unknown as Uint8Array);
+          const phrase = await bip39.entropyToMnemonic(Buffer.from(masterSeed) as unknown as string);
           
           result = {
               encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
@@ -531,7 +531,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
               sodium.memzero(s); // Wipe intermediate
           }
           
-          const sessionKey = sodium.crypto_generichash(32, sharedSecret);
+          const sessionKey = sodium.crypto_generichash(32, sharedSecret, null);
 
           result = {
               sessionKey,
@@ -578,7 +578,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
               sodium.memzero(s);
           }
 
-          result = sodium.crypto_generichash(32, sharedSecret); // Returns the sessionKey
+          result = sodium.crypto_generichash(32, sharedSecret, null); // Returns the sessionKey
         } finally {
           sodium.memzero(myIdentityKeyPrivateBytes);
           sodium.memzero(mySignedPreKeyPrivateBytes);
@@ -626,7 +626,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const { encryptedDataStr, password } = payload;
         const resultData = await retrievePrivateKeys(encryptedDataStr, password);
         if (resultData.success && resultData.keys.masterSeed) {
-          result = await bip39.entropyToMnemonic(Buffer.from(resultData.keys.masterSeed) as unknown as Uint8Array);
+          result = await bip39.entropyToMnemonic(Buffer.from(resultData.keys.masterSeed) as unknown as string);
         } else {
           throw new Error("Failed to retrieve master seed. Incorrect password or invalid bundle.");
         }
@@ -939,7 +939,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           const idBytes = new Uint8Array(new Uint32Array([keyId]).buffer); 
           seedInput.set(idBytes, masterSeedBytes.length + 4);
 
-          const keySeed = sodium.crypto_generichash(32, seedInput);
+          const keySeed = sodium.crypto_generichash(32, seedInput, null);
           const keyPair = sodium.crypto_box_seed_keypair(keySeed);
           
           // Encrypt private key for storage
@@ -990,7 +990,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const idBytes = new Uint8Array(new Uint32Array([keyId]).buffer);
         seedInput.set(idBytes, masterSeedBytes.length + 4);
 
-        const keySeed = sodium.crypto_generichash(32, seedInput);
+        const keySeed = sodium.crypto_generichash(32, seedInput, null);
         const otpkKeyPair = sodium.crypto_box_seed_keypair(keySeed);
         
         // 2. PREPARE KEYS FOR X3DH
@@ -1019,7 +1019,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
               sodium.memzero(s);
           }
 
-          result = sodium.crypto_generichash(32, sharedSecret); // Returns the sessionKey
+          result = sodium.crypto_generichash(32, sharedSecret, null); // Returns the sessionKey
         } finally {
           // 4. SECURE CLEANUP
           sodium.memzero(masterSeedBytes);
