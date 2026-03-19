@@ -777,7 +777,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         // Pass forceRotate if we suspect new members or requested by another peer
         const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, forceRotate);
         if (distributionKeys && distributionKeys.length > 0) {
-          emitGroupKeyDistribution(conversationId, distributionKeys);
+          emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
           if (forceRotate) {
               useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
           }
@@ -1016,8 +1016,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
             // Encrypt for each recipient using Web Worker
             for (const p of conversation.participants as {id: string, publicKey?: string}[]) {
-               const targetUserId = ('userId' in p ? (p as any).userId : p.id);
-               const targetPublicKey = ('user' in p ? (p as any).user?.publicKey : p.publicKey);
+               const targetUserId = ('userId' in p ? (p as { userId?: string }).userId! : p.id);
+               const targetPublicKey = ('user' in p ? (p as { user?: { publicKey?: string } }).user?.publicKey : p.publicKey);
 
                if (targetUserId !== user.id && targetPublicKey) {
                    try {
@@ -1546,7 +1546,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
 
       // INTERCEPT STORY KEYS
-      if ((decrypted as any).type === 'STORY_KEY' || (decrypted.content && decrypted.content.startsWith('STORY_KEY:'))) {
+      if ((decrypted as Record<string, unknown>).type === 'STORY_KEY' || (decrypted.content && decrypted.content.startsWith('STORY_KEY:'))) {
           try {
               // Expecting content format: "STORY_KEY:{storyId}:{base64Key}" or parsing from JSON
               const payloadStr = decrypted.content ? decrypted.content.replace('STORY_KEY:', '') : '';

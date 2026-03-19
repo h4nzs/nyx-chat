@@ -260,7 +260,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
          lastMessage: { id: 'msg-1', content: 'Welcome to NYX. No active chats found.', senderId: 'bot-1', createdAt: new Date().toISOString(), conversationId: 'decoy-1', type: 'SYSTEM' }
       };
-      set({ conversations: [dummyConvo as any], loading: false, initialLoadCompleted: true });
+      set({ conversations: [dummyConvo as unknown as Conversation], loading: false, initialLoadCompleted: true });
       return;
     }
 
@@ -368,9 +368,9 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     try {
       await authFetch(`/api/conversations/${id}`, { method: 'DELETE' });
       get().removeConversation(id);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to delete conversation:", error);
-      const errorMessage = error.message || "Failed to delete conversation.";
+      const errorMessage = (error instanceof Error ? error.message : 'Unknown error') || "Failed to delete conversation.";
       toast.error(errorMessage);
     }
   },
@@ -378,13 +378,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     try {
       await authFetch(`/api/conversations/${id}`, { method: 'DELETE' });
       get().removeConversation(id);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to delete group:", error);
       // Check if error is an ApiError with status property
-      if (error.status === 403) {
+      if (typeof error === 'object' && error !== null && 'status' in error && (error as Record<string, unknown>).status === 403) {
         toast.error("Only the group creator can delete the group.");
       } else {
-        const errorMessage = error.message || "Failed to delete group.";
+        const errorMessage = (error instanceof Error ? error.message : 'Unknown error') || "Failed to delete group.";
         toast.error(errorMessage);
       }
     }
@@ -434,9 +434,9 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       get().addOrUpdateConversation(conv);
       set({ activeId: conv.id, isSidebarOpen: false });
       return conv.id;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to start conversation:", error);
-      throw new Error(`Failed to establish conversation. ${error.message || ''}`);
+      throw new Error(`Failed to establish conversation. ${(error instanceof Error ? error.message : 'Unknown error') || ''}`);
     }
   },
 
@@ -618,10 +618,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         });
         return { conversations: sortConversations(updatedConversations, useAuthStore.getState().user?.id) };
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to toggle pinned conversation", error);
       // Show error toast
-      const errorMessage = error.message || "Failed to toggle pinned conversation.";
+      const errorMessage = (error instanceof Error ? error.message : 'Unknown error') || "Failed to toggle pinned conversation.";
       toast.error(errorMessage);
       // If the API call fails, revert the optimistic update
       set(state => {

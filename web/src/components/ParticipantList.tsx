@@ -30,8 +30,8 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
         body: JSON.stringify({ role: newRole }),
       });
       toast.success(`${profile.name} is now ${newRole.toLowerCase()}.`);
-    } catch (error: any) {
-      toast.error(`Failed to change role: ${error.message || 'Unknown error'}`);
+    } catch (error: unknown) {
+      toast.error(`Failed to change role: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`);
     }
   };
 
@@ -46,8 +46,8 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
             method: 'DELETE',
           });
           toast.success(`${profile.name} removed from group.`);
-        } catch (error: any) {
-          toast.error(`Failed to remove participant: ${error.message || 'Unknown error'}`);
+        } catch (error: unknown) {
+          toast.error(`Failed to remove participant: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`);
         }
       }
     );
@@ -63,8 +63,8 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
         await blockUser(participant.id);
         toast.success(`${profile.name} blocked.`);
       }
-    } catch (error: any) {
-      toast.error(`Failed to ${isBlocked ? 'unblock' : 'block'} user: ${error.message || 'Unknown error'}`);
+    } catch (error: unknown) {
+      toast.error(`Failed to ${isBlocked ? 'unblock' : 'block'} user: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`);
     }
   };
 

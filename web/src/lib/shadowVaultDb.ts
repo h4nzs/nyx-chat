@@ -103,11 +103,11 @@ export class NyxShadowVault extends Dexie {
         }
 
         // Fix: Persist sender info if it was hydrated, otherwise fallback to existing
-        const mSender = m.sender as any;
+        const mSender = m.sender as { name?: string; username?: string; avatarUrl?: string };
         const hasValidName = mSender?.name && mSender.name !== 'Unknown' && mSender.name !== 'Encrypted User';
         
         if (hasValidName) {
-            encryptedSenderName = await encryptVaultText(mSender.name);
+            encryptedSenderName = (await encryptVaultText(mSender.name as string)) || undefined;
             if (mSender.username) {
                 encryptedSenderUsername = await encryptVaultText(mSender.username);
             }
@@ -191,13 +191,13 @@ export class NyxShadowVault extends Dexie {
               name: decryptedSenderName,
               username: decryptedSenderUsername,
               avatarUrl: decryptedSenderAvatarUrl
-          } as any,
+          } as unknown as Message['sender'],
           isViewOnce: r.isViewOnce,
           isDeletedLocal: r.isDeletedLocal
         });
       }
       return messages;
-    } catch (e) {
+    } catch (e: unknown) {
       console.error("Vault Query Error:", e);
       return [];
     }

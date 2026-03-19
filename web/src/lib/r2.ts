@@ -24,10 +24,10 @@ export async function uploadToR2(
         fileSize: file.size
       })
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Tangani error dari server jika ukuran file melebihi batas
-    if (error.message && error.message.includes('File too large')) {
-      throw new Error(error.message);
+    if ((error instanceof Error ? error.message : 'Unknown error') && (error instanceof Error ? error.message : 'Unknown error').includes('File too large')) {
+      throw new Error((error instanceof Error ? error.message : 'Unknown error'));
     }
     throw error;
   }

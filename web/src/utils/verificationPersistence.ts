@@ -20,15 +20,16 @@ function isBrowserWithLocalStorage(): boolean {
 /**
  * Validate that the parsed value has the expected shape
  */
-function isValidVerificationState(obj: any): obj is VerificationState {
+function isValidVerificationState(obj: unknown): obj is VerificationState {
+  const o = obj as Record<string, unknown>;
   return obj !== null &&
          typeof obj === 'object' &&
-         typeof obj.userId === 'string' &&
-         typeof obj.email === 'string' &&
-         typeof obj.timestamp === 'number' &&
-         !isNaN(obj.timestamp) &&
-         obj.timestamp > 0 &&
-         (obj.phrase === undefined || typeof obj.phrase === 'string');
+         typeof o.userId === 'string' &&
+         typeof o.email === 'string' &&
+         typeof o.timestamp === 'number' &&
+         !isNaN(o.timestamp as number) &&
+         (o.timestamp as number) > 0 &&
+         (o.phrase === undefined || typeof o.phrase === 'string');
 }
 
 /**

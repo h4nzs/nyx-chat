@@ -88,8 +88,8 @@ const AddParticipantModal = ({ conversationId, onClose }: {
       });
       toast.success('Participants added successfully!');
       onClose();
-    } catch (error: any) {
-      toast.error(`Failed to add participants: ${error.message || 'Unknown error'}`);
+    } catch (error: unknown) {
+      toast.error(`Failed to add participants: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`);
     } finally {
       setIsLoading(false);
     }

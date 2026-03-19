@@ -65,8 +65,8 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
       if (id) {
         onStarted(id);
       }
-    } catch (e: any) {
-      toast.error(e.message || "Failed to start conversation.");
+    } catch (e: unknown) {
+      toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to start conversation.");
     } finally {
       setLoadingId(null);
     }

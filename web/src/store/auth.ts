@@ -247,7 +247,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         } else {
           throw new Error("No valid session.");
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.log("Bootstrap failed (No session):", error);
         privateKeysCache = null;
         set({ user: null, accessToken: null, blockedUserIds: [] });
@@ -310,7 +310,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
         try { await resetOneTimePreKeys(); } catch (e) { console.error("Reset OTPK failed:", e); }
         connectSocket();
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error("Login error:", error);
         set({ user: null, accessToken: null });
         throw error;
@@ -454,10 +454,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         toast.success('Avatar uploaded! (Profile update required)', { id: toastId });
         // NOTE: We do not call API to save avatarUrl directly anymore.
         // The caller must update their local profile JSON and call updateProfile.
-        return fileUrl as any; // Returning the URL so caller can use it
-      } catch (e: any) {
+        return fileUrl; // Returning the URL so caller can use it
+      } catch (e: unknown) {
         console.error(e);
-        toast.error(`Update failed: ${e.message}`, { id: toastId });
+        toast.error(`Update failed: ${(e instanceof Error ? e.message : 'Unknown error')}`, { id: toastId });
         throw e;
       }
     },
@@ -495,8 +495,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         await authFetch(`/api/users/${userId}/block`, { method: 'POST' });
         toast.success('User blocked', { id: toastId });
         set(state => ({ blockedUserIds: [...state.blockedUserIds, userId] }));
-      } catch (error: any) {
-        const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
+      } catch (error: unknown) {
+        const errorDetails = typeof error === 'object' && error !== null && 'details' in error ? (error as Record<string, unknown>).details : undefined;
+        const errorMsg = errorDetails ? JSON.parse(String(errorDetails)).error : (error instanceof Error ? error.message : 'Unknown error');
         toast.error(`Block failed: ${errorMsg}`, { id: toastId });
         throw error;
       }
@@ -508,8 +509,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         await authFetch(`/api/users/${userId}/block`, { method: 'DELETE' });
         toast.success('User unblocked', { id: toastId });
         set(state => ({ blockedUserIds: state.blockedUserIds.filter(id => id !== userId) }));
-      } catch (error: any) {
-        const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
+      } catch (error: unknown) {
+        const errorDetails = typeof error === 'object' && error !== null && 'details' in error ? (error as Record<string, unknown>).details : undefined;
+        const errorMsg = errorDetails ? JSON.parse(String(errorDetails)).error : (error instanceof Error ? error.message : 'Unknown error');
         toast.error(`Unblock failed: ${errorMsg}`, { id: toastId });
         throw error;
       }
@@ -528,11 +530,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     silentRefresh: async () => {
       try {
         const { api } = await import('@lib/api');
-        const data = await api('/api/auth/refresh', {
+        const data = await api<Record<string, unknown>>('/api/auth/refresh', {
           method: 'POST',
         });
         
-        if (data && data.accessToken) {
+        if (data && typeof data === 'object' && 'accessToken' in data && typeof data.accessToken === 'string') {
           set({ accessToken: data.accessToken });
           return true;
         }

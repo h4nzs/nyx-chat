@@ -86,9 +86,9 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
           objectUrl = URL.createObjectURL(decryptedBlob);
           setDecryptedUrl(objectUrl);
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error("Lightbox decryption failed:", e);
-        if (isMounted) setError(e.message || "Failed to decrypt image.");
+        if (isMounted) setError((e instanceof Error ? e.message : 'Unknown error') || "Failed to decrypt image.");
       } finally {
         if (isMounted) setIsLoading(false);
       }

@@ -64,8 +64,8 @@ export default function AdminDashboard() {
           });
           toast.success(`User @${user.username} unbanned!`);
           loadAllData();
-        } catch (e: any) {
-          toast.error(e.message || "Failed to unban user.");
+        } catch (e: unknown) {
+          toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to unban user.");
         }
       }
     );

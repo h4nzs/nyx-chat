@@ -1,0 +1,499 @@
+
+> nyx-web@2.5.0 lint /home/kenz/nyx-chat/web
+> eslint .
+
+
+/home/kenz/nyx-chat/web/src/App.tsx
+  52:10  warning  'initWebRTCListeners' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/AddParticipantModal.tsx
+  91:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/AuthForm.tsx
+  31:9  warning  'emailOrUsernameIsValid' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/BanUserModal.tsx
+  40:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/CallOverlay.tsx
+   9:25   warning  'userId' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+   9:128  warning  Unexpected any. Specify a different type                                  @typescript-eslint/no-explicit-any
+  76:26   warning  'setIsSpeakerphone' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/ChatList.tsx
+   50:9   warning  'handleLockVault' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  179:50  warning  Unexpected any. Specify a different type              @typescript-eslint/no-explicit-any
+  388:11  warning  'showConfirm' is assigned a value but never used      @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/ChatWindow.tsx
+    1:31  warning  'ChangeEvent' is defined but never used            @typescript-eslint/no-unused-vars
+   13:8   warning  'useDynamicIslandStore' is defined but never used  @typescript-eslint/no-unused-vars
+   71:50  warning  Unexpected any. Specify a different type           @typescript-eslint/no-explicit-any
+  222:9   warning  'clearSearch' is assigned a value but never used   @typescript-eslint/no-unused-vars
+  227:30  warning  Unexpected any. Specify a different type           @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/CommandPalette.tsx
+  4:10  warning  'FiSearch' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/ContextMenu.tsx
+  105:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  106:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  110:39  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/CreateStoryModal.tsx
+   13:68  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  226:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/DynamicIsland.tsx
+   6:10  warning  'FiFile' is defined but never used                     @typescript-eslint/no-unused-vars
+  10:9   warning  'openConversation' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  13:53  warning  Unexpected any. Specify a different type               @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/EditGroupInfoModal.tsx
+  29:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/GroupInfoPanel.tsx
+   83:16  warning  'err' is defined but never used                                             @typescript-eslint/no-unused-vars
+   90:65  warning  'progress' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  104:21  warning  Unexpected any. Specify a different type                                    @typescript-eslint/no-explicit-any
+  117:21  warning  Unexpected any. Specify a different type                                    @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/ImageEditorModal.tsx
+  46:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/LazyImage.tsx
+    8:10  warning  'FiClock' is defined but never used         @typescript-eslint/no-unused-vars
+   24:10  warning  'error' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  137:19  warning  Unexpected any. Specify a different type    @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/Lightbox.tsx
+  89:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/LinkPreviewCard.tsx
+  49:16  warning  'e' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/MarkdownMessage.tsx
+  18:18  warning  'className' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  18:51  warning  Unexpected any. Specify a different type                                     @typescript-eslint/no-explicit-any
+  25:29  warning  Unexpected any. Specify a different type                                     @typescript-eslint/no-explicit-any
+  32:15  warning  'node' is defined but never used. Allowed unused args must match /^_/u       @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/MessageBubble.tsx
+   20:52  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+   46:18  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+   49:96  warning  'participants' is assigned a value but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  212:66  warning  Unexpected any. Specify a different type                                                 @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/MessageInput.tsx
+    1:75  warning  'lazy' is defined but never used                        @typescript-eslint/no-unused-vars
+    3:26  warning  'FiSquare' is defined but never used                    @typescript-eslint/no-unused-vars
+   26:17  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+   30:39  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+   30:49  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+   67:56  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+  136:21  warning  'setEditingMessage' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  168:78  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+  370:71  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+  533:31  warning  Unexpected any. Specify a different type                @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/MessageItem.tsx
+    1:35  warning  'useState' is defined but never used                                            @typescript-eslint/no-unused-vars
+    2:24  warning  'Conversation' is defined but never used                                        @typescript-eslint/no-unused-vars
+   22:7   warning  'MessageStatusIcon' is assigned a value but never used                          @typescript-eslint/no-unused-vars
+   80:42  warning  'participants' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+   98:52  warning  Unexpected any. Specify a different type                                        @typescript-eslint/no-explicit-any
+  167:16  warning  'e' is defined but never used                                                   @typescript-eslint/no-unused-vars
+  213:30  warning  Unexpected any. Specify a different type                                        @typescript-eslint/no-explicit-any
+  226:48  warning  Unexpected any. Specify a different type                                        @typescript-eslint/no-explicit-any
+  245:16  warning  Unexpected any. Specify a different type                                        @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/MessageSkeleton.tsx
+  1:10  warning  'motion' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/NewMessageToast.tsx
+  12:66  warning  'conversationId' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/NotificationPopover.tsx
+  6:61  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/ParticipantList.tsx
+  33:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  49:25  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  66:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  99:39  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/PasswordPromptModal.tsx
+   4:10  warning  'useKeychainStore' is defined but never used    @typescript-eslint/no-unused-vars
+  12:10  warning  'isLoading' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  13:10  warning  'error' is assigned a value but never used      @typescript-eslint/no-unused-vars
+  44:14  warning  'e' is defined but never used                   @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/ProtectedRoute.tsx
+  3:10  warning  'Spinner' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/RecoveryPhraseModal.tsx
+  34:14  warning  'err' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/ReportBugModal.tsx
+  4:25  warning  'FiX' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/ReportUserModal.tsx
+  30:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/ScanQRModal.tsx
+   5:8   warning  'toast' is defined but never used  @typescript-eslint/no-unused-vars
+  35:20  warning  'e' is defined but never used      @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/StartNewChat.tsx
+  68:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/StoryTray.tsx
+   25:42  warning  Unexpected any. Specify a different type                                @typescript-eslint/no-explicit-any
+  143:21  warning  'text' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/StoryViewer.tsx
+   13:56  warning  'onReply' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+   33:48  warning  Unexpected any. Specify a different type                                   @typescript-eslint/no-explicit-any
+  158:14  warning  'e' is defined but never used                                              @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/SystemInitModal.tsx
+  55:14  warning  'e' is defined but never used  @typescript-eslint/no-unused-vars
+  66:14  warning  'e' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/TypingIndicator.tsx
+  24:11  warning  'participant' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/components/UserInfoModal.tsx
+  102:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  118:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/UserInfoPanel.tsx
+  90:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/components/VoiceMessagePlayer.tsx
+  73:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/hooks/usePushNotifications.ts
+  115:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/lib/api.ts
+   27:22  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   56:31  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   97:14  warning  'e' is defined but never used             @typescript-eslint/no-unused-vars
+  179:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/lib/biometricUnlock.ts
+  28:53  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  28:91  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  32:24  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  43:36  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  74:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  74:78  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  77:22  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  92:43  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/lib/crypto-worker-proxy.ts
+   23:58   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   23:86   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   35:49   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   58:68   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   66:96   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   67:23   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  314:95   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  314:104  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  326:13   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  329:65   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  329:83   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  329:94   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  351:91   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  351:119  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  368:76   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  369:62   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  369:80   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  369:91   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  389:36   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/lib/fileUtils.ts
+  47:12  warning  '_error' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/lib/keychainDb.ts
+   36:29  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   44:18  warning  '_e' is defined but never used            @typescript-eslint/no-unused-vars
+  206:74  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  216:73  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  534:8   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  535:10  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  588:16  warning  '_e' is defined but never used            @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/lib/nukeProtocol.ts
+  20:14  warning  '_e' is defined but never used  @typescript-eslint/no-unused-vars
+  31:18  warning  '_e' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/lib/r2.ts
+  27:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/lib/shadowVaultDb.ts
+   59:12  warning  '_e' is defined but never used            @typescript-eslint/no-unused-vars
+  106:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  194:16  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  252:14  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  256:14  warning  '_e' is defined but never used            @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/lib/socket.ts
+   30:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  163:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  316:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  343:72  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/lib/sodiumInitializer.ts
+  26:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/lib/storyCrypto.ts
+  11:52  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  34:97  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/lib/webrtc.ts
+   65:16  warning  'e' is defined but never used             @typescript-eslint/no-unused-vars
+  136:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  144:78  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  165:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  166:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  198:31  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  200:24  warning  'pc' is assigned a value but never used   @typescript-eslint/no-unused-vars
+  212:15  warning  'pc' is assigned a value but never used   @typescript-eslint/no-unused-vars
+  267:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/pages/AdminDashboard.tsx
+  22:42  warning  Unexpected any. Specify a different type                               @typescript-eslint/no-explicit-any
+  31:19  warning  Unexpected any. Specify a different type                               @typescript-eslint/no-explicit-any
+  32:15  warning  'err' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  32:20  warning  Unexpected any. Specify a different type                               @typescript-eslint/no-explicit-any
+  67:21  warning  Unexpected any. Specify a different type                               @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/pages/Chat.tsx
+  18:9  warning  'navigate' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/pages/ConnectPage.tsx
+  65:26  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  76:16  warning  'e' is defined but never used             @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/pages/KeyManagementPage.tsx
+   2:27  warning  'FiRefreshCw' is defined but never used                      @typescript-eslint/no-unused-vars
+  10:10  warning  'api' is defined but never used                              @typescript-eslint/no-unused-vars
+  15:11  warning  'logout' is assigned a value but never used                  @typescript-eslint/no-unused-vars
+  42:23  warning  Unexpected any. Specify a different type                     @typescript-eslint/no-explicit-any
+  61:15  warning  'encryptionPublicKeyB64' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  62:15  warning  'signingPublicKeyB64' is assigned a value but never used     @typescript-eslint/no-unused-vars
+  75:27  warning  Unexpected any. Specify a different type                     @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/pages/LandingPage.tsx
+  3:13  warning  'FiLock' is defined but never used           @typescript-eslint/no-unused-vars
+  3:21  warning  'FiKey' is defined but never used            @typescript-eslint/no-unused-vars
+  3:28  warning  'FiSmartphone' is defined but never used     @typescript-eslint/no-unused-vars
+  4:3   warning  'FiChevronsLeft' is defined but never used   @typescript-eslint/no-unused-vars
+  4:19  warning  'FiChevronsRight' is defined but never used  @typescript-eslint/no-unused-vars
+  7:18  warning  'useMotionValue' is defined but never used   @typescript-eslint/no-unused-vars
+  7:34  warning  'useTransform' is defined but never used     @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/pages/Login.tsx
+    8:10  warning  'startAuthentication' is defined but never used  @typescript-eslint/no-unused-vars
+   68:19  warning  Unexpected any. Specify a different type         @typescript-eslint/no-explicit-any
+   78:33  warning  Unexpected any. Specify a different type         @typescript-eslint/no-explicit-any
+  171:30  warning  'e' is defined but never used                    @typescript-eslint/no-unused-vars
+  184:19  warning  Unexpected any. Specify a different type         @typescript-eslint/no-explicit-any
+  241:22  warning  'e' is defined but never used                    @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/pages/MigrationReceivePage.tsx
+   4:10  warning  'FiSmartphone' is defined but never used       @typescript-eslint/no-unused-vars
+  16:9   warning  'navigate' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  75:43  warning  Unexpected any. Specify a different type       @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/pages/MigrationSendPage.tsx
+   3:10  warning  'FiChevronLeft' is defined but never used  @typescript-eslint/no-unused-vars
+   3:25  warning  'FiCamera' is defined but never used       @typescript-eslint/no-unused-vars
+  43:16  warning  'e' is defined but never used              @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/pages/NotFoundPage.tsx
+  2:18  warning  'FiAlertCircle' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/pages/PrivacyPage.tsx
+  6:78  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/pages/ProfilePage.tsx
+   7:64  warning  'FiCheck' is defined but never used                                  @typescript-eslint/no-unused-vars
+  20:21  warning  'updateProfile' is assigned a value but never used                   @typescript-eslint/no-unused-vars
+  20:36  warning  'updateAvatar' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+  29:10  warning  'isLoading' is assigned a value but never used                       @typescript-eslint/no-unused-vars
+  29:21  warning  'setIsLoading' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+  31:9   warning  'fileInputRef' is assigned a value but never used                    @typescript-eslint/no-unused-vars
+  69:9   warning  'handleSave' is assigned a value but never used                      @typescript-eslint/no-unused-vars
+  74:9   warning  'handleAvatarUpload' is assigned a value but never used              @typescript-eslint/no-unused-vars
+  74:37  warning  'e' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/pages/Register.tsx
+  69:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  78:33  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  95:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/pages/Restore.tsx
+  71:20  warning  'err' is defined but never used           @typescript-eslint/no-unused-vars
+  80:21  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/pages/SessionManagerPage.tsx
+   18:68  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   79:44  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   85:44  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   87:48  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  100:16  warning  'error' is defined but never used         @typescript-eslint/no-unused-vars
+  115:14  warning  'error' is defined but never used         @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/pages/SettingsPage.tsx
+   13:61   warning  'FiBell' is defined but never used                    @typescript-eslint/no-unused-vars
+   14:25   warning  'FiDatabase' is defined but never used                @typescript-eslint/no-unused-vars
+   16:10   warning  'startRegistration' is defined but never used         @typescript-eslint/no-unused-vars
+   65:144  warning  Unexpected any. Specify a different type              @typescript-eslint/no-explicit-any
+   93:117  warning  Unexpected any. Specify a different type              @typescript-eslint/no-explicit-any
+  116:81   warning  'logout' is assigned a value but never used           @typescript-eslint/no-unused-vars
+  116:89   warning  'emergencyLogout' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  164:57   warning  Unexpected any. Specify a different type              @typescript-eslint/no-explicit-any
+  184:21   warning  Unexpected any. Specify a different type              @typescript-eslint/no-explicit-any
+  266:21   warning  Unexpected any. Specify a different type              @typescript-eslint/no-explicit-any
+  285:20   warning  'e' is defined but never used                         @typescript-eslint/no-unused-vars
+  305:33   warning  Unexpected any. Specify a different type              @typescript-eslint/no-explicit-any
+  327:21   warning  Unexpected any. Specify a different type              @typescript-eslint/no-explicit-any
+  364:21   warning  Unexpected any. Specify a different type              @typescript-eslint/no-explicit-any
+  429:20   warning  'e' is defined but never used                         @typescript-eslint/no-unused-vars
+  438:25   warning  Unexpected any. Specify a different type              @typescript-eslint/no-explicit-any
+  750:31   warning  'err' is defined but never used                       @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/store/auth.test.ts
+  35:23  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  37:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/store/auth.ts
+  143:16  warning  'e' is defined but never used             @typescript-eslint/no-unused-vars
+  250:23  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  313:23  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  357:18  warning  '_e' is defined but never used            @typescript-eslint/no-unused-vars
+  449:69  warning  '_e' is defined but never used            @typescript-eslint/no-unused-vars
+  457:27  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  458:19  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  498:23  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  511:23  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/store/callStore.ts
+   7:16  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  16:62  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  17:71  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  21:28  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  80:23  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/store/conversation.ts
+  263:43  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+  276:42  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+  280:53  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+  291:20  warning  '_e' is defined but never used             @typescript-eslint/no-unused-vars
+  299:47  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+  325:69  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+  326:67  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+  371:21  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+  381:21  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+  437:21  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+  507:13  warning  'role' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  522:56  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+  621:21  warning  Unexpected any. Specify a different type   @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/store/message.test.ts
+    6:33  warning  'Message' is defined but never used       @typescript-eslint/no-unused-vars
+  110:25  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/store/message.ts
+   138:31  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   164:34  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   183:34  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   202:34  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   284:25  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   353:20  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   372:18  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   393:18  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   432:12  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   445:12  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   474:12  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   660:22  warning  '_e' is defined but never used              @typescript-eslint/no-unused-vars
+   915:78  warning  'e' is defined but never used               @typescript-eslint/no-unused-vars
+   997:26  warning  'e' is defined but never used               @typescript-eslint/no-unused-vars
+  1019:60  warning  Unexpected any. Specify a different type    @typescript-eslint/no-explicit-any
+  1020:61  warning  Unexpected any. Specify a different type    @typescript-eslint/no-explicit-any
+  1421:11  warning  'state' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  1549:25  warning  Unexpected any. Specify a different type    @typescript-eslint/no-explicit-any
+  1689:53  warning  Unexpected any. Specify a different type    @typescript-eslint/no-explicit-any
+  1689:78  warning  Unexpected any. Specify a different type    @typescript-eslint/no-explicit-any
+  1699:28  warning  Unexpected any. Specify a different type    @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/store/messageInput.ts
+   23:22  warning  Unexpected any. Specify a different type           @typescript-eslint/no-explicit-any
+   64:17  warning  Unexpected any. Specify a different type           @typescript-eslint/no-explicit-any
+  121:16  warning  '_error' is defined but never used                 @typescript-eslint/no-unused-vars
+  168:11  warning  'conversation' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  197:73  warning  '_e' is defined but never used                     @typescript-eslint/no-unused-vars
+  263:21  warning  Unexpected any. Specify a different type           @typescript-eslint/no-explicit-any
+  289:11  warning  'conversation' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  376:21  warning  Unexpected any. Specify a different type           @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/store/messageSearch.ts
+  5:18  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/store/story.ts
+  104:77  warning  '_e' is defined but never used            @typescript-eslint/no-unused-vars
+  147:60  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  153:55  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  153:91  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  206:17  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/store/verification.ts
+  21:28  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  23:49  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/sw.ts
+  147:22  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/types/declarations.d.ts
+  13:35  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  18:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  20:37  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  20:45  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  23:31  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  23:39  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  24:46  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  25:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  29:20  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/types/socket.d.ts
+   12:86  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   17:93  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   58:79  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  106:79  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/utils/crypto.ts
+  251:61   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  298:91   warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  385:134  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  721:20   warning  '_e' is defined but never used            @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/utils/feedback.ts
+  6:14  warning  '_e' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/kenz/nyx-chat/web/src/utils/retry.ts
+  2:18  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/utils/verificationPersistence.ts
+  23:40  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/kenz/nyx-chat/web/src/workers/crypto.worker.ts
+   118:16  warning  '_e' is defined but never used            @typescript-eslint/no-unused-vars
+   156:16  warning  '_e' is defined but never used            @typescript-eslint/no-unused-vars
+  1107:28  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  1260:28  warning  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+✖ 322 problems (0 errors, 322 warnings)
+

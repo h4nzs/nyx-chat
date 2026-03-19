@@ -134,7 +134,7 @@ export default function LazyImage({
           setImageUrl(objectUrl);
           setDecryptionStatus('succeeded');
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error("Image load/decrypt failed:", e);
         if (isMounted) {
           setError("Decryption failed");

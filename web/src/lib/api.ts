@@ -24,7 +24,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
-    public details?: any
+    public details?: unknown
   ) {
     super(message);
     this.name = "ApiError";
@@ -53,7 +53,7 @@ export async function getCsrfToken(): Promise<string> {
   }
 }
 
-export async function api<T = any>(
+export async function api<T = unknown>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
@@ -176,7 +176,7 @@ export function handleApiError(e: unknown): string {
 }
 
 // Upload menggunakan Axios (untuk Progress Bar)
-export async function apiUpload<T = any>({
+export async function apiUpload<T = unknown>({
   path,
   formData,
   onUploadProgress,

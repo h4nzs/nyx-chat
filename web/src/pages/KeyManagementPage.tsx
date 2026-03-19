@@ -39,8 +39,8 @@ export default function KeyManagementPage() {
         setRecoveryPhrase(phrase);
         setShowRecoveryModal(true);
 
-      } catch (error: any) {
-        toast.error(error.message || "Operation failed.");
+      } catch (error: unknown) {
+        toast.error((error instanceof Error ? error.message : 'Unknown error') || "Operation failed.");
       } finally {
         setIsProcessing(false);
       }
@@ -72,8 +72,8 @@ export default function KeyManagementPage() {
               window.location.reload();
             }, 1000);
 
-          } catch (error: any) {
-            toast.error(error.message || "Rotation failed.");
+          } catch (error: unknown) {
+            toast.error((error instanceof Error ? error.message : 'Unknown error') || "Rotation failed.");
           } finally {
             setIsProcessing(false);
           }

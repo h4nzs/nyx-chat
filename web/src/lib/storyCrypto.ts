@@ -8,7 +8,7 @@ export async function generateStoryKey(): Promise<string> {
   return btoa(String.fromCharCode(...new Uint8Array(exported)));
 }
 
-export async function encryptStoryPayload(payload: any, base64Key: string): Promise<string> {
+export async function encryptStoryPayload(payload: unknown, base64Key: string): Promise<string> {
   const rawKey = Uint8Array.from(atob(base64Key), c => c.charCodeAt(0));
   const cryptoKey = await window.crypto.subtle.importKey(
     'raw', rawKey, { name: 'AES-GCM' }, false, ['encrypt']
@@ -31,7 +31,7 @@ export async function encryptStoryPayload(payload: any, base64Key: string): Prom
   return btoa(String.fromCharCode(...combined));
 }
 
-export async function decryptStoryPayload(encryptedDataB64: string, base64Key: string): Promise<any> {
+export async function decryptStoryPayload(encryptedDataB64: string, base64Key: string): Promise<unknown> {
   const rawKey = Uint8Array.from(atob(base64Key), c => c.charCodeAt(0));
   const cryptoKey = await window.crypto.subtle.importKey(
     'raw', rawKey, { name: 'AES-GCM' }, false, ['decrypt']

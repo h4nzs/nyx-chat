@@ -27,7 +27,7 @@ const handleKeyRotation = async (conversationId: string) => {
       await rotateGroupKey(conversationId);
       useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: false });
       return; 
-    } catch (err: any) {
+    } catch (err: unknown) {
       attempt++;
       console.error(`[socket] Key rotation attempt ${attempt} failed for ${conversationId}:`, err);
       if (attempt >= MAX_RETRIES) {
@@ -160,7 +160,7 @@ export function getSocket() {
         // e.g. showNotification(decryptedMessage.sender.name, decryptedMessage.content || "Sent a file");
         
         socket?.emit('message:ack_delivered', { messageId: newMessage.id, conversationId: newMessage.conversationId });
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error("Failed to process incoming message", e);
       }
     });
@@ -313,7 +313,7 @@ export function connectSocket() {
   if (socket) {
     // 3. UPDATE TOKEN DI SOCKET AUTH (FIX UTAMA)
     // Ini memastikan socket menggunakan token baru hasil refresh, bukan token null saat init
-    (socket.auth as any) = { token };
+    socket.auth = { token };
 
     // 4. Connect hanya jika belum connect
     if (!socket.connected) {
@@ -340,7 +340,7 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
   getSocket()?.emit('session:fulfill_response', payload);
 }
 
-export function emitGroupKeyDistribution(conversationId: string, keys: any[]) {
+export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string }[]) {
   getSocket()?.emit('messages:distribute_keys', { conversationId, keys });
 }
 

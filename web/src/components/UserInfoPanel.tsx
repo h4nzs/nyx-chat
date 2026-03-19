@@ -87,8 +87,8 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
       setSafetyNumber(sn);
       setShowSafetyModal(true);
 
-    } catch (e: any) {
-      setError(e.message || "Failed to generate safety number.");
+    } catch (e: unknown) {
+      setError((e instanceof Error ? e.message : 'Unknown error') || "Failed to generate safety number.");
     }
   };
 

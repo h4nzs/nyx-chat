@@ -66,8 +66,8 @@ export default function Register() {
       setStep('biometric');
       toast.success("Identity initialized. Setup security.");
       
-    } catch (err: any) {
-      setError(err.message || "Registration failed");
+    } catch (err: unknown) {
+      setError((err instanceof Error ? err.message : 'Unknown error') || "Registration failed");
     }
   }
 
@@ -92,11 +92,11 @@ export default function Register() {
       } else {
         throw new Error("Verification failed");
       }
-    } catch (error: any) {
-      if (error.name === 'NotAllowedError') {
+    } catch (error: unknown) {
+      if ((error as Error).name === 'NotAllowedError') {
         toast.error("Biometric scan cancelled.");
       } else {
-        toast.error(`Error: ${error.message}`);
+        toast.error(`Error: ${(error instanceof Error ? error.message : 'Unknown error')}`);
       }
     } finally {
       setIsVerifyingBio(false);

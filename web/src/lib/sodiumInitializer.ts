@@ -23,7 +23,7 @@ export async function initializeSodium(): Promise<void> {
     .then(() => {
       isSodiumInitialized = true;
     })
-    .catch((error: any) => {
+    .catch((error: unknown) => {
       console.error('Failed to initialize libsodium:', error);
       // Reset promise to allow retry on next call
       sodiumInitPromise = null;

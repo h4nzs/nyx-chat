@@ -26,8 +26,8 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
       });
       toast.success('Group info updated!');
       onClose();
-    } catch (error: any) {
-      toast.error(`Failed to update: ${error.message || 'Unknown error'}`);
+    } catch (error: unknown) {
+      toast.error(`Failed to update: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`);
     } finally {
       setIsLoading(false);
     }

@@ -62,8 +62,8 @@ export default function ConnectPage() {
                 const convId = await startConversation(targetUser.id);
                 toast.success('Connected!', { id: 'connect' });
                 navigate(`/chat/${convId}`);
-             } catch (e: any) {
-                toast.error(e.message || "Failed to start conversation.", { id: 'connect' });
+             } catch (e: unknown) {
+                toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to start conversation.", { id: 'connect' });
                 navigate('/chat');
              }
           },

@@ -43,9 +43,9 @@ export default function ImageEditorModal({ file, onSave, onCancel }: { file: Fil
       
       const newFile = new File([u8arr], `edited_${file.name}`, { type: mime });
       onSave(newFile);
-    } catch (error: any) {
+    } catch (error: unknown) {
       // Fallback if library strictly throws when empty
-      if (error === 'No stroke found!' || error?.message === 'No stroke found!') {
+      if (error === 'No stroke found!' || (error instanceof Error ? error.message : null) === 'No stroke found!') {
         onSave(file);
       } else {
         toast.error("Failed to save image");

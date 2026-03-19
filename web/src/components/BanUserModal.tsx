@@ -37,8 +37,8 @@ export default function BanUserModal({ isOpen, onClose, targetUserId, onSuccess 
       onClose();
       setReason('');
       if (!targetUserId) setUserId('');
-    } catch (e: any) {
-      toast.error(e.message || "Failed to ban user.");
+    } catch (e: unknown) {
+      toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to ban user.");
     } finally {
       setLoading(false);
     }

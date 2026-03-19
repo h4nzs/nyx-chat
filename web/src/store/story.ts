@@ -67,7 +67,7 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
           const base64Key = await getStoryKey(story.id);
           if (base64Key) {
             const decryptedData = await decryptStoryPayload(story.encryptedPayload, base64Key);
-            return { ...story, decryptedData };
+            return { ...story, decryptedData: decryptedData as any };
           }
         } catch (err) {
           console.error(`Failed to decrypt story ${story.id}`, err);
@@ -144,15 +144,15 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       
       conversations.forEach(c => {
         if (!c.isGroup && c.participants) {
-          const otherParticipant = c.participants.find((p: any) => {
-            const uId = p.userId || p.user?.id || p.id;
+          const otherParticipant = c.participants.find((p: Record<string, unknown>) => {
+            const uId = p.userId || (p.user as Record<string, unknown>)?.id || p.id;
             return uId !== me?.id;
           });
           
           if (otherParticipant) {
-            const actualUserId = (otherParticipant as any).userId || (otherParticipant as any).user?.id || otherParticipant.id;
+            const actualUserId = (otherParticipant as Record<string, unknown>).userId || ((otherParticipant as Record<string, unknown>).user as Record<string, unknown>)?.id || (otherParticipant as Record<string, unknown>).id;
             if (actualUserId) {
-              userToConvMap.set(actualUserId, c.id);
+              userToConvMap.set(actualUserId as string, c.id);
             }
           }
         }
@@ -203,9 +203,9 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       }));
 
       toast.success('Story posted!', { id: toastId });
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      toast.error(`Failed to post story: ${e.message || 'Unknown error'}`, { id: toastId });
+      toast.error(`Failed to post story: ${(e instanceof Error ? e.message : 'Unknown error') || 'Unknown error'}`, { id: toastId });
     }
   }
 }));

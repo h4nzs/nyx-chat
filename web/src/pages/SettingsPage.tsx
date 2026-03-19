@@ -181,9 +181,9 @@ export default function SettingsPage() {
         
         toast.success("Account obliterated.");
         window.location.replace('/');
-    } catch (error: any) {
+    } catch (error: unknown) {
         setIsDeleting(false);
-        const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
+        const errorMsg = (error as any).details ? JSON.parse((error as any).details).error : (error instanceof Error ? error.message : 'Unknown error');
         toast.error(`Deletion failed: ${errorMsg}`);
     }
   };
@@ -263,8 +263,8 @@ export default function SettingsPage() {
       useProfileStore.getState().decryptAndCache(user!.id, encryptedProfile);
 
       toast.success('Identity Updated');
-    } catch (error: any) {
-      const errorMsg = error.details ? JSON.parse(error.details).error : error.message;
+    } catch (error: unknown) {
+      const errorMsg = (error as any).details ? JSON.parse((error as any).details).error : (error instanceof Error ? error.message : 'Unknown error');
       toast.error(`Update failed: ${errorMsg}`);
     } finally {
       setIsLoading(false);
@@ -324,11 +324,11 @@ export default function SettingsPage() {
       } else {
         throw new Error("Verification failed");
       }
-    } catch (error: any) {
-      if (error.name === 'NotAllowedError') {
+    } catch (error: unknown) {
+      if ((error as Error).name === 'NotAllowedError') {
         toast.error("Scan cancelled.", { id: 'passkey' });
       } else {
-        toast.error(`Error: ${error.message}`, { id: 'passkey' });
+        toast.error(`Error: ${(error instanceof Error ? error.message : 'Unknown error')}`, { id: 'passkey' });
       }
     }
   };
@@ -361,9 +361,9 @@ export default function SettingsPage() {
         if (user) setUser({ ...user, isVerified: true });
       }
       
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      toast.error(`Mining failed: ${error.message}`, { id: toastId });
+      toast.error(`Mining failed: ${(error instanceof Error ? error.message : 'Unknown error')}`, { id: toastId });
     } finally {
       setMiningStatus('idle');
     }
@@ -435,7 +435,7 @@ export default function SettingsPage() {
           
           // Proceed to Absolute Nuke ONLY after server acknowledges session termination
           await executeLocalWipe();
-        } catch (error: any) {
+        } catch (error: unknown) {
           console.error("Emergency eject API failed:", error);
           toast.error("Failed to revoke remote sessions. Check your network connection.", { id: toastId });
           // We abort the local wipe here as requested by the code review

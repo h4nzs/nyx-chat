@@ -1104,7 +1104,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         
         if (!headerDhBytes) throw new Error("Invalid header DH key");
 
-        const skippedKeys: any[] = [];
+        const skippedKeys: { dh?: string; epk?: string; n: number; mk: string }[] = [];
         
         try {
             if (!state.DHr || sodium.compare(headerDhBytes, state.DHr) !== 0) {
@@ -1116,8 +1116,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
                       // When storing skipped keys from a previous chain, state.DHr holds the previous public key.
                       // At this point, we only know its DH value, we don't have its EPK context because we are moving PAST it.
                       // The main logic in crypto.ts will use .epk || .dh, so if epk is undefined it just falls back to dh.
-                      skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
-                      sodium.memzero(mk);
+                      skippedKeys.push({ dh: bytesToB64(state.DHr) || undefined, n: state.Nr, mk: bytesToB64(mk) || '' });                      sodium.memzero(mk);
                       state.Nr += 1;
                    }
                 }
@@ -1158,8 +1157,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
                 const [newCKr, mk] = await kdfChain(state.CKr);
                 sodium.memzero(state.CKr);
                 state.CKr = newCKr;
-                skippedKeys.push({ dh: bytesToB64(state.DHr), n: state.Nr, mk: bytesToB64(mk) });
-                sodium.memzero(mk);
+                skippedKeys.push({ dh: bytesToB64(state.DHr) || undefined, n: state.Nr, mk: bytesToB64(mk) || '' });                sodium.memzero(mk);
                 state.Nr += 1;
             }
             
@@ -1257,12 +1255,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         let currentN = serializedState.N || 0;
         let mk: Uint8Array | null = null;
-        const skippedKeys: any[] = [];
+        const skippedKeys: { dh?: string; epk?: string; n: number; mk: string }[] = [];
 
         // 2. Fast-forward ratchet if receiving out-of-order/newer messages
         while (currentN < header.n) {
            const [nextCK, skippedMK] = await kdfChain(CKBytes);
-           skippedKeys.push({ n: currentN, mk: bytesToB64(skippedMK) });
+           skippedKeys.push({ n: currentN, mk: bytesToB64(skippedMK) || '' });
            sodium.memzero(CKBytes);
            CKBytes = nextCK;
            currentN++;

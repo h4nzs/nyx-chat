@@ -77,12 +77,12 @@ export default function RestorePage() {
       toast.success('Account successfully recovered! Welcome back.');
       navigate('/');
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Restore failed:", error);
-      if (error.message?.includes('mnemonic')) {
+      if ((error instanceof Error ? error.message : 'Unknown error')?.includes('mnemonic')) {
         toast.error("Invalid recovery phrase. Please check for typos.");
       } else {
-        toast.error(error.message || "Recovery failed. Please verify your details.");
+        toast.error((error instanceof Error ? error.message : 'Unknown error') || "Recovery failed. Please verify your details.");
       }
     } finally {
       setIsRestoring(false);

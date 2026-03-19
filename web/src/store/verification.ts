@@ -18,9 +18,9 @@ export const useVerificationStore = create<VerificationState>((set, _get) => ({
     const initialStatus: Record<string, boolean> = {};
     for (const convo of conversations) {
       const peer = convo.participants.find(p => p.id !== localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')!).id : null);
-      if (peer && (peer as any).publicKey) {
+      if (peer && (peer as Record<string, unknown>).publicKey) {
         const storedKey = localStorage.getItem(`${VERIFIED_PREFIX}${convo.id}`);
-        if (storedKey && storedKey === (peer as any).publicKey) {
+        if (storedKey && storedKey === (peer as Record<string, unknown>).publicKey) {
           initialStatus[convo.id] = true;
         }
       }

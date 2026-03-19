@@ -27,8 +27,8 @@ export default function ReportUserModal({ isOpen, onClose, reportedUserId, repor
       toast.success("Report submitted successfully.");
       onClose();
       setReason('');
-    } catch (e: any) {
-      toast.error(e.message || "Failed to submit report.");
+    } catch (e: unknown) {
+      toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to submit report.");
     } finally {
       setLoading(false);
     }

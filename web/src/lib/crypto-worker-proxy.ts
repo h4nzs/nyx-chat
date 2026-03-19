@@ -20,7 +20,7 @@ function toArray(buffer: CryptoBuffer): number[] {
 
 
 // Map untuk nyimpen Promise yang nunggu balasan worker
-const pendingRequests = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>();
+const pendingRequests = new Map<string, { resolve: (val: unknown) => void; reject: (err: unknown) => void }>();
 
 worker.onmessage = (e) => {
   const { id, success, result, error } = e.data;
@@ -32,10 +32,10 @@ worker.onmessage = (e) => {
   }
 };
 
-function sendToWorker<T>(type: string, payload: any): Promise<T> {
+function sendToWorker<T>(type: string, payload: unknown): Promise<T> {
   return new Promise((resolve, reject) => {
     const id = uuidv4();
-    pendingRequests.set(id, { resolve, reject });
+    pendingRequests.set(id, { resolve: resolve as (val: unknown) => void, reject });
     worker.postMessage({ id, type, payload });
   });
 }
@@ -55,7 +55,7 @@ export const deriveKeyFromPassword = async (password: string, salt: CryptoBuffer
  * Mengenkripsi Private Keys (atau data sensitif lain)
  * Output: String (JSON representation of IV + Ciphertext)
  */
-export const encryptWithKey = async (keyBytes: CryptoBuffer, data: any): Promise<string> => {
+export const encryptWithKey = async (keyBytes: CryptoBuffer, data: unknown): Promise<string> => {
   return sendToWorker<string>('ENCRYPT_DATA', { keyBytes: Array.from(keyBytes), data });
 };
 
@@ -63,8 +63,8 @@ export const encryptWithKey = async (keyBytes: CryptoBuffer, data: any): Promise
  * Mendekripsi Data
  * Output: Original Data (Object / String)
  */
-export const decryptWithKey = async (keyBytes: CryptoBuffer, encryptedString: string): Promise<any> => {
-  return sendToWorker<any>('DECRYPT_DATA', { keyBytes: Array.from(keyBytes), encryptedString });
+export const decryptWithKey = async (keyBytes: CryptoBuffer, encryptedString: string): Promise<unknown> => {
+  return sendToWorker<unknown>('DECRYPT_DATA', { keyBytes: Array.from(keyBytes), encryptedString });
 };
 
 
@@ -311,7 +311,7 @@ export function worker_dr_ratchet_encrypt(payload: {
     serializedState: DoubleRatchetState,
     plaintext: CryptoBuffer | string
 }): Promise<{ state: DoubleRatchetState, header: DoubleRatchetHeader, ciphertext: Uint8Array, mk: Uint8Array }> {
-    return sendToWorker<{ state: DoubleRatchetState, header: DoubleRatchetHeader, ciphertext: any, mk: any }>('dr_ratchet_encrypt', {
+    return sendToWorker<{ state: DoubleRatchetState, header: DoubleRatchetHeader, ciphertext: ArrayBuffer, mk: ArrayBuffer }>('dr_ratchet_encrypt', {
         serializedState: payload.serializedState,
         plaintext: typeof payload.plaintext === 'string' ? payload.plaintext : Array.from(payload.plaintext)
     }).then(res => ({
@@ -323,10 +323,10 @@ export function worker_dr_ratchet_encrypt(payload: {
 
 export function worker_dr_ratchet_decrypt(payload: {
     serializedState: DoubleRatchetState,
-    header: any,
+    header: DoubleRatchetHeader,
     ciphertext: Uint8Array
 }): Promise<{ state: DoubleRatchetState, plaintext: Uint8Array, skippedKeys: { dh: string, epk?: string, n: number, mk: string }[], mk: Uint8Array }> {
-    return sendToWorker<{ state: DoubleRatchetState, plaintext: any, skippedKeys: any[], mk: any }>('dr_ratchet_decrypt', {
+    return sendToWorker<{ state: DoubleRatchetState, plaintext: ArrayBuffer, skippedKeys: { dh: string, epk?: string, n: number, mk: string }[], mk: ArrayBuffer }>('dr_ratchet_decrypt', {
         serializedState: payload.serializedState,
         header: payload.header,
         ciphertext: Array.from(payload.ciphertext)
@@ -348,7 +348,7 @@ export async function groupRatchetEncrypt(
   plaintext: string | CryptoBuffer,
   signingPrivateKey: CryptoBuffer
 ): Promise<{ state: GroupRatchetState, header: GroupRatchetHeader, ciphertext: Uint8Array, signature: string, mk: Uint8Array }> {
-  return sendToWorker<{ state: GroupRatchetState, header: GroupRatchetHeader, ciphertext: any, signature: string, mk: any }>('group_ratchet_encrypt', { 
+  return sendToWorker<{ state: GroupRatchetState, header: GroupRatchetHeader, ciphertext: ArrayBuffer, signature: string, mk: ArrayBuffer }>('group_ratchet_encrypt', { 
     serializedState, 
     plaintext: typeof plaintext === 'string' ? plaintext : Array.from(plaintext),
     signingPrivateKey: Array.from(signingPrivateKey) 
@@ -365,8 +365,8 @@ export async function groupRatchetDecrypt(
   ciphertext: CryptoBuffer,
   signature: string,
   senderSigningPublicKey: CryptoBuffer
-): Promise<{ state: GroupRatchetState, plaintext: Uint8Array, skippedKeys: any[], mk: Uint8Array }> {
-  return sendToWorker<{ state: GroupRatchetState, plaintext: any, skippedKeys: any[], mk: any }>('group_ratchet_decrypt', { 
+): Promise<{ state: GroupRatchetState, plaintext: Uint8Array, skippedKeys: { n: number; mk: string }[], mk: Uint8Array }> {
+  return sendToWorker<{ state: GroupRatchetState, plaintext: ArrayBuffer, skippedKeys: { n: number; mk: string }[], mk: ArrayBuffer }>('group_ratchet_decrypt', { 
     serializedState, 
     header, 
     ciphertext: Array.from(ciphertext), 
@@ -386,7 +386,7 @@ export async function groupDecryptSkipped(
   signature: string,
   senderSigningPublicKey: CryptoBuffer
 ): Promise<{ plaintext: Uint8Array }> {
-  return sendToWorker<{ plaintext: any }>('group_decrypt_skipped', {
+  return sendToWorker<{ plaintext: ArrayBuffer }>('group_decrypt_skipped', {
     mk,
     headerN,
     ciphertext: Array.from(ciphertext),

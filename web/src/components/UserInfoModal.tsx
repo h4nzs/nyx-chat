@@ -99,8 +99,8 @@ export default function UserInfoModal() {
       setSafetyNumber(sn);
       setShowSafetyModal(true);
 
-    } catch (e: any) {
-      setError(e.message || "Failed to generate safety number.");
+    } catch (e: unknown) {
+      setError((e instanceof Error ? e.message : 'Unknown error') || "Failed to generate safety number.");
     }
   };
 
@@ -115,8 +115,8 @@ export default function UserInfoModal() {
         body: JSON.stringify({ reportedUserId: user.id, reason })
       });
       toast.success("Report submitted successfully.");
-    } catch (e: any) {
-      toast.error(e.message || "Failed to submit report.");
+    } catch (e: unknown) {
+      toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to submit report.");
     }
   };
 

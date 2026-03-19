@@ -33,7 +33,7 @@ export interface GroupReceiverState {
 // --- GLOBAL WRITE QUEUE ---
 // This ensures that even if multiple async processes try to update the database,
 // they do so in a strict, predictable sequence.
-const dbWriteQueue: Promise<any> = Promise.resolve();
+const dbWriteQueue: Promise<unknown> = Promise.resolve();
 let queueTail = dbWriteQueue;
 
 async function enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
@@ -44,7 +44,7 @@ async function enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
         } catch (_e) {}
         return op();
     })();
-    return queueTail;
+    return queueTail as Promise<T>;
 }
 
 // Cache DB connections by userId
@@ -203,7 +203,7 @@ export async function deleteGroupSenderState(conversationId: string): Promise<vo
 /**
  * Stores a pending X3DH header for a conversation.
  */
-export async function storePendingHeader(conversationId: string, header: any): Promise<void> {
+export async function storePendingHeader(conversationId: string, header: Record<string, unknown>): Promise<void> {
   return enqueueWrite(async () => {
       const db = await getDb();
       await db.put(PENDING_HEADERS_STORE_NAME, header, conversationId);
@@ -213,7 +213,7 @@ export async function storePendingHeader(conversationId: string, header: any): P
 /**
  * Retrieves a pending X3DH header.
  */
-export async function getPendingHeader(conversationId: string): Promise<any | null> {
+export async function getPendingHeader(conversationId: string): Promise<Record<string, unknown> | null> {
   const db = await getDb();
   return (await db.get(PENDING_HEADERS_STORE_NAME, conversationId)) || null;
 }
@@ -531,8 +531,8 @@ export async function clearAllKeys(): Promise<void> {
 }
 
 export interface VaultEntry {
-  key: any;
-  value: any;
+  key: unknown;
+  value: unknown;
 }
 
 /**
@@ -607,7 +607,7 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
             if (storeName === GROUP_SENDER_STATES_STORE || storeName === GROUP_RECEIVER_STATES_STORE) {
                await store.put(item.value);
             } else {
-               await store.put(item.value, item.key);
+               await store.put(item.value, item.key as IDBValidKey);
             }
           }
         }

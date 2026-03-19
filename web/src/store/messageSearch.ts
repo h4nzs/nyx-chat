@@ -1,8 +1,9 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { shadowVault, decryptVaultText } from '@lib/shadowVaultDb';
+import type { Message } from "./conversation";
 
 type State = {
-  searchResults: any[];
+  searchResults: Message[];
   highlightedMessageId: string | null;
   searchQuery: string;
   isSearching: boolean;
@@ -54,7 +55,7 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
         
       // ONLY update if the query hasn't changed while we were decrypting
       if (get().currentSearchToken === token) {
-        set({ searchResults: decryptedResults, isSearching: false });
+        set({ searchResults: decryptedResults as unknown as Message[], isSearching: false });
       }
     } catch (error) {
       console.error("Iron Vault Search failed:", error);

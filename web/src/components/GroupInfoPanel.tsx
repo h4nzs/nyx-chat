@@ -101,9 +101,9 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
 
       toast.success('Avatar updated!', { id: toastId });
       setAvatarCropTarget(null);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Avatar upload failed');
-      toast.error(`Failed to upload avatar: ${error.message || 'Unknown error'}`, { id: toastId });
+      toast.error(`Failed to upload avatar: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`, { id: toastId });
       setAvatarCropTarget(null);
     }
   };
@@ -114,8 +114,8 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; o
       await api(`/api/conversations/${conversation.id}/leave`, { method: 'DELETE' });
       toast.success('You have left the group.', { id: toastId });
       handleClose(); 
-    } catch (error: any) {
-      toast.error(`Failed to leave group: ${error.message || 'Unknown error'}`, { id: toastId });
+    } catch (error: unknown) {
+      toast.error(`Failed to leave group: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`, { id: toastId });
     }
   };
 

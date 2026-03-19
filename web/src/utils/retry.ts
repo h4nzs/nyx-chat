@@ -1,5 +1,5 @@
 export async function retry<T>(fn: () => Promise<T>, retries: number = 3, delay: number = 1000): Promise<T> {
-  let lastError: any;
+  let lastError: unknown;
   
   for (let i = 0; i < retries; i++) {
     try {

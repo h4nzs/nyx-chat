@@ -65,8 +65,8 @@ export default function Login() {
 
       navigate("/chat");
 
-    } catch (err: any) {
-      setError(err.message || "Login failed. Please check your credentials.");
+    } catch (err: unknown) {
+      setError((err instanceof Error ? err.message : 'Unknown error') || "Login failed. Please check your credentials.");
     }
   };
 
@@ -181,22 +181,22 @@ export default function Login() {
 
         navigate("/chat");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Biometric login error:", err);
 
       // Tangani berbagai jenis error WebAuthn
-      if (err.name === 'NotAllowedError' || err.message?.includes('cancelled')) {
+      if ((err as Error).name === 'NotAllowedError' || (err instanceof Error ? err.message : 'Unknown error')?.includes('cancelled')) {
         setError("Biometric authentication was cancelled or timed out.");
         return;
       } 
       
       toast.error("Biometric unlock failed. Falling back to password.");
       
-      if (err.name === 'SecurityError') {
+      if ((err as Error).name === 'SecurityError') {
         setError("Biometric authentication is not available due to security settings.");
-      } else if (err.name === 'AbortError') {
+      } else if ((err as Error).name === 'AbortError') {
         setError("Biometric authentication was aborted.");
-      } else if (err.name === 'InvalidStateError') {
+      } else if ((err as Error).name === 'InvalidStateError') {
         setError("Device is locked or already authenticated. Please try again later.");
       } else {
         setError("Biometric login failed. Please use password or try again.");

@@ -248,7 +248,7 @@ const pendingGroupKeyRequests = new Map<string, { timerId: number }>();
 const MAX_KEY_REQUEST_RETRIES = 2; // Total 3 attempts
 const KEY_REQUEST_TIMEOUT_MS = 15000; // 15 seconds
 
-const pendingGroupSessionPromises = new Map<string, Promise<any[] | null>>();
+const pendingGroupSessionPromises = new Map<string, Promise<Record<string, unknown>[] | null>>();
 const groupSessionLocks = new Set<string>();
 
 // --- E2EE WebRTC Signaling Helpers ---
@@ -295,7 +295,7 @@ export async function encryptCallSignal(payload: object, base64Key: string): Pro
   return sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
 }
 
-export async function decryptCallSignal(encryptedStr: string, base64Key: string): Promise<any> {
+export async function decryptCallSignal(encryptedStr: string, base64Key: string): Promise<unknown> {
   const { getSodium } = await import('@lib/sodiumInitializer');
   const sodium = await getSodium();
   const keyBytes = sodium.from_base64(base64Key, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -382,7 +382,7 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
 
 // --- Group Key Management & Recovery ---
 
-export async function ensureGroupSession(conversationId: string, participants: Participant[], forceRotate: boolean = false): Promise<any[] | null> {
+export async function ensureGroupSession(conversationId: string, participants: Participant[], forceRotate: boolean = false): Promise<Record<string, unknown>[] | null> {
   const pending = pendingGroupSessionPromises.get(conversationId);
   if (pending) return pending;
 
@@ -455,9 +455,10 @@ export async function ensureGroupSession(conversationId: string, participants: P
     }
   })();
 
-  pendingGroupSessionPromises.set(conversationId, promise);
+  pendingGroupSessionPromises.set(conversationId, promise as Promise<Record<string, unknown>[] | null>);
+
   try {
-    return await promise;
+    return await promise as Record<string, unknown>[] | null;
   } finally {
     pendingGroupSessionPromises.delete(conversationId);
   }
@@ -503,7 +504,7 @@ export async function rotateGroupKey(conversationId: string, reason: 'membership
     if (conversation) {
       const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
       if (distributionKeys) {
-        emitGroupKeyDistribution(conversationId, distributionKeys);
+        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
       }
     }
   }

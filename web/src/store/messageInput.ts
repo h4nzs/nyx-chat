@@ -59,11 +59,11 @@ const ensureGroupSessionIfNeeded = async (conversationId: string): Promise<boole
     try {
       const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
       if (distributionKeys && distributionKeys.length > 0) {
-        emitGroupKeyDistribution(conversationId, distributionKeys);
+        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error("Failed to ensure group session.", e);
-      toast.error(`Failed to establish group session: ${e.message}`);
+      toast.error(`Failed to establish group session: ${(e instanceof Error ? e.message : 'Unknown error')}`);
       return false;
     }
   }
@@ -113,7 +113,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const urls = text.match(urlRegex);
     if (urls && urls.length > 0) {
       try {
-        const preview = await api("/api/previews", {
+        const preview = await api<any>("/api/previews", {
           method: "POST",
           body: JSON.stringify({ url: urls[0] }),
         });
@@ -260,7 +260,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       updateActivity(activityId, { progress: 100, fileName: 'Done!' });
       setTimeout(() => removeActivity(activityId), 1000); 
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Upload error:", error);
       const errorMsg = handleApiError(error);
       toast.error(`File upload failed: ${errorMsg}`);
@@ -373,7 +373,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       updateActivity(activityId, { progress: 100, fileName: 'Sent!' });
       setTimeout(() => removeActivity(activityId), 1000); 
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       const errorMsg = handleApiError(error);
       toast.error(`Voice message failed: ${errorMsg}`);
       removeActivity(activityId);

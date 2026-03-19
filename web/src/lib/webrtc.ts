@@ -133,10 +133,10 @@ const getMediaStream = async (video: boolean) => {
     localMediaStream = stream;
     useCallStore.getState().setLocalStream(stream);
     return stream;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error accessing media devices.', error);
     // Show toast so it doesn't fail silently
-    import('react-hot-toast').then(m => m.default.error(`Media Error: ${error.message || 'Permission denied'}`));
+    import('react-hot-toast').then(m => m.default.error(`Media Error: ${(error instanceof Error ? error.message : 'Unknown error') || 'Permission denied'}`));
     throw error;
   }
 };
@@ -264,7 +264,9 @@ export const hangup = () => {
   cleanupCall();
 };
 
-export const initWebRTCListeners = (socket: any) => {
+import type { Socket } from "socket.io-client";
+
+export const initWebRTCListeners = (socket: Socket | null) => {
   if (!socket) return;
 
   if (socket.listeners('webrtc:secure_signal').length > 0) return;
@@ -280,7 +282,7 @@ export const initWebRTCListeners = (socket: any) => {
 
     try {
         const { decryptCallSignal } = await import('../utils/crypto');
-        const decryptedPayload = await decryptCallSignal(data.payload, callKey);
+        const decryptedPayload = (await decryptCallSignal(data.payload, callKey)) as any;
         const iceServers = await getDynamicIceServers();
 
         let pc = peerConnections.get(data.from);
