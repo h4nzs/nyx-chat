@@ -65,6 +65,7 @@ export type Message = {
   fileName?: string | null;
   fileType?: string;
   fileSize?: number;
+  sessionId?: string | null;
   createdAt: string;
   error?: boolean;
   preview?: string;

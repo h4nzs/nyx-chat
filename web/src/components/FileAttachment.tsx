@@ -73,8 +73,13 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
       try {
         let rawFileKey: string;
 
-        if (message.isBlindAttachment) {
-             rawFileKey = '';
+        if (message.fileKey) {
+             rawFileKey = message.fileKey;
+        } else if (message.isBlindAttachment) {
+             // Fallback: If isBlindAttachment is true BUT fileKey is missing, we might need to wait or it's a true blind attachment without key yet.
+             // However, for sent messages, fileKey should be populated.
+             // If we are the sender, we should have the key.
+             rawFileKey = ''; 
         } else {
             const conversation = conversations.find(c => c.id === message.conversationId);
             const isGroup = conversation?.isGroup || false;
@@ -90,10 +95,11 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
                 if (isMounted) {
                     setStatus('waiting');
                     const socket = getSocket();
-                    if (socket?.connected && /* sessionId removed */ '') {
+                    // Fix: Removed empty check for sessionId
+                    if (socket?.connected && message.sessionId) {
                         socket.emit('session:request_key', {
                             conversationId: message.conversationId,
-                            sessionId: /* sessionId removed */ ''
+                            sessionId: message.sessionId
                         });
                     }
                     retryTimeout = setTimeout(() => {
@@ -105,6 +111,11 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
 
             if (keyResult.status === 'error') throw keyResult.error;
             rawFileKey = keyResult.value;
+        }
+
+        if (!rawFileKey) {
+             if(isMounted) setStatus('waiting');
+             return;
         }
 
         // Decrypt File Blob

@@ -50,10 +50,15 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
         return;
       }
 
-      const rawFileKey = '';
+      const rawFileKey = message.fileKey || '';
 
       if (!rawFileKey && message.content !== 'waiting_for_key') {
-        if (isMounted) setIsLoading(true);
+        // If we don't have the key yet, but it's not a 'waiting' state, 
+        // it might be a blind attachment that hasn't been processed.
+        if (isMounted) {
+             setError("Waiting for key...");
+             setIsLoading(false);
+        }
         return;
       } else if (!rawFileKey) {
         if (isMounted) {
