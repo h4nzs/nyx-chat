@@ -173,6 +173,7 @@ export async function decryptMessageObject(
                                 finalMessage = {
                                     ...finalMessage,
                                     fileUrl: metadata.url,
+                                    fileKey: metadata.key,
                                     fileName: metadata.name,
                                     fileSize: metadata.size,
                                     fileType: metadata.mimeType,
@@ -362,6 +363,7 @@ export async function decryptMessageObject(
             finalMessage = {
                 ...finalMessage,
                 fileUrl: metadata.url,
+                fileKey: metadata.key,
                 fileName: metadata.name,
                 fileSize: metadata.size,
                 fileType: metadata.mimeType,
