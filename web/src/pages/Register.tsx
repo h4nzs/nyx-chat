@@ -23,11 +23,20 @@ export default function Register() {
   const [isVerifyingBio, setIsVerifyingBio] = useState(false);
 
   const navigate = useNavigate();
-  const { registerAndGeneratePhrase } = useAuthStore(useShallow(s => ({ registerAndGeneratePhrase: s.registerAndGeneratePhrase })));
+  const { registerAndGeneratePhrase, user } = useAuthStore(useShallow(s => ({ registerAndGeneratePhrase: s.registerAndGeneratePhrase, user: s.user })));
 
   useEffect(() => {
     platformAuthenticatorIsAvailable().then(setIsBiometricsSupported);
   }, []);
+
+  useEffect(() => {
+    if (user && sessionStorage.getItem('nyx_registration_in_progress') !== 'true') {
+      navigate('/chat', { replace: true });
+    }
+    if (!user) {
+      sessionStorage.removeItem('nyx_registration_in_progress');
+    }
+  }, [user, navigate]);
 
   async function handleRegister(data: { name?: string, d?: string, b?: string }) {
     const { name, d: username, b: password } = data;
@@ -44,6 +53,7 @@ export default function Register() {
     // --- End Validation ---
 
     try {
+      sessionStorage.setItem('nyx_registration_in_progress', 'true');
       const usernameHash = await hashUsername(username);
       const profileKeyB64 = await generateProfileKey();
       const profileJson = JSON.stringify({ name, description: "", avatarUrl: "" });
@@ -67,6 +77,7 @@ export default function Register() {
       toast.success("Identity initialized. Setup security.");
       
     } catch (err: unknown) {
+      sessionStorage.removeItem('nyx_registration_in_progress');
       setError((err instanceof Error ? err.message : 'Unknown error') || "Registration failed");
     }
   }
@@ -125,6 +136,7 @@ export default function Register() {
     return <RecoveryPhraseModal phrase={recoveryPhrase} onClose={() => {
       // Clear the just-registered flag when user completes registration flow
       sessionStorage.removeItem('nyx_just_registered');
+      sessionStorage.removeItem('nyx_registration_in_progress');
       navigate('/chat');
     }} />
   }

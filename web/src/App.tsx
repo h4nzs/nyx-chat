@@ -332,12 +332,10 @@ const AppContent = () => {
               }
             />
             <Route path="/register" element={
-              isBootstrapping ? <LoadingScreen /> : 
-              user ? <Navigate to="/chat" replace /> :
+              isBootstrapping ? <LoadingScreen /> :
               <PageWrapper><Register /></PageWrapper>
               }
-            />
-            <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
+            />            <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
             <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
             <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
             <Route path="/privacy" element={<PageWrapper><PrivacyPage /></PageWrapper>} />
