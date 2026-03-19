@@ -4,7 +4,6 @@ import type { DoubleRatchetState } from '../types/core';
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { authFetch } from '@lib/api';
 import { useAuthStore } from '@store/auth';
-import { useMessageStore } from '@store/message';
 import { useConversationStore } from '@store/conversation';
 import {
   addSessionKey,
@@ -12,8 +11,6 @@ import {
   getLatestSessionKey,
   storeGroupKey,
   getGroupKey,
-  deleteGroupKey,
-  receiveGroupKey,
   storeOneTimePreKey,
   getOneTimePreKey,
   deleteOneTimePreKey,
@@ -25,7 +22,6 @@ import {
   deleteSkippedKey,
   storeMessageKey,
   getMessageKey,
-  deleteMessageKey,
   getGroupSenderState,
   saveGroupSenderState,
   getGroupReceiverState,
@@ -33,9 +29,7 @@ import {
   deleteGroupStates,
   deleteConversationKeychain,
   deleteRatchetSession,
-  deleteSessionKeys,
-  GroupSenderState,
-  GroupReceiverState
+  deleteSessionKeys
 } from '@lib/keychainDb';
 
 export { deleteConversationKeychain, deleteRatchetSession, deleteSessionKeys };
@@ -610,7 +604,7 @@ async function doEncryptMessage(
   messageId?: string
 ): Promise<{ ciphertext: string; sessionId?: string; drHeader?: DrHeader; mk?: Uint8Array }> {
   const sodium = await getSodiumLib();
-  const { worker_crypto_secretbox_xchacha20poly1305_easy, worker_dr_ratchet_encrypt, groupRatchetEncrypt } = await getWorkerProxy();
+  const { worker_dr_ratchet_encrypt, groupRatchetEncrypt } = await getWorkerProxy();
 
   if (isGroup) {
     // SENDER KEY PROTOCOL
@@ -698,7 +692,7 @@ async function doDecryptMessage(
   if (!cipher) return { status: 'success', value: '' };
 
   const sodium = await getSodiumLib();
-  const { worker_crypto_secretbox_xchacha20poly1305_open_easy, groupRatchetDecrypt } = await getWorkerProxy();
+  const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await getWorkerProxy();
 
   // [FIX PERSISTENCE] GLOBAL SHORTCUT: Check Local Message Key Cache First
   if (messageId) {
@@ -724,7 +718,7 @@ async function doDecryptMessage(
               const encrypted = combined.slice(XCHACHA20_NONCE_BYTES);
               const decrypted = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
               return { status: 'success', value: sodium.to_string(decrypted) };
-          } catch (e) {
+          } catch (_e) {
               // Fail silently and try fallback
           }
       }

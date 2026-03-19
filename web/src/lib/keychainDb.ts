@@ -41,7 +41,7 @@ async function enqueueWrite<T>(op: () => Promise<T>): Promise<T> {
     queueTail = (async () => {
         try {
             await prev;
-        } catch (e) {}
+        } catch (_e) {}
         return op();
     })();
     return queueTail;
@@ -585,7 +585,7 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
             }
             return value;
           });
-      } catch (e) {
+      } catch (_e) {
           throw new Error("Invalid vault file format.");
       }
 

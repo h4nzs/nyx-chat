@@ -21,7 +21,7 @@ interface CommandPaletteState {
   removeCommands: (commandIds: string[]) => void;
 }
 
-export const useCommandPaletteStore = create<CommandPaletteState>((set, get) => ({
+export const useCommandPaletteStore = create<CommandPaletteState>((set, _get) => ({
   isOpen: false,
   commands: [],
   open: () => set({ isOpen: true }),

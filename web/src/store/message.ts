@@ -2,18 +2,15 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { createWithEqualityFn } from "zustand/traditional";
-import { api, apiUpload, authFetch } from "@lib/api"; // Added authFetch
+import { api, authFetch } from "@lib/api"; // Added authFetch
 import { getSocket, emitSessionKeyRequest, emitGroupKeyDistribution } from "@lib/socket";
 import { 
   encryptMessage, 
   decryptMessage, 
-  ensureAndRatchetSession, 
   encryptFile, 
   ensureGroupSession,
-  retrieveLatestSessionKeySecurely, 
   establishSessionFromPreKeyBundle, 
   getMyEncryptionKeyPair, 
-  storeSessionKeySecurely, 
   deriveSessionKeyAsRecipient,
   storeRatchetStateSecurely,
   retrieveRatchetStateSecurely,
@@ -138,9 +135,9 @@ export async function decryptMessageObject(
                      try {
                          const p = JSON.parse(str);
                          if (p.ciphertext) return unwrap(p.ciphertext as string);
-                     } catch {}
-                 }
-                 return str;
+                     } catch (_e) {}
+                     }
+                     return str;
             }
             
             cipherTextToUse = unwrap(cipherTextToUse || '');
@@ -164,7 +161,7 @@ export async function decryptMessageObject(
                                     plainText = JSON.stringify(parsed);
                                 }
                             }
-                        } catch (e) {}
+                        } catch (_e) {}
                     }
                     
                     finalMessage = { ...finalMessage, content: plainText };
@@ -183,7 +180,7 @@ export async function decryptMessageObject(
                                     isBlindAttachment: true
                                 };
                             }
-                        } catch {}
+                        } catch (_e) {}
                     } else if (finalMessage.content && finalMessage.content.startsWith('{') && finalMessage.content.includes('"type":"story_reply"')) {
                         try {
                             const metadata = JSON.parse(finalMessage.content);
@@ -202,7 +199,7 @@ export async function decryptMessageObject(
                                     } as unknown as Message
                                 };
                             }
-                        } catch {}
+                        } catch (_e) {}
                     }
                     if (rawMsg.repliedTo) {
                         finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
@@ -284,7 +281,7 @@ export async function decryptMessageObject(
                             theirRatchetPublicKey = sodium.from_base64(epk, sodium.base64_variants.URLSAFE_NO_PADDING);
                         }
                    }
-               } catch (e) {}
+               } catch (_e) {}
 
                if (!theirRatchetPublicKey) {
                    throw new Error("Cannot initialize Bob: Missing sender's ratchet key in first message.");
@@ -353,7 +350,7 @@ export async function decryptMessageObject(
                       plainText = JSON.stringify(parsed);
                   }
               }
-          } catch (e) {}
+          } catch (_e) {}
       }
 
       finalMessage = { ...finalMessage, content: plainText };
@@ -372,7 +369,7 @@ export async function decryptMessageObject(
                 isBlindAttachment: true
             };
           }
-        } catch (e) { }
+        } catch (_e) { }
       }
 
       if (plainText.startsWith('{') && plainText.includes('"type":"story_reply"')) {
@@ -393,7 +390,7 @@ export async function decryptMessageObject(
                 } as unknown as Message
             };
           }
-        } catch (e) { }
+        } catch (_e) { }
       }      
     } else if (result?.status === 'pending') {
       finalMessage.content = result.reason || 'waiting_for_key';
@@ -432,7 +429,7 @@ function parseReaction(content: string | null | undefined): { targetMessageId: s
     if (payload.type === 'reaction' && payload.targetMessageId && payload.emoji) {
       return payload;
     }
-  } catch (e) {}
+  } catch (_e) {}
   return null;
 }
 
@@ -445,7 +442,7 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
     if (payload.type === 'edit' && payload.targetMessageId && payload.text) {
       return payload;
     }
-  } catch (e) {}
+  } catch (_e) {}
   return null;
 }
 
@@ -474,7 +471,7 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
     if (payload.type === 'STORY_KEY') {
       return payload;
     }
-  } catch (e) {}
+  } catch (_e) {}
   return null;
 }
 
@@ -660,15 +657,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                     const metadata = JSON.parse(message.content);
                     if (metadata.url) targetUrl = metadata.url;
                 }
-            } catch (e) {}
+            } catch (_e) {}
 
             if (targetUrl && !targetUrl.startsWith('blob:')) {
                 try {
                     const url = new URL(targetUrl);
                     const key = url.pathname.substring(1);
                     if (key) query = `?r2Key=${encodeURIComponent(key)}`;
-                } catch (e) {
-                    console.error("Failed to parse file URL for deletion:", e);
+                } catch (_e) {
+                    console.error("Failed to parse file URL for deletion:", _e);
                 }
             }
 
@@ -1912,7 +1909,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
   resendPendingMessages: () => {
     const state = get();
-    Object.entries(state.messages).forEach(([conversationId, messages]) => {
+    Object.entries(state.messages).forEach(([_conversationId, messages]) => {
       messages
         .filter(m => m.optimistic && !m.error)
         .forEach(m => {

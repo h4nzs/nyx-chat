@@ -32,7 +32,7 @@ export const requireAdmin = async (req: Request, res: Response, next: NextFuncti
       return res.status(403).json({ error: 'Access Denied: Admins Only' })
     }
     next()
-  } catch (error) {
+  } catch (_error) {
     res.status(403).json({ error: 'Forbidden' })
   }
 }

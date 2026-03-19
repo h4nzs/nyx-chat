@@ -1,10 +1,10 @@
 import { Router } from 'express'
-import { getSecureLinkPreview, resolveDns, validateRedirectChain } from '../utils/secureLinkPreview.js'
+import { getSecureLinkPreview, validateRedirectChain } from '../utils/secureLinkPreview.js'
 import { requireAuth } from '../middleware/auth.js'
 
 const router: Router = Router()
 
-router.post('/', requireAuth, async (req, res, next) => {
+router.post('/', requireAuth, async (req, res, _next) => {
   const { url } = req.body
   if (!url) {
     return res.status(400).json({ error: 'URL is required' })
@@ -23,7 +23,7 @@ router.post('/', requireAuth, async (req, res, next) => {
   }
 })
 
-router.get('/image', requireAuth, async (req, res, next) => {
+router.get('/image', requireAuth, async (req, res, _next) => {
   const targetUrl = req.query.url as string;
   if (!targetUrl) return res.status(400).json({ error: 'URL is required' });
 

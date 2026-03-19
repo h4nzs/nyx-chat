@@ -3,7 +3,7 @@ export const playHaptic = (pattern: number | number[] = 50) => {
   if (typeof window !== 'undefined' && navigator.vibrate) {
     try {
       navigator.vibrate(pattern);
-    } catch (e) {
+    } catch (_e) {
       // Ignore vibration errors (e.g. user denied permission or not supported context)
     }
   }
@@ -20,7 +20,7 @@ export const playSound = (type: 'send' | 'receive' | 'delete') => {
     const playPromise = audio.play();
     
     if (playPromise !== undefined) {
-      playPromise.catch((error) => {
+      playPromise.catch((_error) => {
         // Auto-play was prevented. This is normal browser policy.
         // We can silently ignore this, as sound is an enhancement, not critical.
         // console.log("Audio playback prevented:", error); 

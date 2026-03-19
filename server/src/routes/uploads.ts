@@ -2,34 +2,12 @@ import { Router, Request, Response, NextFunction } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
 import { ApiError } from '../utils/errors.js'
-import { getIo } from '../socket.js'
 import { env } from '../config.js'
 import { nanoid } from 'nanoid'
-import { getPresignedUploadUrl, deleteR2File } from '../utils/r2.js' 
+import { getPresignedUploadUrl } from '../utils/r2.js' 
 import { uploadLimiter } from '../middleware/rateLimiter.js'
-import { deleteFromSupabase } from '../utils/supabase.js' 
 
 const router: Router = Router()
-
-// Helper: Hapus file lama (Support R2 & Legacy Supabase)
-async function deleteOldFile (url: string) {
-  try {
-    if (!url) {
-      return
-    }
-    // [FIX] Ensure r2PublicDomain is valid before checking includes.
-    // If r2PublicDomain is empty string, url.includes('') is always true!
-    if (env.r2PublicDomain && env.r2PublicDomain.length > 0 && url.includes(env.r2PublicDomain)) {
-      const key = url.replace(`${env.r2PublicDomain}/`, '')
-      await deleteR2File(key)
-    }
-    else {
-      await deleteFromSupabase(url)
-    }
-  } catch (error) {
-    console.error('[Delete File Error]', error)
-  }
-}
 
 // === 0. GENERATE PRESIGNED URL ===
 router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => {

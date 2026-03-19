@@ -8,7 +8,6 @@ import { getIo } from '../socket.js'
 import { ApiError } from '../utils/errors.js'
 import { sendPushNotification } from '../utils/sendPushNotification.js'
 import { deleteR2File } from '../utils/r2.js'
-import { env } from '../config.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 

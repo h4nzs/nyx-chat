@@ -48,7 +48,7 @@ Output must be a JSON array of strings.`;
       if (replies.length === 0) {
         throw new Error("Parsed array contained no valid string replies");
       }
-    } catch (parseError: unknown) {
+    } catch (_parseError: unknown) {
       console.error('PARSE_ERROR_GEMINI'); // Sanitized error marker
       // Manual fallback
       replies = ["Ok", "Got it", "Thanks"]; 

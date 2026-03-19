@@ -1,6 +1,4 @@
 import { createWithEqualityFn } from "zustand/traditional";
-import { useMessageStore } from "./message";
-import type { Message } from "./conversation";
 import { shadowVault, decryptVaultText } from '@lib/shadowVaultDb';
 
 type State = {

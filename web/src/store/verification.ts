@@ -11,7 +11,7 @@ type VerificationState = {
   unsetVerified: (conversationId: string) => void;
 };
 
-export const useVerificationStore = create<VerificationState>((set, get) => ({
+export const useVerificationStore = create<VerificationState>((set, _get) => ({
   verifiedStatus: {},
 
   loadInitialStatus: (conversations) => {

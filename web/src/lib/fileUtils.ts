@@ -44,7 +44,7 @@ export async function compressImage(file: File, isHD: boolean = false): Promise<
   try {
     const compressedFile = await imageCompression(file, options);
     return compressedFile;
-  } catch (error) {
+  } catch (_error) {
     return file;
   }
 }

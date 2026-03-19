@@ -11,8 +11,6 @@ router.post('/user', generalLimiter, requireAuth, async (req, res) => {
     const { reportedUserId, reason } = req.body
     const reporter = req.user!
 
-    const reportedUser = await prisma.user.findUnique({ where: { id: reportedUserId } })
-
     if (!env.discordReportWebhookUrl) {
         console.warn('⚠️ DISCORD_REPORT_WEBHOOK_URL is not set.')
         return res.json({ success: true })

@@ -4,15 +4,13 @@
 import io from "socket.io-client";
 import type { Socket } from "socket.io-client";
 import toast from "react-hot-toast";
-import { useAuthStore, User } from "@store/auth";
-import { useConversationStore, Conversation } from "@store/conversation";
-import { useMessageStore, decryptMessageObject } from "@store/message";
+import { useAuthStore } from "@store/auth";
+import { useConversationStore } from "@store/conversation";
+import { useMessageStore } from "@store/message";
 import { useConnectionStore } from "@store/connection";
 import { usePresenceStore } from "@store/presence";
-import useNotificationStore from '@store/notification';
 import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest, schedulePeriodicGroupKeyRotation } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
-import type { Message } from "@store/conversation";
 import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
 import { triggerReceiveFeedback } from "@utils/feedback";
 
@@ -80,7 +78,7 @@ export function getSocket() {
 
     const { setStatus } = useConnectionStore.getState();
     const { addOrUpdate, setOnlineUsers, userJoined, userLeft } = usePresenceStore.getState();
-    const { updateMessage, addLocalReaction, removeLocalReaction, updateMessageStatus } = useMessageStore.getState();
+    const { updateMessage, removeLocalReaction, updateMessageStatus } = useMessageStore.getState();
     const conversationStore = useConversationStore.getState();
 
     // --- System Listeners ---

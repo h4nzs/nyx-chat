@@ -196,7 +196,7 @@ router.post('/', async (req, res, next) => {
       if (!isVerified && !isGroup) {
         const today = new Date().toISOString().split('T')[0];
         const key = `sandbox:newchat:${creatorId}:${today}`;
-        try { await redisClient.decr(key); } catch (e) { /* ignore */ }
+        try { await redisClient.decr(key); } catch (_e) { /* ignore */ }
       }
       throw dbError;
     }

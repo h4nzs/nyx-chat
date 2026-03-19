@@ -20,11 +20,6 @@ export function useGlobalShortcut(keyCombo: string[], callback: () => void) {
         return;
       }
 
-      const ctrlPressed = requiredKeys.includes('control') ? e.ctrlKey : true;
-      const altPressed = requiredKeys.includes('alt') ? e.altKey : true;
-      const shiftPressed = requiredKeys.includes('shift') ? e.shiftKey : true;
-      const metaPressed = requiredKeys.includes('meta') ? e.metaKey : true;
-
       // Check if ONLY the required modifiers are pressed
       const requiredCtrl = requiredKeys.includes('control');
       const requiredAlt = requiredKeys.includes('alt');

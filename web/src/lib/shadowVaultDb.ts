@@ -56,7 +56,7 @@ export const decryptVaultText = async (encryptedBase64: string): Promise<string 
       null, cipherText, null, nonce, key
     );
     return sodium.to_string(decrypted);
-  } catch (e) {
+  } catch (_e) {
     return null; // Silent fail for corrupted/old data
   }
 };
@@ -253,7 +253,7 @@ export class NyxShadowVault extends Dexie {
         isViewOnce: r.isViewOnce,
         isDeletedLocal: r.isDeletedLocal
       };
-    } catch (e) {
+    } catch (_e) {
       return null;
     }
   }

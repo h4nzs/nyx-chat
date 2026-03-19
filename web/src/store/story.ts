@@ -101,7 +101,7 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
         toast.loading('Processing media...', { id: toastId });
         let fileToProcess = file;
         if (file.type.startsWith('image/')) {
-           try { fileToProcess = await compressImage(file, false); } catch (e) {}
+           try { fileToProcess = await compressImage(file, false); } catch (_e) {}
         }
 
         const { encryptedBlob, key: rawFileKey } = await encryptFile(fileToProcess);

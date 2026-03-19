@@ -68,7 +68,7 @@ router.get('/banned-users', requireAuth, requireAdmin, async (req, res) => {
       orderBy: { bannedAt: 'desc' }
     });
     res.json(bannedUsers);
-  } catch (error) {
+  } catch (_error) {
     res.status(500).json({ error: 'Failed to fetch banned users' });
   }
 });
@@ -95,7 +95,7 @@ router.post('/ban', requireAuth, requireAdmin, async (req, res) => {
     }
 
     res.json({ message: 'User banned successfully' });
-  } catch (e) {
+  } catch (_e) {
     res.status(500).json({ error: 'Failed to ban user' });
   }
 });
@@ -111,7 +111,7 @@ router.post('/unban', requireAuth, requireAdmin, async (req, res) => {
         data: { bannedAt: null, banReason: null }
     });
     res.json({ message: 'User unbanned successfully' });
-  } catch (e) {
+  } catch (_e) {
     res.status(500).json({ error: 'Failed to unban user' });
   }
 });

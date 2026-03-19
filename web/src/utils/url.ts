@@ -1,4 +1,3 @@
-const API_URL = "";
 /**
  * Converts a relative server path to an absolute URL.
  * If the path is already absolute (starts with http) or a blob, it returns it as is.

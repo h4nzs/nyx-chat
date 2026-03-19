@@ -17,7 +17,7 @@ export const executeLocalWipe = async () => {
                 databases.push(`keychain-db-${user.id}`);
             }
         }
-    } catch (e) {}
+    } catch (_e) {}
 
     // Fallback: Hardcoded legacy name just in case
     databases.push('nyx_keychain');
@@ -28,7 +28,7 @@ export const executeLocalWipe = async () => {
             const dbs = await window.indexedDB.databases();
             const names = dbs.map(db => db.name).filter((n): n is string => !!n);
             if (names.length > 0) databases = names;
-        } catch (e) {}
+        } catch (_e) {}
     }
 
     for (const db of databases) {

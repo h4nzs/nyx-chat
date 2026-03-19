@@ -21,7 +21,7 @@ router.get('/', requireAuth, async (req, res, next) => {
       if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
         currentJti = payload.jti
       }
-    } catch (e) {
+    } catch (_e) {
       // Invalid or empty token, ignore safely
     }
 

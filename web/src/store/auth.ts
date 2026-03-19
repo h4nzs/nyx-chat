@@ -2,14 +2,14 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { createWithEqualityFn } from "zustand/traditional";
-import { authFetch, api, apiUpload } from "@lib/api";
+import { authFetch, api } from "@lib/api";
 import { disconnectSocket, connectSocket } from "@lib/socket";
 import { clearAuthCookies } from "@lib/tokenStorage";
 import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";
 import { useMessageStore } from "./message";
 import toast from "react-hot-toast";
-import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, getDeviceAutoUnlockReady, nuclearWipe } from "@lib/keyStorage";
+import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, nuclearWipe } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; 
 import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; 
 
@@ -129,8 +129,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     try {
       autoUnlockKey = await getDeviceAutoUnlockKey();
       encryptedKeys = await getEncryptedKeys();
-    } catch (e) {
-      console.error("Failed to read keys/auto-unlock info:", e);
+    } catch (_e) {
+      console.error("Failed to read keys/auto-unlock info:", _e);
     }
 
     if (autoUnlockKey && encryptedKeys) {
@@ -191,7 +191,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     hasRestoredKeys: false,
     blockedUserIds: [],
 
-    setHasRestoredKeys: async (hasKeys) => set({ hasRestoredKeys: await hasStoredKeys() }),
+    setHasRestoredKeys: async (_hasKeys) => set({ hasRestoredKeys: await hasStoredKeys() }),
     setAccessToken: (token) => set({ accessToken: token }),
     setReadReceipts: (value) => {
       set({ sendReadReceipts: value });
@@ -354,7 +354,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         try {
           const result = await retrievePrivateKeys(encryptedPrivateKeys, password);
           if (result.success) privateKeysCache = result.keys;
-        } catch (e) {}
+        } catch (_e) {}
 
         set({ user: res.user, accessToken: res.accessToken });
         localStorage.setItem("user", JSON.stringify(res.user));
@@ -446,7 +446,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const { uploadToR2 } = await import('@lib/r2');
       let fileToProcess = avatar;
       if (avatar.type.startsWith('image/')) {
-        try { fileToProcess = await compressImage(avatar); } catch (e) {}
+        try { fileToProcess = await compressImage(avatar); } catch (_e) {}
       }
       try {
         toast.loading('Uploading to Cloud...', { id: toastId });

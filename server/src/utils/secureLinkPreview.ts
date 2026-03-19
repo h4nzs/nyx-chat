@@ -22,7 +22,7 @@ export async function resolveDns (urlOrHostname: string): Promise<string> {
   try {
     // If it's a full URL, extract the hostname
     hostname = new URL(urlOrHostname).hostname;
-  } catch (e) {
+  } catch (_e) {
     // If new URL() throws, it means it's already a plain hostname (e.g. from link-preview-js)
   }
 
@@ -76,7 +76,7 @@ export async function validateRedirectChain(initialUrl: string): Promise<string>
         // Not a redirect (200, 404, etc), this is the final URL
         return currentUrl
       }
-    } catch (e) {
+    } catch (_e) {
       // If HEAD fails (e.g. 405 Method Not Allowed), fallback to trying to preview the current URL directly
       // assuming resolveDns passed.
       console.warn('Redirect validation HEAD request failed for:', currentUrl, ', proceeding with caution.')
@@ -103,7 +103,7 @@ export async function getSecureLinkPreview (url: string): Promise<LinkPreview> {
     const preview = await getLinkPreview(safeUrl, {
       timeout: 5000,
       followRedirects: 'manual',
-      handleRedirects: (baseURL: string, forwardedURL: string) => {
+      handleRedirects: (_baseURL: string, _forwardedURL: string) => {
         // Since we pre-validated the chain, we shouldn't encounter new redirects here.
         // If we do, it means the server changed behavior between HEAD and GET.
         // For safety, we can just return the forwardedURL if it's valid, or throw.

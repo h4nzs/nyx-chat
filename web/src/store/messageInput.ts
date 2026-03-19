@@ -2,8 +2,8 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { createWithEqualityFn } from "zustand/traditional";
-import { api, authFetch, handleApiError } from "@lib/api";
-import { encryptMessage, ensureGroupSession, encryptFile } from "@utils/crypto";
+import { api, handleApiError } from "@lib/api";
+import { ensureGroupSession, encryptFile } from "@utils/crypto";
 import { emitGroupKeyDistribution } from "@lib/socket";
 import toast from "react-hot-toast";
 import { useAuthStore } from "./auth";
@@ -12,7 +12,6 @@ import { useConversationStore } from "./conversation";
 import type { Message } from "./conversation";
 import { compressImage } from "@lib/fileUtils";
 import useDynamicIslandStore, { UploadActivity } from "./dynamicIsland";
-import { uploadToR2 } from '../lib/r2';
 
 export type StagedFile = {
   id: string;
@@ -119,7 +118,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           body: JSON.stringify({ url: urls[0] }),
         });
         set({ typingLinkPreview: preview });
-      } catch (error) {
+      } catch (_error) {
         set({ typingLinkPreview: null });
       }
     } else {
@@ -167,7 +166,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     }
 
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
-    const isGroup = conversation.isGroup;
 
     const tempId = generateTempId();
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
@@ -196,15 +194,13 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       let fileToProcess = file;
       if (file.type.startsWith('image/')) {
         updateActivity(activityId, { progress: 10, fileName: `Compressing ${file.name}...` });
-        try { fileToProcess = await compressImage(file, isHD); } catch (e) {}
+        try { fileToProcess = await compressImage(file, isHD); } catch (_e) {}
       }
 
       updateActivity(activityId, { progress: 25, fileName: `Encrypting ${file.name}...` });
       const { encryptedBlob, key: rawFileKey } = await encryptFile(fileToProcess);
       
       updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
-      
-      const encryptedFile = new File([encryptedBlob], file.name, { type: "application/octet-stream" });
       
       // 1. Get Presigned URL
       // [UPDATE] Calculate retention for disappearing messages / view once
@@ -291,7 +287,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     }
 
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
-    const isGroup = conversation.isGroup;
     
     const tempId = Date.now();
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;

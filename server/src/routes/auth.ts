@@ -10,7 +10,7 @@ import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { env } from '../config.js'
 import { requireAuth } from '../middleware/auth.js'
-import { authLimiter, otpLimiter } from '../middleware/rateLimiter.js'
+import { authLimiter } from '../middleware/rateLimiter.js'
 import { nanoid } from 'nanoid'
 import crypto from 'crypto'
 import {
@@ -29,7 +29,7 @@ const rpName = 'NYX'
 const getRpID = () => {
   try {
     return env.nodeEnv === 'production' ? new URL(env.corsOrigin).hostname : 'localhost'
-  } catch (e) {
+  } catch (_e) {
     return 'localhost'
   }
 }
@@ -373,7 +373,7 @@ router.post('/logout', async (req, res) => {
   if (endpoint) {
     try {
       await prisma.pushSubscription.deleteMany({ where: { endpoint } })
-    } catch (e) {}
+    } catch (_e) {}
   }
   try {
     // CodeQL Fix: Do not branch on user-controlled data directly.
@@ -381,7 +381,7 @@ router.post('/logout', async (req, res) => {
     if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
       await prisma.refreshToken.updateMany({ where: { jti: payload.jti }, data: { revokedAt: new Date() } })
     }
-  } catch (e) {
+  } catch (_e) {
     // Ignore invalid token safely
   }
   const isProd = env.nodeEnv === 'production'

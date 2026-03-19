@@ -3,8 +3,6 @@ import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
 import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
 import { ApiError } from '../utils/errors.js'
-import { z } from 'zod'
-import { zodValidate } from '../utils/validate.js'
 
 const router: Router = Router()
 router.use(requireAuth)

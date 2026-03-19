@@ -288,7 +288,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         if (lastMessage) {
           try {
             lastMessage = await decryptMessageObject(lastMessage);
-          } catch (e) {
+          } catch (_e) {
             if (lastMessage.sessionId) {
               emitSessionKeyRequest(lastMessage.conversationId, lastMessage.sessionId);
             }

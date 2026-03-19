@@ -8,7 +8,6 @@ import { Buffer } from 'buffer/';
 import sodium from 'libsodium-wrappers';
 import * as bip39 from 'bip39';
 import { argon2id } from 'hash-wasm';
-import { v4 as uuidv4 } from 'uuid';
 import type { DoubleRatchetState } from '../types/core';
 import type { 
   CryptoBuffer, 
@@ -116,7 +115,7 @@ async function _encryptData(keyBytes: Uint8Array, data: unknown): Promise<string
     if (keyBytes && keyBytes.length > 0) {
       try {
         sodium.memzero(keyBytes);
-      } catch (e) {
+      } catch (_e) {
         keyBytes.fill(0);
       }
     }
@@ -154,7 +153,7 @@ async function _decryptData(keyBytes: Uint8Array, encryptedString: string): Prom
     if (keyBytes && keyBytes.length > 0) {
       try {
         sodium.memzero(keyBytes);
-      } catch (e) {
+      } catch (_e) {
         keyBytes.fill(0);
       }
     }
