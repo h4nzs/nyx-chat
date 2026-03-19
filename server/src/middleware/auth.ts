@@ -67,7 +67,7 @@ export function socketAuthMiddleware (
 
     const user = verifySocketAuth(token)
     if (user) {
-      (socket as any).user = user
+      socket.user = user
     }
 
     next()

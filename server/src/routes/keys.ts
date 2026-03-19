@@ -203,7 +203,7 @@ router.get(
       }
 
       res.json(responseBundle)
-    } catch (e: any) {
+    } catch (e: unknown) {
       next(e)
     }
   }

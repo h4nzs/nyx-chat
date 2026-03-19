@@ -40,8 +40,9 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
         initiatorEphemeralKey: 'server-ratchet', // Add placeholder ephemeral key
         isInitiator: p.user.id === initiatorId
       }
-    } catch (e: any) {
-      console.error(`Failed to process public key for user ${p.user.id}. Key: "${p.user.publicKey}". Error: ${e.message}`)
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error ? e.message : 'Unknown error';
+      console.error(`Failed to process public key for user ${p.user.id}. Key: "${p.user.publicKey}". Error: ${errorMessage}`)
       throw new Error(`Corrupted public key found for user ${p.user.id}. Cannot establish secure session.`)
     }
   }).filter(Boolean) as { sessionId: string; encryptedKey: string; userId: string; conversationId: string; initiatorEphemeralKey: string; isInitiator: boolean }[]

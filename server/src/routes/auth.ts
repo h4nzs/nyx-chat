@@ -153,8 +153,8 @@ async (req, res, next) => {
       accessToken: tokens.access,
       needVerification: false
     })
-  } catch (e: any) {
-    if (e?.code === 'P2002') {
+  } catch (e: unknown) {
+    if (typeof e === 'object' && e !== null && 'code' in e && (e as Record<string, unknown>).code === 'P2002') {
       return next(new ApiError(409, 'Username already taken.'))
     }
     next(e)

@@ -37,17 +37,19 @@ export async function sendPushNotification (userId: string, payload: any) {
           keys: { p256dh: sub.p256dh, auth: sub.auth }
         },
         payloadString
-      ).catch((error: any) => {
+      ).catch((error: unknown) => {
         // Jika subscription tidak valid (misal: user uninstall app), hapus dari DB
-        if (error.statusCode === 410 || error.statusCode === 404) {
+        const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error ? (error as Record<string, unknown>).statusCode : undefined;
+        if (statusCode === 410 || statusCode === 404) {
           return prisma.pushSubscription.delete({ where: { id: sub.id } })
         }
-        console.error(`Error sending push notification for sub ${sub.id}: statusCode=${error?.statusCode || 'unknown'}`);
+        console.error(`Error sending push notification for sub ${sub.id}: statusCode=${statusCode || 'unknown'}`);
       })
     )
 
     await Promise.all(notifications)
-  } catch (error: any) {
-    console.error(`Failed to send push notifications: statusCode=${error?.statusCode || 'unknown'}`);
+  } catch (error: unknown) {
+    const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error ? (error as Record<string, unknown>).statusCode : undefined;
+    console.error(`Failed to send push notifications: statusCode=${statusCode || 'unknown'}`);
   }
 }

@@ -117,7 +117,7 @@ router.post(
       // Client akan men-generate ulang encryptedMetadata dan memanggil endpoint update.
       res.json({
         fileUrl,
-        fileKey: ((req as any).file)?.key
+        fileKey: req.file?.key
       })
     } catch (e) {
       next(e)

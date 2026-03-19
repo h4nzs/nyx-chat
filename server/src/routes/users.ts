@@ -234,8 +234,8 @@ router.post('/:id/block', async (req, res, next) => {
     if (blockerId === blockedId) throw new ApiError(400, 'You cannot block yourself')
     await prisma.blockedUser.create({ data: { blockerId, blockedId } })
     res.json({ success: true, message: 'User blocked' })
-  } catch (error: any) {
-    if (error.code === 'P2002') return res.json({ success: true, message: 'User already blocked' })
+  } catch (error: unknown) {
+    if (typeof error === 'object' && error !== null && 'code' in error && (error as Record<string, unknown>).code === 'P2002') return res.json({ success: true, message: 'User already blocked' })
     next(error)
   }
 })
