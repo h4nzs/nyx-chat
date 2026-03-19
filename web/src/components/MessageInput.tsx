@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2, FiEdit2, FiCpu, FiVolumeX, FiCrop } from 'react-icons/fi';
-import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
 import { useShallow } from 'zustand/react/shallow';
@@ -165,7 +165,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
 
   // Permissions & Logic
   const isOneToOne = !conversation.isGroup;
-  const otherParticipant = isOneToOne && conversation.participants?.find((p: any) => p.id !== useAuthStore.getState().user?.id);
+  const otherParticipant = isOneToOne && (conversation.participants as { id: string }[] | undefined)?.find(p => p.id !== useAuthStore.getState().user?.id);
   const isOtherParticipantBlocked = isOneToOne && otherParticipant && blockedUserIds.includes(otherParticipant.id);
   const isConnected = connectionStatus === 'connected';
   const hasText = text.trim().length > 0;
@@ -367,7 +367,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
       let finalStream = stream;
 
       if (isVoiceAnonymized) {
-          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          const AudioContextClass = window.AudioContext || (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
           const audioCtx = new AudioContextClass();
           audioContextRef.current = audioCtx;
           const source = audioCtx.createMediaStreamSource(stream);
@@ -530,7 +530,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               onEmojiClick={handleEmojiClick}
               autoFocusSearch={false}
               lazyLoadEmojis={true}
-              theme={theme as any}
+              theme={theme === 'dark' ? Theme.DARK : Theme.LIGHT}
             />
           </Suspense>
         </div>

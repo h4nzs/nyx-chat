@@ -4,7 +4,7 @@ import { useContextMenuStore } from '../store/contextMenu';
 import { useShallow } from 'zustand/react/shallow';
 import clsx from 'clsx';
 import { FiPlus, FiChevronLeft } from 'react-icons/fi';
-import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
 import { useThemeStore } from '@store/theme';
 
 export default function ContextMenu() {
@@ -107,7 +107,7 @@ export default function ContextMenu() {
                          }
                          closeMenu();
                       }}
-                      theme={theme as any}
+                      theme={theme === 'dark' ? Theme.DARK : Theme.LIGHT}
                       lazyLoadEmojis={true}
                       searchDisabled={false}
                       skinTonesDisabled={true}

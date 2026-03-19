@@ -95,7 +95,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
   const isSelectionMode = selectedMessageIds.length > 0;
   const isSelected = selectedMessageIds.includes(message.id);
 
-  const profile = useUserProfile(message.sender as any);
+  const profile = useUserProfile(message.sender as { id: string; encryptedProfile?: string | null });
   const mine = message.senderId === meId;
   const ref = useRef<HTMLDivElement>(null);
   const openMenu = useContextMenuStore(s => s.openMenu);
@@ -242,7 +242,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     
     // BLACK OPS: Temporarily store this specific message's reaction handler globally
     // so the expanded EmojiPicker in ContextMenu can access it.
-    (window as any).currentReactionHandler = reactToMessage;
+    (window as { currentReactionHandler?: (emoji: string) => void }).currentReactionHandler = reactToMessage;
 
     // Limit edit window to 5 minutes (300,000 ms)
     const isWithinEditWindow = (Date.now() - new Date(message.createdAt).getTime()) < 5 * 60 * 1000;

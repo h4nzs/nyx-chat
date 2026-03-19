@@ -91,13 +91,13 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
 
   const handleVoiceCall = () => {
     if (peerUser) {
-      startCall(peerUser.id, false, user);
+      startCall(peerUser.id, false, (user as Record<string, unknown>) || {});
     }
   };
 
   const handleVideoCall = () => {
     if (peerUser) {
-      startCall(peerUser.id, true, user);
+      startCall(peerUser.id, true, (user as Record<string, unknown>) || {});
     }
   };
 

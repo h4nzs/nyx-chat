@@ -10,7 +10,7 @@ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
   const openConversation = useConversationStore(state => state.openConversation);
   const removeActivity = useDynamicIslandStore(state => state.removeActivity);
   const navigate = useNavigate();
-  const profile = useUserProfile(activity.sender as any);
+  const profile = useUserProfile(activity.sender as { id: string; encryptedProfile?: string | null });
 
   const handleClick = () => {
     if (activity.link) {

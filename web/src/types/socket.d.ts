@@ -9,12 +9,12 @@ export interface ServerToClientEvents {
     "message:deleted": (payload: { conversationId: string; id: string }) => void;
     "message:viewed": (payload: { messageId: string; conversationId: string }) => void;
     "messages:expired": (payload: { messageIds: string[] }) => void; // New event for disappearing messages
-    "reaction:new": (payload: { conversationId: string; messageId: string; reaction: any }) => void;
+    "reaction:new": (payload: { conversationId: string; messageId: string; reaction: { id: string; userId: string; emoji: string; isMessage?: boolean; tempId?: string } }) => void;
     "reaction:deleted": (payload: { conversationId: string; messageId: string; reactionId: string }) => void;
     "conversation:new": (conversation: Conversation) => void;
     "conversation:updated": (conversation: Partial<Conversation> & { id: string }) => void;
     "conversation:deleted": (payload: { id: string }) => void;
-    "conversation:participants_added": (payload: { conversationId: string; newParticipants: any[] }) => void;
+    "conversation:participants_added": (payload: { conversationId: string; newParticipants: { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[] }) => void;
     "conversation:participant_removed": (payload: { conversationId: string; userId: string }) => void;
     "user:updated": (user: Partial<User> & { id: string }) => void;
     "message:status_updated": (payload: {
@@ -55,7 +55,7 @@ export interface ServerToClientEvents {
 
     // --- DEVICE MIGRATION TUNNEL (SERVER -> CLIENT) ---
     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
-    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: any }) => void;
+    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
 }
 
@@ -103,6 +103,6 @@ export interface ClientToServerEvents {
     // --- DEVICE MIGRATION TUNNEL (CLIENT -> SERVER) ---
     "migration:join": (roomId: string) => void;
     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
-    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: any }) => void;
+    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
 }

@@ -1,4 +1,5 @@
 // Shim untuk react-window
+/* eslint-disable @typescript-eslint/no-explicit-any */
 declare module 'react-window' {
   import { Component, CSSProperties, Ref } from 'react';
 

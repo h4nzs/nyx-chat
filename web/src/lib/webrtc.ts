@@ -141,7 +141,7 @@ const getMediaStream = async (video: boolean) => {
   }
 };
 
-export const startCall = async (to: string, isVideo: boolean, callerProfile: any) => {
+export const startCall = async (to: string, isVideo: boolean, callerProfile: Record<string, unknown>) => {
   try {
     const { generateCallKey, encryptCallSignal } = await import('../utils/crypto');
     const callKey = await generateCallKey();
@@ -162,8 +162,8 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: any
         // Fallback: Try to find 1:1 by participant
         conversation = conversations.find(c =>
           !c.isGroup &&
-          c.participants.some((p: any) => p.userId === to || p.id === to) &&
-          c.participants.some((p: any) => p.userId === currentUser?.id || p.id === currentUser?.id)
+          c.participants.some((p: { userId?: string; id?: string }) => p.userId === to || p.id === to) &&
+          c.participants.some((p: { userId?: string; id?: string }) => p.userId === currentUser?.id || p.id === currentUser?.id)
         );
     }
 
@@ -195,7 +195,7 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: any
         // For groups, we might broadcast 'request' or wait? 
         // Simple Mesh: Send 'request' to all other participants.
         conversation.participants.forEach(p => {
-            const pid = (p as any).userId || p.id;
+            const pid = (p as { userId?: string; id: string }).userId || p.id;
             if (pid !== currentUser?.id) {
                  const pc = createPeerConnection(pid, iceServers);
                  // We create offer immediately? Or send 'request' first?
@@ -266,6 +266,14 @@ export const hangup = () => {
 
 import type { Socket } from "socket.io-client";
 
+type SignalingPayload = 
+  | { type?: string; isVideo: boolean; callerProfile: Record<string, unknown> }
+  | { type?: string; offer: RTCSessionDescriptionInit }
+  | { type?: string; answer: RTCSessionDescriptionInit }
+  | { type?: string; candidate: RTCIceCandidateInit }
+  | { type?: string; reason?: string; callerProfile?: Record<string, unknown> }
+  | Record<string, unknown>;
+
 export const initWebRTCListeners = (socket: Socket | null) => {
   if (!socket) return;
 
@@ -282,7 +290,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
 
     try {
         const { decryptCallSignal } = await import('../utils/crypto');
-        const decryptedPayload = (await decryptCallSignal(data.payload, callKey)) as any;
+        const decryptedPayload = (await decryptCallSignal(data.payload, callKey)) as SignalingPayload;
         const iceServers = await getDynamicIceServers();
 
         let pc = peerConnections.get(data.from);
@@ -290,7 +298,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
         switch (data.type) {
             case 'request':
                 if (state.callState === 'idle') {
-                    useCallStore.getState().setIncomingCall(data.from, decryptedPayload.isVideo, decryptedPayload.callerProfile, callKey);
+                    useCallStore.getState().setIncomingCall(data.from, (decryptedPayload as { isVideo: boolean }).isVideo, (decryptedPayload as { callerProfile: Record<string, unknown> }).callerProfile, callKey);
                 } else {
                     // Mesh: If already in call, we can auto-accept or merge? 
                     // For simple MVP: Reject if busy (Classic phone behavior)
@@ -298,7 +306,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                     // "Mesh Topology P2P (Group Call)" implies adding.
                     if (state.ephemeralCallKey === callKey) {
                          // Same call, new participant?
-                         useCallStore.getState().addRemoteUser(decryptedPayload.callerProfile || { id: data.from });
+                         useCallStore.getState().addRemoteUser((decryptedPayload as { callerProfile?: Record<string, unknown> }).callerProfile || { id: data.from });
                     } else {
                          sendSecureSignal(data.from, 'reject', { reason: 'busy' });
                     }
@@ -337,7 +345,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
             case 'offer':
                 if (!pc) pc = createPeerConnection(data.from, iceServers);
                 try {
-                  await pc.setRemoteDescription(new RTCSessionDescription(decryptedPayload.offer));
+                  await pc.setRemoteDescription(new RTCSessionDescription((decryptedPayload as { offer: RTCSessionDescriptionInit }).offer));
                   const answer = await pc.createAnswer();
                   await pc.setLocalDescription(answer);
                   sendSecureSignal(data.from, 'answer', { answer });
@@ -348,7 +356,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
             case 'answer':
                 if (!pc) return; // Should exist if we sent offer
                 try {
-                  await pc.setRemoteDescription(new RTCSessionDescription(decryptedPayload.answer));
+                  await pc.setRemoteDescription(new RTCSessionDescription((decryptedPayload as { answer: RTCSessionDescriptionInit }).answer));
                 } catch (e) {
                   console.error('Failed to handle answer', e);
                 }
@@ -356,7 +364,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
             case 'ice-candidate':
                 if (!pc) return;
                 try {
-                  await pc.addIceCandidate(new RTCIceCandidate(decryptedPayload.candidate));
+                  await pc.addIceCandidate(new RTCIceCandidate((decryptedPayload as { candidate: RTCIceCandidateInit }).candidate));
                 } catch (e) {
                   console.error('Failed to add ice candidate', e);
                 }

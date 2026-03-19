@@ -249,7 +249,7 @@ export class NyxShadowVault extends Dexie {
             name: decryptedSenderName,
             username: decryptedSenderUsername,
             avatarUrl: decryptedSenderAvatarUrl
-        } as any,
+        } as unknown as Message['sender'],
         isViewOnce: r.isViewOnce,
         isDeletedLocal: r.isDeletedLocal
       };
