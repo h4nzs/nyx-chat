@@ -22,7 +22,7 @@ const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId:
     return { id: userId };
   });
 
-  const profile = useUserProfile(user as any);
+  const profile = useUserProfile(user as { id: string; encryptedProfile?: string | null });
   const stories = useStoryStore(state => state.stories[userId] || []);
   
   if (stories.length === 0) return null;

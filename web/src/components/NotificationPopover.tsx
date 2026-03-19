@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { FiBell } from 'react-icons/fi';
 
-const NotificationItem = ({ notification }: { notification: any }) => {
+const NotificationItem = ({ notification }: { notification: { message: string, timestamp: number, link?: string } }) => {
   const timeAgo = (timestamp: number) => {
     const seconds = Math.floor((new Date().getTime() - timestamp) / 1000);
     let interval = seconds / 31536000;

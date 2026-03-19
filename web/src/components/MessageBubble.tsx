@@ -17,7 +17,7 @@ import { useUserProfile } from '@hooks/useUserProfile';
 import { useSettingsStore } from '@store/settings';
 
 const ReplyQuote = ({ message }: { message: Message }) => {
-  const profile = useUserProfile(message.sender as any);
+  const profile = useUserProfile(message.sender as { id: string; encryptedProfile?: string | null });
   const currentUser = useAuthStore.getState().user;
   const isMe = message.senderId === currentUser?.id;
   const authorName = isMe ? 'You' : (profile.name || 'Unknown');
@@ -43,7 +43,7 @@ interface Props {
   // karena Bubble ini hanya merender kontennya saja.
   onImageClick?: (message: Message) => void;
   isLastInSequence?: boolean;
-  participants?: any[];
+  participants?: Record<string, unknown>[];
 }
 
 export default function MessageBubble({ message, isOwn, onImageClick, isLastInSequence = true, participants = [] }: Props) {
@@ -209,7 +209,7 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
             )}
             {message.linkPreview && !message.fileUrl && (
               <div className="mt-2">
-                <LinkPreviewCard preview={message.linkPreview as any} />
+                <LinkPreviewCard preview={message.linkPreview as { url: string; title: string; description: string; image: string; siteName: string }} />
               </div>
             )}
           </>

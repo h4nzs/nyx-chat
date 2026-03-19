@@ -23,13 +23,13 @@ interface MessageInputProps {
   onSend: (data: { content: string }) => void;
   onTyping: () => void;
   onVoiceSend: (blob: Blob, duration: number) => void;
-  conversation: any; // Using any to match existing flexibility, ideally Typed
+  conversation: { id: string, isGroup: boolean, participants?: { id: string }[] }; // Using typed subset
 }
 
 // --- Helper: Debounce ---
-function debounce<F extends (...args: any[]) => any>(func: F, waitFor: number) {
+function debounce<Args extends unknown[]>(func: (...args: Args) => void, waitFor: number) {
   let timeout: ReturnType<typeof setTimeout> | null = null;
-  return (...args: Parameters<F>) => {
+  return (...args: Args) => {
     if (timeout !== null) clearTimeout(timeout);
     timeout = setTimeout(() => func(...args), waitFor);
   };
@@ -64,7 +64,7 @@ const ReplyPreview = () => {
     setReplyingTo: state.setReplyingTo,
   })));
 
-  const profile = useUserProfile(replyingTo?.sender as any);
+  const profile = useUserProfile(replyingTo?.sender as { id: string; encryptedProfile?: string | null });
   const currentUser = useAuthStore(state => state.user);
 
   if (!replyingTo) return null;
