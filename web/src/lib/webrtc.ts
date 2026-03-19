@@ -141,7 +141,7 @@ const getMediaStream = async (video: boolean) => {
   }
 };
 
-export const startCall = async (to: string, isVideo: boolean, callerProfile: Record<string, unknown>) => {
+export const startCall = async (to: string, isVideo: boolean, callerProfile: MinimalProfile) => {
   try {
     const { generateCallKey, encryptCallSignal } = await import('../utils/crypto');
     const callKey = await generateCallKey();
@@ -266,12 +266,14 @@ export const hangup = () => {
 
 import type { Socket } from "socket.io-client";
 
+import type { MinimalProfile } from '../store/callStore';
+
 type SignalingPayload = 
-  | { type?: string; isVideo: boolean; callerProfile: Record<string, unknown> }
+  | { type?: string; isVideo: boolean; callerProfile: MinimalProfile }
   | { type?: string; offer: RTCSessionDescriptionInit }
   | { type?: string; answer: RTCSessionDescriptionInit }
   | { type?: string; candidate: RTCIceCandidateInit }
-  | { type?: string; reason?: string; callerProfile?: Record<string, unknown> }
+  | { type?: string; reason?: string; callerProfile?: MinimalProfile }
   | Record<string, unknown>;
 
 export const initWebRTCListeners = (socket: Socket | null) => {
@@ -298,7 +300,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
         switch (data.type) {
             case 'request':
                 if (state.callState === 'idle') {
-                    useCallStore.getState().setIncomingCall(data.from, (decryptedPayload as { isVideo: boolean }).isVideo, (decryptedPayload as { callerProfile: Record<string, unknown> }).callerProfile, callKey);
+                    useCallStore.getState().setIncomingCall(data.from, (decryptedPayload as { isVideo: boolean }).isVideo, (decryptedPayload as { callerProfile: MinimalProfile }).callerProfile, callKey);
                 } else {
                     // Mesh: If already in call, we can auto-accept or merge? 
                     // For simple MVP: Reject if busy (Classic phone behavior)
@@ -306,7 +308,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                     // "Mesh Topology P2P (Group Call)" implies adding.
                     if (state.ephemeralCallKey === callKey) {
                          // Same call, new participant?
-                         useCallStore.getState().addRemoteUser((decryptedPayload as { callerProfile?: Record<string, unknown> }).callerProfile || { id: data.from });
+                         useCallStore.getState().addRemoteUser((decryptedPayload as { callerProfile?: MinimalProfile }).callerProfile || { id: data.from });
                     } else {
                          sendSecureSignal(data.from, 'reject', { reason: 'busy' });
                     }

@@ -473,7 +473,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
 
             {typingLinkPreview && (
             <div className="mb-2">
-                <LinkPreviewCard preview={typingLinkPreview} />
+                <LinkPreviewCard preview={typingLinkPreview as { url: string; title: string; description: string; image: string; siteName: string }} />
             </div>
             )}
             

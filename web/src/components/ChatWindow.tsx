@@ -29,6 +29,7 @@ import { useUserProfile } from '@hooks/useUserProfile';
 import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
 import { startCall } from '@lib/webrtc';
 import { useSettingsStore } from '@store/settings';
+import type { MinimalProfile } from '@store/callStore';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -91,13 +92,13 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
 
   const handleVoiceCall = () => {
     if (peerUser) {
-      startCall(peerUser.id, false, (user as Record<string, unknown>) || {});
+      startCall(peerUser.id, false, (user as unknown as MinimalProfile) || { id: user?.id || 'unknown' });
     }
   };
 
   const handleVideoCall = () => {
     if (peerUser) {
-      startCall(peerUser.id, true, (user as Record<string, unknown>) || {});
+      startCall(peerUser.id, true, (user as unknown as MinimalProfile) || { id: user?.id || 'unknown' });
     }
   };
 

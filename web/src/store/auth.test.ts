@@ -61,7 +61,7 @@ describe('useAuthStore', () => {
     // Check final state
     expect(useAuthStore.getState().user).toEqual(mockUser);
     expect(localStorage.getItem('user')).toEqual(JSON.stringify(mockUser));
-    expect(vi.mocked(api)).toHaveBeenCalledWith('/api/auth/login', expect.any(Object));
+    expect(vi.mocked(api)).toHaveBeenCalledWith('/api/auth/login', expect.any(Object) as unknown as Record<string, unknown>);
   });
 
   it('should set user to null on logout', async () => {
@@ -77,6 +77,6 @@ describe('useAuthStore', () => {
     // Check final state
     expect(useAuthStore.getState().user).toBeNull();
     expect(localStorage.getItem('user')).toBeNull();
-    expect(vi.mocked(api)).toHaveBeenCalledWith('/api/auth/logout', expect.any(Object));
+    expect(vi.mocked(api)).toHaveBeenCalledWith('/api/auth/logout', expect.any(Object) as unknown as Record<string, unknown>);
   });
 });

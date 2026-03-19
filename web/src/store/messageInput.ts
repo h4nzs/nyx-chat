@@ -20,7 +20,7 @@ export type StagedFile = {
 
 type State = {
   replyingTo: Message | null;
-  typingLinkPreview: any | null;
+  typingLinkPreview: Record<string, unknown> | null;
   expiresIn: number | null;
   isViewOnce: boolean;
   stagedFiles: StagedFile[];
@@ -113,7 +113,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const urls = text.match(urlRegex);
     if (urls && urls.length > 0) {
       try {
-        const preview = await api<any>("/api/previews", {
+        const preview = await api<Record<string, unknown>>("/api/previews", {
           method: "POST",
           body: JSON.stringify({ url: urls[0] }),
         });

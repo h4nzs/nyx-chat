@@ -112,7 +112,7 @@ describe('Message Store Logic', () => {
         rawMsg.ciphertext,
         rawMsg.conversationId,
         false, // isGroup
-        expect.any(String),
+        expect.any(String) as unknown as string,
         rawMsg.id
       );
     });
