@@ -3,6 +3,7 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
+import { Prisma } from '@prisma/client'
 import { requireAuth } from '../middleware/auth.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
@@ -31,7 +32,7 @@ router.post(
       const { identityKey, signedPreKey, signingKey } = req.body
 
       // Prepare user update data
-      const userUpdateData: any = { publicKey: identityKey }
+      const userUpdateData: Prisma.UserUpdateInput = { publicKey: identityKey }
       if (signingKey) {
         userUpdateData.signingKey = signingKey
       } else {
@@ -185,7 +186,7 @@ router.get(
       const { preKeyBundle, signingKey } = userWithBundle
 
       // Assemble the response bundle
-      const responseBundle: any = {
+      const responseBundle: Record<string, unknown> = {
         identityKey: preKeyBundle.identityKey,
         signedPreKey: {
           key: preKeyBundle.key,
@@ -247,14 +248,14 @@ router.get(
         include: { user: { select: { id: true, publicKey: true } } }
       })
 
-      if (!(initiatorRecord as any)?.user?.publicKey) {
+      if (!initiatorRecord?.user?.publicKey) {
         return res.status(404).json({ error: "Initiator's public key could not be found for this session." })
       }
 
       res.json({
         encryptedKey: keyRecord.encryptedKey,
         initiatorEphemeralKey: keyRecord.initiatorEphemeralKey,
-        initiatorIdentityKey: (initiatorRecord as any).user.publicKey
+        initiatorIdentityKey: initiatorRecord.user.publicKey
       })
     } catch (e) {
       next(e)

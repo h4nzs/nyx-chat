@@ -1,8 +1,9 @@
 import { PrismaClient } from '@prisma/client';
 import pgPkg from 'pg';
+import type { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 
-const { Pool } = pgPkg;
+const { Pool: PgPool } = pgPkg;
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -11,10 +12,10 @@ if (!connectionString) {
 }
 
 // Setup the PostgreSQL connection pool
-const pool = new Pool({ connectionString });
+const pool = new PgPool({ connectionString });
 
 // Instantiate the Prisma adapter
-const adapter = new PrismaPg(pool as any);
+const adapter = new PrismaPg(pool as unknown as Pool);
 
 // Pass the adapter to the PrismaClient
 export const prisma = new PrismaClient({

@@ -1,5 +1,8 @@
 import { prisma } from '../lib/prisma.js'
+import { PrismaClient } from '@prisma/client'
 import { getSodium } from '../lib/sodium.js'
+
+export type PrismaTransactionClient = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">
 
 const B64_VARIANT = 'URLSAFE_NO_PADDING'
 
@@ -7,7 +10,7 @@ const B64_VARIANT = 'URLSAFE_NO_PADDING'
  * Creates a new session key from scratch on the server and encrypts it for all participants.
  * This is used for ratcheting sessions or as a fallback.
  */
-export async function rotateAndDistributeSessionKeys (conversationId: string, initiatorId: string, tx?: any) {
+export async function rotateAndDistributeSessionKeys (conversationId: string, initiatorId: string, tx?: PrismaTransactionClient) {
   const db = tx || prisma
   const sodium = await getSodium()
   const sessionKey = sodium.crypto_secretbox_keygen()

@@ -3,6 +3,7 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
+import { Prisma } from '@prisma/client'
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
 import { ApiError } from '../utils/errors.js'
@@ -193,7 +194,7 @@ router.post('/', zodValidate({
 
     // 4. DATABASE TRANSACTION (Critical Path)
     // Buat array status insert
-    const statusData = participants.map(p => ({
+    const statusData: Prisma.MessageStatusCreateManyMessageInput[] = participants.map(p => ({
       userId: p.userId,
       status: p.userId === senderId ? 'READ' : 'SENT' // Pakai string literal enum
     }))
@@ -209,7 +210,7 @@ router.post('/', zodValidate({
           expiresAt, // Store expiration time
           isViewOnce: isViewOnce === true,
           statuses: {
-            createMany: { data: statusData as any } // createMany lebih cepat dari nested create
+            createMany: { data: statusData } // createMany lebih cepat dari nested create
           }
         },
         include: {
