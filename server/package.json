@@ -63,6 +63,7 @@
     "@types/cookie-parser": "^1.4.7",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.6",
+    "@types/express-serve-static-core": "^5.1.1",
     "@types/jest": "^30.0.0",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/morgan": "^1.9.9",
@@ -70,6 +71,7 @@
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^7.0.11",
     "@types/pg": "^8.18.0",
+    "@types/qs": "^6.15.0",
     "@types/supertest": "^7.2.0",
     "@types/ws": "^8.18.0",
     "@typescript-eslint/eslint-plugin": "^8.57.0",
@@ -87,9 +89,9 @@
     "typescript": "^5.4.5"
   },
   "onlyBuiltDependencies": [
-      "@prisma/engines",
-      "prisma",
-      "argon2",
-      "supabase"
+    "@prisma/engines",
+    "prisma",
+    "argon2",
+    "supabase"
   ]
 }
