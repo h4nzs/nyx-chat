@@ -57,7 +57,9 @@ function setAuthCookies (res: Response, { access, refresh }: { access: string; r
   })
 }
 
-async function issueTokens (user: any, req: any) {
+import { Request } from 'express'
+
+async function issueTokens (user: { id: string, role?: string }, req: Request) {
   // PURE ANONYMITY: Only store ID and Role in JWT. No Email/Username.
   const access = signAccessToken({ 
     id: user.id, 
@@ -487,15 +489,17 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) => 
     // This allows creating a NEW credential on the same device.
     const forceNew = req.query.force === 'true';
     
-    const excludeCredentials = forceNew ? [] : userAuthenticators.reduce((acc: any[], auth) => {
+    type GenOpts = Parameters<typeof generateRegistrationOptions>[0];
+    type ExcludeCredential = NonNullable<GenOpts['excludeCredentials']>[number];
+
+    const excludeCredentials = forceNew ? [] : userAuthenticators.reduce((acc: ExcludeCredential[], auth) => {
         try {
           if (!auth.credentialID) return acc;
           const base64 = String(auth.credentialID).replace(/-/g, '+').replace(/_/g, '/');
           const idBuffer = Buffer.from(base64, 'base64');
           acc.push({
-            id: idBuffer,
-            type: 'public-key',
-            transports: auth.transports ? (auth.transports.split(',') as any) : undefined
+            id: idBuffer as unknown as ExcludeCredential['id'],
+            transports: auth.transports ? (auth.transports.split(',') as ExcludeCredential['transports']) : undefined
           });
         } catch (e) {
           console.warn(`Skipping invalid credential ID: ${auth.credentialID}`, e);
@@ -593,6 +597,8 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
 
     if (!userAuthenticator) throw new ApiError(400, 'Unknown device.')
 
+    type VerifyOpts = Parameters<typeof verifyAuthenticationResponse>[0];
+
     const verification = await verifyAuthenticationResponse({
       response: body,
       expectedChallenge: challenge,
@@ -602,10 +608,10 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
         id: userAuthenticator.credentialID,
         publicKey: isoBase64URL.toBuffer(userAuthenticator.credentialPublicKey),
         counter: Number(userAuthenticator.counter),
-        transports: userAuthenticator.transports ? (userAuthenticator.transports.split(',') as any) : undefined
+        transports: userAuthenticator.transports ? (userAuthenticator.transports.split(',') as NonNullable<VerifyOpts['credential']>['transports']) : undefined
       },
       requireUserVerification: false
-    } as any)
+    } as unknown as VerifyOpts)
 
     if (verification.verified) {
       const { authenticationInfo } = verification

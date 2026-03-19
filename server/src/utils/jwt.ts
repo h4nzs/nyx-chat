@@ -1,11 +1,11 @@
-import jwt, { JwtPayload } from 'jsonwebtoken'
+import jwt, { JwtPayload, SignOptions } from 'jsonwebtoken'
 import crypto from 'node:crypto'
 import { env } from '../config.js'
 
 const ACCESS_TTL = '15m'
 const REFRESH_TTL_SEC = 60 * 60 * 24 * 30 // 30d
 
-export function signAccessToken (payload: any, opts: any = {}) {
+export function signAccessToken (payload: string | Buffer | object, opts: SignOptions = {}) {
   if (env.nodeEnv === 'production' && env.jwtSecret === 'dev-secret') {
     throw new Error('JWT_SECRET must be set in production environment')
   }

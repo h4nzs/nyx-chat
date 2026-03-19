@@ -263,7 +263,11 @@ router.get(
   }
 )
 
-router.get('/turn', requireAuth, async (req, res): Promise<any> => {
+interface TurnResponse {
+  iceServers?: Array<{ urls: string; username?: string; credential?: string }>;
+}
+
+router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
   try {
     const { env } = await import('../config.js');
     if (!env.cfAccountId || !env.cfTurnKeyId || !env.cfTurnApiToken) {
@@ -280,7 +284,7 @@ router.get('/turn', requireAuth, async (req, res): Promise<any> => {
       body: JSON.stringify({ ttl: 86400 }) // 24 hours validity
     });
 
-    const data: any = await response.json();
+    const data = await response.json() as unknown as TurnResponse;
 
     if (data.iceServers) {
       const payload = { 

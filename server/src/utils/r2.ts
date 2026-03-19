@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand, DeleteObjectsCommand } from '@aws-sdk/client-s3'
+import { S3Client, PutObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, PutObjectCommandInput } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '../config.js'
 
@@ -16,7 +16,7 @@ export const s3Client = new S3Client({
 // urlTtl: Berapa lama LINK upload valid (detik)
 // deleteAt: Kapan FILE harus dianggap kadaluarsa (untuk Lifecycle Rules / Metadata)
 export const getPresignedUploadUrl = async (key: string, contentType: string, urlTtl: number = 300, deleteAt?: Date) => {
-  const commandInput: any = {
+  const commandInput: PutObjectCommandInput = {
     Bucket: env.r2BucketName,
     Key: key,
     ContentType: contentType,
