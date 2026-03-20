@@ -467,9 +467,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             keyBytes = new Uint8Array(key);
             
             // Use AEAD IETF version: message, ad, secret_nonce, public_nonce, key
-            // Note: libsodium-wrappers exposes 'crypto_secretbox_xchacha20poly1305_easy' for 
-            // combined mode (nonce+key).
-            result = sodium.crypto_secretbox_xchacha20poly1305_easy(messageBytes, nonceBytes, keyBytes);
+            result = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(messageBytes, null, null, nonceBytes, keyBytes);
         } finally {
             if (messageBytes && typeof message !== 'string') sodium.memzero(messageBytes);
             if (nonceBytes) sodium.memzero(nonceBytes); // Optional
@@ -489,7 +487,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             keyBytes = new Uint8Array(key);
 
             // Use AEAD IETF version: secret_nonce, ciphertext, ad, public_nonce, key
-            result = sodium.crypto_secretbox_xchacha20poly1305_open_easy(ciphertextBytes, nonceBytes, keyBytes);
+            result = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ciphertextBytes, null, nonceBytes, keyBytes);
         } finally {
             if (ciphertextBytes) sodium.memzero(ciphertextBytes);
             if (nonceBytes) sodium.memzero(nonceBytes);
@@ -764,8 +762,10 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             // Generate random nonce (24 bytes for XChaCha20)
             nonce = sodium.randombytes_buf(24);
             
-            ciphertext = sodium.crypto_secretbox_xchacha20poly1305_easy(
+            ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
                 message,
+                null,
+                null,
                 nonce,
                 key
             );
@@ -799,8 +799,10 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             const nonce = combined!.slice(0, nonceBytes);
             const ciphertext = combined!.slice(nonceBytes);
             
-            decrypted = sodium.crypto_secretbox_xchacha20poly1305_open_easy(
+            decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+                null,
                 ciphertext,
+                null,
                 nonce,
                 key!
             );
