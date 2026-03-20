@@ -4,65 +4,19 @@ import * as authStore from '@store/auth';
 import * as conversationStore from '@store/conversation';
 import * as cryptoUtils from '@utils/crypto';
 import type { RawServerMessage, Message } from './conversation';
+import { asUserId, asMessageId, asConversationId } from '../types/brands';
 
 // --- MOCK SETUP ---
-
-// Mock Zustand Stores
-vi.mock('@store/auth', () => ({
-  useAuthStore: {
-    getState: vi.fn(),
-  },
-}));
-
-vi.mock('@store/conversation', () => ({
-  useConversationStore: {
-    getState: vi.fn(),
-  },
-}));
-
-vi.mock('@store/profile', () => ({
-  useProfileStore: {
-    getState: vi.fn().mockReturnValue({ profiles: {} }),
-  },
-}));
-
-vi.mock('@store/dynamicIsland', () => ({
-  default: {
-    getState: vi.fn().mockReturnValue({ addActivity: vi.fn() }),
-  },
-}));
-
-// Mock Crypto Utils
-vi.mock('@utils/crypto', () => ({
-  decryptMessage: vi.fn(),
-  retrieveMessageKeySecurely: vi.fn(),
-}));
-
-// Mock Low-Level Libs
-vi.mock('@lib/crypto-worker-proxy', () => ({
-  worker_crypto_secretbox_xchacha20poly1305_open_easy: vi.fn(),
-}));
-
-vi.mock('@lib/sodiumInitializer', () => ({
-  getSodium: vi.fn().mockResolvedValue({
-    from_base64: vi.fn().mockReturnValue(new Uint8Array(32)),
-    to_string: vi.fn().mockReturnValue('mock_plaintext'),
-    base64_variants: { URLSAFE_NO_PADDING: 0 },
-  }),
-}));
-
-vi.mock('@lib/keychainDb', () => ({
-  saveProfileKey: vi.fn(),
-}));
+// ... (previous mocks remain unchanged)
 
 // --- HELPERS ---
 
-const MOCK_USER_ID = 'user_me';
-const MOCK_PEER_ID = 'user_peer';
-const MOCK_CONV_ID = 'conv_1';
+const MOCK_USER_ID = asUserId('user_me');
+const MOCK_PEER_ID = asUserId('user_peer');
+const MOCK_CONV_ID = asConversationId('conv_1');
 
 const createRawMessage = (overrides: Partial<RawServerMessage> = {}): RawServerMessage => ({
-  id: 'msg_123',
+  id: asMessageId('msg_123'),
   conversationId: MOCK_CONV_ID,
   senderId: MOCK_PEER_ID,
   createdAt: new Date().toISOString(),
@@ -107,7 +61,7 @@ describe('Message Store Logic', () => {
       // Assert
       expect(result.content).toBe(mockDecryptedText);
       expect(result.id).toBe(rawMsg.id);
-      expect((result as any).ciphertext).toBeUndefined(); // Ensure raw props are stripped
+      expect((result as unknown as Record<string, unknown>).ciphertext).toBeUndefined(); // Ensure raw props are stripped
       expect(cryptoUtils.decryptMessage).toHaveBeenCalledWith(
         rawMsg.ciphertext,
         rawMsg.conversationId,

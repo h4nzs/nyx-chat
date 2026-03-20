@@ -9,8 +9,9 @@ import StoryViewer from './StoryViewer';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { toAbsoluteUrl } from '@utils/url';
 import clsx from 'clsx';
+import type { UserId } from '../types/brands';
 
-const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId: string; onClick: () => void }) {
+const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId: UserId; onClick: () => void }) {
   // Find the actual user object from conversations to get encryptedProfile
   const user = useConversationStore(state => {
     for (const c of state.conversations) {
@@ -60,7 +61,7 @@ export default function StoryTray() {
   const { fetchActiveStories, stories } = useStoryStore(useShallow(s => ({ fetchActiveStories: s.fetchActiveStories, stories: s.stories })));
   
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [viewingUserId, setViewingUserId] = useState<string | null>(null);
+  const [viewingUserId, setViewingUserId] = useState<UserId | null>(null);
 
   useEffect(() => {
     if (!me) return;
@@ -68,7 +69,7 @@ export default function StoryTray() {
     fetchActiveStories(me.id);
     
     // Extract unique user IDs from 1-on-1 conversations
-    const userIds = new Set<string>();
+    const userIds = new Set<UserId>();
     conversations.forEach(c => {
       if (!c.isGroup) {
         const other = c.participants.find(p => p.id !== me.id);
@@ -81,7 +82,7 @@ export default function StoryTray() {
     });
   }, [conversations, me, fetchActiveStories]);
 
-  const usersWithStories = Object.keys(stories).filter(id => id !== me?.id && stories[id] && stories[id].length > 0);
+  const usersWithStories = Object.keys(stories).filter(id => id !== me?.id && stories[id] && stories[id].length > 0) as UserId[];
 
   const myProfile = useUserProfile(me);
   const myStories = me ? (stories[me.id] || []) : [];

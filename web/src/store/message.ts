@@ -1,6 +1,8 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
+import type { UserId, ConversationId, MessageId } from '../types/brands';
+import { asUserId, asConversationId, asMessageId } from '../types/brands';
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api"; // Added authFetch
 import { getSocket, emitSessionKeyRequest, emitGroupKeyDistribution } from "@lib/socket";
@@ -17,8 +19,9 @@ import {
   PreKeyBundle 
 } from "@utils/crypto";
 import toast from "react-hot-toast";
-import { useAuthStore, type User } from "./auth";
-import type { Message, RawServerMessage } from "./conversation";
+import { useAuthStore } from "./auth";
+import type { RawServerMessage } from "./conversation";
+import type { User, Message } from "../types/core";
 import useDynamicIslandStore, { UploadActivity } from './dynamicIsland';
 import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
@@ -128,7 +131,7 @@ export async function decryptMessageObject(
             const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
             const sodium = await getSodium();
             
-            let cipherTextToUse = 'ciphertext' in rawMsg ? rawMsg.ciphertext : rawMsg.content;
+            let cipherTextToUse: string | null | undefined = ('ciphertext' in rawMsg ? rawMsg.ciphertext : rawMsg.content) as string | null | undefined;
             
             const unwrap = (str: string): string => {
                  if (str && typeof str === 'string' && str.trim().startsWith('{')) {
@@ -221,10 +224,10 @@ export async function decryptMessageObject(
         return finalMessage;
     }
 
-    let contentToDecrypt = 'ciphertext' in rawMsg ? rawMsg.ciphertext : undefined;
+    let contentToDecrypt: string | undefined = ('ciphertext' in rawMsg ? rawMsg.ciphertext : undefined) as string | undefined;
 
     if (!contentToDecrypt) {
-        contentToDecrypt = ('fileKey' in rawMsg ? rawMsg.fileKey : undefined) || rawMsg.content;
+        contentToDecrypt = (('fileKey' in rawMsg ? rawMsg.fileKey : undefined) || rawMsg.content) as string | undefined;
     }
 
     if (!contentToDecrypt || contentToDecrypt === 'waiting_for_key' || contentToDecrypt === '[Requesting key to decrypt...]') {
@@ -525,11 +528,11 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
   const messageMap = new Map([...existingMessages, ...chatMessages].map(m => [m.id, m]));
   
   for (const reaction of reactions) {
-    const target = messageMap.get(reaction.messageId);
+    const target = messageMap.get(asMessageId(reaction.messageId));
     if (target) {
       const existingReactions = target.reactions || [];
       if (!existingReactions.some(r => r.id === reaction.id)) {
-        target.reactions = [...existingReactions, reaction];
+        target.reactions = [...existingReactions, { ...reaction, userId: asUserId(reaction.userId) }];
       }
     }
   }
@@ -537,7 +540,7 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
   // APPLY EDITS (Sort by timestamp so latest edit wins)
   edits.sort((a, b) => a.timestamp - b.timestamp);
   for (const edit of edits) {
-     const target = messageMap.get(edit.targetMessageId);
+     const target = messageMap.get(asMessageId(edit.targetMessageId));
      if (target) {
         target.content = edit.text;
         target.isEdited = true;
@@ -812,15 +815,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
         const optimisticMessage: Message = {
             ...data,
-            id: `temp_${actualTempId}`,
+            id: asMessageId(`temp_${actualTempId}`),
             tempId: actualTempId,
             optimistic: true,
             sender: user,
-            senderId: user.id,
+            senderId: asUserId(user.id),
             createdAt: new Date().toISOString(),
-            conversationId,
+            conversationId: asConversationId(conversationId),
             reactions: [],
-            statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${actualTempId}`, id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
+            statuses: [{ userId: asUserId(user.id), status: 'READ', messageId: asMessageId(`temp_${actualTempId}`), id: `temp_status_${actualTempId}`, updatedAt: new Date().toISOString() }],
             status: 'SENDING',
             repliedTo: data.repliedTo,
             isSilent: isOptimisticSilent || data.isSilent
@@ -1049,12 +1052,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const isConnected = socket?.connected;
 
       if (!isConnected && !isReactionPayload) {
-        const queueMsg = { ...payload, id: `temp_${actualTempId}`, tempId: actualTempId, conversationId, senderId: user.id, createdAt: new Date().toISOString() } as Message;
+        const queueMsg = { ...payload, id: asMessageId(`temp_${actualTempId}`), tempId: actualTempId, conversationId: asConversationId(conversationId), senderId: asUserId(user.id), createdAt: new Date().toISOString() } as Message;
         await addToQueue(conversationId, queueMsg, actualTempId);
         return;
       }
 
-      socket?.emit("message:send", { ...payload, conversationId, tempId: actualTempId }, async (res: { ok: boolean, msg?: Message, error?: string }) => {
+      socket?.emit("message:send", { ...payload, conversationId: asConversationId(conversationId), tempId: actualTempId }, async (res: { ok: boolean, msg?: Message, error?: string }) => {
         if (res.ok && res.msg) {
             if (!isReactionPayload) {
                 // Get the existing optimistic message to preserve its decrypted text and repliedTo object
@@ -1202,15 +1205,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const tempId = Date.now();
     
     const optimisticMessage: Message = {
-      id: `temp_${tempId}`,
+      id: asMessageId(`temp_${tempId}`),
       tempId: tempId,
       optimistic: true,
       sender: user,
-      senderId: user.id,
+      senderId: asUserId(user.id),
       createdAt: new Date().toISOString(),
-      conversationId,
+      conversationId: asConversationId(conversationId),
       reactions: [],
-      statuses: [{ userId: user.id, status: 'READ', messageId: `temp_${tempId}`, id: `temp_status_${tempId}`, updatedAt: new Date().toISOString() }],
+      statuses: [{ userId: asUserId(user.id), status: 'READ', messageId: asMessageId(`temp_${tempId}`), id: `temp_status_${tempId}`, updatedAt: new Date().toISOString() }],
       fileName: file.name,
       fileSize: file.size,
       fileType: file.type,
@@ -1698,7 +1701,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               if (!isViewingChat && !finalDecrypted.isSilent && finalDecrypted.senderId !== currentUser?.id) {
                   import('@store/dynamicIsland').then(({ default: useDynamicIslandStore }) => {
                       const sender = finalDecrypted.sender as unknown as { encryptedProfile?: string };
-                      const senderName = (sender as any)?.name || (sender as any)?.decryptedProfile?.name || 'Someone'; 
+                      const senderName = (sender as unknown as { name?: string, decryptedProfile?: { name?: string } })?.name || (sender as unknown as { decryptedProfile?: { name?: string } })?.decryptedProfile?.name || 'Someone'; 
                       let snippet = finalDecrypted.content || 'New secure message';
                       if (finalDecrypted.fileUrl || finalDecrypted.isBlindAttachment) snippet = 'Sent an attachment 📎';
                       if (finalDecrypted.content && finalDecrypted.content.startsWith('🔒')) snippet = 'System message';
@@ -1708,8 +1711,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                           sender: sender || { name: senderName },
                           message: snippet,
                           link: `/chat/${finalDecrypted.conversationId}`
-                      } as any, 4000);
-                  }).catch(console.error);
+                      } as Parameters<ReturnType<typeof useDynamicIslandStore.getState>['addActivity']>[0], 4000);                  }).catch(console.error);
               }
 
               // --- CHAT LIST PREVIEW UPDATE ---
@@ -1850,92 +1852,91 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         if (m.id === messageId) {
           const newReactions = [...(m.reactions || [])];
           if (!newReactions.some(r => r.id === reaction.id)) {
-            newReactions.push(reaction);
-          }
-          return { ...m, reactions: newReactions };
-        }
-        return m;
-      })
-    }
-  })),
-  
-  removeLocalReaction: (conversationId, messageId, reactionId) => set(state => ({ messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, reactions: (m.reactions || []).filter(r => r.id !== reactionId) } : m) } })),
-  
-  replaceOptimisticReaction: (conversationId, messageId, tempId, finalReaction) => set(state => ({
-    messages: {
-      ...state.messages,
-      [conversationId]: (state.messages[conversationId] || []).map(m => {
-        if (m.id === messageId) {
-          return {
+            newReactions.push({ ...reaction, userId: asUserId(reaction.userId) });
+            }
+            return { ...m, reactions: newReactions };
+            }
+            return m;
+            })
+            }
+            })),
+
+            removeLocalReaction: (conversationId, messageId, reactionId) => set(state => ({ messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, reactions: (m.reactions || []).filter(r => r.id !== reactionId) } : m) } })),
+
+            replaceOptimisticReaction: (conversationId, messageId, tempId, finalReaction) => set(state => ({
+            messages: {
+            ...state.messages,
+            [conversationId]: (state.messages[conversationId] || []).map(m => {
+            if (m.id === messageId) {
+            return {
             ...m,
-            reactions: (m.reactions || []).map(r => r.id === tempId ? finalReaction : r),
-          };
-        }
-        return m;
-      })
-    }
-  })),
-  updateSenderDetails: (user) => set(state => {
-    const newMessages = { ...state.messages };
-    for (const convoId in newMessages) {
-      newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id }), ...user } } : m) as Message[];
-    }
-    return { messages: newMessages };
-  }),
+            reactions: (m.reactions || []).map(r => r.id === tempId ? { ...finalReaction, userId: asUserId(finalReaction.userId) } : r),
+            };
+            }
+            return m;
+            })
+            }
+            })),
+            updateSenderDetails: (user) => set(state => {
+            const newMessages = { ...state.messages };
+            for (const convoId in newMessages) {
+            newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id }), ...user } } : m) as Message[];
+            }
+            return { messages: newMessages };
+            }),
 
-  updateMessageStatus: (conversationId, messageId, userId, status) => set(state => {
-    const newMessages = { ...state.messages };
-    const convoMessages = newMessages[conversationId];
-    if (!convoMessages) return state;
-    newMessages[conversationId] = convoMessages.map(m => {
-      if (m.id === messageId) {
-        const existingStatus = m.statuses?.find(s => s.userId === userId);
-        if (existingStatus) return { ...m, statuses: m.statuses!.map(s => s.userId === userId ? { ...s, status, updatedAt: new Date().toISOString() } : s) };
-        else return { ...m, statuses: [...(m.statuses || []), { userId, status, messageId, id: `temp-status-${Date.now()}`, updatedAt: new Date().toISOString() }] };
-      }
-      return m;
-    }) as Message[];
-    return { messages: newMessages };
-  }),
+            updateMessageStatus: (conversationId, messageId, userId, status) => set(state => {
+            const newMessages = { ...state.messages };
+            const convoMessages = newMessages[conversationId];
+            if (!convoMessages) return state;
+            newMessages[conversationId] = convoMessages.map(m => {
+            if (m.id === messageId) {
+            const existingStatus = m.statuses?.find(s => s.userId === userId);
+            if (existingStatus) return { ...m, statuses: m.statuses!.map(s => s.userId === userId ? { ...s, status, updatedAt: new Date().toISOString() } : s) };
+            else return { ...m, statuses: [...(m.statuses || []), { userId, status, messageId, id: `temp-status-${Date.now()}`, updatedAt: new Date().toISOString() }] };
+            }
+            return m;
+            }) as Message[];
+            return { messages: newMessages };
+            }),
 
-  clearMessagesForConversation: (conversationId) => {
-    // 1. DELETE FROM LOCAL STORAGE
-    shadowVault.deleteConversationMessages(conversationId).catch(console.error);
-    import('@utils/crypto').then(m => m.deleteConversationKeychain(conversationId)).catch(console.error);
+            clearMessagesForConversation: (conversationId) => {
+            // 1. DELETE FROM LOCAL STORAGE
+            shadowVault.deleteConversationMessages(conversationId).catch(console.error);
+            import('@utils/crypto').then(m => m.deleteConversationKeychain(conversationId)).catch(console.error);
 
-    set(state => {
-      const newMessages = { ...state.messages };
-      delete newMessages[conversationId];
-      return { messages: newMessages };
-    });
-  },
+            set(state => {
+            const newMessages = { ...state.messages };
+            delete newMessages[conversationId];
+            return { messages: newMessages };
+            });
+            },
 
 
-  retrySendMessage: (message: Message) => {
-    const { conversationId, tempId, preview, fileUrl, fileName, fileType, fileSize, repliedToId } = message;
-    set(state => ({
-      messages: { ...state.messages, [conversationId]: state.messages[conversationId]?.filter(m => m.tempId !== tempId) || [] },
-    }));
-    get().sendMessage(conversationId, { content: preview, fileUrl, fileName, fileType, fileSize, repliedToId }, tempId);
-  },
+            retrySendMessage: (message: Message) => {
+            const { conversationId, tempId, preview, fileUrl, fileName, fileType, fileSize, repliedToId } = message;
+            set(state => ({
+            messages: { ...state.messages, [conversationId]: state.messages[conversationId]?.filter(m => m.tempId !== tempId) || [] },
+            }));
+            get().sendMessage(conversationId, { content: preview, fileUrl, fileName, fileType, fileSize, repliedToId }, tempId);
+            },
 
-  resendPendingMessages: () => {
-    const state = get();
-    Object.entries(state.messages).forEach(([_conversationId, messages]) => {
-      messages
-        .filter(m => m.optimistic && !m.error)
-        .forEach(m => {
-          get().retrySendMessage(m);
-        });
-    });
-  },
+            resendPendingMessages: () => {
+            const state = get();
+            Object.entries(state.messages).forEach(([_conversationId, messages]) => {
+            messages
+            .filter(m => m.optimistic && !m.error)
+            .forEach(m => {
+            get().retrySendMessage(m);
+            });
+            });
+            },
 
-  addSystemMessage: (conversationId, content) => {
-    const systemMessage: Message = {
-      id: `system_${Date.now()}`, type: 'SYSTEM', conversationId, content, createdAt: new Date().toISOString(), senderId: 'system' };
-    set(state => ({ messages: { ...state.messages, [conversationId]: [...(state.messages[conversationId] || []), systemMessage] } }));
-  },
-
+            addSystemMessage: (conversationId, content) => {
+            const systemMessage: Message = {
+            id: asMessageId(`system_${Date.now()}`), type: 'SYSTEM', conversationId: asConversationId(conversationId), content, createdAt: new Date().toISOString(), senderId: asUserId('system') };
+            set(state => ({ messages: { ...state.messages, [conversationId]: [...(state.messages[conversationId] || []), systemMessage] } }));
+            },
   reDecryptPendingMessages: async (conversationId: string) => {
     await new Promise(r => setTimeout(r, 1000));
 

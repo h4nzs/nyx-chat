@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useAuthStore } from './auth';
 import { api, authFetch } from '@lib/api';
+import { asUserId } from '../types/brands';
 
 // Mock the api module
 vi.mock('@lib/api');
@@ -32,9 +33,9 @@ vi.mock('@lib/socket', () => ({
 }));
 vi.mock('@lib/sodiumInitializer', () => ({
   getSodium: vi.fn().mockResolvedValue({
-    to_base64: (data: any) => `b64_${data}`,
+    to_base64: (data: unknown) => `b64_${data}`,
     crypto_sign_detached: () => 'mock_signature',
-    crypto_scalarmult_base: (key: any) => `pub_${key}`,
+    crypto_scalarmult_base: (key: unknown) => `pub_${key}`,
   }),
 }));
 
@@ -66,7 +67,7 @@ describe('useAuthStore', () => {
 
   it('should set user to null on logout', async () => {
     const mockUser = { id: '1', name: 'Test User', email: 'test@test.com', username: 'testuser' };
-    useAuthStore.setState({ user: mockUser });
+    useAuthStore.setState({ user: { ...mockUser, id: asUserId(mockUser.id) } });
 
     // Check initial state
     expect(useAuthStore.getState().user).not.toBeNull();

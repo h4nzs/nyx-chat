@@ -9,8 +9,10 @@ import { useConversationStore } from '@store/conversation';
 import { decryptFile } from '@utils/crypto';
 import { api } from '@lib/api';
 import toast from 'react-hot-toast';
+import type { UserId } from '../types/brands';
+import { asUserId } from '../types/brands';
 
-export default function StoryViewer({ userId, onClose, onReply }: { userId: string; onClose: () => void, onReply?: (text: string) => void }) {
+export default function StoryViewer({ userId, onClose, onReply }: { userId: UserId; onClose: () => void, onReply?: (text: string) => void }) {
   const stories = useStoryStore(state => state.stories[userId] || []);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -30,7 +32,7 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: stri
     return { id: userId };
   });
 
-  const profile = useUserProfile(targetUser as any);
+  const profile = useUserProfile(targetUser as unknown as { id: string });
   const [mediaBlobUrl, setMediaBlobUrl] = useState<string | null>(null);
   const mediaBlobUrlRef = useRef<string | null>(null);
   const [replyText, setReplyText] = useState('');

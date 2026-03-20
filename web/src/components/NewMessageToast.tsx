@@ -1,12 +1,13 @@
 import { toast, type Toast } from 'react-hot-toast';
 import { toAbsoluteUrl } from '@utils/url';
+import type { ConversationId } from '../types/brands';
 
 interface NewMessageToastProps {
   t: Toast;
   senderName: string;
   senderAvatar?: string | null;
   message: string;
-  conversationId: string;
+  conversationId: ConversationId;
 }
 
 const NewMessageToast = ({ t, senderName, senderAvatar, message, conversationId }: NewMessageToastProps) => {

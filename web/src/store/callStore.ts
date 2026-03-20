@@ -1,14 +1,8 @@
 import { create } from 'zustand';
+import type { UserId, MinimalProfile } from '../types/core';
+export type { MinimalProfile };
 
 export type CallState = 'idle' | 'ringing' | 'calling' | 'connected';
-
-export type MinimalProfile = {
-  id: string;
-  name?: string;
-  username?: string;
-  avatarUrl?: string | null;
-  [key: string]: unknown;
-};
 
 interface CallStoreState {
   callState: CallState;
@@ -21,13 +15,13 @@ interface CallStoreState {
   ephemeralCallKey: string | null;
 
   setCallState: (state: CallState) => void;
-  setIncomingCall: (from: string, isVideo: boolean, profile: MinimalProfile, key?: string) => void;
-  setOutgoingCall: (to: string | string[], isVideo: boolean, profile: MinimalProfile, key: string) => void;
+  setIncomingCall: (from: UserId, isVideo: boolean, profile: MinimalProfile, key?: string) => void;
+  setOutgoingCall: (to: UserId | UserId[], isVideo: boolean, profile: MinimalProfile | MinimalProfile[], key: string) => void;
   setLocalStream: (stream: MediaStream | null) => void;
-  addRemoteStream: (userId: string, stream: MediaStream) => void;
-  removeRemoteStream: (userId: string) => void;
+  addRemoteStream: (userId: UserId, stream: MediaStream) => void;
+  removeRemoteStream: (userId: UserId) => void;
   addRemoteUser: (profile: MinimalProfile) => void;
-  removeRemoteUser: (userId: string) => void;
+  removeRemoteUser: (userId: UserId) => void;
   toggleMinimize: () => void;
   setMinimized: (minimized: boolean) => void;
   endCall: () => void;
@@ -88,12 +82,12 @@ export const useCallStore = create<CallStoreState>((set) => ({
     let initialUsers: MinimalProfile[] = [];
     if (Array.isArray(profile)) {
         initialUsers = profile;
-    } else if (profile) {
+    } else if (profile && !Array.isArray(profile)) {
         initialUsers = [profile];
     } else if (Array.isArray(to)) {
         initialUsers = to.map(id => ({ id, name: 'User' }));
     } else {
-        initialUsers = [{ id: to, name: 'User' }];
+        initialUsers = [{ id: to as UserId, name: 'User' }];
     }
 
     set({

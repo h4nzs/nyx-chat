@@ -8,8 +8,9 @@ import { useModalStore } from '@store/modal';
 import { useShallow } from 'zustand/react/shallow';
 import { useUserProfile } from "@hooks/useUserProfile";
 import { DecryptedProfile } from "@store/profile";
+import type { ConversationId } from '../types/brands';
 
-const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: { conversationId: string, participant: Participant, profile: DecryptedProfile, amIAdmin: boolean }) => {
+const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: { conversationId: ConversationId, participant: Participant, profile: DecryptedProfile, amIAdmin: boolean }) => {
   const [isOpen, setIsOpen] = useState(false);
   const { user, blockUser, unblockUser, blockedUserIds } = useAuthStore(useShallow(s => ({
     user: s.user, blockUser: s.blockUser, unblockUser: s.unblockUser, blockedUserIds: s.blockedUserIds
@@ -95,8 +96,8 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
   );
 };
 
-const ParticipantItem = ({ p, conversationId, amIAdmin, handleProfileClick }: { p: Participant, conversationId: string, amIAdmin: boolean, handleProfileClick: (p: Participant) => void }) => {
-  const profile = useUserProfile(p as any);
+const ParticipantItem = ({ p, conversationId, amIAdmin, handleProfileClick }: { p: Participant, conversationId: ConversationId, amIAdmin: boolean, handleProfileClick: (p: Participant) => void }) => {
+  const profile = useUserProfile(p as unknown as { id: string });
   return (
     <li className="flex items-center justify-between p-2 rounded-lg hover:bg-secondary">
       <button onClick={() => handleProfileClick(p)} className="flex items-center gap-3 text-left min-w-0">
@@ -120,7 +121,7 @@ const ParticipantItem = ({ p, conversationId, amIAdmin, handleProfileClick }: { 
   );
 };
 
-const ParticipantList = ({ conversationId, participants, amIAdmin }: { conversationId: string, participants: Participant[], amIAdmin: boolean }) => {
+const ParticipantList = ({ conversationId, participants, amIAdmin }: { conversationId: ConversationId, participants: Participant[], amIAdmin: boolean }) => {
   const openProfileModal = useModalStore(s => s.openProfileModal);
 
   const handleProfileClick = (participant: Participant) => {

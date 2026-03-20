@@ -68,7 +68,7 @@ interface KeyFulfillmentPayload {
 
 // Extend the Socket type from Socket.IO to include our custom user property
 interface AuthenticatedSocket extends Socket {
-  user?: AuthPayload & { publicKey: string | null };
+  user?: AuthPayload & { publicKey?: string | null };
 }
 
 export let io: Server;

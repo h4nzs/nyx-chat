@@ -102,7 +102,7 @@ router.post(
       // Note: If keyId conflict exists (unique constraint), this might fail.
       // We assume client manages keyIds correctly (e.g. rolling counter).
       await prisma.oneTimePreKey.createMany({
-        data: keys.map(k => ({
+        data: keys.map((k: { keyId: number; publicKey: string }) => ({
           userId,
           keyId: k.keyId,
           publicKey: k.publicKey

@@ -5,8 +5,9 @@ import { useCallStore } from '../store/callStore';
 import { acceptCall, rejectCall, hangup, replaceVideoTrack, getNetworkQuality } from '../lib/webrtc';
 import { toAbsoluteUrl } from '../utils/url';
 import toast from 'react-hot-toast';
+import type { UserId } from '../types/brands';
 
-const RemoteStream = ({ userId, stream, isVideo, profile }: { userId: string, stream?: MediaStream, isVideo: boolean, profile: any }) => {
+const RemoteStream = ({ userId, stream, isVideo, profile }: { userId: UserId, stream?: MediaStream, isVideo: boolean, profile: Record<string, unknown> }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
@@ -21,8 +22,8 @@ const RemoteStream = ({ userId, stream, isVideo, profile }: { userId: string, st
     }
   }, [stream, isVideo]);
 
-  const name = profile?.name || 'User';
-  const avatar = toAbsoluteUrl(profile?.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${name}`;
+  const name = (profile?.name as string) || 'User';
+  const avatar = toAbsoluteUrl(profile?.avatarUrl as string) || `https://api.dicebear.com/8.x/initials/svg?seed=${name}`;
 
   return (
     <div className="relative w-full h-full bg-gray-900 rounded-2xl overflow-hidden shadow-xl border border-white/10 group flex items-center justify-center">

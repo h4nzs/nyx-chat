@@ -28,6 +28,7 @@ import SwipeableItem from './SwipeableItem';
 import { useContextMenuStore } from '../store/contextMenu';
 import { useSettingsStore } from '@store/settings';
 import StoryTray from './StoryTray';
+import type { UserId } from '../types/brands';
 
 // --- Sub-components ---
 
@@ -163,14 +164,14 @@ const ConversationItem = memo(function ConversationItem({
   privacyCloak
 }: {
   conversation: Conversation;
-  meId?: string;
+  meId?: UserId;
   isOnline: boolean;
   isBlocked: boolean;
-  blockUser: (userId: string) => Promise<void>;
-  unblockUser: (userId: string) => Promise<void>;
+  blockUser: (userId: UserId) => Promise<void>;
+  unblockUser: (userId: UserId) => Promise<void>;
   isActive: boolean;
   onClick: () => void;
-  onUserClick: (userId: string) => void;
+  onUserClick: (userId: UserId) => void;
   onMenuSelect: (action: 'deleteGroup' | 'deleteChat') => void;
   onTogglePin: (id: string) => void;
   privacyCloak: boolean;

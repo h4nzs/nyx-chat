@@ -5,12 +5,14 @@ import io from "socket.io-client";
 import type { Socket } from "socket.io-client";
 import toast from "react-hot-toast";
 import { useAuthStore } from "@store/auth";
-import { useConversationStore } from "@store/conversation";
+import { useConversationStore, type Message } from "@store/conversation";
 import { useMessageStore } from "@store/message";
 import { useConnectionStore } from "@store/connection";
 import { usePresenceStore } from "@store/presence";
 import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest, schedulePeriodicGroupKeyRotation } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
+import { asUserId } from "../types/brands";
+import { IncomingMessageSchema } from "../schemas/core";
 import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
 import { triggerReceiveFeedback } from "@utils/feedback";
 
@@ -119,15 +121,27 @@ export function getSocket() {
     });
 
     // --- Application-specific Listeners ---
-    socket.on("message:new", async (newMessage) => {
+    socket.on("message:new", async (rawPayload: unknown) => {
+      // 1. Zod memeriksa dan mengubah data mentah menjadi Branded Types
+      const parsed = IncomingMessageSchema.safeParse(rawPayload);
+
+      // 2. Fail Gracefully (Jangan biarkan aplikasi crash)
+      if (!parsed.success) {
+          console.error("[Zod Shield] Dropping invalid incoming message:", parsed.error.format());
+          return; 
+      }
+
+      // 3. Data sudah dijamin aman dan memiliki Opaque Types yang benar
+      const safeMessage = parsed.data;
+
       const meId = useAuthStore.getState().user?.id;
       
       // THE SHIELD: Intelligent Echo Cancellation
       // Only block messages from ourselves IF they match a pending optimistic update on this device.
       // This allows messages from our *other* devices to pass through and be synced.
-      if (meId && newMessage.senderId === meId) {
-        const isOptimisticEcho = useMessageStore.getState().messages[newMessage.conversationId]?.some(
-            m => m.tempId && String(m.tempId) === String(newMessage.tempId)
+      if (meId && safeMessage.senderId === meId) {
+        const isOptimisticEcho = useMessageStore.getState().messages[safeMessage.conversationId]?.some(
+            m => m.tempId && String(m.tempId) === String(safeMessage.tempId)
         );
         
         if (isOptimisticEcho) {
@@ -137,7 +151,7 @@ export function getSocket() {
         // If no match, it's a sync from another device (or a re-send we lost track of). Process it.
       }
 
-      const convExists = useConversationStore.getState().conversations.some(c => c.id === newMessage.conversationId);
+      const convExists = useConversationStore.getState().conversations.some(c => c.id === safeMessage.conversationId);
       if (!convExists) {
         return;
       }
@@ -147,7 +161,7 @@ export function getSocket() {
         
         // Delegate EVERYTHING to the store. 
         // The store handles decryption, reaction parsing, and optimistic replacement internally.
-        const decryptedMessage = await addIncomingMessage(newMessage.conversationId, newMessage);
+        const decryptedMessage = await addIncomingMessage(safeMessage.conversationId, safeMessage);
           
         if (!decryptedMessage) return; // Message intercepted (e.g. STORY_KEY)
 
@@ -159,7 +173,7 @@ export function getSocket() {
         // TODO: Trigger Desktop/Push Notification here using decryptedMessage.content or decryptedMessage.fileName
         // e.g. showNotification(decryptedMessage.sender.name, decryptedMessage.content || "Sent a file");
         
-        socket?.emit('message:ack_delivered', { messageId: newMessage.id, conversationId: newMessage.conversationId });
+        socket?.emit('message:ack_delivered', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
       } catch (e: unknown) {
         console.error("Failed to process incoming message", e);
       }
@@ -245,7 +259,7 @@ export function getSocket() {
     });
 
     socket.on("conversation:participants_added", ({ conversationId, newParticipants }) => {
-      useConversationStore.getState().addParticipants(conversationId, newParticipants);
+      useConversationStore.getState().addParticipants(conversationId, newParticipants.map(p => ({ ...p, id: asUserId(p.id) })));
       useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
       fireGhostSync(conversationId, 2000);
     });

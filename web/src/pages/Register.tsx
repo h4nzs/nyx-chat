@@ -86,10 +86,11 @@ export default function Register() {
     setIsVerifyingBio(true);
     try {
       // 1. Get Options
-      const options = await api<any>("/api/auth/webauthn/register/options");
+      const options = await api<unknown>("/api/auth/webauthn/register/options");
       
       // 2. Browser Prompt
-      const attResp = await startRegistration(options);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const attResp = await startRegistration(options as any);
       
       // 3. Verify on Server
       const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {

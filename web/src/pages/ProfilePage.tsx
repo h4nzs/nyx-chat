@@ -8,6 +8,8 @@ import { FiEdit2, FiShield, FiCpu, FiGlobe, FiActivity, FiKey, FiCheck, FiArrowL
 import { toast } from 'react-hot-toast';
 
 import { useUserProfile } from '@hooks/useUserProfile';
+import type { UserId } from '../types/brands';
+import { asUserId } from '../types/brands';
 
 type ProfileUser = User & {
   createdAt?: string;
@@ -15,7 +17,9 @@ type ProfileUser = User & {
 };
 
 export default function ProfilePage() {
-  const { userId } = useParams<{ userId: string }>();
+  const { userId: rawUserId } = useParams<{ userId: string }>();
+  const userId = rawUserId ? asUserId(rawUserId) : undefined;
+  
   const navigate = useNavigate();
   const { user: me, updateProfile, updateAvatar } = useAuthStore(useShallow(s => ({
     user: s.user, updateProfile: s.updateProfile, updateAvatar: s.updateAvatar

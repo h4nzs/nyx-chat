@@ -3,7 +3,7 @@ import reactPlugin from 'eslint-plugin-react';
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'public/**']
+    ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'public/**', 'dev-dist/**', 'vite.config.ts', 'eslint.config.js', 'tailwind.config.ts', 'postcss.config.js']
   },
   ...tseslint.configs.recommended.map(config => ({
     ...config,

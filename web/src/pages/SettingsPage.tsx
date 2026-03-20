@@ -62,7 +62,7 @@ const RockerSwitch = ({ checked, onChange, disabled, label }: { checked: boolean
   </button>
 );
 
-const ControlModule = ({ title, children, className = '', icon: Icon }: { title: string; children: React.ReactNode; className?: string; icon?: any }) => (
+const ControlModule = ({ title, children, className = '', icon: Icon }: { title: string; children: React.ReactNode; className?: string; icon?: React.ElementType }) => (
   <div className={`
     relative bg-bg-main rounded-xl p-6 overflow-hidden
     shadow-neu-flat dark:shadow-neu-flat-dark
@@ -90,7 +90,7 @@ const ControlModule = ({ title, children, className = '', icon: Icon }: { title:
   </div>
 );
 
-const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?: () => void; label: string; icon?: any; danger?: boolean }) => (
+const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?: () => void; label: string; icon?: React.ElementType; danger?: boolean }) => (
   <button
     onClick={onClick}
     className={`
@@ -161,9 +161,9 @@ export default function SettingsPage() {
         const messagesMap = useMessageStore.getState().messages;
         const fileKeys: string[] = [];
         
-        Object.values(messagesMap).flat().forEach((msg: any) => {
+        Object.values(messagesMap).flat().forEach((msg: Record<string, unknown>) => {
             if (msg.senderId === user?.id && msg.fileKey) {
-                fileKeys.push(msg.fileKey);
+                fileKeys.push(msg.fileKey as string);
             }
         });
 
@@ -183,7 +183,7 @@ export default function SettingsPage() {
         window.location.replace('/');
     } catch (error: unknown) {
         setIsDeleting(false);
-        const errorMsg = (error as any).details ? JSON.parse((error as any).details).error : (error instanceof Error ? error.message : 'Unknown error');
+        const errorMsg = (error as Record<string, unknown>).details ? JSON.parse((error as Record<string, unknown>).details as string).error : (error instanceof Error ? error.message : 'Unknown error');
         toast.error(`Deletion failed: ${errorMsg}`);
     }
   };
@@ -264,7 +264,7 @@ export default function SettingsPage() {
 
       toast.success('Identity Updated');
     } catch (error: unknown) {
-      const errorMsg = (error as any).details ? JSON.parse((error as any).details).error : (error instanceof Error ? error.message : 'Unknown error');
+      const errorMsg = (error as Record<string, unknown>).details ? JSON.parse((error as Record<string, unknown>).details as string).error : (error instanceof Error ? error.message : 'Unknown error');
       toast.error(`Update failed: ${errorMsg}`);
     } finally {
       setIsLoading(false);
@@ -302,13 +302,13 @@ export default function SettingsPage() {
 
       toast.loading("Initializing biometric scanner...", { id: 'passkey' });
       // Force creation of a NEW credential (even if one exists) to ensure PRF support is enabled
-      const options = await api<any>("/api/auth/webauthn/register/options?force=true");
+      const options = await api<unknown>("/api/auth/webauthn/register/options?force=true");
       
       toast.loading("Scan fingerprint now to LOCK your vault...", { id: 'passkey' });
       
       // 2. Setup Biometric with PRF (Magic Happens Here)
       // Ini akan mendaftarkan jari ke server SEKALIGUS mengenkripsi phrase di lokal
-      const attResp = await setupBiometricUnlock(options, phraseToLock);
+      const attResp = await setupBiometricUnlock(options as Record<string, unknown>, phraseToLock);
       
       // 3. Verifikasi Server (Hanya untuk login, server tidak menerima phrase)
       const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {

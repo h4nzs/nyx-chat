@@ -31,7 +31,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
     let isMounted = true;
 
     const handleDecryption = async () => {
-      let rawFileKey = message.fileKey || '';
+      const rawFileKey = message.fileKey || '';
 
       if (!message.fileUrl) {
         if (isMounted) setError("Missing file URL.");

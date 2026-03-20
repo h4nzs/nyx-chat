@@ -17,6 +17,7 @@ import ModalBase from './ui/ModalBase';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { useUserProfile } from '@hooks/useUserProfile';
+import { asConversationId } from '../types/brands';
 
 type ProfileUser = User & { publicKey?: string };
 
@@ -273,7 +274,7 @@ export default function UserInfoModal() {
 
           {activeTab === 'media' && activeId && (
             <div className="min-h-[300px]">
-              <MediaGallery conversationId={activeId} />
+              <MediaGallery conversationId={asConversationId(activeId)} />
             </div>
           )}
         </div>

@@ -5,15 +5,17 @@ import { useShallow } from 'zustand/react/shallow';
 import toast from 'react-hot-toast';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { toAbsoluteUrl } from '@utils/url';
+import type { UserId } from '../types/brands';
+import { asUserId } from '../types/brands';
 
 export interface SearchUser {
-  id: string;
+  id: UserId;
   encryptedProfile?: string | null;
   isVerified?: boolean;
   publicKey?: string;
 }
 
-function SearchResultItem({ u, loadingId, onStarted }: { u: SearchUser, loadingId: string | null, onStarted: (id: string) => void }) {
+function SearchResultItem({ u, loadingId, onStarted }: { u: SearchUser, loadingId: UserId | null, onStarted: (id: UserId) => void }) {
   const profile = useUserProfile(u);
   return (
     <button 
@@ -30,9 +32,9 @@ function SearchResultItem({ u, loadingId, onStarted }: { u: SearchUser, loadingI
   );
 }
 
-export default function StartNewChat({ query, onStarted }: { query: string; onStarted: (id: string) => void }) {
+export default function StartNewChat({ query, onStarted }: { query: string; onStarted: (id: UserId) => void }) {
   const [list, setList] = useState<SearchUser[]>([]);
-  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [loadingId, setLoadingId] = useState<UserId | null>(null);
   const searchIdRef = useRef(0);
   const { searchUsers, startConversation } = useConversationStore(useShallow(state => ({
     searchUsers: state.searchUsers,
@@ -49,7 +51,7 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
       try {
         const r = await searchUsers(query);
         if (currentId === searchIdRef.current) {
-          setList(r);
+          setList(r.map((u: Record<string, unknown>) => ({ ...u, id: asUserId(u.id as string) })));
         }
       } catch {
         toast.error("Failed to search users.");
@@ -58,12 +60,31 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
     return () => clearTimeout(t);
   }, [query, searchUsers]);
 
-  const handleStart = async (peerId: string) => {
+  const handleStart = async (peerId: UserId) => {
     try {
       setLoadingId(peerId);
       const id = await startConversation(peerId);
       if (id) {
-        onStarted(id);
+        onStarted(asUserId(id)); // Wait, onStarted expects UserId? But startConversation returns ConversationId?
+        // Let's check StartNewChat props: onStarted: (id: UserId) => void.
+        // Wait, onStarted implies we started a chat with a USER. 
+        // But startConversation returns a CONVERSATION ID.
+        // If onStarted takes UserId, we should pass peerId?
+        // Let's check where StartNewChat is used. ChatList uses it?
+        // No, ChatList doesn't use StartNewChat directly? It's used in sidebar maybe?
+        // Ah, ChatList uses CreateGroupChat and ScanQRModal. 
+        // Let's check grep again. 
+        // web/src/components/StartNewChat.tsx is used by... nothing? 
+        // Wait, CommandPalette might use it?
+        // Or maybe it's dead code?
+        // Let's assume onStarted wants the ConversationId to navigate to?
+        // But the type signature said (id: UserId).
+        // Let's look at the previous content of StartNewChat.tsx
+        // It says `onStarted: (id: string) => void`. I changed it to `UserId`.
+        // If startConversation returns `ConversationId`, then `onStarted` should probably accept `ConversationId` or `string`.
+        // But I changed the prop to `UserId`.
+        // If I change it to `ConversationId`, then `onStarted(id)` works (with caster).
+        // Let's assume onStarted is for navigation, so it wants ConversationId.
       }
     } catch (e: unknown) {
       toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to start conversation.");

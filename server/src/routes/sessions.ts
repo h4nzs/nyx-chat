@@ -62,7 +62,11 @@ router.get('/', requireAuth, async (req, res, next) => {
           if (displayIp.startsWith('::ffff:')) displayIp = displayIp.replace('::ffff:', '');
       } else {
           // Mask the hash so it doesn't look scary/ugly
-          displayIp = `HIDDEN (${s.ipAddress.substring(0, 6)}...)`;
+          if (s.ipAddress) {
+             displayIp = `HIDDEN (${s.ipAddress.substring(0, 6)}...)`;
+          } else {
+             displayIp = 'UNKNOWN';
+          }
       }
 
       return {

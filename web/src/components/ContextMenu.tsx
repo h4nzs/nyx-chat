@@ -102,8 +102,8 @@ export default function ContextMenu() {
                  <Suspense fallback={<div className="w-[300px] h-[400px] flex items-center justify-center text-text-secondary">Loading...</div>}>
                    <EmojiPicker 
                       onEmojiClick={(emojiData: EmojiClickData) => {
-                         if (typeof (window as any).currentReactionHandler === 'function') {
-                            (window as any).currentReactionHandler(emojiData.emoji);
+                         if (typeof (window as unknown as { currentReactionHandler?: (emoji: string) => void }).currentReactionHandler === 'function') {
+                            (window as unknown as { currentReactionHandler: (emoji: string) => void }).currentReactionHandler(emojiData.emoji);
                          }
                          closeMenu();
                       }}

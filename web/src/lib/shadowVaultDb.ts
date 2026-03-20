@@ -2,15 +2,18 @@ import Dexie, { Table } from 'dexie';
 import type { Message } from '@store/conversation';
 import { getSodium } from '@lib/sodiumInitializer';
 import { getMyEncryptionKeyPair } from '@utils/crypto';
+import { asMessageId, asConversationId, asUserId } from '../types/brands';
+import { ShadowVaultMessageSchema } from '../schemas/core';
+import type { MessageId, ConversationId, UserId, StoryId } from '../types/core';
 
 export interface DecryptedMessageRecord {
-  id: string;
-  conversationId: string;
+  id: MessageId;
+  conversationId: ConversationId;
   content: string | null; // ENCRYPTED Base64 string at rest
-  repliedToId?: string;
+  repliedToId?: MessageId;
   repliedTo?: string; // Encrypted JSON string of the replied message
   createdAt: string | Date;
-  senderId: string;
+  senderId: UserId;
   senderName?: string; // Encrypted sender name
   senderUsername?: string; // Encrypted sender username
   senderAvatarUrl?: string; // Encrypted avatar URL
@@ -148,7 +151,14 @@ export class NyxShadowVault extends Dexie {
     try {
       const records = await this.messages.where('conversationId').equals(conversationId).toArray();
       const messages: Message[] = [];
-      for (const r of records) {
+      for (const rawRecord of records) {
+        const parsed = ShadowVaultMessageSchema.safeParse(rawRecord);
+        if (!parsed.success) {
+            console.warn("[ShadowVault Shield] Skipping corrupted local message record:", rawRecord.id, parsed.error.format());
+            continue;
+        }
+        
+        const r = parsed.data;
         let plainText = null;
         let decryptedRepliedTo = undefined;
         let decryptedSenderName = undefined;
@@ -179,13 +189,13 @@ export class NyxShadowVault extends Dexie {
         }
 
         messages.push({
-          id: r.id,
-          conversationId: r.conversationId,
+          id: asMessageId(r.id),
+          conversationId: asConversationId(r.conversationId),
           content: plainText,
-          repliedToId: r.repliedToId,
+          repliedToId: r.repliedToId ? asMessageId(r.repliedToId) : undefined,
           repliedTo: decryptedRepliedTo,
           createdAt: r.createdAt as string,
-          senderId: r.senderId,
+          senderId: asUserId(r.senderId),
           sender: {
               id: r.senderId,
               name: decryptedSenderName,
@@ -237,13 +247,13 @@ export class NyxShadowVault extends Dexie {
       }
 
       return {
-        id: r.id,
-        conversationId: r.conversationId,
+        id: asMessageId(r.id),
+        conversationId: asConversationId(r.conversationId),
         content: plainText,
-        repliedToId: r.repliedToId,
+        repliedToId: r.repliedToId ? asMessageId(r.repliedToId) : undefined,
         repliedTo: decryptedRepliedTo,
         createdAt: r.createdAt as string,
-        senderId: r.senderId,
+        senderId: asUserId(r.senderId),
         sender: {
             id: r.senderId,
             name: decryptedSenderName,

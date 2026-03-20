@@ -2,9 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { useMessageSearchStore } from '@store/messageSearch';
 import { useShallow } from 'zustand/react/shallow';
 import { FiSearch, FiX } from 'react-icons/fi';
+import type { ConversationId, MessageId } from '../types/brands';
+import { asMessageId } from '../types/brands';
 
 interface SearchMessagesProps {
-  conversationId: string;
+  conversationId: ConversationId;
 }
 
 export default function SearchMessages({ conversationId }: SearchMessagesProps) {
@@ -38,7 +40,7 @@ export default function SearchMessages({ conversationId }: SearchMessagesProps) 
     searchMessages(query, conversationId);
   };
 
-  const handleResultClick = (messageId: string) => {
+  const handleResultClick = (messageId: MessageId) => {
     setHighlightedMessageId(messageId);
     setIsOpen(false);
   };
@@ -76,7 +78,7 @@ export default function SearchMessages({ conversationId }: SearchMessagesProps) 
               searchResults.map((msg) => (
                 <div
                   key={msg.id}
-                  onClick={() => handleResultClick(msg.id)}
+                  onClick={() => handleResultClick(asMessageId(msg.id))}
                   className="p-3 hover:bg-secondary cursor-pointer border-b border-border last:border-b-0"
                 >
                   <p className="text-sm text-text-primary truncate">{msg.content}</p>

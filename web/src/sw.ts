@@ -144,7 +144,7 @@ self.addEventListener('push', (event: PushEvent) => {
       }
       // --- END VISIBILITY CHECK ---
 
-      const options: any = {
+      const options: Record<string, unknown> = {
         body,
         icon: '/nyx.png', 
         badge: '/nyx.png',

@@ -4,6 +4,8 @@
 import { getSocket } from './socket';
 import { useCallStore } from '../store/callStore';
 import { api } from './api';
+import { asUserId } from '../types/brands';
+import { WebRTCSignalingSchema } from '../schemas/core';
 
 let cachedIceServers: RTCIceServer[] | null = null;
 let turnCacheExp = 0;
@@ -110,7 +112,7 @@ const createPeerConnection = (targetUserId: string, iceServers: RTCIceServer[]) 
 
   pc.ontrack = (event) => {
     if (event.streams && event.streams[0]) {
-      useCallStore.getState().addRemoteStream(targetUserId, event.streams[0]);
+      useCallStore.getState().addRemoteStream(asUserId(targetUserId), event.streams[0]);
     }
   };
 
@@ -146,7 +148,7 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
     const { generateCallKey, encryptCallSignal } = await import('../utils/crypto');
     const callKey = await generateCallKey();
     
-    useCallStore.getState().setOutgoingCall(to, isVideo, callerProfile, callKey);
+    useCallStore.getState().setOutgoingCall(asUserId(to), isVideo, callerProfile, callKey);
 
     // --- FIX: Find the correct Conversation ID ---
     const { useConversationStore } = await import('../store/conversation');
@@ -281,7 +283,15 @@ export const initWebRTCListeners = (socket: Socket | null) => {
 
   if (socket.listeners('webrtc:secure_signal').length > 0) return;
 
-  socket.on('webrtc:secure_signal', async (data: { from: string, type: string, payload: string }) => {
+  socket.on('webrtc:secure_signal', async (rawPayload: unknown) => {
+    const parsed = WebRTCSignalingSchema.safeParse(rawPayload);
+
+    if (!parsed.success) {
+        console.error("[WebRTC Zod Shield] Dropping invalid signaling payload:", parsed.error.format());
+        return; // Stop eksekusi agar logic SDP/ICE tidak crash
+    }
+
+    const data = parsed.data;
     const state = useCallStore.getState();
     const callKey = state.ephemeralCallKey;
 
@@ -295,22 +305,17 @@ export const initWebRTCListeners = (socket: Socket | null) => {
         const decryptedPayload = (await decryptCallSignal(data.payload, callKey)) as SignalingPayload;
         const iceServers = await getDynamicIceServers();
 
-        let pc = peerConnections.get(data.from);
+        let pc = peerConnections.get(data.from as string);
 
         switch (data.type) {
             case 'request':
                 if (state.callState === 'idle') {
                     useCallStore.getState().setIncomingCall(data.from, (decryptedPayload as { isVideo: boolean }).isVideo, (decryptedPayload as { callerProfile: MinimalProfile }).callerProfile, callKey);
                 } else {
-                    // Mesh: If already in call, we can auto-accept or merge? 
-                    // For simple MVP: Reject if busy (Classic phone behavior)
-                    // Or if it's the SAME call key (same room), we accept/add?
-                    // "Mesh Topology P2P (Group Call)" implies adding.
                     if (state.ephemeralCallKey === callKey) {
-                         // Same call, new participant?
                          useCallStore.getState().addRemoteUser((decryptedPayload as { callerProfile?: MinimalProfile }).callerProfile || { id: data.from });
                     } else {
-                         sendSecureSignal(data.from, 'reject', { reason: 'busy' });
+                         sendSecureSignal(data.from as string, 'reject', { reason: 'busy' });
                     }
                 }
                 break;
@@ -318,12 +323,12 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                 useCallStore.getState().setCallState('connected');
                 useCallStore.getState().addRemoteUser({ id: data.from }); // Add if not present
                 
-                if (!pc) pc = createPeerConnection(data.from, iceServers);
+                if (!pc) pc = createPeerConnection(data.from as string, iceServers);
                 
                 try {
                   const offer = await pc.createOffer();
                   await pc.setLocalDescription(offer);
-                  sendSecureSignal(data.from, 'offer', { offer });
+                  sendSecureSignal(data.from as string, 'offer', { offer });
                 } catch (e) {
                   console.error('Failed to create offer', e);
                 }
@@ -332,7 +337,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
             case 'end':
                 if (pc) {
                     pc.close();
-                    peerConnections.delete(data.from);
+                    peerConnections.delete(data.from as string);
                 }
                 const store = useCallStore.getState();
                 store.removeRemoteStream(data.from);
@@ -345,12 +350,12 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                 }
                 break;
             case 'offer':
-                if (!pc) pc = createPeerConnection(data.from, iceServers);
+                if (!pc) pc = createPeerConnection(data.from as string, iceServers);
                 try {
                   await pc.setRemoteDescription(new RTCSessionDescription((decryptedPayload as { offer: RTCSessionDescriptionInit }).offer));
                   const answer = await pc.createAnswer();
                   await pc.setLocalDescription(answer);
-                  sendSecureSignal(data.from, 'answer', { answer });
+                  sendSecureSignal(data.from as string, 'answer', { answer });
                 } catch (e) {
                   console.error('Failed to handle offer', e);
                 }

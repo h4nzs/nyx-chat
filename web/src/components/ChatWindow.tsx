@@ -1,7 +1,7 @@
 import { useCallback, useRef, ChangeEvent, useState, useEffect, useMemo } from "react";
 import { useAuthStore } from "@store/auth";
 import { getSocket } from "@lib/socket";
-import { Virtuoso } from "react-virtuoso";
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import MessageItem from "@components/MessageItem";
 import { useConversation } from "@hooks/useConversation";
 import { Spinner } from "./Spinner";
@@ -30,6 +30,7 @@ import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
 import { startCall } from '@lib/webrtc';
 import { useSettingsStore } from '@store/settings';
 import type { MinimalProfile } from '@store/callStore';
+import { asConversationId } from '../types/brands';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -69,7 +70,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const cloakClass = privacyCloak ? "blur-[6px] opacity-70 group-hover:blur-none group-hover:opacity-100 group-active:blur-none group-active:opacity-100 transition-all duration-300 select-none" : "";
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
-  const peerProfile = useUserProfile(peerUser as any);
+  const peerProfile = useUserProfile(peerUser as unknown as { id: string; encryptedProfile?: string | null });
   const title = conversation.isGroup ? conversation.title : peerProfile.name;
   const avatarUrl = conversation.isGroup ? conversation.avatarUrl : peerProfile.avatarUrl;
   const isOnline = peerUser ? onlineUsers.has(peerUser.id) : false;
@@ -225,7 +226,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const handleStopRecording = useMessageInputStore(state => state.handleStopRecording);
   
   const typingIndicators = usePresenceStore(state => state.typingIndicators);
-  const virtuosoRef = useRef<any>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [lightboxMessage, setLightboxMessage] = useState<Message | null>(null);
   const [isGroupInfoOpen, setIsGroupInfoOpen] = useState(false);
   const navigate = useNavigate();
@@ -447,7 +448,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
               />
 
               {lightboxMessage && <Lightbox message={lightboxMessage} onClose={() => setLightboxMessage(null)} />}
-              {isGroupInfoOpen && <GroupInfoPanel conversationId={id} onClose={() => setIsGroupInfoOpen(false)} />}
+              {isGroupInfoOpen && <GroupInfoPanel conversationId={asConversationId(id)} onClose={() => setIsGroupInfoOpen(false)} />}
             </>
           );
         })()}

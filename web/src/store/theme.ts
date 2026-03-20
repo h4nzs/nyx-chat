@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { z } from 'zod';
 
 export const ACCENT_COLORS = ['blue', 'green', 'purple', 'orange', 'red'] as const;
 
@@ -11,6 +12,11 @@ type ThemeState = {
   toggleTheme: () => void;
   setAccent: (accent: AccentColor) => void;
 };
+
+const ThemeSchema = z.object({
+  theme: z.enum(['light', 'dark']).optional(),
+  accent: z.enum(['blue', 'green', 'purple', 'orange', 'red']).optional(),
+}).passthrough();
 
 export const useThemeStore = create<ThemeState>()(
   persist(
@@ -25,6 +31,16 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: 'theme-storage', // name of the item in the storage (must be unique)
+      merge: (persistedState: unknown, currentState) => {
+        if (!persistedState || typeof persistedState !== 'object') return currentState;
+        const parsed = ThemeSchema.safeParse(persistedState);
+        if (parsed.success) {
+            return { ...currentState, ...parsed.data };
+        } else {
+            console.warn("[Zustand Persist] Corrupted theme data in localStorage, dropping...");
+            return currentState;
+        }
+      }
     }
   )
 );

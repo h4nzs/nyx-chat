@@ -1,4 +1,4 @@
-import type { DoubleRatchetState } from '../types/core';
+import type { DoubleRatchetState, ConversationId, UserId } from '../types/core';
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
@@ -448,7 +448,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
 
       // 3. Save Initial Sender State ONLY after successful encryption fan-out
       await saveGroupSenderState({
-          conversationId,
+          conversationId: conversationId as ConversationId,
           CK: senderKeyB64,
           N: 0
       });
@@ -483,8 +483,8 @@ export async function handleGroupKeyDistribution(
   // 2. Save as Receiver State
   await saveGroupReceiverState({
       id: `${conversationId}_${senderId}`,
-      conversationId,
-      senderId,
+      conversationId: conversationId as ConversationId,
+      senderId: senderId as UserId,
       CK: senderKeyB64,
       N: 0
   });
@@ -632,7 +632,7 @@ async function doEncryptMessage(
 
     // Update State
     await saveGroupSenderState({
-        conversationId,
+        conversationId: conversationId as ConversationId,
         CK: result.state.CK,
         N: result.state.N
     });
@@ -795,8 +795,8 @@ async function doDecryptMessage(
         await saveGroupReceiverState({
             ...receiverState,
             id: receiverState.id, // Explicit ID preserve
-            conversationId,
-            senderId,
+            conversationId: conversationId as ConversationId,
+            senderId: senderId as UserId,
             CK: result.state.CK,
             N: result.state.N
         });

@@ -13,10 +13,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { useUserProfile } from '@hooks/useUserProfile';
 import MediaGallery from './MediaGallery';
+import type { UserId } from '../types/brands';
+import { asConversationId } from '../types/brands';
 
 type ProfileUser = User & { publicKey?: string };
 
-export default function UserInfoPanel({ userId }: { userId: string }) {
+export default function UserInfoPanel({ userId }: { userId: UserId }) {
   const { activeId } = useConversationStore();
   const { verifiedStatus, setVerified } = useVerificationStore();
   const navigate = useNavigate();
@@ -170,7 +172,7 @@ export default function UserInfoPanel({ userId }: { userId: string }) {
                 transition={{ duration: 0.2 }}
                 className="absolute top-24 left-0 w-full px-4 md:px-6"
               >
-                <MediaGallery conversationId={activeId} />
+                <MediaGallery conversationId={asConversationId(activeId)} />
               </motion.div>
             )}
           </AnimatePresence>

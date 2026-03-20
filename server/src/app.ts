@@ -175,7 +175,8 @@ const isAllowedOrigin = (origin: string): boolean => {
 };
 
 const corsMiddleware = cors({
-  origin: (origin, callback) => {
+  origin: (originHeader, callback) => {
+    const origin = originHeader || '';
     if (isAllowedOrigin(origin)) {
       callback(null, true);
     } else {

@@ -3,9 +3,10 @@ import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import { Spinner } from './Spinner';
 import ModalBase from './ui/ModalBase';
+import type { ConversationId } from '../types/brands';
 
 interface EditGroupInfoModalProps {
-  conversationId: string;
+  conversationId: ConversationId;
   currentTitle: string;
   currentDescription: string | null;
   onClose: () => void;
