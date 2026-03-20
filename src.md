@@ -149,4 +149,52 @@ Ganti blok nomor 7 di `deploy.yml` lu jadi sangat elegan kayak gini:
 6. Di *background*, PM2 nyalain proses *API* baru di `release_BARU`.
 7. Begitu *script* lu nembak `process.send('ready')`, PM2 langsung ngebunuh proses yang lama dengan mulus tanpa ada *request* yang gagal/putus.
 
-Selamat Bro, dengan tambahan ini, *pipeline deploy* NYX lu udah resmi setara sama *startup-startup* Silicon Valley! 🚀 Tinggal di-*commit* dan rasain mulusnya *deploy* tanpa ngorbanin *uptime*.
+### Tapi kalau tangan lu udah gatel pengen ngoding lagi, gw ada beberapa ide ekspansi buat NYX yang sejajar sama visi privasi lu:
+
+### 1. NYX Desktop App (Tauri / Electron)
+
+Aplikasi lu kan sekarang *web/PWA-based*. Gimana kalau kita bungkus jadi aplikasi *desktop native* yang super ringan? Buat lu yang sehari-hari *daily driver*-nya pakai Arch Linux, punya klien *chat* E2EE yang terintegrasi mulus di OS lu itu sebuah kepuasan tersendiri. Kita bisa pakai **Tauri** (berbasis Rust) biar RAM-nya super hemat, beda sama klien *chat* lain yang rakus memori.
+
+### 2. Read-Triggered Disappearing Messages
+
+Gw liat di tipe `Message` lu udah ada variabel `expiresAt` dan lu udah bikin fondasi *messageSweeper*. Gimana kalau kita matengin fitur *Self-Destruct* ini? Bedanya sama *Story*, pesan ini baru mulai nge-hitung mundur **setelah dibaca** sama penerimanya. Jadi pesannya bakal meledak dan hilang dari database lokal `shadowVaultDb` 5 menit setelah mata temen lu ngelihat pesannya.
+
+# Kompresi video di browser memang dilematis karena standar API bawaan seperti Canvas atau WebCodecs tidak sekuat library eksternal (seperti FFmpeg.wasm yang ukurannya mencapai 20-30MB).
+
+Berikut adalah 3 strategi untuk menangani kompresi video tanpa membuat user menunggu unduhan library yang sangat besar:
+1. Gunakan Native WebCodecs API (Paling Ringan)
+Browser modern sudah memiliki WebCodecs API. Ini adalah fitur bawaan (0 byte download) yang memungkinkan Anda mengakses hardware encoder perangkat user secara langsung.
+
+* Kelebihan: Sangat cepat dan tanpa library tambahan.
+* Kekurangan: Implementasinya cukup teknis (perlu mengatur VideoEncoder) dan dukungan browser belum 100% merata (terutama di browser lama).
+* Rekomendasi: Gunakan library pembungkus yang sangat kecil seperti mp4box.js (sekitar 100KB) untuk membantu proses muxing (menggabungkan audio dan video).
+
+2. Strategi Cloud-side Transcoding (Paling Cepat untuk User)
+Jika aplikasi Anda adalah E2EE, mengompresi di server biasanya dilarang karena server tidak boleh melihat isi video. Namun, Anda bisa melakukan ini:
+
+   1. User mengirim video asli (mungkin besar).
+   2. Video dienkripsi secara lokal (E2EE tetap terjaga).
+   3. Server menerima file terenkripsi.
+
+
+* Masalah: Kuota user boros dan upload lama.
+* Solusi: Berikan opsi kepada user: "Kirim Kualitas Tinggi (Lama)" atau "Kirim Cepat (Kompresi Lokal)".
+
+3. Progressive Loading untuk FFmpeg.wasm (Hybrid)
+Jika Anda tetap butuh FFmpeg karena fitur-fiturnya (seperti mengubah resolusi/bitrate secara presisi), lakukan optimasi berikut:
+
+* Pre-fetch saat Idle: Jangan unduh FFmpeg saat user klik "Kirim Video". Gunakan service worker atau unduh di latar belakang segera setelah user login atau saat aplikasi dalam kondisi idle.
+* Caching: Pastikan header Cache-Control pada file WASM diatur dengan benar agar user hanya perlu mengunduh 30MB itu satu kali saja selamanya (disimpan di disk browser).
+* Gunakan Multi-thread Version: Pastikan menggunakan versi ffmpeg-shared yang mendukung multi-threading agar proses kompresi tidak membekukan browser.
+
+4. Batasan Sederhana (The "Low-Tech" Way)
+Terkadang, cara terbaik adalah membatasi input daripada memprosesnya:
+
+* Gunakan atribut capture pada input file untuk memaksa kamera merekam dengan resolusi rendah.
+* Cek ukuran file sebelum enkripsi. Jika > 50MB, peringatkan user atau sarankan untuk memotong durasinya (trimming) menggunakan API bawaan browser yang lebih ringan.
+
+Rekomendasi Saya:
+Mulailah riset tentang WebCodecs API. Ini adalah masa depan kompresi video di web tanpa library berat. Library seperti modern-video-worker bisa membantu menjembatani WebCodecs dengan cara yang lebih simpel.
+Apakah Anda ingin saya buatkan cuplikan kode sederhana tentang cara mengecek dukungan WebCodecs di browser user agar Anda bisa menentukan kapan harus menggunakan fallback?
+
+Zod Schema dan Opaque Types.
