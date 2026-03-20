@@ -1,6 +1,109 @@
+import { z } from 'zod';
+import { 
+  MinimalUserSchema, 
+  IncomingMessageSchema, 
+  MinimalConversationSchema 
+} from '../schemas/core';
 import type { UserId, ConversationId, MessageId, StoryId } from './brands';
 
-// --- 1. CRYPTO & RATCHET STATE ---
+// 1. Ekspor Branded Types
+export type { UserId, ConversationId, MessageId, StoryId };
+
+export type MinimalProfile = {
+  id: UserId;
+  name?: string;
+  username?: string;
+  avatarUrl?: string | null;
+  [key: string]: unknown;
+};
+
+// 2. Inferensi Tipe dari Zod Schemas (Single Source of Truth)
+export type User = z.infer<typeof MinimalUserSchema> & {
+  hasCompletedOnboarding?: boolean;
+  usernameHash?: string;
+  autoDestructDays?: number | null;
+};
+
+export type MessageStatus = {
+  id: string;
+  messageId: MessageId;
+  userId: UserId;
+  status: 'SENT' | 'DELIVERED' | 'READ';
+  updatedAt: string;
+};
+
+export type Message = z.infer<typeof IncomingMessageSchema> & {
+  tempId?: number;
+  type?: 'USER' | 'SYSTEM';
+  sender?: { 
+    id: UserId; 
+    encryptedProfile?: string | null; 
+    name?: string; 
+    username?: string; 
+    avatarUrl?: string | null; 
+  };
+  imageUrl?: string | null;
+  fileUrl?: string | null;
+  fileKey?: string | null;
+  fileName?: string | null;
+  fileType?: string;
+  fileSize?: number;
+  sessionId?: string | null;
+  createdAt: string;
+  error?: boolean;
+  preview?: string;
+  reactions?: { id: string; emoji: string; userId: UserId; isMessage?: boolean }[];
+  optimistic?: boolean;
+  repliedTo?: Message;
+  repliedToId?: MessageId;
+  linkPreview?: unknown;
+  duration?: number;
+  statuses?: MessageStatus[];
+  status?: 'SENDING' | 'SENT' | 'FAILED';
+  deletedAt?: string | Date | null;
+  expiresAt?: string | null;
+  isBlindAttachment?: boolean;
+  isViewOnce?: boolean;
+  isViewed?: boolean;
+  isEdited?: boolean;
+  isSilent?: boolean;
+  isDeletedLocal?: boolean;
+};
+
+export type Participant = {
+  id: UserId;
+  userId?: UserId;
+  encryptedProfile?: string | null;
+  publicKey?: string;
+  signingKey?: string;
+  role: "ADMIN" | "MEMBER" | "admin" | "member";
+  isPinned?: boolean;
+  name?: string;
+  username?: string;
+  avatarUrl?: string | null;
+  joinedAt?: number;
+};
+
+export type Conversation = z.infer<typeof MinimalConversationSchema> & {
+  participants: Participant[];
+  lastMessage: (Message & { preview?: string }) | null;
+  lastUpdated?: number;
+};
+
+export type Story = {
+  id: StoryId;
+  senderId: UserId;
+  encryptedPayload: string;
+  createdAt: string;
+  expiresAt: string;
+  decryptedData?: {
+    text?: string;
+    mediaUrl?: string;
+    mimeType?: string;
+    fileKey?: string;
+  };
+};
+
 export interface EncryptedPayload {
   ciphertext: string;
   nonce: string;
@@ -16,96 +119,3 @@ export interface DoubleRatchetState {
   Nr: number;
   PN: number;
 }
-
-// --- 2. CORE ENTITIES (Branded) ---
-
-export interface User {
-  id: UserId;
-  usernameHash?: string;
-  encryptedProfile?: string | null;
-  role?: string;
-  isVerified?: boolean;
-  hasCompletedOnboarding?: boolean;
-  name?: string;
-  username?: string;
-  autoDestructDays?: number | null;
-}
-
-export interface UserProfile {
-  id: UserId;
-  encryptedProfile?: string | null;
-  name?: string;
-  username?: string;
-  avatarUrl?: string | null;
-}
-
-export interface Participant {
-  userId: UserId;
-  role: "ADMIN" | "MEMBER";
-  isPinned?: boolean;
-  encryptedProfile?: string | null;
-  publicKey?: string;
-  signingKey?: string;
-  name?: string;
-  username?: string;
-  avatarUrl?: string | null;
-}
-
-export interface Conversation {
-  id: ConversationId;
-  isGroup: boolean;
-  title?: string | null;
-  description?: string | null;
-  avatarUrl?: string | null;
-  creatorId?: UserId | null;
-  participants: UserId[]; // Normalized as per instructions
-  lastMessage: (Message & { preview?: string }) | null;
-  updatedAt: string;
-  unreadCount: number;
-  lastUpdated?: number;
-  keyRotationPending?: boolean;
-  requiresKeyRotation?: boolean;
-}
-
-export interface Message {
-  id: MessageId;
-  tempId?: number;
-  type?: 'USER' | 'SYSTEM' | 'TEXT' | 'IMAGE' | 'FILE'; // Merging types seen in store and core
-  conversationId: ConversationId;
-  senderId: UserId;
-  content?: string | null;
-  payload?: EncryptedPayload; // From ServerMessage
-  fileUrl?: string | null;
-  fileKey?: string | null;
-  fileName?: string | null;
-  fileType?: string;
-  fileSize?: number;
-  sessionId?: string | null;
-  encryptedSessionKey?: string | null;
-  createdAt: string | Date; // Supporting both for now to reduce noise, or should I be strict? User didn't specify. I'll stick to string as usually JSON is string.
-  timestamp?: Date; // From ServerMessage
-  
-  replyToId?: MessageId;
-  repliedTo?: Message;
-  
-  error?: boolean;
-  preview?: string;
-  reactions?: { id: string; emoji: string; userId: UserId; isMessage?: boolean }[];
-  optimistic?: boolean;
-  
-  status?: 'SENDING' | 'SENT' | 'FAILED' | 'DELIVERED' | 'READ';
-  statuses?: any[];
-  
-  expiresAt?: string | null;
-  isBlindAttachment?: boolean;
-  isViewOnce?: boolean;
-  isViewed?: boolean;
-  isEdited?: boolean;
-  isSilent?: boolean;
-  isDeletedLocal?: boolean;
-}
-
-// Deprecated or Legacy interfaces (kept for compatibility if needed, or I could remove them if they clash)
-// I will comment them out or remove them to force usage of the new types as per "Biarkan TypeScript meledak"
-// export interface ServerMessage { ... } 
-// export interface DecryptedMessage { ... }

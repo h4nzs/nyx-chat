@@ -11,20 +11,7 @@ import { useAuthStore } from './auth';
 import type { StoryId, UserId, ConversationId } from '../types/brands';
 import { asStoryId, asUserId, asConversationId } from '../types/brands';
 
-export type Story = {
-  id: StoryId;
-  senderId: UserId;
-  encryptedPayload: string;
-  createdAt: string;
-  expiresAt: string;
-  // Decrypted fields
-  decryptedData?: {
-    text?: string;
-    mediaUrl?: string;
-    mimeType?: string;
-    fileKey?: string;
-  };
-};
+import type { Story } from '../types/core';
 
 type StoryState = {
   stories: Record<string, Story[]>;
@@ -69,7 +56,7 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
           const base64Key = await getStoryKey(story.id);
           if (base64Key) {
             const decryptedData = await decryptStoryPayload(story.encryptedPayload, base64Key);
-            return { ...story, decryptedData: decryptedData as any };
+            return { ...story, decryptedData: decryptedData as unknown as Record<string, unknown> };
           }
         } catch (err) {
           console.error(`Failed to decrypt story ${story.id}`, err);

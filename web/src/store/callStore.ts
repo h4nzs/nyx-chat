@@ -1,15 +1,8 @@
 import { create } from 'zustand';
-import type { UserId } from '../types/brands';
+import type { UserId, MinimalProfile } from '../types/core';
+export type { MinimalProfile };
 
 export type CallState = 'idle' | 'ringing' | 'calling' | 'connected';
-
-export type MinimalProfile = {
-  id: UserId;
-  name?: string;
-  username?: string;
-  avatarUrl?: string | null;
-  [key: string]: unknown;
-};
 
 interface CallStoreState {
   callState: CallState;

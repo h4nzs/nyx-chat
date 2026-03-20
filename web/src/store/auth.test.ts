@@ -33,9 +33,9 @@ vi.mock('@lib/socket', () => ({
 }));
 vi.mock('@lib/sodiumInitializer', () => ({
   getSodium: vi.fn().mockResolvedValue({
-    to_base64: (data: any) => `b64_${data}`,
+    to_base64: (data: unknown) => `b64_${data}`,
     crypto_sign_detached: () => 'mock_signature',
-    crypto_scalarmult_base: (key: any) => `pub_${key}`,
+    crypto_scalarmult_base: (key: unknown) => `pub_${key}`,
   }),
 }));
 

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiCpu, FiGlobe, FiAlertTriangle } from 'react-icons/fi';
 import SEO from '../components/SEO';
 
-const Section = ({ title, icon: Icon, children, id }: { title: string; icon: any; children: React.ReactNode; id: string }) => (
+const Section = ({ title, icon: Icon, children, id }: { title: string; icon: React.ElementType; children: React.ReactNode; id: string }) => (
   <section id={id} className="mb-12 scroll-mt-24">
     <div className="flex items-center gap-3 mb-6">
       <div className="p-2 rounded-lg bg-accent/10 text-accent shadow-neumorphic-concave">

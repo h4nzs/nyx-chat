@@ -19,8 +19,9 @@ import {
   PreKeyBundle 
 } from "@utils/crypto";
 import toast from "react-hot-toast";
-import { useAuthStore, type User } from "./auth";
-import type { Message, RawServerMessage } from "./conversation";
+import { useAuthStore } from "./auth";
+import type { RawServerMessage } from "./conversation";
+import type { User, Message } from "../types/core";
 import useDynamicIslandStore, { UploadActivity } from './dynamicIsland';
 import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
@@ -130,7 +131,7 @@ export async function decryptMessageObject(
             const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
             const sodium = await getSodium();
             
-            let cipherTextToUse = 'ciphertext' in rawMsg ? rawMsg.ciphertext : rawMsg.content;
+            let cipherTextToUse: string | null | undefined = ('ciphertext' in rawMsg ? rawMsg.ciphertext : rawMsg.content) as string | null | undefined;
             
             const unwrap = (str: string): string => {
                  if (str && typeof str === 'string' && str.trim().startsWith('{')) {
@@ -223,10 +224,10 @@ export async function decryptMessageObject(
         return finalMessage;
     }
 
-    let contentToDecrypt = 'ciphertext' in rawMsg ? rawMsg.ciphertext : undefined;
+    let contentToDecrypt: string | undefined = ('ciphertext' in rawMsg ? rawMsg.ciphertext : undefined) as string | undefined;
 
     if (!contentToDecrypt) {
-        contentToDecrypt = ('fileKey' in rawMsg ? rawMsg.fileKey : undefined) || rawMsg.content;
+        contentToDecrypt = (('fileKey' in rawMsg ? rawMsg.fileKey : undefined) || rawMsg.content) as string | undefined;
     }
 
     if (!contentToDecrypt || contentToDecrypt === 'waiting_for_key' || contentToDecrypt === '[Requesting key to decrypt...]') {
@@ -1700,7 +1701,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               if (!isViewingChat && !finalDecrypted.isSilent && finalDecrypted.senderId !== currentUser?.id) {
                   import('@store/dynamicIsland').then(({ default: useDynamicIslandStore }) => {
                       const sender = finalDecrypted.sender as unknown as { encryptedProfile?: string };
-                      const senderName = (sender as any)?.name || (sender as any)?.decryptedProfile?.name || 'Someone'; 
+                      const senderName = (sender as unknown as { name?: string, decryptedProfile?: { name?: string } })?.name || (sender as unknown as { decryptedProfile?: { name?: string } })?.decryptedProfile?.name || 'Someone'; 
                       let snippet = finalDecrypted.content || 'New secure message';
                       if (finalDecrypted.fileUrl || finalDecrypted.isBlindAttachment) snippet = 'Sent an attachment 📎';
                       if (finalDecrypted.content && finalDecrypted.content.startsWith('🔒')) snippet = 'System message';
@@ -1710,8 +1711,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                           sender: sender || { name: senderName },
                           message: snippet,
                           link: `/chat/${finalDecrypted.conversationId}`
-                      } as any, 4000);
-                  }).catch(console.error);
+                      } as Parameters<ReturnType<typeof useDynamicIslandStore.getState>['addActivity']>[0], 4000);                  }).catch(console.error);
               }
 
               // --- CHAT LIST PREVIEW UPDATE ---

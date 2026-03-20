@@ -5,7 +5,7 @@ import io from "socket.io-client";
 import type { Socket } from "socket.io-client";
 import toast from "react-hot-toast";
 import { useAuthStore } from "@store/auth";
-import { useConversationStore } from "@store/conversation";
+import { useConversationStore, type Message } from "@store/conversation";
 import { useMessageStore } from "@store/message";
 import { useConnectionStore } from "@store/connection";
 import { usePresenceStore } from "@store/presence";
@@ -161,7 +161,7 @@ export function getSocket() {
         
         // Delegate EVERYTHING to the store. 
         // The store handles decryption, reaction parsing, and optimistic replacement internally.
-        const decryptedMessage = await addIncomingMessage(newMessage.conversationId, newMessage as any);
+        const decryptedMessage = await addIncomingMessage(newMessage.conversationId, newMessage as unknown as Message);
           
         if (!decryptedMessage) return; // Message intercepted (e.g. STORY_KEY)
 

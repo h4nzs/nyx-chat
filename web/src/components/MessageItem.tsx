@@ -210,7 +210,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     if (userReaction?.emoji === emoji) {
       removeLocalReaction(message.conversationId, message.id, userReaction.id);
       try {
-        if ((userReaction as any).isMessage) {
+        if ((userReaction as unknown as { isMessage?: boolean }).isMessage) {
             await api(`/api/messages/${userReaction.id}`, { method: 'DELETE' });
         } else {
             await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
@@ -223,7 +223,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
 
     if (userReaction) {
         removeLocalReaction(message.conversationId, message.id, userReaction.id);
-        const deletePromise = (userReaction as any).isMessage
+        const deletePromise = (userReaction as unknown as { isMessage?: boolean }).isMessage
             ? api(`/api/messages/${userReaction.id}`, { method: 'DELETE' })
             : api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
         deletePromise.catch(console.error);

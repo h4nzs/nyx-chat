@@ -75,10 +75,10 @@ export default function Login() {
       setError("");
 
       // A. Minta Challenge Login
-      const options = await api<any>("/api/auth/webauthn/login/options");
+      const options = await api<unknown>("/api/auth/webauthn/login/options");
 
       // B. Browser minta fingerprint user (Login Server + Unlock Local Vault)
-      const { authResp, recoveryPhrase } = await unlockWithBiometric(options);
+      const { authResp, recoveryPhrase } = await unlockWithBiometric(options as Record<string, unknown>);
 
       // C. Verifikasi ke Server
       const result = await api<{ verified: boolean; user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/webauthn/login/verify", {

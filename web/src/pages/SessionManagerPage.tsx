@@ -15,7 +15,7 @@ const parseUserAgent = (ua: string) => {
   return { browser: 'Unknown', os: 'Device' };
 };
 
-const SessionBlade = ({ session, onLogout, isCurrent }: { session: any, onLogout: (jti: string) => void, isCurrent: boolean }) => {
+const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean, [key: string]: unknown }, onLogout: (jti: string) => void, isCurrent: boolean }) => {
   const { browser, os } = parseUserAgent(session.userAgent);
   const Icon = os === 'Mobile' ? FiSmartphone : FiMonitor;
 
@@ -76,16 +76,15 @@ const SessionBlade = ({ session, onLogout, isCurrent }: { session: any, onLogout
 };
 
 export default function SessionManagerPage() {
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchSessions = async () => {
       try {
-        const data = await api<{ sessions: any[] }>('/api/sessions');
-        
-        const uniqueSessions = new Map<string, any>();
-        for (const session of data.sessions) {
+        const data = await api<{ sessions: { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean, [key: string]: unknown }[] }>('/api/sessions');
+
+        const uniqueSessions = new Map<string, { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean, [key: string]: unknown }>();        for (const session of data.sessions) {
           const existing = uniqueSessions.get(session.userAgent);
           if (!existing || new Date(session.lastUsedAt) > new Date(existing.lastUsedAt)) {
             uniqueSessions.set(session.userAgent, session);
@@ -152,14 +151,16 @@ export default function SessionManagerPage() {
              <div className="hidden md:block fixed left-4 top-0 bottom-0 w-2 bg-[repeating-linear-gradient(0deg,transparent,transparent_20px,rgba(0,0,0,0.1)_20px,rgba(0,0,0,0.1)_21px)]"></div>
              <div className="hidden md:block fixed right-4 top-0 bottom-0 w-2 bg-[repeating-linear-gradient(0deg,transparent,transparent_20px,rgba(0,0,0,0.1)_20px,rgba(0,0,0,0.1)_21px)]"></div>
 
-            {sessions.map(session => (
+            {sessions.map(session => {
+              const sessionProps = session as unknown as { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean };
+              return (
               <SessionBlade
-                key={session.jti}
-                session={session}
+                key={sessionProps.jti}
+                session={sessionProps}
                 onLogout={handleLogoutSession}
-                isCurrent={session.isCurrent} 
+                isCurrent={sessionProps.isCurrent ?? false} 
               />
-            ))}
+            )})}
             
             {sessions.length === 0 && (
                <div className="p-8 text-center text-text-secondary opacity-50">

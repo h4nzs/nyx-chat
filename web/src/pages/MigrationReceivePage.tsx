@@ -72,7 +72,7 @@ export default function MigrationReceivePage() {
     };
   }, []);
 
-  const processMigration = async (sodium: any) => {
+  const processMigration = async (sodium: typeof import('libsodium-wrappers')) => {
     try {
       const { sealedKey, iv } = metaRef.current!;
       const sealedKeyBytes = sodium.from_base64(sealedKey, sodium.base64_variants.URLSAFE_NO_PADDING);

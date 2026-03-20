@@ -1,7 +1,7 @@
 import { useCallback, useRef, ChangeEvent, useState, useEffect, useMemo } from "react";
 import { useAuthStore } from "@store/auth";
 import { getSocket } from "@lib/socket";
-import { Virtuoso } from "react-virtuoso";
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import MessageItem from "@components/MessageItem";
 import { useConversation } from "@hooks/useConversation";
 import { Spinner } from "./Spinner";
@@ -70,7 +70,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
   const cloakClass = privacyCloak ? "blur-[6px] opacity-70 group-hover:blur-none group-hover:opacity-100 group-active:blur-none group-active:opacity-100 transition-all duration-300 select-none" : "";
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
-  const peerProfile = useUserProfile(peerUser as any);
+  const peerProfile = useUserProfile(peerUser as unknown as { id: string; encryptedProfile?: string | null });
   const title = conversation.isGroup ? conversation.title : peerProfile.name;
   const avatarUrl = conversation.isGroup ? conversation.avatarUrl : peerProfile.avatarUrl;
   const isOnline = peerUser ? onlineUsers.has(peerUser.id) : false;
@@ -226,7 +226,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const handleStopRecording = useMessageInputStore(state => state.handleStopRecording);
   
   const typingIndicators = usePresenceStore(state => state.typingIndicators);
-  const virtuosoRef = useRef<any>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [lightboxMessage, setLightboxMessage] = useState<Message | null>(null);
   const [isGroupInfoOpen, setIsGroupInfoOpen] = useState(false);
   const navigate = useNavigate();

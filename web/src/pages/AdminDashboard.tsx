@@ -19,7 +19,11 @@ interface BannedUser {
 export default function AdminDashboard() {
   const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
   const navigate = useNavigate();
-  const [metrics, setMetrics] = useState<any>(null);
+  const [metrics, setMetrics] = useState<{
+    vps: { ramUsage: string; uptime: string };
+    db: { totalUsers: string; totalMessages: string };
+    storage: { totalSizeMB: string; totalFiles: string };
+  } | null>(null);
   const [bannedUsers, setBannedUsers] = useState<BannedUser[]>([]);
   const [isBanModalOpen, setIsBanModalOpen] = useState(false);
   const { showConfirm } = useModalStore(useShallow(s => ({ showConfirm: s.showConfirm })));
@@ -28,8 +32,8 @@ export default function AdminDashboard() {
   // Defined before useEffect to be available inside it
   const loadMetrics = () => {
     authFetch('/api/admin/system-status')
-      .then((res: any) => setMetrics(res))
-      .catch((err: any) => toast.error("Failed to load metrics"));
+      .then((res: unknown) => setMetrics(res as { vps: { ramUsage: string; uptime: string; }; db: { totalUsers: string; totalMessages: string; }; storage: { totalSizeMB: string; totalFiles: string; }; }))
+      .catch((err: unknown) => toast.error("Failed to load metrics"));
   };
 
   const loadBannedUsers = () => {

@@ -46,75 +46,8 @@ export interface RawServerMessage {
   isViewOnce?: boolean;
 }
 
-export type Message = {
-  id: MessageId;
-  tempId?: number;
-  type?: 'USER' | 'SYSTEM';
-  conversationId: ConversationId;
-  senderId: UserId;
-  sender?: { 
-    id: UserId; 
-    encryptedProfile?: string | null;
-    name?: string;
-    username?: string;
-    avatarUrl?: string | null;
-  };
-  content?: string | null;
-  imageUrl?: string | null;
-  fileUrl?: string | null;
-  fileKey?: string | null;
-  fileName?: string | null;
-  fileType?: string;
-  fileSize?: number;
-  sessionId?: string | null;
-  createdAt: string;
-  error?: boolean;
-  preview?: string;
-  reactions?: { id: string; emoji: string; userId: UserId; isMessage?: boolean }[];
-  optimistic?: boolean;
-  repliedTo?: Message;
-  repliedToId?: MessageId;
-  linkPreview?: unknown;
-  duration?: number;
-  statuses?: MessageStatus[]; // Server delivery statuses (for other users)
-  status?: 'SENDING' | 'SENT' | 'FAILED'; // Local status for UI
-  deletedAt?: string | Date | null;
-  expiresAt?: string | null; // New: Disappearing messages
-  isBlindAttachment?: boolean; // New: Flag for Blind Attachments
-  isViewOnce?: boolean;
-  isViewed?: boolean;
-  isEdited?: boolean;
-  isSilent?: boolean; // New: Message was sent without sound
-  isDeletedLocal?: boolean; // New: Tombstone flag for local deletions
-};
-
-export type Participant = {
-  id: UserId;
-  encryptedProfile?: string | null;
-  publicKey?: string;
-  signingKey?: string; // New: Ed25519 Signing Key for Sender Keys
-  role: "ADMIN" | "MEMBER";
-  isPinned?: boolean;
-  name?: string;     // Optimistic/Injected Name
-  username?: string; // Optimistic/Injected Username
-  avatarUrl?: string | null;
-};
-
-export type Conversation = {
-  id: ConversationId;
-  isGroup: boolean;
-  title?: string | null;
-  description?: string | null;
-  avatarUrl?: string | null;
-  creatorId?: UserId | null;
-  participants: Participant[];
-  lastMessage: (Message & { preview?: string }) | null;
-  updatedAt: string;
-  unreadCount: number;
-  lastUpdated?: number;
-  keyRotationPending?: boolean;
-  requiresKeyRotation?: boolean;
-};
+import type { Message, Participant, Conversation } from '../types/core';
+export type { Message, Participant, Conversation };
 
 // --- Helper Functions ---
 
@@ -127,8 +60,8 @@ const sortConversations = (list: Conversation[], currentUserId: string | undefin
     if (aIsPinned && !bIsPinned) return -1;
     if (!aIsPinned && bIsPinned) return 1;
 
-    // If both are pinned or both are not pinned, sort by last message time
-    return new Date(b.lastMessage?.createdAt || b.updatedAt).getTime() - new Date(a.lastMessage?.createdAt || a.updatedAt).getTime();
+    // Then, sort by latest activity
+    return new Date(b.lastMessage?.createdAt || b.updatedAt || 0).getTime() - new Date(a.lastMessage?.createdAt || a.updatedAt || 0).getTime();
   });
 
 const withPreview = (msg: Message): Message => {
@@ -276,18 +209,19 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     if (!shouldProceed) return;
 
     try {
-      const rawConversations = await api<any[]>("/api/conversations");
+      const rawConversations = await api<{ participants: { user: Record<string, unknown>, role?: string, id: string }[], [key: string]: unknown }[]>("/api/conversations");
       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 
       const conversations = await Promise.all(rawConversations.map(async c => {
-        const participants = c.participants.map((p: any) => ({
+        const participants = c.participants.map((p: { user?: { description?: string, id?: string, [key: string]: unknown }, role?: string, id?: string, isPinned?: boolean }) => ({
           ...p.user,
-          description: p.user.description,
+          id: p.id || p.user?.id,
+          description: p.user?.description,
           role: p.role,
-          isPinned: p.isPinned  // Include the pinned status
-        }));
+          isPinned: p.isPinned
+        } as unknown as Participant));
 
-        let lastMessage = c.messages?.[0] || null;
+        let lastMessage = (c.messages as unknown as Message[])?.[0] || null;
         if (lastMessage) {
           try {
             lastMessage = await decryptMessageObject(lastMessage);
@@ -300,7 +234,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           
           if (lastMessage) {
               // Hydrate sender info for the chat list snippet
-              const pInfo = participants.find((p: any) => p.id === lastMessage!.senderId);
+              const pInfo = participants.find((p: { id: string, [key: string]: unknown }) => p.id === lastMessage!.senderId);
               if (pInfo) {
                   lastMessage.sender = {
                       ...(lastMessage.sender || { id: lastMessage.senderId }),
@@ -322,13 +256,14 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       // [NEW] Offline Catch-up / Diff Detection
       // Check if group participants changed while we were offline/disconnected
       const existingConversations = get().conversations;
-      const reconciledConversations = conversations.map(fetched => {
+      const reconciledConversations = conversations.map(fetchedObj => {
+          const fetched = fetchedObj as unknown as Conversation;
           if (fetched.isGroup) {
               const existing = existingConversations.find(e => e.id === fetched.id);
               if (existing) {
                   // Compare participant lists (simple ID comparison)
-                  const existingIds = existing.participants.map((p: any) => p.id).sort().join(',');
-                  const fetchedIds = fetched.participants.map((p: any) => p.id).sort().join(',');
+                  const existingIds = existing.participants.map((p: { id: string, [key: string]: unknown }) => p.id).sort().join(',');
+                  const fetchedIds = fetched.participants.map((p: { id: string, [key: string]: unknown }) => p.id).sort().join(',');
                   
                   if (existingIds !== fetchedIds) {
                       console.log(`[Ratchet] Membership change detected for group ${fetched.id} while offline. Proactive healing...`);
@@ -341,11 +276,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           return fetched;
       });
 
-      set({ conversations: sortConversations(reconciledConversations, useAuthStore.getState().user?.id) });
-      useVerificationStore.getState().loadInitialStatus(conversations);
+      set({ conversations: sortConversations(reconciledConversations as unknown as Conversation[], useAuthStore.getState().user?.id) });
+      useVerificationStore.getState().loadInitialStatus(conversations as unknown as Conversation[]);
 
       const socket = getSocket();
-      conversations.forEach(c => socket.emit("conversation:join", c.id));
+      (conversations as unknown as Conversation[]).forEach(c => socket.emit("conversation:join", c.id));
     } catch (error) {
       console.error("Failed to load conversations", error);
       set({ error: "Failed to load conversations." });
@@ -524,12 +459,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
-          const newParticipants = participants.map((p: any) => ({
+          const newParticipants = participants.map((p: { user?: { description?: string, id?: string, [key: string]: unknown }, role?: string, id?: string, isPinned?: boolean }) => ({
             ...p.user,
-            description: p.user.description,
+            id: p.id || p.user?.id,
+            description: p.user?.description,
             role: p.role,
-            isPinned: p.isPinned  // Include the pinned status
-          }));
+            isPinned: p.isPinned
+          } as unknown as Participant));
           return {
             ...c,
             participants: [...c.participants, ...newParticipants],

@@ -54,19 +54,8 @@ export async function setupAndUploadPreKeyBundle() {
   }
 }
 
-import type { UserId } from '../types/brands';
-
-export type User = {
-  id: UserId;
-  usernameHash?: string;
-  encryptedProfile?: string | null;
-  role?: string;
-  isVerified?: boolean; // Trust Tier (WebAuthn)
-  hasCompletedOnboarding?: boolean;
-  name?: string;     // Optimistic/Injected Name
-  username?: string; // Optimistic/Injected Username
-  autoDestructDays?: number | null;
-};
+import type { UserId, User } from '../types/core';
+export type { User };
 
 type State = {
   user: User | null;

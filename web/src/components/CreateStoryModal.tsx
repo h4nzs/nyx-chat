@@ -11,7 +11,7 @@ import { useProfileStore } from '@store/profile';
 import { asUserId } from '../types/brands';
 
 // --- Sub Component for E2EE Profile Rendering ---
-const ContactItem = ({ contact, isSelected, onToggle }: { contact: any, isSelected: boolean, onToggle: () => void }) => {
+const ContactItem = ({ contact, isSelected, onToggle }: { contact: { id: string; encryptedProfile?: string; username?: string; avatarUrl?: string; [key: string]: unknown }, isSelected: boolean, onToggle: () => void }) => {
   const profile = useProfileStore(state => {
     const cacheKey = contact.encryptedProfile ? `${contact.id}_${contact.encryptedProfile.substring(0, 32)}` : contact.id;
     return state.profiles[cacheKey];
@@ -224,7 +224,7 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
                 <div className="mt-2 border-t border-white/5 pt-4 px-3">
                   <p className="text-[11px] font-bold text-text-secondary mb-3 uppercase tracking-wider px-2">Select Contacts</p>
                   <div className="space-y-1">
-                    {contacts.map((contact: any) => (
+                    {contacts.map((contact: { id: string; encryptedProfile?: string; username?: string; avatarUrl?: string; [key: string]: unknown }) => (
                       <ContactItem 
                         key={contact.id} 
                         contact={contact} 

@@ -61,7 +61,7 @@ describe('Message Store Logic', () => {
       // Assert
       expect(result.content).toBe(mockDecryptedText);
       expect(result.id).toBe(rawMsg.id);
-      expect((result as any).ciphertext).toBeUndefined(); // Ensure raw props are stripped
+      expect((result as unknown as Record<string, unknown>).ciphertext).toBeUndefined(); // Ensure raw props are stripped
       expect(cryptoUtils.decryptMessage).toHaveBeenCalledWith(
         rawMsg.ciphertext,
         rawMsg.conversationId,
