@@ -2,6 +2,7 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { createWithEqualityFn } from "zustand/traditional";
+import { MinimalUserSchema } from '../schemas/core';
 import { authFetch, api } from "@lib/api";
 import { disconnectSocket, connectSocket } from "@lib/socket";
 import { clearAuthCookies } from "@lib/tokenStorage";
@@ -108,6 +109,23 @@ let privateKeysCache: RetrievedKeys | null = null;
 export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => {
   const savedUser = localStorage.getItem("user");
   const savedReadReceipts = localStorage.getItem('sendReadReceipts');
+  
+  let initialUser: User | null = null;
+  if (savedUser) {
+    try {
+        const parsedData = JSON.parse(savedUser);
+        const validated = MinimalUserSchema.safeParse(parsedData);
+        if (validated.success) {
+            initialUser = validated.data;
+        } else {
+            console.warn("[Zustand Persist] Corrupted user data in localStorage, dropping...");
+            localStorage.removeItem("user");
+        }
+    } catch {
+        console.warn("[Zustand Persist] Invalid JSON in localStorage, dropping...");
+        localStorage.removeItem("user");
+    }
+  }
 
   const retrieveAndCacheKeys = async (): Promise<RetrievedKeys> => {
     if (privateKeysCache) return privateKeysCache;
@@ -173,7 +191,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
   };
 
   return {
-    user: savedUser ? JSON.parse(savedUser) : null,
+    user: initialUser,
     accessToken: null,
     isLoading: false,
     isBootstrapping: true,

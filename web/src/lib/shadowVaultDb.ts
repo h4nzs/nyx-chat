@@ -4,15 +4,16 @@ import { getSodium } from '@lib/sodiumInitializer';
 import { getMyEncryptionKeyPair } from '@utils/crypto';
 import { asMessageId, asConversationId, asUserId } from '../types/brands';
 import { ShadowVaultMessageSchema } from '../schemas/core';
+import type { MessageId, ConversationId, UserId, StoryId } from '../types/core';
 
 export interface DecryptedMessageRecord {
-  id: string;
-  conversationId: string;
+  id: MessageId;
+  conversationId: ConversationId;
   content: string | null; // ENCRYPTED Base64 string at rest
-  repliedToId?: string;
+  repliedToId?: MessageId;
   repliedTo?: string; // Encrypted JSON string of the replied message
   createdAt: string | Date;
-  senderId: string;
+  senderId: UserId;
   senderName?: string; // Encrypted sender name
   senderUsername?: string; // Encrypted sender username
   senderAvatarUrl?: string; // Encrypted avatar URL

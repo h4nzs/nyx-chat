@@ -132,16 +132,16 @@ export function getSocket() {
       }
 
       // 3. Data sudah dijamin aman dan memiliki Opaque Types yang benar
-      const newMessage = parsed.data;
+      const safeMessage = parsed.data;
 
       const meId = useAuthStore.getState().user?.id;
       
       // THE SHIELD: Intelligent Echo Cancellation
       // Only block messages from ourselves IF they match a pending optimistic update on this device.
       // This allows messages from our *other* devices to pass through and be synced.
-      if (meId && newMessage.senderId === meId) {
-        const isOptimisticEcho = useMessageStore.getState().messages[newMessage.conversationId]?.some(
-            m => m.tempId && String(m.tempId) === String(newMessage.tempId)
+      if (meId && safeMessage.senderId === meId) {
+        const isOptimisticEcho = useMessageStore.getState().messages[safeMessage.conversationId]?.some(
+            m => m.tempId && String(m.tempId) === String(safeMessage.tempId)
         );
         
         if (isOptimisticEcho) {
@@ -151,7 +151,7 @@ export function getSocket() {
         // If no match, it's a sync from another device (or a re-send we lost track of). Process it.
       }
 
-      const convExists = useConversationStore.getState().conversations.some(c => c.id === newMessage.conversationId);
+      const convExists = useConversationStore.getState().conversations.some(c => c.id === safeMessage.conversationId);
       if (!convExists) {
         return;
       }
@@ -161,7 +161,7 @@ export function getSocket() {
         
         // Delegate EVERYTHING to the store. 
         // The store handles decryption, reaction parsing, and optimistic replacement internally.
-        const decryptedMessage = await addIncomingMessage(newMessage.conversationId, newMessage as unknown as Message);
+        const decryptedMessage = await addIncomingMessage(safeMessage.conversationId, safeMessage);
           
         if (!decryptedMessage) return; // Message intercepted (e.g. STORY_KEY)
 
@@ -173,7 +173,7 @@ export function getSocket() {
         // TODO: Trigger Desktop/Push Notification here using decryptedMessage.content or decryptedMessage.fileName
         // e.g. showNotification(decryptedMessage.sender.name, decryptedMessage.content || "Sent a file");
         
-        socket?.emit('message:ack_delivered', { messageId: newMessage.id, conversationId: newMessage.conversationId });
+        socket?.emit('message:ack_delivered', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
       } catch (e: unknown) {
         console.error("Failed to process incoming message", e);
       }

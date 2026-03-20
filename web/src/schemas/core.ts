@@ -38,6 +38,7 @@ export const IncomingMessageSchema = z.object({
   senderId: UserIdSchema,
   content: z.string().nullable().optional(),
   timestamp: z.union([z.number(), z.string(), z.date()]).transform(val => new Date(val).toISOString()).optional(),
+  createdAt: z.union([z.number(), z.string(), z.date()]).transform(val => new Date(val).toISOString()).default(() => new Date().toISOString()),
 }).passthrough();
 
 // --- WebRTC Signaling Schemas ---

@@ -2,6 +2,7 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { openDB, IDBPDatabase } from 'idb';
+import type { ConversationId, UserId } from '../types/core';
 
 const SESSION_KEYS_STORE_NAME = 'session-keys';
 const GROUP_KEYS_STORE_NAME = 'group-keys';
@@ -17,15 +18,15 @@ const GROUP_SKIPPED_KEYS_STORE = 'group_skipped_keys'; // NEW: Separate store fo
 const DB_VERSION = 9;
 
 export interface GroupSenderState {
-  conversationId: string;
+  conversationId: ConversationId;
   CK: string;
   N: number;
 }
 
 export interface GroupReceiverState {
   id: string; // conversationId_senderId
-  conversationId: string;
-  senderId: string;
+  conversationId: ConversationId;
+  senderId: UserId;
   CK: string;
   N: number;
 }
