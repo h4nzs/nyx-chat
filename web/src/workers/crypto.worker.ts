@@ -457,24 +457,44 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'crypto_secretbox_xchacha20poly1305_easy': {
         const { message, nonce, key } = payload;
-        const messageBytes = typeof message === 'string' ? new TextEncoder().encode(message) : new Uint8Array(message);
-        const nonceBytes = new Uint8Array(nonce);
-        const keyBytes = new Uint8Array(key);
-        
-        // Use AEAD IETF version: message, ad, secret_nonce, public_nonce, key
-        result = sodium.crypto_secretbox_easy(messageBytes, nonceBytes, keyBytes
-        );
+        let messageBytes: Uint8Array | null = null;
+        let nonceBytes: Uint8Array | null = null;
+        let keyBytes: Uint8Array | null = null;
+
+        try {
+            messageBytes = typeof message === 'string' ? new TextEncoder().encode(message) : new Uint8Array(message);
+            nonceBytes = new Uint8Array(nonce);
+            keyBytes = new Uint8Array(key);
+            
+            // Use AEAD IETF version: message, ad, secret_nonce, public_nonce, key
+            // Note: libsodium-wrappers exposes 'crypto_secretbox_xchacha20poly1305_easy' for 
+            // combined mode (nonce+key).
+            result = sodium.crypto_secretbox_xchacha20poly1305_easy(messageBytes, nonceBytes, keyBytes);
+        } finally {
+            if (messageBytes && typeof message !== 'string') sodium.memzero(messageBytes);
+            if (nonceBytes) sodium.memzero(nonceBytes); // Optional
+            if (keyBytes) sodium.memzero(keyBytes);
+        }
         break;
       }
       case 'crypto_secretbox_xchacha20poly1305_open_easy': {
         const { ciphertext, nonce, key } = payload;
-        const ciphertextBytes = new Uint8Array(ciphertext);
-        const nonceBytes = new Uint8Array(nonce);
-        const keyBytes = new Uint8Array(key);
+        let ciphertextBytes: Uint8Array | null = null;
+        let nonceBytes: Uint8Array | null = null;
+        let keyBytes: Uint8Array | null = null;
 
-        // Use AEAD IETF version: secret_nonce, ciphertext, ad, public_nonce, key
-        result = sodium.crypto_secretbox_open_easy(ciphertextBytes, nonceBytes, keyBytes
-        );
+        try {
+            ciphertextBytes = new Uint8Array(ciphertext);
+            nonceBytes = new Uint8Array(nonce);
+            keyBytes = new Uint8Array(key);
+
+            // Use AEAD IETF version: secret_nonce, ciphertext, ad, public_nonce, key
+            result = sodium.crypto_secretbox_xchacha20poly1305_open_easy(ciphertextBytes, nonceBytes, keyBytes);
+        } finally {
+            if (ciphertextBytes) sodium.memzero(ciphertextBytes);
+            if (nonceBytes) sodium.memzero(nonceBytes);
+            if (keyBytes) sodium.memzero(keyBytes);
+        }
         break;
       }
       case 'crypto_box_seal_open': {
@@ -732,47 +752,76 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'encryptProfile': {
         const { profileJsonString, profileKeyB64 } = payload;
-        const key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const message = new TextEncoder().encode(profileJsonString);
-        // Generate random nonce (24 bytes for XChaCha20)
-        const nonce = sodium.randombytes_buf(24);
-        
-        const ciphertext = sodium.crypto_secretbox_easy(
-            message,
-            nonce,
-            key
-        );
-        
-        // Combine nonce + ciphertext
-        const combined = new Uint8Array(nonce.length + ciphertext.length);
-        combined.set(nonce);
-        combined.set(ciphertext, nonce.length);
-        
-        result = sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
+        let key: Uint8Array | null = null;
+        let message: Uint8Array | null = null;
+        let nonce: Uint8Array | null = null;
+        let ciphertext: Uint8Array | null = null;
+        let combined: Uint8Array | null = null;
+
+        try {
+            key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+            message = new TextEncoder().encode(profileJsonString);
+            // Generate random nonce (24 bytes for XChaCha20)
+            nonce = sodium.randombytes_buf(24);
+            
+            ciphertext = sodium.crypto_secretbox_xchacha20poly1305_easy(
+                message,
+                nonce,
+                key
+            );
+            
+            // Combine nonce + ciphertext
+            combined = new Uint8Array(nonce!.length + ciphertext!.length);
+            combined.set(nonce!);
+            combined.set(ciphertext!, nonce!.length);
+            
+            result = sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
+        } finally {
+            if (key) sodium.memzero(key);
+            if (message) sodium.memzero(message); // Optional for profile json but good practice
+            if (nonce) sodium.memzero(nonce); // Nonce isn't secret but cleanup is fine
+            if (ciphertext) sodium.memzero(ciphertext);
+            if (combined) sodium.memzero(combined);
+        }
         break;
       }
       case 'decryptProfile': {
         const { encryptedProfileB64, profileKeyB64 } = payload;
-        const key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const combined = sodium.from_base64(encryptedProfileB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-        
-        const nonceBytes = 24;
-        const nonce = combined.slice(0, nonceBytes);
-        const ciphertext = combined.slice(nonceBytes);
-        
-        const decrypted = sodium.crypto_secretbox_open_easy(
-            ciphertext,
-            nonce,
-            key
-        );
-        
-        result = new TextDecoder().decode(decrypted);
+        let key: Uint8Array | null = null;
+        let combined: Uint8Array | null = null;
+        let decrypted: Uint8Array | null = null;
+
+        try {
+            key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+            combined = sodium.from_base64(encryptedProfileB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+            
+            const nonceBytes = 24;
+            const nonce = combined!.slice(0, nonceBytes);
+            const ciphertext = combined!.slice(nonceBytes);
+            
+            decrypted = sodium.crypto_secretbox_xchacha20poly1305_open_easy(
+                ciphertext,
+                nonce,
+                key!
+            );
+            
+            result = new TextDecoder().decode(decrypted!);
+        } finally {
+            if (key) sodium.memzero(key);
+            if (combined) sodium.memzero(combined);
+            if (decrypted) sodium.memzero(decrypted);
+        }
         break;
       }
       case 'generateProfileKey': {
         // Generate a random 32-byte key for profile encryption
-        const key = sodium.randombytes_buf(32);
-        result = sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
+        let key: Uint8Array | null = null;
+        try {
+            key = sodium.randombytes_buf(32);
+            result = sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
+        } finally {
+            if (key) sodium.memzero(key);
+        }
         break;
       }
       case 'minePoW': {

@@ -448,7 +448,7 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
   return null;
 }
 
-function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string } | null {
+function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string, storyId?: string } | null {
   if (!content) return null;
   try {
     let trimmed = content.trim();
@@ -471,7 +471,7 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
       return payload;
     }
     if (payload.type === 'STORY_KEY') {
-      return payload;
+      return payload; // Should contain storyId and key
     }
   } catch (_e) {}
   return null;
@@ -506,7 +506,9 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
         });
     } else {
       if (silentPayload) {
-          if (silentPayload.type === 'STORY_KEY') {
+          if (silentPayload.type === 'STORY_KEY' && silentPayload.key && silentPayload.storyId) {
+              // Save the story key
+              saveStoryKey(silentPayload.storyId, silentPayload.key).catch(e => console.error("Failed to save story key from history", e));
               // Ignore this message in the UI completely
               continue;
           }
@@ -1601,6 +1603,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       if (silentPayload) {
           decrypted.isSilent = true; // [FIX] Set early to suppress sound in socket.ts
+
+          if (silentPayload.type === 'STORY_KEY' && silentPayload.key && silentPayload.storyId) {
+             saveStoryKey(silentPayload.storyId, silentPayload.key).catch(e => console.error("Failed to save story key live", e));
+             // Don't add to message store? Or add as silent system message?
+             // Usually we drop it from UI by marking isSilent or not adding it.
+             // But existing logic handles isSilent.
+             // If we want to hide it completely from chat list:
+             return null; 
+          }
 
           if (silentPayload.type === 'CALL_INIT' && silentPayload.key) {
              // [FIX] Cleanup optimistic UI if it was mistakenly added

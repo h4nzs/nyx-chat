@@ -31,18 +31,40 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
     let isMounted = true;
 
     const handleDecryption = async () => {
-      const rawFileKey = '';
+      let rawFileKey = message.fileKey || '';
 
       if (!message.fileUrl) {
         if (isMounted) setError("Missing file URL.");
         return;
       }
       
+      // If we don't have the key yet, check if we need to wait or decrypt the message first
       if (!rawFileKey) {
          if (message.content === 'waiting_for_key' || message.content?.startsWith('[')) {
              if (isMounted) setError(message.content);
-         } else {
-             if (isMounted) setIsLoading(true); 
+             return;
+         }
+         
+         // Try to derive key if possible (e.g. from blinded attachment logic if applicable, though usually fileKey should be present)
+         // For now, if missing and not waiting, we assume we might need to fetch it or it's pending.
+         // But we shouldn't just return if we want to try decrypting.
+         // However, decryptFile NEEDS a key. 
+         
+         if (message.isBlindAttachment) {
+             // Blind attachments might have key in content if it was JUST decrypted but not migrated to fileKey prop?
+             // No, standard is fileKey.
+             if (isMounted) setIsLoading(true);
+             // We can't proceed without key.
+             return;
+         }
+         
+         // If regular message but no fileKey, maybe we need to decrypt the message itself first?
+         // Voice messages usually come as blind attachments (metadata encrypted in content).
+         // If we are here, message.content should have been decrypted to metadata, and fileKey extracted.
+         
+         if (isMounted) {
+             setError("Waiting for key...");
+             setIsLoading(false);
          }
          return;
       }

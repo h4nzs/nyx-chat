@@ -297,16 +297,18 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             lastMessage.content = '[Requesting key to decrypt...]';
           }
           
-          // Hydrate sender info for the chat list snippet
-          const pInfo = participants.find((p: any) => p.id === lastMessage!.senderId);
-          if (pInfo) {
-              lastMessage.sender = {
-                  ...(lastMessage.sender || { id: lastMessage.senderId }),
-                  ...pInfo
-              };
-          }
+          if (lastMessage) {
+              // Hydrate sender info for the chat list snippet
+              const pInfo = participants.find((p: any) => p.id === lastMessage!.senderId);
+              if (pInfo) {
+                  lastMessage.sender = {
+                      ...(lastMessage.sender || { id: lastMessage.senderId }),
+                      ...pInfo
+                  };
+              }
 
-          lastMessage = withPreview(lastMessage);
+              lastMessage = withPreview(lastMessage);
+          }
         }
 
         return {

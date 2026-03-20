@@ -442,6 +442,10 @@ export async function ensureGroupSession(conversationId: string, participants: P
         })
       );
 
+      if (missingKeys.length > 0) {
+          throw new Error(`Cannot initialize group session. Missing public keys for participants: ${missingKeys.join(', ')}`);
+      }
+
       // 3. Save Initial Sender State ONLY after successful encryption fan-out
       await saveGroupSenderState({
           conversationId,
@@ -449,7 +453,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
           N: 0
       });
 
-      return distributionKeys.filter(Boolean);
+      return distributionKeys.filter(Boolean) as Record<string, unknown>[];
     } finally {
       groupSessionLocks.delete(conversationId);
     }
