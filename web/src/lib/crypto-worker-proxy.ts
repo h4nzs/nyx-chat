@@ -294,16 +294,14 @@ export function worker_dr_init_alice(payload: {
 
 export function worker_dr_init_bob(payload: {
     sk: Uint8Array,
-    mySignedPreKey: { publicKey: Uint8Array, privateKey: Uint8Array },
-    theirRatchetPublicKey: Uint8Array
+    mySignedPreKey: { publicKey: Uint8Array, privateKey: Uint8Array }
 }): Promise<DoubleRatchetState> {
     return sendToWorker('dr_init_bob', {
         sk: toArray(payload.sk),
         mySignedPreKey: {
             publicKey: toArray(payload.mySignedPreKey.publicKey!),
             privateKey: toArray(payload.mySignedPreKey.privateKey)
-        },
-        theirRatchetPublicKey: toArray(payload.theirRatchetPublicKey)
+        }
     });
 }
 
