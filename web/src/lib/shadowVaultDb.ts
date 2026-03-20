@@ -3,6 +3,7 @@ import type { Message } from '@store/conversation';
 import { getSodium } from '@lib/sodiumInitializer';
 import { getMyEncryptionKeyPair } from '@utils/crypto';
 import { asMessageId, asConversationId, asUserId } from '../types/brands';
+import { ShadowVaultMessageSchema } from '../schemas/core';
 
 export interface DecryptedMessageRecord {
   id: string;
@@ -149,7 +150,14 @@ export class NyxShadowVault extends Dexie {
     try {
       const records = await this.messages.where('conversationId').equals(conversationId).toArray();
       const messages: Message[] = [];
-      for (const r of records) {
+      for (const rawRecord of records) {
+        const parsed = ShadowVaultMessageSchema.safeParse(rawRecord);
+        if (!parsed.success) {
+            console.warn("[ShadowVault Shield] Skipping corrupted local message record:", rawRecord.id, parsed.error.format());
+            continue;
+        }
+        
+        const r = parsed.data;
         let plainText = null;
         let decryptedRepliedTo = undefined;
         let decryptedSenderName = undefined;

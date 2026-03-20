@@ -12,6 +12,7 @@ import { usePresenceStore } from "@store/presence";
 import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest, schedulePeriodicGroupKeyRotation } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
 import { asUserId } from "../types/brands";
+import { IncomingMessageSchema } from "../schemas/core";
 import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
 import { triggerReceiveFeedback } from "@utils/feedback";
 
@@ -120,7 +121,19 @@ export function getSocket() {
     });
 
     // --- Application-specific Listeners ---
-    socket.on("message:new", async (newMessage) => {
+    socket.on("message:new", async (rawPayload: unknown) => {
+      // 1. Zod memeriksa dan mengubah data mentah menjadi Branded Types
+      const parsed = IncomingMessageSchema.safeParse(rawPayload);
+
+      // 2. Fail Gracefully (Jangan biarkan aplikasi crash)
+      if (!parsed.success) {
+          console.error("[Zod Shield] Dropping invalid incoming message:", parsed.error.format());
+          return; 
+      }
+
+      // 3. Data sudah dijamin aman dan memiliki Opaque Types yang benar
+      const newMessage = parsed.data;
+
       const meId = useAuthStore.getState().user?.id;
       
       // THE SHIELD: Intelligent Echo Cancellation
@@ -148,7 +161,7 @@ export function getSocket() {
         
         // Delegate EVERYTHING to the store. 
         // The store handles decryption, reaction parsing, and optimistic replacement internally.
-        const decryptedMessage = await addIncomingMessage(newMessage.conversationId, newMessage);
+        const decryptedMessage = await addIncomingMessage(newMessage.conversationId, newMessage as any);
           
         if (!decryptedMessage) return; // Message intercepted (e.g. STORY_KEY)
 
