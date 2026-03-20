@@ -921,7 +921,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         try {
           nonce = sodium.randombytes_buf(24);
           
-          ciphertext = sodium.crypto_secretbox_easy(sessionKeyBytes, nonce, storageKey
+          ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+            sessionKeyBytes,
+            null,
+            null,
+            nonce,
+            storageKey
           );
 
           if (!nonce || !ciphertext) throw new Error("Encryption failed");
@@ -951,7 +956,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const ciphertext = encryptedKeyBytes.slice(24);
 
         try {
-          result = sodium.crypto_secretbox_open_easy(ciphertext, nonce, storageKey
+          result = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+            null,
+            ciphertext,
+            null,
+            nonce,
+            storageKey
           );
         } finally {
           sodium.memzero(storageKey);
@@ -982,7 +992,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           
           // Encrypt private key for storage
           const nonce = sodium.randombytes_buf(24);
-          const ciphertext = sodium.crypto_secretbox_easy(keyPair.privateKey, nonce, storageKey
+          const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+            keyPair.privateKey,
+            null,
+            null,
+            nonce,
+            storageKey
           );
           
           const combined = new Uint8Array(nonce.length + ciphertext.length);
@@ -1129,7 +1144,13 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         state.Ns += 1;
         
         const nonce = sodium.randombytes_buf(24);
-        const ciphertext = sodium.crypto_secretbox_easy(plaintextBytes, nonce, mk);
+        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+            plaintextBytes,
+            null,
+            null,
+            nonce,
+            mk
+        );
         
         const combined = new Uint8Array(nonce.length + ciphertext.length);
         combined.set(nonce);
@@ -1219,7 +1240,13 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             
             const nonce = ciphertextBytes.slice(0, 24);
             const ctext = ciphertextBytes.slice(24);
-            const plaintext = sodium.crypto_secretbox_open_easy(ctext, nonce, mk);
+            const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+                null,
+                ctext,
+                null,
+                nonce,
+                mk
+            );
             
             result = {
                state: serializeState(state),
@@ -1256,7 +1283,13 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         // Encrypt with Message Key
         const nonce = sodium.randombytes_buf(24);
-        const ciphertext = sodium.crypto_secretbox_easy(plaintextBytes, nonce, mk);
+        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+            plaintextBytes,
+            null,
+            null,
+            nonce,
+            mk
+        );
         
         const combined = new Uint8Array(nonce.length + ciphertext.length);
         combined.set(nonce);
@@ -1331,7 +1364,13 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         // 4. Decrypt
         const nonce = ciphertextBytes.slice(0, 24);
         const ctext = ciphertextBytes.slice(24);
-        const plaintext = sodium.crypto_secretbox_open_easy(ctext, nonce, mk);
+        const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+            null,
+            ctext,
+            null,
+            nonce,
+            mk
+        );
 
         result = {
            state: { CK: bytesToB64(CKBytes), N: currentN },
@@ -1367,7 +1406,13 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           // 2. Decrypt
           const nonce = ciphertextBytes.slice(0, 24);
           const ctext = ciphertextBytes.slice(24);
-          const plaintext = sodium.crypto_secretbox_open_easy(ctext, nonce, mkBytes);
+          const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+              null,
+              ctext,
+              null,
+              nonce,
+              mkBytes
+          );
 
           result = {
              plaintext
