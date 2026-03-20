@@ -97,7 +97,7 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
 };
 
 const ParticipantItem = ({ p, conversationId, amIAdmin, handleProfileClick }: { p: Participant, conversationId: ConversationId, amIAdmin: boolean, handleProfileClick: (p: Participant) => void }) => {
-  const profile = useUserProfile(p as unknown as { id: string });
+  const profile = useUserProfile(p);
   return (
     <li className="flex items-center justify-between p-2 rounded-lg hover:bg-secondary">
       <button onClick={() => handleProfileClick(p)} className="flex items-center gap-3 text-left min-w-0">

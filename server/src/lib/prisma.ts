@@ -15,7 +15,8 @@ if (!connectionString) {
 const pool = new PgPool({ connectionString });
 
 // Instantiate the Prisma adapter
-const adapter = new PrismaPg(pool as unknown as Pool);
+// @ts-expect-error: Bypassing structural typing mismatch between project's @types/pg (8.18.x) and Prisma's internal @types/pg (8.11.x)
+const adapter = new PrismaPg(pool);
 
 // Pass the adapter to the PrismaClient
 export const prisma = new PrismaClient({
