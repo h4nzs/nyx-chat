@@ -7,26 +7,27 @@ import { useMessageStore, decryptMessageObject } from "./message";
 import { getSocket, emitSessionKeyRequest, fireGhostSync } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
+import type { ConversationId, UserId, MessageId } from '../types/brands';
 // Removed all crypto imports
 import toast from 'react-hot-toast';
 
 // --- Type Definitions ---
 export type MessageStatus = {
   id: string;
-  messageId: string;
-  userId: string;
+  messageId: MessageId;
+  userId: UserId;
   status: 'SENT' | 'DELIVERED' | 'READ';
   updatedAt: string;
 };
 
 export interface RawServerMessage {
-  id: string;
+  id: MessageId;
   tempId?: number;
   type?: 'USER' | 'SYSTEM';
-  conversationId: string;
-  senderId: string;
+  conversationId: ConversationId;
+  senderId: UserId;
   sender?: { 
-    id: string; 
+    id: UserId; 
     encryptedProfile?: string | null;
     name?: string;
     username?: string;
@@ -39,20 +40,20 @@ export interface RawServerMessage {
   encryptedSessionKey?: string | null;
   createdAt: string;
   repliedTo?: RawServerMessage;
-  repliedToId?: string;
+  repliedToId?: MessageId;
   linkPreview?: unknown;
   expiresAt?: string | null;
   isViewOnce?: boolean;
 }
 
 export type Message = {
-  id: string;
+  id: MessageId;
   tempId?: number;
   type?: 'USER' | 'SYSTEM';
-  conversationId: string;
-  senderId: string;
+  conversationId: ConversationId;
+  senderId: UserId;
   sender?: { 
-    id: string; 
+    id: UserId; 
     encryptedProfile?: string | null;
     name?: string;
     username?: string;
@@ -69,10 +70,10 @@ export type Message = {
   createdAt: string;
   error?: boolean;
   preview?: string;
-  reactions?: { id: string; emoji: string; userId: string; isMessage?: boolean }[];
+  reactions?: { id: string; emoji: string; userId: UserId; isMessage?: boolean }[];
   optimistic?: boolean;
   repliedTo?: Message;
-  repliedToId?: string;
+  repliedToId?: MessageId;
   linkPreview?: unknown;
   duration?: number;
   statuses?: MessageStatus[]; // Server delivery statuses (for other users)
@@ -88,7 +89,7 @@ export type Message = {
 };
 
 export type Participant = {
-  id: string;
+  id: UserId;
   encryptedProfile?: string | null;
   publicKey?: string;
   signingKey?: string; // New: Ed25519 Signing Key for Sender Keys
@@ -100,12 +101,12 @@ export type Participant = {
 };
 
 export type Conversation = {
-  id: string;
+  id: ConversationId;
   isGroup: boolean;
   title?: string | null;
   description?: string | null;
   avatarUrl?: string | null;
-  creatorId?: string | null;
+  creatorId?: UserId | null;
   participants: Participant[];
   lastMessage: (Message & { preview?: string }) | null;
   updatedAt: string;

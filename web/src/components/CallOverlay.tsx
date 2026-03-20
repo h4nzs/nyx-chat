@@ -5,8 +5,9 @@ import { useCallStore } from '../store/callStore';
 import { acceptCall, rejectCall, hangup, replaceVideoTrack, getNetworkQuality } from '../lib/webrtc';
 import { toAbsoluteUrl } from '../utils/url';
 import toast from 'react-hot-toast';
+import type { UserId } from '../types/brands';
 
-const RemoteStream = ({ userId, stream, isVideo, profile }: { userId: string, stream?: MediaStream, isVideo: boolean, profile: any }) => {
+const RemoteStream = ({ userId, stream, isVideo, profile }: { userId: UserId, stream?: MediaStream, isVideo: boolean, profile: any }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 

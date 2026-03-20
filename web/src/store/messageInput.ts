@@ -1,6 +1,8 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
+import type { UserId, ConversationId, MessageId } from '../types/brands';
+import { asUserId, asConversationId, asMessageId } from '../types/brands';
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, handleApiError } from "@lib/api";
 import { ensureGroupSession, encryptFile } from "@utils/crypto";
@@ -172,10 +174,10 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
     // Optimistic UI (We keep this here to have access to File blob for preview)
     const optimisticMessage: Message = {
-      id: `temp-${tempId}`,
+      id: asMessageId(`temp-${tempId}`),
       tempId,
-      conversationId,
-      senderId: me.id,
+      conversationId: asConversationId(conversationId),
+      senderId: asUserId(me.id),
       sender: me,
       createdAt: new Date().toISOString(),
       optimistic: true,
@@ -292,10 +294,10 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
     const optimisticMessage: Message = {
-      id: `temp-${tempId}`,
+      id: asMessageId(`temp-${tempId}`),
       tempId,
-      conversationId,
-      senderId: me.id,
+      conversationId: asConversationId(conversationId),
+      senderId: asUserId(me.id),
       sender: me,
       createdAt: new Date().toISOString(),
       optimistic: true,

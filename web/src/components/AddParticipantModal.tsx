@@ -5,6 +5,7 @@ import { toAbsoluteUrl } from '@utils/url';
 import { useConversationStore } from '@store/conversation';
 import { useShallow } from 'zustand/react/shallow';
 import { hashUsername } from '@lib/crypto-worker-proxy';
+import { asUserId } from '../types/brands';
 import ModalBase from './ui/ModalBase';
 
 interface UserSearchResult {
@@ -52,7 +53,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
               return { ...u, username: rawQuery, name: rawQuery };
           });
           
-          setSearchResults(optimisticUsers.filter(u => !existingParticipantIds.includes(u.id)));
+          setSearchResults(optimisticUsers.filter(u => !existingParticipantIds.includes(asUserId(u.id))));
         } catch (error) {
           console.error("Failed to search users:", error);
           setSearchResults([]);

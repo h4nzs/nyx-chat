@@ -8,10 +8,12 @@ import { encryptFile } from '@utils/crypto';
 import { compressImage } from '@lib/fileUtils';
 import toast from 'react-hot-toast';
 import { useAuthStore } from './auth';
+import type { StoryId, UserId, ConversationId } from '../types/brands';
+import { asStoryId, asUserId, asConversationId } from '../types/brands';
 
 export type Story = {
-  id: string;
-  senderId: string;
+  id: StoryId;
+  senderId: UserId;
   encryptedPayload: string;
   createdAt: string;
   expiresAt: string;
@@ -27,15 +29,15 @@ export type Story = {
 type StoryState = {
   stories: Record<string, Story[]>;
   isLoading: boolean;
-  fetchActiveStories: (userId: string) => Promise<void>;
-  postStory: (file: File | null, text: string, privacy: 'ALL' | 'EXCLUDE' | 'ONLY', selectedUserIds: string[]) => Promise<void>;
+  fetchActiveStories: (userId: UserId) => Promise<void>;
+  postStory: (file: File | null, text: string, privacy: 'ALL' | 'EXCLUDE' | 'ONLY', selectedUserIds: UserId[]) => Promise<void>;
 };
 
 export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
   stories: {},
   isLoading: false,
 
-  fetchActiveStories: async (userId: string) => {
+  fetchActiveStories: async (userId) => {
     set({ isLoading: true });
     try {
       const rawStories = await api<Story[]>(`/api/stories/user/${userId}`);
@@ -140,7 +142,7 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       const conversations = useConversationStore.getState().conversations;
       
       // Map actual userId to conversationId for O(1) lookups
-      const userToConvMap = new Map<string, string>(); 
+      const userToConvMap = new Map<UserId, ConversationId>(); 
       
       conversations.forEach(c => {
         if (!c.isGroup && c.participants) {
@@ -152,14 +154,14 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
           if (otherParticipant) {
             const actualUserId = (otherParticipant as Record<string, unknown>).userId || ((otherParticipant as Record<string, unknown>).user as Record<string, unknown>)?.id || (otherParticipant as Record<string, unknown>).id;
             if (actualUserId) {
-              userToConvMap.set(actualUserId as string, c.id);
+              userToConvMap.set(asUserId(actualUserId as string), c.id);
             }
           }
         }
       });
 
       const allContacts = Array.from(userToConvMap.keys());
-      let targets: string[] = [];
+      let targets: UserId[] = [];
       
       if (privacy === 'ALL') {
         targets = allContacts;

@@ -54,8 +54,10 @@ export async function setupAndUploadPreKeyBundle() {
   }
 }
 
+import type { UserId } from '../types/brands';
+
 export type User = {
-  id: string;
+  id: UserId;
   usernameHash?: string;
   encryptedProfile?: string | null;
   role?: string;

@@ -16,8 +16,9 @@ import { AnimatedTabs } from './ui/AnimatedTabs';
 import { uploadToR2 } from '@lib/r2'; // <--- Tambah Import ini
 import { compressImage } from '@lib/fileUtils'; // <--- Tambah Import ini
 import ImageCropperModal from './ImageCropperModal';
+import type { ConversationId } from '../types/brands';
 
-const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: string; onClose: () => void; }) => {
+const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: ConversationId; onClose: () => void; }) => {
   const { conversation } = useConversationStore(useShallow(state => ({
     conversation: state.conversations.find(c => c.id === conversationId),
   })));

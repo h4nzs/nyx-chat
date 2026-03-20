@@ -12,9 +12,11 @@ import OnboardingTour from '@components/OnboardingTour';
 import { useParams, useNavigate } from 'react-router-dom';
 import ConnectionStatusBanner from '@components/ConnectionStatusBanner';
 import { FiMessageSquare } from 'react-icons/fi';
+import { asConversationId } from '../types/brands';
 
 export default function Chat() {
-  const { conversationId } = useParams<{ conversationId: string }>();
+  const { conversationId: rawConversationId } = useParams<{ conversationId: string }>();
+  const conversationId = rawConversationId ? asConversationId(rawConversationId) : undefined;
   const navigate = useNavigate();
 
   const {
@@ -56,8 +58,11 @@ export default function Chat() {
 
   // Sync activeId from URL
   useEffect(() => {
-    if (conversationId !== activeId) {
-      openConversation(conversationId || null);
+    if (conversationId && conversationId !== activeId) {
+      openConversation(conversationId);
+    } else if (!conversationId && activeId) {
+        // Optional: clear active conversation if URL is empty? 
+        // For now, let's just respect the URL if present.
     }
   }, [conversationId, activeId, openConversation]);
 
@@ -169,7 +174,7 @@ export default function Chat() {
             "
           >
             {activeConversation.isGroup ? (
-              <GroupInfoPanel conversationId={activeId} onClose={() => {}} />
+              <GroupInfoPanel conversationId={asConversationId(activeId)} onClose={() => {}} />
             ) : ( peerUser && 
               <UserInfoPanel userId={peerUser.id} />
             )}

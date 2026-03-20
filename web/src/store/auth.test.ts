@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useAuthStore } from './auth';
 import { api, authFetch } from '@lib/api';
+import { asUserId } from '../types/brands';
 
 // Mock the api module
 vi.mock('@lib/api');
@@ -66,7 +67,7 @@ describe('useAuthStore', () => {
 
   it('should set user to null on logout', async () => {
     const mockUser = { id: '1', name: 'Test User', email: 'test@test.com', username: 'testuser' };
-    useAuthStore.setState({ user: mockUser });
+    useAuthStore.setState({ user: { ...mockUser, id: asUserId(mockUser.id) } });
 
     // Check initial state
     expect(useAuthStore.getState().user).not.toBeNull();

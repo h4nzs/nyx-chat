@@ -30,6 +30,7 @@ import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
 import { startCall } from '@lib/webrtc';
 import { useSettingsStore } from '@store/settings';
 import type { MinimalProfile } from '@store/callStore';
+import { asConversationId } from '../types/brands';
 
 const KeyRotationBanner = () => (
   <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
@@ -447,7 +448,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
               />
 
               {lightboxMessage && <Lightbox message={lightboxMessage} onClose={() => setLightboxMessage(null)} />}
-              {isGroupInfoOpen && <GroupInfoPanel conversationId={id} onClose={() => setIsGroupInfoOpen(false)} />}
+              {isGroupInfoOpen && <GroupInfoPanel conversationId={asConversationId(id)} onClose={() => setIsGroupInfoOpen(false)} />}
             </>
           );
         })()}

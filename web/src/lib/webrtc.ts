@@ -4,6 +4,7 @@
 import { getSocket } from './socket';
 import { useCallStore } from '../store/callStore';
 import { api } from './api';
+import { asUserId } from '../types/brands';
 
 let cachedIceServers: RTCIceServer[] | null = null;
 let turnCacheExp = 0;
@@ -110,7 +111,7 @@ const createPeerConnection = (targetUserId: string, iceServers: RTCIceServer[]) 
 
   pc.ontrack = (event) => {
     if (event.streams && event.streams[0]) {
-      useCallStore.getState().addRemoteStream(targetUserId, event.streams[0]);
+      useCallStore.getState().addRemoteStream(asUserId(targetUserId), event.streams[0]);
     }
   };
 
@@ -146,7 +147,7 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
     const { generateCallKey, encryptCallSignal } = await import('../utils/crypto');
     const callKey = await generateCallKey();
     
-    useCallStore.getState().setOutgoingCall(to, isVideo, callerProfile, callKey);
+    useCallStore.getState().setOutgoingCall(asUserId(to), isVideo, callerProfile, callKey);
 
     // --- FIX: Find the correct Conversation ID ---
     const { useConversationStore } = await import('../store/conversation');
@@ -300,7 +301,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
         switch (data.type) {
             case 'request':
                 if (state.callState === 'idle') {
-                    useCallStore.getState().setIncomingCall(data.from, (decryptedPayload as { isVideo: boolean }).isVideo, (decryptedPayload as { callerProfile: MinimalProfile }).callerProfile, callKey);
+                    useCallStore.getState().setIncomingCall(asUserId(data.from), (decryptedPayload as { isVideo: boolean }).isVideo, (decryptedPayload as { callerProfile: MinimalProfile }).callerProfile, callKey);
                 } else {
                     // Mesh: If already in call, we can auto-accept or merge? 
                     // For simple MVP: Reject if busy (Classic phone behavior)
@@ -308,7 +309,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                     // "Mesh Topology P2P (Group Call)" implies adding.
                     if (state.ephemeralCallKey === callKey) {
                          // Same call, new participant?
-                         useCallStore.getState().addRemoteUser((decryptedPayload as { callerProfile?: MinimalProfile }).callerProfile || { id: data.from });
+                         useCallStore.getState().addRemoteUser((decryptedPayload as { callerProfile?: MinimalProfile }).callerProfile || { id: asUserId(data.from) });
                     } else {
                          sendSecureSignal(data.from, 'reject', { reason: 'busy' });
                     }
@@ -316,7 +317,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                 break;
             case 'accept':
                 useCallStore.getState().setCallState('connected');
-                useCallStore.getState().addRemoteUser({ id: data.from }); // Add if not present
+                useCallStore.getState().addRemoteUser({ id: asUserId(data.from) }); // Add if not present
                 
                 if (!pc) pc = createPeerConnection(data.from, iceServers);
                 
@@ -335,8 +336,8 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                     peerConnections.delete(data.from);
                 }
                 const store = useCallStore.getState();
-                store.removeRemoteStream(data.from);
-                store.removeRemoteUser(data.from);
+                store.removeRemoteStream(asUserId(data.from));
+                store.removeRemoteUser(asUserId(data.from));
                 
                 // ✔️ FIX: Kalo orang terakhir keluar atau nolak, langsung end call!
                 // Pake store.remoteUsers.length karena state bawaan bisa aja stale (belum update)

@@ -2,11 +2,12 @@ import { useState } from 'react';
 import ModalBase from './ui/ModalBase';
 import { authFetch } from '@lib/api';
 import toast from 'react-hot-toast';
+import type { UserId } from '../types/brands';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  reportedUserId: string;
+  reportedUserId: UserId;
   reportedUserName: string;
 }
 

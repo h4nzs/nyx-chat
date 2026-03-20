@@ -9,9 +9,10 @@ import { hashUsername } from '@lib/crypto-worker-proxy';
 import toast from 'react-hot-toast';
 import ModalBase from './ui/ModalBase';
 import { FiCheck } from 'react-icons/fi';
+import type { UserId } from '../types/brands';
 
 type UserSearchResult = {
-  id: string;
+  id: UserId;
   username: string;
   name: string;
   avatarUrl?: string | null;
@@ -67,7 +68,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
     setSearchQuery('');
   };
 
-  const handleRemoveUser = (userId: string) => {
+  const handleRemoveUser = (userId: UserId) => {
     setSelectedUsers(prev => prev.filter(u => u.id !== userId));
   };
 

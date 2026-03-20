@@ -8,6 +8,7 @@ import AttachmentCropperModal from './AttachmentCropperModal';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
 import { useProfileStore } from '@store/profile';
+import { asUserId } from '../types/brands';
 
 // --- Sub Component for E2EE Profile Rendering ---
 const ContactItem = ({ contact, isSelected, onToggle }: { contact: any, isSelected: boolean, onToggle: () => void }) => {
@@ -93,7 +94,7 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
       toast.error('Add text or media to your story');
       return;
     }
-    await useStoryStore.getState().postStory(file, text, privacyMode, selectedUsers);
+    await useStoryStore.getState().postStory(file, text, privacyMode, selectedUsers.map(id => asUserId(id)));
     onClose();
   };
 

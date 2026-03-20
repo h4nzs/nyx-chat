@@ -2,6 +2,7 @@ import Dexie, { Table } from 'dexie';
 import type { Message } from '@store/conversation';
 import { getSodium } from '@lib/sodiumInitializer';
 import { getMyEncryptionKeyPair } from '@utils/crypto';
+import { asMessageId, asConversationId, asUserId } from '../types/brands';
 
 export interface DecryptedMessageRecord {
   id: string;
@@ -179,13 +180,13 @@ export class NyxShadowVault extends Dexie {
         }
 
         messages.push({
-          id: r.id,
-          conversationId: r.conversationId,
+          id: asMessageId(r.id),
+          conversationId: asConversationId(r.conversationId),
           content: plainText,
-          repliedToId: r.repliedToId,
+          repliedToId: r.repliedToId ? asMessageId(r.repliedToId) : undefined,
           repliedTo: decryptedRepliedTo,
           createdAt: r.createdAt as string,
-          senderId: r.senderId,
+          senderId: asUserId(r.senderId),
           sender: {
               id: r.senderId,
               name: decryptedSenderName,
@@ -237,13 +238,13 @@ export class NyxShadowVault extends Dexie {
       }
 
       return {
-        id: r.id,
-        conversationId: r.conversationId,
+        id: asMessageId(r.id),
+        conversationId: asConversationId(r.conversationId),
         content: plainText,
-        repliedToId: r.repliedToId,
+        repliedToId: r.repliedToId ? asMessageId(r.repliedToId) : undefined,
         repliedTo: decryptedRepliedTo,
         createdAt: r.createdAt as string,
-        senderId: r.senderId,
+        senderId: asUserId(r.senderId),
         sender: {
             id: r.senderId,
             name: decryptedSenderName,

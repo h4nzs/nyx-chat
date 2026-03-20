@@ -2,9 +2,11 @@ import { useState, useEffect } from 'react';
 import { useMessageStore } from '@store/message';
 import { FiFile, FiImage, FiVideo, FiMusic } from 'react-icons/fi';
 import { toAbsoluteUrl } from '@utils/url';
+import type { ConversationId, MessageId } from '../types/brands';
+import { asMessageId } from '../types/brands';
 
 interface MediaItem {
-  id: string;
+  id: MessageId;
   content: string; // URL to the media
   type: 'IMAGE' | 'VIDEO' | 'AUDIO' | 'DOCUMENT';
   fileName?: string;
@@ -23,7 +25,7 @@ const MediaIcon = ({ type }: { type: MediaItem['type'] }) => {
   }
 };
 
-const MediaGallery = ({ conversationId }: { conversationId: string }) => {
+const MediaGallery = ({ conversationId }: { conversationId: ConversationId }) => {
   const messages = useMessageStore(state => state.messages[conversationId] || []);
   const [media, setMedia] = useState<MediaItem[]>([]);
 
@@ -42,7 +44,7 @@ const MediaGallery = ({ conversationId }: { conversationId: string }) => {
         else if (m.fileType?.startsWith('audio/')) type = 'AUDIO';
 
         return {
-            id: m.id,
+            id: asMessageId(m.id),
             content: m.fileUrl || m.imageUrl || '',
             type,
             fileName: m.fileName || undefined // Handle null

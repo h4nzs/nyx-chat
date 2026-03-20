@@ -11,6 +11,7 @@ import { useConnectionStore } from "@store/connection";
 import { usePresenceStore } from "@store/presence";
 import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest, schedulePeriodicGroupKeyRotation } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
+import { asUserId } from "../types/brands";
 import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
 import { triggerReceiveFeedback } from "@utils/feedback";
 
@@ -245,7 +246,7 @@ export function getSocket() {
     });
 
     socket.on("conversation:participants_added", ({ conversationId, newParticipants }) => {
-      useConversationStore.getState().addParticipants(conversationId, newParticipants);
+      useConversationStore.getState().addParticipants(conversationId, newParticipants.map(p => ({ ...p, id: asUserId(p.id) })));
       useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
       fireGhostSync(conversationId, 2000);
     });
