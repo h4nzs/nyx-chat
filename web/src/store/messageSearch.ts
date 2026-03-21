@@ -1,7 +1,7 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { shadowVault, decryptVaultText } from '@lib/shadowVaultDb';
 import type { Message } from "./conversation";
-import type { MessageId } from '../types/brands';
+import type { MessageId } from '@nyx/shared';
 
 type State = {
   searchResults: Message[];

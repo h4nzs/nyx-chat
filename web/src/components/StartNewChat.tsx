@@ -5,8 +5,8 @@ import { useShallow } from 'zustand/react/shallow';
 import toast from 'react-hot-toast';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { toAbsoluteUrl } from '@utils/url';
-import type { UserId, ConversationId } from '../types/brands';
-import { asUserId } from '../types/brands';
+import type { UserId, ConversationId } from '@nyx/shared';
+import { asUserId } from '@nyx/shared';
 
 export interface SearchUser {
   id: UserId;

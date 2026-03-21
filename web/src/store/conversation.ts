@@ -7,7 +7,7 @@ import { useMessageStore, decryptMessageObject } from "./message";
 import { getSocket, emitSessionKeyRequest, fireGhostSync } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
-import type { ConversationId, UserId, MessageId } from '../types/brands';
+import type { ConversationId, UserId, MessageId } from '@nyx/shared';
 // Removed all crypto imports
 import toast from 'react-hot-toast';
 
@@ -46,7 +46,7 @@ export interface RawServerMessage {
   isViewOnce?: boolean;
 }
 
-import type { Message, Participant, Conversation } from '../types/core';
+import type { Message, Participant, Conversation } from '@nyx/shared';
 export type { Message, Participant, Conversation };
 
 // --- Helper Functions ---

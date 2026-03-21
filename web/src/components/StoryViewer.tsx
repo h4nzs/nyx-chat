@@ -9,8 +9,8 @@ import { useConversationStore } from '@store/conversation';
 import { decryptFile } from '@utils/crypto';
 import { api } from '@lib/api';
 import toast from 'react-hot-toast';
-import type { UserId } from '../types/brands';
-import { asUserId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
+import { asUserId } from '@nyx/shared';
 
 export default function StoryViewer({ userId, onClose, onReply }: { userId: UserId; onClose: () => void, onReply?: (text: string) => void }) {
   const stories = useStoryStore(state => state.stories[userId] || []);

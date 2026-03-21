@@ -2,7 +2,7 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { createWithEqualityFn } from "zustand/traditional";
-import { MinimalUserSchema } from '../schemas/core';
+import { MinimalUserSchema } from '@nyx/shared';
 import { authFetch, api } from "@lib/api";
 import { disconnectSocket, connectSocket } from "@lib/socket";
 import { clearAuthCookies } from "@lib/tokenStorage";
@@ -55,7 +55,7 @@ export async function setupAndUploadPreKeyBundle() {
   }
 }
 
-import type { UserId, User } from '../types/core';
+import type { UserId, User } from '@nyx/shared';
 export type { User };
 
 type State = {

@@ -13,8 +13,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { useUserProfile } from '@hooks/useUserProfile';
 import MediaGallery from './MediaGallery';
-import type { UserId } from '../types/brands';
-import { asConversationId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
+import { asConversationId } from '@nyx/shared';
 
 type ProfileUser = User & { publicKey?: string };
 

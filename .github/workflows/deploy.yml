@@ -30,29 +30,35 @@ jobs:
       - name: 📦 Install Dependencies (Root)
         run: pnpm install --no-frozen-lockfile
 
-      # --- PHASE 2: BUILD WEB ---
+      # --- PHASE 2: BUILD SHARED PACKAGE (Krusial buat Node.js VPS) ---
+      - name: 🏗️ Build Shared Package
+        run: pnpm --filter @nyx/shared run build
+
+      # --- PHASE 3: BUILD WEB ---
       - name: 🎨 Build Web (Frontend)
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
           VITE_WS_URL: ${{ secrets.VITE_WS_URL }}
           VITE_APP_SECRET: ${{ secrets.VITE_APP_SECRET }}
           VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
-        run: pnpm --filter ./web run build
+        run: pnpm --filter nyx-web run build
 
-      # --- PHASE 3: BUILD SERVER ---
+      # --- PHASE 4: BUILD SERVER ---
       - name: ⚙️ Build Server (Backend)
         working-directory: ./server
         run: |
-          # Generate Prisma Client untuk proses build
-          npx prisma generate
-          
-          # Build TypeScript
-          pnpm run build
+          pnpm --filter nyx-server exec prisma generate
+          pnpm --filter nyx-server run build
 
-      # --- PHASE 4: PACKAGING ---
+      # --- PHASE 5: PACKAGING ---
       - name: 🗜️ Prepare Artifacts for Deploy
         run: |
           mkdir deploy_package
+
+          cp package.json pnpm-workspace.yaml pnpm-lock.yaml deploy_package/
+          mkdir -p deploy_package/packages/shared
+          cp packages/shared/package.json deploy_package/packages/shared/
+          cp -r packages/shared/dist deploy_package/packages/shared/
           
           # Copy Frontend Build
           mkdir -p deploy_package/web
@@ -112,10 +118,12 @@ jobs:
             
             # 4. INSTALL DI VPS PAKAI PNPM (Cepat & Hemat)
             echo "📦 Installing backend dependencies with PNPM..."
-            cd $RELEASE_DIR/server
+            cd $RELEASE_DIR
             # Batasi memory node saat install biar VPS 1GB lu nggak ngos-ngosan
-            NODE_OPTIONS="--max-old-space-size=512" pnpm install --prod
+            NODE_OPTIONS="--max-old-space-size=512" pnpm install --prod --no-frozen-lockfile
+            cd server
             npx prisma generate
+            cd ..
             
             # 5. 🛡️ ATOMIC SYMLINK SWAP (Anti Downtime)
             echo "🔄 Executing Atomic Swap..."

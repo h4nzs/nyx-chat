@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { UserId, MinimalProfile } from '../types/core';
+import type { UserId, MinimalProfile } from '@nyx/shared';
 export type { MinimalProfile };
 
 export type CallState = 'idle' | 'ringing' | 'calling' | 'connected';

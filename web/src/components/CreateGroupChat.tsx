@@ -9,7 +9,7 @@ import { hashUsername } from '@lib/crypto-worker-proxy';
 import toast from 'react-hot-toast';
 import ModalBase from './ui/ModalBase';
 import { FiCheck } from 'react-icons/fi';
-import type { UserId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
 
 type UserSearchResult = {
   id: UserId;

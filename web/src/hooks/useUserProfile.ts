@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useProfileStore, DecryptedProfile } from '@store/profile';
 import { useShallow } from 'zustand/react/shallow';
-import type { UserId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
 
 // Menerima object user yang memiliki id dan encryptedProfile ATAU UserId langsung
 export function useUserProfile(userInput?: { id: string | UserId; encryptedProfile?: string | null } | UserId | null | undefined) {

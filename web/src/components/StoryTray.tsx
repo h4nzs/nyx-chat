@@ -9,7 +9,7 @@ import StoryViewer from './StoryViewer';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { toAbsoluteUrl } from '@utils/url';
 import clsx from 'clsx';
-import type { UserId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
 
 const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId: UserId; onClick: () => void }) {
   // Find the actual user object from conversations to get encryptedProfile

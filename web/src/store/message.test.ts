@@ -4,7 +4,7 @@ import * as authStore from '@store/auth';
 import * as conversationStore from '@store/conversation';
 import * as cryptoUtils from '@utils/crypto';
 import type { RawServerMessage, Message } from './conversation';
-import { asUserId, asMessageId, asConversationId } from '../types/brands';
+import { asUserId, asMessageId, asConversationId } from '@nyx/shared';
 
 // --- MOCK SETUP ---
 // ... (previous mocks remain unchanged)

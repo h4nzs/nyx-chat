@@ -3,7 +3,7 @@ import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import { Spinner } from './Spinner';
 import ModalBase from './ui/ModalBase';
-import type { ConversationId } from '../types/brands';
+import type { ConversationId } from '@nyx/shared';
 
 interface EditGroupInfoModalProps {
   conversationId: ConversationId;

@@ -8,10 +8,10 @@ import { encryptFile } from '@utils/crypto';
 import { compressImage } from '@lib/fileUtils';
 import toast from 'react-hot-toast';
 import { useAuthStore } from './auth';
-import type { StoryId, UserId, ConversationId } from '../types/brands';
-import { asStoryId, asUserId, asConversationId } from '../types/brands';
+import type { StoryId, UserId, ConversationId } from '@nyx/shared';
+import { asStoryId, asUserId, asConversationId } from '@nyx/shared';
 
-import type { Story } from '../types/core';
+import type { Story } from '@nyx/shared';
 
 type StoryState = {
   stories: Record<string, Story[]>;

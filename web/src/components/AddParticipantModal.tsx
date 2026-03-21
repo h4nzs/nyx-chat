@@ -5,7 +5,7 @@ import { toAbsoluteUrl } from '@utils/url';
 import { useConversationStore } from '@store/conversation';
 import { useShallow } from 'zustand/react/shallow';
 import { hashUsername } from '@lib/crypto-worker-proxy';
-import { asUserId } from '../types/brands';
+import { asUserId } from '@nyx/shared';
 import ModalBase from './ui/ModalBase';
 
 interface UserSearchResult {

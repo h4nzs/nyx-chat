@@ -8,7 +8,7 @@ import { useModalStore } from '@store/modal';
 import { useShallow } from 'zustand/react/shallow';
 import { useUserProfile } from "@hooks/useUserProfile";
 import { DecryptedProfile } from "@store/profile";
-import type { ConversationId } from '../types/brands';
+import type { ConversationId } from '@nyx/shared';
 
 const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: { conversationId: ConversationId, participant: Participant, profile: DecryptedProfile, amIAdmin: boolean }) => {
   const [isOpen, setIsOpen] = useState(false);

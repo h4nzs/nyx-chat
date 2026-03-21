@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import { useMessageStore } from '@store/message';
 import { FiFile, FiImage, FiVideo, FiMusic } from 'react-icons/fi';
 import { toAbsoluteUrl } from '@utils/url';
-import type { ConversationId, MessageId } from '../types/brands';
-import { asMessageId } from '../types/brands';
+import type { ConversationId, MessageId } from '@nyx/shared';
+import { asMessageId } from '@nyx/shared';
 
 interface MediaItem {
   id: MessageId;

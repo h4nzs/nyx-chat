@@ -2,7 +2,7 @@ import { usePresenceStore } from '@store/presence';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
-import type { ConversationId } from '../types/brands';
+import type { ConversationId } from '@nyx/shared';
 
 export default function TypingIndicator({ conversationId }: { conversationId: ConversationId }) {
   const { typingIndicators } = usePresenceStore(useShallow(s => ({ typingIndicators: s.typingIndicators })));

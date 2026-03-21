@@ -28,7 +28,7 @@ import SwipeableItem from './SwipeableItem';
 import { useContextMenuStore } from '../store/contextMenu';
 import { useSettingsStore } from '@store/settings';
 import StoryTray from './StoryTray';
-import type { UserId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
 
 // --- Sub-components ---
 

@@ -17,7 +17,7 @@ import ModalBase from './ui/ModalBase';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { useUserProfile } from '@hooks/useUserProfile';
-import { asConversationId } from '../types/brands';
+import { asConversationId } from '@nyx/shared';
 
 type ProfileUser = User & { publicKey?: string };
 

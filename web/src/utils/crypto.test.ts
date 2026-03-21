@@ -4,7 +4,7 @@ import { Buffer } from 'buffer';
 import * as cryptoUtils from './crypto';
 import * as keychainDb from '@lib/keychainDb';
 import * as authStore from '@store/auth';
-import type { DoubleRatchetState } from '../types/core';
+import type { DoubleRatchetState } from '@nyx/shared';
 
 // --- 1. MOCK SETUP ---
 

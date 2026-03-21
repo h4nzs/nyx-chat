@@ -12,7 +12,7 @@ import OnboardingTour from '@components/OnboardingTour';
 import { useParams, useNavigate } from 'react-router-dom';
 import ConnectionStatusBanner from '@components/ConnectionStatusBanner';
 import { FiMessageSquare } from 'react-icons/fi';
-import { asConversationId } from '../types/brands';
+import { asConversationId } from '@nyx/shared';
 
 export default function Chat() {
   const { conversationId: rawConversationId } = useParams<{ conversationId: string }>();

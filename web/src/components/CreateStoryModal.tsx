@@ -8,7 +8,7 @@ import AttachmentCropperModal from './AttachmentCropperModal';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
 import { useProfileStore } from '@store/profile';
-import { asUserId } from '../types/brands';
+import { asUserId } from '@nyx/shared';
 
 // --- Sub Component for E2EE Profile Rendering ---
 const ContactItem = ({ contact, isSelected, onToggle }: { contact: { id: string; encryptedProfile?: string; username?: string; avatarUrl?: string; [key: string]: unknown }, isSelected: boolean, onToggle: () => void }) => {

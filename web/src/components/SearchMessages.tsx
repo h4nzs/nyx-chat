@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useMessageSearchStore } from '@store/messageSearch';
 import { useShallow } from 'zustand/react/shallow';
 import { FiSearch, FiX } from 'react-icons/fi';
-import type { ConversationId, MessageId } from '../types/brands';
-import { asMessageId } from '../types/brands';
+import type { ConversationId, MessageId } from '@nyx/shared';
+import { asMessageId } from '@nyx/shared';
 
 interface SearchMessagesProps {
   conversationId: ConversationId;

@@ -8,8 +8,8 @@ import { FiEdit2, FiShield, FiCpu, FiGlobe, FiActivity, FiKey, FiCheck, FiArrowL
 import { toast } from 'react-hot-toast';
 
 import { useUserProfile } from '@hooks/useUserProfile';
-import type { UserId } from '../types/brands';
-import { asUserId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
+import { asUserId } from '@nyx/shared';
 
 type ProfileUser = User & {
   createdAt?: string;

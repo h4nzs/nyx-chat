@@ -2,7 +2,7 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { openDB, IDBPDatabase } from 'idb';
-import type { ConversationId, UserId } from '../types/core';
+import type { ConversationId, UserId } from '@nyx/shared';
 
 const SESSION_KEYS_STORE_NAME = 'session-keys';
 const GROUP_KEYS_STORE_NAME = 'group-keys';
