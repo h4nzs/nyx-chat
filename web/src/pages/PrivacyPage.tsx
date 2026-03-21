@@ -26,9 +26,28 @@ export default function PrivacyPage() {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const techArticleSchema = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "TechArticle",
+    "headline": "NYX Security Architecture & Zero-Knowledge Protocol",
+    "alternativeHeadline": "How NYX protects metadata without storing user identities",
+    "author": {
+        "@type": "Organization",
+        "name": "NYX Project"
+    },
+    "keywords": "Signal Protocol, Argon2, Zero-Knowledge, End-to-End Encryption, Privacy",
+    "articleBody": "NYX uses a Double Ratchet algorithm...",
+    "datePublished": "2026-03-01"
+  });
+
   return (
     <div className="min-h-screen bg-bg-main text-text-primary font-sans selection:bg-accent selection:text-white">
-      <SEO title="Legal & Privacy | NYX" description="Read about our Zero-Knowledge architecture, commercial licensing, and how NYX protects your data." canonicalUrl="/privacy" />
+      <SEO 
+        title="Legal & Privacy | NYX" 
+        description="Read about our Zero-Knowledge architecture, commercial licensing, and how NYX protects your data." 
+        canonicalUrl="/privacy" 
+        schemaMarkup={techArticleSchema}
+      />
       
       {/* Header */}
       <header className="sticky top-0 z-50 bg-bg-surface/80 backdrop-blur-xl border-b border-white/5 shadow-sm">

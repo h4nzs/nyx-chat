@@ -161,6 +161,66 @@ export default function LandingPage() {
   // Pilih screenshot berdasarkan tema (opsional) atau fix ke dark
   const heroScreenshot = theme === 'dark' ? '/screenshots/mobile-dark.png' : '/screenshots/mobile-light.png';
 
+  const landingSchema = JSON.stringify({
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "NYX Chat",
+        "applicationCategory": "CommunicationApplication",
+        "operatingSystem": "Web, Android, iOS, Windows, macOS, Linux",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "description": "Zero-knowledge, end-to-end encrypted messaging app that requires no phone number. Built on the Signal Protocol.",
+        "featureList": [
+          "No Phone Number Required",
+          "End-to-End Encryption (Signal Protocol)",
+          "Self-Destructing Messages",
+          "Local-First Architecture",
+          "PWA (Progressive Web App)"
+        ],
+        "softwareHelp": "https://nyx-app.my.id/help",
+        "author": {
+          "@type": "Person",
+          "name": "Han",
+          "url": "https://github.com/h4nzs"
+        }
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Is NYX end-to-end encrypted?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. NYX uses the Signal Protocol (X3DH + Double Ratchet) ensuring only you and the recipient can read messages."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need a phone number?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. You sign up with a username and password only. Your identity is protected by Argon2 hashing."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is it free?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes, NYX is open-source (AGPL-3.0) and completely free to use without ads or tracking."
+            }
+          }
+        ]
+      }
+    ]
+  });
+
   return (
     <div
       className="min-h-screen font-sans text-text-primary overflow-y-auto relative"
@@ -170,7 +230,12 @@ export default function LandingPage() {
                           radial-gradient(circle at 90% 80%, rgba(0,0,0,${grainOpacity * 0.8}), transparent 20%)`,
       }}
     >
-      <SEO title="NYX" description="NYX is a secure, end-to-end encrypted messaging app featuring a stunning Neumorphic design. Chat privately without tracking." canonicalUrl="/" />
+      <SEO 
+        title="NYX" 
+        description="NYX is a secure, end-to-end encrypted messaging app featuring a stunning Neumorphic design. Chat privately without tracking." 
+        canonicalUrl="/" 
+        schemaMarkup={landingSchema}
+      />
       
       {/* Grain texture overlay */}
       <div
@@ -300,7 +365,13 @@ export default function LandingPage() {
                         </td>
                         <td className="py-4 px-4 text-center text-red-500 bg-bg-main/50">
                           <div className="flex items-center justify-center gap-2">
-                            {row.wa === "Yes" || row.wa === "Required" ? <FiX/> : null} {row.wa}
+                            {row.wa === "Yes" || row.wa === "Required" ? (
+                                <>
+                                    <span className="sr-only">Not Supported/Bad</span>
+                                    <div aria-hidden="true"><FiX/></div>
+                                </>
+                            ) : null} 
+                            {row.wa}
                           </div>
                         </td>
                         <td className="py-4 px-4 text-center text-yellow-500 bg-bg-main/50">
@@ -308,7 +379,9 @@ export default function LandingPage() {
                         </td>
                         <td className="py-4 px-6 text-center text-green-500 font-bold bg-bg-main rounded-r-xl shadow-[inset_-2px_2px_5px_rgba(0,0,0,0.1)]">
                           <div className="flex items-center justify-center gap-2">
-                            <FiCheck className="text-xl" /> {row.nyx}
+                            <span className="sr-only">Supported/Good</span>
+                            <div aria-hidden="true"><FiCheck className="text-xl" /></div> 
+                            {row.nyx}
                           </div>
                         </td>
                       </motion.tr>

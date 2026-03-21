@@ -560,8 +560,15 @@ export function registerSocket(httpServer: HttpServer) {
         const userId = socket.user?.id;
         if (!userId) return;
 
-        // Cek apakah user member grup
-        // (Opsional: Query DB untuk validasi)
+        // Validate membership to prevent IDOR/Spam
+        const isParticipant = await prisma.participant.findFirst({
+          where: { conversationId, userId }
+        });
+
+        if (!isParticipant) {
+          console.warn(`[Socket] Unauthorized session key request from ${userId} to ${conversationId}`);
+          return;
+        }
 
         // Broadcast ke semua member di room percakapan
         // "Hei, ada user (userId) yang butuh kunci sesi (sessionId) nih!"

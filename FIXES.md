@@ -533,7 +533,7 @@ Di `LandingPage.tsx`, properti `schemaMarkup` belum digunakan pada komponen `<SE
 NYX adalah Single Page Application (Vite).
 
 - **Masalah:** Saat crawler (terutama selain Google, seperti Bing atau Yandex) mengunjungi website, mereka melihat file `index.html` yang hampir kosong sebelum JavaScript berjalan.
-- **Solusi:** Pertimbangkan Pre-rendering (SSG) hanya untuk halaman publik (`/`, `/about`, `/privacy`) menggunakan plugin seperti `vite-plugin-ssr` atau migrasi halaman marketing ke Next.js/Astro.
+- **Solusi:** Pertimbangkan Pre-rendering (SSG) hanya untuk halaman publik (`/`, `/help`, `/privacy`) menggunakan plugin seperti `vite-plugin-ssr` atau migrasi halaman marketing ke Next.js/Astro.
 
 ---
 
