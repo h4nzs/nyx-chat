@@ -45,7 +45,6 @@ jobs:
 
       # --- PHASE 4: BUILD SERVER ---
       - name: ⚙️ Build Server (Backend)
-        working-directory: ./server
         run: |
           pnpm --filter nyx-server exec prisma generate
           pnpm --filter nyx-server run build
@@ -94,67 +93,58 @@ jobs:
           password: ${{ secrets.VPS_PASSWORD }}
           script: |
             set -e  # Exit on error
-            echo "🚧 Starting Deployment (Hybrid PNPM Mode)..."
+            echo "🚧 Starting Deployment (Barbaric Direct Overwrite Mode)..."
             
             # 1. Pastikan PNPM terinstall di VPS
             if ! command -v pnpm &> /dev/null; then
                 npm install -g pnpm
             fi
             
-            # 2. Bikin folder rilis
-            RELEASE_DIR="/root/nyx-releases/release_$(date +%Y%m%d_%H%M%S)"
-            mkdir -p $RELEASE_DIR
+            # 2. Siapkan direktori utama (Jika belum ada)
+            TARGET_DIR="/root/nyx-app"
+            mkdir -p $TARGET_DIR
             
-            # 3. Unzip
-            unzip -q -o /root/nyx-deploy.zip -d $RELEASE_DIR/
+            # 3. Unzip dan TIMPA LANGSUNG ke direktori utama
+            echo "📦 Unzipping artifact directly to $TARGET_DIR..."
+            unzip -q -o /root/nyx-deploy.zip -d $TARGET_DIR/
             rm /root/nyx-deploy.zip
-            echo "🔐 Restoring Server Environment Variables..."
-            if [ -f /root/nyx-app/server/.env ]; then
-                cp /root/nyx-app/server/.env $RELEASE_DIR/server/.env
-                echo "✅ .env copied successfully from previous release!"
-            else
-                echo "⚠️ WARNING: No existing .env found at /root/nyx-app/server/.env"
-            fi
             
-            # 4. INSTALL DI VPS PAKAI PNPM (Cepat & Hemat)
+            # 4. INSTALL DI VPS PAKAI PNPM (Di Root Monorepo)
             echo "📦 Installing backend dependencies with PNPM..."
-            cd $RELEASE_DIR
-            # Batasi memory node saat install biar VPS 1GB lu nggak ngos-ngosan
+            cd $TARGET_DIR
             NODE_OPTIONS="--max-old-space-size=512" pnpm install --prod --no-frozen-lockfile
-            cd server
-            npx prisma generate
-            cd ..
             
-            # 5. 🛡️ ATOMIC SYMLINK SWAP (Anti Downtime)
-            echo "🔄 Executing Atomic Swap..."
-            ln -sfn $RELEASE_DIR /root/nyx-app_tmp_link
-            mv -Tf /root/nyx-app_tmp_link /root/nyx-app
+            # 5. GENERATE PRISMA ENGINE (Wajib di dalam server/)
+            echo "⚙️ Generating Prisma Engine..."
+            cd $TARGET_DIR/server
+            npx prisma generate
             
             # 6. DEPLOY FRONTEND
+            echo "🌐 Deploying Frontend..."
             sudo mkdir -p /var/www/nyx-web
+            # Hapus isi lama, copy yang baru
             sudo rm -rf /var/www/nyx-web/*
-            sudo cp -r /root/nyx-app/web/dist/* /var/www/nyx-web/
+            sudo cp -r $TARGET_DIR/web/dist/* /var/www/nyx-web/
             sudo systemctl reload nginx || true
             
-            # 7. RESTART PM2 (Hard Restart buat nanganin Symlink)
+            # 7. RESTART PM2 (Bersih dan Langsung)
             echo "🚀 Restarting API..."
             
-            # Wajib bunuh proses lama biar memori PM2 soal folder 'release_lama' kehapus
+            # Hapus proses lama biar memori PM2 benar-benar bersih
             pm2 delete nyx-api || true
             
-            # Start ulang pake path absolute dan paksa CWD ke symlink yang baru
-            pm2 start /root/nyx-app/server/dist/index.js \
+            # Start ulang dengan path absolute yang statis
+            pm2 start $TARGET_DIR/server/dist/index.js \
               --name "nyx-api" \
               -i max \
               --node-args="--max-old-space-size=768" \
-              --cwd /root/nyx-app/server
+              --cwd $TARGET_DIR/server
               
             pm2 save --force
 
-            # 8. BERSIH-BERSIH DISK (Simpan 3 rilis terakhir aja)
-            echo "🧹 Cleaning up old releases..."
-            cd /root/nyx-releases
-            # Tambahin 2>/dev/null biar ga error merah kalo foldernya kosong
-            ls -dt * 2>/dev/null | tail -n +4 | xargs rm -rf || true
+            # 8. BERSIH-BERSIH DISK (Hapus folder rilis lama dari eksperimen sebelumnya)
+            echo "🧹 Cleaning up old symlink releases (if any)..."
+            rm -rf /root/nyx-releases || true
+            rm -f /root/nyx-app_tmp_link || true
             
-            echo "✅ Deployment Success!"
+            echo "✅ Barbaric Deployment Success!"
