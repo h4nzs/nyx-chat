@@ -11,12 +11,12 @@
   },
   "sandbox_mode": {
     "title": "Mengapa akun saya \"Sandboxed\"?",
-    "desc": "Untuk mencegah bot spam tanpa mengumpulkan data pribadi (seperti nomor telepon), akun baru dimulai dalam <1>Mode Sandbox</1> dengan kuota pesan terbatas.",
+    "desc": "Untuk mencegah bot spam tanpa mengumpulkan data pribadi (seperti nomor telepon dan email), akun baru dimulai dalam <1>Mode Sandbox</1> dengan kuota pesan terbatas.",
     "upgrade_text": "Anda dapat meningkatkan ke <1>Status VIP</1> secara instan dan gratis dengan memverifikasi bahwa Anda manusia. Buka <2>Pengaturan &gt; Tingkatkan ke VIP</2> dan pilih <3>Verifikasi Biometrik</3> (Sidik Jari/FaceID) atau <3>Proof of Work</3> (Penambangan CPU)."
   },
   "forgot_password": {
     "title": "Saya lupa kata sandi. Apa yang harus saya lakukan?",
-    "desc": "Karena kami tidak memiliki email Anda, kami tidak dapat mengirim tautan reset. Anda harus menggunakan <1>Frasa Pemulihan</1> Anda.",
+    "desc": "Karena kami tidak memiliki email ataupun nomor Anda, kami tidak dapat mengirim tautan ataupun kode reset. Anda harus menggunakan <1>Frasa Pemulihan</1> Anda.",
     "step1": "Di layar login, klik \"Pulihkan dari frasa\".",
     "step2": "Masukkan 24-kata Frasa Pemulihan Anda untuk membuktikan identitas.",
     "step3": "Atur kata sandi baru.",

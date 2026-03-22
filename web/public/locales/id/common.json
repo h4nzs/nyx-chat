@@ -9,7 +9,24 @@
     "verify": "Verifikasi",
     "skip": "Lewati",
     "continue": "Lanjutkan",
-    "return": "Kembali"
+    "return": "Kembali",
+    "confirm": "Konfirmasi",
+    "starting": "Memulai...",
+    "next": "Lanjut",
+    "previous": "Sebelumnya",
+    "finish": "Selesai",
+    "sending": "Mengirim...",
+    "executing": "Mengeksekusi...",
+    "copy_link": "Salin Tautan",
+    "copied": "Tautan disalin ke papan klip",
+    "copy_failed": "Gagal menyalin tautan",
+    "copied_label": "Disalin",
+    "abort": "BATALKAN",
+    "unlock": "BUKA KUNCI",
+    "done": "Selesai",
+    "saving": "Menyimpan...",
+    "creating": "Membuat...",
+    "create_group": "Buat Grup"
   },
   "nav": {
     "home": "Beranda",
@@ -24,7 +41,31 @@
     "required": "Kolom ini wajib diisi"
   },
   "defaults": {
-    "encrypted_user": "Pengguna Terenkripsi"
+    "encrypted_user": "Pengguna Terenkripsi",
+    "user": "Pengguna",
+    "me": "Saya"
+  },
+  "status": {
+    "connection_lost": "KONEKSI_HILANG // SISTEM_OFFLINE",
+    "establishing_uplink": "MEMBANGUN_UPLINK...",
+    "power_surge": "Lonjakan Daya Diperlukan"
+  },
+  "cmd_palette": {
+    "title": "Baris Perintah Sistem",
+    "placeholder": "JALANKAN_PERINTAH...",
+    "running": "Menjalankan...",
+    "unknown_error": "ERROR: PERINTAH_TIDAK_DIKENAL",
+    "ready": "siap"
+  },
+  "context_menu": {
+    "all_reactions": "Semua Reaksi"
+  },
+  "error_boundary": {
+    "title": "Malfungsi Sistem",
+    "desc": "Terjadi kesalahan tak terduga dalam proses sistem.",
+    "message": "Aplikasi mengalami kesalahan kritis. Diperlukan pemuatan ulang untuk memulihkan integritas sistem.",
+    "reboot": "Reboot Sistem",
+    "footer": "Protokol Aman NYX // Kegagalan Kritis"
   },
   "connect": {
     "invalid_link": "Tautan koneksi tidak valid",
@@ -78,5 +119,17 @@
     "key_not_generated": "Kunci belum dibuat.",
     "refresh_keys": "Segarkan Kunci",
     "revoke_access": "Cabut Akses"
+  },
+  "search": {
+    "no_results": "Tidak ada pengguna ditemukan untuk \"{{query}}\"",
+    "failed": "Gagal mencari pengguna."
+  },
+  "time": {
+    "ago_y": "{{count}}th lalu",
+    "ago_mo": "{{count}}bln lalu",
+    "ago_d": "{{count}}hr lalu",
+    "ago_h": "{{count}}j lalu",
+    "ago_m": "{{count}}m lalu",
+    "ago_s": "{{count}}dtk lalu"
   }
 }

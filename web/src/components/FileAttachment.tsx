@@ -10,6 +10,7 @@ import { useKeychainStore } from '@store/keychain';
 import { useConversationStore } from '@store/conversation';
 import { FiAlertTriangle, FiFile, FiDownload, FiMusic, FiVideo, FiImage, FiRefreshCw } from 'react-icons/fi';
 import { getSocket } from '@lib/socket';
+import { useTranslation } from 'react-i18next';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `${import.meta.env.BASE_URL}pdf.worker.min.mjs`;
 
@@ -28,6 +29,7 @@ interface FileAttachmentProps {
 }
 
 export default function FileAttachment({ message, isOwn }: FileAttachmentProps) {
+  const { t } = useTranslation(['chat']);
   const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'decrypting' | 'waiting' | 'error' | 'success'>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -76,9 +78,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         if (message.fileKey) {
              rawFileKey = message.fileKey;
         } else if (message.isBlindAttachment) {
-             // Fallback: If isBlindAttachment is true BUT fileKey is missing, we might need to wait or it's a true blind attachment without key yet.
-             // However, for sent messages, fileKey should be populated.
-             // If we are the sender, we should have the key.
              rawFileKey = ''; 
         } else {
             const conversation = conversations.find(c => c.id === message.conversationId);
@@ -95,7 +94,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
                 if (isMounted) {
                     setStatus('waiting');
                     const socket = getSocket();
-                    // Fix: Removed empty check for sessionId
                     if (socket?.connected && message.sessionId) {
                         socket.emit('session:request_key', {
                             conversationId: message.conversationId,
@@ -118,7 +116,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
              return;
         }
 
-        // Decrypt File Blob
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
         if (!absoluteUrl) throw new Error("Invalid file URL");
         
@@ -127,7 +124,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         const encryptedBlob = await response.blob();
 
         const originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
-        // Use rawFileKey which is now populated correctly
         const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
 
         if (isMounted) {
@@ -154,7 +150,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
     };
   }, [message, lastKeychainUpdate, retryCount]);
 
-  // Determine file type for rendering
   const getFileType = (): string => {
     if (message.fileType) {
       return message.fileType.split(';')[0];
@@ -180,14 +175,14 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   }`;
 
   if (status === 'decrypting') {
-    return <div className={containerClass}><Spinner size="sm" /><span className="text-sm">Decrypting...</span></div>;
+    return <div className={containerClass}><Spinner size="sm" /><span className="text-sm">{t('media.decrypting')}</span></div>;
   }
 
   if (status === 'waiting') {
     return (
         <div className={`${containerClass} border border-yellow-500/30 text-yellow-600`}>
             <FiRefreshCw className="animate-spin" />
-            <span className="text-sm">Waiting for key...</span>
+            <span className="text-sm">{t('media.waiting_key')}</span>
         </div>
     );
   }
@@ -199,14 +194,13 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         onClick={() => setRetryCount(c => c + 1)}
       >
         <FiAlertTriangle />
-        <span className="text-sm">Decrypt Failed: {errorMsg}. Retry?</span>
+        <span className="text-sm">{t('media.decrypt_failed', { error: errorMsg })}. {t('media.retry')}</span>
       </div>
     );
   }
 
   if (!decryptedUrl) return null;
 
-  // PDF Rendering
   if (isPdf) {
     return (
       <div className={containerClass}>
@@ -222,7 +216,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             file={decryptedUrl}
             onLoadSuccess={({ numPages }) => setNumPages(numPages)}
             loading={<div className="p-4 text-center"><Spinner size="sm" /></div>}
-            error={<div className="p-4 text-center text-red-500">Failed to load PDF</div>}
+            error={<div className="p-4 text-center text-red-500">{t('media.pdf_failed')}</div>}
           >
             <Page pageNumber={1} width={300} renderTextLayer={false} renderAnnotationLayer={false} />
           </Document>
@@ -238,13 +232,12 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
           className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
         >
           <FiDownload size={16} />
-          Download PDF
+          {t('media.download_x', { type: 'PDF' })}
         </a>
       </div>
     );
   }
 
-  // Image Rendering
   if (isImage) {
     return (
       <div className={containerClass}>
@@ -273,13 +266,12 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
           className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
         >
           <FiDownload size={16} />
-          Download Image
+          {t('media.download_x', { type: 'Image' })}
         </a>
       </div>
     );
   }
 
-  // Video Rendering
   if (isVideo) {
     return (
       <div className={containerClass}>
@@ -297,11 +289,11 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             className="w-full max-h-64"
             onError={(e) => {
               const target = e.target as HTMLVideoElement;
-              target.onerror = null; // Prevent infinite loop
+              target.onerror = null;
               console.error("Video failed to load:", e);
             }}
           >
-            Your browser does not support the video tag.
+            {t('media.browser_unsupported', { type: 'video' })}
           </video>
         </div>
         <a 
@@ -310,13 +302,12 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
           className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
         >
           <FiDownload size={16} />
-          Download Video
+          {t('media.download_x', { type: 'Video' })}
         </a>
       </div>
     );
   }
 
-  // Audio Rendering
   if (isAudio) {
     return (
       <div className={containerClass}>
@@ -334,11 +325,11 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             className="w-full"
             onError={(e) => {
               const target = e.target as HTMLAudioElement;
-              target.onerror = null; // Prevent infinite loop
+              target.onerror = null;
               console.error("Audio failed to load:", e);
             }}
           >
-            Your browser does not support the audio element.
+            {t('media.browser_unsupported', { type: 'audio' })}
           </audio>
         </div>
         <a 
@@ -347,13 +338,12 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
           className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
         >
           <FiDownload size={16} />
-          Download Audio
+          {t('media.download_x', { type: 'Audio' })}
         </a>
       </div>
     );
   }
 
-  // Generic File Download (fallback)
   return (
     <a 
       href={decryptedUrl} 

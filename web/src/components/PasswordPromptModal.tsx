@@ -1,10 +1,10 @@
-
 import { useState, useEffect } from 'react';
 import { useModalStore } from '@store/modal';
-import { useKeychainStore } from '@store/keychain';
 import { useShallow } from 'zustand/react/shallow';
+import { useTranslation } from 'react-i18next';
 
 export default function PasswordPromptModal() {
+  const { t } = useTranslation(['modals', 'common']);
   const { isPasswordPromptOpen, onPasswordSubmit, hidePasswordPrompt } = useModalStore(useShallow(s => ({
     isPasswordPromptOpen: s.isPasswordPromptOpen, onPasswordSubmit: s.onPasswordSubmit, hidePasswordPrompt: s.hidePasswordPrompt
   })));
@@ -42,7 +42,7 @@ export default function PasswordPromptModal() {
       setPassword('');
       hidePasswordPrompt();
     } catch (e) {
-      setError('An error occurred');
+      setError(t('modals:password_prompt.error'));
     } finally {
       setIsLoading(false);
       setPassword('');
@@ -64,8 +64,8 @@ export default function PasswordPromptModal() {
               <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
             </svg>
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">ACCESS CONTROL PAD</h2>
-          <p className="text-gray-400 text-sm">Enter your credentials to unlock secure vault</p>
+          <h2 className="text-2xl font-bold text-white mb-2">{t('modals:password_prompt.title')}</h2>
+          <p className="text-gray-400 text-sm">{t('modals:password_prompt.desc')}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -75,7 +75,7 @@ export default function PasswordPromptModal() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full bg-[#111827] border-2 border-gray-700 rounded-lg py-4 px-4 pr-12 text-white focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/30 transition-all duration-300"
-              placeholder="Enter access code"
+              placeholder={t('modals:password_prompt.placeholder')}
             />
             <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
@@ -90,21 +90,21 @@ export default function PasswordPromptModal() {
               onClick={handleCancel}
               className="py-3 px-4 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 transition-all duration-300"
             >
-              ABORT
+              {t('common:actions.abort')}
             </button>
             <button
               type="submit"
               className="py-3 px-4 rounded-lg bg-orange-600 text-white hover:bg-orange-700 shadow-[0_0_15px_rgba(249,115,22,0.4)] transition-all duration-300"
             >
-              UNLOCK
+              {t('common:actions.unlock')}
             </button>
           </div>
         </form>
 
         <div className="mt-6 pt-4 border-t border-gray-800">
           <div className="flex justify-between text-xs text-gray-500">
-            <span>Vault ID: SEC-7A9F</span>
-            <span>Status: LOCKED</span>
+            <span>{t('modals:password_prompt.vault_id')}</span>
+            <span>{t('modals:password_prompt.status_locked')}</span>
           </div>
         </div>
       </div>

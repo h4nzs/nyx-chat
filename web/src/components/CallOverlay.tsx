@@ -6,6 +6,7 @@ import { acceptCall, rejectCall, hangup, replaceVideoTrack, getNetworkQuality } 
 import { toAbsoluteUrl } from '../utils/url';
 import toast from 'react-hot-toast';
 import type { UserId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 const RemoteStream = ({ userId, stream, isVideo, profile }: { userId: UserId, stream?: MediaStream, isVideo: boolean, profile: Record<string, unknown> }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -56,6 +57,7 @@ const RemoteStream = ({ userId, stream, isVideo, profile }: { userId: UserId, st
 };
 
 export default function CallOverlay() {
+  const { t } = useTranslation(['chat']);
   const { 
     callState, 
     remoteUsers,
@@ -147,16 +149,13 @@ export default function CallOverlay() {
       setFacingMode(newMode);
     } catch (err) {
       console.error("Camera switch failed:", err);
-      toast.error("Failed to switch camera");
+      toast.error(t('calls.camera_switch_failed'));
     }
   };
 
   const handleToggleSpeaker = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    // Simplified for Mesh: We'd need to setSinkId on ALL elements. 
-    // Browser support for setSinkId is limited. 
-    // For now, we'll just show the toast.
-    toast('Audio output management is currently restricted in Group Call mode.', { icon: '📱' });
+    toast(t('calls.speaker_restricted'), { icon: '📱' });
   };
 
   const handleToggleScreenShare = async (e: React.MouseEvent) => {
@@ -178,7 +177,7 @@ export default function CallOverlay() {
           }
         }
         setIsScreenSharing(false);
-        toast.success("Screen sharing stopped");
+        toast.success(t('calls.screen_share_stopped'));
 
       } else {
         // --- START SCREEN SHARING ---
@@ -203,7 +202,7 @@ export default function CallOverlay() {
         }
 
         setIsScreenSharing(true);
-        toast.success("Screen sharing started");
+        toast.success(t('calls.screen_share_started'));
 
         // Handle native browser "Stop Sharing" button
         screenTrack.onended = async () => {
@@ -219,7 +218,7 @@ export default function CallOverlay() {
       }
     } catch (err) {
       console.error("Screen share error:", err);
-      toast.error("Failed to share screen");
+      toast.error(t('calls.screen_share_failed'));
     }
   };
 
@@ -270,20 +269,20 @@ export default function CallOverlay() {
             
             <h3 className="text-xl font-bold text-text-primary mb-1 tracking-tight">{profileName}</h3>
             <p className="text-text-secondary mb-8 text-sm uppercase font-black tracking-widest opacity-60">
-              Incoming {isVideoCall ? 'Video' : 'Voice'} Call...
+              {isVideoCall ? t('calls.incoming_video') : t('calls.incoming_voice')}
             </p>
 
             <div className="flex gap-6">
               <button 
                 onClick={rejectCall}
-                aria-label="Reject Call"
+                aria-label={t('calls.actions.reject')}
                 className="w-14 h-14 rounded-full bg-red-500/20 text-red-500 hover:bg-red-500 hover:text-white flex items-center justify-center transition-all shadow-lg hover:shadow-red-500/50"
               >
                 <FiPhoneOff size={24} />
               </button>
               <button 
                 onClick={acceptCall}
-                aria-label={isVideoCall ? "Accept Video Call" : "Accept Audio Call"}
+                aria-label={isVideoCall ? t('calls.actions.accept_video') : t('calls.actions.accept_voice')}
                 className="w-14 h-14 rounded-full bg-green-500/20 text-green-500 hover:bg-green-500 hover:text-white flex items-center justify-center transition-all shadow-lg hover:shadow-green-500/50 animate-pulse"
               >
                 {isVideoCall ? <FiVideo size={24} /> : <FiPhone size={24} />}
@@ -324,7 +323,7 @@ export default function CallOverlay() {
             <button 
               onClick={(e) => { e.stopPropagation(); toggleMinimize(); }} 
               className="p-3 bg-white/10 hover:bg-white/20 rounded-full backdrop-blur-md transition-all text-white absolute top-6 left-6 z-50"
-              title="Minimize Call"
+              title={t('calls.actions.minimize')}
             >
               <FiMinimize2 size={24} />
             </button>
@@ -349,7 +348,7 @@ export default function CallOverlay() {
                     <img src={profileAvatar} alt={profileName} className="w-full h-full object-cover" />
                   </div>
                   <h2 className="text-2xl font-black text-white uppercase tracking-widest">{profileName}</h2>
-                  <p className="text-accent font-mono text-xs mt-2 animate-bounce">DIALING SECURE CHANNEL...</p>
+                  <p className="text-accent font-mono text-xs mt-2 animate-bounce">{t('calls.dialing')}</p>
                </div>
             )}
 
@@ -383,7 +382,7 @@ export default function CallOverlay() {
                   muted 
                   className="w-full h-full object-cover"
                 />
-                <div className="absolute bottom-2 left-2 px-1.5 py-0.5 bg-black/40 backdrop-blur-md rounded text-[8px] text-white/80 font-bold uppercase">YOU</div>
+                <div className="absolute bottom-2 left-2 px-1.5 py-0.5 bg-black/40 backdrop-blur-md rounded text-[8px] text-white/80 font-bold uppercase">{t('calls.you')}</div>
               </div>
             )}
 
@@ -405,7 +404,7 @@ export default function CallOverlay() {
               {isVideoCall && (
                 <button 
                   onClick={handleFlipCamera} 
-                  aria-label="Flip camera"
+                  aria-label={t('calls.actions.flip_camera')}
                   className="w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all backdrop-blur-md border border-white/5"
                 >
                   <FiRefreshCw size={20} />
@@ -416,9 +415,9 @@ export default function CallOverlay() {
               {isVideoCall && !isMobile && (
                 <button 
                   onClick={handleToggleScreenShare} 
-                  aria-label={isScreenSharing ? "Stop sharing screen" : "Share screen"}
+                  aria-label={isScreenSharing ? t('calls.actions.stop_sharing') : t('calls.actions.share_screen')}
                   className={`w-12 h-12 rounded-full ${isScreenSharing ? 'bg-blue-500' : 'bg-white/10 hover:bg-white/20'} text-white flex items-center justify-center transition-all backdrop-blur-md border border-white/5`}
-                  title={isScreenSharing ? "Stop Sharing" : "Share Screen"}
+                  title={isScreenSharing ? t('calls.actions.stop_sharing') : t('calls.actions.share_screen')}
                 >
                   <FiMonitor size={20} />
                 </button>
@@ -426,7 +425,7 @@ export default function CallOverlay() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); toggleMute(); }}
-                aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
+                aria-label={isMuted ? t('calls.actions.unmute') : t('calls.actions.mute')}
                 className={`w-14 h-14 rounded-full flex items-center justify-center transition-all shadow-lg ${isMuted ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'} backdrop-blur-md border border-white/10`}
               >
                 {isMuted ? <FiMicOff size={24} /> : <FiMic size={24} />}
@@ -435,7 +434,7 @@ export default function CallOverlay() {
               {isVideoCall && (
                 <button 
                   onClick={(e) => { e.stopPropagation(); toggleVideo(); }}
-                  aria-label={isVideoOff ? "Turn on camera" : "Turn off camera"}
+                  aria-label={isVideoOff ? t('calls.actions.video_on') : t('calls.actions.video_off')}
                   className={`w-14 h-14 rounded-full flex items-center justify-center transition-all shadow-lg ${isVideoOff ? 'bg-white text-black' : 'bg-white/10 text-white hover:bg-white/20'} backdrop-blur-md border border-white/10`}
                 >
                   {isVideoOff ? <FiVideoOff size={24} /> : <FiVideo size={24} />}
@@ -445,7 +444,7 @@ export default function CallOverlay() {
               {/* Loudspeaker Toggle */}
               <button 
                 onClick={handleToggleSpeaker} 
-                aria-label={isSpeakerphone ? "Switch to earpiece" : "Switch to speaker"}
+                aria-label={isSpeakerphone ? t('calls.actions.earpiece') : t('calls.actions.speaker')}
                 className={`w-12 h-12 rounded-full ${isSpeakerphone ? 'bg-white/10' : 'bg-accent'} hover:bg-white/20 text-white flex items-center justify-center transition-all backdrop-blur-md border border-white/5`}
               >
                 {isSpeakerphone ? <FiVolume2 size={20} /> : <FiVolumeX size={20} />}
@@ -453,7 +452,7 @@ export default function CallOverlay() {
 
               <button 
                 onClick={(e) => { e.stopPropagation(); hangup(); }}
-                aria-label="End call"
+                aria-label={t('calls.actions.end')}
                 className="w-14 h-14 rounded-full bg-red-500 text-white hover:bg-red-600 flex items-center justify-center transition-all shadow-[0_0_30px_rgba(239,68,68,0.6)] border border-red-400/20"
               >
                 <FiPhoneOff size={24} />

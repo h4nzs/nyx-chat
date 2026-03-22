@@ -6,6 +6,7 @@ import { useKeychainStore } from '@store/keychain';
 import { useMessageStore } from '@store/message';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
+import { useTranslation } from 'react-i18next';
 
 interface LightboxProps {
   message: Message;
@@ -13,6 +14,7 @@ interface LightboxProps {
 }
 
 export default function Lightbox({ message, onClose }: LightboxProps) {
+  const { t } = useTranslation(['chat']);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
@@ -46,23 +48,21 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
 
     const handleDecryption = async () => {
       if (!message.fileUrl) {
-        if (isMounted) setError("No file URL provided.");
+        if (isMounted) setError(t('media.no_url'));
         return;
       }
 
       const rawFileKey = message.fileKey || '';
 
       if (!rawFileKey && message.content !== 'waiting_for_key') {
-        // If we don't have the key yet, but it's not a 'waiting' state, 
-        // it might be a blind attachment that hasn't been processed.
         if (isMounted) {
-             setError("Waiting for key...");
+             setError(t('media.waiting_key'));
              setIsLoading(false);
         }
         return;
       } else if (!rawFileKey) {
         if (isMounted) {
-          setError("Waiting for key...");
+          setError(t('media.waiting_key'));
           setIsLoading(false);
         }
         return;
@@ -75,11 +75,11 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
 
       try {
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
-        if (!absoluteUrl) throw new Error("File URL is invalid.");
+        if (!absoluteUrl) throw new Error(t('media.invalid_url'));
 
         const response = await fetch(absoluteUrl);
         if (!response.ok) {
-          if (response.status === 404) throw new Error("File not found on server.");
+          if (response.status === 404) throw new Error(t('media.not_found'));
           throw new Error(`HTTP error! status: ${response.status}`);
         }
         const encryptedBlob = await response.blob();
@@ -93,7 +93,7 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
         }
       } catch (e: unknown) {
         console.error("Lightbox decryption failed:", e);
-        if (isMounted) setError((e instanceof Error ? e.message : 'Unknown error') || "Failed to decrypt image.");
+        if (isMounted) setError((e instanceof Error ? e.message : 'Unknown error') || t('media.decrypt_image_failed'));
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -105,7 +105,7 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
       isMounted = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [message, lastKeychainUpdate]);
+  }, [message, lastKeychainUpdate, t]);
 
   const isVideo = message.fileType?.startsWith('video/');
   const isAudio = message.fileType?.startsWith('audio/');
@@ -138,14 +138,14 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
                    <span className="text-4xl text-accent">🎵</span>
                 </div>
                 <audio src={decryptedUrl} autoPlay controls className="w-full outline-none" onEnded={handleClose} />
-                <p className="text-xs text-text-secondary uppercase tracking-widest font-mono">View Once Audio</p>
+                <p className="text-xs text-text-secondary uppercase tracking-widest font-mono">{t('media.view_once_audio')}</p>
              </div>
           ) : (
             <img 
               src={decryptedUrl} 
-              alt={message.fileName || "Lightbox view"} 
+              alt={message.fileName || t('media.lightbox_view')} 
               className={`object-contain max-w-full max-h-[90vh] select-none shadow-2xl rounded-lg ${message.fileType === 'image/svg+xml' ? 'bg-white/5 p-4' : ''}`} 
-              onError={() => { setError("Failed to load media."); setIsLoading(false); }} 
+              onError={() => { setError(t('media.load_failed')); setIsLoading(false); }} 
             />
           )
         )}

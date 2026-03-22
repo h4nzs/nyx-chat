@@ -6,8 +6,10 @@ import clsx from 'clsx';
 import { FiPlus, FiChevronLeft } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
 import { useThemeStore } from '@store/theme';
+import { useTranslation } from 'react-i18next';
 
 export default function ContextMenu() {
+  const { t } = useTranslation(['common']);
   const { isOpen, x, y, options, reactions, closeMenu } = useContextMenuStore(useShallow(s => ({
     isOpen: s.isOpen, x: s.x, y: s.y, options: s.options, reactions: s.reactions, closeMenu: s.closeMenu
   })));
@@ -96,10 +98,10 @@ export default function ContextMenu() {
                   >
                      <FiChevronLeft size={18} />
                   </button>
-                  <span className="text-xs font-bold text-text-secondary uppercase tracking-wider ml-2">All Reactions</span>
+                  <span className="text-xs font-bold text-text-secondary uppercase tracking-wider ml-2">{t('context_menu.all_reactions')}</span>
                </div>
                <div className="p-1">
-                 <Suspense fallback={<div className="w-[300px] h-[400px] flex items-center justify-center text-text-secondary">Loading...</div>}>
+                 <Suspense fallback={<div className="w-[300px] h-[400px] flex items-center justify-center text-text-secondary">{t('actions.loading')}</div>}>
                    <EmojiPicker 
                       onEmojiClick={(emojiData: EmojiClickData) => {
                          if (typeof (window as unknown as { currentReactionHandler?: (emoji: string) => void }).currentReactionHandler === 'function') {

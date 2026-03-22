@@ -9,8 +9,10 @@ import { useShallow } from 'zustand/react/shallow';
 import { useUserProfile } from "@hooks/useUserProfile";
 import { DecryptedProfile } from "@store/profile";
 import type { ConversationId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: { conversationId: ConversationId, participant: Participant, profile: DecryptedProfile, amIAdmin: boolean }) => {
+  const { t } = useTranslation(['modals']);
   const [isOpen, setIsOpen] = useState(false);
   const { user, blockUser, unblockUser, blockedUserIds } = useAuthStore(useShallow(s => ({
     user: s.user, blockUser: s.blockUser, unblockUser: s.unblockUser, blockedUserIds: s.blockedUserIds
@@ -30,25 +32,27 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
         method: 'PUT',
         body: JSON.stringify({ role: newRole }),
       });
-      toast.success(`${profile.name} is now ${newRole.toLowerCase()}.`);
+      toast.success(t('participants.toasts.role_changed', { name: profile.name, role: newRole.toLowerCase() }));
     } catch (error: unknown) {
-      toast.error(`Failed to change role: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`);
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(t('participants.toasts.role_failed', { error: msg }));
     }
   };
 
   const handleRemove = () => {
     setIsOpen(false);
     showConfirm(
-      'Remove Participant',
-      `Are you sure you want to remove ${profile.name} from the group?`,
+      t('participants.remove_title'),
+      t('participants.remove_desc', { name: profile.name }),
       async () => {
         try {
           await api(`/api/conversations/${conversationId}/participants/${participant.id}`, {
             method: 'DELETE',
           });
-          toast.success(`${profile.name} removed from group.`);
+          toast.success(t('participants.toasts.removed', { name: profile.name }));
         } catch (error: unknown) {
-          toast.error(`Failed to remove participant: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`);
+          const msg = error instanceof Error ? error.message : 'Unknown error';
+          toast.error(t('participants.toasts.remove_failed', { error: msg }));
         }
       }
     );
@@ -59,13 +63,14 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
     try {
       if (isBlocked) {
         await unblockUser(participant.id);
-        toast.success(`${profile.name} unblocked.`);
+        toast.success(t('participants.toasts.unblocked', { name: profile.name }));
       } else {
         await blockUser(participant.id);
-        toast.success(`${profile.name} blocked.`);
+        toast.success(t('participants.toasts.blocked', { name: profile.name }));
       }
     } catch (error: unknown) {
-      toast.error(`Failed to ${isBlocked ? 'unblock' : 'block'} user: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`);
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(t('participants.toasts.block_failed', { error: msg }));
     }
   };
 
@@ -78,16 +83,16 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
         <div className="absolute right-0 mt-2 w-48 bg-bg-primary rounded-md shadow-lg z-10 border border-border">
           <ul className="py-1">
             {amIAdmin && participant.role === 'MEMBER' && (
-              <li><button onClick={() => handleRoleChange('ADMIN')} className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-surface">Make Admin</button></li>
+              <li><button onClick={() => handleRoleChange('ADMIN')} className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-surface">{t('participants.make_admin')}</button></li>
             )}
             {amIAdmin && participant.role === 'ADMIN' && user?.id !== participant.id && (
-              <li><button onClick={() => handleRoleChange('MEMBER')} className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-surface">Dismiss as Admin</button></li>
+              <li><button onClick={() => handleRoleChange('MEMBER')} className="w-full text-left px-4 py-2 text-sm text-text-primary hover:bg-bg-surface">{t('participants.dismiss_admin')}</button></li>
             )}
             {amIAdmin && user?.id !== participant.id && (
-              <li><button onClick={handleRemove} className="w-full text-left px-4 py-2 text-sm text-destructive hover:bg-destructive hover:text-destructive-foreground">Remove from Group</button></li>
+              <li><button onClick={handleRemove} className="w-full text-left px-4 py-2 text-sm text-destructive hover:bg-destructive hover:text-destructive-foreground">{t('participants.remove')}</button></li>
             )}
             <li><button onClick={handleBlockToggle} className={`w-full text-left px-4 py-2 text-sm ${isBlocked ? 'text-green-500 hover:bg-green-500/10' : 'text-destructive hover:bg-destructive/10'}`}>
-              {isBlocked ? 'Unblock User' : 'Block User'}
+              {isBlocked ? t('participants.unblock') : t('participants.block')}
             </button></li>
           </ul>
         </div>
@@ -98,6 +103,7 @@ const ParticipantActions = ({ conversationId, participant, profile, amIAdmin }: 
 
 const ParticipantItem = ({ p, conversationId, amIAdmin, handleProfileClick }: { p: Participant, conversationId: ConversationId, amIAdmin: boolean, handleProfileClick: (p: Participant) => void }) => {
   const profile = useUserProfile(p);
+  const { t } = useTranslation('modals'); // Only for "No description" fallback if needed, but here we can just leave it
   return (
     <li className="flex items-center justify-between p-2 rounded-lg hover:bg-secondary">
       <button onClick={() => handleProfileClick(p)} className="flex items-center gap-3 text-left min-w-0">

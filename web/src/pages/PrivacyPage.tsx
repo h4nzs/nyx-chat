@@ -134,13 +134,13 @@ export default function PrivacyPage() {
               </h4>
               <p className="text-sm text-red-200/80 m-0">
                 <Trans i18nKey="privacy:terms.liability_desc">
-                  NYX is provided "AS IS", without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>
+                  NYX is provided &quot;AS IS&quot;, without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>
                 </Trans>
               </p>
             </div>
             
             <ul className="list-disc pl-5 space-y-4">
-              <li><Trans i18nKey="privacy:terms.gating"><strong>Trust-Tier Gating:</strong> To protect the network, unverified accounts are placed in a restricted "Sandbox Mode". Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.</Trans></li>
+              <li><Trans i18nKey="privacy:terms.gating"><strong>Trust-Tier Gating:</strong> To protect the network, unverified accounts are placed in a restricted &quot;Sandbox Mode&quot;. Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.</Trans></li>
               <li><Trans i18nKey="privacy:terms.abuse"><strong>Zero-Tolerance Abuse Policy:</strong> You agree not to utilize the NYX network for illicit activities, automated API abuse (botting), or distributing malware. Violations will result in immediate network bans.</Trans></li>
             </ul>
           </Section>
@@ -206,7 +206,7 @@ export default function PrivacyPage() {
             <p><Trans i18nKey="privacy:ai.intro">NYX operates with <strong>Zero Telemetry</strong>. We do not track your clicks, screen time, or feature usage.</Trans></p>
             
             <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">{t('privacy:ai.smart_reply_title')}</h3>
-            <p><Trans i18nKey="privacy:ai.smart_reply_desc">We provide an experimental "Smart Reply" feature utilizing the Google Gemini API. This feature is <strong>strictly Opt-In</strong>.</Trans></p>
+            <p><Trans i18nKey="privacy:ai.smart_reply_desc">We provide an experimental &quot;Smart Reply&quot; feature utilizing the Google Gemini API. This feature is <strong>strictly Opt-In</strong>.</Trans></p>
             <ul className="list-disc pl-5 space-y-2 mt-2">
               <li>{t('privacy:ai.smart_reply_1')}</li>
               <li>{t('privacy:ai.smart_reply_2')}</li>

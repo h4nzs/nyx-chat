@@ -4,8 +4,10 @@ import { useShallow } from 'zustand/react/shallow';
 import { FiSearch, FiTerminal, FiChevronRight } from 'react-icons/fi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useGlobalEscape } from '../hooks/useGlobalEscape';
+import { useTranslation } from 'react-i18next';
 
 export default function CommandPalette() {
+  const { t } = useTranslation(['common']);
   const { isOpen, close, commands } = useCommandPaletteStore(useShallow(s => ({
     isOpen: s.isOpen, close: s.close, commands: s.commands
   })));
@@ -91,7 +93,7 @@ export default function CommandPalette() {
               <div className="flex items-center justify-between px-4 py-2 bg-accent/10 border-b border-accent/20">
                 <div className="flex items-center gap-2 text-accent">
                   <FiTerminal size={14} />
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider">System Command Line</span>
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider">{t('cmd_palette.title')}</span>
                 </div>
                 <div className="flex gap-1.5">
                   <div className="w-2.5 h-2.5 rounded-full bg-red-500/50"></div>
@@ -106,7 +108,7 @@ export default function CommandPalette() {
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder="EXECUTE_COMMAND..."
+                  placeholder={t('cmd_palette.placeholder')}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="
@@ -136,12 +138,12 @@ export default function CommandPalette() {
                     >
                       <span className="opacity-50">{cmd.icon || <FiTerminal />}</span>
                       <span className="flex-1 uppercase tracking-tight">{cmd.name}</span>
-                      {index === selectedIndex && <span className="text-[10px] animate-pulse">Running...</span>}
+                      {index === selectedIndex && <span className="text-[10px] animate-pulse">{t('cmd_palette.running')}</span>}
                     </button>
                   ))
                 ) : (
                   <p className="text-center text-red-500 font-mono text-sm p-4 border-t border-dashed border-red-500/30">
-                    ERROR: UNKNOWN_COMMAND
+                    {t('cmd_palette.unknown_error')}
                   </p>
                 )}
               </div>
@@ -149,7 +151,7 @@ export default function CommandPalette() {
               {/* Footer */}
               <div className="px-4 py-1.5 bg-accent/5 border-t border-accent/10 flex justify-between text-[10px] font-mono text-accent/50 uppercase">
                  <span>v2.4.0-stable</span>
-                 <span>ready</span>
+                 <span>{t('cmd_palette.ready')}</span>
               </div>
             </div>
           </motion.div>

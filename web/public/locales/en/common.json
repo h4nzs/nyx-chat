@@ -9,7 +9,24 @@
     "verify": "Verify",
     "skip": "Skip",
     "continue": "Continue",
-    "return": "Return"
+    "return": "Return",
+    "confirm": "Confirm",
+    "starting": "Starting...",
+    "next": "Next",
+    "previous": "Previous",
+    "finish": "Finish",
+    "sending": "Sending...",
+    "executing": "Executing...",
+    "copy_link": "Copy Link",
+    "copied": "Link copied to clipboard",
+    "copy_failed": "Failed to copy link",
+    "copied_label": "Copied",
+    "abort": "ABORT",
+    "unlock": "UNLOCK",
+    "done": "Done",
+    "saving": "Saving...",
+    "creating": "Creating...",
+    "create_group": "Create Group"
   },
   "nav": {
     "home": "Home",
@@ -24,7 +41,31 @@
     "required": "This field is required"
   },
   "defaults": {
-    "encrypted_user": "Encrypted User"
+    "encrypted_user": "Encrypted User",
+    "user": "User",
+    "me": "Me"
+  },
+  "status": {
+    "connection_lost": "CONNECTION_LOST // SYSTEM_OFFLINE",
+    "establishing_uplink": "ESTABLISHING_UPLINK...",
+    "power_surge": "Power Surge Required"
+  },
+  "cmd_palette": {
+    "title": "System Command Line",
+    "placeholder": "EXECUTE_COMMAND...",
+    "running": "Running...",
+    "unknown_error": "ERROR: UNKNOWN_COMMAND",
+    "ready": "ready"
+  },
+  "context_menu": {
+    "all_reactions": "All Reactions"
+  },
+  "error_boundary": {
+    "title": "System Malfunction",
+    "desc": "An unexpected error occurred in the system process.",
+    "message": "The application encountered a critical error. A reload is required to restore system integrity.",
+    "reboot": "Reboot System",
+    "footer": "NYX Secure Protocol // Critical Failure"
   },
   "connect": {
     "invalid_link": "Invalid connection link",
@@ -78,5 +119,17 @@
     "key_not_generated": "Key not generated yet.",
     "refresh_keys": "Refresh Keys",
     "revoke_access": "Revoke Access"
+  },
+  "search": {
+    "no_results": "No users found for \"{{query}}\"",
+    "failed": "Failed to search users."
+  },
+  "time": {
+    "ago_y": "{{count}}y ago",
+    "ago_mo": "{{count}}mo ago",
+    "ago_d": "{{count}}d ago",
+    "ago_h": "{{count}}h ago",
+    "ago_m": "{{count}}m ago",
+    "ago_s": "{{count}}s ago"
   }
 }

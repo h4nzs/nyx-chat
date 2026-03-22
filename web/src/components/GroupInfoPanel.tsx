@@ -13,12 +13,14 @@ import { useGlobalEscape } from '../hooks/useGlobalEscape';
 import MediaGallery from './MediaGallery';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedTabs } from './ui/AnimatedTabs';
-import { uploadToR2 } from '@lib/r2'; // <--- Tambah Import ini
-import { compressImage } from '@lib/fileUtils'; // <--- Tambah Import ini
+import { uploadToR2 } from '@lib/r2';
+import { compressImage } from '@lib/fileUtils';
 import ImageCropperModal from './ImageCropperModal';
 import type { ConversationId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: ConversationId; onClose: () => void; }) => {
+  const { t } = useTranslation(['modals']);
   const { conversation } = useConversationStore(useShallow(state => ({
     conversation: state.conversations.find(c => c.id === conversationId),
   })));
@@ -32,8 +34,8 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tabs = [
-    { id: 'details', label: 'Details' },
-    { id: 'media', label: 'Media' },
+    { id: 'details', label: t('group_info.tabs.details') },
+    { id: 'media', label: t('group_info.tabs.media') },
   ];
 
   useEffect(() => {
@@ -41,7 +43,6 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
     return () => clearTimeout(timer);
   }, []);
 
-  // Cleanup avatar crop target URL to prevent memory leaks
   useEffect(() => {
     return () => {
       if (avatarCropTarget?.url) {
@@ -67,56 +68,54 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
     if (!e.target.files?.[0]) return;
     const file = e.target.files[0];
     setAvatarCropTarget({ url: URL.createObjectURL(file), file });
-    // Reset input to allow re-selecting same file
     e.target.value = '';
   };
 
   const handleUploadCroppedAvatar = async (croppedFile: File) => {
-    const toastId = toast.loading('Processing avatar...');
+    const toastId = toast.loading(t('group_info.toasts.processing_avatar'));
 
     try {
-      // 1. Kompresi Gambar
       let fileToUpload = croppedFile;
       try {
         if (croppedFile.type.startsWith('image/')) {
            fileToUpload = await compressImage(croppedFile);
         }
       } catch (err) {
-        // Fallback, do nothing, the original file will be used.
+        // Fallback
       }
 
-      // 2. Upload ke Cloudflare R2
-      toast.loading('Uploading to cloud...', { id: toastId });
+      toast.loading(t('group_info.toasts.uploading'), { id: toastId });
       
       const fileUrl = await uploadToR2(fileToUpload, 'groups', (progress) => {
          // Opsional: update progress toast
       });
 
-      // 3. Update Backend (Kirim URL)
-      toast.loading('Updating group info...', { id: toastId });
+      toast.loading(t('group_info.toasts.updating'), { id: toastId });
       
       await api(`/api/uploads/groups/${conversation.id}/avatar`, {
         method: 'POST',
-        body: JSON.stringify({ fileUrl }), // Kirim JSON, bukan FormData
+        body: JSON.stringify({ fileUrl }),
       });
 
-      toast.success('Avatar updated!', { id: toastId });
+      toast.success(t('group_info.toasts.avatar_updated'), { id: toastId });
       setAvatarCropTarget(null);
     } catch (error: unknown) {
       console.error('Avatar upload failed');
-      toast.error(`Failed to upload avatar: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`, { id: toastId });
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(t('group_info.toasts.upload_failed', { error: msg }), { id: toastId });
       setAvatarCropTarget(null);
     }
   };
 
   const handleLeaveGroup = async () => {
-    const toastId = toast.loading('Leaving group...');
+    const toastId = toast.loading(t('group_info.toasts.leaving'));
     try {
       await api(`/api/conversations/${conversation.id}/leave`, { method: 'DELETE' });
-      toast.success('You have left the group.', { id: toastId });
+      toast.success(t('group_info.toasts.left_success'), { id: toastId });
       handleClose(); 
     } catch (error: unknown) {
-      toast.error(`Failed to leave group: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`, { id: toastId });
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(t('group_info.toasts.leave_failed', { error: msg }), { id: toastId });
     }
   };
 
@@ -137,7 +136,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
           <button onClick={handleClose} className="btn-flat p-2 rounded-full text-text-secondary mr-2">
             <FiX size={24} />
           </button>
-          <h2 className="text-xl font-bold text-text-primary">Group Info</h2>
+          <h2 className="text-xl font-bold text-text-primary">{t('group_info.title')}</h2>
         </header>
 
         <main className="flex-1 flex flex-col overflow-y-auto bg-bg-main">
@@ -170,7 +169,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                       />
                       {amIAdmin && (
                         <>
-                          <button onClick={() => fileInputRef.current?.click()} className="absolute bottom-0 right-0 bg-accent-gradient rounded-full p-2 text-white hover:opacity-90" aria-label="Change group avatar">
+                          <button onClick={() => fileInputRef.current?.click()} className="absolute bottom-0 right-0 bg-accent-gradient rounded-full p-2 text-white hover:opacity-90" aria-label={t('group_info.change_avatar')}>
                             <FiEdit2 size={16} />
                           </button>
                           <input type="file" ref={fileInputRef} onChange={handleAvatarChange} className="hidden" accept="image/*" />
@@ -178,7 +177,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                       )}
                     </div>
                     <h3 className="text-2xl font-bold text-text-primary">{conversation.title}</h3>
-                    <p className="text-text-secondary mt-1">{conversation.description || 'No description'}</p>
+                    <p className="text-text-secondary mt-1">{conversation.description || t('group_info.no_desc')}</p>
                     {amIAdmin && (
                       <button onClick={() => setIsEditing(true)} className="absolute top-4 right-4 text-text-secondary hover:text-accent-color">
                         <FiEdit2 size={20} />
@@ -189,14 +188,14 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                   {/* Members Card */}
                   <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex">
                     <div className="p-6 border-b border-border">
-                      <h4 className="text-lg font-semibold text-text-primary">{conversation.participants.length} Members</h4>
+                      <h4 className="text-lg font-semibold text-text-primary">{t('group_info.member_count', { count: conversation.participants.length })}</h4>
                       {amIAdmin && (
                         <button
                           onClick={() => setIsAddParticipantModalOpen(true)}
                           className="w-full flex items-center justify-center p-3 mt-4 rounded-lg text-accent shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
                         >
                           <FiPlus className="mr-2" />
-                          <span>Add Participants</span>
+                          <span>{t('group_info.add_participants')}</span>
                         </button>
                       )}
                     </div>
@@ -210,7 +209,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                       className="w-full flex items-center justify-center p-4 font-semibold text-red-500 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all rounded-xl"
                     >
                       <FiLogOut className="mr-3" />
-                      <span>Leave Group</span>
+                      <span>{t('group_info.leave_group')}</span>
                     </button>
                   </div>
                 </motion.div>
@@ -251,7 +250,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
           <ImageCropperModal
             file={avatarCropTarget.file}
             url={avatarCropTarget.url}
-            aspect={1} // Force square for group avatars
+            aspect={1}
             onClose={() => setAvatarCropTarget(null)}
             onSave={handleUploadCroppedAvatar}
           />

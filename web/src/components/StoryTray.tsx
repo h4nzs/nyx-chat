@@ -10,8 +10,10 @@ import { useUserProfile } from '@hooks/useUserProfile';
 import { toAbsoluteUrl } from '@utils/url';
 import clsx from 'clsx';
 import type { UserId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId: UserId; onClick: () => void }) {
+  const { t } = useTranslation(['common']);
   // Find the actual user object from conversations to get encryptedProfile
   const user = useConversationStore(state => {
     for (const c of state.conversations) {
@@ -42,20 +44,21 @@ const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId:
       )}>
         <div className="w-full h-full rounded-full border-2 border-bg-main overflow-hidden bg-bg-main">
           <img 
-            src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || 'User'}`} 
+            src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('defaults.user')}`} 
             alt="Story" 
             className="w-full h-full object-cover" 
           />
         </div>
       </div>
       <span className="text-[10px] font-medium text-text-secondary truncate w-full text-center">
-        {profile.name?.split(' ')[0] || 'User'}
+        {profile.name?.split(' ')[0] || t('defaults.user')}
       </span>
     </button>
   );
 });
 
 export default function StoryTray() {
+  const { t } = useTranslation(['chat', 'common']);
   const { conversations } = useConversationStore(useShallow(s => ({ conversations: s.conversations })));
   const { user: me } = useAuthStore(useShallow(s => ({ user: s.user })));
   const { fetchActiveStories, stories } = useStoryStore(useShallow(s => ({ fetchActiveStories: s.fetchActiveStories, stories: s.stories })));
@@ -65,10 +68,8 @@ export default function StoryTray() {
 
   useEffect(() => {
     if (!me) return;
-    // Fetch my own stories
     fetchActiveStories(me.id);
     
-    // Extract unique user IDs from 1-on-1 conversations
     const userIds = new Set<UserId>();
     conversations.forEach(c => {
       if (!c.isGroup) {
@@ -104,7 +105,7 @@ export default function StoryTray() {
               )}>
                  <div className="w-full h-full rounded-full border-2 border-bg-main overflow-hidden bg-bg-main relative">
                   <img 
-                    src={toAbsoluteUrl(myProfile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${myProfile.name || 'Me'}`} 
+                    src={toAbsoluteUrl(myProfile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${myProfile.name || t('defaults.me')}`} 
                     alt="My Story" 
                     className={clsx("w-full h-full object-cover transition-all", myStories.length === 0 && "opacity-80")} 
                   />
@@ -124,7 +125,7 @@ export default function StoryTray() {
             </button>
 
             <span className="text-[10px] font-medium text-text-primary truncate w-full text-center">
-              Your Story
+              {t('stories.your_story')}
             </span>
           </div>
 

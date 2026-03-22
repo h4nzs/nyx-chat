@@ -66,5 +66,195 @@
     "calibrate": "Mengkalibrasi...",
     "authorize": "Otorisasi Sistem",
     "skip": "Lewati untuk sekarang"
+  },
+  "group_info": {
+    "title": "Info Grup",
+    "create_title": "Buat Grup Baru",
+    "tabs": {
+      "details": "Detail",
+      "media": "Media"
+    },
+    "change_avatar": "Ubah avatar grup",
+    "no_desc": "Tidak ada deskripsi",
+    "member_count": "{{count}} Anggota",
+    "add_participants": "Tambah Peserta",
+    "leave_group": "Keluar Grup",
+    "toasts": {
+      "processing_avatar": "Memproses avatar...",
+      "uploading": "Mengunggah ke cloud...",
+      "updating": "Memperbarui info grup...",
+      "avatar_updated": "Avatar diperbarui!",
+      "upload_failed": "Gagal mengunggah avatar: {{error}}",
+      "leaving": "Meninggalkan grup...",
+      "left_success": "Anda telah meninggalkan grup.",
+      "leave_failed": "Gagal meninggalkan grup: {{error}}",
+      "create_failed": "Nama grup dan setidaknya satu anggota wajib diisi.",
+      "created": "Grup \"{{name}}\" dibuat!",
+      "create_error": "Gagal membuat grup: {{error}}"
+    }
+  },
+  "user_info": {
+    "about": "Tentang {{name}}",
+    "tabs": {
+      "details": "Detail",
+      "media": "Media"
+    },
+    "errors": {
+      "no_keys": "Pengguna ini belum mengatur kunci enkripsi mereka.",
+      "my_key_missing": "Kunci publik Anda tidak ditemukan. Harap atur kunci Anda terlebih dahulu.",
+      "safety_number_failed": "Gagal membuat nomor keamanan."
+    },
+    "verified": "Terverifikasi",
+    "no_desc": "Pengguna ini lebih suka menjaga misteri.",
+    "view_profile": "Lihat Profil Lengkap",
+    "verify_security": "Verifikasi Keamanan"
+  },
+  "participants": {
+    "make_admin": "Jadikan Admin",
+    "dismiss_admin": "Berhentikan sebagai Admin",
+    "remove": "Hapus dari Grup",
+    "block": "Blokir Pengguna",
+    "unblock": "Buka Blokir",
+    "remove_title": "Hapus Peserta",
+    "remove_desc": "Apakah Anda yakin ingin menghapus {{name}} dari grup?",
+    "toasts": {
+      "role_changed": "{{name}} sekarang {{role}}.",
+      "removed": "{{name}} dihapus dari grup.",
+      "unblocked": "{{name}} dibuka blokirnya.",
+      "blocked": "{{name}} diblokir.",
+      "role_failed": "Gagal mengubah peran: {{error}}",
+      "remove_failed": "Gagal menghapus peserta: {{error}}",
+      "block_failed": "Gagal memperbarui status blokir: {{error}}"
+    }
+  },
+  "safety": {
+    "title": "Nomor Keamanan",
+    "desc": "Verifikasi integritas enkripsi ujung-ke-ujung dengan",
+    "hash_label": "Hash Sidik Jari",
+    "confirmed": "Verifikasi Dikonfirmasi",
+    "confirm_btn": "Konfirmasi Nomor Keamanan"
+  },
+  "tour": {
+    "title": "Tur Cepat",
+    "steps": {
+      "welcome": {
+        "title": "Selamat Datang di Nyx!",
+        "content": "Anda telah memasuki zona <1>Zero-Knowledge</1>. Kami tidak tahu siapa Anda, dan kami tidak bisa membaca pesan Anda. Anonimitas total."
+      },
+      "phrase": {
+        "title": "Frasa Pemulihan Anda",
+        "content_1": "Saat pendaftaran, Anda membuat 24-kata Frasa Pemulihan. Ini adalah <1>satu-satunya</1> cara untuk memulihkan akun jika Anda lupa kata sandi.",
+        "content_2": "Kami tidak menyimpannya. Jika Anda kehilangannya, akun Anda hilang selamanya."
+      },
+      "sandbox": {
+        "title": "Sandbox & Verifikasi",
+        "content": "Untuk mencegah spam tanpa menggunakan nomor telepon, akun baru dimulai dalam <1>Mode Sandbox</1>. Anda dapat membuka pesan tanpa batas dengan memverifikasi bahwa Anda manusia (Biometrik atau Proof of Work) di Pengaturan."
+      },
+      "safety": {
+        "title": "Nomor Keamanan",
+        "content": "Setiap percakapan memiliki \"Nomor Keamanan\" unik. Anda dapat membandingkan ini dengan kontak Anda untuk memastikan tidak ada yang menyadap chat Anda."
+      },
+      "community": {
+        "title": "Komunitas & Kinerja",
+        "content_1": "Nyx berjalan di <1>infrastruktur gratis</1>, jadi Anda mungkin mengalami penundaan atau momen koneksi ulang sesekali.",
+        "content_2": "Jika Anda menikmati aplikasi ini, Anda dapat membantu kami meningkatkan ke server yang lebih cepat kapan saja! Buka <1>Pengaturan</1> dan gulir ke bawah untuk mendukung proyek.",
+        "content_3": "Nikmati chat aman Anda!"
+      }
+    }
+  },
+  "report": {
+    "no_reason": "Harap berikan alasan.",
+    "success": "Laporan berhasil dikirim.",
+    "failed": "Gagal mengirim laporan.",
+    "title_user": "Laporkan {{name}}",
+    "desc_user": "Harap berikan detail spesifik mengapa Anda melaporkan pengguna ini. Ini akan dikirim ke tim moderasi.",
+    "placeholder": "Alasan pelaporan (misal: Spam, Pelecehan, Konten Tidak Pantas)...",
+    "submit": "Kirim Laporan",
+    "fill_all": "Harap isi semua kolom",
+    "sending_toast": "Mengirim laporan...",
+    "success_bug": "Laporan terkirim! Terima kasih atas bantuan Anda.",
+    "failed_bug": "Gagal mengirim laporan, silakan coba lagi nanti.",
+    "title_bug": "Laporkan Masalah",
+    "desc_bug": "Menemukan bug? Jelaskan di bawah ini. Info perangkat akan disertakan secara otomatis untuk membantu kami memperbaikinya.",
+    "summary_label": "Ringkasan Masalah",
+    "summary_placeholder": "misal: Tidak bisa mengunggah foto profil",
+    "details_label": "Detail",
+    "details_placeholder": "Jelaskan apa yang terjadi dan langkah-langkah untuk mereproduksi..."
+  },
+  "ban": {
+    "no_id": "ID Pengguna wajib diisi.",
+    "no_reason": "Alasan larangan wajib diisi.",
+    "success": "Pengguna Dilarang & Dikeluarkan!",
+    "failed": "Gagal melarang pengguna.",
+    "title": "Larang Pengguna",
+    "id_label": "ID Pengguna Target",
+    "reason_label": "Alasan Larangan",
+    "reason_placeholder": "Alasan penangguhan (terlihat oleh pengguna)...",
+    "execute": "EKSEKUSI LARANGAN"
+  },
+  "share": {
+    "title": "Identitas Anda",
+    "desc": "Pindai untuk memulai chat aman"
+  },
+  "password_prompt": {
+    "error": "Terjadi kesalahan",
+    "title": "PAD KONTROL AKSES",
+    "desc": "Masukkan kredensial Anda untuk membuka brankas aman",
+    "placeholder": "Masukkan kode akses",
+    "vault_id": "ID Brankas: SEC-7A9F",
+    "status_locked": "Status: TERKUNCI"
+  },
+  "editor": {
+    "save_failed": "Gagal menyimpan gambar",
+    "crop_failed": "Gagal memotong gambar.",
+    "zoom": "ZOOM",
+    "rotate": "Putar"
+  },
+  "notifications": {
+    "title": "Log Sistem",
+    "purge": "HAPUS_SEMUA",
+    "empty": "Sistem nominal. Tidak ada log."
+  },
+  "chat_info": {
+    "title": "Memahami Keamanan Anda di NYX",
+    "e2ee": {
+      "title": "Enkripsi Ujung-ke-Ujung Sejati (E2EE)",
+      "content_1": "Semua percakapan Anda dilindungi oleh <1>Enkripsi Ujung-ke-Ujung</1> yang kuat, terinspirasi oleh Protokol Signal. Anggap saja sebagai brankas digital pribadi.",
+      "content_2": "Hanya Anda dan penerima yang memiliki kunci untuk membuka pesan. Tidak ada orang di antaranya—bahkan server NYX—yang bisa membaca kontennya. Perlindungan ini otomatis dan selalu aktif."
+    },
+    "keys": {
+      "title": "Kunci Master & Frasa Pemulihan Anda",
+      "content_1": "Seluruh akun Anda diamankan oleh satu <1>\"Kunci Master\"</1>. Kunci ini dibuat dari <3>Frasa Pemulihan</3> 24-kata unik yang Anda terima saat pendaftaran.",
+      "important": "<0>Konsep terpenting:</0> Frasa Pemulihan Anda adalah satu-satunya cara untuk mengakses akun jika Anda lupa kata sandi atau berganti perangkat tanpa akses ke yang lama. Kami tidak menyimpannya dan tidak bisa memulihkannya untuk Anda."
+    },
+    "storage": {
+      "title": "Penyimpanan Kunci di Perangkat Ini",
+      "content_1": "Untuk kenyamanan Anda, Kunci Master Anda disimpan di perangkat ini dalam bundel terenkripsi yang sangat aman. Bundel ini \"dikunci\" menggunakan <1>kata sandi</1> Anda.",
+      "list_1": "Saat Anda login, kata sandi Anda digunakan untuk membuka bundel ini dan memuat kunci Anda ke sesi aman.",
+      "list_2": "Kata sandi Anda tidak pernah dikirim ke server kami dalam format yang dapat dibaca."
+    },
+    "access": {
+      "title": "Mengakses Akun Anda di Perangkat Baru",
+      "content_1": "Anda memiliki tiga cara untuk memindahkan akun Anda ke perangkat baru:",
+      "list_1_label": "Migrasi Perangkat (Disarankan):",
+      "list_1_text": "Gunakan fitur \"Transfer ke Perangkat Baru\" di Pengaturan. Pindai kode QR di perangkat baru Anda untuk menyalurkan seluruh riwayat chat dan kunci secara aman dan langsung.",
+      "list_2_label": "Cadangan Brankas:",
+      "list_2_text": "Ekspor file \"NYX Vault\" (.nyxvault) Anda dari Pengaturan. Anda dapat mengimpor file ini di perangkat baru apa pun untuk memulihkan akun dan riwayat Anda secara instan.",
+      "list_3_label": "Pemulihan Darurat:",
+      "list_3_text": "Jika Anda kehilangan perangkat dan cadangan, gunakan fitur \"Pulihkan\" dengan Frasa Pemulihan 24-kata Anda. Ini akan mereset kata sandi Anda dan memulihkan Kunci Identitas Anda, tetapi <1>riwayat chat akan hilang</1> tanpa cadangan Brankas."
+    },
+    "best_practices": {
+      "title": "Praktik Terbaik Keamanan",
+      "do_store": "<0>LAKUKAN</0> simpan Frasa Pemulihan Anda di lokasi offline yang sangat aman (misal: brankas, catatan fisik, atau pengelola kata sandi terenkripsi).",
+      "do_verify": "<0>LAKUKAN</0> verifikasi identitas kontak Anda menggunakan fitur keamanan yang tersedia sebelum membagikan informasi sensitif.",
+      "dont_share": "<0>JANGAN</0> bagikan kata sandi atau Frasa Pemulihan Anda dengan siapa pun. Tidak pernah.",
+      "dont_public": "<0>JANGAN</0> tetap login di komputer publik atau bersama. Gunakan fitur \"Sesi Aktif\" di Pengaturan untuk logout dari jarak jauh jika diperlukan."
+    }
+  },
+  "scan": {
+    "title": "Pindai Kontak",
+    "desc": "Pindai kode QR NYX",
+    "awaiting": "Menunggu target...",
+    "camera_error": "Akses kamera ditolak atau tidak tersedia."
   }
 }

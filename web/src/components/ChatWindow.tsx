@@ -40,8 +40,8 @@ const KeyRotationBanner = () => {
       <div className="flex items-center gap-3">
         <FiShield className="flex-shrink-0 animate-pulse" size={18} />
         <div className="font-mono text-xs">
-          <p className="font-bold uppercase tracking-wider">{t('chat:banners.key_rotation')}</p>
-          <p className="opacity-80">{t('chat:banners.key_rotation_desc')}</p>
+          <p className="font-bold uppercase tracking-wider">{t('banners.key_rotation')}</p>
+          <p className="opacity-80">{t('banners.key_rotation_desc')}</p>
         </div>
       </div>
     </div>
@@ -55,9 +55,9 @@ const NewConversationBanner = () => {
       <div className="flex items-start gap-3">
         <FiInfo className="flex-shrink-0 mt-0.5" size={18} />
         <div className="font-mono text-xs">
-          <p className="font-bold uppercase tracking-wider mb-1">{t('chat:banners.encryption_recommendation')}</p>
+          <p className="font-bold uppercase tracking-wider mb-1">{t('banners.encryption_recommendation')}</p>
           <p className="opacity-90 leading-relaxed">
-            {t('chat:banners.encryption_desc')}
+            {t('banners.encryption_desc')}
           </p>
         </div>
       </div>
@@ -93,9 +93,9 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
 
   const getStatus = () => {
     if (conversation.isGroup) {
-      return t('chat:header.members', { count: conversation.participants.length });
+      return t('header.members', { count: conversation.participants.length });
     }
-    return isOnline ? t('chat:header.online') : t('chat:header.offline');
+    return isOnline ? t('header.online') : t('header.offline');
   };
 
   const handleVoiceCall = () => {
@@ -252,17 +252,16 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     const selectedMessages = messages.filter(m => selectedMessageIds.includes(m.id));
     const allMine = selectedMessages.every(m => m.senderId === meId);
     
-    // Simplified translation logic for now, or use complex logic
-    const confirmMessage = t('chat:messages.bulk_delete_confirm', { count: selectedMessageIds.length }) + 
-      (allMine ? '' : ' ' + t('chat:messages.bulk_delete_desc'));
+    const confirmMessage = t('messages.bulk_delete_confirm', { count: selectedMessageIds.length }) + 
+      (allMine ? '' : ' ' + t('messages.bulk_delete_desc'));
 
     showConfirm(
-      'Bulk Deletion', 
+      t('actions.bulk_delete_title'), 
       confirmMessage,
       async () => {
           await removeMessages(conversation.id, selectedMessageIds);
           // clearMessageSelection is already handled inside removeMessages now
-          toast.success(t('chat:messages.processed', { count: selectedMessageIds.length }));
+          toast.success(t('messages.processed', { count: selectedMessageIds.length }));
       }
     );
   };
@@ -362,7 +361,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
             return (
               <div className="flex-1 flex flex-col items-center justify-center text-red-500 font-mono">
                 <FiShield size={40} className="mb-4 opacity-50" />
-                <p className="uppercase tracking-widest">{t('chat:status.signal_lost')}</p>
+                <p className="uppercase tracking-widest">{t('status.signal_lost')}</p>
                 <p className="text-xs mt-2 opacity-70">{error}</p>
               </div>
             );
@@ -384,12 +383,12 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                           <button onClick={clearMessageSelection} className="p-2 hover:bg-white/10 rounded-full transition-colors text-text-secondary hover:text-white">
                               <FiX size={20} />
                           </button>
-                          <span className="font-bold text-lg text-accent tracking-wide">{t('chat:messages.processed', { count: selectedMessageIds.length }).replace('processed', 'Selected')}</span>
+                          <span className="font-bold text-lg text-accent tracking-wide">{t('messages.selected_count', { count: selectedMessageIds.length })}</span>
                       </div>
                       <button 
                           onClick={handleBulkDelete} 
                           className="p-2 text-red-500 hover:bg-red-500/20 rounded-full transition-all active:scale-95 shadow-neumorphic-concave"
-                          title="Delete Selected"
+                          title={t('actions.delete_selected')}
                       >
                           <FiTrash2 size={20} />
                       </button>
@@ -439,7 +438,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                           <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:-0.15s]"></span>
                           <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"></span>
                         </div>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t('chat:header.typing')}</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t('header.typing')}</span>
                       </div>
                     </motion.div>
                   )}

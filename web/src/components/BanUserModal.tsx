@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import ModalBase from './ui/ModalBase';
 import { authFetch } from '@lib/api';
 import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   isOpen: boolean;
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function BanUserModal({ isOpen, onClose, targetUserId, onSuccess }: Props) {
+  const { t } = useTranslation(['modals', 'common']);
   const [userId, setUserId] = useState(targetUserId || '');
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,8 +25,8 @@ export default function BanUserModal({ isOpen, onClose, targetUserId, onSuccess 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userId.trim()) return toast.error("User ID is required.");
-    if (!reason.trim()) return toast.error("Ban reason is required.");
+    if (!userId.trim()) return toast.error(t('modals:ban.no_id'));
+    if (!reason.trim()) return toast.error(t('modals:ban.no_reason'));
 
     setLoading(true);
     try {
@@ -32,23 +34,23 @@ export default function BanUserModal({ isOpen, onClose, targetUserId, onSuccess 
         method: 'POST',
         body: JSON.stringify({ userId, reason })
       });
-      toast.success("User Banned & Kicked!");
+      toast.success(t('modals:ban.success'));
       onSuccess();
       onClose();
       setReason('');
       if (!targetUserId) setUserId('');
     } catch (e: unknown) {
-      toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to ban user.");
+      toast.error((e instanceof Error ? e.message : 'Unknown error') || t('modals:ban.failed'));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <ModalBase isOpen={isOpen} onClose={onClose} title="Ban User">
+    <ModalBase isOpen={isOpen} onClose={onClose} title={t('modals:ban.title')}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-bold uppercase text-text-secondary">Target User ID</label>
+          <label className="text-xs font-bold uppercase text-text-secondary">{t('modals:ban.id_label')}</label>
           <input
             type="text"
             value={userId}
@@ -60,11 +62,11 @@ export default function BanUserModal({ isOpen, onClose, targetUserId, onSuccess 
         </div>
         
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-bold uppercase text-text-secondary">Ban Reason</label>
+          <label className="text-xs font-bold uppercase text-text-secondary">{t('modals:ban.reason_label')}</label>
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Reason for suspension (visible to user)..."
+            placeholder={t('modals:ban.reason_placeholder')}
             className="
               w-full p-3 rounded-xl bg-bg-main text-text-primary 
               border border-white/10 outline-none focus:border-red-500/50
@@ -80,7 +82,7 @@ export default function BanUserModal({ isOpen, onClose, targetUserId, onSuccess 
             onClick={onClose}
             className="px-4 py-2 rounded-lg text-text-secondary hover:bg-white/5 transition-colors text-sm font-bold"
           >
-            Cancel
+            {t('common:actions.cancel')}
           </button>
           <button
             type="submit"
@@ -91,7 +93,7 @@ export default function BanUserModal({ isOpen, onClose, targetUserId, onSuccess 
               transition-all
             "
           >
-            {loading ? 'Executing...' : 'EXECUTE BAN'}
+            {loading ? t('common:actions.executing') : t('modals:ban.execute')}
           </button>
         </div>
       </form>

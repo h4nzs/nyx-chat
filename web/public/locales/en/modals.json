@@ -66,5 +66,195 @@
     "calibrate": "Calibrating...",
     "authorize": "Authorize Systems",
     "skip": "Skip for now"
+  },
+  "group_info": {
+    "title": "Group Info",
+    "create_title": "Create New Group",
+    "tabs": {
+      "details": "Details",
+      "media": "Media"
+    },
+    "change_avatar": "Change group avatar",
+    "no_desc": "No description",
+    "member_count": "{{count}} Members",
+    "add_participants": "Add Participants",
+    "leave_group": "Leave Group",
+    "toasts": {
+      "processing_avatar": "Processing avatar...",
+      "uploading": "Uploading to cloud...",
+      "updating": "Updating group info...",
+      "avatar_updated": "Avatar updated!",
+      "upload_failed": "Failed to upload avatar: {{error}}",
+      "leaving": "Leaving group...",
+      "left_success": "You have left the group.",
+      "leave_failed": "Failed to leave group: {{error}}",
+      "create_failed": "Group name and at least one member are required.",
+      "created": "Group \"{{name}}\" created!",
+      "create_error": "Failed to create group: {{error}}"
+    }
+  },
+  "user_info": {
+    "about": "About {{name}}",
+    "tabs": {
+      "details": "Details",
+      "media": "Media"
+    },
+    "errors": {
+      "no_keys": "This user has not set up their encryption keys yet.",
+      "my_key_missing": "Your public key is not found. Please set up your keys first.",
+      "safety_number_failed": "Failed to generate safety number."
+    },
+    "verified": "Verified",
+    "no_desc": "This user prefers to keep an air of mystery.",
+    "view_profile": "View Full Profile",
+    "verify_security": "Verify Security"
+  },
+  "participants": {
+    "make_admin": "Make Admin",
+    "dismiss_admin": "Dismiss as Admin",
+    "remove": "Remove from Group",
+    "block": "Block User",
+    "unblock": "Unblock User",
+    "remove_title": "Remove Participant",
+    "remove_desc": "Are you sure you want to remove {{name}} from the group?",
+    "toasts": {
+      "role_changed": "{{name}} is now {{role}}.",
+      "removed": "{{name}} removed from group.",
+      "unblocked": "{{name}} unblocked.",
+      "blocked": "{{name}} blocked.",
+      "role_failed": "Failed to change role: {{error}}",
+      "remove_failed": "Failed to remove participant: {{error}}",
+      "block_failed": "Failed to update block status: {{error}}"
+    }
+  },
+  "safety": {
+    "title": "Safety Number",
+    "desc": "Verify end-to-end encryption integrity with",
+    "hash_label": "Fingerprint Hash",
+    "confirmed": "Verification Confirmed",
+    "confirm_btn": "Confirm Safety Number"
+  },
+  "tour": {
+    "title": "Quick Tour",
+    "steps": {
+      "welcome": {
+        "title": "Welcome to Nyx!",
+        "content": "You have entered a <1>Zero-Knowledge</1> zone. We don't know who you are, and we can't read your messages. Total anonymity."
+      },
+      "phrase": {
+        "title": "Your Recovery Phrase",
+        "content_1": "During registration, you generated a 24-word Recovery Phrase. This is the <1>only</1> way to restore your account if you forget your password.",
+        "content_2": "We do not store it. If you lose it, your account is gone forever."
+      },
+      "sandbox": {
+        "title": "Sandbox & Verification",
+        "content": "To prevent spam without using phone numbers, new accounts start in <1>Sandbox Mode</1>. You can unlock unlimited messaging by verifying you are human (Biometric or Proof of Work) in Settings."
+      },
+      "safety": {
+        "title": "Safety Numbers",
+        "content": "Each conversation has a unique \"Safety Number\". You can compare this with your contact to verify no one is intercepting your chat."
+      },
+      "community": {
+        "title": "Community & Performance",
+        "content_1": "Nyx runs on <1>free-tier infrastructure</1>, so you might experience occasional delays or reconnection moments.",
+        "content_2": "If you enjoy the app, you can help us upgrade to faster servers anytime! Just go to <1>Settings</1> and scroll to the bottom to support the project.",
+        "content_3": "Enjoy your secure chats!"
+      }
+    }
+  },
+  "report": {
+    "no_reason": "Please provide a reason.",
+    "success": "Report submitted successfully.",
+    "failed": "Failed to submit report.",
+    "title_user": "Report {{name}}",
+    "desc_user": "Please provide specific details about why you are reporting this user. This will be sent to the moderation team.",
+    "placeholder": "Reason for reporting (e.g., Spam, Harassment, Inappropriate Content)...",
+    "submit": "Submit Report",
+    "fill_all": "Please fill in all fields",
+    "sending_toast": "Sending report...",
+    "success_bug": "Report sent! Thanks for your help.",
+    "failed_bug": "Failed to send report, try again later.",
+    "title_bug": "Report a Problem",
+    "desc_bug": "Found a bug? Describe it below. Device info will be included automatically to help us fix it.",
+    "summary_label": "Issue Summary",
+    "summary_placeholder": "e.g. Cannot upload profile picture",
+    "details_label": "Details",
+    "details_placeholder": "Describe what happened and steps to reproduce..."
+  },
+  "ban": {
+    "no_id": "User ID is required.",
+    "no_reason": "Ban reason is required.",
+    "success": "User Banned & Kicked!",
+    "failed": "Failed to ban user.",
+    "title": "Ban User",
+    "id_label": "Target User ID",
+    "reason_label": "Ban Reason",
+    "reason_placeholder": "Reason for suspension (visible to user)...",
+    "execute": "EXECUTE BAN"
+  },
+  "share": {
+    "title": "Your Identity",
+    "desc": "Scan to start a secure chat"
+  },
+  "password_prompt": {
+    "error": "An error occurred",
+    "title": "ACCESS CONTROL PAD",
+    "desc": "Enter your credentials to unlock secure vault",
+    "placeholder": "Enter access code",
+    "vault_id": "Vault ID: SEC-7A9F",
+    "status_locked": "Status: LOCKED"
+  },
+  "editor": {
+    "save_failed": "Failed to save image",
+    "crop_failed": "Failed to crop image.",
+    "zoom": "ZOOM",
+    "rotate": "Rotate"
+  },
+  "notifications": {
+    "title": "System Logs",
+    "purge": "PURGE_ALL",
+    "empty": "System nominal. No logs."
+  },
+  "chat_info": {
+    "title": "Understanding Your Security on NYX",
+    "e2ee": {
+      "title": "True End-to-End Encryption (E2EE)",
+      "content_1": "All your conversations are protected by strong <1>End-to-End Encryption</1>, inspired by the Signal Protocol. Think of it as a private digital vault.",
+      "content_2": "Only you and the recipient have the keys to unlock messages. No one in between—not even the NYX servers—can ever read their content. This protection is automatic and always on."
+    },
+    "keys": {
+      "title": "Your Master Key & Recovery Phrase",
+      "content_1": "Your entire account is secured by a single <1>\"Master Key\"</1>. This key is generated from your unique 24-word <3>Recovery Phrase</3> that you received during registration.",
+      "important": "<0>The most important concept:</0> Your Recovery Phrase is the only way to access your account if you forget your password or switch devices without access to an old one. We do not store it and cannot recover it for you."
+    },
+    "storage": {
+      "title": "Key Storage on This Device",
+      "content_1": "For your convenience, your Master Key is stored on this device in a highly secure, encrypted bundle. This bundle is \"locked\" using your <1>password</1>.",
+      "list_1": "When you log in, your password is used to unlock this bundle and load your keys into the secure session.",
+      "list_2": "Your password is never sent to our servers in a readable format."
+    },
+    "access": {
+      "title": "Accessing Your Account on a New Device",
+      "content_1": "You have three ways to move your account to a new device:",
+      "list_1_label": "Device Migration (Recommended):",
+      "list_1_text": "Use the \"Transfer to New Device\" feature in Settings. Scan the QR code on your new device to securely tunnel your entire chat history and keys directly.",
+      "list_2_label": "Vault Backup:",
+      "list_2_text": "Export your \"NYX Vault\" file (.nyxvault) from Settings. You can import this file on any new device to restore your account and history instantly.",
+      "list_3_label": "Emergency Recovery:",
+      "list_3_text": "If you lost your device and backups, use the \"Restore\" feature with your 24-word Recovery Phrase. This will reset your password and restore your Identity Keys, but <1>chat history will be lost</1> without a Vault backup."
+    },
+    "best_practices": {
+      "title": "Security Best Practices",
+      "do_store": "<0>DO</0> store your Recovery Phrase in a very safe, offline location (e.g., a safe, physical note, or an encrypted password manager).",
+      "do_verify": "<0>DO</0> verify your contacts' identities using the available security features before sharing sensitive information.",
+      "dont_share": "<0>DO NOT</0> share your password or Recovery Phrase with anyone. Ever.",
+      "dont_public": "<0>DO NOT</0> stay logged in on public or shared computers. Use the \"Active Sessions\" feature in Settings to log out remotely if needed."
+    }
+  },
+  "scan": {
+    "title": "Scan Contact",
+    "desc": "Scan a NYX QR code",
+    "awaiting": "Awaiting target...",
+    "camera_error": "Camera access denied or unavailable."
   }
 }

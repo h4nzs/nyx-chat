@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { useSettingsStore } from '../store/settings';
 import { useShallow } from 'zustand/react/shallow';
+import { useTranslation } from 'react-i18next';
 
 interface SmartReplyProps {
   lastMessage: string | null;
@@ -10,6 +11,7 @@ interface SmartReplyProps {
 }
 
 export default function SmartReply({ lastMessage, isFromMe, onSelectReply }: SmartReplyProps) {
+  const { t } = useTranslation(['chat']);
   const { enableSmartReply } = useSettingsStore(useShallow(s => ({ enableSmartReply: s.enableSmartReply })));
   const [replies, setReplies] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -48,7 +50,7 @@ export default function SmartReply({ lastMessage, isFromMe, onSelectReply }: Sma
     <div className="flex gap-2 overflow-x-auto px-4 py-2 bg-bg-surface border-t border-white/5 custom-scrollbar">
       {loading ? (
         <span className="text-xs text-text-secondary animate-pulse flex items-center gap-1">
-          <span className="opacity-50">✨</span> AI is thinking...
+          <span className="opacity-50">✨</span> {t('smart_reply.thinking')}
         </span>
       ) : (
         replies.map((reply, i) => (

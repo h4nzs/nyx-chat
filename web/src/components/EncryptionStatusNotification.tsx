@@ -1,7 +1,10 @@
 import { useEffect } from 'react';
 import toast, { Toaster } from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 
 const EncryptionStatusNotification = () => {
+  const { t } = useTranslation(['chat']);
+
   useEffect(() => {
     const checkEncryptionStatus = () => {
       const publicKey = localStorage.getItem('publicKey');
@@ -10,7 +13,7 @@ const EncryptionStatusNotification = () => {
       
       if (!isAvailable) {
         // Show notification about encryption not being available
-        toast((t) => (
+        toast((toastObj) => (
           <div className="p-4 card-neumorphic max-w-sm border border-yellow-300 dark:border-yellow-700 rounded-xl">
             <div className="flex items-start">
               <div className="flex-shrink-0">
@@ -20,23 +23,23 @@ const EncryptionStatusNotification = () => {
               </div>
               <div className="ml-3">
                 <h3 className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                  End-to-end encryption is not enabled
+                  {t('encryption.not_enabled_title')}
                 </h3>
                 <div className="mt-2 text-sm text-yellow-700 dark:text-yellow-300">
                   <p>
-                    Your messages are not encrypted. Go to Settings &gt; Encryption to enable end-to-end encryption for better security.
+                    {t('encryption.not_enabled_desc')}
                   </p>
                 </div>
                 <div className="mt-4">
                   <button
                     onClick={() => {
-                      toast.dismiss(t.id);
+                      toast.dismiss(toastObj.id);
                       // In a real app, navigate to the encryption settings
                       window.location.hash = '#encryption-settings';
                     }}
                     className="inline-flex items-center px-3 py-1 rounded-lg text-xs font-medium text-yellow-800 dark:text-yellow-200 bg-yellow-50 dark:bg-yellow-800 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
                   >
-                    Enable Encryption
+                    {t('encryption.enable_btn')}
                   </button>
                 </div>
               </div>
@@ -59,7 +62,7 @@ const EncryptionStatusNotification = () => {
     
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
+  }, [t]);
 
   return <Toaster position="top-right" />;
 };

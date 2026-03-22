@@ -57,7 +57,14 @@
     "block_user": "Block User",
     "unblock_user": "Unblock User",
     "delete_group": "Delete Group",
-    "delete_chat": "Delete Chat"
+    "delete_chat": "Delete Chat",
+    "delete_message_title": "Delete Message",
+    "delete_message_desc": "Are you sure you want to permanently delete this message?",
+    "bulk_delete_title": "Bulk Deletion",
+    "select": "Select",
+    "copy_text": "Copy Text",
+    "security_info": "Security Info",
+    "copy_id": "Copy Message ID"
   },
   "banners": {
     "key_rotation": "Security Alert: Key Rotation Required",
@@ -84,12 +91,89 @@
     "bulk_delete_confirm": "Delete {{count}} messages?",
     "bulk_delete_desc": "This will only remove them from your device.",
     "processed": "{{count}} messages processed",
+    "selected_count": "{{count}} Selected",
     "no_messages_yet": "No messages yet",
     "view_once_message": "View Once Message",
-    "opened": "Opened"
+    "opened": "Opened",
+    "failed_retry": "Failed to send. Click to retry.",
+    "repair_session": "Repair Session",
+    "message_deleted": "This message was deleted",
+    "security_info": "End-to-End Encrypted via Signal Protocol",
+    "message_id_toast": "Message ID: {{id}}"
+  },
+  "media": {
+    "decrypting": "Decrypting...",
+    "waiting_key": "Waiting for key...",
+    "decrypt_failed": "Decrypt Failed: {{error}}",
+    "retry": "Retry?",
+    "pdf_failed": "Failed to load PDF",
+    "download_x": "Download {{type}}",
+    "browser_unsupported": "Your browser does not support the {{type}} element.",
+    "no_media": "No decrypted media found in local history.",
+    "shared_media": "Shared media",
+    "no_url": "No file URL provided.",
+    "invalid_url": "File URL is invalid.",
+    "not_found": "File not found on server.",
+    "decrypt_image_failed": "Failed to decrypt image.",
+    "load_failed": "Failed to load media.",
+    "view_once_audio": "View Once Audio",
+    "lightbox_view": "Lightbox view",
+    "missing_url": "Missing file URL.",
+    "fetch_voice_failed": "Failed to fetch voice file: {{error}}",
+    "decrypt_voice_failed": "Failed to decrypt voice message.",
+    "invalid_audio_url": "Invalid audio file URL."
   },
   "empty_state": {
     "title": "System Ready",
     "subtitle": "Select a frequency to begin transmission."
+  },
+  "stories": {
+    "your_story": "Your Story",
+    "reply_placeholder": "Reply...",
+    "reply_sent": "Reply sent!",
+    "story_deleted": "Story deleted",
+    "delete_failed": "Failed to delete story"
+  },
+  "calls": {
+    "incoming_video": "Incoming Video Call...",
+    "incoming_voice": "Incoming Voice Call...",
+    "dialing": "DIALING SECURE CHANNEL...",
+    "you": "YOU",
+    "speaker_restricted": "Audio output management is currently restricted in Group Call mode.",
+    "screen_share_started": "Screen sharing started",
+    "screen_share_stopped": "Screen sharing stopped",
+    "camera_switch_failed": "Failed to switch camera",
+    "screen_share_failed": "Failed to share screen",
+    "actions": {
+      "accept_video": "Accept Video Call",
+      "accept_voice": "Accept Audio Call",
+      "reject": "Reject Call",
+      "end": "End Call",
+      "mute": "Mute microphone",
+      "unmute": "Unmute microphone",
+      "video_off": "Turn off camera",
+      "video_on": "Turn on camera",
+      "flip_camera": "Flip camera",
+      "share_screen": "Share screen",
+      "stop_sharing": "Stop sharing screen",
+      "minimize": "Minimize Call",
+      "maximize": "Maximize Call",
+      "speaker": "Switch to speaker",
+      "earpiece": "Switch to earpiece"
+    }
+  },
+  "search": {
+    "placeholder": "Search messages...",
+    "no_results_simple": "No results found.",
+    "close": "Close search",
+    "label": "Search messages in this conversation"
+  },
+  "smart_reply": {
+    "thinking": "AI is thinking..."
+  },
+  "encryption": {
+    "not_enabled_title": "End-to-end encryption is not enabled",
+    "not_enabled_desc": "Your messages are not encrypted. Go to Settings > Encryption to enable end-to-end encryption for better security.",
+    "enable_btn": "Enable Encryption"
   }
 }
