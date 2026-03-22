@@ -24,22 +24,22 @@ export default function ChatInfoModal() {
     <ModalBase
       isOpen={isChatInfoModalOpen}
       onClose={closeChatInfoModal}
-      title={t('chat_info.title')}
+      title={t('modals:chat_info.title')}
     >
       <div className="space-y-6">
 
-        <InfoSection icon={<FiLock size={20} />} title={t('chat_info.e2ee.title')}>
+        <InfoSection icon={<FiLock size={20} />} title={t('modals:chat_info.e2ee.title')}>
           <p>
             <Trans i18nKey="modals:chat_info.e2ee.content_1">
               All your conversations are protected by strong <span className="font-semibold text-text-primary">End-to-End Encryption</span>, inspired by the Signal Protocol. Think of it as a private digital vault.
             </Trans>
           </p>
           <p>
-            {t('chat_info.e2ee.content_2')}
+            {t('modals:chat_info.e2ee.content_2')}
           </p>
         </InfoSection>
 
-        <InfoSection icon={<FiKey size={20} />} title={t('chat_info.keys.title')}>
+        <InfoSection icon={<FiKey size={20} />} title={t('modals:chat_info.keys.title')}>
           <p>
             <Trans i18nKey="modals:chat_info.keys.content_1">
               Your entire account is secured by a single <span className="font-semibold text-text-primary">&quot;Master Key&quot;</span>. This key is generated from your unique 24-word <span className="font-semibold text-text-primary">Recovery Phrase</span> that you received during registration.
@@ -52,36 +52,36 @@ export default function ChatInfoModal() {
           </p>
         </InfoSection>
 
-        <InfoSection icon={<FiZap size={20} />} title={t('chat_info.storage.title')}>
+        <InfoSection icon={<FiZap size={20} />} title={t('modals:chat_info.storage.title')}>
           <p>
             <Trans i18nKey="modals:chat_info.storage.content_1">
               For your convenience, your Master Key is stored on this device in a highly secure, encrypted bundle. This bundle is &quot;locked&quot; using your <span className="font-semibold text-text-primary">password</span>.
             </Trans>
           </p>
           <ul className="list-disc list-inside space-y-1">
-            <li>{t('chat_info.storage.list_1')}</li>
-            <li>{t('chat_info.storage.list_2')}</li>
+            <li>{t('modals:chat_info.storage.list_1')}</li>
+            <li>{t('modals:chat_info.storage.list_2')}</li>
           </ul>
         </InfoSection>
 
-        <InfoSection icon={<FiAlertTriangle size={20} />} title={t('chat_info.access.title')}>
+        <InfoSection icon={<FiAlertTriangle size={20} />} title={t('modals:chat_info.access.title')}>
           <p>
-            {t('chat_info.access.content_1')}
+            {t('modals:chat_info.access.content_1')}
           </p>
           <ul className="list-disc list-inside space-y-2 mt-2">
             <li>
-              <span className="font-semibold text-text-primary">{t('chat_info.access.list_1_label')}</span> {t('chat_info.access.list_1_text')}
+              <span className="font-semibold text-text-primary">{t('modals:chat_info.access.list_1_label')}</span> {t('modals:chat_info.access.list_1_text')}
             </li>
             <li>
-              <span className="font-semibold text-text-primary">{t('chat_info.access.list_2_label')}</span> {t('chat_info.access.list_2_text')}
+              <span className="font-semibold text-text-primary">{t('modals:chat_info.access.list_2_label')}</span> {t('modals:chat_info.access.list_2_text')}
             </li>
             <li>
-              <span className="font-semibold text-text-primary">{t('chat_info.access.list_3_label')}</span> <Trans i18nKey="modals:chat_info.access.list_3_text">If you lost your device and backups, use the &quot;Restore&quot; feature with your 24-word Recovery Phrase. This will reset your password and restore your Identity Keys, but <strong className="text-destructive">chat history will be lost</strong> without a Vault backup.</Trans>
+              <span className="font-semibold text-text-primary">{t('modals:chat_info.access.list_3_label')}</span> <Trans i18nKey="modals:chat_info.access.list_3_text">If you lost your device and backups, use the &quot;Restore&quot; feature with your 24-word Recovery Phrase. This will reset your password and restore your Identity Keys, but <strong className="text-destructive">chat history will be lost</strong> without a Vault backup.</Trans>
             </li>
           </ul>
         </InfoSection>
 
-        <InfoSection icon={<FiHelpCircle size={20} />} title={t('chat_info.best_practices.title')}>
+        <InfoSection icon={<FiHelpCircle size={20} />} title={t('modals:chat_info.best_practices.title')}>
            <ul className="list-disc list-inside space-y-2">
             <li><Trans i18nKey="modals:chat_info.best_practices.do_store"><span className="font-semibold text-text-primary">DO</span> store your Recovery Phrase in a very safe, offline location (e.g., a safe, physical note, or an encrypted password manager).</Trans></li>
             <li><Trans i18nKey="modals:chat_info.best_practices.do_verify"><span className="font-semibold text-text-primary">DO</span> verify your contacts&apos; identities using the available security features before sharing sensitive information.</Trans></li>
