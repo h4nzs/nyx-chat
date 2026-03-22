@@ -1,0 +1,24 @@
+{
+  "actions": {
+    "loading": "Loading...",
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "verify": "Verify",
+    "skip": "Skip",
+    "continue": "Continue"
+  },
+  "nav": {
+    "home": "Home",
+    "login": "Login",
+    "register": "Register",
+    "privacy": "Privacy Policy",
+    "terms": "Terms of Service"
+  },
+  "errors": {
+    "unknown": "Unknown error occurred",
+    "network": "Network error, please try again",
+    "required": "This field is required"
+  }
+}

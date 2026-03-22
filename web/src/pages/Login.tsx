@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useTranslation } from 'react-i18next';
 import { useAuthStore, type User } from "../store/auth";
 import { useShallow } from 'zustand/react/shallow';
 import { useModalStore } from "../store/modal";
@@ -15,8 +16,10 @@ import { executeLocalWipe } from "@lib/nukeProtocol";
 import toast from "react-hot-toast";
 import { FiLock, FiKey, FiShield } from "react-icons/fi";
 import SEO from '../components/SEO';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 
 export default function Login() {
+  const { t } = useTranslation(['auth', 'common']);
   const [error, setError] = useState("");
   const [isBiometricsAvailable, setIsBiometricsAvailable] = useState(false);
   const navigate = useNavigate();
@@ -247,7 +250,8 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-stone-900">
+    <div className="min-h-screen flex flex-col md:flex-row bg-stone-900 relative">
+      <LanguageSwitcher />
       <SEO title="Login" description="Sign in to your NYX secure enclave to access your E2EE chats." canonicalUrl="/login" />
       {/* Left Panel - Concrete Security Panel */}
       <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
@@ -259,19 +263,19 @@ export default function Login() {
             <div className="w-12 h-12 rounded-lg bg-orange-500 flex items-center justify-center mr-3">
               <div className="w-8 h-8 rounded bg-orange-300"></div>
             </div>
-            <h1 className="text-3xl font-black text-white tracking-tighter">SECURE<span className="text-orange-500">VAULT</span></h1>
+            <h1 className="text-3xl font-black text-white tracking-tighter">{t('auth:titles.secure_vault')}</h1>
           </div>
 
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-orange-400 mb-2">ACCESS TERMINAL</h2>
-            <p className="text-stone-400">Authenticate to access your encrypted communications</p>
+            <h2 className="text-2xl font-bold text-orange-400 mb-2">{t('auth:titles.access_terminal')}</h2>
+            <p className="text-stone-400">{t('auth:subtitles.login_desc')}</p>
           </div>
 
           {error && <p className="text-red-500 text-center mb-4 text-sm">{error}</p>}
 
           <AuthForm
             onSubmit={handleLogin}
-            button="Login"
+            button={t('auth:buttons.login')}
           />
 
           {isBiometricsAvailable && (
@@ -286,20 +290,20 @@ export default function Login() {
               <div className="w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center">
                 <IoFingerPrint size={16} className="text-orange-900" />
               </div>
-              <span>Biometric Unlock</span>
+              <span>{t('auth:buttons.biometric_unlock')}</span>
             </button>
           )}
 
           <div className="text-center mt-8 pt-6 border-t border-stone-700">
             <p className="text-stone-500 text-sm mb-4">
-              Don&apos;t have an account? <Link to="/register" className="font-semibold text-orange-500 hover:underline">Sign up</Link>
+              {t('auth:links.no_account')} <Link to="/register" className="font-semibold text-orange-500 hover:underline">{t('auth:links.sign_up')}</Link>
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-4">
-              <Link to="/restore" className="text-sm text-orange-500 hover:underline">Restore from phrase</Link>
-              <Link to="/migrate-receive" className="text-sm text-orange-500 hover:underline">Transfer from Old Device</Link>
+              <Link to="/restore" className="text-sm text-orange-500 hover:underline">{t('auth:links.restore')}</Link>
+              <Link to="/migrate-receive" className="text-sm text-orange-500 hover:underline">{t('auth:links.transfer')}</Link>
             </div>
             <div className="mt-4 pt-4 border-t border-stone-800">
-              <Link to="/privacy" className="text-xs text-stone-600 hover:text-stone-400 transition-colors">Privacy Policy & Terms</Link>
+              <Link to="/privacy" className="text-xs text-stone-600 hover:text-stone-400 transition-colors">{t('common:nav.privacy')} & {t('common:nav.terms')}</Link>
             </div>
           </div>
         </div>

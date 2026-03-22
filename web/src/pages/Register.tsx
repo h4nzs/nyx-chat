@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from "../store/auth";
 import { useShallow } from 'zustand/react/shallow';
 import AuthForm from "../components/AuthForm";
@@ -13,8 +14,10 @@ import { api } from "@lib/api";
 import { FiShield, FiSkipForward } from "react-icons/fi";
 import { IoFingerPrint } from "react-icons/io5";
 import SEO from '../components/SEO';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 
 export default function Register() {
+  const { t } = useTranslation(['auth', 'common']);
   const [error, setError] = useState("");
   const [step, setStep] = useState<'form' | 'biometric' | 'recovery'>('form');
   const [recoveryPhrase, setRecoveryPhrase] = useState('');
@@ -145,16 +148,16 @@ export default function Register() {
   // STEP 2: BIOMETRIC VERIFICATION
   if (step === 'biometric') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-stone-900 p-4">
+      <div className="min-h-screen flex items-center justify-center bg-stone-900 p-4 relative">
+        <LanguageSwitcher />
         <div className="max-w-md w-full bg-stone-800 rounded-2xl p-8 shadow-2xl border border-stone-700 text-center">
           <div className="w-16 h-16 bg-teal-500/10 rounded-full flex items-center justify-center mx-auto mb-6 text-teal-500">
             <IoFingerPrint size={32} />
           </div>
           
-          <h2 className="text-2xl font-black text-white mb-2 tracking-tight">TRUST LEVEL VERIFICATION</h2>
+          <h2 className="text-2xl font-black text-white mb-2 tracking-tight">{t('auth:titles.trust_verification')}</h2>
           <p className="text-stone-400 text-sm mb-8">
-            Verify you are human using your device&apos;s biometric sensor. 
-            Verified accounts get unlimited access. Unverified accounts are sandboxed.
+            {t('auth:subtitles.verify_desc')}
           </p>
 
           {isBiometricsSupported ? (
@@ -164,9 +167,9 @@ export default function Register() {
                 disabled={isVerifyingBio}
                 className="w-full py-4 rounded-xl bg-teal-500 hover:bg-teal-400 text-stone-900 font-bold uppercase tracking-wider shadow-lg shadow-teal-500/20 transition-all flex items-center justify-center gap-2"
               >
-                {isVerifyingBio ? <span className="animate-pulse">Scanning...</span> : (
+                {isVerifyingBio ? <span className="animate-pulse">{t('common:actions.loading')}</span> : (
                   <>
-                    <FiShield /> Verify Identity
+                    <FiShield /> {t('auth:buttons.verify_identity')}
                   </>
                 )}
               </button>
@@ -175,7 +178,7 @@ export default function Register() {
                 onClick={handleSkipBiometric}
                 className="w-full py-4 rounded-xl bg-transparent border border-stone-600 text-stone-400 hover:text-white hover:border-stone-500 font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2"
               >
-                <FiSkipForward /> Skip for now
+                <FiSkipForward /> {t('auth:buttons.skip_now')}
               </button>
             </div>
           ) : (
@@ -198,7 +201,8 @@ export default function Register() {
 
   // STEP 1: REGISTER FORM
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-stone-900">
+    <div className="min-h-screen flex flex-col md:flex-row bg-stone-900 relative">
+      <LanguageSwitcher />
       <SEO title="Register" description="Create a new anonymous, end-to-end encrypted account on NYX. No tracking, no ads." canonicalUrl="/register" />
       {/* Left Panel - Concrete Security Panel */}
       <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
@@ -210,12 +214,12 @@ export default function Register() {
             <div className="w-12 h-12 rounded-lg bg-teal-500 flex items-center justify-center mr-3">
               <div className="w-8 h-8 rounded bg-teal-300"></div>
             </div>
-            <h1 className="text-3xl font-black text-white tracking-tighter">SECURE<span className="text-teal-500">VAULT</span></h1>
+            <h1 className="text-3xl font-black text-white tracking-tighter">{t('auth:titles.secure_vault')}</h1>
           </div>
 
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-teal-400 mb-2">ANONYMOUS REGISTRATION</h2>
-            <p className="text-stone-400">Create a secure identity. No email required.</p>
+            <h2 className="text-2xl font-bold text-teal-400 mb-2">{t('auth:titles.anonymous_reg')}</h2>
+            <p className="text-stone-400">{t('auth:subtitles.register_desc')}</p>
           </div>
 
           {error && <div className="text-red-500 text-center mb-4 text-sm">{error}</div>}
@@ -223,7 +227,7 @@ export default function Register() {
           {/* Modified AuthForm for Username Only */}
           <AuthForm
             onSubmit={handleRegister}
-            button="Initialize Identity"
+            button={t('auth:buttons.register')}
             hideEmail={true} 
             isRegister={true}
           />
@@ -241,7 +245,7 @@ export default function Register() {
 
           <div className="text-center mt-6">
             <p className="text-stone-500 text-sm">
-              Already have an identity? <Link to="/login" className="font-semibold text-teal-500 hover:underline">Login</Link>
+              {t('auth:links.has_account')} <Link to="/login" className="font-semibold text-teal-500 hover:underline">{t('auth:buttons.login')}</Link>
             </p>
           </div>
         </div>

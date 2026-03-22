@@ -1,0 +1,24 @@
+{
+  "actions": {
+    "loading": "Memuat...",
+    "submit": "Kirim",
+    "cancel": "Batal",
+    "save": "Simpan",
+    "delete": "Hapus",
+    "verify": "Verifikasi",
+    "skip": "Lewati",
+    "continue": "Lanjutkan"
+  },
+  "nav": {
+    "home": "Beranda",
+    "login": "Masuk",
+    "register": "Daftar",
+    "privacy": "Kebijakan Privasi",
+    "terms": "Ketentuan Layanan"
+  },
+  "errors": {
+    "unknown": "Terjadi kesalahan yang tidak diketahui",
+    "network": "Kesalahan jaringan, silakan coba lagi",
+    "required": "Kolom ini wajib diisi"
+  }
+}
