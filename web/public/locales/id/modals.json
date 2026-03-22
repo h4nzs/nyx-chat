@@ -23,7 +23,10 @@
       "only": "Hanya dibagikan ke: {{count}} kontak",
       "select_contacts": "Pilih Kontak",
       "no_contacts": "Tidak ada kontak aktif ditemukan.",
-      "save": "Simpan Pengaturan Privasi"
+      "save": "Simpan Pengaturan Privasi",
+      "option_all": "Semua Kontak",
+      "option_exclude": "Kontak Saya Kecuali...",
+      "option_only": "Hanya Bagikan Dengan..."
     },
     "error_empty": "Tambahkan teks atau media ke cerita Anda"
   },
@@ -46,5 +49,22 @@
     "copy_fail": "Gagal menyalin ke clipboard",
     "verify_success": "Verifikasi berhasil! Cadangan Anda terkonfirmasi.",
     "verify_fail": "Verifikasi gagal. Silakan coba lagi."
+  },
+  "edit_group": {
+    "title": "Edit Info Grup",
+    "group_name": "Nama Grup",
+    "description": "Deskripsi",
+    "save": "Simpan Perubahan",
+    "success": "Info grup diperbarui!",
+    "error": "Gagal memperbarui: {{error}}"
+  },
+  "system_init": {
+    "title": "Inisialisasi Sistem",
+    "desc": "Untuk mengaktifkan panggilan Suara/Video Terenkripsi E2EE dan peringatan real-time, NYX memerlukan akses perangkat keras. Media Anda tidak pernah meninggalkan perangkat Anda tanpa enkripsi.",
+    "push_notif": "Notifikasi Push",
+    "camera_mic": "Kamera & Mikrofon",
+    "calibrate": "Mengkalibrasi...",
+    "authorize": "Otorisasi Sistem",
+    "skip": "Lewati untuk sekarang"
   }
 }

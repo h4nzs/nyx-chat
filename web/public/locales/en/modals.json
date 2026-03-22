@@ -23,7 +23,10 @@
       "only": "Only sharing with: {{count}} contacts",
       "select_contacts": "Select Contacts",
       "no_contacts": "No active contacts found.",
-      "save": "Save Privacy Settings"
+      "save": "Save Privacy Settings",
+      "option_all": "All Contacts",
+      "option_exclude": "My Contacts Except...",
+      "option_only": "Only Share With..."
     },
     "error_empty": "Add text or media to your story"
   },
@@ -46,5 +49,22 @@
     "copy_fail": "Failed to copy to clipboard",
     "verify_success": "Verification successful! Your backup is confirmed.",
     "verify_fail": "Verification failed. Please try again."
+  },
+  "edit_group": {
+    "title": "Edit Group Info",
+    "group_name": "Group Name",
+    "description": "Description",
+    "save": "Save Changes",
+    "success": "Group info updated!",
+    "error": "Failed to update: {{error}}"
+  },
+  "system_init": {
+    "title": "System Init",
+    "desc": "To enable End-to-End Encrypted Voice/Video calls and real-time alerts, NYX requires hardware access. Your media never leaves your device unencrypted.",
+    "push_notif": "Push Notifications",
+    "camera_mic": "Camera & Microphone",
+    "calibrate": "Calibrating...",
+    "authorize": "Authorize Systems",
+    "skip": "Skip for now"
   }
 }

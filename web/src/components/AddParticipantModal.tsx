@@ -7,6 +7,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { hashUsername } from '@lib/crypto-worker-proxy';
 import { asUserId } from '@nyx/shared';
 import ModalBase from './ui/ModalBase';
+import { useTranslation } from 'react-i18next';
 
 interface UserSearchResult {
   id: string;
@@ -19,6 +20,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
   conversationId: string;
   onClose: () => void;
 }) => {
+  const { t } = useTranslation(['modals', 'common']);
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
@@ -77,7 +79,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
   const handleAddParticipants = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedUserIds.length === 0) {
-      toast.error('Please select at least one user.');
+      toast.error(t('modals:add_participant.empty_selection'));
       return;
     }
 
@@ -87,10 +89,11 @@ const AddParticipantModal = ({ conversationId, onClose }: {
         method: 'POST',
         body: JSON.stringify({ userIds: selectedUserIds }),
       });
-      toast.success('Participants added successfully!');
+      toast.success(t('modals:add_participant.success'));
       onClose();
     } catch (error: unknown) {
-      toast.error(`Failed to add participants: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`);
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(t('modals:add_participant.error', { error: msg }));
     } finally {
       setIsLoading(false);
     }
@@ -100,7 +103,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
     <ModalBase
       isOpen={true}
       onClose={onClose}
-      title="Add Participants"
+      title={t('modals:add_participant.title')}
       footer={(
         <>
           <button
@@ -109,7 +112,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
             className="px-4 py-2 rounded-md bg-secondary text-text-primary hover:bg-secondary/80 transition-colors"
             disabled={isLoading}
           >
-            Cancel
+            {t('modals:add_participant.cancel')}
           </button>
           <button
             type="submit"
@@ -117,7 +120,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
             className="px-4 py-2 rounded-md bg-accent text-accent-foreground hover:bg-accent/90 transition-colors"
             disabled={isLoading || selectedUserIds.length === 0}
           >
-            {isLoading ? 'Adding...' : 'Add Selected'}
+            {isLoading ? t('modals:add_participant.adding') : t('modals:add_participant.add_selected')}
           </button>
         </>
       )}
@@ -126,12 +129,12 @@ const AddParticipantModal = ({ conversationId, onClose }: {
         <div className="mb-4">
           <input
             type="text"
-            placeholder="Search users..."
+            placeholder={t('modals:add_participant.search_placeholder')}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full p-2 rounded-md bg-background border border-border text-text-primary"
           />
-          {isSearching && <p className="text-sm text-text-secondary mt-2">Searching...</p>}
+          {isSearching && <p className="text-sm text-text-secondary mt-2">{t('modals:add_participant.searching')}</p>}
         </div>
 
         <div className="max-h-60 overflow-y-auto mb-4 border border-border rounded-md">
@@ -160,7 +163,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
               </div>
             ))
           ) : ( searchTerm.trim().length > 2 && !isSearching &&
-            <p className="p-2 text-text-secondary">No users found.</p>
+            <p className="p-2 text-text-secondary">{t('modals:add_participant.no_users')}</p>
           )}
         </div>
       </form>
