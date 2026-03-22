@@ -70,5 +70,14 @@
     "memory_desc": "Cryptographic keys are wiped from RAM (`sodium.memzero`) immediately after decryption cycles.",
     "migration_title": "Peer-to-Peer Migration",
     "migration_desc": "Device migration uses an encrypted WebSocket tunnel. The server relays chunks blindly without key access."
+  },
+  "seo": {
+    "title": "Legal & Privacy | NYX",
+    "description": "Read about our Zero-Knowledge architecture, commercial licensing, and how NYX protects your data."
+  },
+  "footer": {
+    "tagline": "Military-Grade Privacy",
+    "copyright": "© {{year}} NYX. All rights reserved under AGPL-3.0.",
+    "quote": "\"In an era of total surveillance, obfuscation is the only true liberty.\""
   }
 }

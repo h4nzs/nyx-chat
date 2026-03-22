@@ -66,10 +66,30 @@ export default function ProfilePage() {
   }, [profile]);
 
   const stats = [
-    { label: t('settings:profile_page.security_clearance'), value: profileUser?.isVerified ? t('settings:identity.verified') : 'UNVERIFIED', color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
-    { label: t('settings:profile_page.encryption_protocol'), value: profileUser?.publicKey ? t('settings:profile_page.active') : 'INACTIVE', color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', icon: FiKey },
-    { label: t('common:profile.home_server'), value: 'ap-southeast-1', color: 'text-blue-500', icon: FiGlobe },
-    { label: t('common:profile.session_status'), value: t('common:profile.encrypted'), color: 'text-emerald-500', icon: FiActivity },
+    { 
+      label: t('settings:profile_page.security_clearance'), 
+      value: profileUser?.isVerified ? t('settings:identity.verified') : t('settings:identity.unverified', 'UNVERIFIED'), 
+      color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', 
+      icon: FiShield 
+    },
+    { 
+      label: t('settings:profile_page.encryption_protocol'), 
+      value: profileUser?.publicKey ? t('settings:profile_page.active') : t('settings:profile_page.inactive', 'INACTIVE'), 
+      color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', 
+      icon: FiKey 
+    },
+    { 
+      label: t('common:profile.home_server'), 
+      value: 'ap-southeast-1', // Nama region server biasanya tidak diterjemahkan
+      color: 'text-blue-500', 
+      icon: FiGlobe 
+    },
+    { 
+      label: t('common:profile.session_status'), 
+      value: t('common:profile.encrypted'), 
+      color: 'text-emerald-500', 
+      icon: FiActivity 
+    },
   ];
 
   const handleSave = async () => {
@@ -133,7 +153,7 @@ export default function ProfilePage() {
                 <div className="w-full h-full rounded-full p-2 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark">
                   <img 
                     src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
-                    alt="Profile" 
+                    alt={profile.name || "Profile"} 
                     className="w-full h-full rounded-full object-cover"
                   />
                 </div>

@@ -31,5 +31,8 @@
     "title": "Bagaimana jika saya kehilangan Frasa Pemulihan?",
     "irrecoverable": "Akun Anda secara matematis tidak dapat dipulihkan.",
     "desc": "Kami tidak menyimpan frasa atau kata sandi Anda. Jika Anda kehilangannya, tidak ada seorang pun di Bumi—termasuk kami—yang dapat mendekripsi data Anda. Harap tulis frasa Anda dan simpan dengan aman secara offline."
+  },
+  "seo": {
+    "description": "Dapatkan bantuan tentang obrolan E2EE NYX, pemulihan akun, dan fitur keamanan."
   }
 }

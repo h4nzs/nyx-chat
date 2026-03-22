@@ -4,14 +4,16 @@ import { useTranslation, Trans } from 'react-i18next';
 
 import SEO from '../components/SEO';
 
-// ...
-
 export default function HelpPage() {
   const { t } = useTranslation(['help', 'common']);
 
   return (
     <div className="h-screen w-screen flex flex-col items-center justify-center bg-bg-main text-text-primary p-4">
-      <SEO title={t('help:title')} description="Get help with NYX E2EE chat, account recovery, and security features." canonicalUrl="/help" />
+      <SEO 
+        title={t('help:title')} 
+        description={t('help:seo.description', 'Get help with NYX E2EE chat, account recovery, and security features.')} 
+        canonicalUrl="/help" 
+      />
       <div className="w-full max-w-2xl card-neumorphic p-8 overflow-y-auto max-h-[90vh]">
         <div className="flex items-center gap-4 mb-6 pb-4 border-b border-border">
           <Link to="/settings" aria-label={t('help:back_settings')} className="touch-target p-2.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">
@@ -30,10 +32,16 @@ export default function HelpPage() {
             </p>
             <ul className="list-disc list-inside ml-4 space-y-2">
               <li>
-                <span className="font-bold text-text-primary">{t('help:move_account.migration_label')}</span> <Trans i18nKey="help:move_account.migration_text"><span className="font-mono bg-bg-surface p-1 rounded">Settings &gt; Transfer to New Device</span></Trans>
+                <span className="font-bold text-text-primary">{t('help:move_account.migration_label')}</span>{' '}
+                <Trans i18nKey="help:move_account.migration_text">
+                  Go to <span className="font-mono bg-bg-surface p-1 rounded">Settings &gt; Transfer to New Device</span>. This creates a secure, direct tunnel to your new phone via QR code.
+                </Trans>
               </li>
               <li>
-                <span className="font-bold text-text-primary">{t('help:move_account.backup_label')}</span> <Trans i18nKey="help:move_account.backup_text"><span className="font-mono bg-bg-surface p-1 rounded">Settings &gt; Export Vault</span></Trans>
+                <span className="font-bold text-text-primary">{t('help:move_account.backup_label')}</span>{' '}
+                <Trans i18nKey="help:move_account.backup_text">
+                  Go to <span className="font-mono bg-bg-surface p-1 rounded">Settings &gt; Export Vault</span>. Save the `.nyxvault` file and import it on your new device login screen.
+                </Trans>
               </li>
             </ul>
           </section>
@@ -93,7 +101,7 @@ export default function HelpPage() {
 
           <section>
             <h2 className="text-xl font-semibold text-text-primary mb-3">{t('help:lost_phrase.title')}</h2>
-            <p className="mb-2 font-semibold text-destructive">
+            <p className="mb-2 font-semibold text-red-500 dark:text-red-400">
               {t('help:lost_phrase.irrecoverable')}
             </p>
             <p>

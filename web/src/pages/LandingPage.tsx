@@ -152,10 +152,9 @@ export default function LandingPage() {
     setGrainOpacity(theme === 'dark' ? 0.08 : 0.05);
   }, [theme]);
 
-  // Pilih screenshot berdasarkan tema (opsional) atau fix ke dark
+  // Pilih screenshot berdasarkan tema
   const heroScreenshot = theme === 'dark' ? '/screenshots/mobile-dark.png' : '/screenshots/mobile-light.png';
 
-  // Moved inside component to access translation
   const comparisonData = [
     { feature: t('landing:comparison.rows.phone_required'), wa: t('landing:comparison.values.yes'), tg: t('landing:comparison.values.yes'), nyx: t('landing:comparison.values.no'), isWin: true },
     { feature: t('landing:comparison.rows.app_install'), wa: t('landing:comparison.values.required'), tg: t('landing:comparison.values.required'), nyx: t('landing:comparison.values.optional'), isWin: true },
@@ -179,9 +178,9 @@ export default function LandingPage() {
         "description": t('landing:hero.description'),
         "featureList": [
           t('landing:features.no_phone.title'),
-          "End-to-End Encryption (Signal Protocol)",
-          "Self-Destructing Messages",
-          "Local-First Architecture",
+          t('landing:schema.e2ee', 'End-to-End Encryption (Signal Protocol)'),
+          t('landing:schema.self_destruct', 'Self-Destructing Messages'),
+          t('landing:schema.local_first', 'Local-First Architecture'),
           t('landing:features.ghost_app.title')
         ],
         "softwareHelp": "https://nyx-app.my.id/help",
@@ -204,10 +203,10 @@ export default function LandingPage() {
           },
           {
             "@type": "Question",
-            "name": "Do I need a phone number?",
+            "name": t('landing:faq.q2'),
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No. You sign up with a username and password only. Your identity is protected by Argon2 hashing."
+              "text": t('landing:faq.a2')
             }
           },
           {
@@ -295,24 +294,20 @@ export default function LandingPage() {
               </motion.div>
             </div>
 
-            {/* Visual Mockup (UPDATED: Mobile Aspect Ratio) */}
+            {/* Visual Mockup */}
             <div className="lg:col-span-5 flex justify-center lg:justify-end">
                <motion.div 
                  initial={{ opacity: 0, x: 20 }}
                  animate={{ opacity: 1, x: 0 }}
                  transition={{ delay: 0.5, duration: 0.8 }}
-                 // Lebar disesuaikan agar proporsional sebagai HP
                  className="relative w-full max-w-[280px] md:max-w-[320px]"
                >
-                  {/* CSS-Only Phone Frame (Corrected for Mobile 9:19 Ratio) */}
                   <div className="relative mx-auto border-gray-800 dark:border-gray-900 bg-gray-900 border-[10px] rounded-[2.5rem] shadow-[20px_20px_40px_rgba(0,0,0,0.4),-10px_-10px_30px_rgba(255,255,255,0.05)] overflow-hidden">
-                      {/* Buttons */}
                       <div className="h-[32px] w-[3px] bg-gray-800 absolute -start-[13px] top-[72px] rounded-s-lg"></div>
                       <div className="h-[46px] w-[3px] bg-gray-800 absolute -start-[13px] top-[124px] rounded-s-lg"></div>
                       <div className="h-[46px] w-[3px] bg-gray-800 absolute -start-[13px] top-[178px] rounded-s-lg"></div>
                       <div className="h-[64px] w-[3px] bg-gray-800 absolute -end-[13px] top-[142px] rounded-e-lg"></div>
                       
-                      {/* Screen Container: Gunakan Aspect Ratio agar tidak gepeng/kepotong */}
                       <div className="rounded-[2rem] overflow-hidden w-full h-auto aspect-[9/19] bg-bg-main relative">
                           <img 
                             src={heroScreenshot} 
@@ -342,7 +337,7 @@ export default function LandingPage() {
           </AnimatedSection>
         </section>
 
-        {/* COMPARISON TABLE (New Section) */}
+        {/* COMPARISON TABLE */}
         <section className="py-16 md:py-24">
           <AnimatedSection>
             <div className="max-w-5xl mx-auto px-4">
@@ -368,7 +363,7 @@ export default function LandingPage() {
                           <div className="flex items-center justify-center gap-2">
                             {row.wa === t('landing:comparison.values.yes') || row.wa === t('landing:comparison.values.required') ? (
                                 <>
-                                    <span className="sr-only">Not Supported/Bad</span>
+                                    <span className="sr-only">{t('landing:a11y.not_supported', 'Not Supported/Bad')}</span>
                                     <div aria-hidden="true"><FiX/></div>
                                 </>
                             ) : null} 
@@ -380,7 +375,7 @@ export default function LandingPage() {
                         </td>
                         <td className="py-4 px-6 text-center text-green-500 font-bold bg-bg-main rounded-r-xl shadow-[inset_-2px_2px_5px_rgba(0,0,0,0.1)]">
                           <div className="flex items-center justify-center gap-2">
-                            <span className="sr-only">Supported/Good</span>
+                            <span className="sr-only">{t('landing:a11y.supported', 'Supported/Good')}</span>
                             <div aria-hidden="true"><FiCheck className="text-xl" /></div> 
                             {row.nyx}
                           </div>
@@ -394,7 +389,7 @@ export default function LandingPage() {
           </AnimatedSection>
         </section>
 
-        {/* Features Section (Merged) */}
+        {/* Features Section */}
         <section className="py-16 md:py-24" style={{ backgroundColor: theme === 'dark' ? '#222222' : '#e8e2d5' }}>
           <AnimatedSection>
             <div className="max-w-6xl mx-auto px-4">

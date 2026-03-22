@@ -44,14 +44,14 @@ const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId:
       )}>
         <div className="w-full h-full rounded-full border-2 border-bg-main overflow-hidden bg-bg-main">
           <img 
-            src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('defaults.user')}`} 
-            alt="Story" 
+            src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('common:defaults.user')}`} 
+            alt={profile.name || t('common:defaults.user')} 
             className="w-full h-full object-cover" 
           />
         </div>
       </div>
       <span className="text-[10px] font-medium text-text-secondary truncate w-full text-center">
-        {profile.name?.split(' ')[0] || t('defaults.user')}
+        {profile.name?.split(' ')[0] || t('common:defaults.user')}
       </span>
     </button>
   );
@@ -105,8 +105,8 @@ export default function StoryTray() {
               )}>
                  <div className="w-full h-full rounded-full border-2 border-bg-main overflow-hidden bg-bg-main relative">
                   <img 
-                    src={toAbsoluteUrl(myProfile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${myProfile.name || t('defaults.me')}`} 
-                    alt="My Story" 
+                    src={toAbsoluteUrl(myProfile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${myProfile.name || t('common:defaults.me')}`} 
+                    alt={t('chat:stories.your_story')} 
                     className={clsx("w-full h-full object-cover transition-all", myStories.length === 0 && "opacity-80")} 
                   />
                 </div>
@@ -125,7 +125,7 @@ export default function StoryTray() {
             </button>
 
             <span className="text-[10px] font-medium text-text-primary truncate w-full text-center">
-              {t('stories.your_story')}
+              {t('chat:stories.your_story')}
             </span>
           </div>
 

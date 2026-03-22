@@ -45,8 +45,8 @@ export default function PrivacyPage() {
   return (
     <div className="min-h-screen bg-bg-main text-text-primary font-sans selection:bg-accent selection:text-white">
       <SEO 
-        title="Legal & Privacy | NYX" 
-        description="Read about our Zero-Knowledge architecture, commercial licensing, and how NYX protects your data." 
+        title={t('privacy:seo.title', 'Legal & Privacy | NYX')} 
+        description={t('privacy:seo.description', 'Read about our Zero-Knowledge architecture, commercial licensing, and how NYX protects your data.')} 
         canonicalUrl="/privacy" 
         schemaMarkup={techArticleSchema}
       />
@@ -242,10 +242,17 @@ export default function PrivacyPage() {
       <footer className="border-t border-white/5 py-12 bg-black/20">
         <div className="max-w-5xl mx-auto px-6 text-center">
           <div className="inline-flex items-center gap-2 text-text-secondary font-mono text-xs uppercase tracking-widest mb-4">
-            <FiShield /> Military-Grade Privacy
+            <FiShield /> {t('privacy:footer.tagline', 'Military-Grade Privacy')}
           </div>
-          <p className="text-text-secondary text-sm">&copy; {new Date().getFullYear()} NYX. All rights reserved under AGPL-3.0.</p>
-          <p className="mt-2 text-xs opacity-50 font-mono">&quot;In an era of total surveillance, obfuscation is the only true liberty.&quot;</p>
+          <p className="text-text-secondary text-sm">
+            {t('privacy:footer.copyright', { 
+              year: new Date().getFullYear(),
+              defaultValue: '© {{year}} NYX. All rights reserved under AGPL-3.0.' 
+            })}
+          </p>
+          <p className="mt-2 text-xs opacity-50 font-mono">
+            {t('privacy:footer.quote', '"In an era of total surveillance, obfuscation is the only true liberty."')}
+          </p>
         </div>
       </footer>
     </div>

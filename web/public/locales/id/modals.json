@@ -48,7 +48,9 @@
     "copy_success": "Frasa pemulihan disalin!",
     "copy_fail": "Gagal menyalin ke clipboard",
     "verify_success": "Verifikasi berhasil! Cadangan Anda terkonfirmasi.",
-    "verify_fail": "Verifikasi gagal. Silakan coba lagi."
+    "verify_fail": "Verifikasi gagal. Silakan coba lagi.",
+    "aria_toggle_visibility": "Ubah visibilitas frasa",
+    "aria_copy_phrase": "Salin frasa pemulihan"
   },
   "edit_group": {
     "title": "Edit Info Grup",
@@ -256,5 +258,16 @@
     "desc": "Pindai kode QR NYX",
     "awaiting": "Menunggu target...",
     "camera_error": "Akses kamera ditolak atau tidak tersedia."
+  },
+  "user_info_modal": {
+    "about": "Tentang",
+    "media": "Media",
+    "view_personnel": "LIHAT DATA PERSONEL",
+    "verify_handshake": "VERIFIKASI JABAT TANGAN ENKRIPSI",
+    "unblock_signal": "BUKA BLOKIR SINYAL",
+    "block_signal": "BLOKIR SINYAL",
+    "report_signal": "LAPORKAN SINYAL",
+    "prompt_report": "Masukkan alasan melaporkan pengguna ini:",
+    "no_data": "Tidak ada data tersedia."
   }
 }

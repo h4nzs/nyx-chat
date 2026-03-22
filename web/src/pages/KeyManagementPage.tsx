@@ -13,7 +13,8 @@ import { getEncryptedKeys, saveEncryptedKeys } from '@lib/keyStorage';
 import { useTranslation, Trans } from 'react-i18next';
 
 export default function KeyManagementPage() {
-  const { t } = useTranslation(['settings', 'common']);
+  // Tambahkan 'auth' untuk meminjam pesan error kriptografi
+  const { t } = useTranslation(['settings', 'common', 'auth']);
   const { logout } = useAuthStore(useShallow(state => ({ 
     logout: state.logout,
   })));
@@ -31,18 +32,18 @@ export default function KeyManagementPage() {
       setIsProcessing(true);
       try {
         const encryptedKeys = await getEncryptedKeys();
-        if (!encryptedKeys) throw new Error("No encrypted key found in storage.");
+        if (!encryptedKeys) throw new Error(t('auth:messages.keys_not_found'));
         
         const phrase = await getRecoveryPhrase(encryptedKeys, password);
         if (!phrase) {
-          throw new Error("Failed to decrypt keys. Password mismatch.");
+          throw new Error(t('auth:messages.decrypt_failed'));
         }
         
         setRecoveryPhrase(phrase);
         setShowRecoveryModal(true);
 
       } catch (error: unknown) {
-        toast.error((error instanceof Error ? error.message : 'Unknown error') || "Operation failed.");
+        toast.error((error instanceof Error ? error.message : t('common:errors.unknown')));
       } finally {
         setIsProcessing(false);
       }
@@ -75,7 +76,7 @@ export default function KeyManagementPage() {
             }, 1000);
 
           } catch (error: unknown) {
-            toast.error((error instanceof Error ? error.message : 'Unknown error') || "Rotation failed.");
+            toast.error((error instanceof Error ? error.message : t('common:errors.unknown')));
           } finally {
             setIsProcessing(false);
           }

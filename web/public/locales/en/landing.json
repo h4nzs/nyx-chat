@@ -106,5 +106,14 @@
     "source": "Source Code",
     "commercial": "Commercial Licensing",
     "disclaimer": "WhatsApp is a registered trademark of Meta Platforms, Inc. Telegram is a registered trademark of Telegram FZ-LLC. NYX is an independent open-source project and is not affiliated with, endorsed by, or sponsored by these corporate entities. Any architectural comparisons are made strictly for informational and cryptographic review purposes based on public technical documentation available as of {{year}}."
+  },
+  "schema": {
+    "e2ee": "End-to-End Encryption (Signal Protocol)",
+    "self_destruct": "Self-Destructing Messages",
+    "local_first": "Local-First Architecture"
+  },
+  "a11y": {
+    "not_supported": "Not Supported/Bad",
+    "supported": "Supported/Good"
   }
 }

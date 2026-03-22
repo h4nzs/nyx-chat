@@ -70,5 +70,14 @@
     "memory_desc": "Kunci kriptografi dihapus dari RAM (`sodium.memzero`) segera setelah siklus dekripsi.",
     "migration_title": "Migrasi Peer-to-Peer",
     "migration_desc": "Migrasi perangkat menggunakan terowongan WebSocket terenkripsi. Server merelai potongan secara buta tanpa akses kunci."
+  },
+  "seo": {
+    "title": "Hukum & Privasi | NYX",
+    "description": "Baca tentang arsitektur Zero-Knowledge kami, lisensi komersial, dan bagaimana NYX melindungi data Anda."
+  },
+  "footer": {
+    "tagline": "Privasi Tingkat Militer",
+    "copyright": "© {{year}} NYX. Semua hak dilindungi di bawah AGPL-3.0.",
+    "quote": "\"Di era pengawasan total, penyamaran adalah satu-satunya kebebasan sejati.\""
   }
 }

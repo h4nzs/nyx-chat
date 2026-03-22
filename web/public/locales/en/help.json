@@ -31,5 +31,8 @@
     "title": "What if I lose my Recovery Phrase?",
     "irrecoverable": "Your account is mathematically irrecoverable.",
     "desc": "We do not store your phrase or password. If you lose them, no one on Earth—including us—can decrypt your data. Please write down your phrase and store it safely offline."
+  },
+  "seo": {
+    "description": "Get help with NYX E2EE chat, account recovery, and security features."
   }
 }

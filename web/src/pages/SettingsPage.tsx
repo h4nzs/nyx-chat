@@ -114,7 +114,8 @@ const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const { t, i18n } = useTranslation(['settings', 'common']);
+  // Menambahkan namespace 'auth' agar bisa mengakses label untuk keamanan
+  const { t, i18n } = useTranslation(['settings', 'common', 'auth']);
   const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout, emergencyLogout, setUser } = useAuthStore(useShallow(s => ({
     user: s.user, updateProfile: s.updateProfile, updateAvatar: s.updateAvatar, sendReadReceipts: s.sendReadReceipts, setReadReceipts: s.setReadReceipts, logout: s.logout, emergencyLogout: s.emergencyLogout, setUser: s.setUser
   })));
@@ -159,7 +160,6 @@ export default function SettingsPage() {
     
     setIsDeleting(true);
     try {
-        // 1. Collect garbage (Best Effort from Memory)
         const messagesMap = useMessageStore.getState().messages;
         const fileKeys: string[] = [];
         
@@ -169,7 +169,6 @@ export default function SettingsPage() {
             }
         });
 
-        // 2. Nuke Server
         await api('/api/users/me', {
             method: 'DELETE',
             body: JSON.stringify({
@@ -178,14 +177,13 @@ export default function SettingsPage() {
             })
         });
 
-        // 3. Nuke Local
         await executeLocalWipe();
         
         toast.success(t('settings:messages.account_obliterated'));
         window.location.replace('/');
     } catch (error: unknown) {
         setIsDeleting(false);
-        const errorMsg = (error as Record<string, unknown>).details ? JSON.parse((error as Record<string, unknown>).details as string).error : (error instanceof Error ? error.message : 'Unknown error');
+        const errorMsg = (error as Record<string, unknown>).details ? JSON.parse((error as Record<string, unknown>).details as string).error : (error instanceof Error ? error.message : t('common:errors.unknown'));
         toast.error(t('settings:messages.deletion_failed', { error: errorMsg }));
     }
   };
@@ -216,12 +214,10 @@ export default function SettingsPage() {
         setHasBioVault(!!vault);
     };
     checkBioVault();
-    // Listen for storage events in case it changes in another tab (optional but good practice)
     window.addEventListener('storage', checkBioVault);
     return () => window.removeEventListener('storage', checkBioVault);
   }, []);
 
-  // Cleanup avatar crop target URL to prevent memory leaks
   useEffect(() => {
     return () => {
       if (avatarCropTarget?.url) {
@@ -234,7 +230,6 @@ export default function SettingsPage() {
     const file = e.target.files?.[0];
     if (file) {
       setAvatarCropTarget({ url: URL.createObjectURL(file), file });
-      // Reset input to allow re-selecting same file
       e.target.value = '';
     }
   };
@@ -260,13 +255,11 @@ export default function SettingsPage() {
       const encryptedProfile = await encryptProfile(profileJson, key);
 
       await updateProfile({ encryptedProfile });
-      
-      // Force update the local cache
       useProfileStore.getState().decryptAndCache(user!.id, encryptedProfile);
 
       toast.success(t('settings:messages.identity_updated'));
     } catch (error: unknown) {
-      const errorMsg = (error as Record<string, unknown>).details ? JSON.parse((error as Record<string, unknown>).details as string).error : (error instanceof Error ? error.message : 'Unknown error');
+      const errorMsg = (error as Record<string, unknown>).details ? JSON.parse((error as Record<string, unknown>).details as string).error : (error instanceof Error ? error.message : t('common:errors.unknown'));
       toast.error(t('settings:messages.update_failed', { error: errorMsg }));
     } finally {
       setIsLoading(false);
@@ -275,7 +268,6 @@ export default function SettingsPage() {
 
   const handleRegisterPasskey = async () => {
     try {
-      // 1. Dapatkan Recovery Phrase untuk diamankan (Digembok oleh Jari)
       let phraseToLock = '';
       
       const autoUnlockKey = await getDeviceAutoUnlockKey();
@@ -287,7 +279,6 @@ export default function SettingsPage() {
           } catch (e) {}
       }
 
-      // Jika gagal otomatis, minta user input password (DEMI KEAMANAN MAKSIMAL)
       if (!phraseToLock) {
           await new Promise<void>((resolve, reject) => {
               useModalStore.getState().showPasswordPrompt(async (password) => {
@@ -303,16 +294,12 @@ export default function SettingsPage() {
       }
 
       toast.loading(t('settings:messages.biometric_initializing'), { id: 'passkey' });
-      // Force creation of a NEW credential (even if one exists) to ensure PRF support is enabled
       const options = await api<unknown>("/api/auth/webauthn/register/options?force=true");
       
       toast.loading(t('settings:messages.biometric_scan_now'), { id: 'passkey' });
       
-      // 2. Setup Biometric with PRF (Magic Happens Here)
-      // Ini akan mendaftarkan jari ke server SEKALIGUS mengenkripsi phrase di lokal
       const attResp = await setupBiometricUnlock(options as Record<string, unknown>, phraseToLock);
       
-      // 3. Verifikasi Server (Hanya untuk login, server tidak menerima phrase)
       const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {
         method: "POST",
         body: JSON.stringify(attResp),
@@ -328,9 +315,9 @@ export default function SettingsPage() {
       }
     } catch (error: unknown) {
       if ((error as Error).name === 'NotAllowedError') {
-        toast.error("Scan cancelled.", { id: 'passkey' });
+        toast.error(t('common:actions.cancel'), { id: 'passkey' });
       } else {
-        toast.error(`Error: ${(error instanceof Error ? error.message : 'Unknown error')}`, { id: 'passkey' });
+        toast.error(`${t('common:errors.unknown')}`, { id: 'passkey' });
       }
     }
   };
@@ -340,18 +327,15 @@ export default function SettingsPage() {
     const toastId = toast.loading(t('settings:messages.mining_connecting'));
     
     try {
-      // 1. Get Challenge
       const { salt, difficulty } = await api<{ salt: string, difficulty: number }>('/api/auth/pow/challenge');
       
       toast.loading(t('settings:messages.mining_processing'), { id: toastId });
       
-      // 2. Mine in Worker (Non-blocking)
       const { nonce } = await minePoW(salt, difficulty);
       
       setMiningStatus('verifying');
       toast.loading(t('settings:messages.mining_verifying'), { id: toastId });
       
-      // 3. Verify
       const result = await api<{ success: boolean }>('/api/auth/pow/verify', {
         method: 'POST',
         body: JSON.stringify({ nonce })
@@ -365,7 +349,8 @@ export default function SettingsPage() {
       
     } catch (error: unknown) {
       console.error(error);
-      toast.error(t('settings:messages.mining_failed', { error: (error instanceof Error ? error.message : 'Unknown error') }), { id: toastId });
+      const errorMsg = error instanceof Error ? error.message : t('common:errors.unknown');
+      toast.error(t('settings:messages.mining_failed', { error: errorMsg }), { id: toastId });
     } finally {
       setMiningStatus('idle');
     }
@@ -407,7 +392,6 @@ export default function SettingsPage() {
       }
     };
     reader.readAsText(file);
-    // Reset input value so same file can be selected again
     e.target.value = '';
   };
 
@@ -415,32 +399,27 @@ export default function SettingsPage() {
     vaultInputRef.current?.click();
   };
 
-
   const handleLogout = async () => {
+    // Memanggil teks peringatan dari JSON agar dinamis terjemahannya
     showConfirm(
       t('settings:emergency.eject'),
-      "This will instantly revoke your server sessions and obliterate all local cryptographic keys and data. Proceed?",
+      t('settings:emergency.delete_desc'),
       async () => {
         const toastId = toast.loading(t('settings:messages.emergency_revoking'));
         try {
           const { api } = await import('@lib/api');
-          
-          // Attempt to revoke all sessions. 
           try {
-            await api('/api/sessions', { method: 'DELETE' }); // Clear other devices (if endpoint exists)
+            await api('/api/sessions', { method: 'DELETE' }); 
           } catch (e) {
             console.warn("Failed to clear secondary sessions, proceeding to current session logout.");
           }
-          await api('/api/auth/logout', { method: 'POST' }); // Kill current session
+          await api('/api/auth/logout', { method: 'POST' }); 
           
           toast.success(t('settings:messages.emergency_success'), { id: toastId });
-          
-          // Proceed to Absolute Nuke ONLY after server acknowledges session termination
           await executeLocalWipe();
         } catch (error: unknown) {
           console.error("Emergency eject API failed:", error);
           toast.error(t('settings:messages.emergency_failed'), { id: toastId });
-          // We abort the local wipe here as requested by the code review
         }
       }
     );
@@ -715,7 +694,7 @@ export default function SettingsPage() {
                     <div className="font-bold text-sm">
                         {hasBioVault ? t('settings:privacy.biometric_active') : (user.isVerified ? t('settings:privacy.biometric_enable') : t('settings:privacy.biometric_enable'))}
                     </div>
-                    <div className="text-[10px] text-text-secondary">Unlock Vault & Verify VIP</div>
+                    <div className="text-[10px] text-text-secondary">{t('auth:buttons.verify_identity')}</div>
                   </div>
                 </div>
                 <div className={`w-2 h-2 rounded-full shadow-[0_0_5px] ${hasBioVault ? 'bg-green-500 shadow-green-500' : 'bg-gray-500 shadow-transparent'}`}></div>
@@ -736,19 +715,19 @@ export default function SettingsPage() {
                    type="password" 
                    value={panicPass} 
                    onChange={e => setPanicPass(e.target.value)} 
-                   placeholder={t('settings:privacy.panic_password')} 
+                   placeholder={t('auth:fields.password')} 
                    className="bg-bg-main border border-white/10 rounded-lg px-4 py-2 text-sm text-text-primary focus:ring-red-500/50 flex-1 outline-none" 
                  />
                  <button 
                    type="button"
                    onClick={async () => { 
                      await setPanicPassword(panicPass); 
-                     toast.success('Panic Password updated.'); 
+                     toast.success(t('common:actions.saved')); 
                      setPanicPass(''); 
                    }} 
                    className="px-4 py-2 bg-red-500/20 text-red-500 rounded-lg text-sm font-bold hover:bg-red-500 hover:text-white transition-colors"
                  >
-                   Set
+                   {t('common:actions.save')}
                  </button>
               </div>
             </div>
@@ -767,14 +746,14 @@ export default function SettingsPage() {
                 <select
                   value={user?.autoDestructDays || ''}
                   onChange={async (e) => {
-                    const val = e.target.value;                     const days = val === '' ? null : parseInt(val, 10);
+                    const val = e.target.value;                     
+                    const days = val === '' ? null : parseInt(val, 10);
                      try {
                         const { api } = await import('@lib/api');
                         await api('/api/users/me', { method: 'PUT', body: JSON.stringify({ autoDestructDays: days }) });
-                        // Update local store via bootstrap or manual update
                         useAuthStore.getState().bootstrap(true);
-                        toast.success(days ? `Auto-destruct set to ${days} days` : 'Auto-destruct disabled');
-                     } catch (err) { toast.error("Failed to update setting"); }
+                        toast.success(t('common:actions.saved'));
+                     } catch (err) { toast.error(t('common:errors.network')); }
                    }}
                    className="bg-bg-main border border-white/10 rounded-lg px-4 py-2 text-sm text-text-primary focus:ring-accent flex-1 outline-none"
                  >
@@ -918,7 +897,8 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 )}
-                </div>             <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
+                </div>             
+             <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <ActionButton label={t('settings:support.help_center')} icon={FiHelpCircle} onClick={() => navigate('/help')} />
                 <ActionButton label={t('settings:support.report_bug')} icon={FiFlag} onClick={() => setShowReportModal(true)} />
                 <ActionButton label={t('settings:support.legal')} icon={FiShield} onClick={() => navigate('/privacy')} />
@@ -926,7 +906,7 @@ export default function SettingsPage() {
           </ControlModule>
         </div>
 
-        {/* 7. EMERGENCY EJECT (Logout) */}
+        {/* 8. EMERGENCY EJECT (Logout) */}
         <div className="col-span-1 md:col-span-12 mt-8 mb-10 space-y-4">
           <button
             onClick={handleLogout}
@@ -1039,7 +1019,7 @@ export default function SettingsPage() {
                     type="password"
                     value={deletePassword}
                     onChange={(e) => setDeletePassword(e.target.value)}
-                    placeholder="Enter your password..."
+                    placeholder={t('auth:fields.password')}
                     className="
                         w-full bg-bg-main text-text-primary p-4 rounded-xl outline-none
                         border border-red-500/30 focus:border-red-500

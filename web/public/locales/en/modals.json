@@ -48,7 +48,9 @@
     "copy_success": "Recovery phrase copied!",
     "copy_fail": "Failed to copy to clipboard",
     "verify_success": "Verification successful! Your backup is confirmed.",
-    "verify_fail": "Verification failed. Please try again."
+    "verify_fail": "Verification failed. Please try again.",
+    "aria_toggle_visibility": "Toggle phrase visibility",
+    "aria_copy_phrase": "Copy recovery phrase"
   },
   "edit_group": {
     "title": "Edit Group Info",
@@ -256,5 +258,16 @@
     "desc": "Scan a NYX QR code",
     "awaiting": "Awaiting target...",
     "camera_error": "Camera access denied or unavailable."
+  },
+  "user_info_modal": {
+    "about": "About",
+    "media": "Media",
+    "view_personnel": "VIEW PERSONNEL FILE",
+    "verify_handshake": "VERIFY ENCRYPTION HANDSHAKE",
+    "unblock_signal": "UNBLOCK SIGNAL",
+    "block_signal": "BLOCK SIGNAL",
+    "report_signal": "REPORT SIGNAL",
+    "prompt_report": "Enter reason for reporting this user:",
+    "no_data": "No data available."
   }
 }

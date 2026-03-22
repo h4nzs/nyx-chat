@@ -126,8 +126,20 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
         
         {showPhrase && (
            <div className="absolute top-2 right-2 flex gap-2">
-             <button onClick={() => setShowPhrase(false)} aria-label="Toggle phrase visibility" className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"><FiEyeOff size={14} /></button>
-             <button onClick={handleCopyToClipboard} aria-label="Copy recovery phrase" className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"><FiClipboard size={14} /></button>
+             <button 
+               onClick={() => setShowPhrase(false)} 
+               aria-label={t('modals:recovery.aria_toggle_visibility', 'Toggle phrase visibility')} 
+               className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"
+             >
+               <FiEyeOff size={14} />
+             </button>
+             <button 
+               onClick={handleCopyToClipboard} 
+               aria-label={t('modals:recovery.aria_copy_phrase', 'Copy recovery phrase')} 
+               className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"
+             >
+               <FiClipboard size={14} />
+             </button>
            </div>
         )}
       </div>

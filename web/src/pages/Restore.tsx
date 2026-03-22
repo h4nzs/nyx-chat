@@ -54,7 +54,7 @@ export default function RestorePage() {
           nonce
         })
       });
-      // 3. Save to local storage & finalize login
+      // 4. Save to local storage & finalize login
       await saveEncryptedKeys(encryptedPrivateKeys);
       useAuthStore.getState().setHasRestoredKeys(true);
       
@@ -63,7 +63,7 @@ export default function RestorePage() {
           try {
             await useAuthStore.getState().bootstrap(true); // Force fetch user profile
           } catch (err) {
-            toast.error("Failed to sync profile");
+            toast.error(t('auth:restore.error_generic'));
             return;
           }
       }
@@ -73,10 +73,10 @@ export default function RestorePage() {
 
     } catch (error: unknown) {
       console.error("Restore failed:", error);
-      if ((error instanceof Error ? error.message : 'Unknown error')?.includes('mnemonic')) {
+      if ((error instanceof Error ? error.message : t('common:errors.unknown'))?.includes('mnemonic')) {
         toast.error(t('auth:restore.error_mnemonic'));
       } else {
-        toast.error((error instanceof Error ? error.message : 'Unknown error') || t('auth:restore.error_generic'));
+        toast.error((error instanceof Error ? error.message : t('common:errors.unknown')) || t('auth:restore.error_generic'));
       }
     } finally {
       setIsRestoring(false);

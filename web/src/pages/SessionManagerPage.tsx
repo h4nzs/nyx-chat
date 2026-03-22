@@ -18,8 +18,8 @@ const parseUserAgent = (ua: string) => {
 
 const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean, [key: string]: unknown }, onLogout: (jti: string) => void, isCurrent: boolean }) => {
   const { browser, os } = parseUserAgent(session.userAgent);
+  const { t } = useTranslation(['settings', 'common']);
   const Icon = os === 'Mobile' ? FiSmartphone : FiMonitor;
-  const { t } = useTranslation('settings');
 
   return (
     <div className={`
@@ -68,7 +68,7 @@ const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: 
             active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
             hover:text-red-600 hover:scale-105 active:scale-95 transition-all
           "
-          title="Eject Session"
+          title={t('settings:emergency.eject')}
         >
           <FiLogOut size={20} />
         </button>
@@ -78,7 +78,7 @@ const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: 
 };
 
 export default function SessionManagerPage() {
-  const { t } = useTranslation('settings');
+  const { t } = useTranslation(['settings', 'common']);
   const [sessions, setSessions] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -100,13 +100,13 @@ export default function SessionManagerPage() {
         setSessions(processedSessions);
 
       } catch (error) {
-        toast.error('Failed to load active sessions.');
+        toast.error(t('common:errors.network'));
       } finally {
         setLoading(false);
       }
     };
     fetchSessions();
-  }, []);
+  }, [t]);
 
   const handleLogoutSession = async (jti: string) => {
     const toastId = toast.loading(t('settings:messages.ejecting'));
