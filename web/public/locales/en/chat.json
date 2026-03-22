@@ -94,6 +94,7 @@
     "selected_count": "{{count}} Selected",
     "no_messages_yet": "No messages yet",
     "view_once_message": "View Once Message",
+    "delete_failed": "Failed to delete message.",
     "opened": "Opened",
     "failed_retry": "Failed to send. Click to retry.",
     "repair_session": "Repair Session",

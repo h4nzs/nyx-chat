@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 
 // --- Sub Component for E2EE Profile Rendering ---
 const ContactItem = ({ contact, isSelected, onToggle }: { contact: { id: string; encryptedProfile?: string; username?: string; avatarUrl?: string; [key: string]: unknown }, isSelected: boolean, onToggle: () => void }) => {
+  const { t } = useTranslation(['common']);
   const profile = useProfileStore(state => {
     const cacheKey = contact.encryptedProfile ? `${contact.id}_${contact.encryptedProfile.substring(0, 32)}` : contact.id;
     return state.profiles[cacheKey];
@@ -24,7 +25,7 @@ const ContactItem = ({ contact, isSelected, onToggle }: { contact: { id: string;
      }
   }, [contact.id, contact.encryptedProfile, profile]);
 
-  const name = profile?.name || contact.username || 'Unknown User';
+  const name = profile?.name || contact.username || t('common:defaults.user');
   const avatarUrl = profile?.avatarUrl || contact.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(name)}`;
 
   return (
@@ -117,21 +118,39 @@ export default function CreateStoryModal({ onClose }: { onClose: () => void }) {
                {file?.type.startsWith('video/') ? (
                  <video src={safePreviewUrl} className="w-full h-full object-contain" controls />
                ) : (
-                 <img src={safePreviewUrl} alt="preview" className="w-full h-full object-contain" />
+                 <img src={safePreviewUrl} alt={t('common:defaults.preview', 'Preview')} className="w-full h-full object-contain" />
                )}
                
                <div className="absolute top-2 right-2 flex items-center gap-2 opacity-100 transition-opacity">
                  {file?.type.startsWith('image/') && (
                    <>
-                     <button type="button" onClick={() => setShowPaintEditor(true)} className="bg-black/60 hover:bg-accent text-white p-2 rounded-full backdrop-blur-md transition-colors" title="Draw">
+                     <button 
+                       type="button" 
+                       onClick={() => setShowPaintEditor(true)} 
+                       className="bg-black/60 hover:bg-accent text-white p-2 rounded-full backdrop-blur-md transition-colors" 
+                       title={t('modals:editor.draw', 'Draw')}
+                       aria-label={t('modals:editor.draw', 'Draw')}
+                     >
                        <FiEdit3 size={14} />
                      </button>
-                     <button type="button" onClick={() => setShowCropper(true)} className="bg-black/60 hover:bg-accent text-white p-2 rounded-full backdrop-blur-md transition-colors" title="Crop">
+                     <button 
+                       type="button" 
+                       onClick={() => setShowCropper(true)} 
+                       className="bg-black/60 hover:bg-accent text-white p-2 rounded-full backdrop-blur-md transition-colors" 
+                       title={t('modals:editor.crop', 'Crop')}
+                       aria-label={t('modals:editor.crop', 'Crop')}
+                     >
                        <FiCrop size={14} />
                      </button>
                    </>
                  )}
-                 <button type="button" onClick={() => { setFile(null); setPreviewUrl(null); }} className="bg-black/60 hover:bg-red-500 text-white p-2 rounded-full backdrop-blur-md transition-colors" title="Remove">
+                 <button 
+                   type="button" 
+                   onClick={() => { setFile(null); setPreviewUrl(null); }} 
+                   className="bg-black/60 hover:bg-red-500 text-white p-2 rounded-full backdrop-blur-md transition-colors" 
+                   title={t('modals:editor.remove', 'Remove')}
+                   aria-label={t('modals:editor.remove', 'Remove')}
+                 >
                    <FiX size={14} />
                  </button>
                </div>

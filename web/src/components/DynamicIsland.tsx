@@ -5,8 +5,10 @@ import { motion, AnimatePresence } from 'framer-motion';
 import useDynamicIslandStore, { Activity, NotificationActivity, UploadActivity } from '@store/dynamicIsland';
 import { FiFile, FiX, FiMessageSquare, FiUploadCloud } from 'react-icons/fi';
 import { useUserProfile } from '@hooks/useUserProfile';
+import { useTranslation } from 'react-i18next';
 
 const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
+  const { t } = useTranslation(['common']);
   const openConversation = useConversationStore(state => state.openConversation);
   const removeActivity = useDynamicIslandStore(state => state.removeActivity);
   const navigate = useNavigate();
@@ -27,8 +29,8 @@ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
     <div onClick={handleClick} className="w-full h-full flex items-center gap-3 px-1 cursor-pointer group">
       <div className="relative">
         <img 
-          src={profile.avatarUrl ? toAbsoluteUrl(profile.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
-          alt="Avatar"
+          src={profile.avatarUrl ? toAbsoluteUrl(profile.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('common:defaults.user')}`}
+          alt={profile.name || t('common:defaults.avatar', 'Avatar')}
           className="w-8 h-8 rounded-full object-cover border border-white/10"
         />
         <div className="absolute -bottom-1 -right-1 bg-accent rounded-full p-0.5 border border-black">
@@ -38,8 +40,8 @@ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
       
       <div className="flex-1 min-w-0 flex flex-col justify-center">
         <div className="flex justify-between items-baseline">
-           <p className="text-[10px] font-bold text-white/90 uppercase tracking-wider">{profile.name}</p>
-           <span className="text-[8px] text-white/40 font-mono">NOW</span>
+           <p className="text-[10px] font-bold text-white/90 uppercase tracking-wider">{profile.name || t('common:defaults.user')}</p>
+           <span className="text-[8px] text-white/40 font-mono">{t('common:time.now', 'NOW')}</span>
         </div>
         <p className="text-xs text-white/70 truncate font-medium group-hover:text-white transition-colors">
           {activity.message.includes(':') 

@@ -27,6 +27,8 @@
     "saving": "Menyimpan...",
     "creating": "Membuat...",
     "create_group": "Buat Grup",
+    "menu": "Menu",
+    "back": "Kembali",
     "view_profile": "Lihat Profil"
   },
   "action": {
@@ -38,6 +40,8 @@
     "pin_chat": "Sematkan Chat",
     "block_user": "Blokir Pengguna",
     "delete_chat": "Hapus Chat",
+    "menu": "Menu",
+    "back": "Kembali",
     "delete_group": "Hapus Grup",
     "create_group": "Buat Grup"
   },
@@ -59,7 +63,11 @@
   "defaults": {
     "encrypted_user": "Pengguna Terenkripsi",
     "user": "Pengguna",
-    "me": "Saya"
+    "avatar": "Avatar",
+    "me": "Saya",
+    "unknown": "Tidak diketahui",
+    "someone": "Seseorang",
+    "you": "ANDA"
   },
   "status": {
     "connection_lost": "KONEKSI_HILANG // SISTEM_OFFLINE",
@@ -151,6 +159,9 @@
     "ago_d": "{{count}}hr lalu",
     "ago_h": "{{count}}j lalu",
     "ago_m": "{{count}}m lalu",
-    "ago_s": "{{count}}dtk lalu"
+    "ago_s": "{{count}}dtk lalu",
+    "now": "SEKARANG",
+    "yesterday": "Kemarin"
+
   }
 }

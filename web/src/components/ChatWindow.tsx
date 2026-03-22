@@ -66,7 +66,7 @@ const NewConversationBanner = () => {
 };
 
 const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conversation: Conversation; onBack: () => void; onInfoToggle: () => void; onMenuClick: () => void; }) => {
-  const { t } = useTranslation(['chat']);
+  const { t } = useTranslation(['chat', 'common']);
   const user = useAuthStore((s) => s.user);
   const meId = user?.id;
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
@@ -122,14 +122,14 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
         {/* Mobile Back Button */}
         <button 
           onClick={onMenuClick} 
-          aria-label="Menu" 
+          aria-label={t('common:actions.menu', 'Menu')} 
           className="md:hidden p-3 text-text-secondary active:scale-95 transition-transform"
         >
           <FiMoreHorizontal size={24} />
         </button>
         <button 
           onClick={onBack} 
-          aria-label="Back" 
+          aria-label={t('common:actions.back', 'Back')} 
           className="hidden md:block p-3 text-text-secondary hover:text-accent active:scale-95 transition-transform"
         >
           <FiArrowLeft size={20} />
@@ -144,7 +144,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
              <div className="w-10 h-10 rounded-full shadow-neu-pressed dark:shadow-neu-pressed-dark border-2 border-bg-main p-0.5">
                 <img
                   src={toAbsoluteUrl(avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${title}`}
-                  alt="ID"
+                  alt={t('common:defaults.avatar', 'Avatar')}
                   className={clsx("w-full h-full rounded-full object-cover", cloakClass)}
                 />
              </div>
@@ -205,7 +205,7 @@ const ChatSpinner = () => (
 );
 
 export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClick: () => void }) {
-  const { t } = useTranslation(['chat']);
+  const { t } = useTranslation(['chat', 'common']);
   const meId = useAuthStore((s) => s.user?.id);
   const { conversation, messages, isLoading, error, actions, isFetchingMore } = useConversation(id);
   const { loadMessagesForConversation, selectedMessageIds, clearMessageSelection, removeMessages } = useMessageStore(useShallow(s => ({

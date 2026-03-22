@@ -117,6 +117,7 @@
     "remove": "Remove from Group",
     "block": "Block User",
     "unblock": "Unblock User",
+    "admin_role": "Admin",
     "remove_title": "Remove Participant",
     "remove_desc": "Are you sure you want to remove {{name}} from the group?",
     "toasts": {
@@ -209,6 +210,14 @@
   "editor": {
     "save_failed": "Failed to save image",
     "crop_failed": "Failed to crop image.",
+    "draw": "Draw",
+    "process_failed": "Failed to process image.",
+      "blob_failed": "Failed to generate image blob.",
+      "crop": "Crop",
+      "remove": "Remove",
+    "undo": "Urungkan",
+      "redo": "Ulangi",
+      "pick_color": "Pilih warna",
     "zoom": "ZOOM",
     "rotate": "Rotate"
   },

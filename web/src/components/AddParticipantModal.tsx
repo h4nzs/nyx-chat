@@ -92,7 +92,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
       toast.success(t('modals:add_participant.success'));
       onClose();
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : 'Unknown error';
+      const msg = error instanceof Error ? error.message : t('common:errors.unknown', 'Unknown error');
       toast.error(t('modals:add_participant.error', { error: msg }));
     } finally {
       setIsLoading(false);

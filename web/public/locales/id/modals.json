@@ -117,6 +117,7 @@
     "remove": "Hapus dari Grup",
     "block": "Blokir Pengguna",
     "unblock": "Buka Blokir",
+    "admin_role": "Admin",
     "remove_title": "Hapus Peserta",
     "remove_desc": "Apakah Anda yakin ingin menghapus {{name}} dari grup?",
     "toasts": {
@@ -209,6 +210,14 @@
   "editor": {
     "save_failed": "Gagal menyimpan gambar",
     "crop_failed": "Gagal memotong gambar.",
+    "draw": "Gambar",
+    "process_failed": "Gagal memproses gambar.",
+      "blob_failed": "Gagal menghasilkan data gambar.",
+      "crop": "Potong",
+      "remove": "Hapus",
+    "undo": "Urungkan",
+      "redo": "Ulangi",
+      "pick_color": "Pilih warna",
     "zoom": "ZOOM",
     "rotate": "Putar"
   },

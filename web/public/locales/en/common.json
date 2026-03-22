@@ -26,6 +26,8 @@
     "done": "Done",
     "saving": "Saving...",
     "creating": "Creating...",
+    "menu": "Menu",
+    "back": "Back",
     "create_group": "Create Group",
     "view_profile": "View Profile"
   },
@@ -39,6 +41,8 @@
     "block_user": "Block User",
     "delete_chat": "Delete Chat",
     "delete_group": "Delete Group",
+    "menu": "Menu",
+    "back": "Back",
     "create_group": "Create Group"
   },
   "actioin": {
@@ -59,7 +63,10 @@
   "defaults": {
     "encrypted_user": "Encrypted User",
     "user": "User",
-    "me": "Me"
+    "avatar": "Avatar",
+    "me": "Me",
+    "someone": "Someone",
+    "you": "YOU"
   },
   "status": {
     "connection_lost": "CONNECTION_LOST // SYSTEM_OFFLINE",
@@ -151,6 +158,7 @@
     "ago_d": "{{count}}d ago",
     "ago_h": "{{count}}h ago",
     "ago_m": "{{count}}m ago",
-    "ago_s": "{{count}}s ago"
+    "ago_s": "{{count}}s ago",
+    "now": "NOW"
   }
 }

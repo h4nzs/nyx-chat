@@ -735,142 +735,31 @@ Jika rekomendasi di atas diterapkan:
 
 > Apakah Anda ingin saya menerapkan Schema Markup ini sekarang ke `LandingPage.tsx`?
 
-terdapat beberapa bug saat saya mencoba ui dalam bahasa indonesia, analisa semua temuan saya ini tentang teks yang hanya mendisplay nama kata   
-   kunci json nya dan bukan teksnya, juga ada yang tidak berubah ke bahasa indonesia:                                                              
-                                                                                                                                                   
-   Return                                                                                                                                          
-   keys_page.title                                                                                                                                 
-                                                                                                                                                   
-   keys_page.subtitle                                                                                                                              
-                                                                                                                                                   
-   Your private keys are the only way to decrypt your messages. They are stored locally on this device. Losing these keys means losing your        
-   message history forever.                                                                                                                        
-   keys_page.recovery_title                                                                                                                        
-                                                                                                                                                   
-   keys_page.recovery_desc                                                                                                                         
-   keys_page.rotation_title                                                                                                                        
-                                                                                                                                                   
-   keys_page.rotation_desc                                                                                                                         
-                                                                                                                                                   
-   password_prompt.title                                                                                                                           
-                                                                                                                                                   
-   password_prompt.desc                                                                                                                            
-   password_prompt.vault_idpassword_prompt.status_locked                                                                                           
-   action.abort                                                                                                                                    
-   action.unlock                                                                                                                                   
-   KEYS_PAGE.REVEAL_BTN                                                                                                                            
-   KEYS_PAGE.ROTATE_BTN                                                                                                                            
-   sessions_page.title                                                                                                                             
-                                                                                                                                                   
-   sessions_page.subtitle                                                                                                                          
-   Desktop / Firefox                                                                                                                               
-   sessions_page.current                                                                                                                           
-                                                                                                                                                   
-   sessions_page.ip 114.10.149.42                                                                                                                  
-                                                                                                                                                   
-   sessions_page.last_ping 3/22/2026, 10:59:44 PM                                                                                                  
-   smart.ai_reply                                                                                                                                  
-                                                                                                                                                   
-   Auto-generate response suggestions.                                                                                                             
-   SUPPORT.PUSH_NOTIF                                                                                                                              
-   support.help_center                                                                                                                             
-   support.legal                                                                                                                                   
-   support.report_bug                                                                                                                              
-   report.title_bug                                                                                                                                
-                                                                                                                                                   
-   report.desc_bug                                                                                                                                 
-   report.summary_label                                                                                                                            
-   report.details_label                                                                                                                            
-                                                                                                                                                   
-   report.summary_placeholder                                                                                                                      
-   report.details_placeholder                                                                                                                      
-   report.submit                                                                                                                                   
-   NYX disediakan "SEBAGAIMANA ADANYA", tanpa jaminan apa pun. Pengelola tidak bertanggung jawab atas kehilangan data, kunci yang dikompromikan,   
-   atau gangguan layanan. Anda bertanggung jawab penuh untuk mengelola Frasa Pemulihan kriptografi Anda. NYX is provided "AS IS", without warranty 
-   of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible 
-   for managing your cryptographic Recovery Phrase.                                                                                                
-   Kode sumber NYX bangga menjadi open-source dan dilindungi dengan ketat di bawah The NYX source code is proudly open-source and fiercely         
-   protected under the .Jika Anda memodifikasi basis kode NYX dan mengizinkan pengguna berinteraksi dengannya melalui jaringan (misalnya,          
-   menghostingnya sebagai SaaS), Anda secara hukum diwajibkan untuk merilis kode sumber yang dimodifikasi kepada publik. If you modify the NYX     
-   codebase and allow users to interact with it over a network (e.g., hosting it as a SaaS), you are legally obligated to release your modified    
-   source code to the public.                                                                                                                      
-   Kami menyediakan fitur eksperimental "Balasan Cerdas" menggunakan API Google Gemini. Fitur ini We provide an experimental "Smart Reply" feature 
-   utilizing the Google Gemini API. This feature is .                                                                                              
-   actioin.view_profile                                                                                                                            
-   action.pin_chat                                                                                                                                 
-   action.block_user                                                                                                                               
-   action.delete_chat                                                                                                                              
-   action.delete_group                                                                                                                             
-   input.placeholder_default                                                                                                                       
-   input.placeholder_offline                                                                                                                       
-   chat_info.title                                                                                                                                 
-   chat_info.e2ee.title                                                                                                                            
-                                                                                                                                                   
-   All your conversations are protected by strong End-to-End Encryption, inspired by the Signal Protocol. Think of it as a private digital vault.  
-                                                                                                                                                   
-   chat_info.e2ee.content_2                                                                                                                        
-   chat_info.keys.title                                                                                                                            
-                                                                                                                                                   
-   Your entire account is secured by a single "Master Key". This key is generated from your unique 24-word Recovery Phrase that you received       
-   during registration.                                                                                                                            
-                                                                                                                                                   
-   The most important concept: Your Recovery Phrase is the only way to access your account if you forget your password or switch devices without   
-   access to an old one. We do not store it and cannot recover it for you.                                                                         
-   chat_info.storage.title                                                                                                                         
-                                                                                                                                                   
-   For your convenience, your Master Key is stored on this device in a highly secure, encrypted bundle. This bundle is "locked" using your         
-   password.                                                                                                                                       
-                                                                                                                                                   
-       chat_info.storage.list_1                                                                                                                    
-       chat_info.storage.list_2                                                                                                                    
-                                                                                                                                                   
-   chat_info.access.title                                                                                                                          
-                                                                                                                                                   
-   chat_info.access.content_1                                                                                                                      
-                                                                                                                                                   
-       chat_info.access.list_1_label chat_info.access.list_1_text                                                                                  
-       chat_info.access.list_2_label chat_info.access.list_2_text                                                                                  
-       chat_info.access.list_3_label If you lost your device and backups, use the "Restore" feature with your 24-word Recovery Phrase. This will   
-   reset your password and restore your Identity Keys, but chat history will be lost without a Vault backup.                                       
-                                                                                                                                                   
-   chat_info.best_practices.title                                                                                                                  
-                                                                                                                                                   
-       DO store your Recovery Phrase in a very safe, offline location (e.g., a safe, physical note, or an encrypted password manager).             
-       DO verify your contacts' identities using the available security features before sharing sensitive information.                             
-       DO NOT share your password or Recovery Phrase with anyone. Ever.                                                                            
-       DO NOT stay logged in on public or shared computers. Use the "Active Sessions" feature in Settings to log out remotely if needed.           
-   search.placeholder                                                                                                                              
-   group_info.create_title                                                                                                                         
-   action.create_group                                                                                                                             
-   scan.title                                                                                                                                      
-                                                                                                                                                   
-   scan.desc                                                                                                                                       
-                                                                                                                                                   
-   scan.awaiting                                                                                                                                   
-   notifications.title                                                                                                                             
-                                                                                                                                                   
-   notifications.empty                                                                                                                             
-   About Media                                                                                                                                     
-   VIEW PERSONNEL FILE                                                                                                                             
-   VERIFY ENCRYPTION HANDSHAKE                                                                                                                     
-   BLOCK SIGNAL                                                                                                                                    
-   REPORT SIGNAL                                                                                                                                   
-   media.no_media                                                                                                                                  
-   profile.encrypted                                                                                                                               
-   profile.bio_data                                                                                                                                
-    profile.system_telemetry                                                                                                                       
-   profile.verified_operator                                                                                                                       
-   profile.home_server                                                                                                                             
-   profile.session_status                                                                                                                          
-   action.confirm                                                                                                                                  
-   restore.title                                                                                                                                   
-                                                                                                                                                   
-   restore.subtitle                                                                                                                                
-   restore.labels.identifier                                                                                                                       
-   restore.labels.phrase                                                                                                                           
-   restore.labels.new_password                                                                                                                     
-   restore.buttons.abort                                                                                                                           
-   RESTORE.BUTTONS.RECOVER                                                                                                                         
-   ---                                                                                                                                             
-   ini semua adalah teks yang muncul di ui secara mentah saat saya menggunakan bahasa indonesia dan beberapa ada yang duplikat id+en seperti pada  
-   privacypage.
+Bantuan & FAQ
+Bagaimana cara memindahkan akun ke perangkat baru?
+Karena NYX menyimpan kunci dan riwayat secara lokal demi privasi maksimal, Anda tidak bisa begitu saja login untuk melihat pesan lama. Ada dua cara aman untuk pindah:
+
+Migrasi Perangkat (Disarankan): Buka Pengaturan &gt; Transfer ke Perangkat Baru. Ini membuat terowongan langsung yang aman ke ponsel baru Anda via kode QR.
+Cadangan Brankas: Buka Pengaturan &gt; Ekspor Brankas. Simpan file `.nyxvault` dan impor di layar login perangkat baru.
+Mengapa akun saya "Sandboxed"?
+Untuk mencegah bot spam tanpa mengumpulkan data pribadi (seperti nomor telepon dan email), akun baru dimulai dalam Mode Sandbox dengan kuota pesan terbatas.
+
+Anda dapat meningkatkan ke Status VIP secara instan dan gratis dengan memverifikasi bahwa Anda manusia. Buka instantly for free by verifying you are human. Go to dan pilih Verifikasi Biometrik (Sidik Jari/FaceID) atau Proof of Work (Penambangan CPU).
+
+Saya lupa kata sandi. Apa yang harus saya lakukan?
+Karena kami tidak memiliki email ataupun nomor Anda, kami tidak dapat mengirim tautan ataupun kode reset. Anda harus menggunakan Frasa Pemulihan Anda.
+
+Di layar login, klik "Pulihkan dari frasa".
+Masukkan 24-kata Frasa Pemulihan Anda untuk membuktikan identitas.
+Atur kata sandi baru.
+Catatan: Memulihkan dari frasa akan mereset kunci identitas Anda. Anda akan mendapatkan kembali akses ke ID akun Anda, tetapi riwayat chat akan hilang kecuali Anda memiliki Cadangan Brankas.
+
+Mengapa pesan saya tidak tersinkronisasi?
+NYX bersifat Local-First. Pesan berada di perangkat Anda, bukan di cloud. Jika Anda menggunakan NYX di beberapa perangkat (misal: Ponsel + Laptop), mereka bertindak sebagai klien independen.
+
+Kami sedang mengerjakan "Protokol Sinkronisasi" aman untuk masa depan, tetapi saat ini, riwayat tidak tersinkronisasi otomatis antar perangkat demi menjamin privasi zero-knowledge.
+
+Bagaimana jika saya kehilangan Frasa Pemulihan?
+Akun Anda secara matematis tidak dapat dipulihkan.
+
+Kami tidak menyimpan frasa atau kata sandi Anda. Jika Anda kehilangannya, tidak ada seorang pun di Bumi—termasuk kami—yang dapat mendekripsi data Anda. Harap tulis frasa Anda dan simpan dengan aman secara offline.

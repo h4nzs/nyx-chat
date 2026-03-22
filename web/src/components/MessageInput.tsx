@@ -36,13 +36,6 @@ function debounce<Args extends unknown[]>(func: (...args: Args) => void, waitFor
   };
 }
 
-const DURATIONS = [
-  { label: 'Off', value: null },
-  { label: '1m', value: 60 },
-  { label: '1h', value: 3600 },
-  { label: '24h', value: 86400 },
-];
-
 const EditPreview = () => {
   const { t } = useTranslation('chat');
   const { editingMessage, setEditingMessage } = useMessageInputStore(useShallow(s => ({ editingMessage: s.editingMessage, setEditingMessage: s.setEditingMessage })));
@@ -115,6 +108,13 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
   const [showTimerMenu, setShowTimerMenu] = useState(false); // Timer Menu State
   const [showPlusMenu, setShowPlusMenu] = useState(false); // Mobile Plus Menu State
   const [showSilentMenu, setShowSilentMenu] = useState(false); // Silent Drop Menu State
+
+  const DURATIONS = [
+    { label: t('chat:input.timer_off', 'Off'), value: null },
+    { label: '1m', value: 60 },
+    { label: '1h', value: 3600 },
+    { label: '24h', value: 86400 },
+  ];
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
@@ -281,20 +281,30 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
       const restrictedExtensions = ['.exe', '.sh', '.bat', '.cmd', '.msi', '.vbs', '.js', '.ts', '.html', '.php', '.phtml', '.php5', '.py', '.rb', '.pl', '.jar', '.com', '.scr', '.cpl', '.msc'];
 
       if (stagedFiles.length + selectedFiles.length > MAX_FILES_PER_MESSAGE) {
-        toast.error(`You can only send up to ${MAX_FILES_PER_MESSAGE} files at once.`);
-        if (fileInputRef.current) fileInputRef.current.value = '';
+toast.error(t('chat:messages.max_files', { 
+  count: MAX_FILES_PER_MESSAGE, 
+  defaultValue: `You can only send up to ${MAX_FILES_PER_MESSAGE} files at once.` 
+}));        
+
+if (fileInputRef.current) fileInputRef.current.value = '';
         return;
       }
 
       for (const file of selectedFiles) {
         if (file.size > MAX_FILE_SIZE) {
-           toast.error(`"${file.name}" is too large (Max: 100MB)`);
+toast.error(t('chat:messages.file_too_large', { 
+  name: file.name, 
+  defaultValue: `"${file.name}" is too large (Max: 100MB)` 
+}));
            continue;
         }
 
         const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
         if (restrictedExtensions.includes(ext)) {
-           toast.error(`"${file.name}" has a restricted file type and cannot be sent.`);
+toast.error(t('chat:messages.file_restricted', { 
+  name: file.name, 
+  defaultValue: `"${file.name}" has a restricted file type and cannot be sent.` 
+}));
            continue;
         }
 
@@ -529,7 +539,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
       {/* Emoji Picker Popover */}
       {showEmojiPicker && (
         <div ref={emojiPickerRef} className="absolute bottom-24 left-4 z-50 shadow-2xl rounded-xl overflow-hidden">
-          <Suspense fallback={<div className="w-[350px] h-[450px] bg-bg-surface flex items-center justify-center text-text-secondary">Loading Emojis...</div>}>
+          <Suspense fallback={<div className="w-[350px] h-[450px] bg-bg-surface flex items-center justify-center text-text-secondary">{t('common:actions.loading')}</div>}>
             <EmojiPicker
               onEmojiClick={handleEmojiClick}
               autoFocusSearch={false}
@@ -543,7 +553,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
       {/* Disappearing Messages Menu */}
       {showTimerMenu && (
         <div ref={timerMenuRef} className="absolute bottom-full left-10 mb-2 z-50 bg-bg-surface border border-white/10 rounded-xl shadow-xl overflow-hidden min-w-[120px]">
-          <div className="p-2 text-[10px] uppercase font-bold text-text-secondary border-b border-white/5">Auto-Delete</div>
+          <div className="p-2 text-[10px] uppercase font-bold text-text-secondary border-b border-white/5">{t('chat:input.auto_delete', 'Auto-Delete')}</div>
           {DURATIONS.map((opt) => (
             <button
               key={opt.label}
@@ -589,14 +599,14 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
             className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary font-bold"
           >
             <span className={isHD ? "text-accent" : "text-text-secondary"}>HD</span>
-            <span>{isHD ? "HD Quality: ON" : "Standard Quality"}</span>
+            <span>{isHD ? t('chat:input.hd_on', 'HD Quality: ON') : t('chat:input.hd_off', 'Standard Quality')}</span>
           </button>
           <button
             onClick={() => { setIsVoiceAnonymized(!isVoiceAnonymized); setShowPlusMenu(false); }}
             className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary font-bold"
           >
             <FiCpu size={18} className={isVoiceAnonymized ? "text-red-500" : "text-text-secondary"} />
-            <span className={isVoiceAnonymized ? "text-red-500" : ""}>{isVoiceAnonymized ? "Anon Voice: ON" : "Anon Voice: OFF"}</span>
+            <span className={isVoiceAnonymized ? "text-red-500" : ""}>{isVoiceAnonymized ? t('chat:input.anon_on', 'Anon Voice: ON') : t('chat:input.anon_off', 'Anon Voice: OFF')}</span>
           </button>
           <button
             onClick={() => { setShowEmojiPicker(true); setShowPlusMenu(false); }}

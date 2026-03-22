@@ -19,7 +19,7 @@ i18n
     },
     backend: {
       // Path tempat kita nyimpen file terjemahan nanti
-      loadPath: '/locales/{{lng}}/{{ns}}.json?v=20240522',
+      loadPath: '/locales/{{lng}}/{{ns}}.json',
     },
     // Pisahin file berdasarkan konteks biar enteng
     ns: ['common', 'auth', 'errors', 'chat', 'settings', 'landing', 'modals', 'privacy', 'help'],

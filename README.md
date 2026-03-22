@@ -58,7 +58,7 @@ We recently underwent a nuclear dependency upgrade to ensure NYX is future-proof
 
 ### Frontend (Client)
 
-* **Framework:** React 19 Ready + Vite 7 (TypeScript)
+* **Framework:** React 19 Ready + Vite 8 (TypeScript)
 * **State Management:** Zustand v5 (Strict Mode + Persist middleware)
 * **Styling:** Tailwind CSS v4 (Rust-powered Lightning CSS engine)
 * **Crypto Engine:** `libsodium-wrappers` (Pinned at v0.8.x for backward compatibility)
