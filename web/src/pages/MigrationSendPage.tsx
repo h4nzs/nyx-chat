@@ -7,10 +7,12 @@ import { getSodium } from '@lib/sodiumInitializer';
 import { worker_file_encrypt } from '@lib/crypto-worker-proxy';
 import { exportDatabaseToJson } from '@lib/keychainDb';
 import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 
 const CHUNK_SIZE = 500 * 1024; // 500 KB per chunk
 
 export default function MigrationSendPage() {
+  const { t } = useTranslation(['common']);
   const [status, setStatus] = useState<'prefetching' | 'scanning' | 'encrypting' | 'sending' | 'success'>('prefetching');
   const [progress, setProgress] = useState(0);
   const navigate = useNavigate();
@@ -41,7 +43,7 @@ export default function MigrationSendPage() {
         // relying on the fact that the UI layer won't render normal chat components.
         socket.connect();
       } catch (e) {
-        toast.error("Failed to read local vault.");
+        toast.error(t('migration.read_vault_failed'));
       }
     };
     prefetch();
@@ -52,7 +54,7 @@ export default function MigrationSendPage() {
         getSocket().connect();
       }
     };
-  }, []);
+  }, [t]);
 
   // SCANNER LOGIC
   useEffect(() => {
@@ -74,7 +76,7 @@ export default function MigrationSendPage() {
           () => {}
         ).catch(err => {
             console.error("Camera start failed", err);
-            toast.error("Camera access denied or unavailable.");
+            toast.error(t('migration.camera_denied'));
         });
     }, 100);
 
@@ -82,11 +84,11 @@ export default function MigrationSendPage() {
       clearTimeout(timer);
       if (scannerRef.current?.isScanning) scannerRef.current.stop();
     };
-  }, [status]);
+  }, [status, t]);
 
   const processMigration = async (qrText: string) => {
     setStatus('encrypting');
-    toast.loading('Encrypting vault data...', { id: 'send' });
+    toast.loading(t('migration.encrypting_vault'), { id: 'send' });
     
     try {
       const { roomId, pubKey } = JSON.parse(qrText);
@@ -102,7 +104,7 @@ export default function MigrationSendPage() {
       const ivB64 = sodium.to_base64(iv, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       setStatus('sending');
-      toast.loading('Tunneling data to new device...', { id: 'send' });
+      toast.loading(t('migration.tunneling'), { id: 'send' });
 
       // 3. Chunking & Socket Emission
       const socket = getSocket();
@@ -123,7 +125,7 @@ export default function MigrationSendPage() {
         await new Promise(r => setTimeout(r, 50));
       }
 
-      toast.loading('Waiting for receiver to process...', { id: 'send' });
+      toast.loading(t('migration.waiting_receiver'), { id: 'send' });
 
       // Wait for ACK
       const ackResult = await new Promise((resolve) => {
@@ -138,7 +140,7 @@ export default function MigrationSendPage() {
 
       if (ackResult) {
         setStatus('success');
-        toast.success('Transfer Complete!', { id: 'send' });
+        toast.success(t('migration.transfer_complete'), { id: 'send' });
         setTimeout(() => navigate('/settings'), 2000);
       } else {
         throw new Error("Receiver failed to decrypt or timed out");
@@ -146,7 +148,7 @@ export default function MigrationSendPage() {
 
     } catch (e) {
       console.error(e);
-      toast.error('Migration failed. Invalid QR, Network error, or Timeout.', { id: 'send' });
+      toast.error(t('migration.failed_generic'), { id: 'send' });
       setStatus('scanning');
     }
   };
@@ -154,15 +156,15 @@ export default function MigrationSendPage() {
   return (
     <div className="min-h-screen bg-bg-main text-text-primary flex flex-col items-center justify-center p-4">
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-black uppercase tracking-widest text-text-primary">Transfer Vault</h1>
-        <p className="text-xs text-text-secondary mt-2">Send data to your new device</p>
+        <h1 className="text-2xl font-black uppercase tracking-widest text-text-primary">{t('migration.send_title')}</h1>
+        <p className="text-xs text-text-secondary mt-2">{t('migration.send_desc')}</p>
       </div>
 
       <div className="w-full max-w-sm aspect-square bg-black/90 rounded-3xl overflow-hidden shadow-neumorphic-pressed relative mb-8">
         {status === 'prefetching' && (
            <div className="absolute inset-0 flex flex-col items-center justify-center text-accent">
               <FiUploadCloud size={40} className="animate-pulse mb-2" />
-              <span className="font-mono text-xs uppercase">Preparing Vault...</span>
+              <span className="font-mono text-xs uppercase">{t('migration.preparing')}</span>
            </div>
         )}
         
@@ -172,13 +174,13 @@ export default function MigrationSendPage() {
            <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center text-accent z-10">
               <FiUploadCloud size={40} className="animate-bounce mb-2" />
               <span className="font-bold font-mono text-xl">{progress}%</span>
-              <span className="font-mono text-[10px] uppercase mt-2">Tunneling...</span>
+              <span className="font-mono text-[10px] uppercase mt-2">{t('migration.status_tunneling')}</span>
            </div>
         )}
       </div>
 
       <Link to="/settings" className="text-xs font-mono text-text-secondary hover:text-accent uppercase tracking-widest">
-        [ CANCEL ]
+        {t('actions.cancel_bracket')}
       </Link>
     </div>
   );

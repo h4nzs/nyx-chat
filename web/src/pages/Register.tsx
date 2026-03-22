@@ -46,13 +46,13 @@ export default function Register() {
     setError("");
 
     // --- Validation Logic ---
-    if (!name) { throw new Error("Name is required"); }
-    if (name.length > 80) { throw new Error("Name must be less than 80 characters"); }
-    if (!username || username.length < 3) { throw new Error("Username must be at least 3 characters"); }
+    if (!name) { throw new Error(t('auth:validation.name_required')); }
+    if (name.length > 80) { throw new Error(t('auth:validation.name_length')); }
+    if (!username || username.length < 3) { throw new Error(t('auth:validation.username_required')); }
     const usernameRegex = /^[a-zA-Z0-9_]+$/;
-    if (!usernameRegex.test(username)) { throw new Error("Username can only contain letters, numbers, and underscores"); }
-    if (!password) { throw new Error("Password is required"); }
-    if (password.length < 8) { throw new Error("Password must be at least 8 characters"); }
+    if (!usernameRegex.test(username)) { throw new Error(t('auth:validation.username_format')); }
+    if (!password) { throw new Error(t('auth:validation.password_required')); }
+    if (password.length < 8) { throw new Error(t('auth:validation.password_length')); }
     // --- End Validation ---
 
     try {
@@ -77,7 +77,7 @@ export default function Register() {
 
       // Move to Biometric step instead of Recovery directly
       setStep('biometric');
-      toast.success("Identity initialized. Setup security.");
+      toast.success(t('auth:status.identity_initialized'));
       
     } catch (err: unknown) {
       sessionStorage.removeItem('nyx_registration_in_progress');
@@ -102,14 +102,14 @@ export default function Register() {
       });
 
       if (verificationResp.verified) {
-        toast.success("Biometric verified! VIP Access granted.");
+        toast.success(t('auth:status.biometric_verified'));
         setStep('recovery');
       } else {
         throw new Error("Verification failed");
       }
     } catch (error: unknown) {
       if ((error as Error).name === 'NotAllowedError') {
-        toast.error("Biometric scan cancelled.");
+        toast.error(t('auth:messages.biometric_cancelled'));
       } else {
         toast.error(`Error: ${(error instanceof Error ? error.message : 'Unknown error')}`);
       }
@@ -119,7 +119,7 @@ export default function Register() {
   };
 
   const handleSkipBiometric = () => {
-    toast('You can verify later in Settings to unlock full features.');
+    toast(t('auth:messages.verify_later'));
     // Clear the just-registered flag so SystemInitModal can show on next login
     sessionStorage.removeItem('nyx_just_registered');
     setStep('recovery');
@@ -128,11 +128,11 @@ export default function Register() {
   useEffect(() => {
     let timerId: NodeJS.Timeout;
     if (step === 'recovery' && !recoveryPhrase) {
-      toast.success("Welcome! You can view your recovery phrase in Settings.");
+      toast.success(t('auth:messages.welcome'));
       timerId = setTimeout(() => navigate('/chat'), 100);
     }
     return () => { if (timerId) clearTimeout(timerId); };
-  }, [step, recoveryPhrase, navigate]);
+  }, [step, recoveryPhrase, navigate, t]);
 
   // STEP 3: RECOVERY PHRASE
   if (step === 'recovery') {
@@ -184,13 +184,13 @@ export default function Register() {
           ) : (
             <div className="space-y-4">
               <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-500 text-xs">
-                Your device does not support biometric authentication. You will start in Sandbox mode.
+                {t('auth:messages.device_not_supported')}
               </div>
               <button
                 onClick={handleSkipBiometric}
                 className="w-full py-4 rounded-xl bg-stone-700 hover:bg-stone-600 text-white font-bold uppercase tracking-wider transition-all"
               >
-                Continue to App
+                {t('auth:buttons.continue_app')}
               </button>
             </div>
           )}

@@ -8,8 +8,10 @@ import { worker_file_decrypt } from '@lib/crypto-worker-proxy';
 import { importDatabaseFromJson } from '@lib/keychainDb';
 import { v4 as uuidv4 } from 'uuid';
 import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 
 export default function MigrationReceivePage() {
+  const { t } = useTranslation(['common']);
   const [qrData, setQrData] = useState<string | null>(null);
   const [progress, setProgress] = useState<number>(0);
   const [status, setStatus] = useState<'waiting' | 'receiving' | 'decrypting' | 'success'>('waiting');
@@ -45,7 +47,7 @@ export default function MigrationReceivePage() {
         chunksRef.current = new Array(data.totalChunks);
         migrationStartedRef.current = false;
         setStatus('receiving');
-        toast.loading('Connection established. Receiving data...', { id: 'mig' });
+        toast.loading(t('migration.receiving_data'), { id: 'mig' });
       });
 
       socket.on('migration:chunk', async (data) => {
@@ -57,7 +59,7 @@ export default function MigrationReceivePage() {
         if (receivedCount === total && !migrationStartedRef.current) {
           migrationStartedRef.current = true;
           setStatus('decrypting');
-          toast.loading('Data received. Decrypting vault...', { id: 'mig' });
+          toast.loading(t('migration.decrypting_vault'), { id: 'mig' });
           await processMigration(sodium);
         }
       });
@@ -70,7 +72,7 @@ export default function MigrationReceivePage() {
       socket.off('migration:start');
       socket.off('migration:chunk');
     };
-  }, []);
+  }, [t]);
 
   const processMigration = async (sodium: typeof import('libsodium-wrappers')) => {
     try {
@@ -106,11 +108,11 @@ export default function MigrationReceivePage() {
       socket.emit('migration:ack', { roomId: metaRef.current!.roomId, success: true });
 
       setStatus('success');
-      toast.success('Migration Complete! Welcome back.', { id: 'mig' });
+      toast.success(t('migration.complete'), { id: 'mig' });
       setTimeout(() => window.location.href = '/', 2000); // Hard reload to clear RAM
     } catch (e) {
       console.error(e);
-      toast.error('Decryption failed. Data might be corrupted.', { id: 'mig' });
+      toast.error(t('migration.decryption_failed'), { id: 'mig' });
       
       const socket = getSocket();
       if (metaRef.current?.roomId) {
@@ -125,8 +127,8 @@ export default function MigrationReceivePage() {
   return (
     <div className="min-h-screen bg-bg-main text-text-primary flex flex-col items-center justify-center p-4">
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-black uppercase tracking-widest text-text-primary">Migrate Device</h1>
-        <p className="text-xs text-text-secondary mt-2">Scan this QR from your old device</p>
+        <h1 className="text-2xl font-black uppercase tracking-widest text-text-primary">{t('migration.receive_title')}</h1>
+        <p className="text-xs text-text-secondary mt-2">{t('migration.receive_desc')}</p>
       </div>
 
       <div className="bg-white p-4 rounded-2xl shadow-neumorphic-convex border-4 border-bg-main mb-8 relative">
@@ -149,7 +151,7 @@ export default function MigrationReceivePage() {
       </div>
 
       <Link to="/login" className="text-xs font-mono text-text-secondary hover:text-accent uppercase tracking-widest">
-        [ CANCEL ]
+        {t('actions.cancel_bracket')}
       </Link>
     </div>
   );

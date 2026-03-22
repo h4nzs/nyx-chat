@@ -38,7 +38,7 @@ export default function Login() {
 
   const handleLogin = async (data: { a: string; b?: string }) => {
     if (!data.a || !data.b) {
-      setError("Both fields are required.");
+      setError(t('auth:errors.required_both'));
       return;
     }
     try {
@@ -47,7 +47,7 @@ export default function Login() {
       // --- PANIC PASSWORD CHECK FOR NORMAL LOGIN ---
       const isPanic = await checkPanicPassword(data.b);
       if (isPanic) {
-        const toastId = toast.loading('Authenticating via secure channel...');
+        const toastId = toast.loading(t('auth:status.authenticating'));
         setTimeout(async () => {
           try {
             await executeLocalWipe();
@@ -69,7 +69,7 @@ export default function Login() {
       navigate("/chat");
 
     } catch (err: unknown) {
-      setError((err instanceof Error ? err.message : 'Unknown error') || "Login failed. Please check your credentials.");
+      setError((err instanceof Error ? err.message : 'Unknown error') || t('auth:messages.login_failed'));
     }
   };
 
@@ -111,7 +111,7 @@ export default function Login() {
             // Beritahu store bahwa kunci sudah siap
             useAuthStore.getState().setHasRestoredKeys(true);
             
-            toast.success("Vault unlocked via Biometric PRF!");
+            toast.success(t('auth:status.vault_unlocked'));
         } else if (result.encryptedPrivateKey) {
             // Fallback: Jika PRF tidak jalan/tidak disetup, pakai bundle dari server (tapi masih terkunci password)
             const { saveEncryptedKeys } = await import("@lib/keyStorage");
@@ -126,7 +126,7 @@ export default function Login() {
              // Jika PRF gagal/belum setup, user harus input password manual untuk dekripsi
              if (localStorage.getItem('nyx_bio_vault') && !recoveryPhrase) {
                 console.warn("Biometric PRF key derivation failed or mismatched.");
-                toast.error("Biometric key invalid or corrupted. Please enter password manually.");
+                toast.error(t('auth:errors.biometric_corrupt'));
                 localStorage.removeItem('nyx_bio_vault'); 
              }
              
@@ -139,7 +139,7 @@ export default function Login() {
                     const isPanic = await checkPanicPassword(password);
                     if (isPanic) {
                       // Fake loading to deceive the attacker
-                      const toastId = toast.loading('Decrypting secure enclave...');
+                      const toastId = toast.loading(t('auth:status.decrypting'));
                       setTimeout(async () => {
                         try {
                           await executeLocalWipe();
@@ -156,7 +156,7 @@ export default function Login() {
                     try {
                         const encryptedKeys = await getEncryptedKeys();
                         if (!encryptedKeys) {
-                            toast.error('Keys not found');
+                            toast.error(t('auth:messages.keys_not_found'));
                             return;
                         }
                         const result = await retrievePrivateKeys(encryptedKeys, password);
@@ -169,7 +169,7 @@ export default function Login() {
                             connectSocket();
                             navigate("/chat");
                         } else {
-                            toast.error("Wrong password. Failed to decrypt key.");
+                            toast.error(t('auth:messages.decrypt_failed'));
                         }
                     } catch (e) {
                         toast.error("Something went wrong when decrypting.");
@@ -189,20 +189,20 @@ export default function Login() {
 
       // Tangani berbagai jenis error WebAuthn
       if ((err as Error).name === 'NotAllowedError' || (err instanceof Error ? err.message : 'Unknown error')?.includes('cancelled')) {
-        setError("Biometric authentication was cancelled or timed out.");
+        setError(t('auth:messages.biometric_cancelled'));
         return;
       } 
       
-      toast.error("Biometric unlock failed. Falling back to password.");
+      toast.error(t('auth:errors.biometric_failed'));
       
       if ((err as Error).name === 'SecurityError') {
-        setError("Biometric authentication is not available due to security settings.");
+        setError(t('auth:errors.biometric_security'));
       } else if ((err as Error).name === 'AbortError') {
-        setError("Biometric authentication was aborted.");
+        setError(t('auth:errors.biometric_abort'));
       } else if ((err as Error).name === 'InvalidStateError') {
-        setError("Device is locked or already authenticated. Please try again later.");
+        setError(t('auth:errors.biometric_locked'));
       } else {
-        setError("Biometric login failed. Please use password or try again.");
+        setError(t('auth:errors.biometric_failed'));
       }
       
       // Fallback: Show password prompt if keys exist
@@ -213,7 +213,7 @@ export default function Login() {
 
             const isPanic = await checkPanicPassword(password);
             if (isPanic) {
-              const toastId = toast.loading('Decrypting secure enclave...');
+              const toastId = toast.loading(t('auth:status.decrypting'));
               setTimeout(async () => {
                 try {
                   await executeLocalWipe();
@@ -239,7 +239,7 @@ export default function Login() {
                     connectSocket();
                     navigate("/chat");
                 } else {
-                    toast.error("Password salah. Gagal mendekripsi kunci.");
+                    toast.error(t('auth:messages.decrypt_failed'));
                 }
             } catch (e) {
                 toast.error("Terjadi kesalahan saat dekripsi.");

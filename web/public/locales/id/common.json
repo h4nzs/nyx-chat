@@ -3,11 +3,13 @@
     "loading": "Memuat...",
     "submit": "Kirim",
     "cancel": "Batal",
+    "cancel_bracket": "[ BATAL ]",
     "save": "Simpan",
     "delete": "Hapus",
     "verify": "Verifikasi",
     "skip": "Lewati",
-    "continue": "Lanjutkan"
+    "continue": "Lanjutkan",
+    "return": "Kembali"
   },
   "nav": {
     "home": "Beranda",
@@ -20,5 +22,61 @@
     "unknown": "Terjadi kesalahan yang tidak diketahui",
     "network": "Kesalahan jaringan, silakan coba lagi",
     "required": "Kolom ini wajib diisi"
+  },
+  "defaults": {
+    "encrypted_user": "Pengguna Terenkripsi"
+  },
+  "connect": {
+    "invalid_link": "Tautan koneksi tidak valid",
+    "user_not_found": "Pengguna tidak ditemukan atau Anda sedang offline.",
+    "own_profile": "Ini adalah profil Anda sendiri!",
+    "confirm_title": "Koneksi Aman Baru",
+    "confirm_desc": "Apakah Anda ingin memulai percakapan aman dengan {{name}}?",
+    "connecting_to": "Menghubungkan ke {{name}}...",
+    "connected": "Terhubung!",
+    "failed_start": "Gagal memulai percakapan.",
+    "error_processing": "Kesalahan memproses tautan koneksi.",
+    "decrypting_profile": "MENDEKRIPSI PROFIL..."
+  },
+  "migration": {
+    "receiving_data": "Koneksi terjalin. Menerima data...",
+    "decrypting_vault": "Data diterima. Mendekripsi brankas...",
+    "complete": "Migrasi Selesai! Selamat datang kembali.",
+    "decryption_failed": "Dekripsi gagal. Data mungkin rusak.",
+    "receive_title": "Migrasi Perangkat",
+    "receive_desc": "Pindai QR ini dari perangkat lama Anda",
+    "read_vault_failed": "Gagal membaca brankas lokal.",
+    "camera_denied": "Akses kamera ditolak atau tidak tersedia.",
+    "encrypting_vault": "Mengenkripsi data brankas...",
+    "tunneling": "Mengirim data ke perangkat baru...",
+    "waiting_receiver": "Menunggu penerima memproses...",
+    "transfer_complete": "Transfer Selesai!",
+    "receiver_failed": "Penerima gagal mendekripsi atau waktu habis",
+    "failed_generic": "Migrasi gagal. QR tidak valid, kesalahan jaringan, atau waktu habis.",
+    "send_title": "Transfer Brankas",
+    "send_desc": "Kirim data ke perangkat baru Anda",
+    "preparing": "MENYIAPKAN BRANKAS...",
+    "status_tunneling": "MENGIRIM..."
+  },
+  "not_found": {
+    "title": "Halaman Tidak Ditemukan",
+    "desc": "Jalur terenkripsi yang Anda coba akses tidak ada atau telah dihapus dari sistem.",
+    "return_btn": "Kembali ke Basis"
+  },
+  "footer": {
+    "brand_protocol": "Protokol Aman NYX"
+  },
+  "profile": {
+    "user_not_found": "Pengguna tidak ditemukan",
+    "home_server": "Server Rumah",
+    "session_status": "Status Sesi",
+    "encrypted": "TERENKRIPSI",
+    "editing_notice": "Pengeditan profil dikelola di Pengaturan",
+    "verified_operator": "OPERATOR TERVERIFIKASI",
+    "system_telemetry": "Telemetri Sistem",
+    "bio_data": "Data Biografis",
+    "key_not_generated": "Kunci belum dibuat.",
+    "refresh_keys": "Segarkan Kunci",
+    "revoke_access": "Cabut Akses"
   }
 }

@@ -18,7 +18,7 @@ type ProfileUser = User & {
 };
 
 export default function ProfilePage() {
-  const { t } = useTranslation(['settings']);
+  const { t } = useTranslation(['settings', 'common']);
   const { userId: rawUserId } = useParams<{ userId: string }>();
   const userId = rawUserId ? asUserId(rawUserId) : undefined;
   
@@ -66,15 +66,15 @@ export default function ProfilePage() {
   }, [profile]);
 
   const stats = [
-    { label: t('settings:profile_page.security_clearance'), value: profileUser?.isVerified ? 'VERIFIED' : 'UNVERIFIED', color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
-    { label: t('settings:profile_page.encryption_protocol'), value: profileUser?.publicKey ? 'ACTIVE' : 'INACTIVE', color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', icon: FiKey },
-    { label: 'Home Server', value: 'ap-southeast-1', color: 'text-blue-500', icon: FiGlobe },
-    { label: 'Session Status', value: 'ENCRYPTED', color: 'text-emerald-500', icon: FiActivity },
+    { label: t('settings:profile_page.security_clearance'), value: profileUser?.isVerified ? t('settings:identity.verified') : 'UNVERIFIED', color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
+    { label: t('settings:profile_page.encryption_protocol'), value: profileUser?.publicKey ? t('settings:profile_page.active') : 'INACTIVE', color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', icon: FiKey },
+    { label: t('common:profile.home_server'), value: 'ap-southeast-1', color: 'text-blue-500', icon: FiGlobe },
+    { label: t('common:profile.session_status'), value: t('common:profile.encrypted'), color: 'text-emerald-500', icon: FiActivity },
   ];
 
   const handleSave = async () => {
     setIsEditing(false);
-    toast('Profile editing is managed in Settings', { icon: 'ℹ️' });
+    toast(t('common:profile.editing_notice'), { icon: 'ℹ️' });
   };
 
   const handleAvatarUpload = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -82,7 +82,7 @@ export default function ProfilePage() {
   };
 
   if (isFetching) return <div className="h-full flex items-center justify-center bg-bg-main"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-accent"></div></div>;
-  if (!profileUser) return <div className="h-full flex items-center justify-center bg-bg-main text-text-secondary">User not found</div>;
+  if (!profileUser) return <div className="h-full flex items-center justify-center bg-bg-main text-text-secondary">{t('common:profile.user_not_found')}</div>;
 
   return (
     <div className="h-full overflow-y-auto bg-bg-main p-4 md:p-8">
@@ -142,7 +142,7 @@ export default function ProfilePage() {
               <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">{profile.name}</h2>
               {profileUser.isVerified && (
                 <div className="mt-2 inline-block px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-bold tracking-widest uppercase">
-                  VERIFIED OPERATOR
+                  {t('common:profile.verified_operator')}
                 </div>
               )}
             </div>
@@ -150,7 +150,7 @@ export default function ProfilePage() {
             {/* Technical Stats Widget */}
             <div className="bg-bg-main rounded-xl p-5 shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5">
               <h3 className="text-xs font-black uppercase tracking-widest text-text-secondary mb-4 flex items-center gap-2">
-                <FiCpu /> System Telemetry
+                <FiCpu /> {t('common:profile.system_telemetry')}
               </h3>
               <div className="space-y-4">
                 {stats.map((stat) => (
@@ -172,7 +172,7 @@ export default function ProfilePage() {
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-bg-main rounded-2xl p-8 shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5">
               <h3 className="text-xs font-black uppercase tracking-widest text-text-secondary mb-6 border-b border-black/5 dark:border-white/5 pb-2">
-                Biographical Data
+                {t('common:profile.bio_data')}
               </h3>
               
               <div className="space-y-6">
@@ -209,15 +209,15 @@ export default function ProfilePage() {
                 {t('settings:profile_page.public_key')}
               </h3>
               <div className="font-mono text-[10px] leading-relaxed text-text-secondary break-all bg-black/5 dark:bg-black/20 p-4 rounded-lg border border-black/5 dark:border-white/5 shadow-neu-pressed dark:shadow-neu-pressed-dark">
-                {profileUser.publicKey || "Key not generated yet."}
+                {profileUser.publicKey || t('common:profile.key_not_generated')}
               </div>
               {isMe && (
                 <div className="mt-4 flex gap-4">
                    <button className="text-xs font-bold text-accent hover:underline uppercase tracking-wide">
-                     Refresh Keys
+                     {t('common:profile.refresh_keys')}
                    </button>
                    <button className="text-xs font-bold text-red-500 hover:underline uppercase tracking-wide">
-                     Revoke Access
+                     {t('common:profile.revoke_access')}
                    </button>
                 </div>
               )}

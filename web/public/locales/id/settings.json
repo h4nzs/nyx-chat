@@ -19,7 +19,8 @@
     "display_name": "Nama Tampilan",
     "bio": "Biodata",
     "save_btn": "Simpan Identitas",
-    "processing": "Memproses..."
+    "processing": "Memproses...",
+    "limited_access": "Kemampuan akun terbatas. Verifikasi untuk membuka kunci."
   },
   "power": {
     "refuel_title": "Isi Ulang Pengembang",
@@ -52,6 +53,17 @@
     "import_vault": "Impor Brankas",
     "transfer": "Transfer ke Perangkat Baru (QR)"
   },
+  "smart": {
+    "ai_reply": "Balasan Cerdas AI",
+    "privacy_note": "Catatan Privasi:"
+  },
+  "support": {
+    "push_notif": "Notifikasi Push",
+    "background_guide": "Panduan Eksekusi Latar Belakang",
+    "help_center": "Pusat Bantuan",
+    "report_bug": "Laporkan Bug",
+    "legal": "Hukum & Privasi"
+  },
   "emergency": {
     "eject": "Ejeksi Darurat",
     "terminate_sessions": "Hentikan Semua Sesi",
@@ -62,8 +74,16 @@
     "upgrade_title": "Tingkatkan ke VIP",
     "delete_confirm_title": "Konfirmasi Penghapusan",
     "final_warning": "PERINGATAN TERAKHIR",
+    "confirm_password": "Konfirmasi Kata Sandi",
     "abort": "Batalkan",
-    "execute_delete": "Eksekusi Hapus"
+    "execute_delete": "Eksekusi Hapus",
+    "sandbox_mode": "Anda saat ini dalam <1>Mode Sandbox</1>. Tingkatkan untuk menghapus batas pesan dan membuka pembuatan grup.",
+    "instant_biometric": "Biometrik Instan",
+    "biometric_desc": "Gunakan Sidik Jari atau FaceID. Membutuhkan 1 detik.",
+    "pow_mining": "Penambangan Proof of Work",
+    "pow_idle": "Selesaikan teka-teki kriptografi dengan CPU Anda. Membutuhkan 5-10 detik.",
+    "pow_mining_status": "Menambang tumbukan hash... CPU 100%",
+    "pow_verifying": "Memverifikasi bukti..."
   },
   "profile_page": {
     "title": "Profil Operator",
@@ -72,5 +92,52 @@
     "security_clearance": "Izin Keamanan",
     "encryption_protocol": "Protokol Enkripsi",
     "public_key": "Kunci Identitas Publik"
+  },
+  "sessions_page": {
+    "title": "Node Jaringan",
+    "subtitle": "Monitor Koneksi Aktif",
+    "scanning": "Memindai Jaringan...",
+    "no_nodes": "Tidak ada node aktif terdeteksi.",
+    "current": "SAAT INI",
+    "ip": "IP:",
+    "last_ping": "PING_TERAKHIR:"
+  },
+  "keys_page": {
+    "title": "Brankas Kriptografi",
+    "subtitle": "Protokol Enkripsi Ujung-ke-Ujung",
+    "description": "Kunci pribadi Anda adalah satu-satunya cara untuk mendekripsi pesan Anda. Kunci ini disimpan secara lokal di perangkat ini. <1>Kehilangan kunci ini berarti kehilangan riwayat pesan Anda selamanya.</1>",
+    "recovery_title": "Frasa Pemulihan Utama",
+    "recovery_desc": "Tampilkan 24-kata frasa benih Anda untuk cadangan.",
+    "reveal_btn": "Tampilkan Frasa",
+    "rotation_title": "Rotasi Kunci (Destruktif)",
+    "rotation_desc": "Menghasilkan kunci identitas baru. Pesan lama tidak akan bisa dibaca.",
+    "rotate_btn": "Putar Kunci",
+    "confirm_rotation_title": "MULAI ROTASI KUNCI?",
+    "confirm_rotation_desc": "PERINGATAN: TINDAKAN DESTRUKTIF. Riwayat pesan sebelumnya tidak akan bisa didekripsi. Tindakan ini tidak dapat dibatalkan."
+  },
+  "messages": {
+    "account_obliterated": "Akun dimusnahkan.",
+    "deletion_failed": "Penghapusan gagal: {{error}}",
+    "identity_updated": "Identitas Diperbarui",
+    "update_failed": "Pembaruan gagal: {{error}}",
+    "biometric_initializing": "Menginisialisasi pemindai biometrik...",
+    "biometric_scan_now": "Pindai sidik jari sekarang untuk MENGUNCI brankas Anda...",
+    "biometric_success": "Biometrik aktif! Anda sekarang dapat masuk tanpa kata sandi.",
+    "mining_connecting": "Menghubungkan ke kolam penambangan...",
+    "mining_processing": "Menambang teka-teki kriptografi... (Intensif CPU)",
+    "mining_verifying": "Memverifikasi bukti...",
+    "mining_success": "Bukti Diterima! Akun ditingkatkan ke VIP.",
+    "mining_failed": "Penambangan gagal: {{error}}",
+    "export_success": "Brankas berhasil diekspor! Simpan file ini dengan aman.",
+    "export_failed": "Gagal mengekspor brankas.",
+    "import_success": "Brankas berhasil diimpor! Memuat ulang...",
+    "import_failed": "File brankas tidak valid atau data rusak.",
+    "emergency_revoking": "Mencabut sesi server...",
+    "emergency_success": "Sesi dicabut. Memulai penghapusan lokal...",
+    "emergency_failed": "Gagal mencabut sesi jarak jauh. Periksa koneksi jaringan Anda.",
+    "ejecting": "Mengeuarkan sesi...",
+    "terminated": "Sesi dihentikan.",
+    "eject_failed": "Pengeluaran gagal.",
+    "keys_rotated": "Kunci Diputar. Memulai Ulang Sesi..."
   }
 }

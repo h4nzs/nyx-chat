@@ -19,7 +19,8 @@
     "display_name": "Display Name",
     "bio": "Bio-Data",
     "save_btn": "Save Identity",
-    "processing": "Processing..."
+    "processing": "Processing...",
+    "limited_access": "Limited account capabilities. Verify to unlock."
   },
   "power": {
     "refuel_title": "Refuel the Developer",
@@ -52,6 +53,17 @@
     "import_vault": "Import Vault",
     "transfer": "Transfer to New Device (QR)"
   },
+  "smart": {
+    "ai_reply": "AI Smart Reply",
+    "privacy_note": "Privacy Note:"
+  },
+  "support": {
+    "push_notif": "Push Notifications",
+    "background_guide": "Background Execution Guide",
+    "help_center": "Help Center",
+    "report_bug": "Report Bug",
+    "legal": "Legal & Privacy"
+  },
   "emergency": {
     "eject": "Emergency Eject",
     "terminate_sessions": "Terminate All Sessions",
@@ -62,8 +74,16 @@
     "upgrade_title": "Upgrade to VIP",
     "delete_confirm_title": "Confirm Deletion",
     "final_warning": "FINAL WARNING",
+    "confirm_password": "Confirm Password",
     "abort": "Abort",
-    "execute_delete": "Execute Delete"
+    "execute_delete": "Execute Delete",
+    "sandbox_mode": "You are currently in <1>Sandbox Mode</1>. Upgrade to remove messaging limits and unlock group creation.",
+    "instant_biometric": "Instant Biometric",
+    "biometric_desc": "Use Fingerprint or FaceID. Takes 1 second.",
+    "pow_mining": "Proof of Work Mining",
+    "pow_idle": "Solve a cryptographic puzzle with your CPU. Takes 5-10 seconds.",
+    "pow_mining_status": "Mining hash collision... CPU at 100%",
+    "pow_verifying": "Verifying proof..."
   },
   "profile_page": {
     "title": "Operator Profile",
@@ -72,5 +92,52 @@
     "security_clearance": "Security Clearance",
     "encryption_protocol": "Encryption Protocol",
     "public_key": "Public Identity Key"
+  },
+  "sessions_page": {
+    "title": "Network Nodes",
+    "subtitle": "Active Connections Monitor",
+    "scanning": "Scanning Network...",
+    "no_nodes": "No active nodes detected.",
+    "current": "CURRENT",
+    "ip": "IP:",
+    "last_ping": "LAST_PING:"
+  },
+  "keys_page": {
+    "title": "Cryptographic Vault",
+    "subtitle": "End-to-End Encryption Protocol",
+    "description": "Your private keys are the only way to decrypt your messages. They are stored locally on this device. <1>Losing these keys means losing your message history forever.</1>",
+    "recovery_title": "Master Recovery Phrase",
+    "recovery_desc": "Reveal your 24-word seed phrase for backup.",
+    "reveal_btn": "Reveal Phrase",
+    "rotation_title": "Key Rotation (Destructive)",
+    "rotation_desc": "Generates new identity keys. Old messages will become unreadable.",
+    "rotate_btn": "Rotate Keys",
+    "confirm_rotation_title": "INITIATE KEY ROTATION?",
+    "confirm_rotation_desc": "WARNING: DESTRUCTIVE ACTION. Previous message history will become undecryptable. This action is irreversible."
+  },
+  "messages": {
+    "account_obliterated": "Account obliterated.",
+    "deletion_failed": "Deletion failed: {{error}}",
+    "identity_updated": "Identity Updated",
+    "update_failed": "Update failed: {{error}}",
+    "biometric_initializing": "Initializing biometric scanner...",
+    "biometric_scan_now": "Scan fingerprint now to LOCK your vault...",
+    "biometric_success": "Biometric active! You can now login without password.",
+    "mining_connecting": "Connecting to mining pool...",
+    "mining_processing": "Mining cryptographic puzzle... (CPU Intensive)",
+    "mining_verifying": "Verifying proof...",
+    "mining_success": "Proof Accepted! Account upgraded to VIP.",
+    "mining_failed": "Mining failed: {{error}}",
+    "export_success": "Vault exported successfully! Keep this file safe.",
+    "export_failed": "Failed to export vault.",
+    "import_success": "Vault imported successfully! Reloading...",
+    "import_failed": "Invalid vault file or corrupted data.",
+    "emergency_revoking": "Revoking server sessions...",
+    "emergency_success": "Sessions revoked. Initiating local wipe...",
+    "emergency_failed": "Failed to revoke remote sessions. Check your network connection.",
+    "ejecting": "Ejecting session...",
+    "terminated": "Session terminated.",
+    "eject_failed": "Ejection failed.",
+    "keys_rotated": "Keys Rotated. Rebooting Session..."
   }
 }

@@ -4,6 +4,7 @@ import { toast } from 'react-hot-toast';
 import { Spinner } from '@components/Spinner';
 import { Link } from 'react-router-dom';
 import { FiMonitor, FiSmartphone, FiLogOut, FiChevronLeft, FiServer } from 'react-icons/fi';
+import { useTranslation } from 'react-i18next';
 
 const parseUserAgent = (ua: string) => {
   if (!ua) return { browser: 'Unknown', os: 'Device' };
@@ -18,6 +19,7 @@ const parseUserAgent = (ua: string) => {
 const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean, [key: string]: unknown }, onLogout: (jti: string) => void, isCurrent: boolean }) => {
   const { browser, os } = parseUserAgent(session.userAgent);
   const Icon = os === 'Mobile' ? FiSmartphone : FiMonitor;
+  const { t } = useTranslation('settings');
 
   return (
     <div className={`
@@ -45,13 +47,13 @@ const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: 
           <div className="flex items-center gap-2">
             <h3 className="font-bold text-text-primary uppercase tracking-wide text-sm">{os} / {browser}</h3>
             {isCurrent && (
-               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-green-500 text-white shadow-sm">CURRENT</span>
+               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-green-500 text-white shadow-sm">{t('sessions_page.current')}</span>
             )}
           </div>
           
           <div className="font-mono text-xs text-text-secondary mt-1 space-y-0.5 opacity-80">
-            <p>IP: <span className="text-text-primary">{session.ipAddress}</span></p>
-            <p>LAST_PING: {new Date(session.lastUsedAt).toLocaleString()}</p>
+            <p>{t('sessions_page.ip')} <span className="text-text-primary">{session.ipAddress}</span></p>
+            <p>{t('sessions_page.last_ping')} {new Date(session.lastUsedAt).toLocaleString()}</p>
           </div>
         </div>
       </div>
@@ -76,6 +78,7 @@ const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: 
 };
 
 export default function SessionManagerPage() {
+  const { t } = useTranslation('settings');
   const [sessions, setSessions] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -106,13 +109,13 @@ export default function SessionManagerPage() {
   }, []);
 
   const handleLogoutSession = async (jti: string) => {
-    const toastId = toast.loading('Ejecting session...');
+    const toastId = toast.loading(t('messages.ejecting'));
     try {
       await api(`/api/sessions/${jti}`, { method: 'DELETE' });
       setSessions(prev => prev.filter(s => s.jti !== jti));
-      toast.success('Session terminated.', { id: toastId });
+      toast.success(t('messages.terminated'), { id: toastId });
     } catch (error) {
-      toast.error('Ejection failed.', { id: toastId });
+      toast.error(t('messages.eject_failed'), { id: toastId });
     }
   };
 
@@ -134,8 +137,8 @@ export default function SessionManagerPage() {
             <FiChevronLeft size={20} />
           </Link>
           <div className="flex flex-col items-end">
-             <h1 className="text-xl font-black uppercase tracking-widest text-text-primary">Network Nodes</h1>
-             <p className="text-[10px] font-mono text-text-secondary uppercase">Active Connections Monitor</p>
+             <h1 className="text-xl font-black uppercase tracking-widest text-text-primary">{t('sessions_page.title')}</h1>
+             <p className="text-[10px] font-mono text-text-secondary uppercase">{t('sessions_page.subtitle')}</p>
           </div>
       </div>
 
@@ -143,7 +146,7 @@ export default function SessionManagerPage() {
         {loading ? (
           <div className="flex flex-col items-center justify-center h-64 text-text-secondary">
              <Spinner size="lg" />
-             <p className="mt-4 font-mono text-xs animate-pulse">Scanning Network...</p>
+             <p className="mt-4 font-mono text-xs animate-pulse">{t('sessions_page.scanning')}</p>
           </div>
         ) : (
           <div className="space-y-6">
@@ -165,7 +168,7 @@ export default function SessionManagerPage() {
             {sessions.length === 0 && (
                <div className="p-8 text-center text-text-secondary opacity-50">
                   <FiServer size={48} className="mx-auto mb-4" />
-                  <p>No active nodes detected.</p>
+                  <p>{t('sessions_page.no_nodes')}</p>
                </div>
             )}
           </div>

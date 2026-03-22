@@ -1,6 +1,6 @@
 import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
+import { useTranslation, Trans } from 'react-i18next';
 import { useAuthStore } from '@store/auth';
 import { useModalStore } from '@store/modal';
 import { useShallow } from 'zustand/react/shallow';
@@ -181,12 +181,12 @@ export default function SettingsPage() {
         // 3. Nuke Local
         await executeLocalWipe();
         
-        toast.success("Account obliterated.");
+        toast.success(t('settings:messages.account_obliterated'));
         window.location.replace('/');
     } catch (error: unknown) {
         setIsDeleting(false);
         const errorMsg = (error as Record<string, unknown>).details ? JSON.parse((error as Record<string, unknown>).details as string).error : (error instanceof Error ? error.message : 'Unknown error');
-        toast.error(`Deletion failed: ${errorMsg}`);
+        toast.error(t('settings:messages.deletion_failed', { error: errorMsg }));
     }
   };
 
@@ -264,10 +264,10 @@ export default function SettingsPage() {
       // Force update the local cache
       useProfileStore.getState().decryptAndCache(user!.id, encryptedProfile);
 
-      toast.success('Identity Updated');
+      toast.success(t('settings:messages.identity_updated'));
     } catch (error: unknown) {
       const errorMsg = (error as Record<string, unknown>).details ? JSON.parse((error as Record<string, unknown>).details as string).error : (error instanceof Error ? error.message : 'Unknown error');
-      toast.error(`Update failed: ${errorMsg}`);
+      toast.error(t('settings:messages.update_failed', { error: errorMsg }));
     } finally {
       setIsLoading(false);
     }
@@ -302,11 +302,11 @@ export default function SettingsPage() {
           });
       }
 
-      toast.loading("Initializing biometric scanner...", { id: 'passkey' });
+      toast.loading(t('settings:messages.biometric_initializing'), { id: 'passkey' });
       // Force creation of a NEW credential (even if one exists) to ensure PRF support is enabled
       const options = await api<unknown>("/api/auth/webauthn/register/options?force=true");
       
-      toast.loading("Scan fingerprint now to LOCK your vault...", { id: 'passkey' });
+      toast.loading(t('settings:messages.biometric_scan_now'), { id: 'passkey' });
       
       // 2. Setup Biometric with PRF (Magic Happens Here)
       // Ini akan mendaftarkan jari ke server SEKALIGUS mengenkripsi phrase di lokal
@@ -319,7 +319,7 @@ export default function SettingsPage() {
       });
 
       if (verificationResp.verified) {
-        toast.success("Biometric active! You can now login without password.", { id: 'passkey' });
+        toast.success(t('settings:messages.biometric_success'), { id: 'passkey' });
         setShowUpgradeModal(false);
         setHasBioVault(true);
         if (user) setUser({ ...user, isVerified: true });
@@ -337,19 +337,19 @@ export default function SettingsPage() {
 
   const handleProofOfWork = async () => {
     setMiningStatus('mining');
-    const toastId = toast.loading("Connecting to mining pool...");
+    const toastId = toast.loading(t('settings:messages.mining_connecting'));
     
     try {
       // 1. Get Challenge
       const { salt, difficulty } = await api<{ salt: string, difficulty: number }>('/api/auth/pow/challenge');
       
-      toast.loading("Mining cryptographic puzzle... (CPU Intensive)", { id: toastId });
+      toast.loading(t('settings:messages.mining_processing'), { id: toastId });
       
       // 2. Mine in Worker (Non-blocking)
       const { nonce } = await minePoW(salt, difficulty);
       
       setMiningStatus('verifying');
-      toast.loading("Verifying proof...", { id: toastId });
+      toast.loading(t('settings:messages.mining_verifying'), { id: toastId });
       
       // 3. Verify
       const result = await api<{ success: boolean }>('/api/auth/pow/verify', {
@@ -358,14 +358,14 @@ export default function SettingsPage() {
       });
       
       if (result.success) {
-        toast.success("Proof Accepted! Account upgraded to VIP.", { id: toastId });
+        toast.success(t('settings:messages.mining_success'), { id: toastId });
         setShowUpgradeModal(false);
         if (user) setUser({ ...user, isVerified: true });
       }
       
     } catch (error: unknown) {
       console.error(error);
-      toast.error(`Mining failed: ${(error instanceof Error ? error.message : 'Unknown error')}`, { id: toastId });
+      toast.error(t('settings:messages.mining_failed', { error: (error instanceof Error ? error.message : 'Unknown error') }), { id: toastId });
     } finally {
       setMiningStatus('idle');
     }
@@ -383,10 +383,10 @@ export default function SettingsPage() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast.success("Vault exported successfully! Keep this file safe.");
+      toast.success(t('settings:messages.export_success'));
     } catch (error) {
       console.error("Export failed:", error);
-      toast.error("Failed to export vault.");
+      toast.error(t('settings:messages.export_failed'));
     }
   };
 
@@ -399,11 +399,11 @@ export default function SettingsPage() {
       try {
         const json = event.target?.result as string;
         await importDatabaseFromJson(json);
-        toast.success("Vault imported successfully! Reloading...");
+        toast.success(t('settings:messages.import_success'));
         setTimeout(() => window.location.reload(), 1000);
       } catch (error) {
         console.error("Import failed:", error);
-        toast.error("Invalid vault file or corrupted data.");
+        toast.error(t('settings:messages.import_failed'));
       }
     };
     reader.readAsText(file);
@@ -418,10 +418,10 @@ export default function SettingsPage() {
 
   const handleLogout = async () => {
     showConfirm(
-      "EMERGENCY EJECT",
+      t('settings:emergency.eject'),
       "This will instantly revoke your server sessions and obliterate all local cryptographic keys and data. Proceed?",
       async () => {
-        const toastId = toast.loading("Revoking server sessions...");
+        const toastId = toast.loading(t('settings:messages.emergency_revoking'));
         try {
           const { api } = await import('@lib/api');
           
@@ -433,13 +433,13 @@ export default function SettingsPage() {
           }
           await api('/api/auth/logout', { method: 'POST' }); // Kill current session
           
-          toast.success("Sessions revoked. Initiating local wipe...", { id: toastId });
+          toast.success(t('settings:messages.emergency_success'), { id: toastId });
           
           // Proceed to Absolute Nuke ONLY after server acknowledges session termination
           await executeLocalWipe();
         } catch (error: unknown) {
           console.error("Emergency eject API failed:", error);
-          toast.error("Failed to revoke remote sessions. Check your network connection.", { id: toastId });
+          toast.error(t('settings:messages.emergency_failed'), { id: toastId });
           // We abort the local wipe here as requested by the code review
         }
       }
@@ -973,8 +973,10 @@ export default function SettingsPage() {
       <ModalBase isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} title={t('settings:modals.upgrade_title')}>
         <div className="space-y-6">
            <p className="text-sm text-text-secondary text-center">
-             You are currently in <span className="text-yellow-500 font-bold">Sandbox Mode</span>. 
-             Upgrade to remove messaging limits and unlock group creation.
+             <Trans i18nKey="settings:modals.sandbox_mode">
+               You are currently in <span className="text-yellow-500 font-bold">Sandbox Mode</span>. 
+               Upgrade to remove messaging limits and unlock group creation.
+             </Trans>
            </p>
            
            <div className="grid grid-cols-1 gap-4">
@@ -987,8 +989,8 @@ export default function SettingsPage() {
                  <FiZap size={24} />
                </div>
                <div>
-                 <h3 className="font-bold text-text-primary">Instant Biometric</h3>
-                 <p className="text-xs text-text-secondary mt-1">Use Fingerprint or FaceID. Takes 1 second.</p>
+                 <h3 className="font-bold text-text-primary">{t('settings:modals.instant_biometric')}</h3>
+                 <p className="text-xs text-text-secondary mt-1">{t('settings:modals.biometric_desc')}</p>
                </div>
              </button>
 
@@ -1002,10 +1004,10 @@ export default function SettingsPage() {
                  {miningStatus === 'idle' ? <FiCpu size={24} /> : <Spinner size="sm" />}
                </div>
                <div>
-                 <h3 className="font-bold text-text-primary">Proof of Work Mining</h3>
+                 <h3 className="font-bold text-text-primary">{t('settings:modals.pow_mining')}</h3>
                  <p className="text-xs text-text-secondary mt-1">
-                   {miningStatus === 'idle' ? "Solve a cryptographic puzzle with your CPU. Takes 5-10 seconds." : 
-                    miningStatus === 'mining' ? "Mining hash collision... CPU at 100%" : "Verifying proof..."}
+                   {miningStatus === 'idle' ? t('settings:modals.pow_idle') : 
+                    miningStatus === 'mining' ? t('settings:modals.pow_mining_status') : t('settings:modals.pow_verifying')}
                  </p>
                </div>
              </button>
@@ -1021,16 +1023,14 @@ export default function SettingsPage() {
                 <div className="space-y-2">
                     <h4 className="text-red-500 font-bold text-sm">{t('settings:modals.final_warning')}</h4>
                     <p className="text-xs text-text-secondary leading-relaxed">
-                        You are about to execute a self-destruct sequence. 
-                        All messages, keys, and profile data will be wiped from the server.
-                        Orphaned files may remain in encrypted storage but will be inaccessible forever.
+                        {t('settings:emergency.delete_desc')}
                     </p>
                 </div>
             </div>
 
             <div className="space-y-2">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">
-                    {t('settings:modals.confirm_password', 'Confirm Password')}
+                    {t('settings:modals.confirm_password')}
                 </label>
                 <input
                     type="password"
@@ -1064,7 +1064,7 @@ export default function SettingsPage() {
                         shadow-lg shadow-red-600/20
                     "
                 >
-                    {isDeleting ? 'Deleting...' : t('settings:modals.execute_delete')}
+                    {isDeleting ? t('settings:identity.processing') : t('settings:modals.execute_delete')}
                 </button>
             </div>
         </form>

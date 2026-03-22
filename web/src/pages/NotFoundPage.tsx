@@ -1,8 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import { FiHome, FiAlertCircle } from 'react-icons/fi';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 
 export default function NotFoundPage() {
+  const { t } = useTranslation(['common']);
   const navigate = useNavigate();
 
   return (
@@ -24,10 +26,10 @@ export default function NotFoundPage() {
         {/* Message */}
         <div className="space-y-3">
           <h1 className="text-2xl font-bold text-text-primary uppercase tracking-wider">
-            Page Not Found
+            {t('not_found.title')}
           </h1>
           <p className="text-text-secondary font-mono text-sm leading-relaxed">
-            The encrypted path you are trying to access does not exist or has been wiped from the system.
+            {t('not_found.desc')}
           </p>
         </div>
 
@@ -43,13 +45,13 @@ export default function NotFoundPage() {
           "
         >
           <FiHome className="text-lg group-hover:scale-110 transition-transform" />
-          <span>Return to Base</span>
+          <span>{t('not_found.return_btn')}</span>
         </button>
       </motion.div>
 
       {/* Footer Decoration */}
       <div className="absolute bottom-8 text-[10px] text-text-secondary/30 font-mono uppercase tracking-[0.3em]">
-        NYX Secure Protocol {/* End of Line */}
+        {t('footer.brand_protocol')} {/* End of Line */}
       </div>
     </div>
   );
