@@ -1,5 +1,6 @@
 import { useCallback, useRef, ChangeEvent, useState, useEffect, useMemo } from "react";
 import { useAuthStore } from "@store/auth";
+import { useTranslation } from "react-i18next";
 import { getSocket } from "@lib/socket";
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import MessageItem from "@components/MessageItem";
@@ -32,34 +33,40 @@ import { useSettingsStore } from '@store/settings';
 import type { MinimalProfile } from '@store/callStore';
 import { asConversationId } from '@nyx/shared';
 
-const KeyRotationBanner = () => (
-  <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
-    <div className="flex items-center gap-3">
-      <FiShield className="flex-shrink-0 animate-pulse" size={18} />
-      <div className="font-mono text-xs">
-        <p className="font-bold uppercase tracking-wider">Security Alert: Key Rotation Required</p>
-        <p className="opacity-80">Encryption keys desynchronized. Transmit message to re-establish secure handshake.</p>
+const KeyRotationBanner = () => {
+  const { t } = useTranslation(['chat']);
+  return (
+    <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
+      <div className="flex items-center gap-3">
+        <FiShield className="flex-shrink-0 animate-pulse" size={18} />
+        <div className="font-mono text-xs">
+          <p className="font-bold uppercase tracking-wider">{t('chat:banners.key_rotation')}</p>
+          <p className="opacity-80">{t('chat:banners.key_rotation_desc')}</p>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
-const NewConversationBanner = () => (
-  <div className="bg-blue-500/10 border-y border-blue-500/20 px-4 py-3 text-blue-600 dark:text-blue-400">
-    <div className="flex items-start gap-3">
-      <FiInfo className="flex-shrink-0 mt-0.5" size={18} />
-      <div className="font-mono text-xs">
-        <p className="font-bold uppercase tracking-wider mb-1">Encryption Protocol Recommendation</p>
-        <p className="opacity-90 leading-relaxed">
-          For the initial handshake, ensure both parties are <strong>ONLINE</strong>. 
-          Sending messages to offline users in a new conversation may require a key refresh if they come online later.
-        </p>
+const NewConversationBanner = () => {
+  const { t } = useTranslation(['chat']);
+  return (
+    <div className="bg-blue-500/10 border-y border-blue-500/20 px-4 py-3 text-blue-600 dark:text-blue-400">
+      <div className="flex items-start gap-3">
+        <FiInfo className="flex-shrink-0 mt-0.5" size={18} />
+        <div className="font-mono text-xs">
+          <p className="font-bold uppercase tracking-wider mb-1">{t('chat:banners.encryption_recommendation')}</p>
+          <p className="opacity-90 leading-relaxed">
+            {t('chat:banners.encryption_desc')}
+          </p>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conversation: Conversation; onBack: () => void; onInfoToggle: () => void; onMenuClick: () => void; }) => {
+  const { t } = useTranslation(['chat']);
   const user = useAuthStore((s) => s.user);
   const meId = user?.id;
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
@@ -86,9 +93,9 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
 
   const getStatus = () => {
     if (conversation.isGroup) {
-      return `${conversation.participants.length} members`;
+      return t('chat:header.members', { count: conversation.participants.length });
     }
-    return isOnline ? "Online" : "Offline";
+    return isOnline ? t('chat:header.online') : t('chat:header.offline');
   };
 
   const handleVoiceCall = () => {
@@ -198,6 +205,7 @@ const ChatSpinner = () => (
 );
 
 export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClick: () => void }) {
+  const { t } = useTranslation(['chat']);
   const meId = useAuthStore((s) => s.user?.id);
   const { conversation, messages, isLoading, error, actions, isFetchingMore } = useConversation(id);
   const { loadMessagesForConversation, selectedMessageIds, clearMessageSelection, removeMessages } = useMessageStore(useShallow(s => ({
@@ -244,9 +252,9 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     const selectedMessages = messages.filter(m => selectedMessageIds.includes(m.id));
     const allMine = selectedMessages.every(m => m.senderId === meId);
     
-    const confirmMessage = allMine 
-      ? `Permanently delete ${selectedMessageIds.length} messages for everyone?` 
-      : `Delete ${selectedMessageIds.length} messages? This will only remove them from your device. Messages from others will remain on their devices.`;
+    // Simplified translation logic for now, or use complex logic
+    const confirmMessage = t('chat:messages.bulk_delete_confirm', { count: selectedMessageIds.length }) + 
+      (allMine ? '' : ' ' + t('chat:messages.bulk_delete_desc'));
 
     showConfirm(
       'Bulk Deletion', 
@@ -254,7 +262,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
       async () => {
           await removeMessages(conversation.id, selectedMessageIds);
           // clearMessageSelection is already handled inside removeMessages now
-          toast.success(`${selectedMessageIds.length} messages processed`);
+          toast.success(t('chat:messages.processed', { count: selectedMessageIds.length }));
       }
     );
   };
@@ -354,7 +362,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
             return (
               <div className="flex-1 flex flex-col items-center justify-center text-red-500 font-mono">
                 <FiShield size={40} className="mb-4 opacity-50" />
-                <p className="uppercase tracking-widest">Signal Lost</p>
+                <p className="uppercase tracking-widest">{t('chat:status.signal_lost')}</p>
                 <p className="text-xs mt-2 opacity-70">{error}</p>
               </div>
             );
@@ -376,7 +384,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                           <button onClick={clearMessageSelection} className="p-2 hover:bg-white/10 rounded-full transition-colors text-text-secondary hover:text-white">
                               <FiX size={20} />
                           </button>
-                          <span className="font-bold text-lg text-accent tracking-wide">{selectedMessageIds.length} Selected</span>
+                          <span className="font-bold text-lg text-accent tracking-wide">{t('chat:messages.processed', { count: selectedMessageIds.length }).replace('processed', 'Selected')}</span>
                       </div>
                       <button 
                           onClick={handleBulkDelete} 
@@ -431,7 +439,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                           <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:-0.15s]"></span>
                           <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"></span>
                         </div>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Typing...</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t('chat:header.typing')}</span>
                       </div>
                     </motion.div>
                   )}

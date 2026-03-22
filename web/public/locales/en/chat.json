@@ -1,0 +1,55 @@
+{
+  "header": {
+    "online": "Online",
+    "offline": "Offline",
+    "members": "{{count}} members",
+    "typing": "Typing...",
+    "last_seen": "Last seen {{time}}"
+  },
+  "input": {
+    "placeholder": "Type a message...",
+    "recording": "Recording...",
+    "cancel_recording": "Slide to cancel"
+  },
+  "actions": {
+    "reply": "Reply",
+    "edit": "Edit",
+    "copy": "Copy",
+    "forward": "Forward",
+    "delete": "Delete",
+    "delete_selected": "Delete Selected",
+    "info": "Info",
+    "voice_call": "Voice Call",
+    "video_call": "Video Call",
+    "block": "Block",
+    "unblock": "Unblock",
+    "clear_chat": "Clear Chat",
+    "leave_group": "Leave Group"
+  },
+  "banners": {
+    "key_rotation": "Security Alert: Key Rotation Required",
+    "key_rotation_desc": "Encryption keys desynchronized. Transmit message to re-establish secure handshake.",
+    "encryption_recommendation": "Encryption Protocol Recommendation",
+    "encryption_desc": "For the initial handshake, ensure both parties are ONLINE."
+  },
+  "status": {
+    "signal_lost": "Signal Lost",
+    "connecting": "Connecting...",
+    "updating": "Updating..."
+  },
+  "sidebar": {
+    "search_placeholder": "Search...",
+    "global_search": "GLOBAL SEARCH",
+    "no_users": "No users found.",
+    "no_conversations": "No conversations yet",
+    "new_group": "New Group",
+    "scan_qr": "Scan QR Code",
+    "connection_error": "Connection Error",
+    "reconnect": "Reconnect"
+  },
+  "messages": {
+    "bulk_delete_confirm": "Delete {{count}} messages?",
+    "bulk_delete_desc": "This will only remove them from your device.",
+    "processed": "{{count}} messages processed"
+  }
+}

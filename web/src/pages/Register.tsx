@@ -255,8 +255,8 @@ export default function Register() {
       <div className="w-full md:w-3/5 bg-gradient-to-br from-stone-900 to-black relative overflow-hidden flex items-center justify-center p-8">
          {/* ... Visualization code ... */}
          <div className="relative z-10 text-center max-w-lg">
-            <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">PURE <span className="text-teal-500">ANONYMITY</span></h2>
-            <p className="text-stone-400 mb-6">Your username is hashed on your device. We don&apos;t know who you are.</p>
+            <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">{t('auth:marketing.pure_anonymity')}</h2>
+            <p className="text-stone-400 mb-6">{t('auth:marketing.anonymity_desc')}</p>
          </div>
       </div>
     </div>

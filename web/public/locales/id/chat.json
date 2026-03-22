@@ -1,0 +1,55 @@
+{
+  "header": {
+    "online": "Online",
+    "offline": "Offline",
+    "members": "{{count}} anggota",
+    "typing": "Mengetik...",
+    "last_seen": "Terlihat {{time}}"
+  },
+  "input": {
+    "placeholder": "Ketik pesan...",
+    "recording": "Merekam...",
+    "cancel_recording": "Geser untuk batal"
+  },
+  "actions": {
+    "reply": "Balas",
+    "edit": "Ubah",
+    "copy": "Salin",
+    "forward": "Teruskan",
+    "delete": "Hapus",
+    "delete_selected": "Hapus Terpilih",
+    "info": "Info",
+    "voice_call": "Panggilan Suara",
+    "video_call": "Panggilan Video",
+    "block": "Blokir",
+    "unblock": "Buka Blokir",
+    "clear_chat": "Bersihkan Chat",
+    "leave_group": "Keluar Grup"
+  },
+  "banners": {
+    "key_rotation": "Peringatan Keamanan: Rotasi Kunci Diperlukan",
+    "key_rotation_desc": "Kunci enkripsi tidak sinkron. Kirim pesan untuk membangun kembali handshake aman.",
+    "encryption_recommendation": "Rekomendasi Protokol Enkripsi",
+    "encryption_desc": "Untuk handshake awal, pastikan kedua pihak ONLINE."
+  },
+  "status": {
+    "signal_lost": "Sinyal Hilang",
+    "connecting": "Menghubungkan...",
+    "updating": "Memperbarui..."
+  },
+  "sidebar": {
+    "search_placeholder": "Cari...",
+    "global_search": "PENCARIAN GLOBAL",
+    "no_users": "Pengguna tidak ditemukan.",
+    "no_conversations": "Belum ada percakapan",
+    "new_group": "Grup Baru",
+    "scan_qr": "Pindai Kode QR",
+    "connection_error": "Kesalahan Koneksi",
+    "reconnect": "Hubungkan Ulang"
+  },
+  "messages": {
+    "bulk_delete_confirm": "Hapus {{count}} pesan?",
+    "bulk_delete_desc": "Ini hanya akan menghapusnya dari perangkat Anda.",
+    "processed": "{{count}} pesan diproses"
+  }
+}

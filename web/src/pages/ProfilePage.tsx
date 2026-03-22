@@ -1,5 +1,6 @@
 import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore, type User } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
 import { authFetch, handleApiError } from '@lib/api';
@@ -17,6 +18,7 @@ type ProfileUser = User & {
 };
 
 export default function ProfilePage() {
+  const { t } = useTranslation(['settings']);
   const { userId: rawUserId } = useParams<{ userId: string }>();
   const userId = rawUserId ? asUserId(rawUserId) : undefined;
   
@@ -64,8 +66,8 @@ export default function ProfilePage() {
   }, [profile]);
 
   const stats = [
-    { label: 'Security Clearance', value: profileUser?.isVerified ? 'VERIFIED' : 'UNVERIFIED', color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
-    { label: 'Encryption Protocol', value: profileUser?.publicKey ? 'ACTIVE' : 'INACTIVE', color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', icon: FiKey },
+    { label: t('settings:profile_page.security_clearance'), value: profileUser?.isVerified ? 'VERIFIED' : 'UNVERIFIED', color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
+    { label: t('settings:profile_page.encryption_protocol'), value: profileUser?.publicKey ? 'ACTIVE' : 'INACTIVE', color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', icon: FiKey },
     { label: 'Home Server', value: 'ap-southeast-1', color: 'text-blue-500', icon: FiGlobe },
     { label: 'Session Status', value: 'ENCRYPTED', color: 'text-emerald-500', icon: FiActivity },
   ];
@@ -97,10 +99,10 @@ export default function ProfilePage() {
             </button>
             <div>
               <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-text-primary">
-                Operator Profile
+                {t('settings:profile_page.title')}
               </h1>
               <p className="font-mono text-xs text-text-secondary uppercase tracking-widest mt-1">
-                ID: {profileUser.id.substring(0, 8)}-{profileUser.id.substring(profileUser.id.length - 4)} • <span className="text-emerald-500">ACTIVE</span>
+                ID: {profileUser.id.substring(0, 8)}-{profileUser.id.substring(profileUser.id.length - 4)} • <span className="text-emerald-500">{t('settings:profile_page.active')}</span>
               </p>
             </div>
           </div>
@@ -112,7 +114,7 @@ export default function ProfilePage() {
                    className="flex items-center gap-2 px-6 py-2 bg-bg-main text-text-primary rounded-lg font-bold shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed transition-all"
                  >
                    <FiEdit2 size={16} />
-                   EDIT_RECORD
+                   {t('settings:profile_page.edit_record')}
                  </button>
             </div>
           )}
@@ -175,7 +177,7 @@ export default function ProfilePage() {
               
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">Display Name</label>
+                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">{t('settings:identity.display_name')}</label>
                   <input
                     type="text"
                     value={name}
@@ -186,7 +188,7 @@ export default function ProfilePage() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">Operator Bio</label>
+                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">{t('settings:identity.bio')}</label>
                   <textarea
                     value={bio}
                     disabled={!isEditing}
@@ -204,7 +206,7 @@ export default function ProfilePage() {
                 <FiKey size={100} />
               </div>
               <h3 className="text-xs font-black uppercase tracking-widest text-text-secondary mb-4">
-                Public Identity Key
+                {t('settings:profile_page.public_key')}
               </h3>
               <div className="font-mono text-[10px] leading-relaxed text-text-secondary break-all bg-black/5 dark:bg-black/20 p-4 rounded-lg border border-black/5 dark:border-white/5 shadow-neu-pressed dark:shadow-neu-pressed-dark">
                 {profileUser.publicKey || "Key not generated yet."}

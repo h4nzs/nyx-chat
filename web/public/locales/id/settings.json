@@ -1,0 +1,76 @@
+{
+  "header": {
+    "control_deck": "Panel Kontrol",
+    "system_version": "Sistem {{version}}"
+  },
+  "modules": {
+    "identity": "Modul Identitas",
+    "power": "Sel Daya",
+    "visual": "Antarmuka Visual",
+    "privacy": "Perisai Privasi",
+    "data": "Port Data",
+    "smart": "Bantuan Cerdas",
+    "support": "Dukungan & Umpan Balik"
+  },
+  "identity": {
+    "anonymous_id": "ID ANONIM",
+    "verified": "Terverifikasi",
+    "sandboxed": "Sandbox (Tingkatkan)",
+    "display_name": "Nama Tampilan",
+    "bio": "Biodata",
+    "save_btn": "Simpan Identitas",
+    "processing": "Memproses..."
+  },
+  "power": {
+    "refuel_title": "Isi Ulang Pengembang",
+    "description": "Sistem beroperasi pada server berbiaya rendah. Mulai urutan donasi untuk meningkatkan infrastruktur.",
+    "status": "Status: Butuh Kopi"
+  },
+  "visual": {
+    "dark_mode": "Mode Gelap",
+    "accent_emitter": "Pemancar Aksen"
+  },
+  "privacy": {
+    "read_receipts": "Laporan Dibaca",
+    "biometric_active": "Brankas Aktif (VIP)",
+    "biometric_enable": "Aktifkan Biometrik",
+    "panic_password": "Kata Sandi Panik",
+    "panic_desc": "Jika dipaksa membuka kunci, memasukkan sandi ini akan menghapus semua data lokal secara diam-diam.",
+    "dead_man": "Penghancur Otomatis",
+    "dead_man_desc": "Otomatis menghancurkan akun Anda jika tidak aktif dalam periode tertentu.",
+    "auto_destruct_options": {
+      "disabled": "Nonaktif",
+      "7_days": "7 Hari",
+      "14_days": "14 Hari",
+      "30_days": "30 Hari"
+    }
+  },
+  "data": {
+    "keys": "Kunci Enkripsi",
+    "sessions": "Sesi Aktif",
+    "export_vault": "Ekspor Brankas",
+    "import_vault": "Impor Brankas",
+    "transfer": "Transfer ke Perangkat Baru (QR)"
+  },
+  "emergency": {
+    "eject": "Ejeksi Darurat",
+    "terminate_sessions": "Hentikan Semua Sesi",
+    "delete_account": "Hapus Akun",
+    "delete_desc": "Hapus PERMANEN semua data dari server. Tindakan ini tidak dapat dibatalkan."
+  },
+  "modals": {
+    "upgrade_title": "Tingkatkan ke VIP",
+    "delete_confirm_title": "Konfirmasi Penghapusan",
+    "final_warning": "PERINGATAN TERAKHIR",
+    "abort": "Batalkan",
+    "execute_delete": "Eksekusi Hapus"
+  },
+  "profile_page": {
+    "title": "Profil Operator",
+    "active": "AKTIF",
+    "edit_record": "UBAH_REKAMAN",
+    "security_clearance": "Izin Keamanan",
+    "encryption_protocol": "Protokol Enkripsi",
+    "public_key": "Kunci Identitas Publik"
+  }
+}

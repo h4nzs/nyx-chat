@@ -1,5 +1,6 @@
 import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '@store/auth';
 import { useModalStore } from '@store/modal';
 import { useShallow } from 'zustand/react/shallow';
@@ -11,7 +12,7 @@ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
   FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
-  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle, FiInfo
+  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle, FiInfo, FiChevronDown
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
@@ -113,6 +114,7 @@ const ActionButton = ({ onClick, label, icon: Icon, danger = false }: { onClick?
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation(['settings', 'common']);
   const { user, updateProfile, updateAvatar, sendReadReceipts, setReadReceipts, logout, emergencyLogout, setUser } = useAuthStore(useShallow(s => ({
     user: s.user, updateProfile: s.updateProfile, updateAvatar: s.updateAvatar, sendReadReceipts: s.sendReadReceipts, setReadReceipts: s.setReadReceipts, logout: s.logout, emergencyLogout: s.emergencyLogout, setUser: s.setUser
   })));
@@ -463,8 +465,8 @@ export default function SettingsPage() {
           <FiArrowLeft size={24} />
         </Link>
         <div>
-          <h1 className="text-4xl font-black uppercase tracking-tighter opacity-90">Control Deck</h1>
-          <p className="text-sm font-mono text-text-secondary tracking-widest uppercase">System {__APP_VERSION__} </p>
+          <h1 className="text-4xl font-black uppercase tracking-tighter opacity-90">{t('settings:header.control_deck')}</h1>
+          <p className="text-sm font-mono text-text-secondary tracking-widest uppercase">{t('settings:header.system_version', { version: __APP_VERSION__ })} </p>
         </div>
       </header>
 
@@ -474,7 +476,7 @@ export default function SettingsPage() {
         {/* 1. IDENTITY SLOT (Profile) */}
         <div className="col-span-1 md:col-span-12 lg:col-span-8">
           <form onSubmit={handleProfileSubmit} className="h-full">
-            <ControlModule title="Identity Module" className="h-full relative group">
+            <ControlModule title={t('settings:modules.identity')} className="h-full relative group">
               <div className="flex flex-col md:flex-row items-center gap-8">
                 {/* Avatar Slot - Concave Recess */}
                 <div className="relative flex-shrink-0">
@@ -509,10 +511,10 @@ export default function SettingsPage() {
                   {/* ID (Read Only) */}
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
-                       <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">ANONYMOUS ID</label>
+                       <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">{t('settings:identity.anonymous_id')}</label>
                        {user.isVerified ? (
                          <span className="text-[10px] bg-emerald-500/10 text-emerald-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1">
-                           <FiShield size={10} /> Verified
+                           <FiShield size={10} /> {t('settings:identity.verified')}
                          </span>
                        ) : (
                          <button 
@@ -520,7 +522,7 @@ export default function SettingsPage() {
                            onClick={() => setShowUpgradeModal(true)}
                            className="text-[10px] bg-yellow-500/10 text-yellow-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider flex items-center gap-1 hover:bg-yellow-500/20 transition-colors animate-pulse"
                          >
-                           <FiLock size={10} /> Sandboxed (Upgrade)
+                           <FiLock size={10} /> {t('settings:identity.sandboxed')}
                          </button>
                        )}
                     </div>
@@ -530,13 +532,13 @@ export default function SettingsPage() {
                     </div>
                     {!user.isVerified && (
                         <p className="text-[10px] text-text-secondary pl-2">
-                           Limited access. Verify to unlock Groups and higher limits.
+                           {t('settings:identity.limited_access')}
                         </p>
                     )}
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">Display Name</label>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">{t('settings:identity.display_name')}</label>
                     <input
                       type="text"
                       value={name}
@@ -550,7 +552,7 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">Bio-Data</label>
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">{t('settings:identity.bio')}</label>
                     <textarea
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
@@ -579,7 +581,7 @@ export default function SettingsPage() {
                     hover:text-white hover:bg-accent transition-all
                   "
                 >
-                  {isLoading ? 'Processing...' : 'Save Identity'}
+                  {isLoading ? t('settings:identity.processing') : t('settings:identity.save_btn')}
                 </button>
               </div>
             </ControlModule>
@@ -604,15 +606,15 @@ export default function SettingsPage() {
               <div>
                 <div className="flex items-center gap-2 mb-2 text-accent">
                   <FiCoffee size={24} />
-                  <span className="font-black tracking-widest uppercase text-xs">Power Cell</span>
+                  <span className="font-black tracking-widest uppercase text-xs">{t('settings:modules.power')}</span>
                 </div>
-                <h3 className="text-2xl font-bold leading-tight mb-2">Refuel the <br/> Developer</h3>
+                <h3 className="text-2xl font-bold leading-tight mb-2 whitespace-pre-line">{t('settings:power.refuel_title')}</h3>
                 <p className="text-xs text-text-secondary font-mono leading-relaxed">
-                  System operates on low-cost servers. Initiate donation sequence to upgrade infrastructure.
+                  {t('settings:power.description')}
                 </p>
               </div>
               <div className="mt-6 flex items-center justify-between">
-                <span className="text-[10px] uppercase font-bold tracking-widest text-text-secondary/50">Status: Need Coffee</span>
+                <span className="text-[10px] uppercase font-bold tracking-widest text-text-secondary/50">{t('settings:power.status')}</span>
                 <div className="w-12 h-12 rounded-full bg-accent/10 flex items-center justify-center text-accent shadow-[0_0_15px_rgba(var(--accent),0.4)]">
                    <FiHeart className="fill-current" />
                 </div>
@@ -626,16 +628,16 @@ export default function SettingsPage() {
 
         {/* 3. VISUAL INTERFACE (Theme) */}
         <div className="col-span-1 md:col-span-6 lg:col-span-4">
-          <ControlModule title="Visual Interface" icon={theme === 'dark' ? FiMoon : FiSun}>
+          <ControlModule title={t('settings:modules.visual')} icon={theme === 'dark' ? FiMoon : FiSun}>
             <div className="space-y-6">
               <RockerSwitch 
-                label="Dark Mode" 
+                label={t('settings:visual.dark_mode')} 
                 checked={theme === 'dark'} 
                 onChange={toggleTheme} 
               />
               
               <div className="space-y-3 pt-2">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-1">Accent Emitter</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-1">{t('settings:visual.accent_emitter')}</span>
                 <div className="grid grid-cols-4 gap-4 p-2 rounded-2xl shadow-neu-pressed-light dark:shadow-neu-pressed-dark bg-bg-main">
                   {ACCENT_COLORS.map((color) => (
                     <button
@@ -656,16 +658,41 @@ export default function SettingsPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Language Switcher */}
+              <div className="space-y-3 pt-4 border-t border-white/5 mt-4">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-1">
+                  Language / Bahasa
+                </span>
+                <div className="relative">
+                  <select
+                    value={i18n.language}
+                    onChange={(e) => i18n.changeLanguage(e.target.value)}
+                    className="
+                      w-full appearance-none bg-bg-main text-text-primary text-sm font-bold
+                      p-3 rounded-xl outline-none transition-all
+                      shadow-neu-pressed-light dark:shadow-neu-pressed-dark
+                      focus:ring-2 focus:ring-accent/50 cursor-pointer pl-4
+                    "
+                  >
+                    <option value="en">🇺🇸 English</option>
+                    <option value="id">🇮🇩 Indonesia</option>
+                  </select>
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary">
+                    <FiChevronDown />
+                  </div>
+                </div>
+              </div>
             </div>
           </ControlModule>
         </div>
 
         {/* 4. PRIVACY SHIELD (Privacy) */}
         <div className="col-span-1 md:col-span-6 lg:col-span-4">
-          <ControlModule title="Privacy Shield" icon={FiShield}>
+          <ControlModule title={t('settings:modules.privacy')} icon={FiShield}>
             <div className="space-y-4">
               <RockerSwitch 
-                label="Read Receipts" 
+                label={t('settings:privacy.read_receipts')} 
                 checked={readReceipts} 
                 onChange={() => {
                   setReadReceiptsState(!readReceipts);
@@ -686,7 +713,7 @@ export default function SettingsPage() {
                   <IoFingerPrint size={20} />
                   <div className="text-left">
                     <div className="font-bold text-sm">
-                        {hasBioVault ? 'Vault Active (VIP)' : (user.isVerified ? 'Setup Vault Unlock' : 'Enable Biometrics')}
+                        {hasBioVault ? t('settings:privacy.biometric_active') : (user.isVerified ? t('settings:privacy.biometric_enable') : t('settings:privacy.biometric_enable'))}
                     </div>
                     <div className="text-[10px] text-text-secondary">Unlock Vault & Verify VIP</div>
                   </div>
@@ -698,10 +725,10 @@ export default function SettingsPage() {
             <div className="pt-4 border-t border-white/5 space-y-3 mt-4">
               <div>
                 <h4 className="text-sm font-bold text-text-primary flex items-center gap-2">
-                  <FiShield className="text-red-500" /> Panic Password
+                  <FiShield className="text-red-500" /> {t('settings:privacy.panic_password')}
                 </h4>
                 <p className="text-xs text-text-secondary mt-1">
-                  If forced to unlock your device, entering this password on the login screen will silently obliterate all local data.
+                  {t('settings:privacy.panic_desc')}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -709,7 +736,7 @@ export default function SettingsPage() {
                    type="password" 
                    value={panicPass} 
                    onChange={e => setPanicPass(e.target.value)} 
-                   placeholder="Enter Panic Password" 
+                   placeholder={t('settings:privacy.panic_password')} 
                    className="bg-bg-main border border-white/10 rounded-lg px-4 py-2 text-sm text-text-primary focus:ring-red-500/50 flex-1 outline-none" 
                  />
                  <button 
@@ -730,10 +757,10 @@ export default function SettingsPage() {
             <div className="pt-4 border-t border-white/5 space-y-3 mt-4">
              <div>
                <h4 className="text-sm font-bold text-text-primary flex items-center gap-2">
-                 <span className="text-red-500"><FiAlertTriangle size={18} /></span> Dead Man&apos;s Switch
+                 <span className="text-red-500"><FiAlertTriangle size={18} /></span> {t('settings:privacy.dead_man')}
                </h4>
                <p className="text-xs text-text-secondary mt-1">
-                 Automatically destroy your account and all associated messages if you do not open the app for a set period.
+                 {t('settings:privacy.dead_man_desc')}
                </p>
              </div>
              <div className="flex gap-2 items-center">
@@ -751,10 +778,10 @@ export default function SettingsPage() {
                    }}
                    className="bg-bg-main border border-white/10 rounded-lg px-4 py-2 text-sm text-text-primary focus:ring-accent flex-1 outline-none"
                  >
-                   <option value="">Disabled</option>
-                   <option value="7">7 Days</option>
-                   <option value="14">14 Days</option>
-                   <option value="30">30 Days</option>
+                   <option value="">{t('settings:privacy.auto_destruct_options.disabled')}</option>
+                   <option value="7">{t('settings:privacy.auto_destruct_options.7_days')}</option>
+                   <option value="14">{t('settings:privacy.auto_destruct_options.14_days')}</option>
+                   <option value="30">{t('settings:privacy.auto_destruct_options.30_days')}</option>
                  </select>
               </div>
             </div>
@@ -764,15 +791,15 @@ export default function SettingsPage() {
 
         {/* 5. DATA PORT (Sessions & Keys) */}
         <div className="col-span-1 md:col-span-6 lg:col-span-4">
-          <ControlModule title="Data Ports" icon={FiKey}>
+          <ControlModule title={t('settings:modules.data')} icon={FiKey}>
             <div className="space-y-3">
               <ActionButton 
-                label="Encryption Keys" 
+                label={t('settings:data.keys')} 
                 icon={FiKey} 
                 onClick={() => navigate('/settings/keys')} 
               />
               <ActionButton 
-                label="Active Sessions" 
+                label={t('settings:data.sessions')} 
                 icon={FiSmartphone} 
                 onClick={() => navigate('/settings/sessions')} 
               />
@@ -790,7 +817,7 @@ export default function SettingsPage() {
                    "
                  >
                    <FiDownload size={18} />
-                   Export Vault
+                   {t('settings:data.export_vault')}
                  </button>
                  <button 
                    onClick={triggerImport}
@@ -803,7 +830,7 @@ export default function SettingsPage() {
                    "
                  >
                    <FiUpload size={18} />
-                   Import Vault
+                   {t('settings:data.import_vault')}
                  </button>
                  <button 
                    onClick={() => navigate('/settings/migrate-send')}
@@ -816,7 +843,7 @@ export default function SettingsPage() {
                    "
                  >
                    <FiSend size={18} />
-                   Transfer to New Device (QR)
+                   {t('settings:data.transfer')}
                  </button>
                  <input 
                     type="file" 
@@ -832,11 +859,11 @@ export default function SettingsPage() {
 
         {/* 6. SMART ASSISTANCE */}
         <div className="col-span-1 md:col-span-6 lg:col-span-4">
-          <ControlModule title="Smart Assistance" icon={FiActivity}>
+          <ControlModule title={t('settings:modules.smart')} icon={FiActivity}>
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-bold text-text-primary">AI Smart Reply</h3>
+                  <h3 className="text-sm font-bold text-text-primary">{t('settings:smart.ai_reply')}</h3>
                   <p className="text-[10px] text-text-secondary mt-0.5">Auto-generate response suggestions.</p>
                 </div>
                 <RockerSwitch 
@@ -848,7 +875,7 @@ export default function SettingsPage() {
               {enableSmartReply && (
                 <div className="p-3 bg-accent/5 border border-accent/10 rounded-lg">
                   <p className="text-[10px] text-text-secondary leading-relaxed">
-                    <strong className="text-accent">Privacy Note:</strong> Incoming messages are decrypted on-device and sent securely to Google Gemini for analysis. Messages are <strong className="text-text-primary">not stored</strong> by our servers.
+                    <strong className="text-accent">{t('settings:smart.privacy_note')}</strong> Incoming messages are decrypted on-device and sent securely to Google Gemini for analysis. Messages are <strong className="text-text-primary">not stored</strong> by our servers.
                   </p>
                 </div>
               )}
@@ -858,10 +885,10 @@ export default function SettingsPage() {
 
         {/* 7. SUPPORT MODULE */}
         <div className="col-span-1 md:col-span-12 lg:col-span-12">
-          <ControlModule title="Support & Feedback" className="flex flex-col md:flex-row gap-6">
+          <ControlModule title={t('settings:modules.support')} className="flex flex-col md:flex-row gap-6">
              <div className="flex-1 space-y-4">
                 <RockerSwitch 
-                  label="Push Notifications" 
+                  label={t('settings:support.push_notif')} 
                   checked={isSubscribed} 
                   onChange={isSubscribed ? unsubscribeFromPush : subscribeToPush}
                   disabled={pushLoading}
@@ -872,7 +899,7 @@ export default function SettingsPage() {
                   <div className="mt-3 p-4 bg-accent/10 border border-accent/20 rounded-2xl flex items-start gap-3 transition-all animate-in fade-in slide-in-from-top-2">
                     <FiInfo className="text-accent shrink-0 mt-0.5" size={20} />
                     <div className="text-sm text-text-secondary leading-relaxed">
-                      <p className="text-accent font-bold mb-1">Background Activity Required</p>
+                      <p className="text-accent font-bold mb-1">{t('settings:support.background_guide')}</p>
                       <p className="mb-2">
                         To receive notifications when NYX is closed, ensure your device allows this app to run in the background.
                       </p>
@@ -889,9 +916,9 @@ export default function SettingsPage() {
                 )}
              </div>
              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <ActionButton label="Help Center" icon={FiHelpCircle} onClick={() => navigate('/help')} />
-                <ActionButton label="Report Bug" icon={FiFlag} onClick={() => setShowReportModal(true)} />
-                <ActionButton label="Legal & Privacy" icon={FiShield} onClick={() => navigate('/privacy')} />
+                <ActionButton label={t('settings:support.help_center')} icon={FiHelpCircle} onClick={() => navigate('/help')} />
+                <ActionButton label={t('settings:support.report_bug')} icon={FiFlag} onClick={() => setShowReportModal(true)} />
+                <ActionButton label={t('settings:support.legal')} icon={FiShield} onClick={() => navigate('/privacy')} />
              </div>
           </ControlModule>
         </div>
@@ -913,8 +940,8 @@ export default function SettingsPage() {
             
             <div className="relative z-10 flex flex-col items-center justify-center gap-2 text-orange-500 group-hover:text-orange-600">
               <FiLogOut size={32} />
-              <span className="text-xl font-black uppercase tracking-[0.2em]">Emergency Eject</span>
-              <span className="text-xs font-mono opacity-70">Terminate All Sessions</span>
+              <span className="text-xl font-black uppercase tracking-[0.2em]">{t('settings:emergency.eject')}</span>
+              <span className="text-xs font-mono opacity-70">{t('settings:emergency.terminate_sessions')}</span>
             </div>
           </button>
 
@@ -932,9 +959,9 @@ export default function SettingsPage() {
               <div className="p-3 bg-red-600 text-white rounded-full mb-1">
                  <FiAlertTriangle size={24} />
               </div>
-              <span className="text-xl font-black uppercase tracking-[0.2em]">Delete Account</span>
+              <span className="text-xl font-black uppercase tracking-[0.2em]">{t('settings:emergency.delete_account')}</span>
               <span className="text-xs font-mono opacity-70 text-center max-w-md">
-                PERMANENTLY erase all data from servers. This action is irreversible.
+                {t('settings:emergency.delete_desc')}
               </span>
             </div>
           </button>
@@ -943,7 +970,7 @@ export default function SettingsPage() {
       </div>
 
       {/* UPGRADE MODAL */}
-      <ModalBase isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} title="Upgrade to VIP">
+      <ModalBase isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} title={t('settings:modals.upgrade_title')}>
         <div className="space-y-6">
            <p className="text-sm text-text-secondary text-center">
              You are currently in <span className="text-yellow-500 font-bold">Sandbox Mode</span>. 
@@ -987,12 +1014,12 @@ export default function SettingsPage() {
       </ModalBase>
 
       {/* DELETE ACCOUNT MODAL */}
-      <ModalBase isOpen={showDeleteConfirm} onClose={() => { setShowDeleteConfirm(false); setDeletePassword(''); }} title="Confirm Deletion">
+      <ModalBase isOpen={showDeleteConfirm} onClose={() => { setShowDeleteConfirm(false); setDeletePassword(''); }} title={t('settings:modals.delete_confirm_title')}>
         <form onSubmit={handleDeleteAccount} className="space-y-6">
             <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-start gap-3">
                 <FiAlertTriangle className="text-red-500 shrink-0 mt-1" />
                 <div className="space-y-2">
-                    <h4 className="text-red-500 font-bold text-sm">FINAL WARNING</h4>
+                    <h4 className="text-red-500 font-bold text-sm">{t('settings:modals.final_warning')}</h4>
                     <p className="text-xs text-text-secondary leading-relaxed">
                         You are about to execute a self-destruct sequence. 
                         All messages, keys, and profile data will be wiped from the server.
@@ -1003,7 +1030,7 @@ export default function SettingsPage() {
 
             <div className="space-y-2">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2">
-                    Confirm Password
+                    {t('settings:modals.confirm_password', 'Confirm Password')}
                 </label>
                 <input
                     type="password"
@@ -1025,7 +1052,7 @@ export default function SettingsPage() {
                     onClick={() => setShowDeleteConfirm(false)}
                     className="flex-1 py-3 rounded-xl font-bold text-sm text-text-secondary hover:bg-bg-surface transition-colors"
                 >
-                    Abort
+                    {t('settings:modals.abort')}
                 </button>
                 <button
                     type="submit"
@@ -1037,7 +1064,7 @@ export default function SettingsPage() {
                         shadow-lg shadow-red-600/20
                     "
                 >
-                    {isDeleting ? 'Deleting...' : 'Execute Delete'}
+                    {isDeleting ? 'Deleting...' : t('settings:modals.execute_delete')}
                 </button>
             </div>
         </form>

@@ -342,21 +342,21 @@ export default function Login() {
             <div className="absolute inset-0 rounded-full border-4 border-orange-500 animate-ping opacity-20"></div>
           </div>
 
-          <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">INDUSTRIAL-<span className="text-orange-500">GRADE</span> SECURITY</h2>
-          <p className="text-stone-400 mb-6">Your communications are protected with end-to-end encryption using the Signal Protocol.</p>
+          <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">{t('auth:marketing.industrial_security')}</h2>
+          <p className="text-stone-400 mb-6">{t('auth:marketing.industrial_desc')}</p>
 
           <div className="grid grid-cols-3 gap-4 mt-12">
             <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
               <div className="text-orange-500 mb-2"><FiLock size={24} /></div>
-              <h3 className="font-bold text-white text-sm">E2E ENCRYPTED</h3>
+              <h3 className="font-bold text-white text-sm">{t('auth:marketing.e2e_encrypted')}</h3>
             </div>
             <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
               <div className="text-orange-500 mb-2"><FiKey size={24} /></div>
-              <h3 className="font-bold text-white text-sm">KEY OWNERSHIP</h3>
+              <h3 className="font-bold text-white text-sm">{t('auth:marketing.key_ownership')}</h3>
             </div>
             <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
               <div className="text-orange-500 mb-2"><FiShield size={24} /></div>
-              <h3 className="font-bold text-white text-sm">PRIVACY FIRST</h3>
+              <h3 className="font-bold text-white text-sm">{t('auth:marketing.privacy_first')}</h3>
             </div>
           </div>
         </div>

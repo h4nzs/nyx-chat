@@ -1,0 +1,76 @@
+{
+  "header": {
+    "control_deck": "Control Deck",
+    "system_version": "System {{version}}"
+  },
+  "modules": {
+    "identity": "Identity Module",
+    "power": "Power Cell",
+    "visual": "Visual Interface",
+    "privacy": "Privacy Shield",
+    "data": "Data Ports",
+    "smart": "Smart Assistance",
+    "support": "Support & Feedback"
+  },
+  "identity": {
+    "anonymous_id": "ANONYMOUS ID",
+    "verified": "Verified",
+    "sandboxed": "Sandboxed (Upgrade)",
+    "display_name": "Display Name",
+    "bio": "Bio-Data",
+    "save_btn": "Save Identity",
+    "processing": "Processing..."
+  },
+  "power": {
+    "refuel_title": "Refuel the Developer",
+    "description": "System operates on low-cost servers. Initiate donation sequence to upgrade infrastructure.",
+    "status": "Status: Need Coffee"
+  },
+  "visual": {
+    "dark_mode": "Dark Mode",
+    "accent_emitter": "Accent Emitter"
+  },
+  "privacy": {
+    "read_receipts": "Read Receipts",
+    "biometric_active": "Vault Active (VIP)",
+    "biometric_enable": "Enable Biometrics",
+    "panic_password": "Panic Password",
+    "panic_desc": "If forced to unlock your device, entering this password will silently obliterate all local data.",
+    "dead_man": "Dead Man's Switch",
+    "dead_man_desc": "Automatically destroy your account if inactive for a set period.",
+    "auto_destruct_options": {
+      "disabled": "Disabled",
+      "7_days": "7 Days",
+      "14_days": "14 Days",
+      "30_days": "30 Days"
+    }
+  },
+  "data": {
+    "keys": "Encryption Keys",
+    "sessions": "Active Sessions",
+    "export_vault": "Export Vault",
+    "import_vault": "Import Vault",
+    "transfer": "Transfer to New Device (QR)"
+  },
+  "emergency": {
+    "eject": "Emergency Eject",
+    "terminate_sessions": "Terminate All Sessions",
+    "delete_account": "Delete Account",
+    "delete_desc": "PERMANENTLY erase all data from servers. This action is irreversible."
+  },
+  "modals": {
+    "upgrade_title": "Upgrade to VIP",
+    "delete_confirm_title": "Confirm Deletion",
+    "final_warning": "FINAL WARNING",
+    "abort": "Abort",
+    "execute_delete": "Execute Delete"
+  },
+  "profile_page": {
+    "title": "Operator Profile",
+    "active": "ACTIVE",
+    "edit_record": "EDIT_RECORD",
+    "security_clearance": "Security Clearance",
+    "encryption_protocol": "Encryption Protocol",
+    "public_key": "Public Identity Key"
+  }
+}
