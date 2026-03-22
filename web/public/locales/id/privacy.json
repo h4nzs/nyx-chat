@@ -27,7 +27,7 @@
   "terms": {
     "title": "Ketentuan Layanan",
     "liability_title": "Penyangkalan Tanggung Jawab Kritis",
-    "liability_desc": "NYX disediakan \"SEBAGAIMANA ADANYA\", tanpa jaminan apa pun. Pengelola tidak bertanggung jawab atas kehilangan data, kunci yang dikompromikan, atau gangguan layanan. Anda bertanggung jawab penuh untuk mengelola Frasa Pemulihan kriptografi Anda. <0>Jika Anda kehilangan kata sandi dan Frasa Pemulihan, akun dan data Anda tidak dapat diakses selamanya. Kami tidak dapat mem-bypass enkripsi kami sendiri.</0>",
+    "liability_desc": "NYX disediakan \"SEBAGAIMANA ADANYA\", tanpa jaminan apa pun. Pengelola tidak bertanggung jawab atas kehilangan data, kunci yang dikompromikan, atau gangguan layanan. Anda bertanggung jawab penuh untuk mengelola Frasa Pemulihan kriptografi Anda.",
     "gating": "<0>Gerbang Tingkat Kepercayaan:</0> Untuk melindungi jaringan, akun yang belum diverifikasi ditempatkan dalam \"Mode Sandbox\" terbatas. Kemampuan penuh memerlukan verifikasi perangkat keras biometrik atau Proof-of-Work kriptografi.",
     "abuse": "<0>Kebijakan Penyalahgunaan Tanpa Toleransi:</0> Anda setuju untuk tidak menggunakan jaringan NYX untuk aktivitas ilegal, penyalahgunaan API otomatis (botting), atau mendistribusikan malware. Pelanggaran akan mengakibatkan pemblokiran jaringan segera."
   },
@@ -35,7 +35,7 @@
     "title": "Lisensi Perangkat Lunak & Perusahaan",
     "intro": "Kode sumber NYX bangga menjadi open-source dan dilindungi dengan ketat di bawah <0>GNU Affero General Public License v3.0 (AGPL-3.0)</0>.",
     "agpl_title": "Batasan AGPL-3.0",
-    "agpl_desc": "Jika Anda memodifikasi basis kode NYX dan mengizinkan pengguna berinteraksi dengannya melalui jaringan (misalnya, menghostingnya sebagai SaaS), Anda secara hukum diwajibkan untuk merilis kode sumber yang dimodifikasi kepada publik. <0>Penyebaran SaaS sumber tertutup dari NYX di bawah lisensi ini sangat dilarang dan merupakan pelanggaran hak cipta.</0>",
+    "agpl_desc": "Jika Anda memodifikasi basis kode NYX dan mengizinkan pengguna berinteraksi dengannya melalui jaringan (misalnya, menghostingnya sebagai SaaS), Anda secara hukum diwajibkan untuk merilis kode sumber yang dimodifikasi kepada publik.",
     "commercial_title": "Lisensi Ganda Komersial",
     "commercial_desc": "Untuk korporasi, perusahaan, atau startup yang ingin mengintegrasikan NYX ke dalam produk berpemilik, sumber tertutup tanpa kewajiban AGPL, kami menawarkan Lisensi Komersial.",
     "contact_btn": "Hubungi Komando untuk Harga Perusahaan"

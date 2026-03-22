@@ -63,11 +63,14 @@
     "push_notif": "Push Notifications",
     "background_guide": "Background Execution Guide",
     "background_desc": "To receive notifications when NYX is closed, ensure your device allows this app to run in the background.",
-    "android_guide_steps": "<0>🤖 Android:</0> Settings > Apps > NYX (Chrome/any Browser you use if you are not installing nyx into home screen) > Battery > <1>Unrestricted</1>",
-    "ios_guide_steps": "<0>🍎 iOS:</0> Settings > NYX (or Safari/Chrome) > <1>Enable Background App Refresh</1>",
+    "android_guide_steps": "<0>🤖 Android:</0> Settings > Apps > NYX > Battery > <1>Unrestricted</1>",
+    "ios_guide_steps": "<0>🍎 iOS:</0> Settings > NYX > <1>Enable Background App Refresh</1>",
     "help_center": "Help Center",
     "report_bug": "Report Bug",
     "legal": "Legal & Privacy"
+  },
+  "SUPPORT": {
+    "PUSH_NOTIF": "Push Notifications"
   },
   "emergency": {
     "eject": "Emergency Eject",
@@ -104,8 +107,8 @@
     "scanning": "Scanning Network...",
     "no_nodes": "No active nodes detected.",
     "current": "CURRENT",
-    "ip": "IP:",
-    "last_ping": "LAST_PING:"
+    "ip": "IP",
+    "last_ping": "LAST PING"
   },
   "keys_page": {
     "title": "Cryptographic Vault",
@@ -119,6 +122,10 @@
     "rotate_btn": "Rotate Keys",
     "confirm_rotation_title": "INITIATE KEY ROTATION?",
     "confirm_rotation_desc": "WARNING: DESTRUCTIVE ACTION. Previous message history will become undecryptable. This action is irreversible."
+  },
+  "KEYS_PAGE": {
+    "REVEAL_BTN": "REVEAL PHRASE",
+    "ROTATE_BTN": "ROTATE KEYS"
   },
   "messages": {
     "account_obliterated": "Account obliterated.",

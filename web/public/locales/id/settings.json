@@ -63,11 +63,14 @@
     "push_notif": "Notifikasi Push",
     "background_guide": "Panduan Eksekusi Latar Belakang",
     "background_desc": "Untuk menerima notifikasi saat NYX ditutup, pastikan perangkat Anda mengizinkan aplikasi ini berjalan di latar belakang.",
-    "android_guide_steps": "<0>🤖 Android:</0> Pengaturan > Aplikasi > NYX (Chrome/Browser apapun yang Anda gunakan jika tidak menginstal nyx ke layar utama) > Baterai > <1>Tidak Dibatasi</1>",
-    "ios_guide_steps": "<0>🍎 iOS:</0> Pengaturan > NYX (atau Safari/Chrome) > <1>Aktifkan Penyegaran App Latar Belakang</1>",
+    "android_guide_steps": "<0>🤖 Android:</0> Pengaturan > Aplikasi > NYX > Baterai > <1>Tidak Dibatasi</1>",
+    "ios_guide_steps": "<0>🍎 iOS:</0> Pengaturan > NYX > <1>Aktifkan Penyegaran App Latar Belakang</1>",
     "help_center": "Pusat Bantuan",
     "report_bug": "Laporkan Bug",
     "legal": "Hukum & Privasi"
+  },
+  "SUPPORT": {
+    "PUSH_NOTIF": "Notifikasi Push"
   },
   "emergency": {
     "eject": "Ejeksi Darurat",
@@ -104,8 +107,8 @@
     "scanning": "Memindai Jaringan...",
     "no_nodes": "Tidak ada node aktif terdeteksi.",
     "current": "SAAT INI",
-    "ip": "IP:",
-    "last_ping": "PING_TERAKHIR:"
+    "ip": "IP",
+    "last_ping": "PING TERAKHIR"
   },
   "keys_page": {
     "title": "Brankas Kriptografi",
@@ -114,7 +117,6 @@
     "recovery_title": "Frasa Pemulihan Utama",
     "recovery_desc": "Tampilkan 24-kata frasa benih Anda untuk cadangan.",
     "reveal_btn": "Tampilkan Frasa",
-    "REVEAL_BTN": "Tampilkan Frasa",
     "rotation_title": "Rotasi Kunci (Destruktif)",
     "rotation_desc": "Menghasilkan kunci identitas baru. Pesan lama tidak akan bisa dibaca.",
     "rotate_btn": "Putar Kunci",
@@ -122,7 +124,8 @@
     "confirm_rotation_desc": "PERINGATAN: TINDAKAN DESTRUKTIF. Riwayat pesan sebelumnya tidak akan bisa didekripsi. Tindakan ini tidak dapat dibatalkan."
   },
   "KEYS_PAGE": {
-    "REVEAL_BTN": "Tampilkan Frasa"
+    "REVEAL_BTN": "TAMPILKAN FRASA",
+    "ROTATE_BTN": "PUTAR KUNCI"
   },
   "messages": {
     "account_obliterated": "Akun dimusnahkan.",
@@ -143,8 +146,8 @@
     "import_failed": "File brankas tidak valid atau data rusak.",
     "emergency_revoking": "Mencabut sesi server...",
     "emergency_success": "Sesi dicabut. Memulai penghapusan lokal...",
-    "emergency_failed": "Gagal mencabut sesi jarak jauh. Periksa koneksi jaringan Anda.",
-    "ejecting": "Mengeuarkan sesi...",
+    "emergency_failed": "Gagal mencabut sesi jarak jauh.",
+    "ejecting": "Mengeluarkan sesi...",
     "terminated": "Sesi dihentikan.",
     "eject_failed": "Pengeluaran gagal.",
     "keys_rotated": "Kunci Diputar. Memulai Ulang Sesi..."

@@ -175,5 +175,8 @@
     "not_enabled_title": "End-to-end encryption is not enabled",
     "not_enabled_desc": "Your messages are not encrypted. Go to Settings > Encryption to enable end-to-end encryption for better security.",
     "enable_btn": "Enable Encryption"
+  },
+  "user_info": {
+    "view_profile": "View Full Profile"
   }
 }

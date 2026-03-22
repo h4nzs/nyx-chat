@@ -26,7 +26,23 @@
     "done": "Done",
     "saving": "Saving...",
     "creating": "Creating...",
+    "create_group": "Create Group",
+    "view_profile": "View Profile"
+  },
+  "action": {
+    "abort": "ABORT",
+    "unlock": "UNLOCK",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "view_profile": "View Profile",
+    "pin_chat": "Pin Chat",
+    "block_user": "Block User",
+    "delete_chat": "Delete Chat",
+    "delete_group": "Delete Group",
     "create_group": "Create Group"
+  },
+  "actioin": {
+    "view_profile": "View Profile"
   },
   "nav": {
     "home": "Home",
@@ -122,7 +138,12 @@
   },
   "search": {
     "no_results": "No users found for \"{{query}}\"",
-    "failed": "Failed to search users."
+    "failed": "Failed to search users.",
+    "placeholder": "Search..."
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "No notifications"
   },
   "time": {
     "ago_y": "{{count}}y ago",
