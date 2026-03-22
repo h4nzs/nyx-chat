@@ -55,11 +55,16 @@
   },
   "smart": {
     "ai_reply": "Balasan Cerdas AI",
-    "privacy_note": "Catatan Privasi:"
+    "ai_desc": "Hasilkan saran balasan otomatis.",
+    "privacy_note": "Catatan Privasi:",
+    "privacy_desc": "Pesan masuk didekripsi di perangkat dan dikirim secara aman ke Google Gemini untuk analisis. Pesan <1>tidak disimpan</1> oleh server kami."
   },
   "support": {
     "push_notif": "Notifikasi Push",
     "background_guide": "Panduan Eksekusi Latar Belakang",
+    "background_desc": "Untuk menerima notifikasi saat NYX ditutup, pastikan perangkat Anda mengizinkan aplikasi ini berjalan di latar belakang.",
+    "android_guide_steps": "<0>🤖 Android:</0> Pengaturan > Aplikasi > NYX (Chrome/Browser apapun yang Anda gunakan jika tidak menginstal nyx ke layar utama) > Baterai > <1>Tidak Dibatasi</1>",
+    "ios_guide_steps": "<0>🍎 iOS:</0> Pengaturan > NYX (atau Safari/Chrome) > <1>Aktifkan Penyegaran App Latar Belakang</1>",
     "help_center": "Pusat Bantuan",
     "report_bug": "Laporkan Bug",
     "legal": "Hukum & Privasi"
@@ -109,11 +114,15 @@
     "recovery_title": "Frasa Pemulihan Utama",
     "recovery_desc": "Tampilkan 24-kata frasa benih Anda untuk cadangan.",
     "reveal_btn": "Tampilkan Frasa",
+    "REVEAL_BTN": "Tampilkan Frasa",
     "rotation_title": "Rotasi Kunci (Destruktif)",
     "rotation_desc": "Menghasilkan kunci identitas baru. Pesan lama tidak akan bisa dibaca.",
     "rotate_btn": "Putar Kunci",
     "confirm_rotation_title": "MULAI ROTASI KUNCI?",
     "confirm_rotation_desc": "PERINGATAN: TINDAKAN DESTRUKTIF. Riwayat pesan sebelumnya tidak akan bisa didekripsi. Tindakan ini tidak dapat dibatalkan."
+  },
+  "KEYS_PAGE": {
+    "REVEAL_BTN": "Tampilkan Frasa"
   },
   "messages": {
     "account_obliterated": "Akun dimusnahkan.",

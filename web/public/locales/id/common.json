@@ -26,7 +26,23 @@
     "done": "Selesai",
     "saving": "Menyimpan...",
     "creating": "Membuat...",
+    "create_group": "Buat Grup",
+    "view_profile": "Lihat Profil"
+  },
+  "action": {
+    "abort": "BATALKAN",
+    "unlock": "BUKA KUNCI",
+    "confirm": "Konfirmasi",
+    "cancel": "Batal",
+    "view_profile": "Lihat Profil",
+    "pin_chat": "Sematkan Chat",
+    "block_user": "Blokir Pengguna",
+    "delete_chat": "Hapus Chat",
+    "delete_group": "Hapus Grup",
     "create_group": "Buat Grup"
+  },
+  "actioin": {
+    "view_profile": "Lihat Profil"
   },
   "nav": {
     "home": "Beranda",
@@ -122,7 +138,12 @@
   },
   "search": {
     "no_results": "Tidak ada pengguna ditemukan untuk \"{{query}}\"",
-    "failed": "Gagal mencari pengguna."
+    "failed": "Gagal mencari pengguna.",
+    "placeholder": "Cari..."
+  },
+  "notifications": {
+    "title": "Notifikasi",
+    "empty": "Tidak ada notifikasi"
   },
   "time": {
     "ago_y": "{{count}}th lalu",

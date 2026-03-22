@@ -55,11 +55,16 @@
   },
   "smart": {
     "ai_reply": "AI Smart Reply",
-    "privacy_note": "Privacy Note:"
+    "ai_desc": "Auto-generate response suggestions.",
+    "privacy_note": "Privacy Note:",
+    "privacy_desc": "Incoming messages are decrypted on-device and sent securely to Google Gemini for analysis. Messages are <1>not stored</1> by our servers."
   },
   "support": {
     "push_notif": "Push Notifications",
     "background_guide": "Background Execution Guide",
+    "background_desc": "To receive notifications when NYX is closed, ensure your device allows this app to run in the background.",
+    "android_guide_steps": "<0>🤖 Android:</0> Settings > Apps > NYX (Chrome/any Browser you use if you are not installing nyx into home screen) > Battery > <1>Unrestricted</1>",
+    "ios_guide_steps": "<0>🍎 iOS:</0> Settings > NYX (or Safari/Chrome) > <1>Enable Background App Refresh</1>",
     "help_center": "Help Center",
     "report_bug": "Report Bug",
     "legal": "Legal & Privacy"

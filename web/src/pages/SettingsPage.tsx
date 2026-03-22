@@ -864,36 +864,36 @@ export default function SettingsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-bold text-text-primary">{t('settings:smart.ai_reply')}</h3>
-                  <p className="text-[10px] text-text-secondary mt-0.5">Auto-generate response suggestions.</p>
+                  <p className="text-[10px] text-text-secondary mt-0.5">{t('settings:smart.ai_desc')}</p>
                 </div>
-                <RockerSwitch 
-                  checked={enableSmartReply} 
-                  onChange={() => setEnableSmartReply(!enableSmartReply)} 
+                <RockerSwitch
+                  checked={enableSmartReply}
+                  onChange={() => setEnableSmartReply(!enableSmartReply)}
                 />
-              </div>
-              
-              {enableSmartReply && (
+                </div>
+
+                {enableSmartReply && (
                 <div className="p-3 bg-accent/5 border border-accent/10 rounded-lg">
                   <p className="text-[10px] text-text-secondary leading-relaxed">
-                    <strong className="text-accent">{t('settings:smart.privacy_note')}</strong> Incoming messages are decrypted on-device and sent securely to Google Gemini for analysis. Messages are <strong className="text-text-primary">not stored</strong> by our servers.
+                    <strong className="text-accent">{t('settings:smart.privacy_note')}</strong> <Trans i18nKey="settings:smart.privacy_desc">Incoming messages are decrypted on-device and sent securely to Google Gemini for analysis. Messages are <strong className="text-text-primary">not stored</strong> by our servers.</Trans>
                   </p>
                 </div>
-              )}
-            </div>
-          </ControlModule>
-        </div>
+                )}
+                </div>
+                </ControlModule>
+                </div>
 
-        {/* 7. SUPPORT MODULE */}
-        <div className="col-span-1 md:col-span-12 lg:col-span-12">
-          <ControlModule title={t('settings:modules.support')} className="flex flex-col md:flex-row gap-6">
-             <div className="flex-1 space-y-4">
-                <RockerSwitch 
-                  label={t('settings:support.push_notif')} 
-                  checked={isSubscribed} 
+                {/* 7. SUPPORT MODULE */}
+                <div className="col-span-1 md:col-span-12 lg:col-span-12">
+                <ControlModule title={t('settings:modules.support')} className="flex flex-col md:flex-row gap-6">
+                <div className="flex-1 space-y-4">
+                <RockerSwitch
+                  label={t('settings:support.push_notif')}
+                  checked={isSubscribed}
                   onChange={isSubscribed ? unsubscribeFromPush : subscribeToPush}
                   disabled={pushLoading}
                 />
-                
+
                 {/* Background Execution Guide - Only show if push is enabled */}
                 {isSubscribed && (
                   <div className="mt-3 p-4 bg-accent/10 border border-accent/20 rounded-2xl flex items-start gap-3 transition-all animate-in fade-in slide-in-from-top-2">
@@ -901,21 +901,24 @@ export default function SettingsPage() {
                     <div className="text-sm text-text-secondary leading-relaxed">
                       <p className="text-accent font-bold mb-1">{t('settings:support.background_guide')}</p>
                       <p className="mb-2">
-                        To receive notifications when NYX is closed, ensure your device allows this app to run in the background.
+                        {t('settings:support.background_desc')}
                       </p>
                       <div className="bg-black/20 p-3 rounded-xl border border-white/5 space-y-2 text-xs">
                         <p>
-                          <strong className="text-text-primary">🤖 Android:</strong> Settings {'>'} Apps {'>'} NYX (Chrome/any Browser you use if you are not installing nyx into home screen) {'>'} Battery {'>'} <span className="text-emerald-400">Unrestricted</span>
+                          <Trans i18nKey="settings:support.android_guide_steps">
+                            <strong className="text-text-primary">🤖 Android:</strong> Settings {'>'} Apps {'>'} NYX (Chrome/any Browser you use if you are not installing nyx into home screen) {'>'} Battery {'>'} <span className="text-emerald-400">Unrestricted</span>
+                          </Trans>
                         </p>
                         <p>
-                          <strong className="text-text-primary">🍎 iOS:</strong> Settings {'>'} NYX (or Safari/Chrome) {'>'} <span className="text-emerald-400">Enable Background App Refresh</span>
+                          <Trans i18nKey="settings:support.ios_guide_steps">
+                            <strong className="text-text-primary">🍎 iOS:</strong> Settings {'>'} NYX (or Safari/Chrome) {'>'} <span className="text-emerald-400">Enable Background App Refresh</span>
+                          </Trans>
                         </p>
                       </div>
                     </div>
                   </div>
                 )}
-             </div>
-             <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
+                </div>             <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <ActionButton label={t('settings:support.help_center')} icon={FiHelpCircle} onClick={() => navigate('/help')} />
                 <ActionButton label={t('settings:support.report_bug')} icon={FiFlag} onClick={() => setShowReportModal(true)} />
                 <ActionButton label={t('settings:support.legal')} icon={FiShield} onClick={() => navigate('/privacy')} />
