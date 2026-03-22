@@ -22,7 +22,7 @@ i18n
       loadPath: '/locales/{{lng}}/{{ns}}.json?v=20240522',
     },
     // Pisahin file berdasarkan konteks biar enteng
-    ns: ['common', 'auth', 'errors'],
+    ns: ['common', 'auth', 'errors', 'chat', 'settings', 'landing', 'modals'],
     defaultNS: 'common',
   });
 

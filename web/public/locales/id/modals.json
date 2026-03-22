@@ -1,0 +1,50 @@
+{
+  "add_participant": {
+    "title": "Tambah Peserta",
+    "search_placeholder": "Cari pengguna...",
+    "searching": "Mencari...",
+    "no_users": "Pengguna tidak ditemukan.",
+    "add_selected": "Tambah Terpilih",
+    "adding": "Menambahkan...",
+    "cancel": "Batal",
+    "success": "Peserta berhasil ditambahkan!",
+    "error": "Gagal menambahkan peserta: {{error}}",
+    "empty_selection": "Harap pilih setidaknya satu pengguna."
+  },
+  "create_story": {
+    "title": "Buat Cerita",
+    "placeholder": "Apa yang Anda pikirkan? (Terenkripsi E2EE)",
+    "add_media": "Tambah Media (Opsional)",
+    "post_button": "Posting Cerita",
+    "privacy": {
+      "label": "Privasi Cerita",
+      "all": "Dibagikan ke: Semua Kontak",
+      "exclude": "Dikecualikan: {{count}} kontak",
+      "only": "Hanya dibagikan ke: {{count}} kontak",
+      "select_contacts": "Pilih Kontak",
+      "no_contacts": "Tidak ada kontak aktif ditemukan.",
+      "save": "Simpan Pengaturan Privasi"
+    },
+    "error_empty": "Tambahkan teks atau media ke cerita Anda"
+  },
+  "recovery": {
+    "title": "Protokol: Pemulihan",
+    "subtitle": "Menginisialisasi urutan ekspor kunci utama.\nLingkungan aman wajib.",
+    "warning_title": "Peringatan: Data Rahasia",
+    "warning_desc": "Kepemilikan frasa ini memberikan akses sistem total. Jangan kirim secara digital.",
+    "button_acknowledge": "Akui & Lanjutkan",
+    "button_reveal": "Tampilkan Data",
+    "step2_title": "Frasa Aman",
+    "step2_desc": "Rekam urutannya. Prioritas Alpha.",
+    "button_recorded": "Urutan Direkam",
+    "verify_title": "Verifikasi Urutan",
+    "verify_desc": "Rekonstruksi frasa kunci.",
+    "select_words": "Pilih kata di bawah...",
+    "undo": "Urungkan",
+    "confirm": "Konfirmasi",
+    "copy_success": "Frasa pemulihan disalin!",
+    "copy_fail": "Gagal menyalin ke clipboard",
+    "verify_success": "Verifikasi berhasil! Cadangan Anda terkonfirmasi.",
+    "verify_fail": "Verifikasi gagal. Silakan coba lagi."
+  }
+}

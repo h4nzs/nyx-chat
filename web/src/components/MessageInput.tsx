@@ -17,6 +17,7 @@ import { useUserProfile } from '@hooks/useUserProfile';
 import AttachmentCropperModal from './AttachmentCropperModal';
 import ImageEditorModal from './ImageEditorModal';
 import { FiEdit3 } from 'react-icons/fi';
+import { useTranslation } from 'react-i18next';
 
 // --- Types ---
 interface MessageInputProps {
@@ -43,13 +44,14 @@ const DURATIONS = [
 ];
 
 const EditPreview = () => {
+  const { t } = useTranslation('chat');
   const { editingMessage, setEditingMessage } = useMessageInputStore(useShallow(s => ({ editingMessage: s.editingMessage, setEditingMessage: s.setEditingMessage })));
   if (!editingMessage) return null;
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }} className="px-4 pb-2">
       <div className="relative flex items-center justify-between bg-bg-main rounded-t-xl p-3 border-b border-accent/20 shadow-neumorphic-concave">
         <div className="flex flex-col border-l-2 border-accent pl-3">
-          <span className="text-[10px] font-mono uppercase tracking-widest text-accent flex items-center gap-1"><FiEdit2 size={10}/> Editing Message</span>
+          <span className="text-[10px] font-mono uppercase tracking-widest text-accent flex items-center gap-1"><FiEdit2 size={10}/> {t('input.editing')}</span>
           <span className="text-xs text-text-secondary truncate max-w-[200px]">{editingMessage.content}</span>
         </div>
         <button onClick={() => setEditingMessage(null)} className="p-1 rounded-full hover:bg-red-500/10 hover:text-red-500 transition-colors"><FiX size={14} /></button>
@@ -59,6 +61,7 @@ const EditPreview = () => {
 };
 
 const ReplyPreview = () => {
+  const { t } = useTranslation('chat');
   const { replyingTo, setReplyingTo } = useMessageInputStore(useShallow(state => ({
     replyingTo: state.replyingTo,
     setReplyingTo: state.setReplyingTo,
@@ -70,12 +73,12 @@ const ReplyPreview = () => {
   if (!replyingTo) return null;
 
   const isMe = replyingTo.senderId === currentUser?.id;
-  const authorName = isMe ? 'You' : (profile.name || 'Unknown');
+  const authorName = isMe ? t('input.you') : (profile.name || t('input.unknown'));
   let contentPreview = '...';
   
-  if (replyingTo.duration) contentPreview = '[Voice Transmission]';
-  else if (replyingTo.fileName) contentPreview = `[File: ${replyingTo.fileName}]`;
-  else if (replyingTo.fileUrl) contentPreview = '[Attachment]';
+  if (replyingTo.duration) contentPreview = `[${t('input.voice_transmission')}]`;
+  else if (replyingTo.fileName) contentPreview = `[${t('input.file_attachment', { fileName: replyingTo.fileName })}]`;
+  else if (replyingTo.fileUrl) contentPreview = `[${t('input.attachment')}]`;
   else if (replyingTo.content) contentPreview = replyingTo.content;
 
   return (
@@ -91,7 +94,7 @@ const ReplyPreview = () => {
         shadow-neumorphic-concave
       ">
         <div className="flex flex-col border-l-2 border-accent pl-3">
-          <span className="text-[10px] font-mono uppercase tracking-widest text-accent">Replying to {authorName}</span>
+          <span className="text-[10px] font-mono uppercase tracking-widest text-accent">{t('input.replying_to', { name: authorName })}</span>
           <span className="text-xs text-text-secondary truncate max-w-[200px]">{contentPreview}</span>
         </div>
         <button
@@ -106,6 +109,7 @@ const ReplyPreview = () => {
 };
 
 export default function MessageInput({ onSend, onTyping, onVoiceSend, conversation }: MessageInputProps) {
+  const { t } = useTranslation(['chat', 'common']);
   const [text, setText] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showTimerMenu, setShowTimerMenu] = useState(false); // Timer Menu State
@@ -564,21 +568,21 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
             className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
           >
             <FiPaperclip size={18} />
-            <span>Attachment</span>
+            <span>{t('input.attach_file')}</span>
           </button>
           <button
             onClick={() => { setShowTimerMenu(true); setShowPlusMenu(false); }}
             className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
           >
             <FiClock size={18} className={expiresIn ? "text-orange-500" : ""} />
-            <span>Auto-Delete</span>
+            <span>{t('input.set_timer')}</span>
           </button>
           <button
             onClick={() => { setIsViewOnce(!isViewOnce); setShowPlusMenu(false); }}
             className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
           >
             <FiEye size={18} className={isViewOnce ? "text-accent" : ""} />
-            <span>View Once</span>
+            <span>{t('input.toggle_view_once')}</span>
           </button>
           <button
             onClick={() => { setIsHD(!isHD); setShowPlusMenu(false); }}
@@ -599,7 +603,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
             className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
           >
             <FiSmile size={18} />
-            <span>Emoji</span>
+            <span>{t('input.insert_emoji')}</span>
           </button>
         </div>
       )}
@@ -609,13 +613,13 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
         <div className="flex items-center justify-between p-4 bg-red-500/10 rounded-xl border border-red-500/20 m-4">
           <div className="flex items-center gap-3 text-red-500">
             <FiAlertTriangle size={20} />
-            <span className="font-bold text-sm">TRANSMISSION BLOCKED</span>
+            <span className="font-bold text-sm">{t('input.transmission_blocked')}</span>
           </div>
           <button
              onClick={() => useAuthStore.getState().unblockUser(otherParticipant.id)}
              className="text-xs font-mono uppercase bg-red-500 text-white px-3 py-1.5 rounded-lg shadow-sm hover:bg-red-600"
           >
-            Unblock Signal
+            {t('input.unblock_signal')}
           </button>
         </div>
       ) : isRecording ? (
@@ -627,7 +631,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               p-3 rounded-full text-text-secondary 
               hover:text-red-500 hover:bg-red-500/10 transition-all flex-shrink-0
             "
-            title="Cancel Recording"
+            title={t('input.cancel_voice')}
           >
              <FiTrash2 size={20} />
           </button>
@@ -636,7 +640,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
              <span className="font-mono text-sm md:text-lg text-text-primary tracking-widest flex-shrink-0">
                 {new Date(recordingTime * 1000).toISOString().substr(14, 5)}
              </span>
-             <span className="hidden md:inline text-xs text-text-secondary uppercase tracking-wider ml-auto truncate">Recording Audio Feed...</span>
+             <span className="hidden md:inline text-xs text-text-secondary uppercase tracking-wider ml-auto truncate">{t('input.recording_state')}</span>
           </div>
           <button 
             onClick={handleStopRecording} 
@@ -645,7 +649,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               shadow-[0_0_15px_rgba(var(--accent),0.5)]
               hover:scale-110 active:scale-95 transition-all flex-shrink-0
             "
-            title="Send Voice Message"
+            title={t('input.send_voice')}
           >
              <FiSend size={20} />
           </button>
@@ -665,7 +669,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               type="button" 
               onClick={() => fileInputRef.current?.click()} 
               disabled={isInputDisabled}
-              aria-label="Attach file"
+              aria-label={t('input.attach_file')}
               className="
                 p-3 rounded-xl text-text-secondary transition-all
                 hover:text-accent active:scale-95
@@ -678,7 +682,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               type="button" 
               onClick={() => setShowTimerMenu(!showTimerMenu)} 
               disabled={isInputDisabled}
-              aria-label="Set disappearing message timer"
+              aria-label={t('input.set_timer')}
               className={clsx(
                 "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark",
                 expiresIn ? "text-orange-500 bg-orange-500/10" : "text-text-secondary hover:text-orange-500"
@@ -690,7 +694,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               type="button" 
               onClick={() => setIsViewOnce(!isViewOnce)} 
               disabled={isInputDisabled}
-              aria-label="Toggle View Once"
+              aria-label={t('input.toggle_view_once')}
               className={clsx(
                 "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark",
                 isViewOnce ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent"
@@ -702,7 +706,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               type="button" 
               onClick={() => setIsHD(!isHD)} 
               disabled={isInputDisabled}
-              aria-label="Toggle HD Quality"
+              aria-label={t('input.toggle_hd')}
               className={clsx(
                 "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center justify-center",
                 isHD ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent"
@@ -714,7 +718,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               type="button" 
               onClick={() => setIsVoiceAnonymized(!isVoiceAnonymized)} 
               disabled={isInputDisabled}
-              aria-label="Toggle Anonymous Voice"
+              aria-label={t('input.toggle_anon_voice')}
               className={clsx(
                 "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center gap-1 justify-center",
                 isVoiceAnonymized ? "text-red-500 bg-red-500/10 shadow-[inset_2px_2px_4px_rgba(0,0,0,0.4)]" : "text-text-secondary hover:text-red-400"
@@ -726,7 +730,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               type="button" 
               onClick={() => setShowEmojiPicker(!showEmojiPicker)} 
               disabled={isInputDisabled}
-              aria-label="Insert emoji"
+              aria-label={t('input.insert_emoji')}
               className="
                 p-3 rounded-xl text-text-secondary transition-all
                 hover:text-yellow-500 active:scale-95
@@ -743,7 +747,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               type="button" 
               onClick={() => setShowPlusMenu(!showPlusMenu)}
               disabled={isInputDisabled}
-              aria-label="More actions"
+              aria-label={t('input.more_actions')}
               className={clsx(
                 "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark",
                 showPlusMenu ? "text-accent bg-accent/10" : "text-text-secondary"
@@ -764,8 +768,8 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               value={text}
               onChange={handleTextChange}
               disabled={isInputDisabled}
-              aria-label="Message text"
-              placeholder={isConnected ? (expiresIn ? "Disappearing message..." : "Transmit secure message...") : "Connection Lost"}
+              aria-label={t('input.message_text')}
+              placeholder={isConnected ? (expiresIn ? t('input.placeholder_disappearing') : t('input.placeholder_default')) : t('input.placeholder_offline')}
               className="
                 w-full bg-transparent border-none outline-none 
                 text-text-primary placeholder:text-text-secondary/50
@@ -793,7 +797,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
                        }}
                        className="flex items-center gap-2 px-3 py-2 text-sm font-bold text-text-primary hover:bg-white/5 rounded-lg transition-colors w-full"
                      >
-                       <FiVolumeX className="text-accent" size={16} /> Send without sound
+                       <FiVolumeX className="text-accent" size={16} /> {t('input.send_silent')}
                      </button>
                   </motion.div>
                )}
@@ -808,7 +812,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
                 onTouchStart={handleSendTouchStart}
                 onTouchEnd={handleSendTouchEnd}
                 disabled={isInputDisabled}
-                aria-label="Send message"
+                aria-label={t('input.send_message')}
                 className="
                   p-3 rounded-xl bg-accent text-white
                   shadow-neu-flat dark:shadow-neu-flat-dark
@@ -822,7 +826,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
                 type="button"
                 onClick={handleStartRecording}
                 disabled={isInputDisabled}
-                aria-label="Record voice message"
+                aria-label={t('input.record_voice')}
                 className="
                   p-3 rounded-xl text-text-secondary
                   shadow-neu-icon dark:shadow-neu-icon-dark

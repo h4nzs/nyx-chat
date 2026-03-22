@@ -1,0 +1,50 @@
+{
+  "add_participant": {
+    "title": "Add Participants",
+    "search_placeholder": "Search users...",
+    "searching": "Searching...",
+    "no_users": "No users found.",
+    "add_selected": "Add Selected",
+    "adding": "Adding...",
+    "cancel": "Cancel",
+    "success": "Participants added successfully!",
+    "error": "Failed to add participants: {{error}}",
+    "empty_selection": "Please select at least one user."
+  },
+  "create_story": {
+    "title": "Create Story",
+    "placeholder": "What's on your mind? (End-to-End Encrypted)",
+    "add_media": "Add Media (Optional)",
+    "post_button": "Post Story",
+    "privacy": {
+      "label": "Story Privacy",
+      "all": "Shared with: All Contacts",
+      "exclude": "Excluded: {{count}} contacts",
+      "only": "Only sharing with: {{count}} contacts",
+      "select_contacts": "Select Contacts",
+      "no_contacts": "No active contacts found.",
+      "save": "Save Privacy Settings"
+    },
+    "error_empty": "Add text or media to your story"
+  },
+  "recovery": {
+    "title": "Protocol: Recovery",
+    "subtitle": "Initiating master key export sequence.\nSecure environment mandatory.",
+    "warning_title": "Warning: Classified Data",
+    "warning_desc": "Possession of this phrase grants total system access. Do not transmit digitally.",
+    "button_acknowledge": "Acknowledge & Proceed",
+    "button_reveal": "Reveal Data",
+    "step2_title": "Secure Phrase",
+    "step2_desc": "Record the sequence. Priority Alpha.",
+    "button_recorded": "Sequence Recorded",
+    "verify_title": "Verify Sequence",
+    "verify_desc": "Reconstruct the key phrase.",
+    "select_words": "Select words below...",
+    "undo": "Undo",
+    "confirm": "Confirm",
+    "copy_success": "Recovery phrase copied!",
+    "copy_fail": "Failed to copy to clipboard",
+    "verify_success": "Verification successful! Your backup is confirmed.",
+    "verify_fail": "Verification failed. Please try again."
+  }
+}

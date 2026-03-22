@@ -1,14 +1,15 @@
 import { Link } from 'react-router-dom';
 import { 
-  FiGithub, FiLock, FiKey, FiSmartphone, FiSun, FiMoon, 
-  FiChevronsLeft, FiChevronsRight, FiUserPlus, FiMessageSquare, 
+  FiGithub, FiSun, FiMoon, 
+  FiUserPlus, FiMessageSquare, 
   FiShield, FiArrowRight, FiHash, FiEyeOff, FiCheck, FiX, FiCpu 
 } from 'react-icons/fi';
-import { motion, useMotionValue, useTransform, useInView } from 'framer-motion';
+import { motion, useInView } from 'framer-motion';
 import { useState, useRef, useEffect, ReactNode } from 'react';
 import { useThemeStore } from '@store/theme';
 import { useShallow } from 'zustand/react/shallow';
 import SEO from '../components/SEO';
+import { useTranslation } from 'react-i18next';
 
 // --- Animation Variants ---
 const containerVariants = {
@@ -110,47 +111,40 @@ const TestimonialCard = ({ children, author, role }: { children: ReactNode; auth
   </motion.div>
 );
 
-const FAQSection = () => (
-  <section className="py-16 md:py-24">
-    <AnimatedSection>
-      <div className="max-w-3xl mx-auto px-4">
-        <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">FREQUENTLY ASKED QUESTIONS</motion.h2>
-        <div className="space-y-4">
-          {[
-            { q: "Is NYX end-to-end encrypted?", a: "Yes. We use the Signal Protocol (X3DH + Double Ratchet Algorithm) to ensure that only you and the person you're communicating with can read what's sent. Not even the server can decrypt your messages." },
-            { q: "Do I need to install an app?", a: "No. NYX is a Progressive Web App (PWA). You can use it directly in your browser or install it to your home screen for a native-like experience without the app store friction." },
-            { q: "Is it completely free?", a: "Yes, NYX is open-source and free to use. There are no hidden fees, ads, or data tracking." },
-            { q: "How do I recover my account?", a: "When you sign up, you receive a 24-word recovery phrase. This is the ONLY way to restore your account, but remember that you cannot access your messages history. And we do not store this phrase." }
-          ].map((item, i) => (
-            <motion.div variants={itemVariants} key={i} className="bg-bg-surface rounded-lg shadow-[4px_4px_8px_rgba(0,0,0,0.1),-4px_-4px_8px_rgba(255,255,255,0.05)] overflow-hidden">
-              <details className="group">
-                <summary className="flex justify-between items-center font-bold cursor-pointer list-none p-6 text-text-primary hover:text-accent transition-colors">
-                  <span>{item.q}</span>
-                  <span className="transition group-open:rotate-180">
-                    <svg fill="none" height="24" shapeRendering="geometricPrecision" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
-                  </span>
-                </summary>
-                <div className="text-text-secondary px-6 pb-6 pt-0 leading-relaxed">
-                  {item.a}
-                </div>
-              </details>
-            </motion.div>
-          ))}
+const FAQSection = () => {
+  const { t } = useTranslation('landing');
+  return (
+    <section className="py-16 md:py-24">
+      <AnimatedSection>
+        <div className="max-w-3xl mx-auto px-4">
+          <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">
+            {t('faq.title')}
+          </motion.h2>
+          <div className="space-y-4">
+            {[1, 2, 3, 4].map((i) => (
+              <motion.div variants={itemVariants} key={i} className="bg-bg-surface rounded-lg shadow-[4px_4px_8px_rgba(0,0,0,0.1),-4px_-4px_8px_rgba(255,255,255,0.05)] overflow-hidden">
+                <details className="group">
+                  <summary className="flex justify-between items-center font-bold cursor-pointer list-none p-6 text-text-primary hover:text-accent transition-colors">
+                    <span>{t(`faq.q${i}`)}</span>
+                    <span className="transition group-open:rotate-180">
+                      <svg fill="none" height="24" shapeRendering="geometricPrecision" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
+                    </span>
+                  </summary>
+                  <div className="text-text-secondary px-6 pb-6 pt-0 leading-relaxed">
+                    {t(`faq.a${i}`)}
+                  </div>
+                </details>
+              </motion.div>
+            ))}
+          </div>
         </div>
-      </div>
-    </AnimatedSection>
-  </section>
-);
-
-// New Comparison Data
-const comparisonData = [
-  { feature: "Phone No. Required?", wa: "Yes", tg: "Yes", nyx: "NO", isWin: true },
-  { feature: "App Install?", wa: "Required", tg: "Required", nyx: "Optional (PWA)", isWin: true },
-  { feature: "E2E Encryption", wa: "Default", tg: "Secret Chat Only", nyx: "Always On", isWin: true },
-  { feature: "Local Footprint", wa: "SQL Database", tg: "Cloud Cache", nyx: "ZERO (Browser)", isWin: true },
-];
+      </AnimatedSection>
+    </section>
+  );
+};
 
 export default function LandingPage() {
+  const { t } = useTranslation(['landing', 'common']);
   const { theme } = useThemeStore(useShallow(s => ({ theme: s.theme })));
   const [grainOpacity, setGrainOpacity] = useState(0.05);
 
@@ -160,6 +154,14 @@ export default function LandingPage() {
 
   // Pilih screenshot berdasarkan tema (opsional) atau fix ke dark
   const heroScreenshot = theme === 'dark' ? '/screenshots/mobile-dark.png' : '/screenshots/mobile-light.png';
+
+  // Moved inside component to access translation
+  const comparisonData = [
+    { feature: t('landing:comparison.rows.phone_required'), wa: t('landing:comparison.values.yes'), tg: t('landing:comparison.values.yes'), nyx: t('landing:comparison.values.no'), isWin: true },
+    { feature: t('landing:comparison.rows.app_install'), wa: t('landing:comparison.values.required'), tg: t('landing:comparison.values.required'), nyx: t('landing:comparison.values.optional'), isWin: true },
+    { feature: t('landing:comparison.rows.e2e'), wa: t('landing:comparison.values.default'), tg: t('landing:comparison.values.secret_only'), nyx: t('landing:comparison.values.always_on'), isWin: true },
+    { feature: t('landing:comparison.rows.footprint'), wa: t('landing:comparison.values.sql_db'), tg: t('landing:comparison.values.cloud_cache'), nyx: t('landing:comparison.values.zero'), isWin: true },
+  ];
 
   const landingSchema = JSON.stringify({
     "@context": "https://schema.org",
@@ -174,13 +176,13 @@ export default function LandingPage() {
           "price": "0",
           "priceCurrency": "USD"
         },
-        "description": "Zero-knowledge, end-to-end encrypted messaging app that requires no phone number. Built on the Signal Protocol.",
+        "description": t('landing:hero.description'),
         "featureList": [
-          "No Phone Number Required",
+          t('landing:features.no_phone.title'),
           "End-to-End Encryption (Signal Protocol)",
           "Self-Destructing Messages",
           "Local-First Architecture",
-          "PWA (Progressive Web App)"
+          t('landing:features.ghost_app.title')
         ],
         "softwareHelp": "https://nyx-app.my.id/help",
         "author": {
@@ -194,10 +196,10 @@ export default function LandingPage() {
         "mainEntity": [
           {
             "@type": "Question",
-            "name": "Is NYX end-to-end encrypted?",
+            "name": t('landing:faq.q1'),
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. NYX uses the Signal Protocol (X3DH + Double Ratchet) ensuring only you and the recipient can read messages."
+              "text": t('landing:faq.a1')
             }
           },
           {
@@ -210,10 +212,10 @@ export default function LandingPage() {
           },
           {
             "@type": "Question",
-            "name": "Is it free?",
+            "name": t('landing:faq.q3'),
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes, NYX is open-source (AGPL-3.0) and completely free to use without ads or tracking."
+              "text": t('landing:faq.a3')
             }
           }
         ]
@@ -232,7 +234,7 @@ export default function LandingPage() {
     >
       <SEO 
         title="NYX" 
-        description="NYX is a secure, end-to-end encrypted messaging app featuring a stunning Neumorphic design. Chat privately without tracking." 
+        description={t('landing:hero.description')}
         canonicalUrl="/" 
         schemaMarkup={landingSchema}
       />
@@ -260,7 +262,7 @@ export default function LandingPage() {
           </motion.div>
           <motion.div variants={itemVariants}>
             <Link to="/login" className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all">
-              Login
+              {t('landing:header.login')}
             </Link>
           </motion.div>
         </motion.header>
@@ -271,24 +273,23 @@ export default function LandingPage() {
             <div className="lg:col-span-7">
               <motion.div initial="hidden" animate="visible" variants={containerVariants}>
                 <motion.div variants={itemVariants} className="inline-block mb-4 px-4 py-1 rounded-full bg-bg-main shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.1)] text-accent text-xs md:text-sm font-bold tracking-wider uppercase">
-                  {__APP_VERSION__} • E2EE Encrypted • Anonymous
+                  {t('landing:hero.badge', { version: __APP_VERSION__ })}
                 </motion.div>
                 <motion.h1 variants={itemVariants} className="text-5xl md:text-7xl font-black tracking-tighter leading-none mb-6">
-                  PRIVATE<br />
-                  <span className="text-accent" style={{ textShadow: '2px 2px 4px rgba(255, 107, 53, 0.3)' }}>CONVERSATIONS</span><br />
-                  SECURED BY YOU
+                  {t('landing:hero.title_prefix')}<br />
+                  <span className="text-accent" style={{ textShadow: '2px 2px 4px rgba(255, 107, 53, 0.3)' }}>{t('landing:hero.title_highlight')}</span><br />
+                  {t('landing:hero.title_suffix')}
                 </motion.h1>
                 <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary max-w-xl mb-8 leading-relaxed">
-                  End-to-end encrypted messaging with a tactile, industrial design. 
-                  No phone numbers. No trackers. Just you and your data.
+                  {t('landing:hero.description')}
                 </motion.p>
                 <motion.div variants={itemVariants} className="flex flex-col sm:flex-row justify-start items-start gap-4">
                   <Link to="/register" className="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] transition-all flex items-center">
-                    GET STARTED <FiArrowRight className="ml-2" />
+                    {t('landing:hero.cta_start')} <FiArrowRight className="ml-2" />
                   </Link>
                   <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" className="px-8 py-4 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all flex items-center">
                     <FiGithub className="mr-2" />
-                    SOURCE CODE
+                    {t('landing:hero.cta_source')}
                   </a>
                 </motion.div>
               </motion.div>
@@ -330,12 +331,12 @@ export default function LandingPage() {
         <section className="py-16 md:py-24 bg-bg-main/50 backdrop-blur-sm">
           <AnimatedSection>
             <div className="max-w-4xl mx-auto px-4 text-center">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">WHY NYX?</motion.h2>
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">{t('landing:why.title')}</motion.h2>
               <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary mb-4">
-                Tired of complicated sign-ups and mandatory app downloads? NYX is your solution. Access it instantly from your favorite browser—no installation needed.
+                {t('landing:why.desc_1')}
               </motion.p>
               <motion.p variants={itemVariants} className="text-lg md:text-xl text-text-secondary">
-                Worried about your data? We are too. NYX is built on a foundation of privacy, acting only as a secure bridge between you and your contacts.
+                {t('landing:why.desc_2')}
               </motion.p>
             </div>
           </AnimatedSection>
@@ -345,16 +346,16 @@ export default function LandingPage() {
         <section className="py-16 md:py-24">
           <AnimatedSection>
             <div className="max-w-5xl mx-auto px-4">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">NYX vs. THE GIANTS</motion.h2>
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">{t('landing:comparison.title')}</motion.h2>
               
               <div className="bg-bg-surface rounded-3xl p-6 md:p-8 shadow-[inset_3px_3px_6px_rgba(0,0,0,0.2),inset_-3px_-3px_6px_rgba(255,255,255,0.05)] overflow-x-auto">
                 <table className="w-full min-w-[600px] border-separate border-spacing-y-4">
                   <thead>
                     <tr className="text-text-secondary text-sm uppercase tracking-wider">
-                      <th className="text-left py-4 px-6">Feature</th>
-                      <th className="py-4 px-4 font-normal">WhatsApp</th>
-                      <th className="py-4 px-4 font-normal">Telegram</th>
-                      <th className="py-4 px-6 text-accent font-black text-lg">NYX</th>
+                      <th className="text-left py-4 px-6">{t('landing:comparison.headers.feature')}</th>
+                      <th className="py-4 px-4 font-normal">{t('landing:comparison.headers.wa')}</th>
+                      <th className="py-4 px-4 font-normal">{t('landing:comparison.headers.tg')}</th>
+                      <th className="py-4 px-6 text-accent font-black text-lg">{t('landing:comparison.headers.nyx')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -365,7 +366,7 @@ export default function LandingPage() {
                         </td>
                         <td className="py-4 px-4 text-center text-red-500 bg-bg-main/50">
                           <div className="flex items-center justify-center gap-2">
-                            {row.wa === "Yes" || row.wa === "Required" ? (
+                            {row.wa === t('landing:comparison.values.yes') || row.wa === t('landing:comparison.values.required') ? (
                                 <>
                                     <span className="sr-only">Not Supported/Bad</span>
                                     <div aria-hidden="true"><FiX/></div>
@@ -397,27 +398,23 @@ export default function LandingPage() {
         <section className="py-16 md:py-24" style={{ backgroundColor: theme === 'dark' ? '#222222' : '#e8e2d5' }}>
           <AnimatedSection>
             <div className="max-w-6xl mx-auto px-4">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">FEATURES BUILT FOR PRIVACY</motion.h2>
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">{t('landing:features.title')}</motion.h2>
               <motion.div variants={containerVariants} className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
                 
-                {/* New Feature: No Phone Number */}
-                <FeatureCard icon={<FiHash size={24} />} title="NO PHONE NUMBER">
-                  Sign up with just a Username. Your real identity stays safe. No one can &apos;save your contact&apos; without permission.
+                <FeatureCard icon={<FiHash size={24} />} title={t('landing:features.no_phone.title')}>
+                  {t('landing:features.no_phone.desc')}
                 </FeatureCard>
 
-                {/* New Feature: Ghost App */}
-                <FeatureCard icon={<FiEyeOff size={24} />} title="GHOST APP (PWA)">
-                  Zero install. Open in browser, chat, close tab, and clear data. Zero forensic footprint left on your device.
+                <FeatureCard icon={<FiEyeOff size={24} />} title={t('landing:features.ghost_app.title')}>
+                  {t('landing:features.ghost_app.desc')}
                 </FeatureCard>
 
-                {/* New Feature: Argon2 */}
-                <FeatureCard icon={<FiCpu size={24} />} title="ARGON2 SECURITY">
-                  The only web chat that turns your password into a military-grade encryption key using memory-hardened hashing.
+                <FeatureCard icon={<FiCpu size={24} />} title={t('landing:features.argon2.title')}>
+                  {t('landing:features.argon2.desc')}
                 </FeatureCard>
 
-                {/* Old Feature: Neumorphism (Keep this as it's a design selling point) */}
-                <FeatureCard icon={<div className="flex gap-2"><FiSun size={24} /><FiMoon size={24} /></div>} title="TACTILE DESIGN">
-                  A mutated neumorphic interface with chiseled depth and grain texture for a premium physical feel.
+                <FeatureCard icon={<div className="flex gap-2"><FiSun size={24} /><FiMoon size={24} /></div>} title={t('landing:features.tactile.title')}>
+                  {t('landing:features.tactile.desc')}
                 </FeatureCard>
 
               </motion.div>
@@ -429,16 +426,16 @@ export default function LandingPage() {
         <section className="py-16 md:py-24">
           <AnimatedSection>
             <div className="max-w-6xl mx-auto px-4">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-16 tracking-tighter">SIMPLE, SECURE, TRANSPARENT.</motion.h2>
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-16 tracking-tighter">{t('landing:how_it_works.title')}</motion.h2>
               <motion.div variants={containerVariants} className="relative grid md:grid-cols-3 gap-12">
-                <HowItWorksStep icon={<FiUserPlus size={24} />} title="1. CREATE ACCOUNT">
-                  Sign up via username. We automatically generate your 24-word recovery phrase for encryption.
+                <HowItWorksStep icon={<FiUserPlus size={24} />} title={t('landing:how_it_works.step_1.title')}>
+                  {t('landing:how_it_works.step_1.desc')}
                 </HowItWorksStep>
-                <HowItWorksStep icon={<FiMessageSquare size={24} />} title="2. START CHATTING">
-                  Your messages are end-to-end encrypted from the very first word using the Signal Protocol.
+                <HowItWorksStep icon={<FiMessageSquare size={24} />} title={t('landing:how_it_works.step_2.title')}>
+                  {t('landing:how_it_works.step_2.desc')}
                 </HowItWorksStep>
-                <HowItWorksStep icon={<FiShield size={24} />} title="3. VANISH">
-                  Done? Close the browser. Encryption keys are wiped from memory. No trace left behind.
+                <HowItWorksStep icon={<FiShield size={24} />} title={t('landing:how_it_works.step_3.title')}>
+                  {t('landing:how_it_works.step_3.desc')}
                 </HowItWorksStep>
               </motion.div>
             </div>
@@ -449,13 +446,13 @@ export default function LandingPage() {
         <section className="py-16 md:py-24" style={{ backgroundColor: theme === 'dark' ? '#222222' : '#e8e2d5' }}>
           <AnimatedSection>
             <div className="max-w-4xl mx-auto px-4">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">TRUSTED BY PRIVACY ADVOCATES</motion.h2>
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">{t('landing:testimonials.title')}</motion.h2>
               <motion.div variants={containerVariants} className="grid md:grid-cols-2 gap-8">
-                <TestimonialCard author="Yosep." role="Privacy Advocate">
-                  Finally, a chat app that respects my privacy without sacrificing a beautiful user experience. The fact that I control my own keys is a game-changer.
+                <TestimonialCard author="Yosep." role={t('landing:testimonials.yosep_role')}>
+                  {t('landing:testimonials.yosep')}
                 </TestimonialCard>
-                <TestimonialCard author="Sarah T." role="Remote Team Lead">
-                  Nyx has become essential for our team. It&apos;s simple, secure, and a pleasure to use every day.
+                <TestimonialCard author="Sarah T." role={t('landing:testimonials.sarah_role')}>
+                  {t('landing:testimonials.sarah')}
                 </TestimonialCard>
               </motion.div>
             </div>
@@ -469,13 +466,13 @@ export default function LandingPage() {
         <section className="py-16 md:py-24">
           <AnimatedSection>
             <div className="max-w-4xl mx-auto px-4 text-center">
-              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">TAKE BACK YOUR PRIVACY.</motion.h2>
+              <motion.h2 variants={itemVariants} className="text-3xl md:text-4xl font-black mb-6 tracking-tighter">{t('landing:cta.title')}</motion.h2>
               <motion.p variants={itemVariants} className="text-lg text-text-secondary mb-8 max-w-2xl mx-auto">
-                Don&apos;t let your data become a commodity. Switch to NYX today. Free, Open Source, Forever.
+                {t('landing:cta.desc')}
               </motion.p>
               <motion.div variants={itemVariants}>
                 <Link to="/register" className="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] transition-all inline-flex items-center">
-                  CREATE ANONYMOUS ACCOUNT <FiArrowRight className="ml-2" />
+                  {t('landing:cta.button')} <FiArrowRight className="ml-2" />
                 </Link>
               </motion.div>
             </div>
@@ -500,23 +497,21 @@ export default function LandingPage() {
 
             {/* Copyright & Core License */}
             <p className="text-sm font-medium mb-3">
-              &copy; {new Date().getFullYear()} NYX Project. Open Source under <span className="font-bold text-white">AGPL-3.0</span>.
+              {t('landing:footer.rights', { year: new Date().getFullYear() })} <span className="font-bold text-white">AGPL-3.0</span>.
             </p>
 
             {/* Intelligence Links */}
             <div className="flex flex-wrap justify-center items-center gap-3 text-xs font-bold mt-1 mb-8">
-              <a href="/privacy" className="hover:text-accent transition-colors tracking-wide">Legal & Privacy</a>
+              <a href="/privacy" className="hover:text-accent transition-colors tracking-wide">{t('landing:footer.legal')}</a>
               <span className="text-white/10">•</span>
-              <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" className="hover:text-accent transition-colors tracking-wide">Source Code</a>
+              <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" className="hover:text-accent transition-colors tracking-wide">{t('landing:footer.source')}</a>
               <span className="text-white/10">•</span>
-              <a href="https://github.com/h4nzs/nyx-chat/blob/main/COMMERCIAL.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-white transition-colors tracking-wide">Commercial Licensing</a>
+              <a href="https://github.com/h4nzs/nyx-chat/blob/main/COMMERCIAL.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-white transition-colors tracking-wide">{t('landing:footer.commercial')}</a>
             </div>
 
             {/* Disclaimer Hukum (The Shield) */}
             <p className="text-[10px] text-text-secondary/40 max-w-3xl mx-auto leading-relaxed font-mono">
-              WhatsApp is a registered trademark of Meta Platforms, Inc. Telegram is a registered trademark of Telegram FZ-LLC. 
-              NYX is an independent open-source project and is not affiliated with, endorsed by, or sponsored by these corporate entities. 
-              Any architectural comparisons are made strictly for informational and cryptographic review purposes based on public technical documentation available as of {new Date().getFullYear()}.
+              {t('landing:footer.disclaimer', { year: new Date().getFullYear() })}
             </p>
           </div>
         </footer>
