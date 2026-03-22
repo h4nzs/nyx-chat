@@ -13,8 +13,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import ConnectionStatusBanner from '@components/ConnectionStatusBanner';
 import { FiMessageSquare } from 'react-icons/fi';
 import { asConversationId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 export default function Chat() {
+  const { t } = useTranslation('chat');
   const { conversationId: rawConversationId } = useParams<{ conversationId: string }>();
   const conversationId = rawConversationId ? asConversationId(rawConversationId) : undefined;
   const navigate = useNavigate();
@@ -152,8 +154,8 @@ export default function Chat() {
               <div className="p-8 rounded-full bg-bg-surface shadow-neumorphic-convex mb-6">
                 <FiMessageSquare size={64} className="opacity-50" />
               </div>
-              <h2 className="text-2xl font-black uppercase tracking-widest mb-2">System Ready</h2>
-              <p className="font-mono text-sm">Select a frequency to begin transmission.</p>
+              <h2 className="text-2xl font-black uppercase tracking-widest mb-2">{t('empty_state.title')}</h2>
+              <p className="font-mono text-sm">{t('empty_state.subtitle')}</p>
             </div>
           </div>
         )}

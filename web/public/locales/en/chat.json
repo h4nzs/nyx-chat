@@ -50,7 +50,14 @@
     "block": "Block",
     "unblock": "Unblock",
     "clear_chat": "Clear Chat",
-    "leave_group": "Leave Group"
+    "leave_group": "Leave Group",
+    "view_profile": "View Profile",
+    "pin_chat": "Pin Chat",
+    "unpin_chat": "Unpin Chat",
+    "block_user": "Block User",
+    "unblock_user": "Unblock User",
+    "delete_group": "Delete Group",
+    "delete_chat": "Delete Chat"
   },
   "banners": {
     "key_rotation": "Security Alert: Key Rotation Required",
@@ -76,6 +83,13 @@
   "messages": {
     "bulk_delete_confirm": "Delete {{count}} messages?",
     "bulk_delete_desc": "This will only remove them from your device.",
-    "processed": "{{count}} messages processed"
+    "processed": "{{count}} messages processed",
+    "no_messages_yet": "No messages yet",
+    "view_once_message": "View Once Message",
+    "opened": "Opened"
+  },
+  "empty_state": {
+    "title": "System Ready",
+    "subtitle": "Select a frequency to begin transmission."
   }
 }

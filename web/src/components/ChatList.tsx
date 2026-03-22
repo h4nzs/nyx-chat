@@ -29,6 +29,7 @@ import { useContextMenuStore } from '../store/contextMenu';
 import { useSettingsStore } from '@store/settings';
 import StoryTray from './StoryTray';
 import type { UserId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 // --- Sub-components ---
 
@@ -136,13 +137,14 @@ const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (user: Use
 };
 
 const SearchResults = memo(function SearchResults({ results, onSelect }: { results: User[], onSelect: (user: User) => void }) {
+  const { t } = useTranslation('chat');
   return (
     <Virtuoso
       style={{ height: '100%' }}
       data={results}
       components={{
-        Header: () => <p className="text-xs font-bold text-text-secondary px-6 mb-4 mt-2">GLOBAL SEARCH</p>,
-        EmptyPlaceholder: () => <div className="p-6 text-center text-xs text-text-secondary">No users found.</div>,
+        Header: () => <p className="text-xs font-bold text-text-secondary px-6 mb-4 mt-2">{t('sidebar.global_search')}</p>,
+        EmptyPlaceholder: () => <div className="p-6 text-center text-xs text-text-secondary">{t('sidebar.no_users')}</div>,
       }}
       itemContent={(index, user) => <SearchResultItem key={user.id} user={user} onSelect={onSelect} />}
     />
@@ -176,6 +178,7 @@ const ConversationItem = memo(function ConversationItem({
   onTogglePin: (id: string) => void;
   privacyCloak: boolean;
 }) {
+  const { t, i18n } = useTranslation(['chat', 'common']);
   const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
   const peerProfile = useUserProfile(peerUser as { id: string; encryptedProfile?: string | null });
   const title = conversation.isGroup ? conversation.title : peerProfile.name || 'Conversation';
@@ -193,28 +196,35 @@ const ConversationItem = memo(function ConversationItem({
     const date = new Date(timestamp);
     const now = new Date();
     const diffInDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffInDays === 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    if (diffInDays === 1) return 'Yesterday';
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  }, []);
+    
+    // Use Intl.DateTimeFormat for better localization support
+    if (diffInDays === 0) {
+        return new Intl.DateTimeFormat(i18n.language, { hour: '2-digit', minute: '2-digit' }).format(date);
+    }
+    if (diffInDays === 1) {
+        // Simple "Yesterday" localization - ideally this should be in common.json
+        return i18n.language === 'id' ? 'Kemarin' : 'Yesterday';
+    }
+    return new Intl.DateTimeFormat(i18n.language, { month: 'short', day: 'numeric' }).format(date);
+  }, [i18n.language]);
 
   const renderPreviewText = () => {
-    if (!conversation.lastMessage) return 'No messages yet';
+    if (!conversation.lastMessage) return t('messages.no_messages_yet');
     if (conversation.lastMessage.isViewOnce) {
         return (
             <span className="flex items-center gap-1 text-accent text-sm font-medium">
                {conversation.lastMessage.isViewed ? (
-                 <span className="flex items-center gap-1"><FiLock size={12} /> Opened</span>
+                 <span className="flex items-center gap-1"><FiLock size={12} /> {t('messages.opened')}</span>
                ) : (
-                 <span className="flex items-center gap-1"><FiEyeOff size={12} /> View Once Message</span>
+                 <span className="flex items-center gap-1"><FiEyeOff size={12} /> {t('messages.view_once_message')}</span>
                )}
             </span>
         );
     }
     if (conversation.lastMessage.preview !== undefined) {
-        return conversation.lastMessage.preview || 'No messages yet';
+        return conversation.lastMessage.preview || t('messages.no_messages_yet');
     }
-    return conversation.lastMessage.content || 'No messages yet';
+    return conversation.lastMessage.content || t('messages.no_messages_yet');
   };
 
   const previewText = renderPreviewText();
@@ -222,16 +232,16 @@ const ConversationItem = memo(function ConversationItem({
   const handleContextMenu = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     openMenu(e, [
-      ...(peerUser ? [{ label: 'View Profile', icon: <FiUser />, onClick: () => onUserClick(peerUser.id) }] : []),
-      { label: isPinnedByMe ? 'Unpin Chat' : 'Pin Chat', icon: <FiMaximize2 />, onClick: () => onTogglePin(conversation.id) },
-      ...(!conversation.isGroup ? [{ label: isBlocked ? 'Unblock User' : 'Block User', icon: <FiSlash />, onClick: () => {
+      ...(peerUser ? [{ label: t('actions.view_profile'), icon: <FiUser />, onClick: () => onUserClick(peerUser.id) }] : []),
+      { label: isPinnedByMe ? t('actions.unpin_chat') : t('actions.pin_chat'), icon: <FiMaximize2 />, onClick: () => onTogglePin(conversation.id) },
+      ...(!conversation.isGroup ? [{ label: isBlocked ? t('actions.unblock_user') : t('actions.block_user'), icon: <FiSlash />, onClick: () => {
          const other = conversation.participants.find(p => p.id !== meId);
          if (other) {
            if (isBlocked) unblockUser(other.id);
            else blockUser(other.id);
          }
       } }] : []),
-      { label: conversation.isGroup ? 'Delete Group' : 'Delete Chat', icon: <FiTrash2 />, destructive: true, onClick: () => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat') },
+      { label: conversation.isGroup ? t('actions.delete_group') : t('actions.delete_chat'), icon: <FiTrash2 />, destructive: true, onClick: () => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat') },
     ]);
   };
 
@@ -356,6 +366,7 @@ import { useNavigate } from 'react-router-dom';
 // --- Main Component ---
 
 export default function ChatList() {
+  const { t } = useTranslation(['chat', 'common']);
   const navigate = useNavigate();
   const {
     conversations,
@@ -403,12 +414,12 @@ export default function ChatList() {
 
   useEffect(() => {
     const commands = [{
-      id: 'new-group', name: 'New Group', action: openCreateGroupModal,
+      id: 'new-group', name: t('sidebar.new_group'), action: openCreateGroupModal,
       icon: <FiUsers />, section: 'General', keywords: 'create group chat conversation',
     }];
     addCommands(commands);
     return () => removeCommands(commands.map(c => c.id));
-  }, [addCommands, removeCommands, openCreateGroupModal]);
+  }, [addCommands, removeCommands, openCreateGroupModal, t]);
 
   const itemContent = useCallback((index: number, c: Conversation) => {
     const peerUser = !c.isGroup ? c.participants?.find(p => p.id !== meId) : null;
@@ -453,7 +464,7 @@ export default function ChatList() {
           <input
             id="global-search-input"
             type="text"
-            placeholder="Search..."
+            placeholder={t('sidebar.search_placeholder')}
             className="
               w-full h-12 pl-12 pr-12 rounded-full
               bg-bg-main text-text-primary font-medium
@@ -467,7 +478,7 @@ export default function ChatList() {
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
             <button 
               onClick={() => setShowScanModal(true)} 
-              title="Scan QR Code"
+              title={t('sidebar.scan_qr')}
               className="
                 p-2 rounded-full text-text-secondary
                 hover:text-accent active:scale-95 transition-all
@@ -477,7 +488,7 @@ export default function ChatList() {
             </button>
             <button 
               onClick={openCreateGroupModal} 
-              title="New Group Chat"
+              title={t('sidebar.new_group')}
               className="
                 p-2 rounded-full text-text-secondary
                 hover:text-accent active:scale-95 transition-all
@@ -502,12 +513,12 @@ export default function ChatList() {
         
         {error && !isLoading && (
           <div className="p-6 mx-4 text-center">
-            <div className="text-red-500 font-bold mb-2 text-sm">Connection Error</div>
+            <div className="text-red-500 font-bold mb-2 text-sm">{t('sidebar.connection_error')}</div>
             <button 
               onClick={handleRetry}
               className="px-4 py-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-xs font-bold hover:text-red-500 active:shadow-neumorphic-pressed"
             >
-              Reconnect
+              {t('sidebar.reconnect')}
             </button>
           </div>
         )}
@@ -524,7 +535,7 @@ export default function ChatList() {
                 Header: () => <div className="h-2"></div>,
                 EmptyPlaceholder: () => (
                   <div className="flex flex-col items-center justify-center h-40 text-text-secondary/50">
-                    <p className="text-sm font-medium">No conversations yet</p>
+                    <p className="text-sm font-medium">{t('sidebar.no_conversations')}</p>
                   </div>
                 ),
               }}

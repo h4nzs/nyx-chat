@@ -50,7 +50,14 @@
     "block": "Blokir",
     "unblock": "Buka Blokir",
     "clear_chat": "Bersihkan Chat",
-    "leave_group": "Keluar Grup"
+    "leave_group": "Keluar Grup",
+    "view_profile": "Lihat Profil",
+    "pin_chat": "Sematkan Chat",
+    "unpin_chat": "Lepas Sematan",
+    "block_user": "Blokir Pengguna",
+    "unblock_user": "Buka Blokir",
+    "delete_group": "Hapus Grup",
+    "delete_chat": "Hapus Chat"
   },
   "banners": {
     "key_rotation": "Peringatan Keamanan: Rotasi Kunci Diperlukan",
@@ -76,6 +83,13 @@
   "messages": {
     "bulk_delete_confirm": "Hapus {{count}} pesan?",
     "bulk_delete_desc": "Ini hanya akan menghapusnya dari perangkat Anda.",
-    "processed": "{{count}} pesan diproses"
+    "processed": "{{count}} pesan diproses",
+    "no_messages_yet": "Belum ada pesan",
+    "view_once_message": "Pesan Sekali Lihat",
+    "opened": "Dibuka"
+  },
+  "empty_state": {
+    "title": "Sistem Siap",
+    "subtitle": "Pilih frekuensi untuk memulai transmisi."
   }
 }
