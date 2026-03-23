@@ -117,6 +117,7 @@ jobs:
             
             # 4. INSTALL DI VPS PAKAI PNPM (Di Root Monorepo)
             echo "📦 Installing backend dependencies with PNPM..."
+            cp $TARGET_DIR/.env.example $TARGET_DIR/server/.env || true
             cd $TARGET_DIR
             NODE_OPTIONS="--max-old-space-size=512" pnpm install --prod --no-frozen-lockfile
             

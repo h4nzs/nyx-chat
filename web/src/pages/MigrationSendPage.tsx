@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { FiChevronLeft, FiCamera, FiUploadCloud } from 'react-icons/fi';
+import { FiUploadCloud } from 'react-icons/fi';
 import { Html5Qrcode } from 'html5-qrcode';
 import { getSocket } from '@lib/socket';
 import { getSodium } from '@lib/sodiumInitializer';
@@ -30,32 +30,24 @@ export default function MigrationSendPage() {
   useEffect(() => {
     const prefetch = async () => {
       try {
-        // --- CRITICAL FIX: FREEZE STATE ---
-        // Disconnect the socket to prevent incoming messages from advancing the Double Ratchet
-        // while we are capturing the database snapshot.
         const socket = getSocket();
         if (socket?.connected) {
             socket.disconnect();
             console.log("System Frozen: Socket disconnected to prevent Ratchet Race Condition.");
         }
-        // --- END FIX ---
 
         const jsonString = await exportDatabaseToJson();
         vaultDataRef.current = new TextEncoder().encode(jsonString).buffer;
         setStatus('scanning');
         
-        // We must reconnect ONLY for migration signaling, but NOT for normal message processing.
-        // Since getSocket() might re-trigger standard listeners, we connect it manually here
-        // relying on the fact that the UI layer won't render normal chat components.
         socket.connect();
       } catch (e) {
-        toast.error(tRef.current('migration.read_vault_failed'));
+        toast.error(tRef.current('common:migration.read_vault_failed', 'Gagal membaca brankas data.'));
       }
     };
     prefetch();
 
     return () => {
-      // Un-freeze if user leaves the page before finishing
       if (getSocket()?.disconnected) {
         getSocket().connect();
       }
@@ -66,8 +58,6 @@ export default function MigrationSendPage() {
   useEffect(() => {
     if (status !== 'scanning') return;
     
-    // Html5Qrcode needs an element with id to attach to.
-    // We start it after a short delay to ensure DOM is ready
     const timer = setTimeout(() => {
         scannerRef.current = new Html5Qrcode('migration-reader');
         scannerRef.current.start(
@@ -82,7 +72,7 @@ export default function MigrationSendPage() {
           () => {}
         ).catch(err => {
             console.error("Camera start failed", err);
-            toast.error(tRef.current('migration.camera_denied'));
+            toast.error(tRef.current('common:migration.camera_denied', 'Akses kamera ditolak atau tidak ditemukan.'));
         });
     }, 100);
 
@@ -94,7 +84,7 @@ export default function MigrationSendPage() {
 
   const processMigration = async (qrText: string) => {
     setStatus('encrypting');
-    toast.loading(t('migration.encrypting_vault'), { id: 'send' });
+    toast.loading(t('common:migration.encrypting_vault', 'Mengenknripsi brankas...'), { id: 'send' });
     
     try {
       const { roomId, pubKey } = JSON.parse(qrText);
@@ -110,7 +100,7 @@ export default function MigrationSendPage() {
       const ivB64 = sodium.to_base64(iv, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       setStatus('sending');
-      toast.loading(t('migration.tunneling'), { id: 'send' });
+      toast.loading(t('common:migration.tunneling', 'Membangun terowongan aman...'), { id: 'send' });
 
       // 3. Chunking & Socket Emission
       const socket = getSocket();
@@ -127,11 +117,10 @@ export default function MigrationSendPage() {
         socket.emit('migration:chunk', { roomId, chunkIndex: i, chunk });
         setProgress(Math.round(((i + 1) / totalChunks) * 100));
         
-        // Small delay to prevent socket buffer overflow
         await new Promise(r => setTimeout(r, 50));
       }
 
-      toast.loading(t('migration.waiting_receiver'), { id: 'send' });
+      toast.loading(t('common:migration.waiting_receiver', 'Menunggu penerima...'), { id: 'send' });
 
       // Wait for ACK
       const ackResult = await new Promise((resolve) => {
@@ -146,15 +135,15 @@ export default function MigrationSendPage() {
 
       if (ackResult) {
         setStatus('success');
-        toast.success(t('migration.transfer_complete'), { id: 'send' });
+        toast.success(t('common:migration.transfer_complete', 'Transfer selesai!'), { id: 'send' });
         setTimeout(() => navigate('/settings'), 2000);
       } else {
-        throw new Error("Receiver failed to decrypt or timed out");
+        throw new Error(t('common:migration.receiver_failed', 'Penerima gagal mendekripsi atau kehabisan waktu'));
       }
 
     } catch (e) {
       console.error(e);
-      toast.error(t('migration.failed_generic'), { id: 'send' });
+      toast.error(t('common:migration.failed_generic', 'Proses migrasi gagal.'), { id: 'send' });
       setStatus('scanning');
     }
   };
@@ -162,15 +151,15 @@ export default function MigrationSendPage() {
   return (
     <div className="min-h-screen bg-bg-main text-text-primary flex flex-col items-center justify-center p-4">
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-black uppercase tracking-widest text-text-primary">{t('migration.send_title')}</h1>
-        <p className="text-xs text-text-secondary mt-2">{t('migration.send_desc')}</p>
+        <h1 className="text-2xl font-black uppercase tracking-widest text-text-primary">{t('common:migration.send_title', 'Kirim Data')}</h1>
+        <p className="text-xs text-text-secondary mt-2">{t('common:migration.send_desc', 'Pindai QR code di perangkat baru')}</p>
       </div>
 
       <div className="w-full max-w-sm aspect-square bg-black/90 rounded-3xl overflow-hidden shadow-neumorphic-pressed relative mb-8">
         {status === 'prefetching' && (
            <div className="absolute inset-0 flex flex-col items-center justify-center text-accent">
               <FiUploadCloud size={40} className="animate-pulse mb-2" />
-              <span className="font-mono text-xs uppercase">{t('migration.preparing')}</span>
+              <span className="font-mono text-xs uppercase">{t('common:migration.preparing', 'Menyiapkan Data...')}</span>
            </div>
         )}
         
@@ -180,13 +169,13 @@ export default function MigrationSendPage() {
            <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center text-accent z-10">
               <FiUploadCloud size={40} className="animate-bounce mb-2" />
               <span className="font-bold font-mono text-xl">{progress}%</span>
-              <span className="font-mono text-[10px] uppercase mt-2">{t('migration.status_tunneling')}</span>
+              <span className="font-mono text-[10px] uppercase mt-2">{t('common:migration.status_tunneling', 'Mengirim Data...')}</span>
            </div>
         )}
       </div>
 
       <Link to="/settings" className="text-xs font-mono text-text-secondary hover:text-accent uppercase tracking-widest">
-        {t('actions.cancel_bracket')}
+        {t('common:actions.cancel_bracket', '[ BATAL ]')}
       </Link>
     </div>
   );
