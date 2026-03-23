@@ -144,7 +144,7 @@ self.addEventListener('push', (event: PushEvent) => {
       }
       // --- END VISIBILITY CHECK ---
 
-      const options: Record<string, unknown> = {
+      const options: NotificationOptions = {
         body,
         icon: '/nyx.png', 
         badge: '/nyx.png',
@@ -155,7 +155,7 @@ self.addEventListener('push', (event: PushEvent) => {
         tag: conversationId || 'general-message',
         renotify: true,
         vibrate: [100, 50, 100], 
-      };
+      } as NotificationOptions;
 
       await self.registration.showNotification(title, options);
     } catch (err) {

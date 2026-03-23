@@ -1,7 +1,8 @@
 import { Component, ReactNode } from 'react';
 import { FiAlertTriangle, FiRefreshCw } from 'react-icons/fi';
+import { withTranslation, WithTranslation } from 'react-i18next';
 
-interface ErrorBoundaryProps {
+interface ErrorBoundaryProps extends WithTranslation {
   children: ReactNode;
   fallback?: ReactNode;
 }
@@ -30,6 +31,8 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   };
 
   render() {
+    const { t } = this.props;
+
     if (this.state.hasError) {
       if (this.props.fallback) {
         return this.props.fallback;
@@ -50,15 +53,15 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
             {/* Message */}
             <div className="space-y-4">
               <h1 className="text-2xl font-black uppercase tracking-widest text-red-500">
-                System Malfunction
+                {t('error_boundary.title')}
               </h1>
               <div className="bg-bg-surface p-4 rounded-xl border border-red-500/10 shadow-neu-flat">
                 <p className="font-mono text-xs text-text-secondary break-all">
-                  {"An unexpected error occurred in the system process."}
+                  {t('error_boundary.desc')}
                 </p>
               </div>
               <p className="text-text-secondary text-sm">
-                The application encountered a critical error. A reload is required to restore system integrity.
+                {t('error_boundary.message')}
               </p>
             </div>
 
@@ -74,12 +77,12 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               "
             >
               <FiRefreshCw className="text-lg group-hover:rotate-180 transition-transform duration-500" />
-              <span>Reboot System</span>
+              <span>{t('error_boundary.reboot')}</span>
             </button>
           </div>
 
           <div className="absolute bottom-8 text-[10px] text-text-secondary/30 font-mono uppercase tracking-[0.3em]">
-            {"NYX Secure Protocol // Critical Failure"}
+            {t('error_boundary.footer')}
           </div>
         </div>
       );
@@ -89,4 +92,4 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 }
 
-export default ErrorBoundary;
+export default withTranslation('common')(ErrorBoundary);

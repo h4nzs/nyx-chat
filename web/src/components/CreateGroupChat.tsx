@@ -9,7 +9,8 @@ import { hashUsername } from '@lib/crypto-worker-proxy';
 import toast from 'react-hot-toast';
 import ModalBase from './ui/ModalBase';
 import { FiCheck } from 'react-icons/fi';
-import type { UserId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 type UserSearchResult = {
   id: UserId;
@@ -19,6 +20,7 @@ type UserSearchResult = {
 };
 
 export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation(['modals', 'common']);
   const [title, setTitle] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<UserSearchResult[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,7 +59,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
         const selectedIds = selectedUsers.map(u => u.id);
         setUserList(optimisticResults.filter(u => u.id !== me?.id && !selectedIds.includes(u.id)));
       } catch {
-        // Silent fail or show toast? Silent is better for typing.
+        // Silent fail
       }
     }, 300);
     return () => clearTimeout(timer);
@@ -74,7 +76,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
 
   const handleCreateGroup = async () => {
     if (!title.trim() || selectedUsers.length === 0) {
-      return toast.error("Group name and at least one member are required.");
+      return toast.error(t('modals:group_info.toasts.create_failed'));
     }
         setLoading(true);
         try {      const newConversation = await authFetch<Conversation>("/api/conversations", {
@@ -92,14 +94,14 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
       addOrUpdateConversation(newConversation);
       openConversation(newConversation.id);
 
-      toast.success(`Group "${newConversation.title}" created!`);
+      toast.success(t('modals:group_info.toasts.created', { name: newConversation.title }));
       onClose();
 
     } catch (error: unknown) {
       if (error instanceof Error) {
-        toast.error(`Failed to create group: ${error.message}`);
+        toast.error(t('modals:group_info.toasts.create_error', { error: error.message }));
       } else {
-        toast.error("An unknown error occurred while creating the group.");
+        toast.error(t('common:errors.unknown'));
       }
     } finally {
       setLoading(false);
@@ -110,14 +112,14 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
     <ModalBase
       isOpen={true}
       onClose={onClose}
-      title="Create New Group"
+      title={t('modals:group_info.create_title')}
       footer={(
         <>
           <button onClick={onClose} disabled={loading} className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all">
-            Cancel
+            {t('common:actions.cancel')}
           </button>
           <button onClick={handleCreateGroup} disabled={loading || !title.trim() || selectedUsers.length === 0} className="px-4 py-2 rounded-lg bg-accent text-white shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all">
-            {loading ? 'Creating...' : 'Create Group'}
+            {loading ? t('common:actions.creating') : t('common:actions.create_group')}
           </button>
         </>
       )}
@@ -125,7 +127,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
       <div className="flex flex-col gap-4">
         <input
           type="text"
-          placeholder="Group Name"
+          placeholder={t('modals:edit_group.group_name')}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           className="w-full input-neumorphic mb-4"
@@ -136,7 +138,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search users to add..."
+            placeholder={t('modals:add_participant.search_placeholder')}
             className="w-full input-neumorphic"
           />
           {userList.length > 0 && (

@@ -2,8 +2,10 @@ import { useState } from 'react'
 import Alert from './Alert'
 import { Spinner } from './Spinner';
 import { handleApiError } from '@lib/api';
+import { useTranslation } from 'react-i18next';
 
 export default function AuthForm({ onSubmit, button, hideEmail = false, isRegister = false }: { onSubmit: (v: { a: string; b?: string; c?: string; d?: string; name?: string }) => Promise<void>; button: string; hideEmail?: boolean; isRegister?: boolean }) {
+  const { t } = useTranslation(['auth', 'common']);
   const [emailOrUsername, setA] = useState('')
   const [password, setB] = useState('')
   const [email, setC] = useState('')
@@ -30,6 +32,16 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
   // For login, we now only accept Username, so email validation is irrelevant
   const emailOrUsernameIsValid = false; // Disable validation glow for login
 
+  // Determine button text from props or translation
+  const getButtonText = () => {
+      if (button === 'Login') return t('auth:buttons.login');
+      if (button === 'Register') return t('auth:buttons.register');
+      return button;
+  };
+  
+  const buttonText = getButtonText();
+  const loadingText = t('common:actions.loading');
+
   return (
     <form
       className="space-y-4"
@@ -53,13 +65,13 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
         <>
           <div className="relative">
             <input
-              aria-label="Name"
+              aria-label={t('auth:fields.display_name')}
               className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
                 isFocused.name 
                   ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
                   : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
               }`}
-              placeholder="Display Name"
+              placeholder={t('auth:fields.display_name')}
               value={name}
               onChange={(e) => setE(e.target.value)}
               disabled={isLoading}
@@ -72,7 +84,7 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
           {!hideEmail && (
             <div className="relative">
               <input
-                aria-label="Email"
+                aria-label={t('auth:fields.email')}
                 className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
                   isFocused.email 
                     ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
@@ -80,7 +92,7 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
                 } ${
                   emailIsValid ? 'border border-green-500' : ''
                 }`}
-                placeholder="Email"
+                placeholder={t('auth:fields.email')}
                 value={email}
                 onChange={(e) => setC(e.target.value)}
                 disabled={isLoading}
@@ -95,13 +107,13 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
 
           <div className="relative">
             <input
-              aria-label="Username"
+              aria-label={t('auth:fields.username_id')}
               className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
                 isFocused.username 
                   ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
                   : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
               }`}
-              placeholder="Username (ID)"
+              placeholder={t('auth:fields.username_id')}
               value={username}
               onChange={(e) => setD(e.target.value)}
               disabled={isLoading}
@@ -114,13 +126,13 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
       ) : (
         <div className="relative">
           <input
-            aria-label="Username"
+            aria-label={t('auth:fields.username')}
             className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
               isFocused.emailOrUsername 
                 ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
                 : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
             }`}
-            placeholder="Username"
+            placeholder={t('auth:fields.username')}
             value={emailOrUsername}
             onChange={(e) => setA(e.target.value)}
             disabled={isLoading}
@@ -132,14 +144,14 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
 
       <div className="relative">
         <input
-          aria-label="Password"
+          aria-label={t('auth:fields.password')}
           minLength={8}
           className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
             isFocused.password 
               ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
               : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
           }`}
-          placeholder="Password"
+          placeholder={t('auth:fields.password')}
           type="password"
           value={password}
           onChange={(e) => setB(e.target.value)}
@@ -156,15 +168,15 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
             ? 'bg-gradient-to-r from-orange-500 to-orange-600 shadow-[5px_5px_15px_rgba(255,107,53,0.4),-5px_-5px_15px_rgba(255,165,110,0.2)] hover:shadow-[3px_3px_10px_rgba(255,107,53,0.6),-3px_-3px_10px_rgba(255,165,110,0.3)] active:shadow-[inset_3px_3px_8px_rgba(139,69,19,0.6)]' 
             : 'bg-gradient-to-r from-teal-500 to-teal-600 shadow-[5px_5px_15px_rgba(0,150,150,0.4),-5px_-5px_15px_rgba(100,200,200,0.2)] hover:shadow-[3px_3px_10px_rgba(0,150,150,0.6),-3px_-3px_10px_rgba(100,200,200,0.3)] active:shadow-[inset_3px_3px_8px_rgba(0,100,100,0.6)]'
         }`}
-        aria-label={button}
+        aria-label={buttonText}
         disabled={isLoading}
       >
         {isLoading ? (
           <div className="flex items-center justify-center">
             <Spinner size="sm" className="mr-2" />
-            {button}...
+            {loadingText}
           </div>
-        ) : button}
+        ) : buttonText}
       </button>
     </form>
   )

@@ -1,5 +1,6 @@
 import { useCallback, useRef, ChangeEvent, useState, useEffect, useMemo } from "react";
 import { useAuthStore } from "@store/auth";
+import { useTranslation } from "react-i18next";
 import { getSocket } from "@lib/socket";
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import MessageItem from "@components/MessageItem";
@@ -30,36 +31,42 @@ import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
 import { startCall } from '@lib/webrtc';
 import { useSettingsStore } from '@store/settings';
 import type { MinimalProfile } from '@store/callStore';
-import { asConversationId } from '../types/brands';
+import { asConversationId } from '@nyx/shared';
 
-const KeyRotationBanner = () => (
-  <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
-    <div className="flex items-center gap-3">
-      <FiShield className="flex-shrink-0 animate-pulse" size={18} />
-      <div className="font-mono text-xs">
-        <p className="font-bold uppercase tracking-wider">Security Alert: Key Rotation Required</p>
-        <p className="opacity-80">Encryption keys desynchronized. Transmit message to re-establish secure handshake.</p>
+const KeyRotationBanner = () => {
+  const { t } = useTranslation(['chat']);
+  return (
+    <div className="bg-yellow-500/10 border-y border-yellow-500/20 px-4 py-3 text-yellow-600 dark:text-yellow-400">
+      <div className="flex items-center gap-3">
+        <FiShield className="flex-shrink-0 animate-pulse" size={18} />
+        <div className="font-mono text-xs">
+          <p className="font-bold uppercase tracking-wider">{t('banners.key_rotation')}</p>
+          <p className="opacity-80">{t('banners.key_rotation_desc')}</p>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
-const NewConversationBanner = () => (
-  <div className="bg-blue-500/10 border-y border-blue-500/20 px-4 py-3 text-blue-600 dark:text-blue-400">
-    <div className="flex items-start gap-3">
-      <FiInfo className="flex-shrink-0 mt-0.5" size={18} />
-      <div className="font-mono text-xs">
-        <p className="font-bold uppercase tracking-wider mb-1">Encryption Protocol Recommendation</p>
-        <p className="opacity-90 leading-relaxed">
-          For the initial handshake, ensure both parties are <strong>ONLINE</strong>. 
-          Sending messages to offline users in a new conversation may require a key refresh if they come online later.
-        </p>
+const NewConversationBanner = () => {
+  const { t } = useTranslation(['chat']);
+  return (
+    <div className="bg-blue-500/10 border-y border-blue-500/20 px-4 py-3 text-blue-600 dark:text-blue-400">
+      <div className="flex items-start gap-3">
+        <FiInfo className="flex-shrink-0 mt-0.5" size={18} />
+        <div className="font-mono text-xs">
+          <p className="font-bold uppercase tracking-wider mb-1">{t('banners.encryption_recommendation')}</p>
+          <p className="opacity-90 leading-relaxed">
+            {t('banners.encryption_desc')}
+          </p>
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conversation: Conversation; onBack: () => void; onInfoToggle: () => void; onMenuClick: () => void; }) => {
+  const { t } = useTranslation(['chat', 'common']);
   const user = useAuthStore((s) => s.user);
   const meId = user?.id;
   const onlineUsers = usePresenceStore((s) => s.onlineUsers);
@@ -86,9 +93,9 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
 
   const getStatus = () => {
     if (conversation.isGroup) {
-      return `${conversation.participants.length} members`;
+      return t('header.members', { count: conversation.participants.length });
     }
-    return isOnline ? "Online" : "Offline";
+    return isOnline ? t('header.online') : t('header.offline');
   };
 
   const handleVoiceCall = () => {
@@ -115,14 +122,14 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
         {/* Mobile Back Button */}
         <button 
           onClick={onMenuClick} 
-          aria-label="Menu" 
+          aria-label={t('common:actions.menu', 'Menu')} 
           className="md:hidden p-3 text-text-secondary active:scale-95 transition-transform"
         >
           <FiMoreHorizontal size={24} />
         </button>
         <button 
           onClick={onBack} 
-          aria-label="Back" 
+          aria-label={t('common:actions.back', 'Back')} 
           className="hidden md:block p-3 text-text-secondary hover:text-accent active:scale-95 transition-transform"
         >
           <FiArrowLeft size={20} />
@@ -137,7 +144,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
              <div className="w-10 h-10 rounded-full shadow-neu-pressed dark:shadow-neu-pressed-dark border-2 border-bg-main p-0.5">
                 <img
                   src={toAbsoluteUrl(avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${title}`}
-                  alt="ID"
+                  alt={t('common:defaults.avatar', 'Avatar')}
                   className={clsx("w-full h-full rounded-full object-cover", cloakClass)}
                 />
              </div>
@@ -198,6 +205,7 @@ const ChatSpinner = () => (
 );
 
 export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClick: () => void }) {
+  const { t } = useTranslation(['chat', 'common']);
   const meId = useAuthStore((s) => s.user?.id);
   const { conversation, messages, isLoading, error, actions, isFetchingMore } = useConversation(id);
   const { loadMessagesForConversation, selectedMessageIds, clearMessageSelection, removeMessages } = useMessageStore(useShallow(s => ({
@@ -244,17 +252,16 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     const selectedMessages = messages.filter(m => selectedMessageIds.includes(m.id));
     const allMine = selectedMessages.every(m => m.senderId === meId);
     
-    const confirmMessage = allMine 
-      ? `Permanently delete ${selectedMessageIds.length} messages for everyone?` 
-      : `Delete ${selectedMessageIds.length} messages? This will only remove them from your device. Messages from others will remain on their devices.`;
+    const confirmMessage = t('messages.bulk_delete_confirm', { count: selectedMessageIds.length }) + 
+      (allMine ? '' : ' ' + t('messages.bulk_delete_desc'));
 
     showConfirm(
-      'Bulk Deletion', 
+      t('actions.bulk_delete_title'), 
       confirmMessage,
       async () => {
           await removeMessages(conversation.id, selectedMessageIds);
           // clearMessageSelection is already handled inside removeMessages now
-          toast.success(`${selectedMessageIds.length} messages processed`);
+          toast.success(t('messages.processed', { count: selectedMessageIds.length }));
       }
     );
   };
@@ -354,7 +361,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
             return (
               <div className="flex-1 flex flex-col items-center justify-center text-red-500 font-mono">
                 <FiShield size={40} className="mb-4 opacity-50" />
-                <p className="uppercase tracking-widest">Signal Lost</p>
+                <p className="uppercase tracking-widest">{t('status.signal_lost')}</p>
                 <p className="text-xs mt-2 opacity-70">{error}</p>
               </div>
             );
@@ -376,12 +383,12 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                           <button onClick={clearMessageSelection} className="p-2 hover:bg-white/10 rounded-full transition-colors text-text-secondary hover:text-white">
                               <FiX size={20} />
                           </button>
-                          <span className="font-bold text-lg text-accent tracking-wide">{selectedMessageIds.length} Selected</span>
+                          <span className="font-bold text-lg text-accent tracking-wide">{t('messages.selected_count', { count: selectedMessageIds.length })}</span>
                       </div>
                       <button 
                           onClick={handleBulkDelete} 
                           className="p-2 text-red-500 hover:bg-red-500/20 rounded-full transition-all active:scale-95 shadow-neumorphic-concave"
-                          title="Delete Selected"
+                          title={t('actions.delete_selected')}
                       >
                           <FiTrash2 size={20} />
                       </button>
@@ -431,7 +438,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                           <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce [animation-delay:-0.15s]"></span>
                           <span className="w-1.5 h-1.5 bg-accent rounded-full animate-bounce"></span>
                         </div>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">Typing...</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t('header.typing')}</span>
                       </div>
                     </motion.div>
                   )}

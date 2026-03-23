@@ -25,7 +25,7 @@ const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content, isOwn = fals
           },
           pre({ children, ...props }: React.HTMLProps<HTMLPreElement>) {
             return (
-              <pre className="block bg-secondary p-2 rounded-md my-1 text-sm font-mono overflow-x-auto [&>code]:bg-transparent [&>code]:p-0" {...props}>
+              <pre {...props} className="block bg-secondary p-2 rounded-md my-1 text-sm font-mono overflow-x-auto [&>code]:bg-transparent [&>code]:p-0">
                 {children}
               </pre>
             );

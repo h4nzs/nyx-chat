@@ -2,14 +2,16 @@ import { useState, useEffect, useRef } from 'react';
 import { useMessageSearchStore } from '@store/messageSearch';
 import { useShallow } from 'zustand/react/shallow';
 import { FiSearch, FiX } from 'react-icons/fi';
-import type { ConversationId, MessageId } from '../types/brands';
-import { asMessageId } from '../types/brands';
+import type { ConversationId, MessageId } from '@nyx/shared';
+import { asMessageId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 interface SearchMessagesProps {
   conversationId: ConversationId;
 }
 
 export default function SearchMessages({ conversationId }: SearchMessagesProps) {
+  const { t } = useTranslation(['chat']);
   const [isOpen, setIsOpen] = useState(false);
   const {
     searchQuery,
@@ -49,7 +51,7 @@ export default function SearchMessages({ conversationId }: SearchMessagesProps) 
     <div className="relative">
       <button 
         onClick={() => setIsOpen(!isOpen)} 
-        aria-label={isOpen ? "Close search" : "Search messages in this conversation"}
+        aria-label={isOpen ? t('search.close') : t('search.label')}
         className="p-2 rounded-full text-text-secondary hover:text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
       >
         {isOpen ? <FiX /> : <FiSearch />}
@@ -63,7 +65,7 @@ export default function SearchMessages({ conversationId }: SearchMessagesProps) 
               type="text"
               value={searchQuery}
               onChange={handleSearchChange}
-              placeholder="Search messages..."
+              placeholder={t('search.placeholder')}
               className="w-full bg-transparent p-3 rounded-lg text-sm text-text-primary placeholder-text-secondary focus:outline-none focus:ring-2 focus:ring-accent shadow-neumorphic-concave"
             />
           </form>
@@ -86,7 +88,7 @@ export default function SearchMessages({ conversationId }: SearchMessagesProps) 
                 </div>
               ))
             ) : (
-              searchQuery && !isSearching && <p className="p-4 text-sm text-text-secondary text-center">No results found.</p>
+              searchQuery && !isSearching && <p className="p-4 text-sm text-text-secondary text-center">{t('search.no_results_simple')}</p>
             )}
           </div>
         </div>

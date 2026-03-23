@@ -1,8 +1,8 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
-import type { UserId, ConversationId, MessageId } from '../types/brands';
-import { asUserId, asConversationId, asMessageId } from '../types/brands';
+import type { UserId, ConversationId, MessageId } from '@nyx/shared';
+import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api"; // Added authFetch
 import { getSocket, emitSessionKeyRequest, emitGroupKeyDistribution } from "@lib/socket";
@@ -21,7 +21,7 @@ import {
 import toast from "react-hot-toast";
 import { useAuthStore } from "./auth";
 import type { RawServerMessage } from "./conversation";
-import type { User, Message } from "../types/core";
+import type { User, Message } from '@nyx/shared';
 import useDynamicIslandStore, { UploadActivity } from './dynamicIsland';
 import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";

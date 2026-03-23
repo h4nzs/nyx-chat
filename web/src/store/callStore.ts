@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { UserId, MinimalProfile } from '../types/core';
+import type { UserId, MinimalProfile } from '@nyx/shared';
 export type { MinimalProfile };
 
 export type CallState = 'idle' | 'ringing' | 'calling' | 'connected';
@@ -15,7 +15,7 @@ interface CallStoreState {
   ephemeralCallKey: string | null;
 
   setCallState: (state: CallState) => void;
-  setIncomingCall: (from: UserId, isVideo: boolean, profile: MinimalProfile, key?: string) => void;
+  setIncomingCall: (from: UserId, isVideo: boolean, profile?: MinimalProfile, key?: string) => void;
   setOutgoingCall: (to: UserId | UserId[], isVideo: boolean, profile: MinimalProfile | MinimalProfile[], key: string) => void;
   setLocalStream: (stream: MediaStream | null) => void;
   addRemoteStream: (userId: UserId, stream: MediaStream) => void;
@@ -65,7 +65,7 @@ export const useCallStore = create<CallStoreState>((set) => ({
 
   setIncomingCall: (from, isVideo, profile, key) => set({
     callState: 'ringing',
-    remoteUsers: [profile || { id: from, name: 'Unknown' }],
+    remoteUsers: profile ? [profile] : [],
     isVideoCall: isVideo,
     isReceivingCall: true,
     isMinimized: false,
@@ -73,22 +73,7 @@ export const useCallStore = create<CallStoreState>((set) => ({
   }),
 
   setOutgoingCall: (to, isVideo, profile, key) => {
-    // Handle both single ID (1:1) and array of IDs (Group)
-    // If 'to' is array, 'profile' might be array or single object? 
-    // Assuming simple init for now: users added incrementally or via 'profile' arg if it's an array.
-    // Ideally 'to' implies IDs. We need profiles. 
-    // For now, we initialize with minimal profile placeholders if actual profiles aren't passed fully.
-    
-    let initialUsers: MinimalProfile[] = [];
-    if (Array.isArray(profile)) {
-        initialUsers = profile;
-    } else if (profile && !Array.isArray(profile)) {
-        initialUsers = [profile];
-    } else if (Array.isArray(to)) {
-        initialUsers = to.map(id => ({ id, name: 'User' }));
-    } else {
-        initialUsers = [{ id: to as UserId, name: 'User' }];
-    }
+    const initialUsers = Array.isArray(profile) ? profile : (profile ? [profile] : []);
 
     set({
         callState: 'calling',

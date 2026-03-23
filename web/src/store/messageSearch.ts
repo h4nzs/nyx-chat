@@ -1,17 +1,18 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { shadowVault, decryptVaultText } from '@lib/shadowVaultDb';
 import type { Message } from "./conversation";
+import type { MessageId } from '@nyx/shared';
 
 type State = {
   searchResults: Message[];
-  highlightedMessageId: string | null;
+  highlightedMessageId: MessageId | null;
   searchQuery: string;
   isSearching: boolean;
   currentSearchToken: string | null;
   
   // Actions
   searchMessages: (query: string, conversationId: string) => Promise<void>;
-  setHighlightedMessageId: (messageId: string | null) => void;
+  setHighlightedMessageId: (messageId: MessageId | null) => void;
   clearSearch: () => void;
 };
 

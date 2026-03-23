@@ -1,6 +1,6 @@
 import { toast, type Toast } from 'react-hot-toast';
 import { toAbsoluteUrl } from '@utils/url';
-import type { ConversationId } from '../types/brands';
+import type { ConversationId } from '@nyx/shared';
 
 interface NewMessageToastProps {
   t: Toast;

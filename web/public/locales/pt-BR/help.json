@@ -1,0 +1,38 @@
+{
+  "title": "Ajuda e Perguntas Frequentes",
+  "back_settings": "Voltar para Configurações",
+  "move_account": {
+    "title": "Como movo minha conta para um novo dispositivo?",
+    "desc": "Como o NYX guarda as chaves e o histórico localmente para máxima privacidade, você não pode simplesmente fazer login para ver suas mensagens antigas. Há duas formas seguras de mudar:",
+    "migration_label": "Migração de Dispositivo (Recomendado):",
+    "migration_text": "Vá em <1>Configurações &gt; Transferir para Novo Dispositivo</1>. Isso cria um túnel direto e seguro para o seu novo celular através de um QR code.",
+    "backup_label": "Backup do Cofre:",
+    "backup_text": "Vá em <1>Configurações &gt; Exportar Cofre</1>. Salve o arquivo `.nyxvault` e importe-o na tela de login do novo dispositivo."
+  },
+  "sandbox_mode": {
+    "title": "Por que minha conta está no modo \"Sandbox\"?",
+    "desc": "Para evitar bots de spam sem coletar dados pessoais (como números de telefone e e-mail), novas contas começam no <1>Modo Sandbox</1> com uma cota de mensagens limitada.",
+    "upgrade_text": "Você pode fazer o upgrade para o <1>Status VIP</1> instantaneamente e de graça verificando que você é humano. Vá em <2>Configurações &gt; Fazer Upgrade para VIP</2> e escolha <3>Verificação Biométrica</3> (Impressão Digital/FaceID) ou <3>Proof of Work</3> (Mineração de CPU)."
+  },
+  "forgot_password": {
+    "title": "Esqueci minha senha. O que devo fazer?",
+    "desc": "Como não temos seu e-mail nem o seu número, não podemos enviar links ou códigos de redefinição. Você precisará usar sua <1>Frase de Recuperação</1>.",
+    "step1": "Na tela de login, clique em \"Recuperar com frase\".",
+    "step2": "Insira sua Frase de Recuperação de 24 palavras para provar sua identidade.",
+    "step3": "Crie uma nova senha.",
+    "warning": "Nota: A recuperação pela frase redefinirá sua chave de identidade. Você recuperará o acesso à sua conta, mas <1>o histórico de conversas será perdido</1> a menos que você tenha um Backup do Cofre."
+  },
+  "sync_issues": {
+    "title": "Por que minhas mensagens não estão sincronizadas?",
+    "desc": "O NYX funciona de forma <1>Local-First (Foco no Local)</1>. As mensagens ficam no seu dispositivo, não na nuvem. Se você usa o NYX em vários dispositivos (ex: Celular + Notebook), eles agem como clientes independentes.",
+    "future_text": "Estamos trabalhando em um \"Protocolo de Sincronização\" seguro para o futuro, mas, no momento, o histórico não sincroniza automaticamente entre dispositivos para garantir a privacidade zero-knowledge."
+  },
+  "lost_phrase": {
+    "title": "E se eu perder minha Frase de Recuperação?",
+    "irrecoverable": "Sua conta será matematicamente irrecuperável.",
+    "desc": "Nós não guardamos sua frase nem sua senha. Se você perdê-las, ninguém no mundo — incluindo nós — poderá descriptografar seus dados. Por favor, anote sua frase e guarde-a em um local seguro e offline."
+  },
+  "seo": {
+    "description": "Obtenha ajuda sobre as conversas E2EE do NYX, recuperação de conta e recursos de segurança."
+  }
+}

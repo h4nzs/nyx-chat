@@ -1,13 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useProfileStore, DecryptedProfile } from '@store/profile';
 import { useShallow } from 'zustand/react/shallow';
+import type { UserId } from '@nyx/shared';
 
-// Menerima object user yang memiliki id dan encryptedProfile
-export function useUserProfile(user?: { id: string; encryptedProfile?: string | null } | null) {
+// Menerima object user yang memiliki id dan encryptedProfile ATAU UserId langsung
+export function useUserProfile(userInput?: { id: string | UserId; encryptedProfile?: string | null } | UserId | null | undefined) {
   const { profiles, decryptAndCache } = useProfileStore(useShallow(s => ({
     profiles: s.profiles, decryptAndCache: s.decryptAndCache
   })));
   
+  // Normalize input
+  const user = typeof userInput === 'string' 
+    ? { id: userInput, encryptedProfile: undefined } 
+    : userInput;
+
   // Default data (Sebelum dekripsi / jika tidak punya kunci)
   const [profile, setProfile] = useState<DecryptedProfile>({ 
     name: user ? "Encrypted User" : "Unknown",

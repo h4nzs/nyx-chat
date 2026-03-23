@@ -3,7 +3,7 @@ import {
   MinimalUserSchema, 
   IncomingMessageSchema, 
   MinimalConversationSchema 
-} from '../schemas/core';
+} from './schemas';
 import type { UserId, ConversationId, MessageId, StoryId } from './brands';
 
 // 1. Ekspor Branded Types

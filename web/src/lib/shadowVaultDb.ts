@@ -2,9 +2,9 @@ import Dexie, { Table } from 'dexie';
 import type { Message } from '@store/conversation';
 import { getSodium } from '@lib/sodiumInitializer';
 import { getMyEncryptionKeyPair } from '@utils/crypto';
-import { asMessageId, asConversationId, asUserId } from '../types/brands';
-import { ShadowVaultMessageSchema } from '../schemas/core';
-import type { MessageId, ConversationId, UserId, StoryId } from '../types/core';
+import { asMessageId, asConversationId, asUserId } from '@nyx/shared';
+import { ShadowVaultMessageSchema } from '@nyx/shared';
+import type { MessageId, ConversationId, UserId, StoryId } from '@nyx/shared';
 
 export interface DecryptedMessageRecord {
   id: MessageId;

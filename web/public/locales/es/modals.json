@@ -1,0 +1,282 @@
+{
+  "add_participant": {
+    "title": "Añadir participante",
+    "search_placeholder": "Buscar usuarios...",
+    "searching": "Buscando...",
+    "no_users": "No se encontraron usuarios.",
+    "add_selected": "Añadir seleccionados",
+    "adding": "Añadiendo...",
+    "cancel": "Cancelar",
+    "success": "¡Participante añadido con éxito!",
+    "error": "Error al añadir participante: {{error}}",
+    "empty_selection": "Por favor, selecciona al menos un usuario."
+  },
+  "create_story": {
+    "title": "Crear historia",
+    "placeholder": "¿Qué tienes en mente? (Cifrado E2E)",
+    "add_media": "Añadir multimedia (Opcional)",
+    "post_button": "Publicar historia",
+    "privacy": {
+      "label": "Privacidad de la historia",
+      "all": "Compartido con: Todos los contactos",
+      "exclude": "Excluidos: {{count}} contactos",
+      "only": "Solo compartido con: {{count}} contactos",
+      "select_contacts": "Seleccionar contactos",
+      "no_contacts": "No se encontraron contactos activos.",
+      "save": "Guardar privacidad",
+      "option_all": "Todos los contactos",
+      "option_exclude": "Mis contactos excepto...",
+      "option_only": "Solo compartir con..."
+    },
+    "error_empty": "Añade texto o multimedia a tu historia"
+  },
+  "recovery": {
+    "title": "Protocolo: Recuperación",
+    "subtitle": "Iniciando secuencia de exportación de clave maestra.\nEntorno seguro obligatorio.",
+    "warning_title": "Advertencia: Datos confidenciales",
+    "warning_desc": "Poseer esta frase otorga acceso total al sistema. No la transmitas digitalmente.",
+    "button_acknowledge": "Entendido y continuar",
+    "button_reveal": "Mostrar datos",
+    "step2_title": "Frase de seguridad",
+    "step2_desc": "Registra la secuencia. Prioridad Alfa.",
+    "button_recorded": "Secuencia registrada",
+    "verify_title": "Verificar secuencia",
+    "verify_desc": "Reconstruye la frase clave.",
+    "select_words": "Selecciona las palabras abajo...",
+    "undo": "Deshacer",
+    "confirm": "Confirmar",
+    "copy_success": "¡Frase de recuperación copiada!",
+    "copy_fail": "Error al copiar al portapapeles",
+    "verify_success": "¡Verificación exitosa! Tu copia de seguridad está confirmada.",
+    "verify_fail": "La verificación falló. Por favor, inténtalo de nuevo.",
+    "aria_toggle_visibility": "Alternar visibilidad de la frase",
+    "aria_copy_phrase": "Copiar frase de recuperación"
+  },
+  "edit_group": {
+    "title": "Editar info del grupo",
+    "group_name": "Nombre del grupo",
+    "description": "Descripción",
+    "save": "Guardar cambios",
+    "success": "¡Info del grupo actualizada!",
+    "error": "Error al actualizar: {{error}}"
+  },
+  "system_init": {
+    "title": "Inicialización del sistema",
+    "desc": "Para activar las llamadas de voz/video con cifrado E2E y las alertas en tiempo real, NYX necesita acceso al hardware. Tus archivos multimedia nunca salen de tu dispositivo sin estar cifrados.",
+    "push_notif": "Notificaciones Push (SO)",
+    "camera_mic": "Cámara y Micrófono",
+    "calibrate": "Calibrando...",
+    "authorize": "Autorizar sistema",
+    "skip": "Saltar por ahora"
+  },
+  "group_info": {
+    "title": "Info del grupo",
+    "create_title": "Crear nuevo grupo",
+    "tabs": {
+      "details": "Detalles",
+      "media": "Multimedia"
+    },
+    "change_avatar": "Cambiar avatar del grupo",
+    "no_desc": "Sin descripción",
+    "member_count": "{{count}} miembros",
+    "add_participants": "Añadir participantes",
+    "leave_group": "Salir del grupo",
+    "toasts": {
+      "processing_avatar": "Procesando avatar...",
+      "uploading": "Subiendo a la nube...",
+      "updating": "Actualizando info del grupo...",
+      "avatar_updated": "¡Avatar actualizado!",
+      "upload_failed": "Error al subir avatar: {{error}}",
+      "leaving": "Saliendo del grupo...",
+      "left_success": "Has salido del grupo.",
+      "leave_failed": "Error al salir del grupo: {{error}}",
+      "create_failed": "El nombre del grupo y al menos un miembro son obligatorios.",
+      "created": "¡Grupo \"{{name}}\" creado!",
+      "create_error": "Error al crear el grupo: {{error}}"
+    }
+  },
+  "user_info": {
+    "about": "Acerca de {{name}}",
+    "tabs": {
+      "details": "Detalles",
+      "media": "Multimedia"
+    },
+    "errors": {
+      "no_keys": "Este usuario no ha configurado sus claves de cifrado aún.",
+      "my_key_missing": "No se encontró tu clave pública. Por favor, configura tus claves primero.",
+      "safety_number_failed": "Error al generar el número de seguridad."
+    },
+    "verified": "Verificado",
+    "no_desc": "Este usuario prefiere mantenerse en el misterio.",
+    "view_profile": "Ver perfil completo",
+    "verify_security": "Verificar seguridad"
+  },
+  "participants": {
+    "make_admin": "Hacer administrador",
+    "dismiss_admin": "Quitar administrador",
+    "remove": "Eliminar del grupo",
+    "block": "Bloquear usuario",
+    "unblock": "Desbloquear",
+    "admin_role": "Admin",
+    "remove_title": "Eliminar participante",
+    "remove_desc": "¿Estás seguro de que quieres eliminar a {{name}} del grupo?",
+    "toasts": {
+      "role_changed": "{{name}} ahora es {{role}}.",
+      "removed": "{{name}} fue eliminado del grupo.",
+      "unblocked": "{{name}} ha sido desbloqueado.",
+      "blocked": "{{name}} ha sido bloqueado.",
+      "role_failed": "Error al cambiar el rol: {{error}}",
+      "remove_failed": "Error al eliminar participante: {{error}}",
+      "block_failed": "Error al actualizar estado de bloqueo: {{error}}"
+    }
+  },
+  "safety": {
+    "title": "Número de seguridad",
+    "desc": "Verifica la integridad del cifrado de extremo a extremo con",
+    "hash_label": "Hash de huella digital",
+    "confirmed": "Verificación confirmada",
+    "confirm_btn": "Confirmar número de seguridad"
+  },
+  "tour": {
+    "title": "Tour rápido",
+    "steps": {
+      "welcome": {
+        "title": "¡Bienvenido a Nyx!",
+        "content": "Has entrado a una zona de <1>Conocimiento Cero (Zero-Knowledge)</1>. No sabemos quién eres y no podemos leer tus mensajes. Anonimato total."
+      },
+      "phrase": {
+        "title": "Tu frase de recuperación",
+        "content_1": "Al registrarte, creaste una frase de recuperación de 24 palabras. Esta es la <1>única</1> manera de recuperar tu cuenta si olvidas tu contraseña.",
+        "content_2": "Nosotros no la guardamos. Si la pierdes, tu cuenta se pierde para siempre."
+      },
+      "sandbox": {
+        "title": "Sandbox y verificación",
+        "content": "Para evitar el spam sin usar números de teléfono, las cuentas nuevas comienzan en <1>Modo Sandbox</1>. Puedes desbloquear mensajes ilimitados verificando que eres humano (Biometría o Proof of Work) en la Configuración."
+      },
+      "safety": {
+        "title": "Número de seguridad",
+        "content": "Cada chat tiene un \"Número de seguridad\" único. Puedes compararlo con el de tu contacto para asegurarte de que nadie esté interceptando el chat."
+      },
+      "community": {
+        "title": "Comunidad y rendimiento",
+        "content_1": "Nyx funciona con <1>infraestructura básica</1>, por lo que podrías experimentar algo de retraso o reconexiones ocasionales.",
+        "content_2": "Si te gusta la app, ¡puedes ayudarnos a mejorar a servidores más rápidos en cualquier momento! Ve a <1>Configuración</1> para apoyar el proyecto.",
+        "content_3": "¡Disfruta tus chats seguros!"
+      }
+    }
+  },
+  "report": {
+    "no_reason": "Por favor, indica un motivo.",
+    "success": "Reporte enviado con éxito.",
+    "failed": "Error al enviar el reporte.",
+    "title_user": "Reportar a {{name}}",
+    "desc_user": "Por favor, detalla por qué estás reportando a este usuario. Esto será enviado al equipo de moderación.",
+    "placeholder": "Motivo del reporte (ej: Spam, Acoso, Contenido Inapropiado)...",
+    "submit": "Enviar reporte",
+    "fill_all": "Por favor, llena todos los campos",
+    "sending_toast": "Enviando reporte...",
+    "success_bug": "¡Reporte enviado! Gracias por tu ayuda.",
+    "failed_bug": "Error al enviar el reporte, por favor intenta más tarde.",
+    "title_bug": "Reportar un problema",
+    "desc_bug": "¿Encontraste un bug? Descríbelo abajo. Se incluirá automáticamente la información de tu dispositivo para ayudarnos a arreglarlo.",
+    "summary_label": "Resumen del problema",
+    "summary_placeholder": "ej: No puedo subir mi foto de perfil",
+    "details_label": "Detalles",
+    "details_placeholder": "Explica qué pasó y los pasos para reproducir el bug..."
+  },
+  "ban": {
+    "no_id": "El ID de usuario es obligatorio.",
+    "no_reason": "El motivo del baneo es obligatorio.",
+    "success": "¡Usuario baneado y expulsado!",
+    "failed": "Error al banear al usuario.",
+    "title": "Banear usuario",
+    "id_label": "ID del usuario objetivo",
+    "reason_label": "Motivo del baneo",
+    "reason_placeholder": "Razón de la suspensión (visible para el usuario)...",
+    "execute": "EJECUTAR BANEO"
+  },
+  "share": {
+    "title": "Tu identidad",
+    "desc": "Escanea para iniciar un chat seguro"
+  },
+  "password_prompt": {
+    "error": "Ocurrió un error",
+    "title": "PANEL DE CONTROL DE ACCESO",
+    "desc": "Ingresa tus credenciales para abrir la bóveda segura",
+    "placeholder": "Introduce el código de acceso",
+    "vault_id": "ID de la Bóveda: SEC-7A9F",
+    "status_locked": "Estado: BLOQUEADO"
+  },
+  "editor": {
+    "save_failed": "Error al guardar la imagen",
+    "crop_failed": "Error al recortar la imagen.",
+    "draw": "Dibujar",
+    "process_failed": "Error al procesar la imagen.",
+    "blob_failed": "Error al generar los datos de la imagen.",
+    "crop": "Recortar",
+    "remove": "Quitar",
+    "undo": "Deshacer",
+    "redo": "Rehacer",
+    "pick_color": "Elegir color",
+    "zoom": "ZOOM",
+    "rotate": "Rotar"
+  },
+  "notifications": {
+    "title": "Registros del sistema",
+    "purge": "BORRAR_TODO",
+    "empty": "Sistema nominal. No hay registros."
+  },
+  "chat_info": {
+    "title": "Entendiendo tu seguridad en NYX",
+    "e2ee": {
+      "title": "Cifrado de extremo a extremo real (E2EE)",
+      "content_1": "Todas tus conversaciones están protegidas por un fuerte <1>Cifrado de extremo a extremo</1>, inspirado en el Protocolo Signal. Piénsalo como una bóveda digital privada.",
+      "content_2": "Solo tú y el destinatario tienen las llaves para abrir los mensajes. Nadie en el medio, ni siquiera los servidores de NYX, puede leer el contenido. Esta protección es automática y siempre está activa."
+    },
+    "keys": {
+      "title": "Tu Clave Maestra y Frase de Recuperación",
+      "content_1": "Toda tu cuenta está asegurada por una única <1>\"Clave Maestra\"</1>. Esta clave se crea a partir de una <3>Frase de Recuperación</3> única de 24 palabras que recibiste al registrarte.",
+      "important": "<0>El concepto más importante:</0> Tu Frase de Recuperación es la única forma de acceder a tu cuenta si olvidas tu contraseña o cambias de dispositivo y pierdes el antiguo. Nosotros no la guardamos y no podemos recuperarla por ti."
+    },
+    "storage": {
+      "title": "Almacenamiento de claves en este dispositivo",
+      "content_1": "Para tu comodidad, tu Clave Maestra se guarda en este dispositivo dentro de un paquete cifrado altamente seguro. Este paquete está \"bloqueado\" usando tu <1>contraseña</1>.",
+      "list_1": "Al iniciar sesión, tu contraseña se usa para abrir este paquete y cargar tus claves a la sesión segura.",
+      "list_2": "Tu contraseña nunca se envía a nuestros servidores en un formato legible."
+    },
+    "access": {
+      "title": "Acceder a tu cuenta en un nuevo dispositivo",
+      "content_1": "Tienes tres formas de mudar tu cuenta a un nuevo dispositivo:",
+      "list_1_label": "Migración de dispositivo (Recomendado):",
+      "list_1_text": "Usa la función \"Transferir a nuevo dispositivo\" en Configuración. Escanea el código QR en tu nuevo dispositivo para enviar todo tu historial de chats y claves de forma segura y directa.",
+      "list_2_label": "Copia de seguridad de la Bóveda:",
+      "list_2_text": "Exporta tu archivo \"NYX Vault\" (.nyxvault) desde Configuración. Puedes importar este archivo en cualquier dispositivo nuevo para recuperar tu cuenta y tu historial al instante.",
+      "list_3_label": "Recuperación de emergencia:",
+      "list_3_text": "Si pierdes tu dispositivo y tus copias de seguridad, usa la función \"Recuperar\" con tu Frase de Recuperación de 24 palabras. Esto restablecerá tu contraseña y recuperará tu Clave de Identidad, pero <1>el historial de chats se perderá</1> sin una copia de seguridad de la Bóveda."
+    },
+    "best_practices": {
+      "title": "Mejores prácticas de seguridad",
+      "do_store": "<0>SÍ</0> guarda tu Frase de Recuperación en un lugar sin conexión muy seguro (ej: una caja fuerte, una nota física o un gestor de contraseñas cifrado).",
+      "do_verify": "<0>SÍ</0> verifica la identidad de tus contactos usando las funciones de seguridad disponibles antes de compartir información confidencial.",
+      "dont_share": "<0>NO</0> compartas tu contraseña ni tu Frase de Recuperación con nadie. Jamás.",
+      "dont_public": "<0>NO</0> dejes tu sesión iniciada en computadoras públicas o compartidas. Usa la función de \"Sesiones Activas\" en Configuración para cerrar sesión de forma remota si es necesario."
+    }
+  },
+  "scan": {
+    "title": "Escanear contacto",
+    "desc": "Escanea el código QR de NYX",
+    "awaiting": "Esperando objetivo...",
+    "camera_error": "Acceso a la cámara denegado o no disponible."
+  },
+  "user_info_modal": {
+    "about": "Acerca de",
+    "media": "Multimedia",
+    "view_personnel": "VER DATOS DEL PERSONAL",
+    "verify_handshake": "VERIFICAR ENLACE DE CIFRADO",
+    "unblock_signal": "DESBLOQUEAR",
+    "block_signal": "BLOQUEAR",
+    "report_signal": "REPORTAR",
+    "prompt_report": "Ingresa el motivo para reportar a este usuario:",
+    "no_data": "No hay datos disponibles."
+  }
+}

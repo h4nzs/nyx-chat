@@ -10,6 +10,7 @@ import { useKeychainStore } from '@store/keychain';
 import { useConversationStore } from '@store/conversation';
 import { FiAlertTriangle, FiFile, FiDownload, FiMusic, FiVideo, FiImage, FiRefreshCw } from 'react-icons/fi';
 import { getSocket } from '@lib/socket';
+import { useTranslation } from 'react-i18next';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `${import.meta.env.BASE_URL}pdf.worker.min.mjs`;
 
@@ -28,6 +29,7 @@ interface FileAttachmentProps {
 }
 
 export default function FileAttachment({ message, isOwn }: FileAttachmentProps) {
+  const { t } = useTranslation(['chat', 'common']);
   const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'decrypting' | 'waiting' | 'error' | 'success'>('idle');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -76,9 +78,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         if (message.fileKey) {
              rawFileKey = message.fileKey;
         } else if (message.isBlindAttachment) {
-             // Fallback: If isBlindAttachment is true BUT fileKey is missing, we might need to wait or it's a true blind attachment without key yet.
-             // However, for sent messages, fileKey should be populated.
-             // If we are the sender, we should have the key.
              rawFileKey = ''; 
         } else {
             const conversation = conversations.find(c => c.id === message.conversationId);
@@ -95,7 +94,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
                 if (isMounted) {
                     setStatus('waiting');
                     const socket = getSocket();
-                    // Fix: Removed empty check for sessionId
                     if (socket?.connected && message.sessionId) {
                         socket.emit('session:request_key', {
                             conversationId: message.conversationId,
@@ -118,7 +116,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
              return;
         }
 
-        // Decrypt File Blob
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
         if (!absoluteUrl) throw new Error("Invalid file URL");
         
@@ -127,7 +124,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         const encryptedBlob = await response.blob();
 
         const originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
-        // Use rawFileKey which is now populated correctly
         const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
 
         if (isMounted) {
@@ -138,7 +134,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
       } catch (e: unknown) {
         console.error("Decrypt failed:", e);
         if (isMounted) {
-            const errorMessage = e instanceof Error ? e.message : "Failed to decrypt file";
+            const errorMessage = e instanceof Error ? e.message : t('chat:media.default_error', 'Failed to decrypt file');
             setErrorMsg(errorMessage);
             setStatus('error');
         }
@@ -152,9 +148,8 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
       if (objectUrl) URL.revokeObjectURL(objectUrl);
       clearTimeout(retryTimeout);
     };
-  }, [message, lastKeychainUpdate, retryCount]);
+  }, [message, lastKeychainUpdate, retryCount, t]);
 
-  // Determine file type for rendering
   const getFileType = (): string => {
     if (message.fileType) {
       return message.fileType.split(';')[0];
@@ -180,14 +175,14 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   }`;
 
   if (status === 'decrypting') {
-    return <div className={containerClass}><Spinner size="sm" /><span className="text-sm">Decrypting...</span></div>;
+    return <div className={containerClass}><Spinner size="sm" /><span className="text-sm">{t('chat:media.decrypting')}</span></div>;
   }
 
   if (status === 'waiting') {
     return (
         <div className={`${containerClass} border border-yellow-500/30 text-yellow-600`}>
             <FiRefreshCw className="animate-spin" />
-            <span className="text-sm">Waiting for key...</span>
+            <span className="text-sm">{t('chat:media.waiting_key')}</span>
         </div>
     );
   }
@@ -199,22 +194,21 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         onClick={() => setRetryCount(c => c + 1)}
       >
         <FiAlertTriangle />
-        <span className="text-sm">Decrypt Failed: {errorMsg}. Retry?</span>
+        <span className="text-sm">{t('chat:media.decrypt_failed', { error: errorMsg })}. {t('chat:media.retry')}</span>
       </div>
     );
   }
 
   if (!decryptedUrl) return null;
 
-  // PDF Rendering
   if (isPdf) {
     return (
       <div className={containerClass}>
         <div className="flex items-center gap-2">
           <FiFile className="text-red-500" size={20} />
           <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm truncate">{message.fileName || 'Document.pdf'}</p>
-            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : 'Unknown'}</p>
+            <p className="font-medium text-sm truncate">{message.fileName || t('chat:media.document_placeholder', 'Document.pdf')}</p>
+            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}</p>
           </div>
         </div>
         <div className="mt-2 border rounded overflow-hidden">
@@ -222,13 +216,13 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             file={decryptedUrl}
             onLoadSuccess={({ numPages }) => setNumPages(numPages)}
             loading={<div className="p-4 text-center"><Spinner size="sm" /></div>}
-            error={<div className="p-4 text-center text-red-500">Failed to load PDF</div>}
+            error={<div className="p-4 text-center text-red-500">{t('chat:media.pdf_failed')}</div>}
           >
             <Page pageNumber={1} width={300} renderTextLayer={false} renderAnnotationLayer={false} />
           </Document>
           {numPages && numPages > 1 && (
             <div className="p-2 text-center text-xs text-gray-500">
-              {numPages} pages
+              {numPages} {t('chat:media.pages', 'pages')}
             </div>
           )}
         </div>
@@ -238,27 +232,26 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
           className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
         >
           <FiDownload size={16} />
-          Download PDF
+          {t('chat:media.download_x', { type: 'PDF' })}
         </a>
       </div>
     );
   }
 
-  // Image Rendering
   if (isImage) {
     return (
       <div className={containerClass}>
         <div className="flex items-center gap-2">
           <FiImage className="text-blue-500" size={20} />
           <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm truncate">{message.fileName || 'Image'}</p>
-            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : 'Unknown'}</p>
+            <p className="font-medium text-sm truncate">{message.fileName || t('chat:media.image_placeholder', 'Image')}</p>
+            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}</p>
           </div>
         </div>
         <div className="mt-2 border rounded overflow-hidden max-h-64">
           <img 
             src={decryptedUrl} 
-            alt={message.fileName || 'Image attachment'} 
+            alt={message.fileName || t('chat:media.image_alt', 'Image attachment')} 
             className="w-full h-auto object-contain max-h-64"
             onError={(e) => {
               const target = e.target as HTMLImageElement;
@@ -273,21 +266,20 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
           className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
         >
           <FiDownload size={16} />
-          Download Image
+          {t('chat:media.download_x', { type: 'Image' })}
         </a>
       </div>
     );
   }
 
-  // Video Rendering
   if (isVideo) {
     return (
       <div className={containerClass}>
         <div className="flex items-center gap-2">
           <FiVideo className="text-purple-500" size={20} />
           <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm truncate">{message.fileName || 'Video'}</p>
-            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : 'Unknown'}</p>
+            <p className="font-medium text-sm truncate">{message.fileName || t('chat:media.video_placeholder', 'Video')}</p>
+            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}</p>
           </div>
         </div>
         <div className="mt-2 border rounded overflow-hidden">
@@ -297,11 +289,11 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             className="w-full max-h-64"
             onError={(e) => {
               const target = e.target as HTMLVideoElement;
-              target.onerror = null; // Prevent infinite loop
+              target.onerror = null;
               console.error("Video failed to load:", e);
             }}
           >
-            Your browser does not support the video tag.
+            {t('chat:media.browser_unsupported', { type: 'video' })}
           </video>
         </div>
         <a 
@@ -310,21 +302,20 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
           className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
         >
           <FiDownload size={16} />
-          Download Video
+          {t('chat:media.download_x', { type: 'Video' })}
         </a>
       </div>
     );
   }
 
-  // Audio Rendering
   if (isAudio) {
     return (
       <div className={containerClass}>
         <div className="flex items-center gap-2">
           <FiMusic className="text-green-500" size={20} />
           <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm truncate">{message.fileName || 'Audio'}</p>
-            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : 'Unknown'}</p>
+            <p className="font-medium text-sm truncate">{message.fileName || t('chat:media.audio_placeholder', 'Audio')}</p>
+            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}</p>
           </div>
         </div>
         <div className="mt-2">
@@ -334,11 +325,11 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             className="w-full"
             onError={(e) => {
               const target = e.target as HTMLAudioElement;
-              target.onerror = null; // Prevent infinite loop
+              target.onerror = null;
               console.error("Audio failed to load:", e);
             }}
           >
-            Your browser does not support the audio element.
+            {t('chat:media.browser_unsupported', { type: 'audio' })}
           </audio>
         </div>
         <a 
@@ -347,13 +338,12 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
           className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
         >
           <FiDownload size={16} />
-          Download Audio
+          {t('chat:media.download_x', { type: 'Audio' })}
         </a>
       </div>
     );
   }
 
-  // Generic File Download (fallback)
   return (
     <a 
       href={decryptedUrl} 
@@ -364,8 +354,8 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         <FiFile size={20} />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="font-medium text-sm truncate">{message.fileName || 'File'}</p>
-        <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : 'Unknown'}</p>
+        <p className="font-medium text-sm truncate">{message.fileName || t('chat:media.file_placeholder', 'File')}</p>
+        <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}</p>
       </div>
       <div className="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10">
         <FiDownload size={18} />

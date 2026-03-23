@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import clsx from 'clsx';
 
@@ -28,11 +28,13 @@ import SwipeableItem from './SwipeableItem';
 import { useContextMenuStore } from '../store/contextMenu';
 import { useSettingsStore } from '@store/settings';
 import StoryTray from './StoryTray';
-import type { UserId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 // --- Sub-components ---
 
 const UserProfile = memo(function UserProfile() {
+  const { t } = useTranslation(['modals', 'common']);
   const { user, logout } = useAuthStore(useShallow(state => ({ user: state.user, logout: state.logout })));
   const { showConfirm: confirmLogout } = useModalStore(useShallow(state => ({ showConfirm: state.showConfirm })));
   const { privacyCloak, setPrivacyCloak } = useSettingsStore(useShallow(s => ({ privacyCloak: s.privacyCloak, setPrivacyCloak: s.setPrivacyCloak })));
@@ -42,11 +44,11 @@ const UserProfile = memo(function UserProfile() {
 
   const handleLogout = useCallback(() => {
     confirmLogout(
-      "Confirm Logout",
-      "Are you sure you want to end your session?",
+      t('modals:logout.title', 'Confirm Logout'),
+      t('modals:logout.desc', 'Are you sure you want to end your session?'),
       logout
     );
-  }, [logout, confirmLogout]);
+  }, [logout, confirmLogout, t]);
 
   const handleLockVault = useCallback(() => {
     // Clear decoy state and force reload to trigger the lock screen
@@ -62,15 +64,15 @@ const UserProfile = memo(function UserProfile() {
         <div className="flex items-center gap-3 overflow-hidden cursor-pointer group" onClick={() => setShowShareModal(true)}>
           <div className="relative flex-shrink-0">
             <img 
-              src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
-              alt="Avatar" 
+              src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('common:defaults.user')}`} 
+              alt={t('common:defaults.avatar', 'Avatar')} 
               className="w-10 h-10 rounded-full object-cover shadow-neu-flat dark:shadow-neu-flat-dark border-2 border-bg-main group-hover:border-accent transition-colors" 
             />
             <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border border-bg-surface"></div>
           </div>
           <div className="min-w-0">
             <p className="text-sm font-bold text-text-primary truncate group-hover:text-accent transition-colors">{profile.name}</p>
-            {user.isVerified && <span className="text-[10px] text-accent font-bold tracking-wider">VERIFIED</span>}
+            {user.isVerified && <span className="text-[10px] text-accent font-bold tracking-wider">{t('modals:user_info.verified', 'VERIFIED')}</span>}
           </div>
         </div>
 
@@ -83,20 +85,23 @@ const UserProfile = memo(function UserProfile() {
               "p-2.5 rounded-xl transition-all shadow-neumorphic-concave focus:outline-none",
               privacyCloak ? "text-accent bg-white/5" : "text-text-secondary hover:text-accent hover:bg-white/5"
             )}
-            title="Toggle Privacy Cloak"
+            title={t('common:actions.toggle_cloak', 'Toggle Privacy Cloak')}
+            aria-label={t('common:actions.toggle_cloak', 'Toggle Privacy Cloak')}
           >
             {privacyCloak ? <FiEyeOff size={18} /> : <FiEye size={18} />}
           </button>
           <Link 
             to="/settings" 
-            aria-label="Settings" 
+            aria-label={t('common:actions.settings', 'Settings')}
+            title={t('common:actions.settings', 'Settings')}
             className="btn-flat p-2 rounded-full text-text-secondary hover:text-text-primary transition-all"
           >
             <FiSettings size={20} />
           </Link>
           <button 
             onClick={handleLogout} 
-            aria-label="Logout" 
+            aria-label={t('common:actions.logout', 'Logout')}
+            title={t('common:actions.logout', 'Logout')}
             className="btn-flat p-2 rounded-full text-text-secondary hover:text-red-500 transition-all"
           >
             <FiLogOut size={20} />
@@ -109,10 +114,11 @@ const UserProfile = memo(function UserProfile() {
 });
 
 const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (user: User) => void }) => {
+  const { t } = useTranslation(['common']);
   const profile = useUserProfile(user);
   // Prioritize the direct user property which might contain the optimistic rawQuery
-  const displayName = user.name || profile.name;
-  const displayUsername = user.username || 'unknown';
+  const displayName = user.name || profile.name || t('common:defaults.user');
+  const displayUsername = user.username || t('common:defaults.unknown');
 
   return (
     <button 
@@ -123,11 +129,11 @@ const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (user: Use
         shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5
       "
     >
-      <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${displayName}`} alt="Avatar" className="w-10 h-10 rounded-full bg-secondary object-cover" />
+      <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${displayName}`} alt={t('common:defaults.avatar', 'Avatar')} className="w-10 h-10 rounded-full bg-secondary object-cover" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
            <p className="font-bold text-sm text-text-primary">{displayName}</p>
-           {user.isVerified && <div className="w-2 h-2 rounded-full bg-accent" title="Verified"></div>}
+           {user.isVerified && <div className="w-2 h-2 rounded-full bg-accent" title={t('modals:user_info.verified', 'Verified')}></div>}
         </div>
         <p className="text-xs text-text-secondary font-mono mt-0.5">@{displayUsername}</p>
       </div>
@@ -136,13 +142,14 @@ const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (user: Use
 };
 
 const SearchResults = memo(function SearchResults({ results, onSelect }: { results: User[], onSelect: (user: User) => void }) {
+  const { t } = useTranslation('chat');
   return (
     <Virtuoso
       style={{ height: '100%' }}
       data={results}
       components={{
-        Header: () => <p className="text-xs font-bold text-text-secondary px-6 mb-4 mt-2">GLOBAL SEARCH</p>,
-        EmptyPlaceholder: () => <div className="p-6 text-center text-xs text-text-secondary">No users found.</div>,
+        Header: () => <p className="text-xs font-bold text-text-secondary px-6 mb-4 mt-2">{t('sidebar.global_search')}</p>,
+        EmptyPlaceholder: () => <div className="p-6 text-center text-xs text-text-secondary">{t('sidebar.no_users')}</div>,
       }}
       itemContent={(index, user) => <SearchResultItem key={user.id} user={user} onSelect={onSelect} />}
     />
@@ -176,9 +183,10 @@ const ConversationItem = memo(function ConversationItem({
   onTogglePin: (id: string) => void;
   privacyCloak: boolean;
 }) {
+  const { t, i18n } = useTranslation(['chat', 'common']);
   const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
   const peerProfile = useUserProfile(peerUser as { id: string; encryptedProfile?: string | null });
-  const title = conversation.isGroup ? conversation.title : peerProfile.name || 'Conversation';
+  const title = conversation.isGroup ? conversation.title : peerProfile.name || t('common:defaults.conversation', 'Conversation');
   const isUnread = conversation.unreadCount > 0;
   const isPinnedByMe = Boolean(conversation.participants?.some(p => p.id === meId && p.isPinned));
   const openMenu = useContextMenuStore(s => s.openMenu);
@@ -193,28 +201,34 @@ const ConversationItem = memo(function ConversationItem({
     const date = new Date(timestamp);
     const now = new Date();
     const diffInDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
-    if (diffInDays === 0) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    if (diffInDays === 1) return 'Yesterday';
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  }, []);
+    
+    // Use Intl.DateTimeFormat for better localization support
+    if (diffInDays === 0) {
+        return new Intl.DateTimeFormat(i18n.language, { hour: '2-digit', minute: '2-digit' }).format(date);
+    }
+    if (diffInDays === 1) {
+        return t('common:time.yesterday', 'Yesterday');
+    }
+    return new Intl.DateTimeFormat(i18n.language, { month: 'short', day: 'numeric' }).format(date);
+  }, [i18n.language, t]);
 
   const renderPreviewText = () => {
-    if (!conversation.lastMessage) return 'No messages yet';
+    if (!conversation.lastMessage) return t('chat:messages.no_messages_yet', 'No messages yet');
     if (conversation.lastMessage.isViewOnce) {
         return (
             <span className="flex items-center gap-1 text-accent text-sm font-medium">
                {conversation.lastMessage.isViewed ? (
-                 <span className="flex items-center gap-1"><FiLock size={12} /> Opened</span>
+                 <span className="flex items-center gap-1"><FiLock size={12} /> {t('chat:messages.opened', 'Opened')}</span>
                ) : (
-                 <span className="flex items-center gap-1"><FiEyeOff size={12} /> View Once Message</span>
+                 <span className="flex items-center gap-1"><FiEyeOff size={12} /> {t('chat:messages.view_once_message', 'View once message')}</span>
                )}
             </span>
         );
     }
     if (conversation.lastMessage.preview !== undefined) {
-        return conversation.lastMessage.preview || 'No messages yet';
+        return conversation.lastMessage.preview || t('chat:messages.no_messages_yet', 'No messages yet');
     }
-    return conversation.lastMessage.content || 'No messages yet';
+    return conversation.lastMessage.content || t('chat:messages.no_messages_yet', 'No messages yet');
   };
 
   const previewText = renderPreviewText();
@@ -222,16 +236,16 @@ const ConversationItem = memo(function ConversationItem({
   const handleContextMenu = (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     openMenu(e, [
-      ...(peerUser ? [{ label: 'View Profile', icon: <FiUser />, onClick: () => onUserClick(peerUser.id) }] : []),
-      { label: isPinnedByMe ? 'Unpin Chat' : 'Pin Chat', icon: <FiMaximize2 />, onClick: () => onTogglePin(conversation.id) },
-      ...(!conversation.isGroup ? [{ label: isBlocked ? 'Unblock User' : 'Block User', icon: <FiSlash />, onClick: () => {
+      ...(peerUser ? [{ label: t('chat:actions.view_profile', 'View Profile'), icon: <FiUser />, onClick: () => onUserClick(peerUser.id) }] : []),
+      { label: isPinnedByMe ? t('chat:actions.unpin_chat', 'Unpin Chat') : t('chat:actions.pin_chat', 'Pin Chat'), icon: <FiMaximize2 />, onClick: () => onTogglePin(conversation.id) },
+      ...(!conversation.isGroup ? [{ label: isBlocked ? t('chat:actions.unblock_user', 'Unblock User') : t('chat:actions.block_user', 'Block User'), icon: <FiSlash />, onClick: () => {
          const other = conversation.participants.find(p => p.id !== meId);
          if (other) {
            if (isBlocked) unblockUser(other.id);
            else blockUser(other.id);
          }
       } }] : []),
-      { label: conversation.isGroup ? 'Delete Group' : 'Delete Chat', icon: <FiTrash2 />, destructive: true, onClick: () => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat') },
+      { label: conversation.isGroup ? t('chat:actions.delete_group', 'Delete Group') : t('chat:actions.delete_chat', 'Delete Chat'), icon: <FiTrash2 />, destructive: true, onClick: () => onMenuSelect(conversation.isGroup ? 'deleteGroup' : 'deleteChat') },
     ]);
   };
 
@@ -271,7 +285,7 @@ const ConversationItem = memo(function ConversationItem({
             >
               <img
                 src={avatarSrc}
-                alt="Avatar"
+                alt={t('common:defaults.avatar', 'Avatar')}
                 className={clsx(
                   "w-12 h-12 rounded-full object-cover border-2 transition-all pointer-events-none",
                   isActive ? "border-bg-surface shadow-inner" : "border-bg-main shadow-sm",
@@ -350,12 +364,10 @@ const ConversationItem = memo(function ConversationItem({
   );
 });
 
-
-import { useNavigate } from 'react-router-dom';
-
 // --- Main Component ---
 
 export default function ChatList() {
+  const { t } = useTranslation(['chat', 'common']);
   const navigate = useNavigate();
   const {
     conversations,
@@ -403,12 +415,12 @@ export default function ChatList() {
 
   useEffect(() => {
     const commands = [{
-      id: 'new-group', name: 'New Group', action: openCreateGroupModal,
+      id: 'new-group', name: t('chat:sidebar.new_group'), action: openCreateGroupModal,
       icon: <FiUsers />, section: 'General', keywords: 'create group chat conversation',
     }];
     addCommands(commands);
     return () => removeCommands(commands.map(c => c.id));
-  }, [addCommands, removeCommands, openCreateGroupModal]);
+  }, [addCommands, removeCommands, openCreateGroupModal, t]);
 
   const itemContent = useCallback((index: number, c: Conversation) => {
     const peerUser = !c.isGroup ? c.participants?.find(p => p.id !== meId) : null;
@@ -453,7 +465,7 @@ export default function ChatList() {
           <input
             id="global-search-input"
             type="text"
-            placeholder="Search..."
+            placeholder={t('chat:sidebar.search_placeholder')}
             className="
               w-full h-12 pl-12 pr-12 rounded-full
               bg-bg-main text-text-primary font-medium
@@ -467,7 +479,8 @@ export default function ChatList() {
           <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
             <button 
               onClick={() => setShowScanModal(true)} 
-              title="Scan QR Code"
+              title={t('chat:sidebar.scan_qr')}
+              aria-label={t('chat:sidebar.scan_qr')}
               className="
                 p-2 rounded-full text-text-secondary
                 hover:text-accent active:scale-95 transition-all
@@ -477,7 +490,8 @@ export default function ChatList() {
             </button>
             <button 
               onClick={openCreateGroupModal} 
-              title="New Group Chat"
+              title={t('chat:sidebar.new_group')}
+              aria-label={t('chat:sidebar.new_group')}
               className="
                 p-2 rounded-full text-text-secondary
                 hover:text-accent active:scale-95 transition-all
@@ -502,12 +516,12 @@ export default function ChatList() {
         
         {error && !isLoading && (
           <div className="p-6 mx-4 text-center">
-            <div className="text-red-500 font-bold mb-2 text-sm">Connection Error</div>
+            <div className="text-red-500 font-bold mb-2 text-sm">{t('chat:sidebar.connection_error')}</div>
             <button 
               onClick={handleRetry}
               className="px-4 py-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-xs font-bold hover:text-red-500 active:shadow-neumorphic-pressed"
             >
-              Reconnect
+              {t('chat:sidebar.reconnect')}
             </button>
           </div>
         )}
@@ -524,7 +538,7 @@ export default function ChatList() {
                 Header: () => <div className="h-2"></div>,
                 EmptyPlaceholder: () => (
                   <div className="flex flex-col items-center justify-center h-40 text-text-secondary/50">
-                    <p className="text-sm font-medium">No conversations yet</p>
+                    <p className="text-sm font-medium">{t('chat:sidebar.no_conversations')}</p>
                   </div>
                 ),
               }}

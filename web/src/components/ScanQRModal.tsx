@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FiX, FiCamera } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Html5Qrcode } from 'html5-qrcode';
-import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   onClose: () => void;
@@ -10,6 +10,7 @@ interface Props {
 }
 
 export default function ScanQRModal({ onClose, onScanSuccess }: Props) {
+  const { t } = useTranslation(['modals']);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +40,7 @@ export default function ScanQRModal({ onClose, onScanSuccess }: Props) {
         () => {} // Ignore scan failures (frame missed)
       ).catch(err => {
           console.error("Camera start failed", err);
-          setError("Camera access denied or unavailable.");
+          setError(t('scan.camera_error'));
       });
     }, 200);
 
@@ -49,7 +50,7 @@ export default function ScanQRModal({ onClose, onScanSuccess }: Props) {
         scannerRef.current.stop().catch(() => {});
       }
     };
-  }, [onScanSuccess]);
+  }, [onScanSuccess, t]);
 
   return (
     <AnimatePresence>
@@ -78,8 +79,8 @@ export default function ScanQRModal({ onClose, onScanSuccess }: Props) {
             <div className="w-12 h-12 rounded-full bg-accent/20 text-accent flex items-center justify-center mx-auto mb-3">
               <FiCamera size={24} />
             </div>
-            <h2 className="text-xl font-black uppercase tracking-widest text-text-primary">Scan Contact</h2>
-            <p className="text-xs text-text-secondary mt-1 font-mono">Scan a NYX QR code</p>
+            <h2 className="text-xl font-black uppercase tracking-widest text-text-primary">{t('scan.title')}</h2>
+            <p className="text-xs text-text-secondary mt-1 font-mono">{t('scan.desc')}</p>
           </div>
 
           <div className="w-full aspect-square bg-black rounded-2xl overflow-hidden relative shadow-inner border-2 border-white/5">
@@ -93,7 +94,7 @@ export default function ScanQRModal({ onClose, onScanSuccess }: Props) {
           </div>
           
           <div className="mt-6 text-center">
-            <p className="text-[10px] text-text-secondary uppercase tracking-widest">Awaiting target...</p>
+            <p className="text-[10px] text-text-secondary uppercase tracking-widest">{t('scan.awaiting')}</p>
           </div>
         </motion.div>
       </motion.div>

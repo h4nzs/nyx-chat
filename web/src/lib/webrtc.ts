@@ -4,8 +4,8 @@
 import { getSocket } from './socket';
 import { useCallStore } from '../store/callStore';
 import { api } from './api';
-import { asUserId } from '../types/brands';
-import { WebRTCSignalingSchema } from '../schemas/core';
+import { asUserId } from '@nyx/shared';
+import { WebRTCSignalingSchema } from '@nyx/shared';
 
 let cachedIceServers: RTCIceServer[] | null = null;
 let turnCacheExp = 0;

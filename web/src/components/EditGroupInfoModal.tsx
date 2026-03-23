@@ -3,7 +3,8 @@ import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import { Spinner } from './Spinner';
 import ModalBase from './ui/ModalBase';
-import type { ConversationId } from '../types/brands';
+import type { ConversationId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 interface EditGroupInfoModalProps {
   conversationId: ConversationId;
@@ -13,6 +14,7 @@ interface EditGroupInfoModalProps {
 }
 
 export default function EditGroupInfoModal({ conversationId, currentTitle, currentDescription, onClose }: EditGroupInfoModalProps) {
+  const { t } = useTranslation(['modals', 'common']);
   const [title, setTitle] = useState(currentTitle);
   const [description, setDescription] = useState(currentDescription || '');
   const [isLoading, setIsLoading] = useState(false);
@@ -25,10 +27,11 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
         method: 'PUT',
         body: JSON.stringify({ title, description }),
       });
-      toast.success('Group info updated!');
+      toast.success(t('modals:edit_group.success'));
       onClose();
     } catch (error: unknown) {
-      toast.error(`Failed to update: ${(error instanceof Error ? error.message : 'Unknown error') || 'Unknown error'}`);
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      toast.error(t('modals:edit_group.error', { error: msg }));
     } finally {
       setIsLoading(false);
     }
@@ -38,22 +41,22 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
     <ModalBase
       isOpen={true}
       onClose={onClose}
-      title="Edit Group Info"
+      title={t('modals:edit_group.title')}
       footer={(
         <>
           <button type="button" onClick={onClose} className="px-4 py-2 rounded-md text-text-primary bg-secondary hover:bg-secondary/80">
-            Cancel
+             {t('common:actions.cancel')}
           </button>
           <button type="submit" form="edit-group-form" disabled={isLoading} className="btn btn-primary">
             {isLoading && <Spinner size="sm" className="mr-2" />} 
-            Save Changes
+            {t('modals:edit_group.save')}
           </button>
         </>
       )}
     >
       <form id="edit-group-form" onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="group-title" className="block text-sm font-medium text-text-secondary mb-1">Group Name</label>
+          <label htmlFor="group-title" className="block text-sm font-medium text-text-secondary mb-1">{t('modals:edit_group.group_name')}</label>
             <input
               id="group-title"
               type="text"
@@ -63,7 +66,7 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
             />
         </div>
         <div>
-          <label htmlFor="group-description" className="block text-sm font-medium text-text-secondary mb-1">Description</label>
+          <label htmlFor="group-description" className="block text-sm font-medium text-text-secondary mb-1">{t('modals:edit_group.description')}</label>
           <textarea
             id="group-description"
             value={description}

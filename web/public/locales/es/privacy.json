@@ -1,0 +1,83 @@
+{
+  "title": "Centro Legal y de Privacidad",
+  "subtitle": "Transparencia absoluta sobre nuestro manejo de datos Zero-Knowledge, protocolos criptográficos y términos de licencia de software.",
+  "last_updated": "Última actualización: Marzo 2026",
+  "back": "Volver al inicio",
+  "nav": {
+    "privacy": "Política de Privacidad",
+    "terms": "Términos de Servicio",
+    "licensing": "Licencia de Software",
+    "cookies": "Política de Cookies",
+    "ai": "IA y Telemetría",
+    "security": "Arquitectura de Seguridad"
+  },
+  "privacy": {
+    "title": "Política de Privacidad",
+    "intro": "Nuestra regla de oro: Si no tenemos tus datos, nadie puede pedírnoslos.",
+    "minimization_title": "1. Minimización de datos y Criptografía",
+    "minimization_1": "<0>Protocolo de Identidad Ciega:</0> No guardamos tu nombre de usuario, correo o número de teléfono. Usamos hashing Argon2id en tu dispositivo. El servidor solo guarda un hash criptográfico (`usernameHash`), lo que hace que tu identidad sea matemáticamente imposible de descifrar por nosotros.",
+    "minimization_2": "<0>Metadatos Cifrados:</0> Tu nombre visible, bio y avatar se cifran simétricamente en tu dispositivo. Para nuestros servidores, tu perfil es solo un bloque de texto cifrado incomprensible.",
+    "minimization_3": "<0>Comunicaciones E2EE:</0> Todos los mensajes directos, notas de voz y archivos adjuntos tienen Cifrado de Extremo a Extremo usando el Protocolo Signal (Double Ratchet). Actuamos únicamente como un puente ciego.",
+    "logging_title": "2. Registros temporales de red",
+    "logging_desc": "Para mantener la red estable y evitar ataques DDoS o Botnets, procesamos temporalmente:",
+    "logging_1": "Direcciones IP (hasheadas de forma irreversible al conectar).",
+    "logging_2": "Marcas de tiempo de conexión WebSocket (se borran automáticamente de Redis).",
+    "logging_3": "Cola de mensajes cifrados sin conexión (se borran automáticamente tras entregarse al destinatario)."
+  },
+  "terms": {
+    "title": "Términos de Servicio",
+    "liability_title": "Exención de responsabilidad crítica",
+    "liability_desc": "NYX se ofrece \"TAL CUAL\", sin garantías de ningún tipo. Los creadores no se hacen responsables por pérdida de datos, claves comprometidas o caídas del servicio. Tú eres el único responsable de cuidar tu Frase de Recuperación.",
+    "gating": "<0>Control de confianza:</0> Para proteger la red, las cuentas no verificadas entran en un \"Modo Sandbox\" limitado. Para usar todo el potencial, necesitas verificación biométrica o Prueba de Trabajo (Proof-of-Work) criptográfica.",
+    "abuse": "<0>Tolerancia cero al abuso:</0> Aceptas no usar la red de NYX para actividades ilegales, abuso automatizado de API (bots) o distribución de malware. Romper esta regla resultará en un bloqueo inmediato."
+  },
+  "licensing": {
+    "title": "Licencia de Software y Empresas",
+    "intro": "El código de NYX es orgullosamente de código abierto y está estrictamente protegido bajo la <0>GNU Affero General Public License v3.0 (AGPL-3.0)</0>.",
+    "agpl_title": "Límites de la AGPL-3.0",
+    "agpl_desc": "Si modificas el código de NYX y permites que usuarios interactúen con él a través de una red (por ejemplo, ofreciéndolo como SaaS), estás legalmente obligado a publicar tu código fuente modificado para todos.",
+    "commercial_title": "Licencia dual comercial",
+    "commercial_desc": "Para empresas o startups que quieran integrar NYX en productos privados sin las obligaciones de la AGPL, ofrecemos una Licencia Comercial.",
+    "contact_btn": "Contactar al equipo para precios corporativos"
+  },
+  "cookies": {
+    "title": "Política de Cookies y Almacenamiento",
+    "intro": "No usamos cookies de rastreo, anuncios ni analíticas de terceros. El almacenamiento local se usa estrictamente para la seguridad criptográfica y tu sesión.",
+    "table_type": "Tipo de almacenamiento",
+    "table_item": "Elemento",
+    "table_purpose": "Propósito",
+    "cookie_desc": "Autenticación segura y mantener la sesión.",
+    "idb_keys_desc": "Almacenamiento local de tus Claves Privadas cifradas.",
+    "idb_vault_desc": "Almacenamiento local de tu historial de chats E2EE."
+  },
+  "ai": {
+    "title": "IA y Telemetría",
+    "intro": "NYX funciona con <0>Cero Telemetría</0>. No rastreamos tus clics, tiempo de uso ni qué funciones utilizas.",
+    "smart_reply_title": "Respuestas Inteligentes (IA Opcional)",
+    "smart_reply_desc": "Ofrecemos una función experimental de \"Respuestas Inteligentes\" usando la API de Google Gemini. Esta función es <0>totalmente opcional</0>.",
+    "smart_reply_1": "Los mensajes se descifran localmente antes de enviarse a la IA.",
+    "smart_reply_2": "El servidor de NYX actúa como un proxy ciego; no guarda el prompt ni la respuesta de la IA.",
+    "smart_reply_3": "Los datos procesados por la API de Gemini son temporales y no se usan para entrenar modelos de IA, según las reglas de privacidad de Google."
+  },
+  "security": {
+    "title": "Arquitectura de Seguridad",
+    "intro": "Nuestro código criptográfico está abierto para ser auditado.",
+    "signal_title": "Protocolo Signal",
+    "signal_desc": "Acuerdo de claves X3DH y secreto perfecto hacia adelante y hacia atrás (Double Ratchet) vía libsodium (XChaCha20-Poly1305).",
+    "webauthn_title": "WebAuthn PRF",
+    "webauthn_desc": "Descifrado biométrico sin contraseñas usando los enclaves seguros del hardware (Secure Enclave/TPM).",
+    "memory_title": "Memoria volátil",
+    "memory_desc": "Las claves criptográficas se borran de la memoria RAM (`sodium.memzero`) inmediatamente después de usarse.",
+    "migration_title": "Migración Peer-to-Peer",
+    "migration_desc": "La migración entre dispositivos usa túneles WebSocket cifrados. El servidor solo pasa los datos a ciegas sin ver las claves."
+  },
+  "seo": {
+    "title": "Legal y Privacidad | NYX",
+    "description": "Descubre nuestra arquitectura Zero-Knowledge, licencias comerciales y cómo NYX protege tus datos."
+  },
+  "footer": {
+    "tagline": "Privacidad de Grado Militar",
+    "copyright": "© {{year}} NYX. Todos los derechos reservados bajo AGPL-3.0.",
+    "quote": "\"En la era de la vigilancia total, pasar desapercibido es la única libertad verdadera.\""
+  }
+}

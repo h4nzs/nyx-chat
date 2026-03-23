@@ -9,10 +9,12 @@ import { useConversationStore } from '@store/conversation';
 import { decryptFile } from '@utils/crypto';
 import { api } from '@lib/api';
 import toast from 'react-hot-toast';
-import type { UserId } from '../types/brands';
-import { asUserId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
+import { asUserId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 export default function StoryViewer({ userId, onClose, onReply }: { userId: UserId; onClose: () => void, onReply?: (text: string) => void }) {
+  const { t } = useTranslation(['chat', 'media']);
   const stories = useStoryStore(state => state.stories[userId] || []);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -140,7 +142,7 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
         await useMessageStore.getState().sendMessage(conversation.id, {
             content: JSON.stringify(payload),
         });
-        toast.success("Reply sent!");
+        toast.success(t('stories.reply_sent'));
         onClose();
     }
   };
@@ -154,11 +156,11 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
           [userId]: state.stories[userId].filter(s => s.id !== currentStory.id)
         }
       }));
-      toast.success("Story deleted");
+      toast.success(t('stories.story_deleted'));
       if (stories.length <= 1) onClose();
       else handleNext();
     } catch (e) {
-      toast.error("Failed to delete story");
+      toast.error(t('stories.delete_failed'));
     }
   };
 
@@ -233,7 +235,7 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
             )}
           </>
         ) : (
-          <div className="text-white/50 text-sm">Decrypting...</div>
+          <div className="text-white/50 text-sm">{t('media.decrypting')}</div>
         )}
       </div>
 
@@ -250,7 +252,7 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
            >
              <input 
                type="text" 
-               placeholder="Reply..." 
+               placeholder={t('stories.reply_placeholder')} 
                value={replyText}
                onChange={e => setReplyText(e.target.value)}
                onFocus={() => setIsTyping(true)}

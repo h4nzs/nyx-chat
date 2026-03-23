@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { useMessageStore } from '@store/message';
 import { FiFile, FiImage, FiVideo, FiMusic } from 'react-icons/fi';
 import { toAbsoluteUrl } from '@utils/url';
-import type { ConversationId, MessageId } from '../types/brands';
-import { asMessageId } from '../types/brands';
+import type { ConversationId, MessageId } from '@nyx/shared';
+import { asMessageId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 interface MediaItem {
   id: MessageId;
@@ -26,6 +27,7 @@ const MediaIcon = ({ type }: { type: MediaItem['type'] }) => {
 };
 
 const MediaGallery = ({ conversationId }: { conversationId: ConversationId }) => {
+  const { t } = useTranslation(['chat']);
   const messages = useMessageStore(state => state.messages[conversationId] || []);
   const [media, setMedia] = useState<MediaItem[]>([]);
 
@@ -58,7 +60,7 @@ const MediaGallery = ({ conversationId }: { conversationId: ConversationId }) =>
     return (
         <div className="flex flex-col items-center justify-center p-8 opacity-50">
             <FiFile size={40} className="mb-2" />
-            <p className="text-center text-xs text-text-secondary">No decrypted media found in local history.</p>
+            <p className="text-center text-xs text-text-secondary">{t('media.no_media')}</p>
         </div>
     );
   }
@@ -74,7 +76,7 @@ const MediaGallery = ({ conversationId }: { conversationId: ConversationId }) =>
           className="aspect-square bg-bg-surface rounded-lg shadow-neumorphic-convex flex items-center justify-center overflow-hidden group transition-all active:shadow-neumorphic-pressed relative"
         >
           {item.type === 'IMAGE' ? (
-            <img src={toAbsoluteUrl(item.content)} alt={item.fileName || 'Shared media'} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
+            <img src={toAbsoluteUrl(item.content)} alt={item.fileName || t('media.shared_media')} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300" />
           ) : (
             <div className="flex flex-col items-center gap-2 text-center p-2">
               <MediaIcon type={item.type} />

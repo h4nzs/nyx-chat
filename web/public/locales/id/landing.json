@@ -1,0 +1,119 @@
+{
+  "header": {
+    "login": "Masuk"
+  },
+  "hero": {
+    "badge": "{{version}} • Terenkripsi E2EE • Anonim",
+    "title_prefix": "PERCAKAPAN",
+    "title_highlight": "PRIBADI",
+    "title_suffix": "DIAMANKAN OLEH ANDA",
+    "description": "Pesan terenkripsi end-to-end dengan desain industrial yang nyata. Tanpa nomor telepon ataupun email. Tanpa pelacak. Hanya Anda dan data Anda.",
+    "cta_start": "MULAI SEKARANG",
+    "cta_source": "KODE SUMBER"
+  },
+  "why": {
+    "title": "KENAPA NYX?",
+    "desc_1": "Lelah dengan pendaftaran rumit dan wajib mengunduh aplikasi? NYX solusinya. Akses instan dari browser favorit Anda—tanpa instalasi.",
+    "desc_2": "Khawatir dengan data Anda? Kami juga!. NYX dibangun di atas fondasi privasi, hanya bertindak sebagai jembatan aman antara Anda dan kontak Anda."
+  },
+  "comparison": {
+    "title": "NYX vs. RAKSASA",
+    "headers": {
+      "feature": "Fitur",
+      "wa": "WhatsApp",
+      "tg": "Telegram",
+      "nyx": "NYX"
+    },
+    "rows": {
+      "phone_required": "Butuh No. HP?",
+      "app_install": "Instal Aplikasi?",
+      "e2e": "Enkripsi E2E",
+      "footprint": "Jejak Lokal"
+    },
+    "values": {
+      "yes": "Ya",
+      "no": "TIDAK",
+      "required": "Wajib",
+      "optional": "Opsional (PWA)",
+      "default": "Bawaan",
+      "secret_only": "Hanya Chat Rahasia",
+      "always_on": "Selalu Aktif",
+      "sql_db": "Database SQL",
+      "cloud_cache": "Cache Cloud",
+      "zero": "NOL (Browser)"
+    }
+  },
+  "features": {
+    "title": "FITUR UNTUK PRIVASI",
+    "no_phone": {
+      "title": "TANPA NOMOR TELEPON DAN EMAIL",
+      "desc": "Daftar hanya dengan Username. Identitas asli Anda tetap aman. Tidak ada yang bisa 'menyimpan kontak Anda' tanpa izin."
+    },
+    "ghost_app": {
+      "title": "APLIKASI HANTU (PWA)",
+      "desc": "Tanpa instalasi. Buka di browser, chat, tutup tab, dan bersihkan data. Nol jejak forensik tertinggal di perangkat Anda."
+    },
+    "argon2": {
+      "title": "KEAMANAN ARGON2",
+      "desc": "Satu-satunya chat web yang mengubah password Anda menjadi kunci enkripsi tingkat militer menggunakan hashing memory-hardened."
+    },
+    "tactile": {
+      "title": "DESAIN TAKTIL",
+      "desc": "Antarmuka neumorphic termutasi dengan kedalaman pahatan dan tekstur butiran untuk rasa fisik premium."
+    }
+  },
+  "how_it_works": {
+    "title": "SEDERHANA, AMAN, TRANSPARAN.",
+    "step_1": {
+      "title": "1. BUAT AKUN",
+      "desc": "Daftar via username. Kami otomatis membuat 24-kata frasa pemulihan untuk enkripsi."
+    },
+    "step_2": {
+      "title": "2. MULAI CHATTING",
+      "desc": "Pesan Anda terenkripsi end-to-end sejak kata pertama menggunakan Protokol Signal."
+    },
+    "step_3": {
+      "title": "3. MENGHILANG",
+      "desc": "Selesai? Tutup browser. Kunci enkripsi dihapus dari memori. Tidak ada jejak tertinggal."
+    }
+  },
+  "testimonials": {
+    "title": "DIPERCAYA OLEH PEJUANG PRIVASI",
+    "yosep": "Akhirnya, aplikasi chat yang menghargai privasi saya tanpa mengorbankan pengalaman pengguna yang indah. Fakta bahwa saya mengontrol kunci saya sendiri adalah game-changer.",
+    "yosep_role": "Advokat Privasi",
+    "sarah": "Nyx telah menjadi esensial bagi tim kami. Sederhana, aman, dan menyenangkan digunakan setiap hari.",
+    "sarah_role": "Ketua Tim Remote"
+  },
+  "faq": {
+    "title": "PERTANYAAN UMUM",
+    "q1": "Apakah NYX terenkripsi end-to-end?",
+    "a1": "Ya. Kami menggunakan Protokol Signal (X3DH + Double Ratchet Algorithm) untuk memastikan hanya Anda dan orang yang Anda ajak komunikasi yang bisa membaca pesan. Bahkan server tidak bisa mendekripsi pesan Anda.",
+    "q2": "Apakah saya perlu menginstal aplikasi?",
+    "a2": "Tidak. NYX adalah Progressive Web App (PWA). Anda bisa menggunakannya langsung di browser atau menginstalnya ke layar utama untuk pengalaman seperti aplikasi native tanpa kerumitan toko aplikasi.",
+    "q3": "Apakah ini sepenuhnya gratis?",
+    "a3": "Ya, NYX adalah open-source dan gratis untuk digunakan. Tidak ada biaya tersembunyi, iklan, atau pelacakan data.",
+    "q4": "Bagaimana cara memulihkan akun saya?",
+    "a4": "Saat mendaftar, Anda menerima 24-kata frasa pemulihan. Ini adalah SATU-SATUNYA cara untuk memulihkan akun Anda, tapi ingat bahwa Anda tidak bisa mengakses riwayat pesan. Dan kami tidak menyimpan frasa ini."
+  },
+  "cta": {
+    "title": "AMBIL KEMBALI PRIVASI ANDA.",
+    "desc": "Jangan biarkan data Anda menjadi komoditas. Beralih ke NYX hari ini. Gratis, Open Source, Selamanya.",
+    "button": "BUAT AKUN ANONIM"
+  },
+  "footer": {
+    "rights": "© {{year}} Proyek NYX. Open Source di bawah",
+    "legal": "Legal & Privasi",
+    "source": "Kode Sumber",
+    "commercial": "Lisensi Komersial",
+    "disclaimer": "WhatsApp adalah merek dagang terdaftar dari Meta Platforms, Inc. Telegram adalah merek dagang terdaftar dari Telegram FZ-LLC. NYX adalah proyek open-source independen dan tidak berafiliasi dengan, didukung oleh, atau disponsori oleh entitas korporat ini. Setiap perbandingan arsitektur dibuat semata-mata untuk tujuan informasional dan tinjauan kriptografi berdasarkan dokumentasi teknis publik yang tersedia per {{year}}."
+  },
+  "schema": {
+    "e2ee": "Enkripsi Ujung-ke-Ujung (Protokol Signal)",
+    "self_destruct": "Pesan Menghancurkan Diri Sendiri",
+    "local_first": "Arsitektur Mengutamakan Lokal (Local-First)"
+  },
+  "a11y": {
+    "not_supported": "Tidak Didukung",
+    "supported": "Didukung"
+  }
+}

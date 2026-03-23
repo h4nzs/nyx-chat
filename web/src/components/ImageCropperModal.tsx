@@ -3,6 +3,7 @@ import Cropper from 'react-easy-crop';
 import { FiCheck, FiX, FiRotateCw } from 'react-icons/fi';
 import { getCroppedImg } from '../utils/canvasUtils';
 import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 
 type Area = {
   x: number;
@@ -16,6 +17,7 @@ export default function ImageCropperModal({
 }: { 
   file: File, url: string, aspect?: number, onClose: () => void, onSave: (file: File) => void 
 }) {
+  const { t } = useTranslation(['modals', 'common']);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
@@ -34,7 +36,7 @@ export default function ImageCropperModal({
       onSave(croppedFile);
     } catch (e) {
       console.error(e);
-      toast.error("Failed to crop image.");
+      toast.error(t('modals:editor.crop_failed', 'Failed to crop image.'));
     } finally {
       setIsProcessing(false);
     }
@@ -59,19 +61,44 @@ export default function ImageCropperModal({
         <div className="p-4 bg-bg-surface flex flex-col gap-4">
           {/* Controls */}
           <div className="flex items-center gap-4 px-2">
-            <span className="text-xs text-text-secondary font-bold">ZOOM</span>
-            <input type="range" value={zoom} min={1} max={3} step={0.1} aria-label="Zoom" onChange={(e) => setZoom(Number(e.target.value))} className="flex-1 accent-accent" />
+            <span className="text-xs text-text-secondary font-bold">{t('modals:editor.zoom', 'ZOOM')}</span>
+            <input 
+              type="range" 
+              value={zoom} 
+              min={1} 
+              max={3} 
+              step={0.1} 
+              aria-label={t('modals:editor.zoom', 'ZOOM')} 
+              onChange={(e) => setZoom(Number(e.target.value))} 
+              className="flex-1 accent-accent" 
+            />
           </div>
 
           {/* Actions */}
           <div className="flex items-center justify-between gap-4">
-            <button onClick={onClose} disabled={isProcessing} className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/20 transition-colors">
+            <button 
+              onClick={onClose} 
+              disabled={isProcessing} 
+              aria-label={t('common:actions.cancel', 'Cancel')}
+              title={t('common:actions.cancel', 'Cancel')}
+              className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500/20 transition-colors"
+            >
               <FiX size={20} />
             </button>
-            <button onClick={() => setRotation((prev) => (prev + 90) % 360)} disabled={isProcessing} className="flex items-center justify-center gap-2 p-3 bg-white/5 text-text-primary rounded-xl hover:bg-white/10 transition-colors flex-1 font-bold text-sm">
-              <FiRotateCw size={18} /> Rotate
+            <button 
+              onClick={() => setRotation((prev) => (prev + 90) % 360)} 
+              disabled={isProcessing} 
+              className="flex items-center justify-center gap-2 p-3 bg-white/5 text-text-primary rounded-xl hover:bg-white/10 transition-colors flex-1 font-bold text-sm"
+            >
+              <FiRotateCw size={18} /> {t('modals:editor.rotate', 'Rotate')}
             </button>
-            <button onClick={handleSave} disabled={isProcessing} className="p-3 bg-accent text-white rounded-xl hover:scale-105 transition-all shadow-[0_0_15px_rgba(var(--accent),0.4)]">
+            <button 
+              onClick={handleSave} 
+              disabled={isProcessing} 
+              aria-label={t('common:actions.save', 'Save')}
+              title={t('common:actions.save', 'Save')}
+              className="p-3 bg-accent text-white rounded-xl hover:scale-105 transition-all shadow-[0_0_15px_rgba(var(--accent),0.4)]"
+            >
               <FiCheck size={20} />
             </button>
           </div>

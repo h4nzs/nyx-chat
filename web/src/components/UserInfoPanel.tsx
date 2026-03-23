@@ -4,8 +4,6 @@ import { toAbsoluteUrl } from '@utils/url';
 import { authFetch, handleApiError } from '@lib/api';
 import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
-// import { generateSafetyNumber } from '@lib/crypto-worker-proxy'; // Dynamic
-// import { getSodium } from '@lib/sodiumInitializer'; // Dynamic
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
 import { useVerificationStore } from '@store/verification';
@@ -13,12 +11,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { useUserProfile } from '@hooks/useUserProfile';
 import MediaGallery from './MediaGallery';
-import type { UserId } from '../types/brands';
-import { asConversationId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
+import { asConversationId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 type ProfileUser = User & { publicKey?: string };
 
 export default function UserInfoPanel({ userId }: { userId: UserId }) {
+  // Tambahkan namespace 'common' untuk menangkap pesan error global
+  const { t } = useTranslation(['modals', 'common']);
   const { activeId } = useConversationStore();
   const { verifiedStatus, setVerified } = useVerificationStore();
   const navigate = useNavigate();
@@ -31,8 +32,8 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
   const [activeTab, setActiveTab] = useState('details');
 
   const tabs = [
-    { id: 'details', label: 'Details' },
-    { id: 'media', label: 'Media' },
+    { id: 'details', label: t('modals:user_info.tabs.details') },
+    { id: 'media', label: t('modals:user_info.tabs.media') },
   ];
 
   const isAlreadyVerified = activeId ? verifiedStatus[activeId] : false;
@@ -67,18 +68,17 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
 
   const handleVerifySecurity = async () => {
     if (!user?.publicKey) {
-      setError("This user has not set up their encryption keys yet.");
+      setError(t('modals:user_info.errors.no_keys'));
       return;
     }
 
     try {
-      // Dynamic imports
       const { generateSafetyNumber } = await import('@lib/crypto-worker-proxy');
       const { getSodium } = await import('@lib/sodiumInitializer');
 
       const myPublicKeyB64 = localStorage.getItem('publicKey');
       if (!myPublicKeyB64) {
-        throw new Error("Your public key is not found. Please set up your keys first.");
+        throw new Error(t('modals:user_info.errors.my_key_missing'));
       }
       
       const sodium = await getSodium();
@@ -90,13 +90,13 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
       setShowSafetyModal(true);
 
     } catch (e: unknown) {
-      setError((e instanceof Error ? e.message : 'Unknown error') || "Failed to generate safety number.");
+      setError((e instanceof Error ? e.message : t('common:errors.unknown')) || t('modals:user_info.errors.safety_number_failed'));
     }
   };
 
   const renderDetails = () => {
     if (loading) return <div className="flex justify-center items-center min-h-[200px]"><Spinner /></div>;
-    if (error) return <p className="text-center text-destructive">{error}</p>;
+    if (error) return <p className="text-center text-red-500">{error}</p>;
     if (user) {
       return (
         <div className="space-y-6">
@@ -112,10 +112,10 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
             />
             <h3 className="text-xl font-bold text-text-primary">{profile.name}</h3>
             {user.isVerified && (
-              <span className="inline-block mt-1 px-2 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-wider">Verified</span>
+              <span className="inline-block mt-1 px-2 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-wider">{t('modals:user_info.verified')}</span>
             )}
             <p className="text-text-secondary mt-2 text-sm">
-              {profile.description || 'This user prefers to keep an air of mystery.'}
+              {profile.description || t('modals:user_info.no_desc')}
             </p>
           </div>
           <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-4 space-y-2">
@@ -123,13 +123,13 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
               onClick={handleViewProfile}
               className="w-full p-3 rounded-lg font-semibold text-white bg-accent shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
             >
-              View Full Profile
+              {t('modals:user_info.view_profile')}
             </button>
             <button
               onClick={handleVerifySecurity}
               className="w-full p-3 rounded-lg font-semibold text-text-primary bg-bg-surface shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
             >
-              Verify Security
+              {t('modals:user_info.verify_security')}
             </button>
           </div>
         </div>
@@ -141,8 +141,8 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
   return (
     <>
       <div className="h-full flex flex-col">
-        <div className="p-4 text-center border-b border-border">
-            <h2 className="text-lg font-semibold">About {profile.name || 'User'}</h2>
+        <div className="p-4 text-center border-b border-white/5 dark:border-black/5">
+            <h2 className="text-lg font-semibold">{t('modals:user_info.about', { name: profile.name || t('common:defaults.user') })}</h2>
         </div>
         
         <div className="flex-1 overflow-y-auto p-4 md:p-6 relative">

@@ -3,7 +3,7 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import CryptoWorker from '../workers/crypto.worker.ts?worker';
-import type { DoubleRatchetState } from '../types/core';
+import type { DoubleRatchetState } from '@nyx/shared';
 import type { 
   CryptoBuffer, 
   SodiumKeyPair, 

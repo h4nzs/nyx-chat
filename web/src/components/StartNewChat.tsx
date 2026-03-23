@@ -5,8 +5,9 @@ import { useShallow } from 'zustand/react/shallow';
 import toast from 'react-hot-toast';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { toAbsoluteUrl } from '@utils/url';
-import type { UserId } from '../types/brands';
-import { asUserId } from '../types/brands';
+import type { UserId, ConversationId } from '@nyx/shared';
+import { asUserId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 export interface SearchUser {
   id: UserId;
@@ -16,6 +17,7 @@ export interface SearchUser {
 }
 
 function SearchResultItem({ u, loadingId, onStarted }: { u: SearchUser, loadingId: UserId | null, onStarted: (id: UserId) => void }) {
+  const { t } = useTranslation(['common']);
   const profile = useUserProfile(u);
   return (
     <button 
@@ -27,12 +29,13 @@ function SearchResultItem({ u, loadingId, onStarted }: { u: SearchUser, loadingI
       <div className="flex-1 text-left">
         <div className="font-medium text-white">{profile.name}</div>
       </div>
-      {loadingId === u.id && <span className="ml-2 text-xs text-text-secondary">Starting…</span>}
+      {loadingId === u.id && <span className="ml-2 text-xs text-text-secondary">{t('actions.starting')}</span>}
     </button>
   );
 }
 
-export default function StartNewChat({ query, onStarted }: { query: string; onStarted: (id: UserId) => void }) {
+export default function StartNewChat({ query, onStarted }: { query: string; onStarted: (id: ConversationId) => void }) {
+  const { t } = useTranslation(['common', 'chat']);
   const [list, setList] = useState<SearchUser[]>([]);
   const [loadingId, setLoadingId] = useState<UserId | null>(null);
   const searchIdRef = useRef(0);
@@ -46,7 +49,7 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
       setList([]);
       return;
     }
-    const t = setTimeout(async () => {
+    const tTimer = setTimeout(async () => {
       const currentId = ++searchIdRef.current;
       try {
         const r = await searchUsers(query);
@@ -54,40 +57,21 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
           setList(r.map((u: Record<string, unknown>) => ({ ...u, id: asUserId(u.id as string) })));
         }
       } catch {
-        toast.error("Failed to search users.");
+        toast.error(t('search.failed'));
       }
     }, 300);
-    return () => clearTimeout(t);
-  }, [query, searchUsers]);
+    return () => clearTimeout(tTimer);
+  }, [query, searchUsers, t]);
 
   const handleStart = async (peerId: UserId) => {
     try {
       setLoadingId(peerId);
       const id = await startConversation(peerId);
       if (id) {
-        onStarted(asUserId(id)); // Wait, onStarted expects UserId? But startConversation returns ConversationId?
-        // Let's check StartNewChat props: onStarted: (id: UserId) => void.
-        // Wait, onStarted implies we started a chat with a USER. 
-        // But startConversation returns a CONVERSATION ID.
-        // If onStarted takes UserId, we should pass peerId?
-        // Let's check where StartNewChat is used. ChatList uses it?
-        // No, ChatList doesn't use StartNewChat directly? It's used in sidebar maybe?
-        // Ah, ChatList uses CreateGroupChat and ScanQRModal. 
-        // Let's check grep again. 
-        // web/src/components/StartNewChat.tsx is used by... nothing? 
-        // Wait, CommandPalette might use it?
-        // Or maybe it's dead code?
-        // Let's assume onStarted wants the ConversationId to navigate to?
-        // But the type signature said (id: UserId).
-        // Let's look at the previous content of StartNewChat.tsx
-        // It says `onStarted: (id: string) => void`. I changed it to `UserId`.
-        // If startConversation returns `ConversationId`, then `onStarted` should probably accept `ConversationId` or `string`.
-        // But I changed the prop to `UserId`.
-        // If I change it to `ConversationId`, then `onStarted(id)` works (with caster).
-        // Let's assume onStarted is for navigation, so it wants ConversationId.
+        onStarted(id as unknown as ConversationId);
       }
     } catch (e: unknown) {
-      toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to start conversation.");
+      toast.error((e instanceof Error ? e.message : 'Unknown error') || t('connect.failed_start'));
     } finally {
       setLoadingId(null);
     }
@@ -104,7 +88,7 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
           )}
         />
       ) : (
-        <div className="text-center py-4 text-sm text-text-secondary">No users found for &quot;{query}&quot;</div>
+        <div className="text-center py-4 text-sm text-text-secondary">{t('search.no_results', { query })}</div>
       )}
     </div>
   );

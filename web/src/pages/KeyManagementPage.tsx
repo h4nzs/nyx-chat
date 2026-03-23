@@ -10,8 +10,11 @@ import RecoveryPhraseModal from '@components/RecoveryPhraseModal';
 import { api } from '@lib/api';
 import { getRecoveryPhrase, generateNewKeys } from '@lib/crypto-worker-proxy';
 import { getEncryptedKeys, saveEncryptedKeys } from '@lib/keyStorage';
+import { useTranslation, Trans } from 'react-i18next';
 
 export default function KeyManagementPage() {
+  // Tambahkan 'auth' untuk meminjam pesan error kriptografi
+  const { t } = useTranslation(['settings', 'common', 'auth']);
   const { logout } = useAuthStore(useShallow(state => ({ 
     logout: state.logout,
   })));
@@ -29,18 +32,18 @@ export default function KeyManagementPage() {
       setIsProcessing(true);
       try {
         const encryptedKeys = await getEncryptedKeys();
-        if (!encryptedKeys) throw new Error("No encrypted key found in storage.");
+        if (!encryptedKeys) throw new Error(t('auth:messages.keys_not_found'));
         
         const phrase = await getRecoveryPhrase(encryptedKeys, password);
         if (!phrase) {
-          throw new Error("Failed to decrypt keys. Password mismatch.");
+          throw new Error(t('auth:messages.decrypt_failed'));
         }
         
         setRecoveryPhrase(phrase);
         setShowRecoveryModal(true);
 
       } catch (error: unknown) {
-        toast.error((error instanceof Error ? error.message : 'Unknown error') || "Operation failed.");
+        toast.error((error instanceof Error ? error.message : t('common:errors.unknown')));
       } finally {
         setIsProcessing(false);
       }
@@ -49,8 +52,8 @@ export default function KeyManagementPage() {
 
   const handleGenerateNew = () => {
     showConfirm(
-      "INITIATE KEY ROTATION?",
-      "WARNING: DESTRUCTIVE ACTION. Previous message history will become undecryptable. This action is irreversible.",
+      t('settings:keys_page.confirm_rotation_title'),
+      t('settings:keys_page.confirm_rotation_desc'),
       () => {
         showPasswordPrompt(async (password) => {
           if (!password) return;
@@ -66,14 +69,14 @@ export default function KeyManagementPage() {
             
             await setupAndUploadPreKeyBundle();
 
-            toast.success('Keys Rotated. Rebooting Session...');
+            toast.success(t('settings:messages.keys_rotated'));
             // Force a reload to re-bootstrap the app with the new keys
             setTimeout(() => {
               window.location.reload();
             }, 1000);
 
           } catch (error: unknown) {
-            toast.error((error instanceof Error ? error.message : 'Unknown error') || "Rotation failed.");
+            toast.error((error instanceof Error ? error.message : t('common:errors.unknown')));
           } finally {
             setIsProcessing(false);
           }
@@ -98,7 +101,7 @@ export default function KeyManagementPage() {
           "
         >
           <FiChevronLeft size={20} />
-          <span className="font-bold text-sm uppercase tracking-wide">Return</span>
+          <span className="font-bold text-sm uppercase tracking-wide">{t('common:actions.return', 'Return')}</span>
         </Link>
       </div>
 
@@ -115,8 +118,8 @@ export default function KeyManagementPage() {
                <FiKey size={32} />
             </div>
             <div>
-              <h1 className="text-2xl font-black uppercase tracking-tighter text-text-primary">Cryptographic Vault</h1>
-              <p className="text-xs font-mono text-text-secondary mt-1 uppercase tracking-widest">End-to-End Encryption Protocol</p>
+              <h1 className="text-2xl font-black uppercase tracking-tighter text-text-primary">{t('settings:keys_page.title')}</h1>
+              <p className="text-xs font-mono text-text-secondary mt-1 uppercase tracking-widest">{t('settings:keys_page.subtitle')}</p>
             </div>
           </div>
           
@@ -127,8 +130,10 @@ export default function KeyManagementPage() {
 
         <div className="p-8 space-y-8">
           <p className="text-sm text-text-secondary leading-relaxed font-medium">
-            Your private keys are the only way to decrypt your messages. They are stored locally on this device. 
-            <strong className="text-text-primary"> Losing these keys means losing your message history forever.</strong>
+            <Trans i18nKey="settings:keys_page.description">
+              Your private keys are the only way to decrypt your messages. They are stored locally on this device. 
+              <strong className="text-text-primary"> Losing these keys means losing your message history forever.</strong>
+            </Trans>
           </p>
 
           <div className="space-y-6">
@@ -137,8 +142,8 @@ export default function KeyManagementPage() {
               <div className="flex items-start gap-4 mb-4">
                  <FiShield className="text-green-500 mt-1" size={20} />
                  <div>
-                   <h3 className="font-bold text-text-primary">Master Recovery Phrase</h3>
-                   <p className="text-xs text-text-secondary mt-1">Reveal your 24-word seed phrase for backup.</p>
+                   <h3 className="font-bold text-text-primary">{t('settings:keys_page.recovery_title')}</h3>
+                   <p className="text-xs text-text-secondary mt-1">{t('settings:keys_page.recovery_desc')}</p>
                  </div>
               </div>
               <button 
@@ -152,7 +157,7 @@ export default function KeyManagementPage() {
                   hover:text-green-500 transition-colors
                 "
               >
-                {isProcessing ? <Spinner size="sm" /> : 'Reveal Phrase'}
+                {isProcessing ? <Spinner size="sm" /> : t('settings:keys_page.reveal_btn')}
               </button>
             </div>
 
@@ -164,8 +169,8 @@ export default function KeyManagementPage() {
               <div className="flex items-start gap-4 mb-4">
                  <FiAlertTriangle className="text-red-500 mt-1" size={20} />
                  <div>
-                   <h3 className="font-bold text-red-600 dark:text-red-400">Key Rotation (Destructive)</h3>
-                   <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-1">Generates new identity keys. Old messages will become unreadable.</p>
+                   <h3 className="font-bold text-red-600 dark:text-red-400">{t('settings:keys_page.rotation_title')}</h3>
+                   <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-1">{t('settings:keys_page.rotation_desc')}</p>
                  </div>
               </div>
               
@@ -180,7 +185,7 @@ export default function KeyManagementPage() {
                   hover:bg-red-500 hover:text-white transition-all
                 "
               >
-                {isProcessing ? <Spinner size="sm" /> : 'Rotate Keys'}
+                {isProcessing ? <Spinner size="sm" /> : t('settings:keys_page.rotate_btn')}
               </button>
             </div>
           </div>

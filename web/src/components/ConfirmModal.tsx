@@ -1,8 +1,10 @@
 import { useModalStore } from '@store/modal';
 import { useShallow } from 'zustand/react/shallow';
 import ModalBase from './ui/ModalBase';
+import { useTranslation } from 'react-i18next';
 
 const ConfirmModal = () => {
+  const { t } = useTranslation(['common']);
   const { isConfirmOpen, confirmTitle, confirmMessage, onConfirm, onCancel, hideConfirm } = useModalStore(useShallow(state => ({
     isConfirmOpen: state.isConfirmOpen,
     confirmTitle: state.confirmTitle,
@@ -26,7 +28,7 @@ const ConfirmModal = () => {
             }}
             className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
           >
-            Cancel
+            {t('actions.cancel')}
           </button>
           <button
             onClick={() => {
@@ -35,7 +37,7 @@ const ConfirmModal = () => {
             }}
             className="px-4 py-2 rounded-lg bg-destructive text-destructive-foreground shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
           >
-            Confirm
+            {t('actions.confirm')}
           </button>
         </>
       )}

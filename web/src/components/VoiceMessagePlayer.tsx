@@ -6,12 +6,14 @@ import { decryptFile } from '@utils/crypto';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
 import { useKeychainStore } from '@store/keychain';
+import { useTranslation } from 'react-i18next';
 
 interface VoiceMessagePlayerProps {
   message: Message;
 }
 
 const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
+  const { t } = useTranslation(['chat']);
   const containerRef = useRef<HTMLDivElement>(null);
   const wavesurferRef = useRef<WaveSurfer | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -34,7 +36,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
       const rawFileKey = message.fileKey || '';
 
       if (!message.fileUrl) {
-        if (isMounted) setError("Missing file URL.");
+        if (isMounted) setError(t('media.missing_url'));
         return;
       }
       
@@ -45,25 +47,14 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
              return;
          }
          
-         // Try to derive key if possible (e.g. from blinded attachment logic if applicable, though usually fileKey should be present)
-         // For now, if missing and not waiting, we assume we might need to fetch it or it's pending.
-         // But we shouldn't just return if we want to try decrypting.
-         // However, decryptFile NEEDS a key. 
-         
          if (message.isBlindAttachment) {
-             // Blind attachments might have key in content if it was JUST decrypted but not migrated to fileKey prop?
-             // No, standard is fileKey.
              if (isMounted) setIsLoading(true);
              // We can't proceed without key.
              return;
          }
          
-         // If regular message but no fileKey, maybe we need to decrypt the message itself first?
-         // Voice messages usually come as blind attachments (metadata encrypted in content).
-         // If we are here, message.content should have been decrypted to metadata, and fileKey extracted.
-         
          if (isMounted) {
-             setError("Waiting for key...");
+             setError(t('media.waiting_key'));
              setIsLoading(false);
          }
          return;
@@ -77,12 +68,12 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
       try {
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
         if (!absoluteUrl) {
-          throw new Error("File URL is invalid.");
+          throw new Error(t('media.invalid_url'));
         }
         
         const response = await fetch(absoluteUrl);
         if (!response.ok) {
-          if (response.status === 404) throw new Error("File not found on server.");
+          if (response.status === 404) throw new Error(t('media.not_found'));
           throw new Error(`Failed to fetch voice file: ${response.statusText}`);
         }
         const encryptedBlob = await response.blob();
@@ -94,7 +85,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
         }
       } catch (e: unknown) {
         console.error("Voice message decryption failed:", e);
-        if (isMounted) setError((e instanceof Error ? e.message : 'Unknown error') || "Failed to decrypt voice message.");
+        if (isMounted) setError((e instanceof Error ? e.message : 'Unknown error') || t('media.decrypt_voice_failed'));
       } finally {
         if (isMounted) setIsLoading(false);
       }
@@ -107,7 +98,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
       if (absoluteUrl) {
         setAudioSrc(absoluteUrl);
       } else {
-        setError("Invalid audio file URL.");
+        setError(t('media.invalid_audio_url'));
       }
     }
 
@@ -115,7 +106,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
       isMounted = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [message.fileUrl, message.fileType, message.content, lastKeychainUpdate]);
+  }, [message.fileUrl, message.fileType, message.content, lastKeychainUpdate, t]);
 
   // 2. Initialize WaveSurfer once we have the audioSrc
   useEffect(() => {
@@ -188,7 +179,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
     return (
       <div className="flex items-center gap-3 w-full max-w-[280px] h-[60px] bg-bg-main/50 p-2 rounded-2xl border border-white/5">
         <Spinner size="sm" />
-        <span className="text-sm text-text-secondary">Decrypting...</span>
+        <span className="text-sm text-text-secondary">{t('media.decrypting')}</span>
       </div>
     );
   }

@@ -18,17 +18,19 @@ import MessageBubble from "./MessageBubble";
 import { useUserProfile } from '@hooks/useUserProfile';
 import SwipeableItem from "./SwipeableItem";
 import { useContextMenuStore } from "../store/contextMenu";
+import { useTranslation } from "react-i18next";
 
 const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
   const meId = useAuthStore((s) => s.user?.id);
   const retrySendMessage = useMessageInputStore(s => s.retrySendMessage);
+  const { t } = useTranslation('chat');
   
   if (message.senderId !== meId) return null;
   
   if (message.status === 'FAILED' || message.error) {
     return (
-      <button onClick={() => retrySendMessage(message)} title="Failed to send. Click to retry.">
-        <FiRefreshCw className="text-destructive cursor-pointer" size={14} />
+      <button onClick={() => retrySendMessage(message)} title={t('messages.failed_retry')}>
+        <FiRefreshCw className="text-red-500 cursor-pointer" size={14} />
       </button>
     );
   }
@@ -59,7 +61,7 @@ const ReactionsDisplay = ({ reactions }: { reactions: Message['reactions'] }) =>
   return (
     <div className="flex gap-1 mt-1.5">
       {Object.entries(grouped).map(([emoji, count]) => (
-        <span key={emoji} className="px-2 py-0.5 rounded-full bg-secondary/80 text-text-primary text-xs cursor-default">
+        <span key={emoji} className="px-2 py-0.5 rounded-full bg-bg-surface/80 text-text-primary text-xs cursor-default">
           {emoji} {count > 1 ? count : ''}
         </span>
       ))}
@@ -78,6 +80,7 @@ interface MessageItemProps {
 }
 
 const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageClick, isFirstInSequence, isLastInSequence }: MessageItemProps) => {
+  const { t } = useTranslation(['chat', 'common']);
   const meId = useAuthStore((s) => s.user?.id);
   const setReplyingTo = useMessageInputStore(state => state.setReplyingTo);
   const setEditingMessage = useMessageInputStore(state => state.setEditingMessage);
@@ -146,7 +149,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
                   onClick={() => useMessageStore.getState().repairSecureSession(message.conversationId, isGroup)}
                   className="text-[10px] text-blue-500 hover:text-blue-400 font-bold bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg transition-colors uppercase tracking-wide"
               >
-                  Repair Session
+                  {t('chat:messages.repair_session')}
               </button>
           )}
         </div>
@@ -155,7 +158,10 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
   }
 
   const handleDelete = () => {
-    showConfirm('Delete Message', 'Are you sure you want to permanently delete this message?', () => {
+    showConfirm(
+      t('chat:actions.delete_message_title'), 
+      t('chat:actions.delete_message_desc'), 
+      () => {
       removeMessage(message.conversationId, message.id);
       let query = '';
       let targetUrl = message.fileUrl;
@@ -178,7 +184,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
 
       api(`/api/messages/${message.id}${query}`, { method: 'DELETE' }).catch((error) => {
         console.error("Failed to delete message:", error);
-        toast.error("Failed to delete message.");
+        toast.error(t('chat:messages.delete_failed', 'Failed to delete message.'));
         addOptimisticMessage(message.conversationId, message);
       });
     });
@@ -192,12 +198,12 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     }
   };
 
-  if (message.isDeletedLocal || message.content === "[This message was deleted]") {
+  if (message.isDeletedLocal || message.content === "[This message was deleted]" || message.content === t('chat:messages.message_deleted')) {
     return (
       <div ref={ref} className={`flex items-center p-2 ${mine ? 'justify-end' : 'justify-start'}`}>
         <div className="flex items-center gap-2 text-xs italic text-text-secondary bg-bg-surface px-3 py-1.5 rounded-xl border border-white/5 shadow-sm">
            <FiTrash2 size={12} />
-           <span>This message was deleted</span>
+           <span>{t('chat:messages.message_deleted')}</span>
         </div>
       </div>
     );
@@ -256,13 +262,13 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
                        isWithinEditWindow;
 
     openMenu(e, [
-      { label: 'Reply', icon: <FiCornerUpLeft />, onClick: () => setReplyingTo(message) },
-      { label: 'Select', icon: <FiCheckSquare />, onClick: () => toggleMessageSelection(message.id) },
-      ...(isEditable ? [{ label: 'Edit', icon: <FiEdit2 />, onClick: () => setEditingMessage(message) }] : []),
-      { label: 'Copy Text', icon: <FiCopy />, onClick: () => navigator.clipboard.writeText(message.content || '') },
-      { label: 'Security Info', icon: <FiShield />, onClick: () => toast('End-to-End Encrypted via Signal Protocol') },
-      { label: 'Copy Message ID', icon: <FiInfo />, onClick: () => navigator.clipboard.writeText(message.id) },
-      ...(mine && !message.optimistic ? [{ label: 'Delete', icon: <FiTrash2 />, destructive: true, onClick: handleDelete }] : [])
+      { label: t('chat:actions.reply'), icon: <FiCornerUpLeft />, onClick: () => setReplyingTo(message) },
+      { label: t('chat:actions.select'), icon: <FiCheckSquare />, onClick: () => toggleMessageSelection(message.id) },
+      ...(isEditable ? [{ label: t('chat:actions.edit'), icon: <FiEdit2 />, onClick: () => setEditingMessage(message) }] : []),
+      { label: t('chat:actions.copy_text'), icon: <FiCopy />, onClick: () => navigator.clipboard.writeText(message.content || '') },
+      { label: t('chat:actions.security_info'), icon: <FiShield />, onClick: () => toast(t('chat:messages.security_info')) },
+      { label: t('chat:actions.copy_id'), icon: <FiInfo />, onClick: () => navigator.clipboard.writeText(message.id) },
+      ...(mine && !message.optimistic ? [{ label: t('chat:actions.delete'), icon: <FiTrash2 />, destructive: true, onClick: handleDelete }] : [])
     ], [
       { emoji: '👍', onClick: () => reactToMessage('👍') },
       { emoji: '❤️', onClick: () => reactToMessage('❤️') },
@@ -276,7 +282,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     <motion.div ref={ref} id={`msg-${message.id}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, ease: 'easeOut' }} className={clsx('group flex flex-col', isFirstInSequence ? 'mt-3' : 'mt-1', mine ? 'items-end' : 'items-start', isHighlighted && 'bg-accent/10 rounded-lg p-1 -mx-1')}>
       <SwipeableItem 
         leftAction={{ icon: <FiCornerUpLeft size={20} />, color: 'bg-blue-500/80', onAction: () => setReplyingTo(message) }}
-        rightAction={{ icon: <FiInfo size={20} />, color: 'bg-secondary/80', onAction: () => toast('Message ID: ' + message.id) }}
+        rightAction={{ icon: <FiInfo size={20} />, color: 'bg-bg-surface/80', onAction: () => toast(t('chat:messages.message_id_toast', { id: message.id })) }}
       >
         <div onContextMenu={handleContextMenu} onClick={handleClick} className={`flex items-end gap-2 w-full select-none ${mine ? 'flex-row-reverse justify-start' : 'flex-row justify-start'}`}>
           {isSelectionMode && (
@@ -293,8 +299,8 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
             <div className="w-8 flex-shrink-0 mb-1 self-end">
               {isLastInSequence && (
                 <img 
-                  src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} 
-                  alt="Avatar" 
+                  src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('common:defaults.user')}`} 
+                  alt={t('common:defaults.avatar', 'Avatar')} 
                   className="w-8 h-8 rounded-full bg-secondary object-cover shadow-sm cursor-pointer hover:scale-105 transition-transform pointer-events-auto" 
                 />
               )}
@@ -304,17 +310,20 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
           <div className={clsx("flex flex-col max-w-[85%] sm:max-w-[70%]", mine ? "items-end" : "items-start")}>
             {!mine && isGroup && profile.name && isFirstInSequence && (
               <p className="text-[10px] font-bold mb-1 ml-1 user-color-name cursor-pointer hover:underline uppercase tracking-wide pointer-events-auto" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>
-                {profile.name}
+                {profile.name || t('common:defaults.user')}
               </p>
             )}
             
-            <div className="pointer-events-auto w-full">
+            <div className="pointer-events-auto w-full flex items-end gap-1">
               <MessageBubble 
                 message={message} 
                 isOwn={mine} 
                 onImageClick={onImageClick}
                 isLastInSequence={isLastInSequence}
               />
+              <div className="flex-shrink-0 mb-1">
+                  <MessageStatusIcon message={message} participants={participants} />
+              </div>
             </div>
             
             <ReactionsDisplay reactions={message.reactions} />

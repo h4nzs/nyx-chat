@@ -17,11 +17,13 @@ import ModalBase from './ui/ModalBase';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { useUserProfile } from '@hooks/useUserProfile';
-import { asConversationId } from '../types/brands';
+import { asConversationId } from '@nyx/shared';
+import { useTranslation } from 'react-i18next';
 
 type ProfileUser = User & { publicKey?: string };
 
 export default function UserInfoModal() {
+  const { t } = useTranslation(['modals', 'common', 'chat']);
   const { isProfileModalOpen, profileUserId, closeProfileModal } = useModalStore(useShallow(s => ({
     isProfileModalOpen: s.isProfileModalOpen, profileUserId: s.profileUserId, closeProfileModal: s.closeProfileModal
   })));
@@ -41,8 +43,8 @@ export default function UserInfoModal() {
   const blockedUserIds = useAuthStore(state => state.blockedUserIds);
 
   const tabs = [
-    { id: 'about', label: 'About' },
-    { id: 'media', label: 'Media' },
+    { id: 'about', label: t('modals:user_info_modal.about', 'About') },
+    { id: 'media', label: t('modals:user_info_modal.media', 'Media') },
   ];
 
   const isAlreadyVerified = activeId ? verifiedStatus[activeId] : false;
@@ -78,7 +80,7 @@ export default function UserInfoModal() {
 
   const handleVerifySecurity = async () => {
     if (!user?.publicKey) {
-      setError("This user has not set up their encryption keys yet.");
+      setError(t('modals:user_info.errors.no_keys'));
       return;
     }
 
@@ -89,7 +91,7 @@ export default function UserInfoModal() {
 
       const keyPair = await getEncryptionKeyPair();
       if (!keyPair || !keyPair.publicKey) {
-        throw new Error("Your public key is not found. Please set up your keys first.");
+        throw new Error(t('modals:user_info.errors.my_key_missing'));
       }
 
       const sodium = await getSodium();
@@ -101,13 +103,13 @@ export default function UserInfoModal() {
       setShowSafetyModal(true);
 
     } catch (e: unknown) {
-      setError((e instanceof Error ? e.message : 'Unknown error') || "Failed to generate safety number.");
+      setError((e instanceof Error ? e.message : t('common:errors.unknown')) || t('modals:user_info.errors.safety_number_failed'));
     }
   };
 
   const handleReportUser = async () => {
     if (!user) return;
-    const reason = prompt("Enter reason for reporting this user:");
+    const reason = prompt(t('modals:user_info_modal.prompt_report', 'Enter reason for reporting this user:'));
     if (!reason) return;
     
     try {
@@ -115,9 +117,9 @@ export default function UserInfoModal() {
         method: 'POST',
         body: JSON.stringify({ reportedUserId: user.id, reason })
       });
-      toast.success("Report submitted successfully.");
+      toast.success(t('modals:report.success'));
     } catch (e: unknown) {
-      toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to submit report.");
+      toast.error((e instanceof Error ? e.message : t('common:errors.unknown')) || t('modals:report.failed'));
     }
   };
 
@@ -154,7 +156,7 @@ export default function UserInfoModal() {
                 </div>
                 {user.isVerified && (
                   <span className="text-[10px] text-emerald-500 font-bold tracking-widest uppercase px-2">
-                    Verified
+                    {t('modals:user_info.verified')}
                   </span>
                 )}
               </div>
@@ -162,14 +164,14 @@ export default function UserInfoModal() {
           </div>
 
           <div className="w-full text-left">
-             <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2 mb-1 block">Bio-Data</label>
+             <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2 mb-1 block">{t('common:profile.bio_data')}</label>
              <div className="
                w-full p-4 rounded-xl min-h-[80px]
                bg-bg-main text-text-primary text-sm font-medium
                shadow-neu-pressed dark:shadow-neu-pressed-dark
                border border-white/5
              ">
-               {profile.description || <span className="opacity-40 italic">No data available.</span>}
+               {profile.description || <span className="opacity-40 italic">{t('modals:user_info_modal.no_data', 'No data available.')}</span>}
              </div>
           </div>
         </div>
@@ -183,7 +185,7 @@ export default function UserInfoModal() {
       <ModalBase
         isOpen={isProfileModalOpen}
         onClose={closeProfileModal}
-        title={profile.name || 'User Profile'}
+        title={profile.name || t('common:defaults.user')}
       >
         <div className="flex flex-col gap-4">
           <div className="px-4 md:px-0">
@@ -205,7 +207,7 @@ export default function UserInfoModal() {
                       hover:text-accent transition-all
                     "
                   >
-                    View Personnel File
+                    {t('modals:user_info_modal.view_personnel', 'View Personnel File')}
                   </button>
                   <button
                     onClick={handleVerifySecurity}
@@ -217,7 +219,7 @@ export default function UserInfoModal() {
                       hover:text-green-500 transition-all
                     "
                   >
-                    Verify Encryption Handshake
+                    {t('modals:user_info_modal.verify_handshake', 'Verify Encryption Handshake')}
                   </button>
                   {user && user.id !== useAuthStore.getState().user?.id && (
                     <>
@@ -234,7 +236,7 @@ export default function UserInfoModal() {
                             hover:bg-red-500 hover:text-white transition-all
                           "
                         >
-                          Unblock Signal
+                          {t('modals:user_info_modal.unblock_signal', 'Unblock Signal')}
                         </button>
                       ) : (
                         <button
@@ -249,7 +251,7 @@ export default function UserInfoModal() {
                             hover:text-red-500 transition-all
                           "
                         >
-                          Block Signal
+                          {t('modals:user_info_modal.block_signal', 'Block Signal')}
                         </button>
                       )}
                       
@@ -263,7 +265,7 @@ export default function UserInfoModal() {
                           hover:text-yellow-500 transition-all
                         "
                       >
-                        Report Signal
+                        {t('modals:user_info_modal.report_signal', 'Report Signal')}
                       </button>
                     </>
                   )}

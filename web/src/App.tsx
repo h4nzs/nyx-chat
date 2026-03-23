@@ -305,18 +305,18 @@ const AppContent = () => {
       <PrivacyCloak />
 
       {/* Global Modals & UI Elements */}
-      <CommandPalette />
-      <ConfirmModal />
-      <UserInfoModal />
-      <PasswordPromptModal />
-      <ChatInfoModal />
-      <DynamicIsland />
-      <ContextMenu />
-      <CallOverlay />
-      <SystemInitModal />
+      <Suspense fallback={<LoadingScreen />}>
+        <CommandPalette />
+        <ConfirmModal />
+        <UserInfoModal />
+        <PasswordPromptModal />
+        <ChatInfoModal />
+        <DynamicIsland />
+        <ContextMenu />
+        <CallOverlay />
+        <SystemInitModal />
 
-      <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
-        <Suspense fallback={<LoadingScreen />}>
+        <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
           <Routes>
             {/* Public Routes */}
             <Route path="/" element={
@@ -358,8 +358,8 @@ const AppContent = () => {
             {/* Fallback */}
             <Route path="*" element={<PageWrapper><NotFoundPage /></PageWrapper>} />
           </Routes>
-        </Suspense>
-      </div>
+        </div>
+      </Suspense>
     </>
   );
 };

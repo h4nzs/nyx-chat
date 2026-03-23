@@ -1,7 +1,8 @@
-
 import { useState, useMemo } from 'react';
 import { FiShield, FiEye, FiEyeOff, FiClipboard } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
+import { Trans } from 'react-i18next';
 
 interface RecoveryPhraseModalProps {
   phrase: string;
@@ -20,6 +21,7 @@ const shuffle = <T,>(array: T[]): T[] => {
 };
 
 export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseModalProps) {
+  const { t } = useTranslation(['modals', 'common']);
   const [step, setStep] = useState(1);
   const [showPhrase, setShowPhrase] = useState(false);
   const [userInput, setUserInput] = useState<string[]>([]);
@@ -30,9 +32,9 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
   const handleCopyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(phrase);
-      toast.success('Recovery phrase copied!');
+      toast.success(t('modals:recovery.copy_success'));
     } catch (err) {
-      toast.error('Failed to copy to clipboard');
+      toast.error(t('modals:recovery.copy_fail'));
     }
   };
 
@@ -47,10 +49,10 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
 
   const handleVerify = () => {
     if (userInput.join(' ') === phrase) {
-      toast.success('Verification successful! Your backup is confirmed.');
+      toast.success(t('modals:recovery.verify_success'));
       onClose();
     } else {
-      toast.error('Verification failed. Please try again.');
+      toast.error(t('modals:recovery.verify_fail'));
       setUserInput([]);
     }
   };
@@ -61,20 +63,19 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
         <div className="p-4 rounded-full bg-bg-main shadow-neumorphic-convex text-accent mb-4">
            <FiShield size={32} />
         </div>
-        <h2 className="text-xl font-black uppercase tracking-wide text-text-primary">Protocol: Recovery</h2>
-        <p className="text-xs text-text-secondary mt-2 leading-relaxed font-mono">
-          Initiating master key export sequence. 
-          <br />Secure environment mandatory.
+        <h2 className="text-xl font-black uppercase tracking-wide text-text-primary">{t('modals:recovery.title')}</h2>
+        <p className="text-xs text-text-secondary mt-2 leading-relaxed font-mono whitespace-pre-line">
+          {t('modals:recovery.subtitle')}
         </p>
       </div>
       
       <div className="bg-bg-main p-4 rounded-xl shadow-neumorphic-concave border-l-4 border-red-500 mb-8">
         <div className="flex items-center gap-2 mb-1 text-red-500 font-bold uppercase text-[10px] tracking-widest">
            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-           Warning: Classified Data
+           {t('modals:recovery.warning_title')}
         </div>
         <p className="text-xs text-text-secondary">
-          Possession of this phrase grants total system access. Do not transmit digitally.
+          {t('modals:recovery.warning_desc')}
         </p>
       </div>
       
@@ -87,15 +88,15 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
           hover:text-accent transition-all
         "
       >
-        Acknowledge & Proceed
+        {t('modals:recovery.button_acknowledge')}
       </button>
     </>
   );
 
   const renderStep2 = () => (
     <>
-      <h2 className="text-xl font-black uppercase tracking-wide text-text-primary text-center mb-2">Secure Phrase</h2>
-      <p className="text-xs text-text-secondary text-center mb-6 font-mono">Record the sequence. Priority Alpha.</p>
+      <h2 className="text-xl font-black uppercase tracking-wide text-text-primary text-center mb-2">{t('modals:recovery.step2_title')}</h2>
+      <p className="text-xs text-text-secondary text-center mb-6 font-mono">{t('modals:recovery.step2_desc')}</p>
       
       <div className="relative bg-bg-main p-6 rounded-2xl shadow-neumorphic-concave mb-6 border border-white/5">
         <div className={`grid grid-cols-3 gap-3 ${!showPhrase ? 'blur-sm opacity-50' : ''} transition-all duration-500`}>
@@ -118,15 +119,27 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
                 transition-all
               "
             >
-              <FiEye /> Reveal Data
+              <FiEye /> {t('modals:recovery.button_reveal')}
             </button>
           </div>
         )}
         
         {showPhrase && (
            <div className="absolute top-2 right-2 flex gap-2">
-             <button onClick={() => setShowPhrase(false)} aria-label="Toggle phrase visibility" className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"><FiEyeOff size={14} /></button>
-             <button onClick={handleCopyToClipboard} aria-label="Copy recovery phrase" className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"><FiClipboard size={14} /></button>
+             <button 
+               onClick={() => setShowPhrase(false)} 
+               aria-label={t('modals:recovery.aria_toggle_visibility', 'Toggle phrase visibility')} 
+               className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"
+             >
+               <FiEyeOff size={14} />
+             </button>
+             <button 
+               onClick={handleCopyToClipboard} 
+               aria-label={t('modals:recovery.aria_copy_phrase', 'Copy recovery phrase')} 
+               className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"
+             >
+               <FiClipboard size={14} />
+             </button>
            </div>
         )}
       </div>
@@ -135,22 +148,22 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
         onClick={() => setStep(3)}
         className="w-full py-3 rounded-xl bg-accent text-white font-bold uppercase tracking-wider shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
       >
-        Sequence Recorded
+        {t('modals:recovery.button_recorded')}
       </button>
     </>
   );
 
   const renderStep3 = () => (
     <>
-      <h2 className="text-xl font-black uppercase tracking-wide text-text-primary text-center mb-2">Verify Sequence</h2>
-      <p className="text-xs text-text-secondary text-center mb-6 font-mono">Reconstruct the key phrase.</p>
+      <h2 className="text-xl font-black uppercase tracking-wide text-text-primary text-center mb-2">{t('modals:recovery.verify_title')}</h2>
+      <p className="text-xs text-text-secondary text-center mb-6 font-mono">{t('modals:recovery.verify_desc')}</p>
       
       <div className="
         bg-bg-main p-4 rounded-xl shadow-neumorphic-concave 
         min-h-[100px] mb-6 font-mono text-sm text-center flex flex-wrap gap-2 justify-center items-center
         border border-white/5
       ">
-        {userInput.length === 0 && <span className="text-text-secondary/40">Select words below...</span>}
+        {userInput.length === 0 && <span className="text-text-secondary/40">{t('modals:recovery.select_words')}</span>}
         {userInput.map((word, i) => (
            <span key={i} className="px-2 py-1 rounded bg-accent/20 text-accent border border-accent/30">{word}</span>
         ))}
@@ -180,14 +193,14 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
           disabled={userInput.length === 0}
           className="flex-1 py-3 rounded-xl bg-bg-surface text-text-secondary font-bold uppercase text-xs shadow-neumorphic-convex active:shadow-neumorphic-pressed disabled:opacity-50 transition-all"
         >
-          Undo
+          {t('modals:recovery.undo')}
         </button>
         <button
           onClick={handleVerify}
           disabled={userInput.length !== words.length}
           className="flex-1 py-3 rounded-xl bg-accent text-white font-bold uppercase text-xs shadow-neumorphic-convex active:shadow-neumorphic-pressed disabled:opacity-50 disabled:shadow-none transition-all"
         >
-          Confirm
+          {t('modals:recovery.confirm')}
         </button>
       </div>
     </>

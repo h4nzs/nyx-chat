@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
+import { useTranslation } from 'react-i18next';
 import { useAuthStore, type User } from "../store/auth";
 import { useShallow } from 'zustand/react/shallow';
 import { useModalStore } from "../store/modal";
@@ -15,8 +16,10 @@ import { executeLocalWipe } from "@lib/nukeProtocol";
 import toast from "react-hot-toast";
 import { FiLock, FiKey, FiShield } from "react-icons/fi";
 import SEO from '../components/SEO';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 
 export default function Login() {
+  const { t } = useTranslation(['auth', 'common']);
   const [error, setError] = useState("");
   const [isBiometricsAvailable, setIsBiometricsAvailable] = useState(false);
   const navigate = useNavigate();
@@ -35,7 +38,7 @@ export default function Login() {
 
   const handleLogin = async (data: { a: string; b?: string }) => {
     if (!data.a || !data.b) {
-      setError("Both fields are required.");
+      setError(t('auth:errors.required_both'));
       return;
     }
     try {
@@ -44,7 +47,7 @@ export default function Login() {
       // --- PANIC PASSWORD CHECK FOR NORMAL LOGIN ---
       const isPanic = await checkPanicPassword(data.b);
       if (isPanic) {
-        const toastId = toast.loading('Authenticating via secure channel...');
+        const toastId = toast.loading(t('auth:status.authenticating'));
         setTimeout(async () => {
           try {
             await executeLocalWipe();
@@ -66,7 +69,7 @@ export default function Login() {
       navigate("/chat");
 
     } catch (err: unknown) {
-      setError((err instanceof Error ? err.message : 'Unknown error') || "Login failed. Please check your credentials.");
+      setError((err instanceof Error ? err.message : 'Unknown error') || t('auth:messages.login_failed'));
     }
   };
 
@@ -108,7 +111,7 @@ export default function Login() {
             // Beritahu store bahwa kunci sudah siap
             useAuthStore.getState().setHasRestoredKeys(true);
             
-            toast.success("Vault unlocked via Biometric PRF!");
+            toast.success(t('auth:status.vault_unlocked'));
         } else if (result.encryptedPrivateKey) {
             // Fallback: Jika PRF tidak jalan/tidak disetup, pakai bundle dari server (tapi masih terkunci password)
             const { saveEncryptedKeys } = await import("@lib/keyStorage");
@@ -123,7 +126,7 @@ export default function Login() {
              // Jika PRF gagal/belum setup, user harus input password manual untuk dekripsi
              if (localStorage.getItem('nyx_bio_vault') && !recoveryPhrase) {
                 console.warn("Biometric PRF key derivation failed or mismatched.");
-                toast.error("Biometric key invalid or corrupted. Please enter password manually.");
+                toast.error(t('auth:errors.biometric_corrupt'));
                 localStorage.removeItem('nyx_bio_vault'); 
              }
              
@@ -136,7 +139,7 @@ export default function Login() {
                     const isPanic = await checkPanicPassword(password);
                     if (isPanic) {
                       // Fake loading to deceive the attacker
-                      const toastId = toast.loading('Decrypting secure enclave...');
+                      const toastId = toast.loading(t('auth:status.decrypting'));
                       setTimeout(async () => {
                         try {
                           await executeLocalWipe();
@@ -153,7 +156,7 @@ export default function Login() {
                     try {
                         const encryptedKeys = await getEncryptedKeys();
                         if (!encryptedKeys) {
-                            toast.error('Keys not found');
+                            toast.error(t('auth:messages.keys_not_found'));
                             return;
                         }
                         const result = await retrievePrivateKeys(encryptedKeys, password);
@@ -166,7 +169,7 @@ export default function Login() {
                             connectSocket();
                             navigate("/chat");
                         } else {
-                            toast.error("Wrong password. Failed to decrypt key.");
+                            toast.error(t('auth:messages.decrypt_failed'));
                         }
                     } catch (e) {
                         toast.error("Something went wrong when decrypting.");
@@ -186,20 +189,20 @@ export default function Login() {
 
       // Tangani berbagai jenis error WebAuthn
       if ((err as Error).name === 'NotAllowedError' || (err instanceof Error ? err.message : 'Unknown error')?.includes('cancelled')) {
-        setError("Biometric authentication was cancelled or timed out.");
+        setError(t('auth:messages.biometric_cancelled'));
         return;
       } 
       
-      toast.error("Biometric unlock failed. Falling back to password.");
+      toast.error(t('auth:errors.biometric_failed'));
       
       if ((err as Error).name === 'SecurityError') {
-        setError("Biometric authentication is not available due to security settings.");
+        setError(t('auth:errors.biometric_security'));
       } else if ((err as Error).name === 'AbortError') {
-        setError("Biometric authentication was aborted.");
+        setError(t('auth:errors.biometric_abort'));
       } else if ((err as Error).name === 'InvalidStateError') {
-        setError("Device is locked or already authenticated. Please try again later.");
+        setError(t('auth:errors.biometric_locked'));
       } else {
-        setError("Biometric login failed. Please use password or try again.");
+        setError(t('auth:errors.biometric_failed'));
       }
       
       // Fallback: Show password prompt if keys exist
@@ -210,7 +213,7 @@ export default function Login() {
 
             const isPanic = await checkPanicPassword(password);
             if (isPanic) {
-              const toastId = toast.loading('Decrypting secure enclave...');
+              const toastId = toast.loading(t('auth:status.decrypting'));
               setTimeout(async () => {
                 try {
                   await executeLocalWipe();
@@ -236,7 +239,7 @@ export default function Login() {
                     connectSocket();
                     navigate("/chat");
                 } else {
-                    toast.error("Password salah. Gagal mendekripsi kunci.");
+                    toast.error(t('auth:messages.decrypt_failed'));
                 }
             } catch (e) {
                 toast.error("Terjadi kesalahan saat dekripsi.");
@@ -247,7 +250,8 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-stone-900">
+    <div className="min-h-screen flex flex-col md:flex-row bg-stone-900 relative">
+      <LanguageSwitcher />
       <SEO title="Login" description="Sign in to your NYX secure enclave to access your E2EE chats." canonicalUrl="/login" />
       {/* Left Panel - Concrete Security Panel */}
       <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
@@ -259,19 +263,19 @@ export default function Login() {
             <div className="w-12 h-12 rounded-lg bg-orange-500 flex items-center justify-center mr-3">
               <div className="w-8 h-8 rounded bg-orange-300"></div>
             </div>
-            <h1 className="text-3xl font-black text-white tracking-tighter">SECURE<span className="text-orange-500">VAULT</span></h1>
+            <h1 className="text-3xl font-black text-white tracking-tighter">{t('auth:titles.secure_vault')}</h1>
           </div>
 
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-orange-400 mb-2">ACCESS TERMINAL</h2>
-            <p className="text-stone-400">Authenticate to access your encrypted communications</p>
+            <h2 className="text-2xl font-bold text-orange-400 mb-2">{t('auth:titles.access_terminal')}</h2>
+            <p className="text-stone-400">{t('auth:subtitles.login_desc')}</p>
           </div>
 
           {error && <p className="text-red-500 text-center mb-4 text-sm">{error}</p>}
 
           <AuthForm
             onSubmit={handleLogin}
-            button="Login"
+            button={t('auth:buttons.login')}
           />
 
           {isBiometricsAvailable && (
@@ -286,20 +290,20 @@ export default function Login() {
               <div className="w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center">
                 <IoFingerPrint size={16} className="text-orange-900" />
               </div>
-              <span>Biometric Unlock</span>
+              <span>{t('auth:buttons.biometric_unlock')}</span>
             </button>
           )}
 
           <div className="text-center mt-8 pt-6 border-t border-stone-700">
             <p className="text-stone-500 text-sm mb-4">
-              Don&apos;t have an account? <Link to="/register" className="font-semibold text-orange-500 hover:underline">Sign up</Link>
+              {t('auth:links.no_account')} <Link to="/register" className="font-semibold text-orange-500 hover:underline">{t('auth:links.sign_up')}</Link>
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-4">
-              <Link to="/restore" className="text-sm text-orange-500 hover:underline">Restore from phrase</Link>
-              <Link to="/migrate-receive" className="text-sm text-orange-500 hover:underline">Transfer from Old Device</Link>
+              <Link to="/restore" className="text-sm text-orange-500 hover:underline">{t('auth:links.restore')}</Link>
+              <Link to="/migrate-receive" className="text-sm text-orange-500 hover:underline">{t('auth:links.transfer')}</Link>
             </div>
             <div className="mt-4 pt-4 border-t border-stone-800">
-              <Link to="/privacy" className="text-xs text-stone-600 hover:text-stone-400 transition-colors">Privacy Policy & Terms</Link>
+              <Link to="/privacy" className="text-xs text-stone-600 hover:text-stone-400 transition-colors">{t('common:nav.privacy')} & {t('common:nav.terms')}</Link>
             </div>
           </div>
         </div>
@@ -338,21 +342,21 @@ export default function Login() {
             <div className="absolute inset-0 rounded-full border-4 border-orange-500 animate-ping opacity-20"></div>
           </div>
 
-          <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">INDUSTRIAL-<span className="text-orange-500">GRADE</span> SECURITY</h2>
-          <p className="text-stone-400 mb-6">Your communications are protected with end-to-end encryption using the Signal Protocol.</p>
+          <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">{t('auth:marketing.industrial_security')}</h2>
+          <p className="text-stone-400 mb-6">{t('auth:marketing.industrial_desc')}</p>
 
           <div className="grid grid-cols-3 gap-4 mt-12">
             <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
               <div className="text-orange-500 mb-2"><FiLock size={24} /></div>
-              <h3 className="font-bold text-white text-sm">E2E ENCRYPTED</h3>
+              <h3 className="font-bold text-white text-sm">{t('auth:marketing.e2e_encrypted')}</h3>
             </div>
             <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
               <div className="text-orange-500 mb-2"><FiKey size={24} /></div>
-              <h3 className="font-bold text-white text-sm">KEY OWNERSHIP</h3>
+              <h3 className="font-bold text-white text-sm">{t('auth:marketing.key_ownership')}</h3>
             </div>
             <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
               <div className="text-orange-500 mb-2"><FiShield size={24} /></div>
-              <h3 className="font-bold text-white text-sm">PRIVACY FIRST</h3>
+              <h3 className="font-bold text-white text-sm">{t('auth:marketing.privacy_first')}</h3>
             </div>
           </div>
         </div>

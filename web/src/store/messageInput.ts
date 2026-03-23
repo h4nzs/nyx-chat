@@ -1,8 +1,8 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
-import type { UserId, ConversationId, MessageId } from '../types/brands';
-import { asUserId, asConversationId, asMessageId } from '../types/brands';
+import type { UserId, ConversationId, MessageId } from '@nyx/shared';
+import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, handleApiError } from "@lib/api";
 import { ensureGroupSession, encryptFile } from "@utils/crypto";

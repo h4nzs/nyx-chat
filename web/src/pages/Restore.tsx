@@ -7,8 +7,10 @@ import { recoverAccountWithSignature } from '@lib/crypto-worker-proxy';
 import { saveEncryptedKeys } from '@lib/keyStorage';
 import { useAuthStore } from '@store/auth';
 import { api } from '@lib/api';
+import { useTranslation } from 'react-i18next';
 
 export default function RestorePage() {
+  const { t } = useTranslation(['auth', 'common']);
   const [identifier, setIdentifier] = useState('');
   const [phrase, setPhrase] = useState('');
   const [password, setPassword] = useState('');
@@ -18,7 +20,7 @@ export default function RestorePage() {
   const handleRestore = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!identifier || !phrase.trim() || !password) {
-      toast.error("Please fill in all fields.");
+      toast.error(t('auth:restore.error_fill'));
       return;
     }
     setIsRestoring(true);
@@ -37,7 +39,7 @@ export default function RestorePage() {
       } = await recoverAccountWithSignature(trimmedPhrase, password, identifier, timestamp, nonce);
 
       if (!encryptedPrivateKeys || !signatureB64) {
-        throw new Error("Failed to generate recovery payload.");
+        throw new Error(t('auth:restore.error_payload'));
       }
 
       // 3. Send Cryptographic Proof to Server
@@ -52,37 +54,29 @@ export default function RestorePage() {
           nonce
         })
       });
-      // 3. Save to local storage & finalize login
+      // 4. Save to local storage & finalize login
       await saveEncryptedKeys(encryptedPrivateKeys);
       useAuthStore.getState().setHasRestoredKeys(true);
       
-      // Force fetch user profile to complete login state
-      // (Assuming bootstrap or login logic usually handles this, but here we manually refresh)
-      // Since we have the token now (via cookie or response), bootstrap should work or we can reload.
-      // But let's follow the plan: force fetch profile? useAuthStore doesn't expose fetchProfile directly in the interface I recall.
-      // Let's check auth store. It has `bootstrap` which fetches /me.
-      // Or we can just navigate to / and let App.tsx bootstrap.
-      // The plan says "Force fetch user profile". I'll use bootstrap() if available or just rely on navigation.
-      // Actually, api/auth/recover returns accessToken. We should set it.
       if (res.accessToken) {
           useAuthStore.getState().setAccessToken(res.accessToken);
           try {
             await useAuthStore.getState().bootstrap(true); // Force fetch user profile
           } catch (err) {
-            toast.error("Failed to sync profile");
+            toast.error(t('auth:restore.error_generic'));
             return;
           }
       }
 
-      toast.success('Account successfully recovered! Welcome back.');
+      toast.success(t('auth:restore.success'));
       navigate('/');
 
     } catch (error: unknown) {
       console.error("Restore failed:", error);
-      if ((error instanceof Error ? error.message : 'Unknown error')?.includes('mnemonic')) {
-        toast.error("Invalid recovery phrase. Please check for typos.");
+      if ((error instanceof Error ? error.message : t('common:errors.unknown'))?.includes('mnemonic')) {
+        toast.error(t('auth:restore.error_mnemonic'));
       } else {
-        toast.error((error instanceof Error ? error.message : 'Unknown error') || "Recovery failed. Please verify your details.");
+        toast.error((error instanceof Error ? error.message : t('common:errors.unknown')) || t('auth:restore.error_generic'));
       }
     } finally {
       setIsRestoring(false);
@@ -96,9 +90,9 @@ export default function RestorePage() {
           <div className="inline-flex p-4 rounded-full bg-bg-surface shadow-neumorphic-convex mb-4 text-accent">
              <FiKey size={40} />
           </div>
-          <h1 className="text-2xl font-black uppercase tracking-[0.2em] text-text-primary">Account Recovery</h1>
+          <h1 className="text-2xl font-black uppercase tracking-[0.2em] text-text-primary">{t('auth:restore.title')}</h1>
           <p className="text-xs text-text-secondary mt-2 tracking-widest uppercase">
-            Zero-Knowledge Password Reset
+            {t('auth:restore.subtitle')}
           </p>
         </div>
         
@@ -106,39 +100,39 @@ export default function RestorePage() {
           <div className="space-y-6">
             <div className="form-control">
               <label className="label mb-2 block">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Email or Username</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">{t('auth:restore.labels.identifier')}</span>
               </label>
               <input
                 type="text"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
                 className="w-full p-4 rounded-xl bg-bg-main text-text-primary font-mono text-sm shadow-neumorphic-concave focus:outline-none focus:ring-1 focus:ring-accent/50"
-                placeholder="USER_ID..."
+                placeholder={t('auth:restore.placeholders.identifier')}
                 required
               />
             </div>
             <div className="form-control">
               <label className="label mb-2 block">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">Recovery Phrase</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">{t('auth:restore.labels.phrase')}</span>
               </label>
               <textarea
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
                 className="w-full h-24 p-4 rounded-xl resize-none bg-bg-main text-text-primary font-mono text-sm shadow-neumorphic-concave focus:outline-none focus:ring-1 focus:ring-accent/50"
-                placeholder="ENTER_24_WORD_SEED_PHRASE..."
+                placeholder={t('auth:restore.placeholders.phrase')}
                 required
               />
             </div>
             <div className="form-control">
               <label className="label mb-2 block">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">New Server Password</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary">{t('auth:restore.labels.new_password')}</span>
               </label>
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full p-4 rounded-xl bg-bg-main text-text-primary font-mono text-sm shadow-neumorphic-concave focus:outline-none focus:ring-1 focus:ring-accent/50"
-                placeholder="SET_NEW_PASSWORD..."
+                placeholder={t('auth:restore.placeholders.new_password')}
                 required
               />
             </div>
@@ -150,13 +144,13 @@ export default function RestorePage() {
               disabled={isRestoring}
             >
               {isRestoring ? <Spinner size="sm" className="text-white" /> : <FiUpload />}
-              {isRestoring ? 'VERIFYING...' : 'RECOVER_ACCOUNT'}
+              {isRestoring ? t('auth:restore.buttons.verifying') : t('auth:restore.buttons.recover')}
             </button>
           </div>
         </form>
         <div className="mt-8 text-center">
           <Link to="/login" className="text-xs font-mono text-text-secondary hover:text-accent uppercase tracking-widest transition-colors">
-            [ ABORT_SEQUENCE ]
+            {t('auth:restore.buttons.abort')}
           </Link>
         </div>
       </div>

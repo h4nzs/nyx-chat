@@ -3,10 +3,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FiCheckCircle, FiXCircle, FiLoader, FiShield, FiBell, FiCamera } from 'react-icons/fi';
 import { useAuthStore } from '@store/auth';
 import { useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 type PermStatus = 'idle' | 'loading' | 'granted' | 'denied';
 
 export default function SystemInitModal() {
+  const { t } = useTranslation('modals');
   const [isVisible, setIsVisible] = useState(false);
   const [notifStatus, setNotifStatus] = useState<PermStatus>('idle');
   const [mediaStatus, setMediaStatus] = useState<PermStatus>('idle');
@@ -95,18 +97,18 @@ export default function SystemInitModal() {
           
           <div className="flex items-center gap-3 mb-6 text-accent">
              <FiShield size={28} />
-             <h2 className="text-2xl font-black uppercase tracking-widest">System Init</h2>
+             <h2 className="text-2xl font-black uppercase tracking-widest">{t('system_init.title')}</h2>
           </div>
 
           <p className="text-text-secondary text-sm mb-8 leading-relaxed">
-            To enable End-to-End Encrypted Voice/Video calls and real-time alerts, NYX requires hardware access. Your media never leaves your device unencrypted.
+            {t('system_init.desc')}
           </p>
 
           <div className="space-y-4 mb-8 font-mono text-sm">
             <div className="flex items-center justify-between p-3 rounded-lg bg-bg-main border border-white/5">
                <div className="flex items-center gap-3">
                  <FiBell className="text-text-primary" />
-                 <span>Push Notifications</span>
+                 <span>{t('system_init.push_notif')}</span>
                </div>
                {renderIcon(notifStatus)}
             </div>
@@ -114,7 +116,7 @@ export default function SystemInitModal() {
             <div className="flex items-center justify-between p-3 rounded-lg bg-bg-main border border-white/5">
                <div className="flex items-center gap-3">
                  <FiCamera className="text-text-primary" />
-                 <span>Camera & Microphone</span>
+                 <span>{t('system_init.camera_mic')}</span>
                </div>
                {renderIcon(mediaStatus)}
             </div>
@@ -126,13 +128,13 @@ export default function SystemInitModal() {
               disabled={notifStatus === 'loading' || mediaStatus === 'loading'}
               className="w-full py-3 rounded-xl bg-accent text-white font-bold uppercase tracking-wider hover:bg-indigo-600 transition-colors disabled:opacity-50"
             >
-              {notifStatus === 'loading' || mediaStatus === 'loading' ? 'Calibrating...' : 'Authorize Systems'}
+              {notifStatus === 'loading' || mediaStatus === 'loading' ? t('system_init.calibrate') : t('system_init.authorize')}
             </button>
             <button 
               onClick={close}
               className="w-full py-3 rounded-xl text-text-secondary font-bold text-sm uppercase tracking-wider hover:text-text-primary transition-colors"
             >
-              Skip for now
+              {t('system_init.skip')}
             </button>
           </div>
         </motion.div>

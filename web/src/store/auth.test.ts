@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useAuthStore } from './auth';
 import { api, authFetch } from '@lib/api';
-import { asUserId } from '../types/brands';
+import { asUserId } from '@nyx/shared';
 
 // Mock the api module
 vi.mock('@lib/api');

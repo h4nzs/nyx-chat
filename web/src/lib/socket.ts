@@ -11,8 +11,8 @@ import { useConnectionStore } from "@store/connection";
 import { usePresenceStore } from "@store/presence";
 import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest, schedulePeriodicGroupKeyRotation } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
-import { asUserId } from "../types/brands";
-import { IncomingMessageSchema } from "../schemas/core";
+import { asUserId } from '@nyx/shared';
+import { IncomingMessageSchema } from '@nyx/shared';
 import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
 import { triggerReceiveFeedback } from "@utils/feedback";
 

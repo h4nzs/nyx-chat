@@ -1,0 +1,155 @@
+{
+  "header": {
+    "control_deck": "Panel de control",
+    "system_version": "Sistema {{version}}"
+  },
+  "modules": {
+    "identity": "Módulo de identidad",
+    "power": "Celda de energía",
+    "visual": "Interfaz visual",
+    "privacy": "Escudo de privacidad",
+    "data": "Puerto de datos",
+    "smart": "Asistencia inteligente",
+    "support": "Soporte y comentarios"
+  },
+  "identity": {
+    "anonymous_id": "ID ANÓNIMO",
+    "verified": "Verificado",
+    "sandboxed": "Sandbox (Mejorar)",
+    "display_name": "Nombre visible",
+    "bio": "Biografía",
+    "save_btn": "Guardar identidad",
+    "processing": "Procesando...",
+    "limited_access": "Acceso limitado. Verifica tu cuenta para desbloquear."
+  },
+  "power": {
+    "refuel_title": "Recargar al desarrollador",
+    "description": "El sistema funciona en servidores de bajo costo. Inicia una donación para mejorar la infraestructura.",
+    "status": "Estado: Necesita café"
+  },
+  "visual": {
+    "dark_mode": "Modo oscuro",
+    "accent_emitter": "Color de acento"
+  },
+  "privacy": {
+    "read_receipts": "Confirmación de lectura",
+    "biometric_active": "Bóveda activa (VIP)",
+    "biometric_enable": "Activar biometría",
+    "panic_password": "Contraseña de pánico",
+    "panic_desc": "Si te obligan a desbloquear en una emergencia, introducir esta contraseña borrará silenciosamente todos tus datos locales.",
+    "dead_man": "Autodestrucción",
+    "dead_man_desc": "Destruye automáticamente tu cuenta si estás inactivo por un tiempo determinado.",
+    "auto_destruct_options": {
+      "disabled": "Desactivado",
+      "7_days": "7 Días",
+      "14_days": "14 Días",
+      "30_days": "30 Días"
+    }
+  },
+  "data": {
+    "keys": "Claves de cifrado",
+    "sessions": "Sesiones activas",
+    "export_vault": "Exportar bóveda",
+    "import_vault": "Importar bóveda",
+    "transfer": "Transferir a nuevo dispositivo (QR)"
+  },
+  "smart": {
+    "ai_reply": "Respuestas Inteligentes (IA)",
+    "ai_desc": "Generar sugerencias de respuesta automáticas.",
+    "privacy_note": "Nota de privacidad:",
+    "privacy_desc": "Los mensajes entrantes se descifran en el dispositivo y se envían de forma segura a Google Gemini para su análisis. Los mensajes <1>no se guardan</1> en nuestros servidores."
+  },
+  "support": {
+    "push_notif": "Notificaciones Push",
+    "background_guide": "Guía de ejecución en segundo plano",
+    "background_desc": "Para recibir notificaciones cuando NYX esté cerrado, asegúrate de que tu dispositivo permite que la aplicación funcione en segundo plano.",
+    "android_guide_steps": "<0>🤖 Android:</0> Ajustes > Aplicaciones > NYX > Batería > <1>Sin restricciones</1>",
+    "ios_guide_steps": "<0>🍎 iOS:</0> Ajustes > NYX > <1>Actualizar en segundo plano</1>",
+    "help_center": "Centro de ayuda",
+    "report_bug": "Reportar un bug",
+    "legal": "Legal y Privacidad"
+  },
+  "SUPPORT": {
+    "PUSH_NOTIF": "Notificaciones Push"
+  },
+  "emergency": {
+    "eject": "Salida de emergencia",
+    "terminate_sessions": "Cerrar todas las sesiones",
+    "delete_account": "Borrar cuenta",
+    "delete_desc": "Borra de forma PERMANENTE todos tus datos del servidor. Esta acción no se puede deshacer."
+  },
+  "modals": {
+    "upgrade_title": "Mejorar a VIP",
+    "delete_confirm_title": "Confirmar borrado",
+    "final_warning": "ÚLTIMA ADVERTENCIA",
+    "confirm_password": "Confirmar contraseña",
+    "abort": "Abortar",
+    "execute_delete": "Ejecutar borrado",
+    "sandbox_mode": "Actualmente estás en el <1>Modo Sandbox</1>. Mejora tu cuenta para quitar el límite de mensajes y poder crear grupos.",
+    "instant_biometric": "Biometría instantánea",
+    "biometric_desc": "Usa tu huella dactilar o FaceID. Toma 1 segundo.",
+    "pow_mining": "Minería Proof of Work",
+    "pow_idle": "Resuelve un puzzle criptográfico con tu CPU. Toma de 3 a 10 segundos.",
+    "pow_mining_status": "Minando colisión de hash... CPU 100%",
+    "pow_verifying": "Verificando prueba..."
+  },
+  "profile_page": {
+    "title": "Perfil de operador",
+    "active": "ACTIVO",
+    "edit_record": "EDITAR_REGISTRO",
+    "security_clearance": "Nivel de seguridad",
+    "encryption_protocol": "Protocolo de cifrado",
+    "public_key": "Clave pública de identidad"
+  },
+  "sessions_page": {
+    "title": "Nodos de red",
+    "subtitle": "Monitor de conexiones activas",
+    "scanning": "Escaneando red...",
+    "no_nodes": "No se detectaron nodos activos.",
+    "current": "ACTUAL",
+    "ip": "IP",
+    "last_ping": "ÚLTIMO PING"
+  },
+  "keys_page": {
+    "title": "Bóveda criptográfica",
+    "subtitle": "Protocolo de cifrado de extremo a extremo",
+    "description": "Tu clave privada es la única forma de descifrar tus mensajes. Está guardada localmente en este dispositivo. <1>Si pierdes esta clave, perderás tu historial de mensajes para siempre.</1>",
+    "recovery_title": "Frase maestra de recuperación",
+    "recovery_desc": "Muestra tu frase semilla de 24 palabras como copia de seguridad.",
+    "reveal_btn": "Mostrar frase",
+    "rotation_title": "Rotación de claves (Destructivo)",
+    "rotation_desc": "Genera una nueva clave de identidad. Los mensajes antiguos ya no se podrán leer.",
+    "rotate_btn": "Rotar claves",
+    "confirm_rotation_title": "¿INICIAR ROTACIÓN DE CLAVES?",
+    "confirm_rotation_desc": "ADVERTENCIA: ACCIÓN DESTRUCTIVA. El historial de mensajes anterior ya no se podrá descifrar. Esto no se puede deshacer."
+  },
+  "KEYS_PAGE": {
+    "REVEAL_BTN": "MOSTRAR FRASE",
+    "ROTATE_BTN": "ROTAR CLAVES"
+  },
+  "messages": {
+    "account_obliterated": "Cuenta destruida.",
+    "deletion_failed": "Error al borrar: {{error}}",
+    "identity_updated": "Identidad actualizada",
+    "update_failed": "Error al actualizar: {{error}}",
+    "biometric_initializing": "Iniciando escáner biométrico...",
+    "biometric_scan_now": "Escanea tu huella ahora para BLOQUEAR tu bóveda...",
+    "biometric_success": "¡Biometría activada! Ahora puedes entrar sin contraseña.",
+    "mining_connecting": "Conectando con la minería...",
+    "mining_processing": "Minando puzzle criptográfico... (Uso intenso de CPU)",
+    "mining_verifying": "Verificando prueba...",
+    "mining_success": "¡Prueba aceptada! Cuenta mejorada a VIP.",
+    "mining_failed": "Error en minería de hash: {{error}}",
+    "export_success": "¡Bóveda exportada con éxito! Guarda este archivo de forma segura.",
+    "export_failed": "Error al exportar la bóveda.",
+    "import_success": "¡Bóveda importada con éxito! Recargando...",
+    "import_failed": "Archivo de bóveda inválido o datos corruptos.",
+    "emergency_revoking": "Revocando sesiones del servidor...",
+    "emergency_success": "Sesiones revocadas. Iniciando borrado local...",
+    "emergency_failed": "Error al revocar sesiones remotas.",
+    "ejecting": "Expulsando sesión...",
+    "terminated": "Sesión terminada.",
+    "eject_failed": "Error al expulsar.",
+    "keys_rotated": "Claves rotadas. Reiniciando sesión..."
+  }
+}

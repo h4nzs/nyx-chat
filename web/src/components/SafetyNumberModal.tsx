@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import QRCode from 'react-qr-code';
 import { FiShield, FiX, FiCheck } from 'react-icons/fi';
 import { Spinner } from './Spinner';
+import { useTranslation } from 'react-i18next';
 
 interface SafetyNumberModalProps {
   safetyNumber: string;
@@ -19,6 +20,7 @@ export default function SafetyNumberModal({
   onVerify,
   isVerified
 }: SafetyNumberModalProps) {
+  const { t } = useTranslation(['modals']);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -50,9 +52,9 @@ export default function SafetyNumberModal({
              <FiShield size={32} />
           </div>
           
-          <h2 className="text-xl font-black uppercase tracking-wide text-text-primary">Safety Number</h2>
+          <h2 className="text-xl font-black uppercase tracking-wide text-text-primary">{t('safety.title')}</h2>
           <p className="text-xs text-text-secondary mt-2 mb-6 font-mono max-w-xs">
-            Verify end-to-end encryption integrity with <span className="font-bold text-text-primary">{userName}</span>.
+            {t('safety.desc')} <span className="font-bold text-text-primary">{userName}</span>.
           </p>
 
           {isLoading ? (
@@ -70,7 +72,7 @@ export default function SafetyNumberModal({
               </div>
               
               <div className="w-full mt-6 mb-6">
-                 <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary mb-2 block text-left pl-2">Fingerprint Hash</label>
+                 <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary mb-2 block text-left pl-2">{t('safety.hash_label')}</label>
                  <div className="
                    font-mono text-lg tracking-widest text-accent text-center
                    p-4 bg-bg-main rounded-xl shadow-neumorphic-concave
@@ -84,7 +86,7 @@ export default function SafetyNumberModal({
 
           {isVerified ? (
             <div className="flex items-center gap-2 text-green-500 font-bold uppercase text-xs tracking-wider bg-green-500/10 px-4 py-2 rounded-full">
-               <FiCheck /> Verification Confirmed
+               <FiCheck /> {t('safety.confirmed')}
             </div>
           ) : (
             <button 
@@ -96,7 +98,7 @@ export default function SafetyNumberModal({
                 hover:brightness-110 transition-all
               "
             >
-              Confirm Safety Number
+              {t('safety.confirm_btn')}
             </button>
           )}
         </div>

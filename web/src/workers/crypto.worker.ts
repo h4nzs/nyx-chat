@@ -8,7 +8,7 @@ import { Buffer } from 'buffer/';
 import sodium from 'libsodium-wrappers';
 import * as bip39 from 'bip39';
 import { argon2id } from 'hash-wasm';
-import type { DoubleRatchetState } from '../types/core';
+import type { DoubleRatchetState } from '@nyx/shared';
 import type { 
   CryptoBuffer, 
   SodiumKeyPair, 

@@ -1,5 +1,6 @@
 import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuthStore, type User } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
 import { authFetch, handleApiError } from '@lib/api';
@@ -8,8 +9,8 @@ import { FiEdit2, FiShield, FiCpu, FiGlobe, FiActivity, FiKey, FiCheck, FiArrowL
 import { toast } from 'react-hot-toast';
 
 import { useUserProfile } from '@hooks/useUserProfile';
-import type { UserId } from '../types/brands';
-import { asUserId } from '../types/brands';
+import type { UserId } from '@nyx/shared';
+import { asUserId } from '@nyx/shared';
 
 type ProfileUser = User & {
   createdAt?: string;
@@ -17,6 +18,7 @@ type ProfileUser = User & {
 };
 
 export default function ProfilePage() {
+  const { t } = useTranslation(['settings', 'common']);
   const { userId: rawUserId } = useParams<{ userId: string }>();
   const userId = rawUserId ? asUserId(rawUserId) : undefined;
   
@@ -64,15 +66,35 @@ export default function ProfilePage() {
   }, [profile]);
 
   const stats = [
-    { label: 'Security Clearance', value: profileUser?.isVerified ? 'VERIFIED' : 'UNVERIFIED', color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', icon: FiShield },
-    { label: 'Encryption Protocol', value: profileUser?.publicKey ? 'ACTIVE' : 'INACTIVE', color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', icon: FiKey },
-    { label: 'Home Server', value: 'ap-southeast-1', color: 'text-blue-500', icon: FiGlobe },
-    { label: 'Session Status', value: 'ENCRYPTED', color: 'text-emerald-500', icon: FiActivity },
+    { 
+      label: t('settings:profile_page.security_clearance'), 
+      value: profileUser?.isVerified ? t('settings:identity.verified') : t('settings:identity.unverified', 'UNVERIFIED'), 
+      color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', 
+      icon: FiShield 
+    },
+    { 
+      label: t('settings:profile_page.encryption_protocol'), 
+      value: profileUser?.publicKey ? t('settings:profile_page.active') : t('settings:profile_page.inactive', 'INACTIVE'), 
+      color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', 
+      icon: FiKey 
+    },
+    { 
+      label: t('common:profile.home_server'), 
+      value: 'ap-southeast-1', // Nama region server biasanya tidak diterjemahkan
+      color: 'text-blue-500', 
+      icon: FiGlobe 
+    },
+    { 
+      label: t('common:profile.session_status'), 
+      value: t('common:profile.encrypted'), 
+      color: 'text-emerald-500', 
+      icon: FiActivity 
+    },
   ];
 
   const handleSave = async () => {
     setIsEditing(false);
-    toast('Profile editing is managed in Settings', { icon: 'ℹ️' });
+    toast(t('common:profile.editing_notice'), { icon: 'ℹ️' });
   };
 
   const handleAvatarUpload = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -80,7 +102,7 @@ export default function ProfilePage() {
   };
 
   if (isFetching) return <div className="h-full flex items-center justify-center bg-bg-main"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-accent"></div></div>;
-  if (!profileUser) return <div className="h-full flex items-center justify-center bg-bg-main text-text-secondary">User not found</div>;
+  if (!profileUser) return <div className="h-full flex items-center justify-center bg-bg-main text-text-secondary">{t('common:profile.user_not_found')}</div>;
 
   return (
     <div className="h-full overflow-y-auto bg-bg-main p-4 md:p-8">
@@ -97,10 +119,10 @@ export default function ProfilePage() {
             </button>
             <div>
               <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tighter text-text-primary">
-                Operator Profile
+                {t('settings:profile_page.title')}
               </h1>
               <p className="font-mono text-xs text-text-secondary uppercase tracking-widest mt-1">
-                ID: {profileUser.id.substring(0, 8)}-{profileUser.id.substring(profileUser.id.length - 4)} • <span className="text-emerald-500">ACTIVE</span>
+                ID: {profileUser.id.substring(0, 8)}-{profileUser.id.substring(profileUser.id.length - 4)} • <span className="text-emerald-500">{t('settings:profile_page.active')}</span>
               </p>
             </div>
           </div>
@@ -112,7 +134,7 @@ export default function ProfilePage() {
                    className="flex items-center gap-2 px-6 py-2 bg-bg-main text-text-primary rounded-lg font-bold shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed transition-all"
                  >
                    <FiEdit2 size={16} />
-                   EDIT_RECORD
+                   {t('settings:profile_page.edit_record')}
                  </button>
             </div>
           )}
@@ -131,7 +153,7 @@ export default function ProfilePage() {
                 <div className="w-full h-full rounded-full p-2 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark">
                   <img 
                     src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
-                    alt="Profile" 
+                    alt={profile.name || "Profile"} 
                     className="w-full h-full rounded-full object-cover"
                   />
                 </div>
@@ -140,7 +162,7 @@ export default function ProfilePage() {
               <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">{profile.name}</h2>
               {profileUser.isVerified && (
                 <div className="mt-2 inline-block px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-bold tracking-widest uppercase">
-                  VERIFIED OPERATOR
+                  {t('common:profile.verified_operator')}
                 </div>
               )}
             </div>
@@ -148,7 +170,7 @@ export default function ProfilePage() {
             {/* Technical Stats Widget */}
             <div className="bg-bg-main rounded-xl p-5 shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5">
               <h3 className="text-xs font-black uppercase tracking-widest text-text-secondary mb-4 flex items-center gap-2">
-                <FiCpu /> System Telemetry
+                <FiCpu /> {t('common:profile.system_telemetry')}
               </h3>
               <div className="space-y-4">
                 {stats.map((stat) => (
@@ -170,12 +192,12 @@ export default function ProfilePage() {
           <div className="lg:col-span-2 space-y-6">
             <div className="bg-bg-main rounded-2xl p-8 shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5">
               <h3 className="text-xs font-black uppercase tracking-widest text-text-secondary mb-6 border-b border-black/5 dark:border-white/5 pb-2">
-                Biographical Data
+                {t('common:profile.bio_data')}
               </h3>
               
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">Display Name</label>
+                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">{t('settings:identity.display_name')}</label>
                   <input
                     type="text"
                     value={name}
@@ -186,7 +208,7 @@ export default function ProfilePage() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">Operator Bio</label>
+                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">{t('settings:identity.bio')}</label>
                   <textarea
                     value={bio}
                     disabled={!isEditing}
@@ -204,18 +226,18 @@ export default function ProfilePage() {
                 <FiKey size={100} />
               </div>
               <h3 className="text-xs font-black uppercase tracking-widest text-text-secondary mb-4">
-                Public Identity Key
+                {t('settings:profile_page.public_key')}
               </h3>
               <div className="font-mono text-[10px] leading-relaxed text-text-secondary break-all bg-black/5 dark:bg-black/20 p-4 rounded-lg border border-black/5 dark:border-white/5 shadow-neu-pressed dark:shadow-neu-pressed-dark">
-                {profileUser.publicKey || "Key not generated yet."}
+                {profileUser.publicKey || t('common:profile.key_not_generated')}
               </div>
               {isMe && (
                 <div className="mt-4 flex gap-4">
                    <button className="text-xs font-bold text-accent hover:underline uppercase tracking-wide">
-                     Refresh Keys
+                     {t('common:profile.refresh_keys')}
                    </button>
                    <button className="text-xs font-bold text-red-500 hover:underline uppercase tracking-wide">
-                     Revoke Access
+                     {t('common:profile.revoke_access')}
                    </button>
                 </div>
               )}

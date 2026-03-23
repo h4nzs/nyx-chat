@@ -5,12 +5,14 @@ import { useAuthStore } from '@store/auth';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   onClose: () => void;
 }
 
 export default function ShareProfileModal({ onClose }: Props) {
+  const { t } = useTranslation(['modals', 'common']);
   const user = useAuthStore(state => state.user);
   const profile = useUserProfile(user);
   const [copied, setCopied] = useState(false);
@@ -25,10 +27,10 @@ export default function ShareProfileModal({ onClose }: Props) {
     try {
       await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
-      toast.success('Link copied to clipboard');
+      toast.success(t('common:actions.copied'));
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error('Failed to copy link');
+      toast.error(t('common:actions.copy_failed'));
     }
   };
 
@@ -56,8 +58,8 @@ export default function ShareProfileModal({ onClose }: Props) {
           </button>
 
           <div className="text-center mb-6 mt-2">
-            <h2 className="text-xl font-black uppercase tracking-widest text-text-primary">Your Identity</h2>
-            <p className="text-xs text-text-secondary mt-1 font-mono">Scan to start a secure chat</p>
+            <h2 className="text-xl font-black uppercase tracking-widest text-text-primary">{t('modals:share.title')}</h2>
+            <p className="text-xs text-text-secondary mt-1 font-mono">{t('modals:share.desc')}</p>
           </div>
 
           <div className="bg-white p-4 rounded-xl flex items-center justify-center mx-auto w-fit mb-6 shadow-neumorphic-pressed">
@@ -72,7 +74,7 @@ export default function ShareProfileModal({ onClose }: Props) {
                 className="w-full h-full object-cover"
               />
             </div>
-            <h3 className="font-bold text-lg text-text-primary">{profile?.name || 'Encrypted User'}</h3>
+            <h3 className="font-bold text-lg text-text-primary">{profile?.name || t('common:defaults.encrypted_user')}</h3>
           </div>
 
           <button 
@@ -80,7 +82,7 @@ export default function ShareProfileModal({ onClose }: Props) {
             className="w-full py-3 rounded-xl bg-bg-main border border-white/5 text-text-primary font-bold uppercase tracking-wider hover:bg-white/5 transition-colors flex items-center justify-center gap-2"
           >
             {copied ? <FiCheck className="text-green-500" /> : <FiCopy />}
-            {copied ? 'Copied' : 'Copy Link'}
+            {copied ? t('common:actions.copied_label') : t('common:actions.copy_link')}
           </button>
         </motion.div>
       </motion.div>
