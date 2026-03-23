@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiCpu, FiGlobe, FiAlertTriangle } from 'react-icons/fi';
 import SEO from '../components/SEO';
 import { useTranslation, Trans } from 'react-i18next';
@@ -21,7 +20,6 @@ const Section = ({ title, icon: Icon, children, id }: { title: string; icon: Rea
 export default function PrivacyPage() {
   const { t } = useTranslation(['privacy']);
   const [activeSection, setActiveSection] = useState('privacy');
-  const navigate = useNavigate();
 
   const scrollTo = (id: string) => {
     setActiveSection(id);
@@ -54,12 +52,13 @@ export default function PrivacyPage() {
       {/* Header */}
       <header className="sticky top-0 z-50 bg-bg-surface/80 backdrop-blur-xl border-b border-white/5 shadow-sm">
         <div className="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-          <button 
-            onClick={() => navigate(-1)} 
+          {/* PERBAIKAN: Gunakan tag <a> biasa agar selalu kembali ke Beranda dengan pasti */}
+          <a 
+            href="/" 
             className="flex items-center gap-2 text-text-secondary hover:text-accent transition-colors text-sm font-bold tracking-wide uppercase"
           >
             <FiArrowLeft size={16} /> {t('privacy:back')}
-          </button>
+          </a>
           <div className="font-mono text-[10px] text-text-secondary uppercase tracking-[0.2em] flex items-center gap-2">
             <FiShield className="text-accent" /> {t('privacy:title')}
           </div>
@@ -132,15 +131,19 @@ export default function PrivacyPage() {
               <h4 className="flex items-center gap-2 text-red-400 font-bold mb-2">
                 <FiAlertTriangle /> {t('privacy:terms.liability_title')}
               </h4>
-              <p className="text-sm text-red-200/80 m-0">
+              <p className="text-sm text-red-200/80 m-0 leading-relaxed">
                 <Trans i18nKey="privacy:terms.liability_desc">
-                  NYX is provided &quot;AS IS&quot;, without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>
+                  NYX is provided "AS IS", without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>
                 </Trans>
+                {/* PENAMBAHAN: Link ke Help Page yang natural */}
+                <span className="block mt-3 border-t border-red-500/20 pt-3">
+                  If you need guidance on how to securely back up your keys before an emergency occurs, please consult our <a href="/help" className="text-white underline hover:text-accent transition-colors font-semibold">Help Center</a>.
+                </span>
               </p>
             </div>
             
             <ul className="list-disc pl-5 space-y-4">
-              <li><Trans i18nKey="privacy:terms.gating"><strong>Trust-Tier Gating:</strong> To protect the network, unverified accounts are placed in a restricted &quot;Sandbox Mode&quot;. Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.</Trans></li>
+              <li><Trans i18nKey="privacy:terms.gating"><strong>Trust-Tier Gating:</strong> To protect the network, unverified accounts are placed in a restricted "Sandbox Mode". Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.</Trans></li>
               <li><Trans i18nKey="privacy:terms.abuse"><strong>Zero-Tolerance Abuse Policy:</strong> You agree not to utilize the NYX network for illicit activities, automated API abuse (botting), or distributing malware. Violations will result in immediate network bans.</Trans></li>
             </ul>
           </Section>
@@ -206,7 +209,7 @@ export default function PrivacyPage() {
             <p><Trans i18nKey="privacy:ai.intro">NYX operates with <strong>Zero Telemetry</strong>. We do not track your clicks, screen time, or feature usage.</Trans></p>
             
             <h3 className="text-lg font-bold text-text-primary mt-6 mb-3">{t('privacy:ai.smart_reply_title')}</h3>
-            <p><Trans i18nKey="privacy:ai.smart_reply_desc">We provide an experimental &quot;Smart Reply&quot; feature utilizing the Google Gemini API. This feature is <strong>strictly Opt-In</strong>.</Trans></p>
+            <p><Trans i18nKey="privacy:ai.smart_reply_desc">We provide an experimental "Smart Reply" feature utilizing the Google Gemini API. This feature is <strong>strictly Opt-In</strong>.</Trans></p>
             <ul className="list-disc pl-5 space-y-2 mt-2">
               <li>{t('privacy:ai.smart_reply_1')}</li>
               <li>{t('privacy:ai.smart_reply_2')}</li>

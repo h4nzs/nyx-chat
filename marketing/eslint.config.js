@@ -20,7 +20,7 @@ export default defineConfig([
       globals: globals.browser,
       parserOptions: {
         // Sesuaikan array ini jika file tsconfig Anda namanya berbeda (misal hanya ['tsconfig.json'])
-        project: ['./tsconfig.app.json', './tsconfig.node.json'], 
+        project: ['./tsconfig.json'], 
         tsconfigRootDir: import.meta.dirname,
       },
     },

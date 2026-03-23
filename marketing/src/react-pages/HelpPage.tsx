@@ -1,4 +1,3 @@
-import { Link } from 'react-router-dom';
 import { FiChevronLeft, FiHelpCircle } from 'react-icons/fi';
 import { useTranslation, Trans } from 'react-i18next';
 
@@ -16,9 +15,10 @@ export default function HelpPage() {
       />
       <div className="w-full max-w-2xl card-neumorphic p-8 overflow-y-auto max-h-[90vh]">
         <div className="flex items-center gap-4 mb-6 pb-4 border-b border-border">
-          <Link to="/settings" aria-label={t('help:back_settings')} className="touch-target p-2.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm transition-all">
+          {/* PERBAIKAN: Gunakan tag <a> biasa dan arahkan ke "/" (Beranda) */}
+          <a href="/" aria-label={t('help:back_settings')} className="touch-target p-2.5 rounded-full text-text-secondary shadow-neumorphic-convex-sm active:shadow-neumorphic-pressed-sm hover:text-accent transition-all">
             <FiChevronLeft size={24} />
-          </Link>
+          </a>
           <FiHelpCircle className="text-accent text-3xl" />
           <h1 className="text-2xl font-bold text-text-primary">{t('help:title')}</h1>
         </div>

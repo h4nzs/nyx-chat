@@ -2,9 +2,9 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Suspense, lazy } from 'react';
 import { Spinner } from './components/Spinner';
 
-const LandingPage = lazy(() => import('./pages/LandingPage'));
-const HelpPage = lazy(() => import('./pages/HelpPage'));
-const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
+const LandingPage = lazy(() => import('./react-pages/LandingPage'));
+const HelpPage = lazy(() => import('./react-pages/HelpPage'));
+const PrivacyPage = lazy(() => import('./react-pages/PrivacyPage'));
 
 const LoadingScreen = () => (
   <div className="w-full h-screen flex items-center justify-center bg-bg-main">
