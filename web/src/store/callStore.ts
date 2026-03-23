@@ -65,7 +65,7 @@ export const useCallStore = create<CallStoreState>((set) => ({
 
   setIncomingCall: (from, isVideo, profile, key) => set({
     callState: 'ringing',
-    remoteUsers: profile ? [profile] : [],
+    remoteUsers: profile ? [profile] : [{ id: from, name: 'Unknown User' }],
     isVideoCall: isVideo,
     isReceivingCall: true,
     isMinimized: false,
@@ -73,7 +73,13 @@ export const useCallStore = create<CallStoreState>((set) => ({
   }),
 
   setOutgoingCall: (to, isVideo, profile, key) => {
-    const initialUsers = Array.isArray(profile) ? profile : (profile ? [profile] : []);
+    const toArray = Array.isArray(to) ? to : [to];
+    const profileArray = Array.isArray(profile) ? profile : (profile ? [profile] : []);
+    
+    const initialUsers = toArray.map(id => {
+      const existing = profileArray.find(p => p.id === id);
+      return existing || { id, name: 'Unknown User' };
+    });
 
     set({
         callState: 'calling',

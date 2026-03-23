@@ -118,7 +118,7 @@ type Actions = {
   deleteConversation: (id: string) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
   toggleSidebar: () => void;
-  startConversation: (peerId: string, optimisticProfile?: { name: string; username: string }) => Promise<string>;
+  startConversation: (peerId: string, optimisticProfile?: { name: string; username: string }) => Promise<ConversationId>;
   searchUsers: (query: string) => Promise<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>;
   addOrUpdateConversation: (conversation: Conversation) => void;
   removeConversation: (conversationId: string) => void;
@@ -331,7 +331,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
   toggleSidebar: () => set(s => ({ isSidebarOpen: !s.isSidebarOpen })),
 
-  startConversation: async (peerId: string, optimisticProfile?: { name: string; username: string }): Promise<string> => {
+  startConversation: async (peerId: string, optimisticProfile?: { name: string; username: string }): Promise<ConversationId> => {
     const { user } = useAuthStore.getState();
     if (!user) {
       throw new Error("Cannot start a conversation: user is not authenticated.");

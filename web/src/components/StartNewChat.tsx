@@ -67,9 +67,7 @@ export default function StartNewChat({ query, onStarted }: { query: string; onSt
     try {
       setLoadingId(peerId);
       const id = await startConversation(peerId);
-      if (id) {
-        onStarted(id as unknown as ConversationId);
-      }
+      onStarted(id);
     } catch (e: unknown) {
       toast.error((e instanceof Error ? e.message : 'Unknown error') || t('connect.failed_start'));
     } finally {

@@ -26,7 +26,7 @@ export const MinimalConversationSchema = z.object({
   avatarUrl: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   creatorId: UserIdSchema.nullable().optional(),
-  updatedAt: z.preprocess((val) => { try { return new Date(val as any).toISOString() } catch { return undefined; } }, z.string().optional()),
+  updatedAt: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as any); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
   unreadCount: z.number().default(0),
   keyRotationPending: z.boolean().optional(),
   requiresKeyRotation: z.boolean().optional(),
@@ -37,8 +37,8 @@ export const IncomingMessageSchema = z.object({
   conversationId: ConversationIdSchema,
   senderId: UserIdSchema,
   content: z.string().nullable().optional(),
-  timestamp: z.preprocess((val) => { try { return new Date(val as any).toISOString() } catch { return undefined; } }, z.string().optional()),
-  createdAt: z.preprocess((val) => { try { return new Date(val as any).toISOString() } catch { return undefined; } }, z.string().default(() => new Date().toISOString())),
+  timestamp: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as any); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
+  createdAt: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as any); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().default(() => new Date().toISOString())),
 }).passthrough();
 
 // --- WebRTC Signaling Schemas ---
@@ -58,7 +58,7 @@ export const ShadowVaultMessageSchema = z.object({
   conversationId: ConversationIdSchema,
   senderId: UserIdSchema,
   content: z.string().nullable().optional(),
-  createdAt: z.preprocess((val) => { try { return new Date(val as any).toISOString() } catch { return undefined; } }, z.string().optional()), 
+  createdAt: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as any); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()), 
   status: z.enum(['sending', 'sent', 'delivered', 'read', 'failed']).optional().default('sent'),
   repliedToId: z.string().optional(),
   repliedTo: z.string().optional(),

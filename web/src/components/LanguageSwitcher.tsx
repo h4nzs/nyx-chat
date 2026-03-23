@@ -2,32 +2,40 @@ import { useTranslation } from 'react-i18next';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { FiGlobe, FiCheck } from 'react-icons/fi';
 
-export default function LanguageSwitcher() {
+// Tambahkan props agar komponen ini fleksibel
+interface LanguageSwitcherProps {
+  isAbsolute?: boolean;
+}
+
+// Daftar bahasa ditaruh di array agar gampang ditambah/dikurangi nantinya
+const LANGUAGES = [
+  { code: 'en', short: 'EN', label: '🇺🇸 English' },
+  { code: 'id', short: 'ID', label: '🇮🇩 Indonesia' },
+  { code: 'es', short: 'ES', label: '🇪🇸 Español' },
+  { code: 'pt-BR', short: 'PT', label: '🇧🇷 Português Brazil' },
+];
+
+export default function LanguageSwitcher({ isAbsolute = true }: LanguageSwitcherProps) {
   const { i18n } = useTranslation();
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
   };
 
-  const getLanguageLabel = () => {
-    switch (i18n.language) {
-      case 'id':
-        return 'ID';
-      case 'es':
-        return 'ES';
-      case 'en':
-      default:
-        return 'EN';
-    }
-  };
+  const currentLang = LANGUAGES.find(l => l.code === i18n.language) || LANGUAGES[0];
+
+  // Logic untuk menentukan class berdasarkan posisi
+  const containerClass = isAbsolute 
+    ? "absolute top-4 right-4 z-50" 
+    : "relative z-50";
 
   return (
-    <div className="absolute top-4 right-4 z-50">
+    <div className={containerClass}>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <button className="inline-flex items-center justify-center rounded-md bg-black/30 backdrop-blur-md px-3 py-2 text-sm font-medium text-gray-300 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-white/75 transition-all shadow-lg border border-white/5">
             <FiGlobe className="w-4 h-4 mr-2" />
-            {getLanguageLabel()}
+            {currentLang.short}
           </button>
         </DropdownMenu.Trigger>
 
@@ -37,37 +45,21 @@ export default function LanguageSwitcher() {
             sideOffset={5}
             align="end"
           >
-            <DropdownMenu.Item 
-              className={`group flex items-center px-2 py-2 text-sm rounded-md outline-none cursor-pointer transition-colors ${i18n.language === 'en' ? 'bg-orange-500/20 text-orange-400' : 'text-gray-300 hover:bg-white/10'}`}
-              onClick={() => changeLanguage('en')}
-            >
-              <span className="flex-1">🇺🇸 English</span>
-              {i18n.language === 'en' && <FiCheck className="ml-2 w-4 h-4" />}
-            </DropdownMenu.Item>
-
-            <DropdownMenu.Item 
-              className={`group flex items-center px-2 py-2 text-sm rounded-md outline-none cursor-pointer transition-colors ${i18n.language === 'id' ? 'bg-orange-500/20 text-orange-400' : 'text-gray-300 hover:bg-white/10'}`}
-              onClick={() => changeLanguage('id')}
-            >
-              <span className="flex-1">🇮🇩 Indonesia</span>
-              {i18n.language === 'id' && <FiCheck className="ml-2 w-4 h-4" />}
-            </DropdownMenu.Item>
-
-            <DropdownMenu.Item 
-              className={`group flex items-center px-2 py-2 text-sm rounded-md outline-none cursor-pointer transition-colors ${i18n.language === 'es' ? 'bg-orange-500/20 text-orange-400' : 'text-gray-300 hover:bg-white/10'}`}
-              onClick={() => changeLanguage('es')}
-            >
-              <span className="flex-1">🇪🇸 Español</span>
-              {i18n.language === 'es' && <FiCheck className="ml-2 w-4 h-4" />}
-            </DropdownMenu.Item>
-
-            <DropdownMenu.Item 
-              className={`group flex items-center px-2 py-2 text-sm rounded-md outline-none cursor-pointer transition-colors ${i18n.language === 'pt-BR' ? 'bg-orange-500/20 text-orange-400' : 'text-gray-300 hover:bg-white/10'}`}
-              onClick={() => changeLanguage('pt-BR')}
-            >
-              <span className="flex-1">🇧🇷 Português Brasil</span>
-              {i18n.language === 'pt-BR' && <FiCheck className="ml-2 w-4 h-4" />}
-            </DropdownMenu.Item>
+            {LANGUAGES.map((lang) => {
+              const isActive = i18n.language === lang.code;
+              return (
+                <DropdownMenu.Item 
+                  key={lang.code}
+                  className={`group flex items-center px-2 py-2 text-sm rounded-md outline-none cursor-pointer transition-colors ${
+                    isActive ? 'bg-orange-500/20 text-orange-400' : 'text-gray-300 hover:bg-white/10'
+                  }`}
+                  onClick={() => changeLanguage(lang.code)}
+                >
+                  <span className="flex-1">{lang.label}</span>
+                  {isActive && <FiCheck className="ml-2 w-4 h-4" />}
+                </DropdownMenu.Item>
+              );
+            })}
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>

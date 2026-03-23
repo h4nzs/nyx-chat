@@ -570,6 +570,11 @@ export function registerSocket(httpServer: HttpServer) {
           return;
         }
 
+        // Rate Limit (e.g. 10 requests / 60 seconds)
+        if (!await checkRateLimit(userId, 'session_request_missing', 10, 60)) {
+          return socket.emit("error", { message: "Rate limit exceeded for missing key requests." });
+        }
+
         // Broadcast ke semua member di room percakapan
         // "Hei, ada user (userId) yang butuh kunci sesi (sessionId) nih!"
         socket.to(conversationId).emit("session:key_requested", {

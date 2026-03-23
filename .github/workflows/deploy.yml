@@ -100,11 +100,15 @@ jobs:
                 npm install -g pnpm
             fi
             
-            pm2 stop nyx-api
+            pm2 stop nyx-api || true
+
             
             # 2. Siapkan direktori utama (Jika belum ada)
             TARGET_DIR="/root/nyx-app"
             mkdir -p $TARGET_DIR
+            rm -rf $TARGET_DIR/server
+            rm -rf $TARGET_DIR/web
+
             
             # 3. Unzip dan TIMPA LANGSUNG ke direktori utama
             echo "📦 Unzipping artifact directly to $TARGET_DIR..."

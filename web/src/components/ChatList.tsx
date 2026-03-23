@@ -200,18 +200,21 @@ const ConversationItem = memo(function ConversationItem({
   const formatConversationTime = useCallback((timestamp: string) => {
     const date = new Date(timestamp);
     const now = new Date();
-    const diffInDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
-    
+
+    // Create Date objects for midnight today and midnight yesterday
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
     // Use Intl.DateTimeFormat for better localization support
-    if (diffInDays === 0) {
+    if (messageDate.getTime() === today.getTime()) {
         return new Intl.DateTimeFormat(i18n.language, { hour: '2-digit', minute: '2-digit' }).format(date);
     }
-    if (diffInDays === 1) {
+    if (messageDate.getTime() === yesterday.getTime()) {
         return t('common:time.yesterday', 'Yesterday');
     }
     return new Intl.DateTimeFormat(i18n.language, { month: 'short', day: 'numeric' }).format(date);
   }, [i18n.language, t]);
-
   const renderPreviewText = () => {
     if (!conversation.lastMessage) return t('chat:messages.no_messages_yet', 'No messages yet');
     if (conversation.lastMessage.isViewOnce) {

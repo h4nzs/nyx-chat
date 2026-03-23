@@ -13,6 +13,12 @@ const CHUNK_SIZE = 500 * 1024; // 500 KB per chunk
 
 export default function MigrationSendPage() {
   const { t } = useTranslation(['common']);
+  const tRef = useRef(t);
+  
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
+
   const [status, setStatus] = useState<'prefetching' | 'scanning' | 'encrypting' | 'sending' | 'success'>('prefetching');
   const [progress, setProgress] = useState(0);
   const navigate = useNavigate();
@@ -43,7 +49,7 @@ export default function MigrationSendPage() {
         // relying on the fact that the UI layer won't render normal chat components.
         socket.connect();
       } catch (e) {
-        toast.error(t('migration.read_vault_failed'));
+        toast.error(tRef.current('migration.read_vault_failed'));
       }
     };
     prefetch();
@@ -54,7 +60,7 @@ export default function MigrationSendPage() {
         getSocket().connect();
       }
     };
-  }, [t]);
+  }, []);
 
   // SCANNER LOGIC
   useEffect(() => {
@@ -76,7 +82,7 @@ export default function MigrationSendPage() {
           () => {}
         ).catch(err => {
             console.error("Camera start failed", err);
-            toast.error(t('migration.camera_denied'));
+            toast.error(tRef.current('migration.camera_denied'));
         });
     }, 100);
 
@@ -84,7 +90,7 @@ export default function MigrationSendPage() {
       clearTimeout(timer);
       if (scannerRef.current?.isScanning) scannerRef.current.stop();
     };
-  }, [status, t]);
+  }, [status]);
 
   const processMigration = async (qrText: string) => {
     setStatus('encrypting');
