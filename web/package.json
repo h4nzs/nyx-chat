@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "postbuild": "node scripts/ping-indexnow.js",
     "preview": "vite preview",
     "test": "vitest --environment jsdom",
     "lint": "eslint ."
