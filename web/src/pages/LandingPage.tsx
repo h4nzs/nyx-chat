@@ -255,7 +255,7 @@ export default function LandingPage() {
            animate="visible"
            variants={containerVariants}
            className="p-4 flex justify-between items-center max-w-6xl mx-auto relative"
-          >
+        >
           {/* KIRI: Logo */}
           <motion.div variants={itemVariants} className="flex items-center">
             <img src="/pwa-512x512.png" alt="NYX Logo" className="w-8 h-8 mr-2" />
