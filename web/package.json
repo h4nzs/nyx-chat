@@ -6,7 +6,7 @@
     "url": "https://github.com/h4nzs/nyx-chat.git"
   },
   "name": "nyx-web",
-  "version": "2.5.1",
+  "version": "2.5.2",
   "private": true,
   "type": "module",
   "scripts": {
