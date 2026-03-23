@@ -43,6 +43,9 @@ jobs:
           VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
         run: pnpm --filter nyx-web run build
 
+      - name: 🚀 Build Marketing (Sisi Publik)
+        run: pnpm --filter ./marketing run build
+
       # --- PHASE 4: BUILD SERVER ---
       - name: ⚙️ Build Server (Backend)
         run: |
@@ -62,6 +65,9 @@ jobs:
           # Copy Frontend Build
           mkdir -p deploy_package/web
           cp -r web/dist deploy_package/web/
+
+          mkdir -p deploy_package/marketing
+          cp -r marketing/dist deploy_package/marketing/
           
           # Copy Backend (Bawa Prisma hasil generate dari GitHub, TAPI TINGGALKAN node_modules)
           mkdir -p deploy_package/server
@@ -108,6 +114,7 @@ jobs:
             mkdir -p $TARGET_DIR
             rm -rf $TARGET_DIR/server
             rm -rf $TARGET_DIR/web
+            rm -rf $TARGET_DIR/marketing
 
             
             # 3. Unzip dan TIMPA LANGSUNG ke direktori utama
@@ -132,6 +139,12 @@ jobs:
             # Hapus isi lama, copy yang baru
             sudo rm -rf /var/www/nyx-web/*
             sudo cp -r $TARGET_DIR/web/dist/* /var/www/nyx-web/
+
+            echo "🌐 Deploying Marketing Frontend..."
+            sudo mkdir -p /var/www/nyx-marketing
+            sudo rm -rf /var/www/nyx-marketing/*
+            sudo cp -r $TARGET_DIR/marketing/dist/* /var/www/nyx-marketing/
+            
             sudo systemctl reload nginx || true
             
             # 7. RESTART PM2 (Bersih dan Langsung)

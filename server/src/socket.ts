@@ -85,8 +85,12 @@ export function registerSocket(httpServer: HttpServer) {
     cors: {
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
+        
+        // 👇 PERBAIKAN: Ratakan array
+        const baseOrigins = Array.isArray(env.corsOrigin) ? env.corsOrigin : [env.corsOrigin];
+
         const allowedOrigins = [
-          env.corsOrigin, 
+          ...baseOrigins, // 👈 PERBAIKAN: Gunakan spread operator (...)
           "http://localhost:5173", 
           "http://localhost:4173",
           // Tambahkan domain HTTP untuk support Cloudflare Tunnel
@@ -95,6 +99,7 @@ export function registerSocket(httpServer: HttpServer) {
           "http://*.nyx-app.my.id",
           "https://*.nyx-app.my.id"
         ];
+        
         if (
           allowedOrigins.includes(origin) || 
           origin.endsWith('.vercel.app') || 
@@ -105,7 +110,8 @@ export function registerSocket(httpServer: HttpServer) {
         ) {
           callback(null, true);
         } else {
-                callback(new Error('Not allowed by CORS'));        }
+          callback(new Error('Not allowed by CORS'));        
+        }
       },
       credentials: true,
       methods: ["GET", "POST"]
@@ -170,7 +176,6 @@ export function registerSocket(httpServer: HttpServer) {
         return next();
       }
 
-      // @ts-ignore
       const userId = payload.id || payload.sub;
       // OPTIMIZATION: Select publicKey here
       const user = await prisma.user.findUnique({ 
