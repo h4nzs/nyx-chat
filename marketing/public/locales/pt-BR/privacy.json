@@ -1,0 +1,83 @@
+{
+  "title": "Centro Jurídico e de Privacidade",
+  "subtitle": "Transparência absoluta sobre nosso tratamento de dados Zero-Knowledge, protocolos criptográficos e termos de licenciamento de software.",
+  "last_updated": "Última Atualização: Março de 2026",
+  "back": "Voltar para o Início",
+  "nav": {
+    "privacy": "Política de Privacidade",
+    "terms": "Termos de Serviço",
+    "licensing": "Licença de Software",
+    "cookies": "Política de Cookies",
+    "ai": "IA e Telemetria",
+    "security": "Arquitetura de Segurança"
+  },
+  "privacy": {
+    "title": "Política de Privacidade",
+    "intro": "Nossa regra de ouro: Se não temos seus dados, ninguém pode exigi-los de nós.",
+    "minimization_title": "1. Minimização de Dados e Criptografia",
+    "minimization_1": "<0>Protocolo de Identidade Cega:</0> Não guardamos seu nome de usuário, e-mail ou número de telefone. Usamos hash Argon2id no seu dispositivo. O servidor guarda apenas um hash criptográfico (`usernameHash`), tornando sua identidade matematicamente impossível de ser descoberta por nós.",
+    "minimization_2": "<0>Metadados Criptografados:</0> Seu nome de exibição, biografia e avatar são criptografados simetricamente no seu dispositivo. Para nossos servidores, seu perfil é apenas um bloco de texto criptografado incompreensível.",
+    "minimization_3": "<0>Comunicações E2EE:</0> Todas as mensagens diretas, mensagens de voz e arquivos anexos possuem Criptografia de Ponta a Ponta usando o Protocolo Signal (Double Ratchet). Atuamos apenas como uma ponte cega.",
+    "logging_title": "2. Registros Temporários de Rede",
+    "logging_desc": "Para manter a estabilidade da rede e evitar ataques DDoS ou Botnets, processamos temporariamente:",
+    "logging_1": "Endereços IP (transformados em hash de forma irreversível ao conectar).",
+    "logging_2": "Carimbos de data/hora de conexão WebSocket (apagados automaticamente do Redis).",
+    "logging_3": "Fila de mensagens criptografadas offline (apagadas automaticamente após serem entregues ao destinatário)."
+  },
+  "terms": {
+    "title": "Termos de Serviço",
+    "liability_title": "Isenção Crítica de Responsabilidade",
+    "liability_desc": "O NYX é fornecido \"NO ESTADO EM QUE SE ENCONTRA\", sem garantias de qualquer tipo. Os criadores não se responsabilizam por perda de dados, chaves comprometidas ou interrupções no serviço. Você é o único responsável por gerenciar sua Frase de Recuperação criptográfica.",
+    "gating": "<0>Controle de Nível de Confiança:</0> Para proteger a rede, contas não verificadas são colocadas em um \"Modo Sandbox\" limitado. Para ter acesso total, é necessária a verificação por hardware biométrico ou Prova de Trabalho (Proof-of-Work) criptográfica.",
+    "abuse": "<0>Política de Tolerância Zero para Abusos:</0> Você concorda em não usar a rede NYX para atividades ilegais, abuso automatizado de API (uso de bots) ou distribuição de malware. Violações resultarão em bloqueio imediato."
+  },
+  "licensing": {
+    "title": "Licença de Software e Empresas",
+    "intro": "O código-fonte do NYX tem o orgulho de ser de código aberto e é estritamente protegido sob a <0>Licença Pública Geral Affero GNU v3.0 (AGPL-3.0)</0>.",
+    "agpl_title": "Limitações da AGPL-3.0",
+    "agpl_desc": "Se você modificar o código do NYX e permitir que usuários interajam com ele através de uma rede (por exemplo, hospedando-o como um SaaS), você é legalmente obrigado a liberar o código-fonte modificado para o público.",
+    "commercial_title": "Licença Dupla Comercial",
+    "commercial_desc": "Para corporações, empresas ou startups que desejam integrar o NYX em produtos proprietários e de código fechado sem as obrigações da AGPL, oferecemos uma Licença Comercial.",
+    "contact_btn": "Entre em Contato com o Comando para Preços Corporativos"
+  },
+  "cookies": {
+    "title": "Política de Cookies e Armazenamento",
+    "intro": "Não usamos cookies de rastreamento, anúncios ou análises de terceiros. O armazenamento local é usado estritamente para segurança criptográfica e sessão.",
+    "table_type": "Tipo de Armazenamento",
+    "table_item": "Item",
+    "table_purpose": "Propósito",
+    "cookie_desc": "Autenticação segura e manutenção da sessão.",
+    "idb_keys_desc": "Armazenamento local das suas Chaves Privadas criptografadas.",
+    "idb_vault_desc": "Armazenamento local do seu histórico de conversas E2EE."
+  },
+  "ai": {
+    "title": "IA e Telemetria",
+    "intro": "O NYX opera com <0>Zero Telemetria</0>. Não rastreamos seus cliques, tempo de tela ou quais recursos você usa.",
+    "smart_reply_title": "Respostas Inteligentes (IA Opcional)",
+    "smart_reply_desc": "Oferecemos um recurso experimental de \"Respostas Inteligentes\" usando a API do Google Gemini. Este recurso é <0>totalmente opcional</0>.",
+    "smart_reply_1": "As mensagens são descriptografadas localmente antes de serem enviadas à IA.",
+    "smart_reply_2": "O servidor do NYX atua como um proxy cego; não salva o prompt nem a resposta da IA.",
+    "smart_reply_3": "Os dados processados pela API do Gemini são temporários e não são usados para treinar os modelos de IA básicos, conforme as regras da API empresarial do Google."
+  },
+  "security": {
+    "title": "Arquitetura de Segurança",
+    "intro": "Nossa implementação criptográfica é aberta para auditoria.",
+    "signal_title": "Protocolo Signal",
+    "signal_desc": "Acordo de chaves X3DH e sigilo perfeito direto e reverso (Double Ratchet) via libsodium (XChaCha20-Poly1305).",
+    "webauthn_title": "WebAuthn PRF",
+    "webauthn_desc": "Descriptografia biométrica sem senha usando os enclaves seguros de hardware (Secure Enclave/TPM).",
+    "memory_title": "Memória Volátil",
+    "memory_desc": "As chaves criptográficas são apagadas da memória RAM (`sodium.memzero`) imediatamente após o ciclo de descriptografia.",
+    "migration_title": "Migração Peer-to-Peer",
+    "migration_desc": "A migração de dispositivo usa túneis WebSocket criptografados. O servidor retransmite os pedaços às cegas, sem acesso às chaves."
+  },
+  "seo": {
+    "title": "Jurídico e Privacidade | NYX",
+    "description": "Leia sobre nossa arquitetura Zero-Knowledge, licenciamento comercial e como o NYX protege seus dados."
+  },
+  "footer": {
+    "tagline": "Privacidade de Nível Militar",
+    "copyright": "© {{year}} NYX. Todos os direitos reservados sob a AGPL-3.0.",
+    "quote": "\"Na era da vigilância total, passar despercebido é a única liberdade verdadeira.\""
+  }
+}

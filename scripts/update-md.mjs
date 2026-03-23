@@ -5,13 +5,13 @@ const pkg = JSON.parse(fs.readFileSync('./package.json', 'utf8'));
 const newVersion = pkg.version;
 
 // 2. SINKRONISASI KE WORKSPACE (Web & Server)
-['./web/package.json', './server/package.json'].forEach(path => {
+['./web/package.json', './server/package.json', './marketing/package.json', './packages/shared/shared/package.json'].forEach(path => {
     let subPkg = JSON.parse(fs.readFileSync(path, 'utf8'));
     subPkg.version = newVersion;
     // Tulis ulang dengan format rapi (indentasi 2 spasi)
     fs.writeFileSync(path, JSON.stringify(subPkg, null, 2) + '\n');
 });
-console.log(`✅ Workspaces (web & server) berhasil disinkronisasi ke versi ${newVersion}!`);
+console.log(`✅ Workspaces berhasil disinkronisasi ke versi ${newVersion}!`);
 
 // 3. Format khusus Shields.io untuk README
 const badgeVersion = newVersion.replace(/-/g, '--');

@@ -1,0 +1,167 @@
+{
+  "actions": {
+    "loading": "Memuat...",
+    "submit": "Kirim",
+    "cancel": "Batal",
+    "cancel_bracket": "[ BATAL ]",
+    "save": "Simpan",
+    "delete": "Hapus",
+    "verify": "Verifikasi",
+    "skip": "Lewati",
+    "continue": "Lanjutkan",
+    "return": "Kembali",
+    "confirm": "Konfirmasi",
+    "starting": "Memulai...",
+    "next": "Lanjut",
+    "previous": "Sebelumnya",
+    "finish": "Selesai",
+    "sending": "Mengirim...",
+    "executing": "Mengeksekusi...",
+    "copy_link": "Salin Tautan",
+    "copied": "Tautan disalin ke papan klip",
+    "copy_failed": "Gagal menyalin tautan",
+    "copied_label": "Disalin",
+    "abort": "BATALKAN",
+    "unlock": "BUKA KUNCI",
+    "done": "Selesai",
+    "saving": "Menyimpan...",
+    "creating": "Membuat...",
+    "create_group": "Buat Grup",
+    "menu": "Menu",
+    "back": "Kembali",
+    "view_profile": "Lihat Profil"
+  },
+  "action": {
+    "abort": "BATALKAN",
+    "unlock": "BUKA KUNCI",
+    "confirm": "Konfirmasi",
+    "cancel": "Batal",
+    "view_profile": "Lihat Profil",
+    "pin_chat": "Sematkan Chat",
+    "block_user": "Blokir Pengguna",
+    "delete_chat": "Hapus Chat",
+    "menu": "Menu",
+    "back": "Kembali",
+    "delete_group": "Hapus Grup",
+    "create_group": "Buat Grup"
+  },
+  "actioin": {
+    "view_profile": "Lihat Profil"
+  },
+  "nav": {
+    "home": "Beranda",
+    "login": "Masuk",
+    "register": "Daftar",
+    "privacy": "Kebijakan Privasi",
+    "terms": "Ketentuan Layanan"
+  },
+  "errors": {
+    "unknown": "Terjadi kesalahan yang tidak diketahui",
+    "network": "Kesalahan jaringan, silakan coba lagi",
+    "required": "Kolom ini wajib diisi"
+  },
+  "defaults": {
+    "encrypted_user": "Pengguna Terenkripsi",
+    "user": "Pengguna",
+    "avatar": "Avatar",
+    "me": "Saya",
+    "unknown": "Tidak diketahui",
+    "someone": "Seseorang",
+    "you": "ANDA"
+  },
+  "status": {
+    "connection_lost": "KONEKSI_HILANG // SISTEM_OFFLINE",
+    "establishing_uplink": "MEMBANGUN_UPLINK...",
+    "power_surge": "Lonjakan Daya Diperlukan"
+  },
+  "cmd_palette": {
+    "title": "Baris Perintah Sistem",
+    "placeholder": "JALANKAN_PERINTAH...",
+    "running": "Menjalankan...",
+    "unknown_error": "ERROR: PERINTAH_TIDAK_DIKENAL",
+    "ready": "siap"
+  },
+  "context_menu": {
+    "all_reactions": "Semua Emoji"
+  },
+  "error_boundary": {
+    "title": "Malfungsi Sistem",
+    "desc": "Terjadi kesalahan tak terduga dalam proses sistem.",
+    "message": "Aplikasi mengalami kesalahan kritis. Diperlukan pemuatan ulang (refresh) untuk memulihkan integritas sistem.",
+    "reboot": "Reboot Sistem",
+    "footer": "Protokol Aman NYX // Kegagalan Kritis"
+  },
+  "connect": {
+    "invalid_link": "Tautan koneksi tidak valid",
+    "user_not_found": "Pengguna tidak ditemukan atau Anda sedang offline.",
+    "own_profile": "Ini adalah profil Anda sendiri!",
+    "confirm_title": "Koneksi Aman Baru",
+    "confirm_desc": "Apakah Anda ingin memulai percakapan aman dengan {{name}}?",
+    "connecting_to": "Menghubungkan ke {{name}}...",
+    "connected": "Terhubung!",
+    "failed_start": "Gagal memulai percakapan.",
+    "error_processing": "Kesalahan memproses tautan koneksi.",
+    "decrypting_profile": "MENDEKRIPSI PROFIL..."
+  },
+  "migration": {
+    "receiving_data": "Koneksi terjalin. Menerima data...",
+    "decrypting_vault": "Data diterima. Mendekripsi brankas...",
+    "complete": "Migrasi Selesai! Selamat datang kembali.",
+    "decryption_failed": "Dekripsi gagal. Data mungkin rusak.",
+    "receive_title": "Migrasi Perangkat",
+    "receive_desc": "Pindai QR ini dari perangkat lama Anda",
+    "read_vault_failed": "Gagal membaca brankas lokal.",
+    "camera_denied": "Akses kamera ditolak atau tidak tersedia.",
+    "encrypting_vault": "Mengenkripsi data brankas...",
+    "tunneling": "Mengirim data ke perangkat baru...",
+    "waiting_receiver": "Menunggu penerima memproses...",
+    "transfer_complete": "Transfer Selesai!",
+    "receiver_failed": "Penerima gagal mendekripsi atau waktu habis",
+    "failed_generic": "Migrasi gagal. QR tidak valid, kesalahan jaringan, atau waktu habis.",
+    "send_title": "Transfer Brankas",
+    "send_desc": "Kirim data ke perangkat baru Anda",
+    "preparing": "MENYIAPKAN BRANKAS...",
+    "status_tunneling": "MENGIRIM..."
+  },
+  "not_found": {
+    "title": "Halaman Tidak Ditemukan",
+    "desc": "Jalur terenkripsi yang Anda coba akses tidak ada atau telah dihapus dari sistem.",
+    "return_btn": "Kembali ke Basis"
+  },
+  "footer": {
+    "brand_protocol": "Protokol Keamanan NYX"
+  },
+  "profile": {
+    "user_not_found": "Pengguna tidak ditemukan",
+    "home_server": "Server Rumah",
+    "session_status": "Status Sesi",
+    "encrypted": "TERENKRIPSI",
+    "editing_notice": "Pengeditan profil dikelola di Pengaturan",
+    "verified_operator": "OPERATOR TERVERIFIKASI",
+    "system_telemetry": "Telemetri Sistem",
+    "bio_data": "Data Biografis",
+    "key_not_generated": "Kunci belum dibuat.",
+    "refresh_keys": "Segarkan Kunci",
+    "revoke_access": "Cabut Akses"
+  },
+  "search": {
+    "no_results": "Tidak ada pengguna ditemukan untuk \"{{query}}\"",
+    "failed": "Gagal mencari pengguna.",
+    "placeholder": "Cari..."
+  },
+  "notifications": {
+    "title": "Notifikasi",
+    "empty": "Tidak ada notifikasi"
+  },
+  "time": {
+    "ago_y": "{{count}}th lalu",
+    "ago_mo": "{{count}}bln lalu",
+    "ago_d": "{{count}}hr lalu",
+    "ago_h": "{{count}}j lalu",
+    "ago_m": "{{count}}m lalu",
+    "ago_s": "{{count}}dtk lalu",
+    "now": "SEKARANG",
+    "yesterday": "Kemarin"
+
+  }
+}

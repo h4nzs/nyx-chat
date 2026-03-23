@@ -1,0 +1,164 @@
+{
+  "actions": {
+    "loading": "Loading...",
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "cancel_bracket": "[ CANCEL ]",
+    "save": "Save",
+    "delete": "Delete",
+    "verify": "Verify",
+    "skip": "Skip",
+    "continue": "Continue",
+    "return": "Return",
+    "confirm": "Confirm",
+    "starting": "Starting...",
+    "next": "Next",
+    "previous": "Previous",
+    "finish": "Finish",
+    "sending": "Sending...",
+    "executing": "Executing...",
+    "copy_link": "Copy Link",
+    "copied": "Link copied to clipboard",
+    "copy_failed": "Failed to copy link",
+    "copied_label": "Copied",
+    "abort": "ABORT",
+    "unlock": "UNLOCK",
+    "done": "Done",
+    "saving": "Saving...",
+    "creating": "Creating...",
+    "menu": "Menu",
+    "back": "Back",
+    "create_group": "Create Group",
+    "view_profile": "View Profile"
+  },
+  "action": {
+    "abort": "ABORT",
+    "unlock": "UNLOCK",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "view_profile": "View Profile",
+    "pin_chat": "Pin Chat",
+    "block_user": "Block User",
+    "delete_chat": "Delete Chat",
+    "delete_group": "Delete Group",
+    "menu": "Menu",
+    "back": "Back",
+    "create_group": "Create Group"
+  },
+  "actioin": {
+    "view_profile": "View Profile"
+  },
+  "nav": {
+    "home": "Home",
+    "login": "Login",
+    "register": "Register",
+    "privacy": "Privacy Policy",
+    "terms": "Terms of Service"
+  },
+  "errors": {
+    "unknown": "Unknown error occurred",
+    "network": "Network error, please try again",
+    "required": "This field is required"
+  },
+  "defaults": {
+    "encrypted_user": "Encrypted User",
+    "user": "User",
+    "avatar": "Avatar",
+    "me": "Me",
+    "someone": "Someone",
+    "you": "YOU"
+  },
+  "status": {
+    "connection_lost": "CONNECTION_LOST // SYSTEM_OFFLINE",
+    "establishing_uplink": "ESTABLISHING_UPLINK...",
+    "power_surge": "Power Surge Required"
+  },
+  "cmd_palette": {
+    "title": "System Command Line",
+    "placeholder": "EXECUTE_COMMAND...",
+    "running": "Running...",
+    "unknown_error": "ERROR: UNKNOWN_COMMAND",
+    "ready": "ready"
+  },
+  "context_menu": {
+    "all_reactions": "All Reactions"
+  },
+  "error_boundary": {
+    "title": "System Malfunction",
+    "desc": "An unexpected error occurred in the system process.",
+    "message": "The application encountered a critical error. A reload is required to restore system integrity.",
+    "reboot": "Reboot System",
+    "footer": "NYX Secure Protocol // Critical Failure"
+  },
+  "connect": {
+    "invalid_link": "Invalid connection link",
+    "user_not_found": "User not found or you are offline.",
+    "own_profile": "This is your own profile!",
+    "confirm_title": "New Secure Connection",
+    "confirm_desc": "Do you want to start a secure conversation with {{name}}?",
+    "connecting_to": "Connecting to {{name}}...",
+    "connected": "Connected!",
+    "failed_start": "Failed to start conversation.",
+    "error_processing": "Error processing connection link.",
+    "decrypting_profile": "DECRYPTING PROFILE..."
+  },
+  "migration": {
+    "receiving_data": "Connection established. Receiving data...",
+    "decrypting_vault": "Data received. Decrypting vault...",
+    "complete": "Migration Complete! Welcome back.",
+    "decryption_failed": "Decryption failed. Data might be corrupted.",
+    "receive_title": "Migrate Device",
+    "receive_desc": "Scan this QR from your old device",
+    "read_vault_failed": "Failed to read local vault.",
+    "camera_denied": "Camera access denied or unavailable.",
+    "encrypting_vault": "Encrypting vault data...",
+    "tunneling": "Tunneling data to new device...",
+    "waiting_receiver": "Waiting for receiver to process...",
+    "transfer_complete": "Transfer Complete!",
+    "receiver_failed": "Receiver failed to decrypt or timed out",
+    "failed_generic": "Migration failed. Invalid QR, Network error, or Timeout.",
+    "send_title": "Transfer Vault",
+    "send_desc": "Send data to your new device",
+    "preparing": "PREPARING VAULT...",
+    "status_tunneling": "TUNNELING..."
+  },
+  "not_found": {
+    "title": "Page Not Found",
+    "desc": "The encrypted path you are trying to access does not exist or has been wiped from the system.",
+    "return_btn": "Return to Base"
+  },
+  "footer": {
+    "brand_protocol": "NYX Secure Protocol"
+  },
+  "profile": {
+    "user_not_found": "User not found",
+    "home_server": "Home Server",
+    "session_status": "Session Status",
+    "encrypted": "ENCRYPTED",
+    "editing_notice": "Profile editing is managed in Settings",
+    "verified_operator": "VERIFIED OPERATOR",
+    "system_telemetry": "System Telemetry",
+    "bio_data": "Biographical Data",
+    "key_not_generated": "Key not generated yet.",
+    "refresh_keys": "Refresh Keys",
+    "revoke_access": "Revoke Access"
+  },
+  "search": {
+    "no_results": "No users found for \"{{query}}\"",
+    "failed": "Failed to search users.",
+    "placeholder": "Search..."
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "No notifications"
+  },
+  "time": {
+    "ago_y": "{{count}}y ago",
+    "ago_mo": "{{count}}mo ago",
+    "ago_d": "{{count}}d ago",
+    "ago_h": "{{count}}h ago",
+    "ago_m": "{{count}}m ago",
+    "ago_s": "{{count}}s ago",
+    "now": "NOW"
+  }
+}

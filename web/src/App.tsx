@@ -7,7 +7,7 @@ import { Toaster, useToasterStore, toast } from 'react-hot-toast';
 import { FiLogOut, FiSettings } from 'react-icons/fi';
 import { motion } from 'framer-motion';
 
-// Lazy Loaded Pages
+// Lazy Loaded Pages (DIBERSIHKAN: LandingPage, HelpPage, PrivacyPage dihapus)
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
 const Restore = lazy(() => import('./pages/Restore'));
@@ -16,9 +16,6 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const KeyManagementPage = lazy(() => import('./pages/KeyManagementPage'));
 const SessionManagerPage = lazy(() => import('./pages/SessionManagerPage'));
 const ProfilePage = lazy(() => import('./pages/ProfilePage'));
-const LandingPage = lazy(() => import('./pages/LandingPage'));
-const HelpPage = lazy(() => import('./pages/HelpPage'));
-const PrivacyPage = lazy(() => import('./pages/PrivacyPage'));
 const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const MigrationReceivePage = lazy(() => import('./pages/MigrationReceivePage'));
 const MigrationSendPage = lazy(() => import('./pages/MigrationSendPage'));
@@ -276,7 +273,7 @@ const AppContent = () => {
       <Toaster
         position="top-center"
         reverseOrder={false}
-        containerStyle={{ zIndex: 99999 }} // <-- ADD THIS LINE
+        containerStyle={{ zIndex: 99999 }}
         toastOptions={{
           duration: 5000,
           className: 'glass-toast',
@@ -318,11 +315,12 @@ const AppContent = () => {
 
         <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
           <Routes>
-            {/* Public Routes */}
+            {/* Public/Auth Routes */}
+            {/* UBAH: Rute root "/" kini langsung melempar user ke /login jika belum auth */}
             <Route path="/" element={
               isBootstrapping ? <LoadingScreen /> : 
               user ? <Navigate to="/chat" replace /> :
-              <PageWrapper><LandingPage /></PageWrapper>
+              <Navigate to="/login" replace />
               }
             />
             <Route path="/login" element={
@@ -335,10 +333,9 @@ const AppContent = () => {
               isBootstrapping ? <LoadingScreen /> :
               <PageWrapper><Register /></PageWrapper>
               }
-            />            <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
+            />
+            <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
             <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
-            <Route path="/help" element={<PageWrapper><HelpPage /></PageWrapper>} />
-            <Route path="/privacy" element={<PageWrapper><PrivacyPage /></PageWrapper>} />
 
             {/* Protected Routes */}
             <Route element={<ProtectedRoute />}>

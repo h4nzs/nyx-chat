@@ -1,0 +1,38 @@
+{
+  "title": "Help & FAQ",
+  "back_settings": "Back to Settings",
+  "move_account": {
+    "title": "How do I move my account to a new device?",
+    "desc": "Since NYX stores your keys and history locally for maximum privacy, you cannot simply log in to see old messages. You have two secure ways to move:",
+    "migration_label": "Device Migration (Recommended):",
+    "migration_text": "Go to <1>Settings &gt; Transfer to New Device</1>. This creates a secure, direct tunnel to your new phone via QR code.",
+    "backup_label": "Vault Backup:",
+    "backup_text": "Go to <1>Settings &gt; Export Vault</1>. Save the `.nyxvault` file and import it on your new device login screen."
+  },
+  "sandbox_mode": {
+    "title": "Why is my account \"Sandboxed\"?",
+    "desc": "To prevent spam bots without collecting personal data (like phone numbers), new accounts start in <1>Sandbox Mode</1> with limited messaging quotas.",
+    "upgrade_text": "You can upgrade to <1>VIP Status</1> instantly for free by verifying you are human. Go to <2>Settings &gt; Upgrade to VIP</2> and choose either <3>Biometric Verification</3> (Fingerprint/FaceID) or <3>Proof of Work</3> (CPU Mining)."
+  },
+  "forgot_password": {
+    "title": "I forgot my password. What do I do?",
+    "desc": "Because we don't have your email, we cannot send you a reset link. You must use your <1>Recovery Phrase</1>.",
+    "step1": "On the login screen, click \"Restore from phrase\".",
+    "step2": "Enter your 24-word Recovery Phrase to prove your identity.",
+    "step3": "Set a new password.",
+    "warning": "Note: Restoring from a phrase resets your identity keys. You will regain access to your account ID, but <1>chat history will be lost</1> unless you have a Vault Backup."
+  },
+  "sync_issues": {
+    "title": "Why are my messages not syncing?",
+    "desc": "NYX is <1>Local-First</1>. Messages live on your device, not the cloud. If you use NYX on multiple devices (e.g. Phone + Laptop), they act as independent clients.",
+    "future_text": "We are working on a secure \"Sync Protocol\" for the future, but currently, history does not automatically sync between devices to ensure zero-knowledge privacy."
+  },
+  "lost_phrase": {
+    "title": "What if I lose my Recovery Phrase?",
+    "irrecoverable": "Your account is mathematically irrecoverable.",
+    "desc": "We do not store your phrase or password. If you lose them, no one on Earth—including us—can decrypt your data. Please write down your phrase and store it safely offline."
+  },
+  "seo": {
+    "description": "Get help with NYX E2EE chat, account recovery, and security features."
+  }
+}

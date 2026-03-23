@@ -1,0 +1,282 @@
+{
+  "add_participant": {
+    "title": "Adicionar Participante",
+    "search_placeholder": "Buscar usuários...",
+    "searching": "Buscando...",
+    "no_users": "Nenhum usuário encontrado.",
+    "add_selected": "Adicionar Selecionados",
+    "adding": "Adicionando...",
+    "cancel": "Cancelar",
+    "success": "Participante adicionado com sucesso!",
+    "error": "Falha ao adicionar participante: {{error}}",
+    "empty_selection": "Por favor, selecione pelo menos um usuário."
+  },
+  "create_story": {
+    "title": "Criar Status",
+    "placeholder": "O que você está pensando? (Criptografado E2E)",
+    "add_media": "Adicionar Mídia (Opcional)",
+    "post_button": "Publicar Status",
+    "privacy": {
+      "label": "Privacidade do Status",
+      "all": "Compartilhado com: Todos os Contatos",
+      "exclude": "Exceto: {{count}} contatos",
+      "only": "Compartilhado apenas com: {{count}} contatos",
+      "select_contacts": "Selecionar Contatos",
+      "no_contacts": "Nenhum contato ativo encontrado.",
+      "save": "Salvar Privacidade",
+      "option_all": "Todos os Contatos",
+      "option_exclude": "Meus Contatos Exceto...",
+      "option_only": "Compartilhar Apenas Com..."
+    },
+    "error_empty": "Adicione texto ou mídia ao seu status"
+  },
+  "recovery": {
+    "title": "Protocolo: Recuperação",
+    "subtitle": "Iniciando sequência de exportação da chave mestra.\nAmbiente seguro obrigatório.",
+    "warning_title": "Aviso: Dados Confidenciais",
+    "warning_desc": "A posse desta frase concede acesso total ao sistema. Não a envie digitalmente.",
+    "button_acknowledge": "Ciente e Continuar",
+    "button_reveal": "Mostrar Dados",
+    "step2_title": "Frase de Segurança",
+    "step2_desc": "Grave a sequência. Prioridade Alfa.",
+    "button_recorded": "Sequência Gravada",
+    "verify_title": "Verificar Sequência",
+    "verify_desc": "Reconstrua a frase-chave.",
+    "select_words": "Selecione as palavras abaixo...",
+    "undo": "Desfazer",
+    "confirm": "Confirmar",
+    "copy_success": "Frase de recuperação copiada!",
+    "copy_fail": "Falha ao copiar para a área de transferência",
+    "verify_success": "Verificação bem-sucedida! Seu backup está confirmado.",
+    "verify_fail": "A verificação falhou. Por favor, tente novamente.",
+    "aria_toggle_visibility": "Alternar visibilidade da frase",
+    "aria_copy_phrase": "Copiar frase de recuperação"
+  },
+  "edit_group": {
+    "title": "Editar Info do Grupo",
+    "group_name": "Nome do Grupo",
+    "description": "Descrição",
+    "save": "Salvar Alterações",
+    "success": "Info do grupo atualizada!",
+    "error": "Falha ao atualizar: {{error}}"
+  },
+  "system_init": {
+    "title": "Inicialização do Sistema",
+    "desc": "Para ativar chamadas de Voz/Vídeo com Criptografia E2E e alertas em tempo real, o NYX requer acesso ao hardware. Suas mídias nunca saem do seu dispositivo sem criptografia.",
+    "push_notif": "Notificações Push (OS)",
+    "camera_mic": "Câmera e Microfone",
+    "calibrate": "Calibrando...",
+    "authorize": "Autorizar Sistema",
+    "skip": "Pular por enquanto"
+  },
+  "group_info": {
+    "title": "Info do Grupo",
+    "create_title": "Criar Novo Grupo",
+    "tabs": {
+      "details": "Detalhes",
+      "media": "Mídia"
+    },
+    "change_avatar": "Mudar avatar do grupo",
+    "no_desc": "Sem descrição",
+    "member_count": "{{count}} Membros",
+    "add_participants": "Adicionar Participantes",
+    "leave_group": "Sair do Grupo",
+    "toasts": {
+      "processing_avatar": "Processando avatar...",
+      "uploading": "Enviando para a nuvem...",
+      "updating": "Atualizando info do grupo...",
+      "avatar_updated": "Avatar atualizado!",
+      "upload_failed": "Falha ao enviar avatar: {{error}}",
+      "leaving": "Saindo do grupo...",
+      "left_success": "Você saiu do grupo.",
+      "leave_failed": "Falha ao sair do grupo: {{error}}",
+      "create_failed": "O nome do grupo e pelo menos um membro são obrigatórios.",
+      "created": "Grupo \"{{name}}\" criado!",
+      "create_error": "Falha ao criar o grupo: {{error}}"
+    }
+  },
+  "user_info": {
+    "about": "Sobre {{name}}",
+    "tabs": {
+      "details": "Detalhes",
+      "media": "Mídia"
+    },
+    "errors": {
+      "no_keys": "Este usuário ainda não configurou suas chaves de criptografia.",
+      "my_key_missing": "Sua chave pública não foi encontrada. Por favor, configure suas chaves primeiro.",
+      "safety_number_failed": "Falha ao gerar o número de segurança."
+    },
+    "verified": "Verificado",
+    "no_desc": "Este usuário prefere ser misterioso.",
+    "view_profile": "Ver Perfil Completo",
+    "verify_security": "Verificar Segurança"
+  },
+  "participants": {
+    "make_admin": "Tornar Administrador",
+    "dismiss_admin": "Remover de Administrador",
+    "remove": "Remover do Grupo",
+    "block": "Bloquear Usuário",
+    "unblock": "Desbloquear",
+    "admin_role": "Admin",
+    "remove_title": "Remover Participante",
+    "remove_desc": "Tem certeza de que deseja remover {{name}} do grupo?",
+    "toasts": {
+      "role_changed": "{{name}} agora é {{role}}.",
+      "removed": "{{name}} foi removido do grupo.",
+      "unblocked": "{{name}} foi desbloqueado.",
+      "blocked": "{{name}} foi bloqueado.",
+      "role_failed": "Falha ao alterar função: {{error}}",
+      "remove_failed": "Falha ao remover participante: {{error}}",
+      "block_failed": "Falha ao atualizar status de bloqueio: {{error}}"
+    }
+  },
+  "safety": {
+    "title": "Número de Segurança",
+    "desc": "Verifique a integridade da criptografia de ponta a ponta com",
+    "hash_label": "Hash da Impressão Digital",
+    "confirmed": "Verificação Confirmada",
+    "confirm_btn": "Confirmar Número de Segurança"
+  },
+  "tour": {
+    "title": "Tour Rápido",
+    "steps": {
+      "welcome": {
+        "title": "Bem-vindo ao Nyx!",
+        "content": "Você entrou em uma zona de <1>Zero-Knowledge</1> (Conhecimento Zero). Nós não sabemos quem você é e não podemos ler suas mensagens. Anonimato total."
+      },
+      "phrase": {
+        "title": "Sua Frase de Recuperação",
+        "content_1": "Ao se cadastrar, você criou uma Frase de Recuperação de 24 palavras. Essa é a <1>única</1> maneira de recuperar sua conta se esquecer sua senha.",
+        "content_2": "Nós não a guardamos. Se você a perder, sua conta estará perdida para sempre."
+      },
+      "sandbox": {
+        "title": "Sandbox e Verificação",
+        "content": "Para evitar spam sem usar números de telefone, novas contas começam no <1>Modo Sandbox</1>. Você pode desbloquear mensagens ilimitadas verificando que é humano (Biometria ou Proof of Work) nas Configurações."
+      },
+      "safety": {
+        "title": "Número de Segurança",
+        "content": "Cada conversa tem um \"Número de Segurança\" único. Você pode compará-lo com o seu contato para ter certeza de que ninguém está interceptando o chat."
+      },
+      "community": {
+        "title": "Comunidade e Desempenho",
+        "content_1": "O Nyx roda em uma <1>infraestrutura básica</1>, então você pode sentir um pouco de atraso ou ter que reconectar ocasionalmente.",
+        "content_2": "Se gostar do app, você pode nos ajudar a migrar para servidores mais rápidos a qualquer momento! Vá em <1>Configurações</1> para apoiar o projeto.",
+        "content_3": "Aproveite suas conversas seguras!"
+      }
+    }
+  },
+  "report": {
+    "no_reason": "Por favor, informe um motivo.",
+    "success": "Denúncia enviada com sucesso.",
+    "failed": "Falha ao enviar a denúncia.",
+    "title_user": "Denunciar {{name}}",
+    "desc_user": "Por favor, detalhe especificamente o motivo de estar denunciando este usuário. Isso será enviado à equipe de moderação.",
+    "placeholder": "Motivo da denúncia (ex: Spam, Assédio, Conteúdo Inapropriado)...",
+    "submit": "Enviar Denúncia",
+    "fill_all": "Por favor, preencha todos os campos",
+    "sending_toast": "Enviando denúncia...",
+    "success_bug": "Relatório enviado! Obrigado pela ajuda.",
+    "failed_bug": "Falha ao enviar o relatório, tente novamente mais tarde.",
+    "title_bug": "Relatar um Problema",
+    "desc_bug": "Encontrou um bug? Descreva abaixo. Informações do dispositivo serão incluídas automaticamente para nos ajudar a consertá-lo.",
+    "summary_label": "Resumo do Problema",
+    "summary_placeholder": "ex: Não consigo enviar minha foto de perfil",
+    "details_label": "Detalhes",
+    "details_placeholder": "Explique o que aconteceu e os passos para reproduzir o bug..."
+  },
+  "ban": {
+    "no_id": "O ID do Usuário é obrigatório.",
+    "no_reason": "O motivo do banimento é obrigatório.",
+    "success": "Usuário Banido e Expulso!",
+    "failed": "Falha ao banir o usuário.",
+    "title": "Banir Usuário",
+    "id_label": "ID do Usuário Alvo",
+    "reason_label": "Motivo do Banimento",
+    "reason_placeholder": "Motivo da suspensão (visível para o usuário)...",
+    "execute": "EXECUTAR BANIMENTO"
+  },
+  "share": {
+    "title": "Sua Identidade",
+    "desc": "Escaneie para iniciar uma conversa segura"
+  },
+  "password_prompt": {
+    "error": "Ocorreu um erro",
+    "title": "PAINEL DE CONTROLE DE ACESSO",
+    "desc": "Insira suas credenciais para abrir o cofre seguro",
+    "placeholder": "Digite o código de acesso",
+    "vault_id": "ID do Cofre: SEC-7A9F",
+    "status_locked": "Status: BLOQUEADO"
+  },
+  "editor": {
+    "save_failed": "Falha ao salvar a imagem",
+    "crop_failed": "Falha ao cortar a imagem.",
+    "draw": "Desenhar",
+    "process_failed": "Falha ao processar a imagem.",
+    "blob_failed": "Falha ao gerar dados da imagem.",
+    "crop": "Cortar",
+    "remove": "Remover",
+    "undo": "Desfazer",
+    "redo": "Refazer",
+    "pick_color": "Escolher cor",
+    "zoom": "ZOOM",
+    "rotate": "Rotacionar"
+  },
+  "notifications": {
+    "title": "Logs do Sistema",
+    "purge": "APAGAR_TUDO",
+    "empty": "Sistema nominal. Sem logs."
+  },
+  "chat_info": {
+    "title": "Entendendo sua Segurança no NYX",
+    "e2ee": {
+      "title": "Verdadeira Criptografia de Ponta a Ponta (E2EE)",
+      "content_1": "Todas as suas conversas são protegidas por uma forte <1>Criptografia de Ponta a Ponta</1>, inspirada no Protocolo Signal. Pense nisso como um cofre digital privado.",
+      "content_2": "Apenas você e o destinatário possuem as chaves para abrir as mensagens. Ninguém no meio—nem mesmo os servidores do NYX—pode ler o conteúdo. Essa proteção é automática e está sempre ativada."
+    },
+    "keys": {
+      "title": "Sua Chave Mestra e Frase de Recuperação",
+      "content_1": "Toda a sua conta é protegida por uma única <1>\"Chave Mestra\"</1>. Esta chave é criada a partir de uma <3>Frase de Recuperação</3> única de 24 palavras que você recebeu no cadastro.",
+      "important": "<0>Conceito mais importante:</0> Sua Frase de Recuperação é a única maneira de acessar sua conta se você esquecer sua senha ou trocar de dispositivo sem acesso ao antigo. Nós não a guardamos e não podemos recuperá-la por você."
+    },
+    "storage": {
+      "title": "Armazenamento de Chaves neste Dispositivo",
+      "content_1": "Para sua conveniência, sua Chave Mestra é armazenada neste dispositivo em um pacote criptografado altamente seguro. Este pacote é \"trancado\" com a sua <1>senha</1>.",
+      "list_1": "Ao fazer login, sua senha é usada para abrir este pacote e carregar suas chaves na sessão segura.",
+      "list_2": "Sua senha nunca é enviada para nossos servidores em um formato legível."
+    },
+    "access": {
+      "title": "Acessando sua Conta em um Novo Dispositivo",
+      "content_1": "Você tem três maneiras de migrar sua conta para um novo dispositivo:",
+      "list_1_label": "Migração de Dispositivo (Recomendado):",
+      "list_1_text": "Use o recurso \"Transferir para Novo Dispositivo\" nas Configurações. Escaneie o QR code no seu novo dispositivo para transferir de forma segura e direta todo o seu histórico de conversas e chaves.",
+      "list_2_label": "Backup do Cofre:",
+      "list_2_text": "Exporte seu arquivo \"NYX Vault\" (.nyxvault) nas Configurações. Você pode importar este arquivo em qualquer novo dispositivo para restaurar instantaneamente sua conta e seu histórico.",
+      "list_3_label": "Recuperação de Emergência:",
+      "list_3_text": "Se você perder o dispositivo e os backups, use a função \"Recuperar\" com sua Frase de Recuperação de 24 palavras. Isso redefinirá sua senha e restaurará sua Chave de Identidade, mas <1>o histórico de conversas será perdido</1> sem um backup do Cofre."
+    },
+    "best_practices": {
+      "title": "Melhores Práticas de Segurança",
+      "do_store": "<0>SIM,</0> guarde sua Frase de Recuperação em um local offline altamente seguro (ex: cofre, anotação física ou gerenciador de senhas criptografado).",
+      "do_verify": "<0>SIM,</0> verifique a identidade dos seus contatos usando os recursos de segurança disponíveis antes de compartilhar informações confidenciais.",
+      "dont_share": "<0>NÃO</0> compartilhe sua senha ou sua Frase de Recuperação com ninguém. Nunca.",
+      "dont_public": "<0>NÃO</0> continue logado em computadores públicos ou compartilhados. Use o recurso \"Sessões Ativas\" nas Configurações para sair remotamente, se necessário."
+    }
+  },
+  "scan": {
+    "title": "Escanear Contato",
+    "desc": "Escaneie o QR code do NYX",
+    "awaiting": "Aguardando alvo...",
+    "camera_error": "Acesso à câmera negado ou indisponível."
+  },
+  "user_info_modal": {
+    "about": "Sobre",
+    "media": "Mídia",
+    "view_personnel": "VER DADOS DO PESSOAL",
+    "verify_handshake": "VERIFICAR HANDSHAKE DE CRIPTOGRAFIA",
+    "unblock_signal": "DESBLOQUEAR",
+    "block_signal": "BLOQUEAR",
+    "report_signal": "DENUNCIAR",
+    "prompt_report": "Insira o motivo para denunciar este usuário:",
+    "no_data": "Nenhum dado disponível."
+  }
+}
