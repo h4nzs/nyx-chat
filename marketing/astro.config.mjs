@@ -9,6 +9,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // https://astro.build/config
 export default defineConfig({
+  build: {
+    format: 'file'
+  },
   // Aktifkan integrasi React
   integrations: [react()],
   
