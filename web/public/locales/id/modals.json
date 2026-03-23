@@ -63,7 +63,7 @@
   "system_init": {
     "title": "Inisialisasi Sistem",
     "desc": "Untuk mengaktifkan panggilan Suara/Video Terenkripsi E2EE dan peringatan real-time, NYX memerlukan akses perangkat keras. Media Anda tidak pernah meninggalkan perangkat Anda tanpa enkripsi.",
-    "push_notif": "Notifikasi Push",
+    "push_notif": "Notifikasi Push (OS)",
     "camera_mic": "Kamera & Mikrofon",
     "calibrate": "Mengkalibrasi...",
     "authorize": "Otorisasi Sistem",
@@ -107,7 +107,7 @@
       "safety_number_failed": "Gagal membuat nomor keamanan."
     },
     "verified": "Terverifikasi",
-    "no_desc": "Pengguna ini lebih suka menjaga misteri.",
+    "no_desc": "Pengguna ini lebih suka menjadi misterius.",
     "view_profile": "Lihat Profil Lengkap",
     "verify_security": "Verifikasi Keamanan"
   },
@@ -159,8 +159,8 @@
       },
       "community": {
         "title": "Komunitas & Kinerja",
-        "content_1": "Nyx berjalan di <1>infrastruktur gratis</1>, jadi Anda mungkin mengalami penundaan atau momen koneksi ulang sesekali.",
-        "content_2": "Jika Anda menikmati aplikasi ini, Anda dapat membantu kami meningkatkan ke server yang lebih cepat kapan saja! Buka <1>Pengaturan</1> dan gulir ke bawah untuk mendukung proyek.",
+        "content_1": "Nyx berjalan di <1>infrastruktur rendah</1>, jadi Anda mungkin mengalami penundaan atau momen koneksi ulang sesekali.",
+        "content_2": "Jika Anda menikmati aplikasi ini, Anda dapat membantu kami meningkatkan ke server yang lebih cepat kapan saja! Buka <1>Pengaturan</1> untuk mendukung proyek.",
         "content_3": "Nikmati chat aman Anda!"
       }
     }
@@ -182,7 +182,7 @@
     "summary_label": "Ringkasan Masalah",
     "summary_placeholder": "misal: Tidak bisa mengunggah foto profil",
     "details_label": "Detail",
-    "details_placeholder": "Jelaskan apa yang terjadi dan langkah-langkah untuk mereproduksi..."
+    "details_placeholder": "Jelaskan apa yang terjadi dan langkah-langkah untuk mereproduksi bug..."
   },
   "ban": {
     "no_id": "ID Pengguna wajib diisi.",
@@ -273,9 +273,9 @@
     "media": "Media",
     "view_personnel": "LIHAT DATA PERSONEL",
     "verify_handshake": "VERIFIKASI JABAT TANGAN ENKRIPSI",
-    "unblock_signal": "BUKA BLOKIR SINYAL",
-    "block_signal": "BLOKIR SINYAL",
-    "report_signal": "LAPORKAN SINYAL",
+    "unblock_signal": "BUKA BLOKIR",
+    "block_signal": "BLOKIR",
+    "report_signal": "LAPORKAN",
     "prompt_report": "Masukkan alasan melaporkan pengguna ini:",
     "no_data": "Tidak ada data tersedia."
   }

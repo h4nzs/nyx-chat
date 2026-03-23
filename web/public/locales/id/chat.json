@@ -4,16 +4,16 @@
     "offline": "Offline",
     "members": "{{count}} anggota",
     "typing": "Mengetik...",
-    "last_seen": "Terlihat {{time}}"
+    "last_seen": "Terakhir terlihat {{time}}"
   },
   "input": {
     "placeholder": "Ketik pesan...",
-    "placeholder_default": "Kirim pesan aman...",
+    "placeholder_default": "Kirim pesan...",
     "placeholder_disappearing": "Pesan menghilang...",
     "placeholder_offline": "Koneksi Terputus",
     "recording": "Merekam...",
     "recording_state": "Merekam Audio...",
-    "cancel_recording": "Geser untuk batal",
+    "cancel_recording": "Batalkan",
     "attach_file": "Lampirkan file",
     "set_timer": "Atur waktu pesan menghilang",
     "toggle_view_once": "Sekali Lihat",
@@ -26,7 +26,7 @@
     "record_voice": "Rekam pesan suara",
     "cancel_voice": "Batalkan Rekaman",
     "send_voice": "Kirim Pesan Suara",
-    "send_silent": "Kirim tanpa suara",
+    "send_silent": "Kirim tanpa notifikasi",
     "editing": "Mengedit Pesan",
     "replying_to": "Membalas {{name}}",
     "voice_transmission": "Transmisi Suara",
@@ -34,8 +34,8 @@
     "attachment": "Lampiran",
     "you": "Anda",
     "unknown": "Tidak Diketahui",
-    "transmission_blocked": "TRANSMISI DIBLOKIR",
-    "unblock_signal": "Buka Blokir Sinyal"
+    "transmission_blocked": "KONTAK DIBLOKIR",
+    "unblock_signal": "Buka Blokir"
   },
   "actions": {
     "reply": "Balas",

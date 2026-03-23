@@ -10,6 +10,7 @@ import { useThemeStore } from '@store/theme';
 import { useShallow } from 'zustand/react/shallow';
 import SEO from '../components/SEO';
 import { useTranslation } from 'react-i18next';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 
 // --- Animation Variants ---
 const containerVariants = {
@@ -251,18 +252,29 @@ export default function LandingPage() {
         {/* Header */}
         <motion.header
           initial="hidden"
-          animate="visible"
-          variants={containerVariants}
-          className="p-4 flex justify-between items-center max-w-6xl mx-auto"
-        >
+           animate="visible"
+           variants={containerVariants}
+           className="p-4 flex justify-between items-center max-w-6xl mx-auto relative"
+          >
+          {/* KIRI: Logo */}
           <motion.div variants={itemVariants} className="flex items-center">
             <img src="/pwa-512x512.png" alt="NYX Logo" className="w-8 h-8 mr-2" />
             <span className="text-2xl font-bold tracking-tighter">NYX</span>
           </motion.div>
-          <motion.div variants={itemVariants}>
-            <Link to="/login" className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all">
+
+          {/* KANAN: Grouping Login + Language */}
+          <motion.div variants={itemVariants} className="flex items-center gap-4">
+            <Link 
+              to="/login" 
+              className="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all"
+            >
               {t('landing:header.login')}
             </Link>
+
+            {/* Bungkus Switcher agar tidak absolute keluar jalur */}
+            <div className="relative"> 
+               <LanguageSwitcher />
+            </div>
           </motion.div>
         </motion.header>
 

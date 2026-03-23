@@ -29,14 +29,14 @@
   },
   "visual": {
     "dark_mode": "Mode Gelap",
-    "accent_emitter": "Pemancar Aksen"
+    "accent_emitter": "Warna Aksen"
   },
   "privacy": {
     "read_receipts": "Laporan Dibaca",
     "biometric_active": "Brankas Aktif (VIP)",
     "biometric_enable": "Aktifkan Biometrik",
     "panic_password": "Kata Sandi Panik",
-    "panic_desc": "Jika dipaksa membuka kunci, memasukkan sandi ini akan menghapus semua data lokal secara diam-diam.",
+    "panic_desc": "Jika dipaksa membuka kunci dalam keadaan darurat, memasukkan sandi ini akan menghapus semua data lokal secara diam-diam.",
     "dead_man": "Penghancur Otomatis",
     "dead_man_desc": "Otomatis menghancurkan akun Anda jika tidak aktif dalam periode tertentu.",
     "auto_destruct_options": {
@@ -73,7 +73,7 @@
     "PUSH_NOTIF": "Notifikasi Push"
   },
   "emergency": {
-    "eject": "Ejeksi Darurat",
+    "eject": "Keluar Darurat",
     "terminate_sessions": "Hentikan Semua Sesi",
     "delete_account": "Hapus Akun",
     "delete_desc": "Hapus PERMANEN semua data dari server. Tindakan ini tidak dapat dibatalkan."
@@ -89,7 +89,7 @@
     "instant_biometric": "Biometrik Instan",
     "biometric_desc": "Gunakan Sidik Jari atau FaceID. Membutuhkan 1 detik.",
     "pow_mining": "Penambangan Proof of Work",
-    "pow_idle": "Selesaikan teka-teki kriptografi dengan CPU Anda. Membutuhkan 5-10 detik.",
+    "pow_idle": "Selesaikan teka-teki kriptografi dengan CPU Anda. Membutuhkan 3-10 detik.",
     "pow_mining_status": "Menambang tumbukan hash... CPU 100%",
     "pow_verifying": "Memverifikasi bukti..."
   },
@@ -135,11 +135,11 @@
     "biometric_initializing": "Menginisialisasi pemindai biometrik...",
     "biometric_scan_now": "Pindai sidik jari sekarang untuk MENGUNCI brankas Anda...",
     "biometric_success": "Biometrik aktif! Anda sekarang dapat masuk tanpa kata sandi.",
-    "mining_connecting": "Menghubungkan ke kolam penambangan...",
+    "mining_connecting": "Menghubungkan ke penambangan...",
     "mining_processing": "Menambang teka-teki kriptografi... (Intensif CPU)",
     "mining_verifying": "Memverifikasi bukti...",
     "mining_success": "Bukti Diterima! Akun ditingkatkan ke VIP.",
-    "mining_failed": "Penambangan gagal: {{error}}",
+    "mining_failed": "Penambangan hash gagal: {{error}}",
     "export_success": "Brankas berhasil diekspor! Simpan file ini dengan aman.",
     "export_failed": "Gagal mengekspor brankas.",
     "import_success": "Brankas berhasil diimpor! Memuat ulang...",

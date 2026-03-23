@@ -82,12 +82,12 @@
     "ready": "siap"
   },
   "context_menu": {
-    "all_reactions": "Semua Reaksi"
+    "all_reactions": "Semua Emoji"
   },
   "error_boundary": {
     "title": "Malfungsi Sistem",
     "desc": "Terjadi kesalahan tak terduga dalam proses sistem.",
-    "message": "Aplikasi mengalami kesalahan kritis. Diperlukan pemuatan ulang untuk memulihkan integritas sistem.",
+    "message": "Aplikasi mengalami kesalahan kritis. Diperlukan pemuatan ulang (refresh) untuk memulihkan integritas sistem.",
     "reboot": "Reboot Sistem",
     "footer": "Protokol Aman NYX // Kegagalan Kritis"
   },
@@ -129,7 +129,7 @@
     "return_btn": "Kembali ke Basis"
   },
   "footer": {
-    "brand_protocol": "Protokol Aman NYX"
+    "brand_protocol": "Protokol Keamanan NYX"
   },
   "profile": {
     "user_not_found": "Pengguna tidak ditemukan",

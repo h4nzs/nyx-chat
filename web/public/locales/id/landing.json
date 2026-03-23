@@ -13,7 +13,7 @@
   },
   "why": {
     "title": "KENAPA NYX?",
-    "desc_1": "Lelah dengan pendaftaran rumit dan wajib unduh aplikasi? NYX solusinya. Akses instan dari browser favorit Anda—tanpa instalasi.",
+    "desc_1": "Lelah dengan pendaftaran rumit dan wajib mengunduh aplikasi? NYX solusinya. Akses instan dari browser favorit Anda—tanpa instalasi.",
     "desc_2": "Khawatir dengan data Anda? Kami juga!. NYX dibangun di atas fondasi privasi, hanya bertindak sebagai jembatan aman antara Anda dan kontak Anda."
   },
   "comparison": {
@@ -46,12 +46,12 @@
   "features": {
     "title": "FITUR UNTUK PRIVASI",
     "no_phone": {
-      "title": "TANPA NOMOR TELEPON",
+      "title": "TANPA NOMOR TELEPON DAN EMAIL",
       "desc": "Daftar hanya dengan Username. Identitas asli Anda tetap aman. Tidak ada yang bisa 'menyimpan kontak Anda' tanpa izin."
     },
     "ghost_app": {
       "title": "APLIKASI HANTU (PWA)",
-      "desc": "Tanpa instal. Buka di browser, chat, tutup tab, dan bersihkan data. Nol jejak forensik tertinggal di perangkat Anda."
+      "desc": "Tanpa instalasi. Buka di browser, chat, tutup tab, dan bersihkan data. Nol jejak forensik tertinggal di perangkat Anda."
     },
     "argon2": {
       "title": "KEAMANAN ARGON2",
