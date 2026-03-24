@@ -1,55 +1,63 @@
-const HOST = "app.nyx-app.my.id";
-const PUBLIC_HOST = "nyx-app.my.id";
-// Kunci hex 32 karakter yang baru
 const KEY = "nyx-live-index-5bUFU-DpfATyDQAczXwbvGVOHxx2VTHzUhfwJLhaVX3I4FtEQU2vGHaLoefa2lwI"; 
 
-const URL_LIST = [
-  `https://${PUBLIC_HOST}/`,
-  `https://${HOST}/login`,
-  `https://${HOST}/register`,
-  `https://${PUBLIC_HOST}/privacy`,
-  `https://${PUBLIC_HOST}/help`,
-  `https://${HOST}/migrate-receive`,
-  `https://${HOST}/migrate-send`
+// Pisahkan URL berdasarkan Host masing-masing
+const SITES = [
+  {
+    host: "nyx-app.my.id",
+    urls: [
+      "https://nyx-app.my.id/",
+      "https://nyx-app.my.id/privacy",
+      "https://nyx-app.my.id/help"
+    ]
+  },
+  {
+    host: "app.nyx-app.my.id",
+    urls: [
+      "https://app.nyx-app.my.id/login",
+      "https://app.nyx-app.my.id/register",
+      "https://app.nyx-app.my.id/migrate-receive",
+      "https://app.nyx-app.my.id/migrate-send"
+    ]
+  }
 ];
 
 async function pingIndexNow() {
-  console.log('\n🚀 [IndexNow] Mengirim ping ke mesin pencari...');
-  
-  // Format JSON persis sesuai Dokumentasi "Submitting set of URLs" Option 1
-  const payload = {
-    host: HOST,
-    publicHost: PUBLIC_HOST,
-    key: KEY,
-    urlList: URL_LIST
-  };
+  console.log('\n🚀 [IndexNow] Memulai proses ping ke mesin pencari...');
 
-  try {
-    // Kita bisa menembak ke api.indexnow.org (hub pusat) atau www.bing.com/indexnow
-    const response = await fetch("https://api.indexnow.org/indexnow", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Host": "api.indexnow.org"
-      },
-      body: JSON.stringify(payload)
-    });
+  for (const site of SITES) {
+    console.log(`\n📡 Mengirim ping untuk host: ${site.host}`);
+    
+    // Format JSON wajib sesuai standar IndexNow
+    const payload = {
+      host: site.host,
+      key: KEY,
+      urlList: site.urls
+    };
 
-    // Menangani respons 200 (OK) dan 202 (Accepted)
-    if (response.status === 200 || response.status === 202) {
-      console.log(`✅ [IndexNow] Ping sukses! (Status: ${response.status}). URL diterima.`);
-    } else {
-      console.error(`❌ [IndexNow] Gagal. Kode HTTP: ${response.status}`);
-      // Menampilkan alasan berdasarkan dokumentasi
-      if (response.status === 400) console.error("Alasan: Format JSON tidak valid.");
-      if (response.status === 403) console.error("Alasan: Kunci tidak valid atau file .txt tidak ditemukan di web.");
-      if (response.status === 422) console.error("Alasan: URL tidak cocok dengan host.");
-      if (response.status === 429) console.error("Alasan: Terlalu banyak request (Spam).");
+    try {
+      const response = await fetch("https://api.indexnow.org/indexnow", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8"
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.status === 200 || response.status === 202) {
+        console.log(`✅ [Sukses] URL untuk ${site.host} diterima! (HTTP ${response.status})`);
+      } else {
+        console.error(`❌ [Gagal] Host ${site.host} ditolak. Kode HTTP: ${response.status}`);
+        
+        if (response.status === 400) console.error("   Alasan: Format JSON tidak valid.");
+        if (response.status === 403) console.error(`   Alasan: File ${KEY}.txt tidak ditemukan di https://${site.host}/`);
+        if (response.status === 422) console.error("   Alasan: Ada URL yang tidak cocok dengan host.");
+        if (response.status === 429) console.error("   Alasan: Terlalu banyak request (Spam).");
+      }
+    } catch (error) {
+      console.error(`❌ [Error Sistem] Gagal menghubungi server saat ping ${site.host}:`, error.message);
     }
-  } catch (error) {
-    console.error('❌ [IndexNow] Terjadi kesalahan sistem:', error.message);
   }
-  console.log('');
+  console.log('\n🏁 [IndexNow] Selesai!\n');
 }
 
 pingIndexNow();
