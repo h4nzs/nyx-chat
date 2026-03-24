@@ -3,11 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>NYX - Secure Message</title>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preload" href="/fonts/nunito-v20-latin-regular.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preconnect" href="https://api.nyx-app.my.id">
+    <link rel="preconnect" href="https://api.nyx-app.my.id" crossorigin>
 
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png" />
@@ -21,8 +22,12 @@
     <meta name="apple-mobile-web-app-title" content="NYX">
     <meta name="yandex-verification" content="3926b52b86cac4aa" />
 
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
-    
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+
+    <noscript>
+      <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    </noscript>
+
     <style>
       /* Dark mode default background to prevent white flash */
       body { background-color: #f0f2f5; margin: 0; padding: 0; }
