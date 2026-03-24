@@ -70,9 +70,16 @@ const navItems = [
           <p class="text-lg text-text-primary font-medium mb-4">{t('privacy:privacy.intro')}</p>
           <h3 class="text-lg font-bold mt-8 mb-3 border-b border-white/5 pb-2">{t('privacy:privacy.minimization_title')}</h3>
           <ul class="list-disc pl-5 space-y-3 text-text-secondary">
-            <li><strong>Blind Identity Protocol:</strong> We do not store your raw username, email, or phone number. We utilize client-side Argon2id hashing. The server only stores a cryptographic hash (`usernameHash`), rendering your identity mathematically irreversible to us.</li>
-            <li><strong>Encrypted Metadata:</strong> Your display name, bio, and avatar are symmetrically encrypted on your device. To our infrastructure, your profile is an opaque blob of ciphertext.</li>
-            <li><strong>E2EE Communication:</strong> All direct messages, voice notes, and file attachments are End-to-End Encrypted using the Signal Protocol. We act solely as a blind relay network.</li>
+            <li>
+              <strong>Blind Identity Protocol:</strong> We utilize client-side 
+              <a href="https://en.wikipedia.org/wiki/Argon2" target="_blank" rel="noopener noreferrer" class="text-accent underline">Argon2id hashing</a>. 
+              The server only stores a cryptographic hash, rendering your identity irreversible.
+            </li>
+            <li>
+              <strong>E2EE Communication:</strong> All messages are End-to-End Encrypted using the 
+              <a href="https://signal.org/docs/" target="_blank" rel="noopener noreferrer" class="text-accent underline">Signal Protocol (Double Ratchet)</a>. 
+              We act solely as a blind relay network.
+            </li>
           </ul>
         </section>
 

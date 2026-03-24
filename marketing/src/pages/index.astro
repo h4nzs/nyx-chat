@@ -24,14 +24,28 @@ const comparisonData = [
 
 const landingSchema = JSON.stringify({
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  "name": "NYX Chat",
-  "applicationCategory": "CommunicationApplication",
-  "operatingSystem": "Web, Android, iOS, Windows, macOS, Linux",
-  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-  "description": description,
-  "softwareHelp": "https://nyx-app.my.id/help/",
-  "author": { "@type": "Person", "name": "Han", "url": "https://github.com/h4nzs" }
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "NYX Chat",
+      // ... (sisa data sebelumnya)
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": t('landing:faq.q1'),
+          "acceptedAnswer": { "@type": "Answer", "text": t('landing:faq.a1') }
+        },
+        {
+          "@type": "Question",
+          "name": t('landing:faq.q2'),
+          "acceptedAnswer": { "@type": "Answer", "text": t('landing:faq.a2') }
+        }
+      ]
+    }
+  ]
 });
 ---
 
@@ -68,6 +82,12 @@ const landingSchema = JSON.stringify({
               <span class="text-accent" style="text-shadow: 2px 2px 4px rgba(255, 107, 53, 0.3);">{t('landing:hero.title_highlight')}</span><br />
               {t('landing:hero.title_suffix')}
             </h1>
+            <p class="sr-only">
+              NYX is a zero-knowledge messaging application designed for absolute privacy. 
+              It utilizes the Signal Protocol (Double Ratchet) for end-to-end encryption 
+              and Argon2id for client-side identity hashing, allowing secure communication 
+              without requiring a phone number or email address.
+            </p>
             <p class="text-lg md:text-xl text-text-secondary max-w-xl mb-8 leading-relaxed">
               {t('landing:hero.description')}
             </p>
@@ -110,15 +130,26 @@ const landingSchema = JSON.stringify({
               <tbody>
                 {comparisonData.map((row) => (
                   <tr class="group hover:-translate-y-1 transition-transform">
-                    <td class="py-4 px-6 font-bold text-text-primary bg-bg-main rounded-l-xl shadow-[2px_2px_5px_rgba(0,0,0,0.1)]">{row.feature}</td>
+                    <td class="py-4 px-6 font-bold text-text-primary bg-bg-main rounded-l-xl shadow-[2px_2px_5px_rgba(0,0,0,0.1)]">
+                      {row.feature}
+                    </td>
                     <td class="py-4 px-4 text-center text-red-500 bg-bg-main/50">
                       <div class="flex items-center justify-center gap-2">
-                        {row.wa === t('landing:comparison.values.yes') || row.wa === t('landing:comparison.values.required') ? <FiX/> : null} {row.wa}
+                        {row.wa === t('landing:comparison.values.yes') || row.wa === t('landing:comparison.values.required') 
+                          ? <><FiX/><span class="sr-only">Not Supported / Required:</span></> 
+                          : null} 
+                        {row.wa}
                       </div>
                     </td>
-                    <td class="py-4 px-4 text-center text-yellow-500 bg-bg-main/50">{row.tg}</td>
+                    <td class="py-4 px-4 text-center text-yellow-500 bg-bg-main/50">
+                      {row.tg}
+                    </td>
                     <td class="py-4 px-6 text-center text-green-500 font-bold bg-bg-main rounded-r-xl shadow-[inset_-2px_2px_5px_rgba(0,0,0,0.1)]">
-                      <div class="flex items-center justify-center gap-2"><FiCheck className="text-xl" /> {row.nyx}</div>
+                      <div class="flex items-center justify-center gap-2">
+                        <FiCheck className="text-xl" /> 
+                        <span class="sr-only">Supported by NYX:</span>
+                        {row.nyx}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -173,18 +204,36 @@ const landingSchema = JSON.stringify({
         </div>
       </section>
 
-      <footer class="py-12 border-t border-white/5 bg-bg-main relative">
+      <footer class="py-12 border-t border-white/5 bg-bg-main relative overflow-hidden">
+        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-md h-[1px] bg-gradient-to-r from-transparent via-accent/50 to-transparent"></div>
+
         <div class="max-w-6xl mx-auto px-6 text-center text-text-secondary flex flex-col items-center">
           <div class="flex items-center justify-center gap-3 mb-4">
-            <img src="/pwa-512x512.png" alt="NYX" class="w-6 h-6 grayscale" />
+            <img
+              src="/pwa-512x512.png"
+              alt="NYX"
+              class="w-6 h-6 grayscale hover:grayscale-0 transition-all duration-300"
+            />
             <span class="text-sm font-black tracking-[0.3em] text-text-primary uppercase">NYX</span>
           </div>
-          <p class="text-sm font-medium mb-3">© {new Date().getFullYear()} NYX. <span class="font-bold text-white">AGPL-3.0</span>.</p>
-          <div class="flex flex-wrap justify-center gap-3 text-xs font-bold mt-1 mb-8">
-            <a href="/privacy" class="hover:text-accent transition-colors">Legal & Privacy</a>
+
+          <p class="text-sm font-medium mb-3">
+            {t('landing:footer.rights', { year: new Date().getFullYear().toString() })} <span class="font-bold text-white">AGPL-3.0</span>.
+          </p>
+
+          <div class="flex flex-wrap justify-center items-center gap-3 text-xs font-bold mt-1 mb-8">
+            <a href="/privacy" class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.legal')}</a>
             <span class="text-white/10">•</span>
-            <a href="/help" class="hover:text-accent transition-colors">Help Center</a>
+            <a href="/help" class="hover:text-accent transition-colors tracking-wide">Help Center</a>
+            <span class="text-white/10">•</span>
+            <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.source')}</a>
+            <span class="text-white/10">•</span>
+            <a href="https://github.com/h4nzs/nyx-chat/blob/main/COMMERCIAL.md" target="_blank" rel="noopener noreferrer" class="text-accent hover:text-white transition-colors tracking-wide">{t('landing:footer.commercial')}</a>
           </div>
+
+          <p class="text-[10px] text-text-secondary/40 max-w-3xl mx-auto leading-relaxed font-mono">
+            {t('landing:footer.disclaimer', { year: new Date().getFullYear().toString() })}
+          </p>
         </div>
       </footer>
     </div>
