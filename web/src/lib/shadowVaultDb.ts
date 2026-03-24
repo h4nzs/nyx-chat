@@ -1,25 +1,10 @@
-import Dexie, { Table } from 'dexie';
+import { db, DecryptedMessageRecord } from './db';
 import type { Message } from '@store/conversation';
 import { getSodium } from '@lib/sodiumInitializer';
 import { getMyEncryptionKeyPair } from '@utils/crypto';
 import { asMessageId, asConversationId, asUserId } from '@nyx/shared';
+import type { StoryId } from '@nyx/shared';
 import { ShadowVaultMessageSchema } from '@nyx/shared';
-import type { MessageId, ConversationId, UserId, StoryId } from '@nyx/shared';
-
-export interface DecryptedMessageRecord {
-  id: MessageId;
-  conversationId: ConversationId;
-  content: string | null; // ENCRYPTED Base64 string at rest
-  repliedToId?: MessageId;
-  repliedTo?: string; // Encrypted JSON string of the replied message
-  createdAt: string | Date;
-  senderId: UserId;
-  senderName?: string; // Encrypted sender name
-  senderUsername?: string; // Encrypted sender username
-  senderAvatarUrl?: string; // Encrypted avatar URL
-  isViewOnce?: boolean;
-  isDeletedLocal?: boolean;
-}
 
 // --- CRYPTO ENGINE FOR IRON VAULT ---
 const getVaultKey = async () => {
@@ -65,16 +50,13 @@ export const decryptVaultText = async (encryptedBase64: string): Promise<string 
 };
 // ------------------------------------
 
-export class NyxShadowVault extends Dexie {
-  messages!: Table<DecryptedMessageRecord, string>;
-  storyKeys!: Table<{ storyId: string; key: string }, string>;
+class NyxShadowVaultProxy {
+  get messages() {
+    return db.messages;
+  }
 
-  constructor() {
-    super('nyx_shadow_vault');
-    this.version(4).stores({
-      messages: 'id, conversationId, createdAt',
-      storyKeys: 'storyId'
-    });
+  get storyKeys() {
+    return db.storyKeys;
   }
 
   async upsertMessages(messages: Message[]) {
@@ -86,7 +68,7 @@ export class NyxShadowVault extends Dexie {
       const records: DecryptedMessageRecord[] = [];
       for (const m of validMessages) {
         // [FIX] PERSISTENCE: Check if we already have a record with better profile data
-        const existing = await this.messages.get(m.id);
+        const existing = await db.messages.get(m.id);
         
         let encryptedContent: string | null = null;
         let encryptedRepliedTo: string | undefined = undefined;
@@ -141,7 +123,7 @@ export class NyxShadowVault extends Dexie {
           isDeletedLocal: m.isDeletedLocal
         });
       }
-      await this.messages.bulkPut(records);
+      await db.messages.bulkPut(records);
     } catch (err) {
       console.error("Iron Vault Encryption Error:", err);
     }
@@ -149,7 +131,7 @@ export class NyxShadowVault extends Dexie {
 
   async getMessagesByConversation(conversationId: string): Promise<Message[]> {
     try {
-      const records = await this.messages.where('conversationId').equals(conversationId).toArray();
+      const records = await db.messages.where('conversationId').equals(conversationId).toArray();
       const messages: Message[] = [];
       for (const rawRecord of records) {
         const parsed = ShadowVaultMessageSchema.safeParse(rawRecord);
@@ -215,7 +197,7 @@ export class NyxShadowVault extends Dexie {
 
   async getMessage(id: string): Promise<Message | null> {
     try {
-      const r = await this.messages.get(id);
+      const r = await db.messages.get(id);
       if (!r) return null;
       let plainText = null;
       let decryptedRepliedTo = undefined;
@@ -270,7 +252,7 @@ export class NyxShadowVault extends Dexie {
 
   async deleteMessage(id: string) {
     try {
-      await this.messages.delete(id);
+      await db.messages.delete(id);
     } catch (e) {
       console.error("Failed to delete message from vault", e);
     }
@@ -278,20 +260,20 @@ export class NyxShadowVault extends Dexie {
 
   async deleteConversationMessages(conversationId: string) {
     try {
-      await this.messages.where('conversationId').equals(conversationId).delete();
+      await db.messages.where('conversationId').equals(conversationId).delete();
     } catch (e) {
       console.error("Failed to delete conversation messages from vault", e);
     }
   }
 }
 
-export const shadowVault = new NyxShadowVault();
+export const shadowVault = new NyxShadowVaultProxy();
 
 export async function saveStoryKey(storyId: string, base64Key: string): Promise<void> {
-  await shadowVault.storyKeys.put({ storyId, key: base64Key });
+  await db.storyKeys.put({ storyId: storyId as StoryId, key: base64Key });
 }
 
 export async function getStoryKey(storyId: string): Promise<string | null> {
-  const record = await shadowVault.storyKeys.get(storyId);
+  const record = await db.storyKeys.get(storyId);
   return record ? record.key : null;
 }

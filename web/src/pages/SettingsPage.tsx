@@ -42,7 +42,7 @@ const parseApiError = (error: unknown, fallback: string): string => {
         return parsed.error || fallback;
       }
       if (typeof details === 'object' && details !== null && 'error' in details) {
-        return (details as any).error;
+        return (details as { error: string }).error;
       }
     } catch {
       // fallback

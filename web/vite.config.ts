@@ -144,7 +144,7 @@ export default defineConfig(({ mode }) => {
             if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
               return 'react-vendor';
             }
-            if (id.includes('framer-motion') || id.includes('react-icons') || id.includes('clsx') || id.includes('classnames')) {
+            if (id.includes('framer-motion') || id.includes('react-icons') || id.includes('clsx')) {
               return 'ui-vendor';
             }
             if (id.includes('libsodium-wrappers') || id.includes('bip39') || id.includes('@simplewebauthn/browser')) {

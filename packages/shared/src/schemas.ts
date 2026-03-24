@@ -24,7 +24,7 @@ export const MinimalConversationSchema = z.object({
   isGroup: z.boolean().default(false),
   encryptedMetadata: z.string().nullable().optional(),
   creatorId: UserIdSchema.nullable().optional(),
-  updatedAt: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as any); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
+  updatedAt: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as string | number | Date); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
   unreadCount: z.number().default(0),
   keyRotationPending: z.boolean().optional(),
   requiresKeyRotation: z.boolean().optional(),
@@ -35,11 +35,11 @@ export const IncomingMessageSchema = z.object({
   conversationId: ConversationIdSchema,
   senderId: UserIdSchema,
   content: z.string().nullable().optional(),
-  timestamp: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as any); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
+  timestamp: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as string | number | Date); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
   createdAt: z.preprocess((val) => { 
     if (val === null || val === undefined) return undefined; 
     try { 
-      const d = new Date(val as any); 
+      const d = new Date(val as string | number | Date); 
       if (isNaN(d.getTime())) throw new Error("Invalid date");
       return d.toISOString(); 
     } catch { 
@@ -56,7 +56,7 @@ export const WebRTCSignalingSchema = z.object({
   from: UserIdSchema,
   // Using passthrough because payload is often an encrypted string during 'webrtc:secure_signal' 
   // but could be object if not fully encrypted at the transport layer
-  payload: z.any().optional(), 
+  payload: z.unknown().optional(), 
 }).passthrough();
 
 // --- Local Database Schemas ---
@@ -65,7 +65,7 @@ export const ShadowVaultMessageSchema = z.object({
   conversationId: ConversationIdSchema,
   senderId: UserIdSchema,
   content: z.string().nullable().optional(),
-  createdAt: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as any); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()), 
+  createdAt: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as string | number | Date); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()), 
   status: z.enum(['sending', 'sent', 'delivered', 'read', 'failed']).optional().default('sent'),
   repliedToId: z.string().optional(),
   repliedTo: z.string().optional(),

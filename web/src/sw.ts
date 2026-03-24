@@ -44,9 +44,28 @@ self.addEventListener('push', (event: PushEvent) => {
       // ATTEMPT E2EE DECRYPTION FOR SEALED BOXES
       if (data.type === 'ENCRYPTED_MESSAGE' && data.data?.encryptedPushPayload) {
         try {
-           const idb = await import('idb-keyval');
-           const encryptedKeys = await idb.get('nyx_encrypted_keys');
-           const autoUnlockKey = await idb.get('nyx_device_auto_unlock_key');
+           // Helper to read from NyxUnifiedDB directly without heavy deps
+           const getKvValue = (key: string): Promise<unknown> => {
+             return new Promise((resolve) => {
+               const req = indexedDB.open('NyxUnifiedDB');
+               req.onsuccess = () => {
+                 const db = req.result;
+                 if (!db.objectStoreNames.contains('kvStore')) {
+                   resolve(undefined);
+                   return;
+                 }
+                 const tx = db.transaction('kvStore', 'readonly');
+                 const store = tx.objectStore('kvStore');
+                 const getReq = store.get(key);
+                 getReq.onsuccess = () => resolve(getReq.result?.value);
+                 getReq.onerror = () => resolve(undefined);
+               };
+               req.onerror = () => resolve(undefined);
+             });
+           };
+
+           const encryptedKeys = (await getKvValue('nyx_encrypted_keys')) as string | undefined;
+           const autoUnlockKey = (await getKvValue('nyx_device_auto_unlock_key')) as string | undefined;
 
            if (encryptedKeys && autoUnlockKey) {
            const sodiumModule = await import('libsodium-wrappers');
@@ -75,7 +94,7 @@ self.addEventListener('push', (event: PushEvent) => {
                // 3. Decrypt the Private Keys using WebCrypto AES-GCM
                const cryptoKey = await crypto.subtle.importKey(
                    'raw',
-                   kek as BufferSource,
+                   kek as unknown as BufferSource,
                    { name: 'AES-GCM' },
                    false,
                    ['decrypt']

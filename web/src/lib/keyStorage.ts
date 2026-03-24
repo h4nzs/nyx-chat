@@ -1,5 +1,4 @@
-// web/src/lib/keyStorage.ts
-import { get, set, del } from 'idb-keyval';
+import { db } from './db';
 import { clearAllKeys as clearSessionKeys } from './keychainDb';
 import { sha256 } from 'hash-wasm';
 
@@ -8,6 +7,20 @@ const STORAGE_KEYS = {
   DEVICE_AUTO_UNLOCK_KEY: 'nyx_device_auto_unlock_key',
   DEVICE_AUTO_UNLOCK_READY: 'nyx_device_auto_unlock_ready',
   PANIC_HASH: 'nyx_panic_hash',
+};
+
+// Helper for KV operations
+const get = async <T>(key: string): Promise<T | undefined> => {
+  const item = await db.kvStore.get(key);
+  return item?.value as T | undefined;
+};
+
+const set = async (key: string, value: unknown) => {
+  await db.kvStore.put({ key, value });
+};
+
+const del = async (key: string) => {
+  await db.kvStore.delete(key);
 };
 
 export const setPanicPassword = async (password: string) => {

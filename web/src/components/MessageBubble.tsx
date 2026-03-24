@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Message, MessageStatus } from "@store/conversation";
 import { useAuthStore } from "@store/auth";
-import classNames from "classnames";
 import { FaCheck, FaCheckDouble } from "react-icons/fa";
 import { FiClock, FiEyeOff, FiCamera, FiVideo, FiMic, FiEye, FiVolumeX } from "react-icons/fi";
 import FileAttachment from "./FileAttachment";
@@ -184,9 +183,9 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
               isPlaceholder ? (
                 <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
               ) : (
-                <div className={classNames("text-base break-words w-full", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
+                <div className={clsx("text-base break-words w-full", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
                   <div 
-                    className={classNames("relative overflow-hidden transition-all duration-300", {
+                    className={clsx("relative overflow-hidden transition-all duration-300", {
                       "max-h-[250px]": isLongMessage && !isTextExpanded,
                       "max-h-none": !isLongMessage || isTextExpanded
                     })}
@@ -196,7 +195,7 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
                   </div>                  {isLongMessage && (
                     <button
                       onClick={() => setIsTextExpanded(!isTextExpanded)}
-                      className={classNames("mt-2 text-xs font-bold uppercase tracking-wider block active:scale-95 transition-all", {
+                      className={clsx("mt-2 text-xs font-bold uppercase tracking-wider block active:scale-95 transition-all", {
                         "text-white/80 hover:text-white": isOwn,
                         "text-accent hover:text-indigo-400": !isOwn
                       })}
