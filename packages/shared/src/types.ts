@@ -88,6 +88,11 @@ export type Conversation = z.infer<typeof MinimalConversationSchema> & {
   participants: Participant[];
   lastMessage: (Message & { preview?: string }) | null;
   lastUpdated?: number;
+  decryptedMetadata?: {
+    title?: string;
+    description?: string;
+    avatarUrl?: string;
+  };
 };
 
 export type Story = {

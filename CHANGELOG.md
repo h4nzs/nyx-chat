@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.4] - 2026-03-24
+
+This massive update brings a complete rewrite of our public-facing infrastructure, major architectural security enhancements ("The Grand Unification"), native WebRTC calls, the new Stories feature, and full internationalization. 
+
+### 🚀 New Features
+- **Next-Gen Marketing Pages (Astro):** Completely rewrote the landing, privacy, and help pages using pure Astro for zero-JS footprint, blazing-fast performance, and superior SEO/GEO.
+- **Global Internationalization (i18n):** Added native multi-language support across the app and landing pages. Officially supporting Indonesian (`id`), Spanish (`es`), and Portuguese (Brazil) (`pt-BR`), complete with a dynamic Language Switcher.
+- **Stories & Canvas Editor:** Introduced end-to-end encrypted Stories with complete privacy controls. Includes a native canvas image editor, dynamic crop modes, and attachment cropper.
+- **WebRTC & TURN Server:** Implemented a dedicated TURN server and a new WebRTC P2P mesh topology for highly reliable, encrypted audio/video calls.
+- **QR Connect:** New QR-based quick connect and peer discovery feature.
+- **Manual State Sync:** Added a new "Desync" button for users to manually forcefully reconcile local and server message states.
+
+### 🛡️ Architecture & Security ("The Grand Unification")
+- **Full Strict Mode:** Enforced TypeScript `strict: true` across the entire frontend and backend monorepo.
+- **Zod & Opaque Types:** Replaced loose types with Zod runtime shields and cryptographic opaque types to strictly validate all incoming/outgoing payloads.
+- **Shared Package:** Extracted core types and validations into a new unified `@nyx/shared` package for flawless backend-frontend contract matching.
+- **CodeQL Refactor:** Refactored GitHub CodeQL workflows for deeper security analysis.
+- **Vulnerability Patches:** Resolved multiple critical/high severity findings, updated vulnerable dependencies via `pnpm` overrides (e.g., `flatted`, `undici`), and hardened socket payload shields.
+- **Cryptography Enhancements:** Hardened X3DH protocol initiators and optimized cryptographic operations ordering via Proxy Web Workers.
+
+### 💅 Polish & Improvements
+- **SEO & IndexNow:** Implemented advanced SEO tags, GEO-hooks, and automated `IndexNow` pinging for faster search engine indexing.
+- **Media Optimization:** Enhanced image loading logic (lazy loading, responsive sizing) and UI icon refinements.
+- **Error Handling UI:** Redesigned error boundaries and fallback UIs for a smoother user experience during network failures.
+- **Settings Expansion:** Added new dedicated UI toggles for Push Notifications within the Settings page.
+
+### 🐛 Bug Fixes
+- **Message State & Sync:** Fixed recurring issues with message desync, offline queue logic, and atomic increment errors between local IndexedDB and server state.
+- **File Uploads:** Rewrote file upload sequence logic to prevent freezing and ensure proper metadata attachment.
+- **Dynamic Island:** Fixed null message rendering bugs that caused the Dynamic Island navigation to crash.
+- **Routing & Previews:** Fixed missing URL previews on reply messages and corrected React Router navigation edge cases in the Register flow.
+- **Legal & Branding:** Corrected typos and formatting in the Privacy Policy, Licensing (AGPL/Commercial), and Trademark attributions.
+
 ## [2.3.0] - 2026-03-07
 
 This release introduces the **"Tactical UX & Advanced Operations"** upgrade. It significantly elevates the user experience, media handling, and functional messaging capabilities while maintaining strict adherence to Zero-Knowledge and E2EE protocols.

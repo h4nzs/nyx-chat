@@ -27,8 +27,8 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
   const [userList, setUserList] = useState<UserSearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const me = useAuthStore(s => s.user);
-  const { addOrUpdateConversation, openConversation } = useConversationStore(useShallow(state => ({
-    addOrUpdateConversation: state.addOrUpdateConversation,
+  const { createGroup, openConversation } = useConversationStore(useShallow(state => ({
+    createGroup: state.createGroup,
     openConversation: state.openConversation,
   })));
 
@@ -79,22 +79,15 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
       return toast.error(t('modals:group_info.toasts.create_failed'));
     }
         setLoading(true);
-        try {      const newConversation = await authFetch<Conversation>("/api/conversations", {
-        method: "POST",
-        body: JSON.stringify({
-          title: title.trim(),
-          userIds: selectedUsers.map(u => u.id),
-          isGroup: true,
-        }),
-      });
+        try {
+      const conversationId = await createGroup(title.trim(), selectedUsers.map(u => u.id));
 
       // Join the socket room for real-time updates
-      getSocket().emit("conversation:join", newConversation.id);
+      getSocket().emit("conversation:join", conversationId);
 
-      addOrUpdateConversation(newConversation);
-      openConversation(newConversation.id);
+      openConversation(conversationId);
 
-      toast.success(t('modals:group_info.toasts.created', { name: newConversation.title }));
+      toast.success(t('modals:group_info.toasts.created', { name: title }));
       onClose();
 
     } catch (error: unknown) {

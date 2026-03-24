@@ -97,6 +97,7 @@ DATABASE_URL="postgresql://user:pass@localhost:5432/nyx_db"
 REDIS_URL="redis://localhost:6379"
 JWT_SECRET="super-long-random-string-min-32-chars"
 # Cloudflare R2 Config...
+# And more, see **(.env.example)**
 
 ```
 

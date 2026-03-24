@@ -78,8 +78,12 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
   const peerProfile = useUserProfile(peerUser as unknown as { id: string; encryptedProfile?: string | null });
-  const title = conversation.isGroup ? conversation.title : peerProfile.name;
-  const avatarUrl = conversation.isGroup ? conversation.avatarUrl : peerProfile.avatarUrl;
+  const title = conversation.isGroup 
+    ? (conversation.decryptedMetadata?.title || t('common:defaults.group_unknown', 'Unknown Group'))
+    : peerProfile.name;
+  const avatarUrl = conversation.isGroup 
+    ? conversation.decryptedMetadata?.avatarUrl 
+    : peerProfile.avatarUrl;
   const isOnline = peerUser ? onlineUsers.has(peerUser.id) : false;
   const isConvVerified = verifiedStatus[conversation.id] || false;
 

@@ -92,9 +92,15 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
 
       toast.loading(t('modals:group_info.toasts.updating'), { id: toastId });
       
-      await api(`/api/uploads/groups/${conversation.id}/avatar`, {
-        method: 'POST',
-        body: JSON.stringify({ fileUrl }),
+      // [FIX] ZERO-KNOWLEDGE METADATA UPDATE
+      const { encryptGroupMetadata } = await import('@utils/crypto');
+      const currentMetadata = conversation.decryptedMetadata || {};
+      const newMetadata = { ...currentMetadata, avatarUrl: fileUrl };
+      const encryptedMetadata = await encryptGroupMetadata(newMetadata, conversation.id);
+
+      await api(`/api/conversations/${conversation.id}/details`, {
+        method: 'PUT',
+        body: JSON.stringify({ encryptedMetadata }),
       });
 
       toast.success(t('modals:group_info.toasts.avatar_updated'), { id: toastId });
@@ -119,9 +125,10 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
     }
   };
 
-  const avatarSrc = conversation.avatarUrl 
-    ? `${toAbsoluteUrl(conversation.avatarUrl)}?t=${conversation.lastUpdated}` 
-    : `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`;
+  const title = conversation.decryptedMetadata?.title || t('common:defaults.group_unknown', 'Unknown Group');
+  const avatarSrc = conversation.decryptedMetadata?.avatarUrl 
+    ? `${toAbsoluteUrl(conversation.decryptedMetadata.avatarUrl)}?t=${conversation.lastUpdated}` 
+    : `https://api.dicebear.com/8.x/initials/svg?seed=${title}`;
 
   return (
     <div className="fixed inset-0 z-40">
@@ -160,11 +167,11 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                     <div className="relative w-24 h-24 mx-auto mb-4">
                       <img
                         src={avatarSrc}
-                        alt={conversation.title || t('common:defaults.avatar', 'Avatar')}
+                        alt={title}
                         className="w-full h-full rounded-full object-cover bg-bg-primary"
                         onError={(e) => {
                           const target = e.target as HTMLImageElement;
-                          target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`;
+                          target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${title}`;
                         }}
                       />
                       {amIAdmin && (
@@ -176,8 +183,8 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                         </>
                       )}
                     </div>
-                    <h3 className="text-2xl font-bold text-text-primary">{conversation.title}</h3>
-                    <p className="text-text-secondary mt-1">{conversation.description || t('modals:group_info.no_desc')}</p>
+                    <h3 className="text-2xl font-bold text-text-primary">{title}</h3>
+                    <p className="text-text-secondary mt-1">{conversation.decryptedMetadata?.description || t('modals:group_info.no_desc')}</p>
                     {amIAdmin && (
                       <button onClick={() => setIsEditing(true)} className="absolute top-4 right-4 text-text-secondary hover:text-accent-color">
                         <FiEdit2 size={20} />
@@ -233,8 +240,8 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
         {isEditing && (
           <EditGroupInfoModal
             conversationId={conversation.id}
-            currentTitle={conversation.title || ''}
-            currentDescription={conversation.description || null}
+            currentTitle={conversation.decryptedMetadata?.title || ''}
+            currentDescription={conversation.decryptedMetadata?.description || null}
             onClose={() => setIsEditing(false)}
           />
         )}
