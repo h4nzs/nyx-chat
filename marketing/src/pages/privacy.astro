@@ -99,9 +99,9 @@ const navItems = [
           <div class="prose dark:prose-invert max-w-none text-text-secondary leading-relaxed">
             
             <div class="bg-red-500/10 border border-red-500/20 rounded-xl p-5 mb-6 not-prose">
-              <h4 class="flex items-center gap-2 text-red-400 font-bold mb-2">
+              <h3 class="flex items-center gap-2 text-red-400 font-bold mb-2">
                 <FiAlertTriangle /> {t('privacy:terms.liability_title')}
-              </h4>
+              </h3>
               <p class="text-sm text-red-200/80 m-0 leading-relaxed">
                 <span set:html={t('privacy:terms.liability_desc') !== 'privacy:terms.liability_desc' ? t('privacy:terms.liability_desc') : 'NYX is provided &quot;AS IS&quot;, without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>'} />
                 
@@ -132,7 +132,7 @@ const navItems = [
             <p set:html={t('privacy:licensing.agpl_desc') !== 'privacy:licensing.agpl_desc' ? t('privacy:licensing.agpl_desc') : 'If you modify the NYX codebase and allow users to interact with it over a network (e.g., hosting it as a SaaS), you are legally obligated to release your modified source code to the public. <strong>Closed-source SaaS deployments of NYX under this license are strictly prohibited and constitute copyright infringement.</strong>'} />
             
             <div class="bg-bg-surface border border-white/10 rounded-xl p-5 mt-6 not-prose">
-              <h4 class="font-bold text-text-primary mb-2">{t('privacy:licensing.commercial_title')}</h4>
+              <h3 class="font-bold text-text-primary mb-2">{t('privacy:licensing.commercial_title')}</h3>
               <p class="text-sm mb-4 text-text-secondary">
                 {t('privacy:licensing.commercial_desc')}
               </p>
@@ -209,19 +209,19 @@ const navItems = [
             <p>{t('privacy:security.intro')}</p>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6 not-prose">
               <div class="bg-bg-surface p-4 rounded-xl border border-white/5">
-                <h4 class="font-bold text-text-primary mb-1">{t('privacy:security.signal_title')}</h4>
+                <h3 class="font-bold text-text-primary mb-1">{t('privacy:security.signal_title')}</h3>
                 <p class="text-xs text-text-secondary">{t('privacy:security.signal_desc')}</p>
               </div>
               <div class="bg-bg-surface p-4 rounded-xl border border-white/5">
-                <h4 class="font-bold text-text-primary mb-1">{t('privacy:security.webauthn_title')}</h4>
+                <h3 class="font-bold text-text-primary mb-1">{t('privacy:security.webauthn_title')}</h3>
                 <p class="text-xs text-text-secondary">{t('privacy:security.webauthn_desc')}</p>
               </div>
               <div class="bg-bg-surface p-4 rounded-xl border border-white/5">
-                <h4 class="font-bold text-text-primary mb-1">{t('privacy:security.memory_title')}</h4>
+                <h3 class="font-bold text-text-primary mb-1">{t('privacy:security.memory_title')}</h3>
                 <p class="text-xs text-text-secondary">{t('privacy:security.memory_desc')}</p>
               </div>
               <div class="bg-bg-surface p-4 rounded-xl border border-white/5">
-                <h4 class="font-bold text-text-primary mb-1">{t('privacy:security.migration_title')}</h4>
+                <h3 class="font-bold text-text-primary mb-1">{t('privacy:security.migration_title')}</h3>
                 <p class="text-xs text-text-secondary">{t('privacy:security.migration_desc')}</p>
               </div>
             </div>

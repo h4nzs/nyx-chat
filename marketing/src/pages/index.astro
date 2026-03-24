@@ -3,6 +3,8 @@ import MainLayout from '../layouts/MainLayout.astro';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import { getLangFromUrl, useTranslations } from '../utils/i18n';
 import { FiGithub, FiUserPlus, FiMessageSquare, FiShield, FiArrowRight, FiHash, FiEyeOff, FiCheck, FiX, FiCpu, FiSun, FiMoon } from 'react-icons/fi';
+import { Image } from 'astro:assets';
+import mobileDarkImg from '../assets/screenshots/mobile-dark.png';
 
 const { lang: propLang } = Astro.props;
 const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
@@ -117,7 +119,15 @@ const landingSchema = JSON.stringify({
                 <div class="h-[46px] w-[3px] bg-gray-800 absolute -left-[13px] top-[178px] rounded-l-lg"></div>
                 <div class="h-[64px] w-[3px] bg-gray-800 absolute -right-[13px] top-[142px] rounded-r-lg"></div>
                 <div class="rounded-[2rem] overflow-hidden w-full h-auto aspect-[9/19] bg-bg-main relative">
-                  <img src="/screenshots/mobile-dark.png" alt="App Screenshot" loading="eager" class="object-cover object-top w-full h-full opacity-90 hover:scale-105 transition-transform duration-700" />
+                  <Image 
+                    src={mobileDarkImg} 
+                    alt="App Screenshot" 
+                    loading="eager" 
+                    fetchpriority="high"
+                    widths={[260, 430]} 
+                    sizes="(max-width: 768px) 260px, 430px"
+                    class="object-cover object-top w-full h-full opacity-90 hover:scale-105 transition-transform duration-700" 
+                  />
                 </div>
               </div>
             </div>
