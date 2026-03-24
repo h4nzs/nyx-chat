@@ -5,6 +5,7 @@ import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiCpu, FiGlobe, FiAlertTrian
 
 const { lang: propLang } = Astro.props;
 const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
+const langPrefix = lang === 'en' ? '' : `/${lang}`;
 const t = useTranslations(lang);
 
 const title = t('privacy:seo.title') !== 'privacy:seo.title' ? t('privacy:seo.title') : 'Legal & Privacy | NYX';
@@ -36,7 +37,7 @@ const navItems = [
     
     <header class="sticky top-0 z-50 bg-bg-surface/80 backdrop-blur-xl border-b border-white/5 shadow-sm">
       <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-        <a href="/" class="flex items-center gap-2 text-text-secondary hover:text-accent transition-colors text-sm font-bold tracking-wide uppercase">
+        <a href={`${langPrefix}/` || '/'} class="flex items-center gap-2 text-text-secondary hover:text-accent transition-colors text-sm font-bold tracking-wide uppercase">
           <FiArrowLeft size={16} /> {t('privacy:back')}
         </a>
         <div class="font-mono text-[10px] text-text-secondary uppercase tracking-[0.2em] flex items-center gap-2">
@@ -96,12 +97,23 @@ const navItems = [
             <h2 class="text-2xl font-bold text-text-primary tracking-tight">{t('privacy:terms.title')}</h2>
           </div>
           <div class="prose dark:prose-invert max-w-none text-text-secondary leading-relaxed">
+            
             <div class="bg-red-500/10 border border-red-500/20 rounded-xl p-5 mb-6 not-prose">
               <h4 class="flex items-center gap-2 text-red-400 font-bold mb-2">
                 <FiAlertTriangle /> {t('privacy:terms.liability_title')}
               </h4>
-              <p class="text-sm text-red-200/80 m-0" set:html={t('privacy:terms.liability_desc') !== 'privacy:terms.liability_desc' ? t('privacy:terms.liability_desc') : 'NYX is provided &quot;AS IS&quot;, without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>'} />
+              <p class="text-sm text-red-200/80 m-0 leading-relaxed">
+                <span set:html={t('privacy:terms.liability_desc') !== 'privacy:terms.liability_desc' ? t('privacy:terms.liability_desc') : 'NYX is provided &quot;AS IS&quot;, without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>'} />
+                
+                <span class="block mt-3 border-t border-red-500/20 pt-3">
+                  {t('privacy:terms.help_guidance') !== 'privacy:terms.help_guidance' ? t('privacy:terms.help_guidance') : 'If you need guidance, consult our'} 
+                  <a href={`${langPrefix}/help`} class="text-white underline hover:text-accent font-semibold">
+                    {t('common:help') !== 'common:help' ? t('common:help') : 'Help Center'}
+                  </a>.
+                </span>
+              </p>
             </div>
+
             <ul class="list-disc pl-5 space-y-4">
               <li set:html={t('privacy:terms.gating') !== 'privacy:terms.gating' ? t('privacy:terms.gating') : '<strong>Trust-Tier Gating:</strong> To protect the network, unverified accounts are placed in a restricted &quot;Sandbox Mode&quot;. Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.'} />
               <li set:html={t('privacy:terms.abuse') !== 'privacy:terms.abuse' ? t('privacy:terms.abuse') : '<strong>Zero-Tolerance Abuse Policy:</strong> You agree not to utilize the NYX network for illicit activities, automated API abuse (botting), or distributing malware. Violations will result in immediate network bans.'} />

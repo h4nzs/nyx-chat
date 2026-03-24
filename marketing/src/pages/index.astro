@@ -6,6 +6,7 @@ import { FiGithub, FiUserPlus, FiMessageSquare, FiShield, FiArrowRight, FiHash, 
 
 const { lang: propLang } = Astro.props;
 const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
+const langPrefix = lang === 'en' ? '' : `/${lang}`;
 const t = useTranslations(lang);
 
 const APP_URL = "https://app.nyx-app.my.id";
@@ -292,9 +293,9 @@ const landingSchema = JSON.stringify({
             {t('landing:footer.rights', { year: new Date().getFullYear().toString() })} <span class="font-bold text-white">AGPL-3.0</span>.
           </p>
           <div class="flex flex-wrap justify-center items-center gap-3 text-xs font-bold mt-1 mb-8">
-            <a href="/privacy" class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.legal')}</a>
+            <a href={`${langPrefix}/privacy`} class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.legal')}</a>
             <span class="text-white/10">•</span>
-            <a href="/help" class="hover:text-accent transition-colors tracking-wide">
+            <a href={`${langPrefix}/help`} class="hover:text-accent transition-colors tracking-wide">
               {t('common:help') !== 'common:help' ? t('common:help') : 'Help Center'}
             </a>
             <span class="text-white/10">•</span>

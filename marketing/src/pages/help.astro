@@ -8,6 +8,7 @@ import {
 
 const { lang: propLang } = Astro.props;
 const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
+const langPrefix = lang === 'en' ? '' : `/${lang}`;
 const t = useTranslations(lang);
 
 const title = t('help:title');
@@ -27,7 +28,7 @@ const categories = [
     <div class="max-w-4xl mx-auto">
       
       <nav class="flex items-center gap-2 text-xs font-bold text-text-secondary uppercase tracking-widest mb-8 animate-in fade-in duration-500">
-        <a href="/" class="hover:text-accent transition-colors">{t('common:home') !== 'common:home' ? t('common:home') : 'Home'}</a>
+        <a href={`${langPrefix}/` || '/'} class="hover:text-accent transition-colors">{t('common:home') !== 'common:home' ? t('common:home') : 'Home'}</a>
         <span>/</span>
         <span class="text-accent">{title}</span>
       </nav>
@@ -52,7 +53,7 @@ const categories = [
         <div class="flex-1 space-y-16">
           <header class="mb-12 border-b border-white/5 pb-8 animate-in slide-in-from-bottom-4 duration-700">
             <div class="flex items-center gap-4 mb-4">
-              <a href="/" aria-label="Back" class="p-2.5 rounded-full text-text-secondary bg-bg-main shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.1)] hover:text-accent transition-all">
+              <a href={`${langPrefix}/` || '/'} aria-label="Back" class="p-2.5 rounded-full text-text-secondary bg-bg-main shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.1)] hover:text-accent transition-all">
                 <FiChevronLeft size={24} />
               </a>
               <h1 class="text-4xl md:text-5xl font-black tracking-tighter bg-gradient-to-r from-white to-text-secondary bg-clip-text text-transparent">{title}</h1>
