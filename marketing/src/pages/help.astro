@@ -3,15 +3,14 @@ import MainLayout from '../layouts/MainLayout.astro';
 import { getLangFromUrl, useTranslations } from '../utils/i18n';
 import { 
   FiChevronLeft, FiHelpCircle, FiRefreshCw, 
-  FiUserCheck, FiKey, FiCloudOff, FiAlertCircle,
-  FiShield, FiZap
+  FiUserCheck, FiKey, FiCloudOff, FiAlertCircle
 } from 'react-icons/fi';
 
 const lang = getLangFromUrl(Astro.url);
 const t = useTranslations(lang);
 
 const title = t('help:title');
-const description = "Knowledge base for NYX: learn about secure account migration, sandbox mode, and zero-knowledge architecture.";
+const description = t('help:seo.description') !== 'help:seo.description' ? t('help:seo.description') : 'Get help with NYX E2EE chat, account recovery, and security features.';
 
 const categories = [
   { id: 'migration', icon: FiRefreshCw, title: t('help:move_account.title') },
@@ -27,7 +26,7 @@ const categories = [
     <div class="max-w-4xl mx-auto">
       
       <nav class="flex items-center gap-2 text-xs font-bold text-text-secondary uppercase tracking-widest mb-8 animate-in fade-in duration-500">
-        <a href="/" class="hover:text-accent transition-colors">Home</a>
+        <a href="/" class="hover:text-accent transition-colors">{t('common:home') !== 'common:home' ? t('common:home') : 'Home'}</a>
         <span>/</span>
         <span class="text-accent">{title}</span>
       </nav>
@@ -37,7 +36,7 @@ const categories = [
         <aside class="md:w-64 flex-shrink-0 hidden md:block">
           <div class="sticky top-8 bg-bg-surface rounded-2xl p-6 border border-white/5 shadow-neu-flat-dark">
             <h3 class="text-sm font-black uppercase tracking-tighter mb-4 flex items-center gap-2">
-              <FiHelpCircle class="text-accent" /> Topics
+              <FiHelpCircle class="text-accent" /> {t('help:topics') !== 'help:topics' ? t('help:topics') : 'Topics'}
             </h3>
             <nav class="space-y-1">
               {categories.map(cat => (
@@ -51,10 +50,12 @@ const categories = [
 
         <div class="flex-1 space-y-16">
           <header class="mb-12 border-b border-white/5 pb-8 animate-in slide-in-from-bottom-4 duration-700">
-            <h1 class="text-4xl md:text-5xl font-black tracking-tighter mb-4 bg-gradient-to-r from-white to-text-secondary bg-clip-text text-transparent">{title}</h1>
-            <p class="text-lg text-text-secondary leading-relaxed">
-              Panduan teknis dan operasional untuk ekosistem NYX yang aman dan terenkripsi.
-            </p>
+            <div class="flex items-center gap-4 mb-4">
+              <a href="/" aria-label="Back" class="p-2.5 rounded-full text-text-secondary bg-bg-main shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.1)] hover:text-accent transition-all">
+                <FiChevronLeft size={24} />
+              </a>
+              <h1 class="text-4xl md:text-5xl font-black tracking-tighter bg-gradient-to-r from-white to-text-secondary bg-clip-text text-transparent">{title}</h1>
+            </div>
           </header>
 
           <section id="migration" class="scroll-mt-24 group">
@@ -65,17 +66,17 @@ const categories = [
               <h2 class="text-2xl font-bold tracking-tight">{t('help:move_account.title')}</h2>
             </div>
             <div class="bg-bg-surface p-6 rounded-2xl border border-white/5 text-text-secondary shadow-sm">
-              <p class="mb-6">{t('help:move_account.desc')}</p>
-              <div class="grid sm:grid-cols-2 gap-4">
-                <div class="bg-black/20 p-5 rounded-xl border border-white/5">
-                  <h4 class="text-text-primary font-bold mb-2 flex items-center gap-2 italic"><FiZap class="text-yellow-500" /> 1. Jalur Cepat (QR)</h4>
-                  <p class="text-sm">Gunakan fitur <code class="text-accent">Transfer to New Device</code> untuk migrasi langsung antar perangkat via P2P Tunnel.</p>
-                </div>
-                <div class="bg-black/20 p-5 rounded-xl border border-white/5">
-                  <h4 class="text-text-primary font-bold mb-2 flex items-center gap-2 italic"><FiShield class="text-blue-500" /> 2. Jalur Vault</h4>
-                  <p class="text-sm">Ekspor file <code class="text-accent">.nyxvault</code> terenkripsi dan impor kembali di perangkat baru mana pun.</p>
-                </div>
-              </div>
+              <p class="mb-4">{t('help:move_account.desc')}</p>
+              <ul class="list-disc list-inside ml-4 space-y-3">
+                <li>
+                  <span class="font-bold text-text-primary">{t('help:move_account.migration_label')}</span>{' '}
+                  <span set:html={t('help:move_account.migration_text') !== 'help:move_account.migration_text' ? t('help:move_account.migration_text') : 'Go to <span class="font-mono bg-black/30 p-1 rounded">Settings &gt; Transfer to New Device</span>. This creates a secure, direct tunnel to your new phone via QR code.'} />
+                </li>
+                <li>
+                  <span class="font-bold text-text-primary">{t('help:move_account.backup_label')}</span>{' '}
+                  <span set:html={t('help:move_account.backup_text') !== 'help:move_account.backup_text' ? t('help:move_account.backup_text') : 'Go to <span class="font-mono bg-black/30 p-1 rounded">Settings &gt; Export Vault</span>. Save the <code>.nyxvault</code> file and import it on your new device login screen.'} />
+                </li>
+              </ul>
             </div>
           </section>
 
@@ -87,13 +88,8 @@ const categories = [
               <h2 class="text-2xl font-bold tracking-tight">{t('help:sandbox_mode.title')}</h2>
             </div>
             <div class="bg-bg-surface p-6 rounded-2xl border border-white/5 text-text-secondary">
-              <p class="mb-4">NYX menggunakan sistem <strong class="text-text-primary">Proof-of-Humanity</strong> untuk mencegah bot tanpa mengambil data pribadi pengguna (seperti nomor telepon).</p>
-              <div class="flex flex-col gap-3">
-                <div class="flex gap-4 items-start p-4 bg-accent/5 rounded-xl border border-accent/10">
-                  <span class="px-2 py-1 bg-accent text-white text-[10px] font-black rounded uppercase mt-1">Update</span>
-                  <p class="text-sm m-0">Tingkatkan ke <strong>VIP Status</strong> secara instan melalui Verifikasi Biometrik atau kriptografi <em>Proof of Work</em> di menu Settings.</p>
-                </div>
-              </div>
+              <p class="mb-3" set:html={t('help:sandbox_mode.desc') !== 'help:sandbox_mode.desc' ? t('help:sandbox_mode.desc') : 'To prevent spam bots without collecting personal data (like phone numbers), new accounts start in <strong>Sandbox Mode</strong> with limited messaging quotas.'} />
+              <p set:html={t('help:sandbox_mode.upgrade_text') !== 'help:sandbox_mode.upgrade_text' ? t('help:sandbox_mode.upgrade_text') : 'You can upgrade to <strong>VIP Status</strong> instantly for free by verifying you are human. Go to <span class="font-mono bg-black/30 p-1 rounded">Settings &gt; Upgrade to VIP</span> and choose either <strong>Biometric Verification</strong> (Fingerprint/FaceID) or <strong>Proof of Work</strong> (CPU Mining).'} />
             </div>
           </section>
 
@@ -106,19 +102,13 @@ const categories = [
             </div>
             <div class="bg-yellow-500/5 border border-yellow-500/20 p-6 rounded-2xl relative overflow-hidden">
                <div class="absolute -right-4 -top-4 opacity-10"><FiKey size={120} /></div>
-               <p class="text-yellow-200/80 mb-6 italic leading-relaxed">
-                 Karena arsitektur Zero-Knowledge, NYX tidak menyimpan kunci Anda. Kami tidak bisa memulihkan akun lewat email atau SMS.
-               </p>
-               <ol class="space-y-4 text-text-secondary">
-                 <li class="flex gap-4">
-                   <span class="flex-shrink-0 w-6 h-6 bg-yellow-500 text-black flex items-center justify-center rounded-full font-black text-xs">1</span>
-                   <span>Masukkan 24 kata <strong class="text-text-primary italic">Recovery Phrase</strong> Anda pada layar login.</span>
-                 </li>
-                 <li class="flex gap-4">
-                   <span class="flex-shrink-0 w-6 h-6 bg-yellow-500 text-black flex items-center justify-center rounded-full font-black text-xs">2</span>
-                   <span>Tentukan <em>Master Password</em> baru untuk mengenkripsi database lokal Anda.</span>
-                 </li>
-               </ol>
+               <p class="text-yellow-200/80 mb-4 italic leading-relaxed" set:html={t('help:forgot_password.desc') !== 'help:forgot_password.desc' ? t('help:forgot_password.desc') : 'Because we don\'t have your email, we cannot send you a reset link. You must use your <strong>Recovery Phrase</strong>.'} />
+               <ul class="list-disc list-inside ml-4 space-y-2 text-text-secondary">
+                 <li>{t('help:forgot_password.step1')}</li>
+                 <li>{t('help:forgot_password.step2')}</li>
+                 <li>{t('help:forgot_password.step3')}</li>
+               </ul>
+               <p class="mt-4 text-yellow-500 text-sm" set:html={t('help:forgot_password.warning') !== 'help:forgot_password.warning' ? t('help:forgot_password.warning') : 'Note: Restoring from a phrase resets your identity keys. You will regain access to your account ID, but <strong>chat history will be lost</strong> unless you have a Vault Backup.'} />
             </div>
           </section>
 
@@ -130,11 +120,8 @@ const categories = [
               <h2 class="text-2xl font-bold tracking-tight">{t('help:sync_issues.title')}</h2>
             </div>
             <div class="bg-bg-surface p-6 rounded-2xl border border-white/5 text-text-secondary leading-relaxed">
-              <p class="mb-4">NYX mengusung filosofi <strong class="text-text-primary text-accent">Local-First</strong>. Pesan Anda hidup di perangkat Anda, bukan di cloud kami.</p>
-              <div class="p-4 bg-black/20 rounded-xl border-l-4 border-accent">
-                <p class="text-sm m-0 italic">{t('help:sync_issues.desc')}</p>
-              </div>
-              <p class="mt-4 text-sm opacity-60 font-mono italic">// {t('help:sync_issues.future_text')}</p>
+              <p class="mb-4" set:html={t('help:sync_issues.desc') !== 'help:sync_issues.desc' ? t('help:sync_issues.desc') : 'NYX is <strong>Local-First</strong>. Messages live on your device, not the cloud. If you use NYX on multiple devices (e.g. Phone + Laptop), they act as independent clients.'} />
+              <p>{t('help:sync_issues.future_text')}</p>
             </div>
           </section>
 
@@ -146,7 +133,7 @@ const categories = [
               <h2 class="text-2xl font-bold tracking-tight text-red-400">{t('help:lost_phrase.title')}</h2>
             </div>
             <div class="bg-red-500/5 border border-red-500/20 p-6 rounded-2xl">
-              <h4 class="text-red-400 font-black uppercase tracking-tighter mb-2 italic">⚠️ STATUS: {t('help:lost_phrase.irrecoverable')}</h4>
+              <p class="mb-2 font-semibold text-red-500">{t('help:lost_phrase.irrecoverable')}</p>
               <p class="text-text-secondary leading-relaxed m-0">{t('help:lost_phrase.desc')}</p>
             </div>
           </section>
@@ -154,9 +141,6 @@ const categories = [
         </div>
       </div>
 
-      <footer class="mt-20 pt-8 border-t border-white/5 text-center text-text-secondary">
-        <p class="text-xs uppercase tracking-[0.2em] font-bold opacity-30">NYX Intelligence Base &bull; Security Level 0</p>
-      </footer>
     </div>
   </div>
 </MainLayout>

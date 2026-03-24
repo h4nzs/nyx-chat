@@ -4,14 +4,12 @@ import LanguageSwitcher from '../components/LanguageSwitcher';
 import { getLangFromUrl, useTranslations } from '../utils/i18n';
 import { FiGithub, FiUserPlus, FiMessageSquare, FiShield, FiArrowRight, FiHash, FiEyeOff, FiCheck, FiX, FiCpu, FiSun, FiMoon } from 'react-icons/fi';
 
-// 1. Deteksi Bahasa dari URL
 const lang = getLangFromUrl(Astro.url);
 const t = useTranslations(lang);
 
 const APP_URL = "https://app.nyx-app.my.id";
 const APP_VERSION = import.meta.env.npm_package_version || "2.5.4";
 
-// 2. Data Terjemahan
 const title = "Private & Encrypted Messaging";
 const description = t('landing:hero.description');
 
@@ -28,7 +26,12 @@ const landingSchema = JSON.stringify({
     {
       "@type": "SoftwareApplication",
       "name": "NYX Chat",
-      // ... (sisa data sebelumnya)
+      "applicationCategory": "CommunicationApplication",
+      "operatingSystem": "Web, Android, iOS, Windows, macOS, Linux",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "description": description,
+      "softwareHelp": "https://nyx-app.my.id/help/",
+      "author": { "@type": "Person", "name": "Han", "url": "https://github.com/h4nzs" }
     },
     {
       "@type": "FAQPage",
@@ -42,6 +45,11 @@ const landingSchema = JSON.stringify({
           "@type": "Question",
           "name": t('landing:faq.q2'),
           "acceptedAnswer": { "@type": "Answer", "text": t('landing:faq.a2') }
+        },
+        {
+          "@type": "Question",
+          "name": t('landing:faq.q3'),
+          "acceptedAnswer": { "@type": "Answer", "text": t('landing:faq.a3') }
         }
       ]
     }
@@ -75,7 +83,7 @@ const landingSchema = JSON.stringify({
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
           <div class="lg:col-span-7 animate-in fade-in slide-in-from-bottom-8 duration-1000">
             <div class="inline-block mb-4 px-4 py-1 rounded-full bg-bg-main shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.1)] text-accent text-xs md:text-sm font-bold tracking-wider uppercase">
-              {t('landing:hero.badge', { version: __APP_VERSION__ })}
+              {t('landing:hero.badge', { version: APP_VERSION })}
             </div>
             <h1 class="text-5xl md:text-7xl font-black tracking-tighter leading-none mb-6">
               {t('landing:hero.title_prefix')}<br />
@@ -83,10 +91,7 @@ const landingSchema = JSON.stringify({
               {t('landing:hero.title_suffix')}
             </h1>
             <p class="sr-only">
-              NYX is a zero-knowledge messaging application designed for absolute privacy. 
-              It utilizes the Signal Protocol (Double Ratchet) for end-to-end encryption 
-              and Argon2id for client-side identity hashing, allowing secure communication 
-              without requiring a phone number or email address.
+              {t('landing:seo.geo_hook') !== 'landing:seo.geo_hook' ? t('landing:seo.geo_hook') : 'NYX is a zero-knowledge messaging application designed for absolute privacy. It utilizes the Signal Protocol (Double Ratchet) for end-to-end encryption and Argon2id for client-side identity hashing, allowing secure communication without requiring a phone number or email address.'}
             </p>
             <p class="text-lg md:text-xl text-text-secondary max-w-xl mb-8 leading-relaxed">
               {t('landing:hero.description')}
@@ -105,6 +110,10 @@ const landingSchema = JSON.stringify({
           <div class="lg:col-span-5 flex justify-center lg:justify-end animate-in fade-in slide-in-from-right-8 duration-1000 delay-300">
             <div class="relative w-full max-w-[280px] md:max-w-[320px]">
               <div class="relative mx-auto border-gray-900 bg-gray-900 border-[10px] rounded-[2.5rem] shadow-[20px_20px_40px_rgba(0,0,0,0.4),-10px_-10px_30px_rgba(255,255,255,0.05)] overflow-hidden">
+                <div class="h-[32px] w-[3px] bg-gray-800 absolute -left-[13px] top-[72px] rounded-l-lg"></div>
+                <div class="h-[46px] w-[3px] bg-gray-800 absolute -left-[13px] top-[124px] rounded-l-lg"></div>
+                <div class="h-[46px] w-[3px] bg-gray-800 absolute -left-[13px] top-[178px] rounded-l-lg"></div>
+                <div class="h-[64px] w-[3px] bg-gray-800 absolute -right-[13px] top-[142px] rounded-r-lg"></div>
                 <div class="rounded-[2rem] overflow-hidden w-full h-auto aspect-[9/19] bg-bg-main relative">
                   <img src="/screenshots/mobile-dark.png" alt="App Screenshot" loading="eager" class="object-cover object-top w-full h-full opacity-90 hover:scale-105 transition-transform duration-700" />
                 </div>
@@ -113,6 +122,14 @@ const landingSchema = JSON.stringify({
           </div>
         </div>
       </main>
+
+      <section class="py-16 md:py-24 bg-bg-main/50 backdrop-blur-sm">
+        <div class="max-w-4xl mx-auto px-4 text-center">
+          <h2 class="text-3xl md:text-4xl font-black mb-6 tracking-tighter">{t('landing:why.title')}</h2>
+          <p class="text-lg md:text-xl text-text-secondary mb-4">{t('landing:why.desc_1')}</p>
+          <p class="text-lg md:text-xl text-text-secondary">{t('landing:why.desc_2')}</p>
+        </div>
+      </section>
 
       <section class="py-16 md:py-24">
         <div class="max-w-5xl mx-auto px-4">
@@ -130,7 +147,7 @@ const landingSchema = JSON.stringify({
               <tbody>
                 {comparisonData.map((row) => (
                   <tr class="group hover:-translate-y-1 transition-transform">
-                    <td class="py-4 px-6 font-bold text-text-primary bg-bg-main rounded-l-xl shadow-[2px_2px_5px_rgba(0,0,0,0.1)]">
+                    <td class="py-4 px-6 font-bold text-text-primary bg-bg-main rounded-l-xl shadow-[2px_2px_5px_rgba(0,0,0,0.1)] border-r border-transparent">
                       {row.feature}
                     </td>
                     <td class="py-4 px-4 text-center text-red-500 bg-bg-main/50">
@@ -182,6 +199,55 @@ const landingSchema = JSON.stringify({
       </section>
 
       <section class="py-16 md:py-24">
+        <div class="max-w-6xl mx-auto px-4">
+          <h2 class="text-3xl md:text-4xl font-black text-center mb-16 tracking-tighter">{t('landing:how_it_works.title')}</h2>
+          <div class="relative grid md:grid-cols-3 gap-12">
+            <div class="relative flex flex-col items-center text-center">
+              <div class="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4 z-10 text-accent">
+                <FiUserPlus size={24} />
+              </div>
+              <h3 class="text-xl font-bold text-text-primary mb-2">{t('landing:how_it_works.step_1.title')}</h3>
+              <p class="text-text-secondary max-w-xs">{t('landing:how_it_works.step_1.desc')}</p>
+              <div class="absolute top-9 left-1/2 w-full h-0.5 border-t border-dashed border-white/20 hidden md:block"></div>
+            </div>
+            <div class="relative flex flex-col items-center text-center">
+              <div class="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4 z-10 text-accent">
+                <FiMessageSquare size={24} />
+              </div>
+              <h3 class="text-xl font-bold text-text-primary mb-2">{t('landing:how_it_works.step_2.title')}</h3>
+              <p class="text-text-secondary max-w-xs">{t('landing:how_it_works.step_2.desc')}</p>
+              <div class="absolute top-9 left-1/2 w-full h-0.5 border-t border-dashed border-white/20 hidden md:block"></div>
+            </div>
+            <div class="relative flex flex-col items-center text-center">
+              <div class="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4 z-10 text-accent">
+                <FiShield size={24} />
+              </div>
+              <h3 class="text-xl font-bold text-text-primary mb-2">{t('landing:how_it_works.step_3.title')}</h3>
+              <p class="text-text-secondary max-w-xs">{t('landing:how_it_works.step_3.desc')}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="py-16 md:py-24 bg-[#222222]">
+        <div class="max-w-4xl mx-auto px-4">
+          <h2 class="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">{t('landing:testimonials.title')}</h2>
+          <div class="grid md:grid-cols-2 gap-8">
+            <div class="bg-bg-surface p-8 rounded-lg shadow-[8px_8px_16px_rgba(0,0,0,0.2),-8px_-8px_16px_rgba(255,255,255,0.1)] border border-transparent hover:border-accent/30 transition-all duration-300" style="background-image: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.05) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(0,0,0,0.1) 0%, transparent 40%); background-blend-mode: overlay;">
+              <p class="text-lg italic text-text-primary mb-4">"{t('landing:testimonials.yosep')}"</p>
+              <p class="font-bold text-accent">Yosep.</p>
+              <p class="text-sm text-text-secondary">{t('landing:testimonials.yosep_role')}</p>
+            </div>
+            <div class="bg-bg-surface p-8 rounded-lg shadow-[8px_8px_16px_rgba(0,0,0,0.2),-8px_-8px_16px_rgba(255,255,255,0.1)] border border-transparent hover:border-accent/30 transition-all duration-300" style="background-image: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.05) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(0,0,0,0.1) 0%, transparent 40%); background-blend-mode: overlay;">
+              <p class="text-lg italic text-text-primary mb-4">"{t('landing:testimonials.sarah')}"</p>
+              <p class="font-bold text-accent">Sarah T.</p>
+              <p class="text-sm text-text-secondary">{t('landing:testimonials.sarah_role')}</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="py-16 md:py-24">
         <div class="max-w-3xl mx-auto px-4">
           <h2 class="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">{t('landing:faq.title')}</h2>
           <div class="space-y-4">
@@ -204,33 +270,37 @@ const landingSchema = JSON.stringify({
         </div>
       </section>
 
+      <section class="py-16 md:py-24">
+        <div class="max-w-4xl mx-auto px-4 text-center">
+          <h2 class="text-3xl md:text-4xl font-black mb-6 tracking-tighter">{t('landing:cta.title')}</h2>
+          <p class="text-lg text-text-secondary mb-8 max-w-2xl mx-auto">{t('landing:cta.desc')}</p>
+          <a href={`${APP_URL}/register`} class="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] hover:-translate-y-1 transition-all inline-flex items-center">
+            {t('landing:cta.button')} <FiArrowRight className="ml-2" />
+          </a>
+        </div>
+      </section>
+
       <footer class="py-12 border-t border-white/5 bg-bg-main relative overflow-hidden">
         <div class="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-md h-[1px] bg-gradient-to-r from-transparent via-accent/50 to-transparent"></div>
-
         <div class="max-w-6xl mx-auto px-6 text-center text-text-secondary flex flex-col items-center">
           <div class="flex items-center justify-center gap-3 mb-4">
-            <img
-              src="/pwa-512x512.png"
-              alt="NYX"
-              class="w-6 h-6 grayscale hover:grayscale-0 transition-all duration-300"
-            />
+            <img src="/pwa-512x512.png" alt="NYX" class="w-6 h-6 grayscale hover:grayscale-0 transition-all duration-300" />
             <span class="text-sm font-black tracking-[0.3em] text-text-primary uppercase">NYX</span>
           </div>
-
           <p class="text-sm font-medium mb-3">
             {t('landing:footer.rights', { year: new Date().getFullYear().toString() })} <span class="font-bold text-white">AGPL-3.0</span>.
           </p>
-
           <div class="flex flex-wrap justify-center items-center gap-3 text-xs font-bold mt-1 mb-8">
             <a href="/privacy" class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.legal')}</a>
             <span class="text-white/10">•</span>
-            <a href="/help" class="hover:text-accent transition-colors tracking-wide">Help Center</a>
+            <a href="/help" class="hover:text-accent transition-colors tracking-wide">
+              {t('common:help') !== 'common:help' ? t('common:help') : 'Help Center'}
+            </a>
             <span class="text-white/10">•</span>
             <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.source')}</a>
             <span class="text-white/10">•</span>
             <a href="https://github.com/h4nzs/nyx-chat/blob/main/COMMERCIAL.md" target="_blank" rel="noopener noreferrer" class="text-accent hover:text-white transition-colors tracking-wide">{t('landing:footer.commercial')}</a>
           </div>
-
           <p class="text-[10px] text-text-secondary/40 max-w-3xl mx-auto leading-relaxed font-mono">
             {t('landing:footer.disclaimer', { year: new Date().getFullYear().toString() })}
           </p>
