@@ -645,7 +645,9 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const { encryptedDataStr, password } = payload;
         const resultData = await retrievePrivateKeys(encryptedDataStr, password);
         if (resultData.success && resultData.keys.masterSeed) {
-          result = await entropyToMnemonic(Buffer.from(resultData.keys.masterSeed) as unknown as string);
+          // Convert Uint8Array to Hex string using sodium, avoiding Buffer dependency for bip39
+          const masterSeedHex = sodium.to_hex(resultData.keys.masterSeed);
+          result = await entropyToMnemonic(masterSeedHex);
         } else {
           throw new Error("Failed to retrieve master seed. Incorrect password or invalid bundle.");
         }
