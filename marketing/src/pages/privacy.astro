@@ -37,7 +37,7 @@ const navItems = [
     
     <header class="sticky top-0 z-50 bg-bg-surface/80 backdrop-blur-xl border-b border-white/5 shadow-sm">
       <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
-        <a href={`${langPrefix}/` || '/'} class="flex items-center gap-2 text-text-secondary hover:text-accent transition-colors text-sm font-bold tracking-wide uppercase">
+        <a href={lang === 'en' ? '/' : langPrefix} class="flex items-center gap-2 text-text-secondary hover:text-accent transition-colors text-sm font-bold tracking-wide uppercase">
           <FiArrowLeft size={16} /> {t('privacy:back')}
         </a>
         <div class="font-mono text-[10px] text-text-secondary uppercase tracking-[0.2em] flex items-center gap-2">
