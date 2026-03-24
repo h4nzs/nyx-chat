@@ -26,7 +26,11 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
   const [showPhrase, setShowPhrase] = useState(false);
   const [userInput, setUserInput] = useState<string[]>([]);
 
-  const words = useMemo(() => phrase.split(' '), [phrase]);
+  const words = useMemo(() => {
+      if (!phrase) return [];
+      return phrase.trim().split(/\s+/).filter(w => w.length > 0);
+  }, [phrase]);
+  
   const verificationWords = useMemo(() => shuffle([...words]), [words]);
 
   const handleCopyToClipboard = async () => {
@@ -39,7 +43,7 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
   };
 
   const handleWordClick = (word: string) => {
-    if (userInput.includes(word) || userInput.length >= phrase.split(' ').length) return;
+    if (userInput.includes(word) || userInput.length >= words.length) return;
     setUserInput(prev => [...prev, word]);
   };
 
@@ -98,25 +102,28 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
       <h2 className="text-xl font-black uppercase tracking-wide text-text-primary text-center mb-2">{t('modals:recovery.step2_title')}</h2>
       <p className="text-xs text-text-secondary text-center mb-6 font-mono">{t('modals:recovery.step2_desc')}</p>
       
-      <div className="relative bg-bg-main p-6 rounded-2xl shadow-neumorphic-concave mb-6 border border-white/5">
-        <div className={`grid grid-cols-3 gap-3 ${!showPhrase ? 'blur-sm opacity-50' : ''} transition-all duration-500`}>
+      <div className="relative bg-bg-main p-6 rounded-2xl shadow-neumorphic-concave mb-6 border border-white/5 min-h-[200px]">
+        {/* Content Layer */}
+        <div className={`grid grid-cols-3 gap-3 transition-all duration-300 ${!showPhrase ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
           {words.map((word, index) => (
-            <div key={index} className="flex items-center gap-2 p-2 rounded bg-black/10 dark:bg-white/5 border border-white/10">
-               <span className="text-[10px] text-text-secondary font-mono w-4">{index + 1}.</span>
-               <span className="text-sm font-bold text-text-primary tracking-wide">{word}</span>
+            <div key={index} className="flex items-center gap-2 p-2 rounded bg-black/5 dark:bg-white/5 border border-white/10">
+               <span className="text-[10px] text-text-secondary font-mono w-4 select-none">{index + 1}.</span>
+               <span className="text-sm font-bold text-gray-900 dark:text-gray-100 tracking-wide select-all">{word}</span>
             </div>
           ))}
         </div>
         
+        {/* Mask Layer */}
         {!showPhrase && (
-          <div className="absolute inset-0 flex items-center justify-center z-10">
+          <div className="absolute inset-0 flex flex-col items-center justify-center z-10 bg-bg-main/95 backdrop-blur-sm rounded-2xl transition-all">
+            <FiShield size={48} className="text-text-secondary/20 mb-4" />
             <button 
               onClick={() => setShowPhrase(true)}
               className="
                 flex items-center gap-2 px-6 py-3 rounded-full 
                 bg-bg-surface text-text-primary font-bold text-sm
                 shadow-neumorphic-convex active:shadow-neumorphic-pressed
-                transition-all
+                transition-all border border-white/5 hover:scale-105
               "
             >
               <FiEye /> {t('modals:recovery.button_reveal')}
@@ -125,18 +132,18 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
         )}
         
         {showPhrase && (
-           <div className="absolute top-2 right-2 flex gap-2">
+           <div className="absolute top-2 right-2 flex gap-2 z-20">
              <button 
                onClick={() => setShowPhrase(false)} 
                aria-label={t('modals:recovery.aria_toggle_visibility', 'Toggle phrase visibility')} 
-               className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"
+               className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary transition-all"
              >
                <FiEyeOff size={14} />
              </button>
              <button 
                onClick={handleCopyToClipboard} 
                aria-label={t('modals:recovery.aria_copy_phrase', 'Copy recovery phrase')} 
-               className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary"
+               className="p-2 rounded-full bg-bg-surface shadow-neumorphic-convex text-text-secondary hover:text-text-primary transition-all"
              >
                <FiClipboard size={14} />
              </button>

@@ -4,7 +4,7 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api";
 import { useMessageStore, decryptMessageObject } from "./message";
-import { getSocket, emitSessionKeyRequest, fireGhostSync } from "@lib/socket";
+import { getSocket, emitSessionKeyRequest, fireGhostSync, emitGroupKeyDistribution } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
 import type { ConversationId, UserId, MessageId } from '@nyx/shared';
@@ -47,7 +47,7 @@ export interface RawServerMessage {
 }
 
 import type { Message, Participant, Conversation } from '@nyx/shared';
-import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey } from "@utils/crypto";
+import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, ensureGroupSession } from "@utils/crypto";
 export type { Message, Participant, Conversation };
 
 // --- Helper Functions ---
@@ -412,6 +412,14 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
                 encryptedMetadata: null 
             })
         });
+
+        // Step 1.5: Initialize Group Sender Key (Zero-Knowledge)
+        // We must generate and distribute our Sender Key so we can encrypt the metadata (which uses the Sender Key protocol)
+        // The participants list from the server includes public keys.
+        const distributionKeys = await ensureGroupSession(conv.id, conv.participants as unknown as Participant[], true);
+        if (distributionKeys) {
+            emitGroupKeyDistribution(conv.id, distributionKeys as { userId: string; key: string }[]);
+        }
         
         // Step 2: Encrypt the metadata
         const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl }, conv.id);
