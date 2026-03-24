@@ -105,6 +105,11 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
       <div className="relative bg-bg-main p-6 rounded-2xl shadow-neumorphic-concave mb-6 border border-white/5 min-h-[200px]">
         {/* Content Layer */}
         <div className={`grid grid-cols-3 gap-3 transition-all duration-300 ${!showPhrase ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
+          {words.length === 0 && showPhrase && (
+             <div className="col-span-3 text-center text-red-500 font-mono text-xs p-4 border border-red-500/20 rounded bg-red-500/10">
+               DEBUG: Phrase data is empty or invalid. Length: {phrase?.length || 0}
+             </div>
+          )}
           {words.map((word, index) => (
             <div key={index} className="flex items-center gap-2 p-2 rounded bg-black/5 dark:bg-white/5 border border-white/10">
                <span className="text-[10px] text-text-secondary font-mono w-4 select-none">{index + 1}.</span>

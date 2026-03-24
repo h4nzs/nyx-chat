@@ -6,7 +6,7 @@ import { Buffer } from 'buffer/';
 (self as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
 
 import sodium from 'libsodium-wrappers';
-import * as bip39 from 'bip39';
+import { entropyToMnemonic, mnemonicToEntropy } from 'bip39';
 import { argon2id } from 'hash-wasm';
 import type { DoubleRatchetState } from '@nyx/shared';
 import type { 
@@ -423,7 +423,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             masterSeed: masterSeed
           }, password);
 
-          const phrase = await bip39.entropyToMnemonic(Buffer.from(masterSeed) as unknown as string);
+          const phrase = await entropyToMnemonic(Buffer.from(masterSeed) as unknown as string);
           
           result = {
               encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
@@ -645,7 +645,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const { encryptedDataStr, password } = payload;
         const resultData = await retrievePrivateKeys(encryptedDataStr, password);
         if (resultData.success && resultData.keys.masterSeed) {
-          result = await bip39.entropyToMnemonic(Buffer.from(resultData.keys.masterSeed) as unknown as string);
+          result = await entropyToMnemonic(Buffer.from(resultData.keys.masterSeed) as unknown as string);
         } else {
           throw new Error("Failed to retrieve master seed. Incorrect password or invalid bundle.");
         }
@@ -653,7 +653,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'restoreFromPhrase': {
         const { phrase, password } = payload;
-        const masterSeedHex = bip39.mnemonicToEntropy(phrase);
+        const masterSeedHex = mnemonicToEntropy(phrase);
         const masterSeed = sodium.from_hex(masterSeedHex);
 
         const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
@@ -690,7 +690,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'recoverAccountWithSignature': {
         const { phrase, newPassword, identifier, timestamp, nonce } = payload;
-        const masterSeedHex = bip39.mnemonicToEntropy(phrase);
+        const masterSeedHex = mnemonicToEntropy(phrase);
         const masterSeed = sodium.from_hex(masterSeedHex);
 
         const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
