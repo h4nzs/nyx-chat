@@ -1,0 +1,12 @@
+---
+import BaseHelp from '../help.astro';
+
+export function getStaticPaths() {
+  return [
+    { params: { lang: 'id' } },
+    { params: { lang: 'es' } },
+    { params: { lang: 'pt-BR' } },
+  ];
+}
+---
+<BaseHelp />
