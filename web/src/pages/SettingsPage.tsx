@@ -32,7 +32,30 @@ import ImageCropperModal from '../components/ImageCropperModal';
 
 /* --- MICRO-COMPONENTS --- */
 
-const RockerSwitch = ({ checked, onChange, disabled, label }: { checked: boolean; onChange: () => void; disabled?: boolean; label?: string }) => (
+const parseApiError = (error: unknown, fallback: string): string => {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === 'object' && 'details' in error) {
+    try {
+      const details = (error as Record<string, unknown>).details;
+      if (typeof details === 'string') {
+        const parsed = JSON.parse(details);
+        return parsed.error || fallback;
+      }
+      if (typeof details === 'object' && details !== null && 'error' in details) {
+        return (details as any).error;
+      }
+    } catch {
+      // fallback
+    }
+  }
+  return fallback;
+};
+
+const sanitizeErrorLog = (error: unknown): string => {
+  return error instanceof Error ? `${error.name}: ${error.message}` : 'UnknownError';
+};
+
+const RockerSwitch = ({ checked, onChange, disabled, label, ariaLabel }: { checked: boolean; onChange: () => void; disabled?: boolean; label?: string; ariaLabel?: string }) => (
   <button
     type="button"
     onClick={disabled ? undefined : onChange}
@@ -44,6 +67,7 @@ const RockerSwitch = ({ checked, onChange, disabled, label }: { checked: boolean
     `}
     role="switch"
     aria-checked={checked}
+    aria-label={ariaLabel || label || 'Toggle'}
   >
     <span className="font-bold text-sm tracking-wide text-text-primary uppercase">{label}</span>
     
@@ -183,7 +207,7 @@ export default function SettingsPage() {
         window.location.replace('/');
     } catch (error: unknown) {
         setIsDeleting(false);
-        const errorMsg = (error as Record<string, unknown>).details ? JSON.parse((error as Record<string, unknown>).details as string).error : (error instanceof Error ? error.message : t('common:errors.unknown'));
+        const errorMsg = parseApiError(error, t('common:errors.unknown'));
         toast.error(t('settings:messages.deletion_failed', { error: errorMsg }));
     }
   };
@@ -259,7 +283,7 @@ export default function SettingsPage() {
 
       toast.success(t('settings:messages.identity_updated'));
     } catch (error: unknown) {
-      const errorMsg = (error as Record<string, unknown>).details ? JSON.parse((error as Record<string, unknown>).details as string).error : (error instanceof Error ? error.message : t('common:errors.unknown'));
+      const errorMsg = parseApiError(error, t('common:errors.unknown'));
       toast.error(t('settings:messages.update_failed', { error: errorMsg }));
     } finally {
       setIsLoading(false);
@@ -348,7 +372,7 @@ export default function SettingsPage() {
       }
       
     } catch (error: unknown) {
-      console.error(error);
+      console.error(sanitizeErrorLog(error));
       const errorMsg = error instanceof Error ? error.message : t('common:errors.unknown');
       toast.error(t('settings:messages.mining_failed', { error: errorMsg }), { id: toastId });
     } finally {
@@ -370,7 +394,7 @@ export default function SettingsPage() {
       URL.revokeObjectURL(url);
       toast.success(t('settings:messages.export_success'));
     } catch (error) {
-      console.error("Export failed:", error);
+      console.error("Export failed:", sanitizeErrorLog(error));
       toast.error(t('settings:messages.export_failed'));
     }
   };
@@ -387,7 +411,7 @@ export default function SettingsPage() {
         toast.success(t('settings:messages.import_success'));
         setTimeout(() => window.location.reload(), 1000);
       } catch (error) {
-        console.error("Import failed:", error);
+        console.error("Import failed:", sanitizeErrorLog(error));
         toast.error(t('settings:messages.import_failed'));
       }
     };
@@ -403,7 +427,7 @@ export default function SettingsPage() {
     // Memanggil teks peringatan dari JSON agar dinamis terjemahannya
     showConfirm(
       t('settings:emergency.eject'),
-      t('settings:emergency.delete_desc'),
+      t('settings:emergency.logout_desc', 'This will log you out and clear your device data.'),
       async () => {
         const toastId = toast.loading(t('settings:messages.emergency_revoking'));
         try {
@@ -418,7 +442,7 @@ export default function SettingsPage() {
           toast.success(t('settings:messages.emergency_success'), { id: toastId });
           await executeLocalWipe();
         } catch (error: unknown) {
-          console.error("Emergency eject API failed:", error);
+          console.error("Emergency eject API failed:", sanitizeErrorLog(error));
           toast.error(t('settings:messages.emergency_failed'), { id: toastId });
         }
       }
@@ -432,8 +456,9 @@ export default function SettingsPage() {
       
       {/* HEADER */}
       <header className="max-w-7xl mx-auto mb-10 flex items-center gap-6">
-        <Link 
-          to="/chat" 
+        <Link
+          to="/chat"
+          aria-label={t('common:actions.back', 'Back')}
           className="
             p-4 rounded-full bg-bg-main text-text-primary
             shadow-neu-flat-light dark:shadow-neu-flat-dark
@@ -442,8 +467,7 @@ export default function SettingsPage() {
           "
         >
           <FiArrowLeft size={24} />
-        </Link>
-        <div>
+        </Link>        <div>
           <h1 className="text-4xl font-black uppercase tracking-tighter opacity-90">{t('settings:header.control_deck')}</h1>
           <p className="text-sm font-mono text-text-secondary tracking-widest uppercase">{t('settings:header.system_version', { version: __APP_VERSION__ })} </p>
         </div>
@@ -473,6 +497,7 @@ export default function SettingsPage() {
                   </div>
                   <button
                     type="button"
+                    aria-label={t('settings:profile_page.edit_record')}
                     onClick={() => fileInputRef.current?.click()}
                     className="
                       absolute bottom-2 right-2 p-3 rounded-full 
@@ -641,11 +666,11 @@ export default function SettingsPage() {
               {/* Language Switcher */}
               <div className="space-y-3 pt-4 border-t border-white/5 mt-4">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-1">
-                  Language / Bahasa
+                  {t('settings:visual.language', 'Language')}
                 </span>
                 <div className="relative">
                   <select
-                    value={i18n.language}
+                    value={i18n.language.split('-')[0] === 'pt' ? 'pt-BR' : i18n.language.split('-')[0]}
                     onChange={(e) => i18n.changeLanguage(e.target.value)}
                     className="
                       w-full appearance-none bg-bg-main text-text-primary text-sm font-bold
@@ -656,6 +681,8 @@ export default function SettingsPage() {
                   >
                     <option value="en">🇺🇸 English</option>
                     <option value="id">🇮🇩 Indonesia</option>
+                    <option value="es">🇪🇸 Español</option>
+                    <option value="pt-BR">🇧🇷 Português (Brasil)</option>
                   </select>
                   <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-text-secondary">
                     <FiChevronDown />

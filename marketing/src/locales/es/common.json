@@ -1,0 +1,166 @@
+{
+  "actions": {
+    "loading": "Cargando...",
+    "submit": "Enviar",
+    "cancel": "Cancelar",
+    "cancel_bracket": "[ CANCELAR ]",
+    "save": "Guardar",
+    "delete": "Borrar",
+    "verify": "Verificar",
+    "skip": "Saltar",
+    "continue": "Continuar",
+    "return": "Volver",
+    "confirm": "Confirmar",
+    "starting": "Iniciando...",
+    "next": "Siguiente",
+    "previous": "Anterior",
+    "finish": "Terminar",
+    "sending": "Enviando...",
+    "executing": "Ejecutando...",
+    "copy_link": "Copiar enlace",
+    "copied": "Enlace copiado al portapapeles",
+    "copy_failed": "Error al copiar el enlace",
+    "copied_label": "Copiado",
+    "abort": "ABORTAR",
+    "unlock": "DESBLOQUEAR",
+    "done": "Listo",
+    "saving": "Guardando...",
+    "creating": "Creando...",
+    "create_group": "Crear grupo",
+    "menu": "Menú",
+    "back": "Atrás",
+    "view_profile": "Ver perfil"
+  },
+  "action": {
+    "abort": "ABORTAR",
+    "unlock": "DESBLOQUEAR",
+    "confirm": "Confirmar",
+    "cancel": "Cancelar",
+    "view_profile": "Ver perfil",
+    "pin_chat": "Fijar chat",
+    "block_user": "Bloquear usuario",
+    "delete_chat": "Borrar chat",
+    "menu": "Menú",
+    "back": "Atrás",
+    "delete_group": "Borrar grupo",
+    "create_group": "Crear grupo"
+  },
+  "actioin": {
+    "view_profile": "Ver perfil"
+  },
+  "nav": {
+    "home": "Inicio",
+    "login": "Entrar",
+    "register": "Registrarse",
+    "privacy": "Privacidad",
+    "terms": "Términos de servicio"
+  },
+  "errors": {
+    "unknown": "Ocurrió un error desconocido",
+    "network": "Error de red, inténtalo de nuevo",
+    "required": "Este campo es obligatorio"
+  },
+  "defaults": {
+    "encrypted_user": "Usuario cifrado",
+    "user": "Usuario",
+    "avatar": "Avatar",
+    "me": "Yo",
+    "unknown": "Desconocido",
+    "someone": "Alguien",
+    "you": "TÚ"
+  },
+  "status": {
+    "connection_lost": "CONEXIÓN_PERDIDA // SISTEMA_OFFLINE",
+    "establishing_uplink": "ESTABLECIENDO_ENLACE...",
+    "power_surge": "Se necesita un pico de energía"
+  },
+  "cmd_palette": {
+    "title": "Línea de comandos",
+    "placeholder": "EJECUTAR_COMANDO...",
+    "running": "Ejecutando...",
+    "unknown_error": "ERROR: COMANDO_DESCONOCIDO",
+    "ready": "listo"
+  },
+  "context_menu": {
+    "all_reactions": "Todos los emojis"
+  },
+  "error_boundary": {
+    "title": "Fallo del sistema",
+    "desc": "Ocurrió un error inesperado en el proceso del sistema.",
+    "message": "La aplicación sufrió un error crítico. Es necesario recargar para restaurar el sistema.",
+    "reboot": "Reiniciar sistema",
+    "footer": "Protocolo Seguro NYX // Fallo Crítico"
+  },
+  "connect": {
+    "invalid_link": "Enlace de conexión no válido",
+    "user_not_found": "Usuario no encontrado o estás desconectado.",
+    "own_profile": "¡Este es tu propio perfil!",
+    "confirm_title": "Nueva conexión segura",
+    "confirm_desc": "¿Quieres iniciar una conversación segura con {{name}}?",
+    "connecting_to": "Conectando con {{name}}...",
+    "connected": "¡Conectado!",
+    "failed_start": "No se pudo iniciar la conversación.",
+    "error_processing": "Error al procesar el enlace de conexión.",
+    "decrypting_profile": "DESCIFRANDO PERFIL..."
+  },
+  "migration": {
+    "receiving_data": "Conexión establecida. Recibiendo datos...",
+    "decrypting_vault": "Datos recibidos. Descifrando bóveda...",
+    "complete": "¡Migración completada! Bienvenido de nuevo.",
+    "decryption_failed": "Fallo al descifrar. Los datos podrían estar corruptos.",
+    "receive_title": "Migración de dispositivo",
+    "receive_desc": "Escanea este QR desde tu dispositivo antiguo",
+    "read_vault_failed": "Error al leer la bóveda local.",
+    "camera_denied": "Acceso a la cámara denegado o no disponible.",
+    "encrypting_vault": "Cifrando datos de la bóveda...",
+    "tunneling": "Enviando datos al nuevo dispositivo...",
+    "waiting_receiver": "Esperando a que el receptor procese...",
+    "transfer_complete": "¡Transferencia completada!",
+    "receiver_failed": "El receptor falló al descifrar o se agotó el tiempo",
+    "failed_generic": "Fallo en la migración. QR inválido, error de red o tiempo agotado.",
+    "send_title": "Transferencia de bóveda",
+    "send_desc": "Envía los datos a tu nuevo dispositivo",
+    "preparing": "PREPARANDO BÓVEDA...",
+    "status_tunneling": "ENVIANDO..."
+  },
+  "not_found": {
+    "title": "Página no encontrada",
+    "desc": "La ruta cifrada que intentas buscar no existe o fue eliminada del sistema.",
+    "return_btn": "Volver a la base"
+  },
+  "footer": {
+    "brand_protocol": "Protocolo de Seguridad NYX"
+  },
+  "profile": {
+    "user_not_found": "Usuario no encontrado",
+    "home_server": "Servidor base",
+    "session_status": "Estado de la sesión",
+    "encrypted": "CIFRADO",
+    "editing_notice": "La edición del perfil se maneja en Configuración",
+    "verified_operator": "OPERADOR VERIFICADO",
+    "system_telemetry": "Telemetría del sistema",
+    "bio_data": "Datos biográficos",
+    "key_not_generated": "Aún no se ha generado la clave.",
+    "refresh_keys": "Refrescar claves",
+    "revoke_access": "Revocar acceso"
+  },
+  "search": {
+    "no_results": "No se encontraron usuarios para \"{{query}}\"",
+    "failed": "Error al buscar usuarios.",
+    "placeholder": "Buscar..."
+  },
+  "notifications": {
+    "title": "Notificaciones",
+    "empty": "No hay notificaciones"
+  },
+  "time": {
+    "ago_y": "hace {{count}} a",
+    "ago_mo": "hace {{count}} m",
+    "ago_d": "hace {{count}} d",
+    "ago_h": "hace {{count}} h",
+    "ago_m": "hace {{count}} min",
+    "ago_s": "hace {{count}} s",
+    "now": "AHORA",
+    "yesterday": "Ayer"
+  }
+}

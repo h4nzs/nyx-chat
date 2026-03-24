@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import QRCode from 'react-qr-code';
-import { FiSmartphone, FiDownloadCloud, FiCheckCircle } from 'react-icons/fi';
+// Obati isu impor Vite (CommonJS ke ESM)
+import * as QRCodeModule from 'react-qr-code';
+const QRCode = (QRCodeModule as any).default || QRCodeModule;
+
+import { FiDownloadCloud, FiCheckCircle } from 'react-icons/fi';
 import { getSocket, connectSocket } from '@lib/socket';
 import { getSodium } from '@lib/sodiumInitializer';
 import { worker_file_decrypt } from '@lib/crypto-worker-proxy';
@@ -47,7 +50,7 @@ export default function MigrationReceivePage() {
         chunksRef.current = new Array(data.totalChunks);
         migrationStartedRef.current = false;
         setStatus('receiving');
-        toast.loading(t('migration.receiving_data'), { id: 'mig' });
+        toast.loading(t('common:migration.receiving_data', 'Menerima data...'), { id: 'mig' });
       });
 
       socket.on('migration:chunk', async (data) => {
@@ -59,7 +62,7 @@ export default function MigrationReceivePage() {
         if (receivedCount === total && !migrationStartedRef.current) {
           migrationStartedRef.current = true;
           setStatus('decrypting');
-          toast.loading(t('migration.decrypting_vault'), { id: 'mig' });
+          toast.loading(t('common:migration.decrypting_vault', 'Mendekripsi brankas...'), { id: 'mig' });
           await processMigration(sodium);
         }
       });
@@ -108,11 +111,11 @@ export default function MigrationReceivePage() {
       socket.emit('migration:ack', { roomId: metaRef.current!.roomId, success: true });
 
       setStatus('success');
-      toast.success(t('migration.complete'), { id: 'mig' });
+      toast.success(t('common:migration.complete', 'Migrasi Selesai!'), { id: 'mig' });
       setTimeout(() => window.location.href = '/', 2000); // Hard reload to clear RAM
     } catch (e) {
       console.error(e);
-      toast.error(t('migration.decryption_failed'), { id: 'mig' });
+      toast.error(t('common:migration.decryption_failed', 'Gagal mendekripsi data.'), { id: 'mig' });
       
       const socket = getSocket();
       if (metaRef.current?.roomId) {
@@ -127,8 +130,8 @@ export default function MigrationReceivePage() {
   return (
     <div className="min-h-screen bg-bg-main text-text-primary flex flex-col items-center justify-center p-4">
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-black uppercase tracking-widest text-text-primary">{t('migration.receive_title')}</h1>
-        <p className="text-xs text-text-secondary mt-2">{t('migration.receive_desc')}</p>
+        <h1 className="text-2xl font-black uppercase tracking-widest text-text-primary">{t('common:migration.receive_title', 'Terima Data')}</h1>
+        <p className="text-xs text-text-secondary mt-2">{t('common:migration.receive_desc', 'Pindai QR ini dari perangkat lama Anda')}</p>
       </div>
 
       <div className="bg-white p-4 rounded-2xl shadow-neumorphic-convex border-4 border-bg-main mb-8 relative">
@@ -151,7 +154,7 @@ export default function MigrationReceivePage() {
       </div>
 
       <Link to="/login" className="text-xs font-mono text-text-secondary hover:text-accent uppercase tracking-widest">
-        {t('actions.cancel_bracket')}
+        {t('common:actions.cancel_bracket', '[ BATAL ]')}
       </Link>
     </div>
   );

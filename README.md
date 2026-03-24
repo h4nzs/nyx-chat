@@ -5,7 +5,7 @@
 </p>
 <h1 align="center">NYX - Zero-Knowledge Messenger</h1>
 
-![Version](https://img.shields.io/badge/version-2.5.1-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.5.4-blue?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-AGPLv3-red?style=for-the-badge)
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
@@ -81,10 +81,10 @@ NYX is designed for high-security, zero-trust deployments.
 
 ### Local Development Quick Start
 
-*Prerequisites: Node.js 20+, `pnpm`, PostgreSQL, Redis.*
+*Prerequisites: Node.js 22+, `pnpm`, PostgreSQL, Redis.*
 
 ```bash
-git clone https://github.com/your-username/nyx-chat.git
+git clone https://github.com/h4nzs/nyx-chat.git
 cd nyx-chat
 pnpm install # Installs dependencies for the workspace
 
@@ -97,6 +97,7 @@ DATABASE_URL="postgresql://user:pass@localhost:5432/nyx_db"
 REDIS_URL="redis://localhost:6379"
 JWT_SECRET="super-long-random-string-min-32-chars"
 # Cloudflare R2 Config...
+# And more, see **(.env.example)**
 
 ```
 
@@ -153,3 +154,21 @@ While the term "NYX" may be used broadly in various contexts, the **specific vis
 If you fork this repository to create your own SaaS, enterprise tool, or public deployment, you must:
 1. **Change the visual identity:** Replace all official logos, icons, and specific graphic assets found in `web/public/`.
 2. **Prevent confusion:** Clearly state that your deployment is a modified fork and is *not* affiliated with or officially endorsed by the original NYX Command repository.
+
+---
+
+<div align="center">
+
+<pre>
+███╗   ██╗██╗   ██╗██╗  ██╗
+████╗  ██║╚██╗ ██╔╝╚██╗██╔╝
+██╔██╗ ██║ ╚████╔╝  ╚███╔╝
+██║╚██╗██║  ╚██╔╝   ██╔██╗
+██║ ╚████║   ██║   ██╔╝ ██╗
+╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝
+</pre>
+
+**ZERO-KNOWLEDGE MESSENGER**  
+*License: AGPL-3.0 (Commercial Dual-License Available)*
+
+</div>

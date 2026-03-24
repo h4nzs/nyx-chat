@@ -100,10 +100,11 @@ export function useChatList() {
     }
   
     const filteredConversations = conversations.filter(c => {
-      const title = c.title || 'Conversation';
+      const title = c.isGroup 
+          ? (c.decryptedMetadata?.title || 'Unknown Group') 
+          : (c.participants.find(p => p.id !== meId)?.name || 'Unknown User');
       return title.toLowerCase().includes(searchQuery.toLowerCase());
-    });
-  
+    });  
     const showSearchResults = searchQuery.trim().length > 0;
   
     return {

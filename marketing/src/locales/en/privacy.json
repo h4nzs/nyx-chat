@@ -1,0 +1,83 @@
+{
+  "title": "Legal & Privacy Center",
+  "subtitle": "Absolute transparency regarding our Zero-Knowledge data handling, cryptographic protocols, and software licensing terms.",
+  "last_updated": "Last Updated: March 2026",
+  "back": "Back to Hub",
+  "nav": {
+    "privacy": "Privacy Policy",
+    "terms": "Terms of Service",
+    "licensing": "Software Licensing",
+    "cookies": "Cookie Policy",
+    "ai": "AI & Telemetry",
+    "security": "Security Architecture"
+  },
+  "privacy": {
+    "title": "Privacy Policy",
+    "intro": "Our core directive: If we don't have your data, no one can demand it from us.",
+    "minimization_title": "1. Data Minimization & Cryptography",
+    "minimization_1": "<strong>Blind Identity Protocol:</strong> We do not store your raw username, email, or phone number. We utilize client-side <a href=\"https://en.wikipedia.org/wiki/Argon2\" target=\"_blank\" class=\"text-accent underline\">Argon2id hashing</a>. The server only stores a cryptographic hash (`usernameHash`), rendering your identity mathematically irreversible to us.",
+    "minimization_2": "<0>Encrypted Metadata:</0> Your display name, bio, and avatar are symmetrically encrypted on your device. To our infrastructure, your profile is an opaque blob of ciphertext.",
+    "minimization_3": "<strong>E2EE Communication:</strong> All direct messages, voice notes, and file attachments are End-to-End Encrypted using the <a href=\"https://signal.org/docs/\" target=\"_blank\" class=\"text-accent underline\">Signal Protocol (Double Ratchet)</a>. We act solely as a blind relay network.",
+    "logging_title": "2. Ephemeral Network Logging",
+    "logging_desc": "To maintain network integrity and prevent DDoS/Botnet attacks, we temporarily process:",
+    "logging_1": "IP addresses (irreversibly hashed upon connection).",
+    "logging_2": "WebSocket connection timestamps (swept automatically from Redis).",
+    "logging_3": "Encrypted offline message queues (automatically purged upon successful delivery to the recipient)."
+  },
+  "terms": {
+    "title": "Terms of Service",
+    "liability_title": "Critical Disclaimer of Liability",
+    "liability_desc": "NYX is provided \"AS IS\", without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <0>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</0>",
+    "gating": "<0>Trust-Tier Gating:</0> To protect the network, unverified accounts are placed in a restricted \"Sandbox Mode\". Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.",
+    "abuse": "<0>Zero-Tolerance Abuse Policy:</0> You agree not to utilize the NYX network for illicit activities, automated API abuse (botting), or distributing malware. Violations will result in immediate network bans."
+  },
+  "licensing": {
+    "title": "Software Licensing & Enterprise",
+    "intro": "The NYX source code is proudly open-source and fiercely protected under the <0>GNU Affero General Public License v3.0 (AGPL-3.0)</0>.",
+    "agpl_title": "The AGPL-3.0 Constraint",
+    "agpl_desc": "If you modify the NYX codebase and allow users to interact with it over a network (e.g., hosting it as a SaaS), you are legally obligated to release your modified source code to the public. <0>Closed-source SaaS deployments of NYX under this license are strictly prohibited and constitute copyright infringement.</0>",
+    "commercial_title": "Commercial Dual-Licensing",
+    "commercial_desc": "For corporations, enterprises, or startups wishing to integrate NYX into a proprietary, closed-source product without the AGPL obligations, we offer a Commercial License.",
+    "contact_btn": "Contact Command for Enterprise Pricing"
+  },
+  "cookies": {
+    "title": "Cookie & Storage Policy",
+    "intro": "We do not use tracking, advertising, or third-party analytics cookies. Local storage is used strictly for cryptographic persistence and authentication.",
+    "table_type": "Storage Type",
+    "table_item": "Item",
+    "table_purpose": "Purpose",
+    "cookie_desc": "Secure authentication & session persistence.",
+    "idb_keys_desc": "Local storage of your encrypted Private Keys.",
+    "idb_vault_desc": "Local storage of your E2EE chat history."
+  },
+  "ai": {
+    "title": "AI & Telemetry",
+    "intro": "NYX operates with <0>Zero Telemetry</0>. We do not track your clicks, screen time, or feature usage.",
+    "smart_reply_title": "Smart Reply (Optional AI)",
+    "smart_reply_desc": "We provide an experimental \"Smart Reply\" feature utilizing the Google Gemini API. This feature is <0>strictly Opt-In</0>.",
+    "smart_reply_1": "Messages are decrypted locally before being sent to the AI.",
+    "smart_reply_2": "The NYX Server acts as a blind proxy; it does not log the prompt or the AI's response.",
+    "smart_reply_3": "Data processed by the Gemini API is ephemeral and is not used to train foundational AI models, per Google's enterprise API terms."
+  },
+  "security": {
+    "title": "Security Architecture",
+    "intro": "Our cryptographic implementations are open for audit.",
+    "signal_title": "Signal Protocol",
+    "signal_desc": "X3DH key agreement and Double Ratchet forward/backward secrecy via libsodium (XChaCha20-Poly1305).",
+    "webauthn_title": "WebAuthn PRF",
+    "webauthn_desc": "Passwordless biometric vault decryption leveraging hardware secure enclaves (Secure Enclave/TPM).",
+    "memory_title": "Volatile Memory",
+    "memory_desc": "Cryptographic keys are wiped from RAM (`sodium.memzero`) immediately after decryption cycles.",
+    "migration_title": "Peer-to-Peer Migration",
+    "migration_desc": "Device migration uses an encrypted WebSocket tunnel. The server relays chunks blindly without key access."
+  },
+  "seo": {
+    "title": "Legal & Privacy | NYX",
+    "description": "Read about our Zero-Knowledge architecture, commercial licensing, and how NYX protects your data."
+  },
+  "footer": {
+    "tagline": "Military-Grade Privacy",
+    "copyright": "© {{year}} NYX. All rights reserved under AGPL-3.0.",
+    "quote": "\"In an era of total surveillance, obfuscation is the only true liberty.\""
+  }
+}

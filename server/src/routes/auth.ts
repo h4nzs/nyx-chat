@@ -28,7 +28,7 @@ const router: Router = Router()
 const rpName = 'NYX'
 const getRpID = () => {
   try {
-    return env.nodeEnv === 'production' ? new URL(env.corsOrigin).hostname : 'localhost'
+    return env.nodeEnv === 'production' ? '.nyx-app.my.id' : 'localhost'
   } catch (_e) {
     return 'localhost'
   }

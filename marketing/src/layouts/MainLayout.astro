@@ -1,0 +1,25 @@
+---
+// marketing/src/layouts/MainLayout.astro
+import '../index.css';
+import SEO from '../components/SEO.astro'; // 👈 Import komponen SEO Astro
+
+const { title, description, canonicalUrl, schemaMarkup } = Astro.props;
+---
+
+<html lang="en" class="dark" data-accent="purple">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} - NYX</title>
+    <link rel="icon" type="image/png" href="/pwa-512x512.png" />
+    <SEO 
+      title={`${title} - NYX`} 
+      description={description} 
+      canonicalUrl={canonicalUrl}
+      schemaMarkup={schemaMarkup}
+    />
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

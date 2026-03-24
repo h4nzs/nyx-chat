@@ -14,7 +14,7 @@ import { asUserId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
 
 export default function StoryViewer({ userId, onClose, onReply }: { userId: UserId; onClose: () => void, onReply?: (text: string) => void }) {
-  const { t } = useTranslation(['chat', 'media']);
+  const { t } = useTranslation(['chat']);
   const stories = useStoryStore(state => state.stories[userId] || []);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [progress, setProgress] = useState(0);

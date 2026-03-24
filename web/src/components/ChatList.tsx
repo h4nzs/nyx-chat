@@ -186,7 +186,9 @@ const ConversationItem = memo(function ConversationItem({
   const { t, i18n } = useTranslation(['chat', 'common']);
   const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
   const peerProfile = useUserProfile(peerUser as { id: string; encryptedProfile?: string | null });
-  const title = conversation.isGroup ? conversation.title : peerProfile.name || t('common:defaults.conversation', 'Conversation');
+  const title = conversation.isGroup 
+    ? (conversation.decryptedMetadata?.title || t('common:defaults.group_unknown', 'Unknown Group')) 
+    : (peerProfile.name || t('common:defaults.conversation', 'Conversation'));
   const isUnread = conversation.unreadCount > 0;
   const isPinnedByMe = Boolean(conversation.participants?.some(p => p.id === meId && p.isPinned));
   const openMenu = useContextMenuStore(s => s.openMenu);
@@ -194,24 +196,27 @@ const ConversationItem = memo(function ConversationItem({
   const cloakClass = privacyCloak ? "blur-[6px] opacity-70 group-hover:blur-none group-hover:opacity-100 group-active:blur-none group-active:opacity-100 transition-all duration-300 select-none" : "";
 
   const avatarSrc = conversation.isGroup 
-    ? (conversation.avatarUrl ? `${toAbsoluteUrl(conversation.avatarUrl)}?t=${conversation.lastUpdated}` : `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`)
+    ? (conversation.decryptedMetadata?.avatarUrl ? `${toAbsoluteUrl(conversation.decryptedMetadata.avatarUrl)}?t=${conversation.lastUpdated}` : `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.decryptedMetadata?.title || 'group'}`)
     : (peerProfile.avatarUrl ? toAbsoluteUrl(peerProfile.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${title}`);
 
   const formatConversationTime = useCallback((timestamp: string) => {
     const date = new Date(timestamp);
     const now = new Date();
-    const diffInDays = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60 * 24));
-    
+
+    // Create Date objects for midnight today and midnight yesterday
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
     // Use Intl.DateTimeFormat for better localization support
-    if (diffInDays === 0) {
+    if (messageDate.getTime() === today.getTime()) {
         return new Intl.DateTimeFormat(i18n.language, { hour: '2-digit', minute: '2-digit' }).format(date);
     }
-    if (diffInDays === 1) {
+    if (messageDate.getTime() === yesterday.getTime()) {
         return t('common:time.yesterday', 'Yesterday');
     }
     return new Intl.DateTimeFormat(i18n.language, { month: 'short', day: 'numeric' }).format(date);
   }, [i18n.language, t]);
-
   const renderPreviewText = () => {
     if (!conversation.lastMessage) return t('chat:messages.no_messages_yet', 'No messages yet');
     if (conversation.lastMessage.isViewOnce) {
@@ -294,7 +299,7 @@ const ConversationItem = memo(function ConversationItem({
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
                   if (conversation.isGroup) {
-                    target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.title}`;
+                    target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.decryptedMetadata?.title || 'group'}`;
                   } else {
                     target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${title}`;
                   }

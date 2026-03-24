@@ -1,0 +1,155 @@
+{
+  "header": {
+    "control_deck": "Painel de Controle",
+    "system_version": "Sistema {{version}}"
+  },
+  "modules": {
+    "identity": "Módulo de Identidade",
+    "power": "Célula de Energia",
+    "visual": "Interface Visual",
+    "privacy": "Escudo de Privacidade",
+    "data": "Porta de Dados",
+    "smart": "Assistência Inteligente",
+    "support": "Suporte e Feedback"
+  },
+  "identity": {
+    "anonymous_id": "ID ANÔNIMO",
+    "verified": "Verificado",
+    "sandboxed": "Sandbox (Fazer Upgrade)",
+    "display_name": "Nome de Exibição",
+    "bio": "Biografia",
+    "save_btn": "Salvar Identidade",
+    "processing": "Processando...",
+    "limited_access": "Acesso limitado. Verifique sua conta para desbloquear."
+  },
+  "power": {
+    "refuel_title": "Recarregar Desenvolvedor",
+    "description": "O sistema funciona em servidores de baixo custo. Inicie uma doação para melhorar a infraestrutura.",
+    "status": "Status: Precisa de Café"
+  },
+  "visual": {
+    "dark_mode": "Modo Escuro",
+    "accent_emitter": "Cor de Destaque"
+  },
+  "privacy": {
+    "read_receipts": "Recibos de Leitura",
+    "biometric_active": "Cofre Ativo (VIP)",
+    "biometric_enable": "Ativar Biometria",
+    "panic_password": "Senha de Pânico",
+    "panic_desc": "Se você for forçado a desbloquear em uma emergência, digitar esta senha apagará silenciosamente todos os seus dados locais.",
+    "dead_man": "Autodestruição",
+    "dead_man_desc": "Destrói automaticamente sua conta se você ficar inativo por um determinado período.",
+    "auto_destruct_options": {
+      "disabled": "Desativado",
+      "7_days": "7 Dias",
+      "14_days": "14 Dias",
+      "30_days": "30 Dias"
+    }
+  },
+  "data": {
+    "keys": "Chaves de Criptografia",
+    "sessions": "Sessões Ativas",
+    "export_vault": "Exportar Cofre",
+    "import_vault": "Importar Cofre",
+    "transfer": "Transferir para Novo Dispositivo (QR)"
+  },
+  "smart": {
+    "ai_reply": "Respostas Inteligentes (IA)",
+    "ai_desc": "Gerar sugestões de respostas automáticas.",
+    "privacy_note": "Nota de Privacidade:",
+    "privacy_desc": "As mensagens recebidas são descriptografadas no dispositivo e enviadas de forma segura ao Google Gemini para análise. As mensagens <1>não são salvas</1> pelos nossos servidores."
+  },
+  "support": {
+    "push_notif": "Notificações Push",
+    "background_guide": "Guia de Execução em Segundo Plano",
+    "background_desc": "Para receber notificações quando o NYX estiver fechado, certifique-se de que seu dispositivo permite que o aplicativo funcione em segundo plano.",
+    "android_guide_steps": "<0>🤖 Android:</0> Configurações > Aplicativos > NYX > Bateria > <1>Sem restrições</1>",
+    "ios_guide_steps": "<0>🍎 iOS:</0> Ajustes > NYX > <1>Atualização em 2º Plano</1>",
+    "help_center": "Centro de Ajuda",
+    "report_bug": "Relatar um Bug",
+    "legal": "Jurídico e Privacidade"
+  },
+  "SUPPORT": {
+    "PUSH_NOTIF": "Notificações Push"
+  },
+  "emergency": {
+    "eject": "Saída de Emergência",
+    "terminate_sessions": "Encerrar Todas as Sessões",
+    "delete_account": "Excluir Conta",
+    "delete_desc": "Apaga PERMANENTEMENTE todos os seus dados do servidor. Esta ação não pode ser desfeita."
+  },
+  "modals": {
+    "upgrade_title": "Fazer Upgrade para VIP",
+    "delete_confirm_title": "Confirmar Exclusão",
+    "final_warning": "ÚLTIMO AVISO",
+    "confirm_password": "Confirmar Senha",
+    "abort": "Abortar",
+    "execute_delete": "Executar Exclusão",
+    "sandbox_mode": "Você está atualmente no <1>Modo Sandbox</1>. Faça o upgrade para remover o limite de mensagens e poder criar grupos.",
+    "instant_biometric": "Biometria Instantânea",
+    "biometric_desc": "Use Impressão Digital ou FaceID. Leva 1 segundo.",
+    "pow_mining": "Mineração Proof of Work",
+    "pow_idle": "Resolva um quebra-cabeça criptográfico com sua CPU. Leva de 3 a 10 segundos.",
+    "pow_mining_status": "Minerando colisão de hash... CPU 100%",
+    "pow_verifying": "Verificando prova..."
+  },
+  "profile_page": {
+    "title": "Perfil do Operador",
+    "active": "ATIVO",
+    "edit_record": "EDITAR_REGISTRO",
+    "security_clearance": "Nível de Segurança",
+    "encryption_protocol": "Protocolo de Criptografia",
+    "public_key": "Chave Pública de Identidade"
+  },
+  "sessions_page": {
+    "title": "Nós da Rede",
+    "subtitle": "Monitor de Conexões Ativas",
+    "scanning": "Escaneando Rede...",
+    "no_nodes": "Nenhum nó ativo detectado.",
+    "current": "ATUAL",
+    "ip": "IP",
+    "last_ping": "ÚLTIMO PING"
+  },
+  "keys_page": {
+    "title": "Cofre Criptográfico",
+    "subtitle": "Protocolo de Criptografia de Ponta a Ponta",
+    "description": "Sua chave privada é a única maneira de descriptografar suas mensagens. Ela é armazenada localmente neste dispositivo. <1>Perder esta chave significa perder seu histórico de mensagens para sempre.</1>",
+    "recovery_title": "Frase Mestra de Recuperação",
+    "recovery_desc": "Exiba sua frase semente de 24 palavras para backup.",
+    "reveal_btn": "Mostrar Frase",
+    "rotation_title": "Rotação de Chaves (Destrutivo)",
+    "rotation_desc": "Gera uma nova chave de identidade. Mensagens antigas não poderão mais ser lidas.",
+    "rotate_btn": "Rotacionar Chaves",
+    "confirm_rotation_title": "INICIAR ROTAÇÃO DE CHAVES?",
+    "confirm_rotation_desc": "AVISO: AÇÃO DESTRUTIVA. O histórico de mensagens anterior não poderá mais ser descriptografado. Isso não pode ser desfeito."
+  },
+  "KEYS_PAGE": {
+    "REVEAL_BTN": "MOSTRAR FRASE",
+    "ROTATE_BTN": "ROTACIONAR CHAVES"
+  },
+  "messages": {
+    "account_obliterated": "Conta obliterada.",
+    "deletion_failed": "Falha na exclusão: {{error}}",
+    "identity_updated": "Identidade Atualizada",
+    "update_failed": "Falha na atualização: {{error}}",
+    "biometric_initializing": "Inicializando scanner biométrico...",
+    "biometric_scan_now": "Escaneie sua impressão digital agora para BLOQUEAR seu cofre...",
+    "biometric_success": "Biometria ativada! Agora você pode entrar sem senha.",
+    "mining_connecting": "Conectando à mineração...",
+    "mining_processing": "Minerando quebra-cabeça criptográfico... (Uso intenso de CPU)",
+    "mining_verifying": "Verificando prova...",
+    "mining_success": "Prova Aceita! Conta atualizada para VIP.",
+    "mining_failed": "Falha na mineração de hash: {{error}}",
+    "export_success": "Cofre exportado com sucesso! Guarde este arquivo com segurança.",
+    "export_failed": "Falha ao exportar o cofre.",
+    "import_success": "Cofre importado com sucesso! Recarregando...",
+    "import_failed": "Arquivo de cofre inválido ou dados corrompidos.",
+    "emergency_revoking": "Revogando sessões do servidor...",
+    "emergency_success": "Sessões revogadas. Iniciando exclusão local...",
+    "emergency_failed": "Falha ao revogar sessões remotas.",
+    "ejecting": "Ejetando sessão...",
+    "terminated": "Sessão encerrada.",
+    "eject_failed": "Falha ao ejetar.",
+    "keys_rotated": "Chaves Rotacionadas. Reiniciando Sessão..."
+  }
+}

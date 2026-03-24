@@ -1,0 +1,119 @@
+{
+  "header": {
+    "login": "Entrar"
+  },
+  "hero": {
+    "badge": "{{version}} • Criptografia E2EE • Anônimo",
+    "title_prefix": "CONVERSAS",
+    "title_highlight": "PRIVADAS",
+    "title_suffix": "PROTEGIDAS POR VOCÊ",
+    "description": "Mensagens com criptografia de ponta a ponta e um design industrial autêntico. Sem números de telefone ou e-mails. Sem rastreadores. Apenas você e seus dados.",
+    "cta_start": "COMECE AGORA",
+    "cta_source": "CÓDIGO FONTE"
+  },
+  "why": {
+    "title": "POR QUE O NYX?",
+    "desc_1": "Cansado de cadastros complicados e de ter que baixar aplicativos obrigatoriamente? O NYX é a solução. Acesso instantâneo do seu navegador favorito, sem instalar nada.",
+    "desc_2": "Preocupado com seus dados? Nós também! O NYX foi construído sobre uma base de privacidade, atuando apenas como uma ponte segura entre você e seus contatos."
+  },
+  "comparison": {
+    "title": "NYX vs. AS GIGANTES",
+    "headers": {
+      "feature": "Recurso",
+      "wa": "WhatsApp",
+      "tg": "Telegram",
+      "nyx": "NYX"
+    },
+    "rows": {
+      "phone_required": "Pede número?",
+      "app_install": "Instalar app?",
+      "e2e": "Criptografia E2E",
+      "footprint": "Rastro local"
+    },
+    "values": {
+      "yes": "Sim",
+      "no": "NÃO",
+      "required": "Obrigatório",
+      "optional": "Opcional (PWA)",
+      "default": "Padrão",
+      "secret_only": "Apenas chats secretos",
+      "always_on": "Sempre ativo",
+      "sql_db": "Banco de dados SQL",
+      "cloud_cache": "Cache na nuvem",
+      "zero": "ZERO (Navegador)"
+    }
+  },
+  "features": {
+    "title": "RECURSOS PARA SUA PRIVACIDADE",
+    "no_phone": {
+      "title": "SEM NÚMERO NEM E-MAIL",
+      "desc": "Cadastre-se apenas com um nome de usuário. Sua identidade real fica a salvo. Ninguém pode 'salvar seu contato' sem a sua permissão."
+    },
+    "ghost_app": {
+      "title": "APP FANTASMA (PWA)",
+      "desc": "Sem instalação. Abra no navegador, converse, feche a aba e limpe os dados. Zero rastro forense deixado no seu dispositivo."
+    },
+    "argon2": {
+      "title": "SEGURANÇA ARGON2",
+      "desc": "O único chat web que transforma sua senha em uma chave de criptografia de nível militar, usando um hash resistente a ataques de memória."
+    },
+    "tactile": {
+      "title": "DESIGN TÁTIL",
+      "desc": "Interface neumórfica com profundidade esculpida e textura granulada para uma sensação física premium."
+    }
+  },
+  "how_it_works": {
+    "title": "SIMPLES, SEGURO, TRANSPARENTE.",
+    "step_1": {
+      "title": "1. CRIE UMA CONTA",
+      "desc": "Cadastre-se com um nome de usuário. Geramos automaticamente uma frase de recuperação de 24 palavras para sua criptografia."
+    },
+    "step_2": {
+      "title": "2. COMECE A CONVERSAR",
+      "desc": "Suas mensagens são criptografadas de ponta a ponta desde a primeira palavra usando o Protocolo Signal."
+    },
+    "step_3": {
+      "title": "3. DESAPAREÇA",
+      "desc": "Terminou? Feche o navegador. As chaves de criptografia são apagadas da memória. Nenhum rastro é deixado."
+    }
+  },
+  "testimonials": {
+    "title": "CONFIADO POR DEFENSORES DA PRIVACIDADE",
+    "yosep": "Finalmente, um app de mensagens que respeita a minha privacidade sem abrir mão de uma experiência de usuário incrível. O fato de eu mesmo controlar as minhas chaves muda tudo.",
+    "yosep_role": "Defensor da Privacidade",
+    "sarah": "O Nyx se tornou essencial para a nossa equipe. É simples, seguro e um prazer usá-lo todos os dias.",
+    "sarah_role": "Líder de Equipe Remota"
+  },
+  "faq": {
+    "title": "PERGUNTAS FREQUENTES",
+    "q1": "O NYX possui criptografia de ponta a ponta?",
+    "a1": "Sim. Usamos o Protocolo Signal (X3DH + Double Ratchet Algorithm) para garantir que apenas você e a pessoa com quem está falando possam ler as mensagens. Nem mesmo o servidor pode descriptografá-las.",
+    "q2": "Preciso instalar algum aplicativo?",
+    "a2": "Não. O NYX é um Progressive Web App (PWA). Você pode usá-lo direto no seu navegador ou instalá-lo na tela inicial para ter uma experiência de app nativo sem a dor de cabeça das lojas de aplicativos.",
+    "q3": "É totalmente gratuito?",
+    "a3": "Sim, o NYX é de código aberto e totalmente gratuito. Sem cobranças ocultas, sem anúncios e sem rastreamento de dados.",
+    "q4": "Como eu recupero minha conta?",
+    "a4": "Ao se cadastrar, você recebe uma frase de recuperação de 24 palavras. Essa é a ÚNICA maneira de recuperar sua conta, mas lembre-se de que você não poderá acessar seu histórico de mensagens. E nós não guardamos essa frase."
+  },
+  "cta": {
+    "title": "RECUPERE SUA PRIVACIDADE.",
+    "desc": "Não deixe que seus dados sejam um produto. Mude para o NYX hoje mesmo. Grátis, de Código Aberto, para sempre.",
+    "button": "CRIAR CONTA ANÔNIMA"
+  },
+  "footer": {
+    "rights": "© {{year}} Projeto NYX. Código Aberto sob a",
+    "legal": "Legal e Privacidade",
+    "source": "Código Fonte",
+    "commercial": "Licença Comercial",
+    "disclaimer": "O WhatsApp é uma marca registrada da Meta Platforms, Inc. O Telegram é uma marca registrada da Telegram FZ-LLC. O NYX é um projeto independente de código aberto e não é afiliado, endossado ou patrocinado por essas entidades corporativas. Qualquer comparação de arquitetura é feita apenas para fins informativos e de revisão criptográfica com base em documentações técnicas públicas disponíveis até {{year}}."
+  },
+  "schema": {
+    "e2ee": "Criptografia de Ponta a Ponta (Protocolo Signal)",
+    "self_destruct": "Mensagens que se Autodestroem",
+    "local_first": "Arquitetura Focada no Local (Local-First)"
+  },
+  "a11y": {
+    "not_supported": "Não Suportado",
+    "supported": "Suportado"
+  }
+}

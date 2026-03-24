@@ -19,7 +19,9 @@ if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process
 
 export const env = {
   port: parseInt(process.env.PORT || '4000', 10),
-  corsOrigin: process.env.CORS_ORIGIN || 'https://nyx-app.my.id',
+  corsOrigin: (process.env.CORS_ORIGIN || 'https://app.nyx-app.my.id')
+  .split(',')
+  .map(url => url.trim()),
 
   // --- DITAMBAHKAN AGAR BUILD BERHASIL ---
   appUrl: process.env.APP_URL || 'https://api.nyx-app.my.id',

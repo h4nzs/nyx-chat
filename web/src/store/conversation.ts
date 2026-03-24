@@ -47,6 +47,7 @@ export interface RawServerMessage {
 }
 
 import type { Message, Participant, Conversation } from '@nyx/shared';
+import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey } from "@utils/crypto";
 export type { Message, Participant, Conversation };
 
 // --- Helper Functions ---
@@ -118,7 +119,8 @@ type Actions = {
   deleteConversation: (id: string) => Promise<void>;
   deleteGroup: (id: string) => Promise<void>;
   toggleSidebar: () => void;
-  startConversation: (peerId: string, optimisticProfile?: { name: string; username: string }) => Promise<string>;
+  startConversation: (peerId: string, optimisticProfile?: { name: string; username: string }) => Promise<ConversationId>;
+  createGroup: (name: string, userIds: string[], avatarUrl?: string) => Promise<ConversationId>;
   searchUsers: (query: string) => Promise<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>;
   addOrUpdateConversation: (conversation: Conversation) => void;
   removeConversation: (conversationId: string) => void;
@@ -245,11 +247,25 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
               lastMessage = withPreview(lastMessage);
           }
         }
+        
+        // DECRYPT METADATA
+        let decryptedMetadata = undefined;
+        if (c.isGroup && c.encryptedMetadata) {
+             try {
+                 const decrypted = await decryptGroupMetadata(c.encryptedMetadata as string, c.id as string);
+                 if (decrypted) {
+                     decryptedMetadata = decrypted;
+                 }
+             } catch (e) {
+                 console.warn(`Failed to decrypt metadata for group ${c.id}`);
+             }
+        }
 
         return {
           ...c,
           lastMessage,
-          participants
+          participants,
+          decryptedMetadata
         };
       }));
 
@@ -331,7 +347,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
   toggleSidebar: () => set(s => ({ isSidebarOpen: !s.isSidebarOpen })),
 
-  startConversation: async (peerId: string, optimisticProfile?: { name: string; username: string }): Promise<string> => {
+  startConversation: async (peerId: string, optimisticProfile?: { name: string; username: string }): Promise<ConversationId> => {
     const { user } = useAuthStore.getState();
     if (!user) {
       throw new Error("Cannot start a conversation: user is not authenticated.");
@@ -380,15 +396,73 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     }
   },
 
-  addOrUpdateConversation: (conversation) => {
+  createGroup: async (name: string, userIds: string[], avatarUrl?: string): Promise<ConversationId> => {
+    const { user } = useAuthStore.getState();
+    if (!user) throw new Error("Not authenticated");
+
+    // 1. We create the group first to get an ID
+    // But to encrypt metadata we need the ID. Chicken and egg?
+    // Actually, we can assume the server allows creating with encryptedMetadata.
+    // BUT we need the conversationID to encrypt the metadata (as context).
+    // Solution: Create group -> Get ID -> Encrypt Metadata -> Update Group?
+    // OR: Use a temporary ID? No.
+    // CORRECT TNO WAY: 
+    // The server generates the ID.
+    // We can't encrypt with ID context before we have it.
+    // So we must do 2 steps or use a predictable ID (not safe).
+    // Let's do: Create with placeholder or null metadata -> Encrypt -> Update.
+    
+    // Step 1: Create Group with NO metadata
+    const conv = await authFetch<Conversation>("/api/conversations", {
+        method: "POST",
+        body: JSON.stringify({
+            userIds,
+            isGroup: true,
+            encryptedMetadata: null 
+        })
+    });
+    
+    // Step 2: Now we have ID, encrypt the metadata
+    const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl }, conv.id);
+    
+    // Step 3: Update the group with encrypted metadata
+    await authFetch(`/api/conversations/${conv.id}/details`, {
+        method: 'PUT',
+        body: JSON.stringify({ encryptedMetadata })
+    });
+    
+    // Step 4: Optimistically update local state with decrypted data
+    const updatedConv: Conversation = {
+        ...conv,
+        decryptedMetadata: { title: name, avatarUrl },
+        encryptedMetadata
+    };
+    
+    getSocket().emit("conversation:join", conv.id);
+    get().addOrUpdateConversation(updatedConv);
+    set({ activeId: conv.id, isSidebarOpen: false });
+    
+    return conv.id;
+  },
+
+  addOrUpdateConversation: async (conversation) => {
+    let decryptedMetadata = conversation.decryptedMetadata;
+    
+    // If we have encrypted metadata but no decrypted version, try to decrypt
+    if (!decryptedMetadata && conversation.isGroup && conversation.encryptedMetadata) {
+        try {
+            const dec = await decryptGroupMetadata(conversation.encryptedMetadata as string, conversation.id);
+            if (dec) decryptedMetadata = dec;
+        } catch {}
+    }
+
     set(state => {
       const existing = state.conversations.find(c => c.id === conversation.id);
       if (existing) {
         const updated = {
           ...existing,
-          title: conversation.title,
-          description: conversation.description,
-          avatarUrl: conversation.avatarUrl,
+          encryptedMetadata: conversation.encryptedMetadata,
+          decryptedMetadata: decryptedMetadata || existing.decryptedMetadata,
           isGroup: conversation.isGroup, // Ensure isGroup is updated
           participants: conversation.participants,
           lastMessage: conversation.lastMessage || existing.lastMessage,
@@ -400,7 +474,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         };
       } else {
         return {
-          conversations: sortConversations([conversation, ...state.conversations], useAuthStore.getState().user?.id)
+          conversations: sortConversations([{ ...conversation, decryptedMetadata }, ...state.conversations], useAuthStore.getState().user?.id)
         };
       }
     });
@@ -431,9 +505,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const oldIds = oldConv.participants.map(p => p.id).sort().join(',');
       const newIds = data.participants.map(p => p.id).sort().join(',');
       if (oldIds !== newIds) {
-        import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(id)).catch(() => { console.warn('Key rotation deferred'); });
+        forceRotateGroupSenderKey(id).catch(() => { console.warn('Key rotation deferred'); });
       }
     }
+    
+    // If metadata updated, we should probably try to decrypt it if we can? 
+    // But here we just store it. The UI should trigger decryption if needed or we assume it's passed in.
+    // Ideally updateConversation should handle this, but for now we rely on the component or load loop.
 
     return {
       conversations: state.conversations.map((c) =>

@@ -1,0 +1,83 @@
+{
+  "title": "Pusat Hukum & Privasi",
+  "subtitle": "Transparansi mutlak mengenai penanganan data Zero-Knowledge, protokol kriptografi, dan persyaratan lisensi perangkat lunak kami.",
+  "last_updated": "Terakhir Diperbarui: Maret 2026",
+  "back": "Kembali ke Hub",
+  "nav": {
+    "privacy": "Kebijakan Privasi",
+    "terms": "Ketentuan Layanan",
+    "licensing": "Lisensi Perangkat Lunak",
+    "cookies": "Kebijakan Cookie",
+    "ai": "AI & Telemetri",
+    "security": "Arsitektur Keamanan"
+  },
+  "privacy": {
+    "title": "Kebijakan Privasi",
+    "intro": "Direktif inti kami: Jika kami tidak memiliki data Anda, tidak ada yang bisa memintanya dari kami.",
+    "minimization_title": "1. Minimisasi Data & Kriptografi",
+    "minimization_1": "<strong>Protokol Identitas Buta:</strong> Kami tidak menyimpan nama pengguna mentah, email, atau nomor telepon Anda. Kami menggunakan <a href=\"https://en.wikipedia.org/wiki/Argon2\" target=\"_blank\" class=\"text-accent underline\">hashing Argon2id</a> di sisi klien. Server hanya menyimpan hash kriptografis (`usernameHash`), membuat identitas Anda tidak dapat dibaca kembali secara matematis oleh kami.",
+    "minimization_2": "<0>Metadata Terenkripsi:</0> Nama tampilan, bio, dan avatar Anda dienkripsi secara simetris di perangkat Anda. Bagi infrastruktur kami, profil Anda adalah gumpalan ciphertext yang tidak tembus pandang.",
+    "minimization_3": "<strong>Komunikasi E2EE:</strong> Semua pesan langsung, pesan suara, dan lampiran file Terenkripsi End-to-End menggunakan <a href=\"https://signal.org/docs/\" target=\"_blank\" class=\"text-accent underline\">Signal Protocol (Double Ratchet)</a>. Kami sepenuhnya hanya bertindak sebagai jaringan relai buta.",
+    "logging_title": "2. Pencatatan Jaringan Sementara",
+    "logging_desc": "Untuk menjaga integritas jaringan dan mencegah serangan DDoS/Botnet, kami memproses sementara:",
+    "logging_1": "Alamat IP (di-hash secara tidak dapat dibalik saat koneksi).",
+    "logging_2": "Stempel waktu koneksi WebSocket (dihapus otomatis dari Redis).",
+    "logging_3": "Antrean pesan offline terenkripsi (dihapus otomatis setelah berhasil dikirim ke penerima)."
+  },
+  "terms": {
+    "title": "Ketentuan Layanan",
+    "liability_title": "Penyangkalan Tanggung Jawab Kritis",
+    "liability_desc": "NYX disediakan \"SEBAGAIMANA ADANYA\", tanpa jaminan apa pun. Pengelola tidak bertanggung jawab atas kehilangan data, kunci yang dikompromikan, atau gangguan layanan. Anda bertanggung jawab penuh untuk mengelola Frasa Pemulihan kriptografi Anda.",
+    "gating": "<0>Gerbang Tingkat Kepercayaan:</0> Untuk melindungi jaringan, akun yang belum diverifikasi ditempatkan dalam \"Mode Sandbox\" terbatas. Kemampuan penuh memerlukan verifikasi perangkat keras biometrik atau Proof-of-Work kriptografi.",
+    "abuse": "<0>Kebijakan Penyalahgunaan Tanpa Toleransi:</0> Anda setuju untuk tidak menggunakan jaringan NYX untuk aktivitas ilegal, penyalahgunaan API otomatis (botting), atau mendistribusikan malware. Pelanggaran akan mengakibatkan pemblokiran jaringan segera."
+  },
+  "licensing": {
+    "title": "Lisensi Perangkat Lunak & Perusahaan",
+    "intro": "Kode sumber NYX bangga menjadi open-source dan dilindungi dengan ketat di bawah <0>GNU Affero General Public License v3.0 (AGPL-3.0)</0>.",
+    "agpl_title": "Batasan AGPL-3.0",
+    "agpl_desc": "Jika Anda memodifikasi basis kode NYX dan mengizinkan pengguna berinteraksi dengannya melalui jaringan (misalnya, menghostingnya sebagai SaaS), Anda secara hukum diwajibkan untuk merilis kode sumber yang dimodifikasi kepada publik.",
+    "commercial_title": "Lisensi Ganda Komersial",
+    "commercial_desc": "Untuk korporasi, perusahaan, atau startup yang ingin mengintegrasikan NYX ke dalam produk berpemilik, sumber tertutup tanpa kewajiban AGPL, kami menawarkan Lisensi Komersial.",
+    "contact_btn": "Hubungi Komando untuk Harga Perusahaan"
+  },
+  "cookies": {
+    "title": "Kebijakan Cookie & Penyimpanan",
+    "intro": "Kami tidak menggunakan cookie pelacakan, iklan, atau analitik pihak ketiga. Penyimpanan lokal digunakan secara ketat untuk persistensi kriptografi dan autentikasi.",
+    "table_type": "Tipe Penyimpanan",
+    "table_item": "Item",
+    "table_purpose": "Tujuan",
+    "cookie_desc": "Autentikasi aman & persistensi sesi.",
+    "idb_keys_desc": "Penyimpanan lokal Kunci Pribadi terenkripsi Anda.",
+    "idb_vault_desc": "Penyimpanan lokal riwayat chat E2EE Anda."
+  },
+  "ai": {
+    "title": "AI & Telemetri",
+    "intro": "NYX beroperasi dengan <0>Nol Telemetri</0>. Kami tidak melacak klik, waktu layar, atau penggunaan fitur Anda.",
+    "smart_reply_title": "Balasan Cerdas (AI Opsional)",
+    "smart_reply_desc": "Kami menyediakan fitur eksperimental \"Balasan Cerdas\" menggunakan API Google Gemini. Fitur ini <0>benar-benar Opt-In</0>.",
+    "smart_reply_1": "Pesan didekripsi secara lokal sebelum dikirim ke AI.",
+    "smart_reply_2": "Server NYX bertindak sebagai proksi buta; tidak mencatat prompt atau respons AI.",
+    "smart_reply_3": "Data yang diproses oleh API Gemini bersifat sementara dan tidak digunakan untuk melatih model AI dasar, sesuai ketentuan API perusahaan Google."
+  },
+  "security": {
+    "title": "Arsitektur Keamanan",
+    "intro": "Implementasi kriptografi kami terbuka untuk audit.",
+    "signal_title": "Protokol Signal",
+    "signal_desc": "Kesepakatan kunci X3DH dan Double Ratchet forward/backward secrecy via libsodium (XChaCha20-Poly1305).",
+    "webauthn_title": "WebAuthn PRF",
+    "webauthn_desc": "Dekripsi brankas biometrik tanpa kata sandi memanfaatkan hardware secure enclaves (Secure Enclave/TPM).",
+    "memory_title": "Memori Volatil",
+    "memory_desc": "Kunci kriptografi dihapus dari RAM (`sodium.memzero`) segera setelah siklus dekripsi.",
+    "migration_title": "Migrasi Peer-to-Peer",
+    "migration_desc": "Migrasi perangkat menggunakan terowongan WebSocket terenkripsi. Server merelai potongan secara buta tanpa akses kunci."
+  },
+  "seo": {
+    "title": "Hukum & Privasi | NYX",
+    "description": "Baca tentang arsitektur Zero-Knowledge kami, lisensi komersial, dan bagaimana NYX melindungi data Anda."
+  },
+  "footer": {
+    "tagline": "Privasi Tingkat Militer",
+    "copyright": "© {{year}} NYX. Semua hak dilindungi di bawah AGPL-3.0.",
+    "quote": "\"Di era pengawasan total, penyamaran adalah satu-satunya kebebasan sejati.\""
+  }
+}

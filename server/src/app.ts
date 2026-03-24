@@ -148,11 +148,13 @@ function escapeRegExp(string: string) {
 const isAllowedOrigin = (origin: string): boolean => {
   if (!origin) return true;
 
+  // 👇 PERBAIKAN: Ratakan array jika env.corsOrigin berbentuk array
+  const baseOrigins = Array.isArray(env.corsOrigin) ? env.corsOrigin : [env.corsOrigin];
+
   const allowedOrigins = [
-    env.corsOrigin,
+    ...baseOrigins, // 👈 PERBAIKAN: Gunakan spread operator (...)
     "http://localhost:5173",
     "http://localhost:4173",
-    "https://*.supabase.co",
     // IZINKAN HTTP & HTTPS UNTUK CLOUDFLARE TUNNEL
     "https://nyx-app.my.id",
     "https://www.nyx-app.my.id",
@@ -164,7 +166,6 @@ const isAllowedOrigin = (origin: string): boolean => {
 
   return allowedOrigins.some(allowedOrigin => {
     if (allowedOrigin.includes('*')) {
-      // Securely escape the domain string first, then replace the escaped wildcard
       const escapedOrigin = escapeRegExp(allowedOrigin);
       const pattern = escapedOrigin.replace(/\\\*/g, '.*'); 
       const regex = new RegExp('^' + pattern + '$');

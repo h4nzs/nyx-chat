@@ -22,7 +22,7 @@ jobs:
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'pnpm'
           cache-dependency-path: 'pnpm-lock.yaml'
 
@@ -43,6 +43,9 @@ jobs:
           VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
         run: pnpm --filter nyx-web run build
 
+      - name: 🚀 Build Marketing (Sisi Publik)
+        run: pnpm --filter ./marketing run build
+
       # --- PHASE 4: BUILD SERVER ---
       - name: ⚙️ Build Server (Backend)
         run: |
@@ -62,6 +65,9 @@ jobs:
           # Copy Frontend Build
           mkdir -p deploy_package/web
           cp -r web/dist deploy_package/web/
+
+          mkdir -p deploy_package/marketing
+          cp -r marketing/dist deploy_package/marketing/
           
           # Copy Backend (Bawa Prisma hasil generate dari GitHub, TAPI TINGGALKAN node_modules)
           mkdir -p deploy_package/server
@@ -100,11 +106,16 @@ jobs:
                 npm install -g pnpm
             fi
             
-            pm2 stop nyx-api
+            pm2 stop nyx-api || true
+
             
             # 2. Siapkan direktori utama (Jika belum ada)
             TARGET_DIR="/root/nyx-app"
             mkdir -p $TARGET_DIR
+            rm -rf $TARGET_DIR/server
+            rm -rf $TARGET_DIR/web
+            rm -rf $TARGET_DIR/marketing
+
             
             # 3. Unzip dan TIMPA LANGSUNG ke direktori utama
             echo "📦 Unzipping artifact directly to $TARGET_DIR..."
@@ -113,6 +124,7 @@ jobs:
             
             # 4. INSTALL DI VPS PAKAI PNPM (Di Root Monorepo)
             echo "📦 Installing backend dependencies with PNPM..."
+            cp $TARGET_DIR/.env.example $TARGET_DIR/server/.env || true
             cd $TARGET_DIR
             NODE_OPTIONS="--max-old-space-size=512" pnpm install --prod --no-frozen-lockfile
             
@@ -127,6 +139,12 @@ jobs:
             # Hapus isi lama, copy yang baru
             sudo rm -rf /var/www/nyx-web/*
             sudo cp -r $TARGET_DIR/web/dist/* /var/www/nyx-web/
+
+            echo "🌐 Deploying Marketing Frontend..."
+            sudo mkdir -p /var/www/nyx-marketing
+            sudo rm -rf /var/www/nyx-marketing/*
+            sudo cp -r $TARGET_DIR/marketing/dist/* /var/www/nyx-marketing/
+            
             sudo systemctl reload nginx || true
             
             # 7. RESTART PM2 (Bersih dan Langsung)

@@ -1,0 +1,15 @@
+---
+import BaseIndex from '../index.astro';
+
+export function getStaticPaths() {
+  return [
+    { params: { lang: 'id' } },
+    { params: { lang: 'es' } },
+    { params: { lang: 'pt-BR' } },
+  ];
+}
+
+// TANGKAP DAN LEMPAR PARAMETERNYA!
+const { lang } = Astro.params;
+---
+<BaseIndex lang={lang} />

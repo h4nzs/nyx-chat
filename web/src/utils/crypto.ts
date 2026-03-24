@@ -43,6 +43,62 @@ import {
 } from '@lib/socket';
 import type { Participant } from '@store/conversation';
 
+// --- Group Metadata Helpers ---
+
+export async function encryptGroupMetadata(
+  metadata: { title?: string; description?: string; avatarUrl?: string },
+  conversationId: string
+): Promise<string> {
+  const payload = JSON.stringify(metadata);
+  // Encrypt as a group message
+  const result = await encryptMessage(payload, conversationId, true);
+  
+  // We must embed the senderId so receivers know whose key to use for decryption
+  const myId = useAuthStore.getState().user?.id;
+  if (!myId) throw new Error("Cannot encrypt metadata: User not authenticated");
+
+  // The result from encryptMessage for groups is already a JSON string containing header, ciphertext, signature
+  // We need to parse it to inject senderId, or wrap it.
+  // encryptMessage returns: { ciphertext: string (JSON), mk: Uint8Array } for groups
+  
+  // Let's wrap it to be safe and consistent
+  const wrapper = {
+    ...JSON.parse(result.ciphertext), // { header, ciphertext, signature }
+    senderId: myId
+  };
+  
+  return JSON.stringify(wrapper);
+}
+
+export async function decryptGroupMetadata(
+  encryptedMetadataStr: string,
+  conversationId: string
+): Promise<{ title?: string; description?: string; avatarUrl?: string } | null> {
+  try {
+    const wrapper = JSON.parse(encryptedMetadataStr);
+    const { senderId, ...rest } = wrapper;
+
+    if (!senderId) {
+      console.warn("Decryption failed: Missing senderId in group metadata");
+      return null;
+    }
+    
+    // Reconstruct the payload expected by decryptMessage
+    const cipherPayload = JSON.stringify(rest);
+    
+    const result = await decryptMessage(cipherPayload, conversationId, true, senderId);
+    
+    if (result.status === 'success') {
+      return JSON.parse(result.value);
+    } else {
+      console.warn(`Group metadata decryption failed: ${result.status}`, result);
+      return null;
+    }
+  } catch (e) {
+    console.error("Failed to decrypt group metadata", e);
+    return null;
+  }
+}
 
 // --- Secure Storage Helpers ---
 

@@ -1,0 +1,27 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "baseUrl": ".",
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": false, // Matikan ini agar tidak error import type
+    "noImplicitAny": false,        // Kurangi ketatnya aturan untuk sementara
+    "paths": {
+      "@/*": ["../web/src/*"],
+      "@lib/*": ["../web/src/lib/*"],
+      "@utils/*": ["../web/src/utils/*"],
+      "@hooks/*": ["../web/src/hooks/*"],
+      "@store/*": ["../web/src/store/*"],
+      "@components/*": ["../web/src/components/*"]
+    }
+  },
+  "include": [
+    "src/**/*", 
+    "../web/src/components/**/*", 
+    "../web/src/store/**/*",
+    "../web/src/hooks/**/*",
+    "../web/src/lib/**/*",
+    "../web/src/utils/**/*"
+  ]
+}

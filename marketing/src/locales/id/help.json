@@ -1,0 +1,38 @@
+{
+  "title": "Bantuan & FAQ",
+  "back_settings": "Kembali ke Pengaturan",
+  "move_account": {
+    "title": "Bagaimana cara memindahkan akun ke perangkat baru?",
+    "desc": "Karena NYX menyimpan kunci dan riwayat secara lokal demi privasi maksimal, Anda tidak bisa begitu saja login untuk melihat pesan lama. Ada dua cara aman untuk pindah:",
+    "migration_label": "Migrasi Perangkat (Disarankan):",
+    "migration_text": "Buka <1>Pengaturan &gt; Transfer ke Perangkat Baru</1>. Ini membuat terowongan langsung yang aman ke ponsel baru Anda via kode QR.",
+    "backup_label": "Cadangan Brankas:",
+    "backup_text": "Buka <1>Pengaturan &gt; Ekspor Brankas</1>. Simpan file `.nyxvault` dan impor di layar login perangkat baru."
+  },
+  "sandbox_mode": {
+    "title": "Mengapa akun saya \"Sandboxed\"?",
+    "desc": "Untuk mencegah bot spam tanpa mengumpulkan data pribadi (seperti nomor telepon dan email), akun baru dimulai dalam <1>Mode Sandbox</1> dengan kuota pesan terbatas.",
+    "upgrade_text": "Anda dapat meningkatkan ke <1>Status VIP</1> secara instan dan gratis dengan memverifikasi bahwa Anda manusia. Buka <2>Pengaturan &gt; Tingkatkan ke VIP</2> dan pilih <3>Verifikasi Biometrik</3> (Sidik Jari/FaceID) atau <3>Proof of Work</3> (Penambangan CPU)."
+  },
+  "forgot_password": {
+    "title": "Saya lupa kata sandi. Apa yang harus saya lakukan?",
+    "desc": "Karena kami tidak memiliki email ataupun nomor Anda, kami tidak dapat mengirim tautan ataupun kode reset. Anda harus menggunakan <1>Frasa Pemulihan</1> Anda.",
+    "step1": "Di layar login, klik \"Pulihkan dari frasa\".",
+    "step2": "Masukkan 24-kata Frasa Pemulihan Anda untuk membuktikan identitas.",
+    "step3": "Atur kata sandi baru.",
+    "warning": "Catatan: Memulihkan dari frasa akan mereset kunci identitas Anda. Anda akan mendapatkan kembali akses ke ID akun Anda, tetapi <1>riwayat chat akan hilang</1> kecuali Anda memiliki Cadangan Brankas."
+  },
+  "sync_issues": {
+    "title": "Mengapa pesan saya tidak tersinkronisasi?",
+    "desc": "NYX bersifat <1>Local-First</1>. Pesan berada di perangkat Anda, bukan di cloud. Jika Anda menggunakan NYX di beberapa perangkat (misal: Ponsel + Laptop), mereka bertindak sebagai klien independen.",
+    "future_text": "Kami sedang mengerjakan \"Protokol Sinkronisasi\" aman untuk masa depan, tetapi saat ini, riwayat tidak tersinkronisasi otomatis antar perangkat demi menjamin privasi zero-knowledge."
+  },
+  "lost_phrase": {
+    "title": "Bagaimana jika saya kehilangan Frasa Pemulihan?",
+    "irrecoverable": "Akun Anda secara matematis tidak dapat dipulihkan.",
+    "desc": "Kami tidak menyimpan frasa atau kata sandi Anda. Jika Anda kehilangannya, tidak ada seorang pun di Bumi—termasuk kami—yang dapat mendekripsi data Anda. Harap tulis frasa Anda dan simpan dengan aman secara offline."
+  },
+  "seo": {
+    "description": "Dapatkan bantuan tentang obrolan E2EE NYX, pemulihan akun, dan fitur keamanan."
+  }
+}

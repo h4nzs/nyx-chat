@@ -81,7 +81,7 @@ export default function Register() {
       
     } catch (err: unknown) {
       sessionStorage.removeItem('nyx_registration_in_progress');
-      setError((err instanceof Error ? err.message : 'Unknown error') || "Registration failed");
+      setError((err instanceof Error ? err.message : t('common:errors.unknown', 'Unknown error')) || t('auth:errors.registration_failed', 'Registration failed'));
     }
   }
 
@@ -105,13 +105,13 @@ export default function Register() {
         toast.success(t('auth:status.biometric_verified'));
         setStep('recovery');
       } else {
-        throw new Error("Verification failed");
+        throw new Error(t('auth:errors.verification_failed', 'Verification failed'));
       }
     } catch (error: unknown) {
       if ((error as Error).name === 'NotAllowedError') {
         toast.error(t('auth:messages.biometric_cancelled'));
       } else {
-        toast.error(`Error: ${(error instanceof Error ? error.message : 'Unknown error')}`);
+        toast.error(`${t('common:errors.error_prefix', 'Error:')} ${(error instanceof Error ? error.message : t('common:errors.unknown', 'Unknown error'))}`);
       }
     } finally {
       setIsVerifyingBio(false);
@@ -237,7 +237,7 @@ export default function Register() {
             <Turnstile
               siteKey="0x4AAAAAACN0kvKqxA8cYt6U" 
               onSuccess={setTurnstileToken}
-              onError={() => toast.error("Security check failed.")}
+              onError={() => toast.error(t('auth:errors.security_check_failed', 'Security check failed.'))}
               onExpire={() => setTurnstileToken('')}
               options={{ theme: 'auto' }}
             />

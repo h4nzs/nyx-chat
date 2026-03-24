@@ -78,8 +78,12 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
 
   const peerUser = !conversation.isGroup ? conversation.participants?.find((p) => p.id !== meId) : null;
   const peerProfile = useUserProfile(peerUser as unknown as { id: string; encryptedProfile?: string | null });
-  const title = conversation.isGroup ? conversation.title : peerProfile.name;
-  const avatarUrl = conversation.isGroup ? conversation.avatarUrl : peerProfile.avatarUrl;
+  const title = conversation.isGroup 
+    ? (conversation.decryptedMetadata?.title || t('common:defaults.group_unknown', 'Unknown Group'))
+    : peerProfile.name;
+  const avatarUrl = conversation.isGroup 
+    ? conversation.decryptedMetadata?.avatarUrl 
+    : peerProfile.avatarUrl;
   const isOnline = peerUser ? onlineUsers.has(peerUser.id) : false;
   const isConvVerified = verifiedStatus[conversation.id] || false;
 
@@ -167,14 +171,16 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
       <div className="flex items-center gap-2 md:gap-3">
         {!conversation.isGroup && (
           <>
-            <button 
-              onClick={handleVoiceCall} 
+            <button
+              onClick={handleVoiceCall}
+              aria-label={t('actions.voice_call')}
               className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-main text-text-secondary shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all duration-200"
             >
               <FiPhone size={16} />
             </button>
-            <button 
-              onClick={handleVideoCall} 
+            <button
+              onClick={handleVideoCall}
+              aria-label={t('actions.video_call')}
               className="flex items-center justify-center w-9 h-9 rounded-full bg-bg-main text-text-secondary shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all duration-200"
             >
               <FiVideo size={16} />
@@ -182,10 +188,11 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
           </>
         )}
         <SearchMessages conversationId={conversation.id} />
-        <button 
-          onClick={openChatInfoModal} 
+        <button
+          onClick={openChatInfoModal}
+          aria-label={t('actions.info')}
           className="
-            flex items-center justify-center w-9 h-9 rounded-full 
+            flex items-center justify-center w-9 h-9 rounded-full
             bg-bg-main text-text-secondary
             shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent
             active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all duration-200
@@ -193,8 +200,7 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
         >
           {conversation.isGroup ? <FiUsers size={18} /> : <FiInfo size={18} />}
         </button>
-      </div>
-    </div>
+      </div>    </div>
   );
 };
 
@@ -248,15 +254,19 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
   const handleBulkDelete = () => {
     if (!conversation || !messages || !meId) return;
-    
+
     const selectedMessages = messages.filter(m => selectedMessageIds.includes(m.id));
     const allMine = selectedMessages.every(m => m.senderId === meId);
-    
-    const confirmMessage = t('messages.bulk_delete_confirm', { count: selectedMessageIds.length }) + 
-      (allMine ? '' : ' ' + t('messages.bulk_delete_desc'));
+
+    const confirmMessage = allMine 
+      ? t('messages.bulk_delete_confirm', { count: selectedMessageIds.length })
+      : t('messages.bulk_delete_confirm_mixed', { 
+          count: selectedMessageIds.length, 
+          defaultValue: `${t('messages.bulk_delete_confirm', { count: selectedMessageIds.length })} ${t('messages.bulk_delete_desc')}` 
+        });
 
     showConfirm(
-      t('actions.bulk_delete_title'), 
+      t('actions.bulk_delete_title'),
       confirmMessage,
       async () => {
           await removeMessages(conversation.id, selectedMessageIds);
@@ -265,7 +275,6 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
       }
     );
   };
-
   useEffect(() => {
     if (!highlightedMessageId) return;
 
@@ -380,20 +389,20 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
               {isSelectionMode ? (
                   <div className="h-16 flex items-center justify-between px-4 bg-accent/10 border-b border-white/5 backdrop-blur-md z-30">
                       <div className="flex items-center gap-4">
-                          <button onClick={clearMessageSelection} className="p-2 hover:bg-white/10 rounded-full transition-colors text-text-secondary hover:text-white">
+                          <button onClick={clearMessageSelection} aria-label={t('common:actions.cancel_bracket')} className="p-2 hover:bg-white/10 rounded-full transition-colors text-text-secondary hover:text-white">
                               <FiX size={20} />
                           </button>
                           <span className="font-bold text-lg text-accent tracking-wide">{t('messages.selected_count', { count: selectedMessageIds.length })}</span>
                       </div>
-                      <button 
-                          onClick={handleBulkDelete} 
+                      <button
+                          onClick={handleBulkDelete}
                           className="p-2 text-red-500 hover:bg-red-500/20 rounded-full transition-all active:scale-95 shadow-neumorphic-concave"
                           title={t('actions.delete_selected')}
+                          aria-label={t('actions.delete_selected')}
                       >
                           <FiTrash2 size={20} />
                       </button>
-                  </div>
-              ) : (
+                  </div>              ) : (
                   <ChatHeader 
                     conversation={conversation} 
                     onBack={() => navigate('/chat')} 

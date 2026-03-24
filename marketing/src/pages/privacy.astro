@@ -1,0 +1,279 @@
+---
+import MainLayout from '../layouts/MainLayout.astro';
+import { getLangFromUrl, useTranslations } from '../utils/i18n';
+import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiCpu, FiGlobe, FiAlertTriangle } from 'react-icons/fi';
+
+const { lang: propLang } = Astro.props;
+const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
+const langPrefix = lang === 'en' ? '' : `/${lang}`;
+const t = useTranslations(lang);
+
+const title = t('privacy:seo.title') !== 'privacy:seo.title' ? t('privacy:seo.title') : 'Legal & Privacy | NYX';
+const description = t('privacy:seo.description') !== 'privacy:seo.description' ? t('privacy:seo.description') : 'Read about our Zero-Knowledge architecture, commercial licensing, and how NYX protects your data.';
+
+const techArticleSchema = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "NYX Security Architecture & Zero-Knowledge Protocol",
+  "alternativeHeadline": "How NYX protects metadata without storing user identities",
+  "author": { "@type": "Organization", "name": "NYX Project" },
+  "keywords": "Signal Protocol, Argon2, Zero-Knowledge, End-to-End Encryption, Privacy",
+  "articleBody": "NYX uses a Double Ratchet algorithm...",
+  "datePublished": "2026-03-01"
+});
+
+const navItems = [
+  { id: 'privacy', label: t('privacy:nav.privacy') },
+  { id: 'terms', label: t('privacy:nav.terms') },
+  { id: 'licensing', label: t('privacy:nav.licensing') },
+  { id: 'cookies', label: t('privacy:nav.cookies') },
+  { id: 'ai', label: t('privacy:nav.ai') },
+  { id: 'security', label: t('privacy:nav.security') },
+];
+---
+
+<MainLayout title={title} description={description} canonicalUrl={Astro.url.pathname} schemaMarkup={techArticleSchema}>
+  <div class="min-h-screen bg-bg-main text-text-primary font-sans selection:bg-accent selection:text-white">
+    
+    <header class="sticky top-0 z-50 bg-bg-surface/80 backdrop-blur-xl border-b border-white/5 shadow-sm">
+      <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+        <a href={lang === 'en' ? '/' : langPrefix} class="flex items-center gap-2 text-text-secondary hover:text-accent transition-colors text-sm font-bold tracking-wide uppercase">
+          <FiArrowLeft size={16} /> {t('privacy:back')}
+        </a>
+        <div class="font-mono text-[10px] text-text-secondary uppercase tracking-[0.2em] flex items-center gap-2">
+          <FiShield className="text-accent" /> {t('privacy:title')}
+        </div>
+      </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-6 py-12 flex flex-col md:flex-row gap-12">
+      <aside class="md:w-64 flex-shrink-0 hidden md:block">
+        <nav class="sticky top-28 space-y-2" id="toc-nav">
+          {navItems.map((item) => (
+            <a href={`#${item.id}`} class="nav-link block w-full text-left px-4 py-3 rounded-xl text-sm font-bold transition-all duration-300 text-text-secondary hover:bg-white/5 hover:text-text-primary border border-transparent">
+              {item.label}
+            </a>
+          ))}
+        </nav>
+      </aside>
+
+      <div class="flex-1 min-w-0">
+        <div class="mb-16">
+          <h1 class="text-4xl sm:text-5xl font-black mb-4 tracking-tighter bg-gradient-to-r from-white to-text-secondary bg-clip-text text-transparent">{t('privacy:title')}</h1>
+          <p class="text-lg text-text-secondary max-w-2xl">{t('privacy:subtitle')}</p>
+          <div class="mt-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent/10 text-accent text-xs font-mono font-bold border border-accent/20">
+            <span class="w-2 h-2 rounded-full bg-accent animate-pulse shadow-[0_0_8px_rgba(var(--color-accent),0.8)]"></span>
+            {t('privacy:last_updated')}
+          </div>
+        </div>
+
+        <section id="privacy" class="mb-12 scroll-mt-24 content-section">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 rounded-lg bg-accent/10 text-accent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2)]"><FiLock size={24} /></div>
+            <h2 class="text-2xl font-bold text-text-primary tracking-tight">{t('privacy:privacy.title')}</h2>
+          </div>
+          <div class="prose dark:prose-invert max-w-none text-text-secondary leading-relaxed">
+            <p class="text-lg text-text-primary font-medium mb-4">{t('privacy:privacy.intro')}</p>
+            <h3 class="text-lg font-bold text-text-primary mt-8 mb-3 border-b border-white/5 pb-2">{t('privacy:privacy.minimization_title')}</h3>
+            <ul class="list-disc pl-5 space-y-3">
+              <li set:html={t('privacy:privacy.minimization_1') !== 'privacy:privacy.minimization_1' ? t('privacy:privacy.minimization_1') : '<strong>Blind Identity Protocol:</strong> We do not store your raw username, email, or phone number. We utilize client-side <a href=\"https://en.wikipedia.org/wiki/Argon2\" target=\"_blank\" class=\"text-accent underline\">Argon2id hashing</a>. The server only stores a cryptographic hash (`usernameHash`), rendering your identity mathematically irreversible to us.'} />
+              <li set:html={t('privacy:privacy.minimization_2') !== 'privacy:privacy.minimization_2' ? t('privacy:privacy.minimization_2') : '<strong>Encrypted Metadata:</strong> Your display name, bio, and avatar are symmetrically encrypted on your device. To our infrastructure, your profile is an opaque blob of ciphertext.'} />
+              <li set:html={t('privacy:privacy.minimization_3') !== 'privacy:privacy.minimization_3' ? t('privacy:privacy.minimization_3') : '<strong>E2EE Communication:</strong> All direct messages, voice notes, and file attachments are End-to-End Encrypted using the <a href=\"https://signal.org/docs/\" target=\"_blank\" class=\"text-accent underline\">Signal Protocol (Double Ratchet)</a>. We act solely as a blind relay network.'} />
+            </ul>
+
+            <h3 class="text-lg font-bold text-text-primary mt-8 mb-3 border-b border-white/5 pb-2">{t('privacy:privacy.logging_title')}</h3>
+            <p>{t('privacy:privacy.logging_desc')}</p>
+            <ul class="list-disc pl-5 space-y-2 mt-2">
+              <li>{t('privacy:privacy.logging_1')}</li>
+              <li>{t('privacy:privacy.logging_2')}</li>
+              <li>{t('privacy:privacy.logging_3')}</li>
+            </ul>
+          </div>
+        </section>
+
+        <section id="terms" class="mb-12 scroll-mt-24 content-section">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 rounded-lg bg-accent/10 text-accent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2)]"><FiGlobe size={24} /></div>
+            <h2 class="text-2xl font-bold text-text-primary tracking-tight">{t('privacy:terms.title')}</h2>
+          </div>
+          <div class="prose dark:prose-invert max-w-none text-text-secondary leading-relaxed">
+            
+            <div class="bg-red-500/10 border border-red-500/20 rounded-xl p-5 mb-6 not-prose">
+              <h3 class="flex items-center gap-2 text-red-400 font-bold mb-2">
+                <FiAlertTriangle /> {t('privacy:terms.liability_title')}
+              </h3>
+              <p class="text-sm text-red-200/80 m-0 leading-relaxed">
+                <span set:html={t('privacy:terms.liability_desc') !== 'privacy:terms.liability_desc' ? t('privacy:terms.liability_desc') : 'NYX is provided &quot;AS IS&quot;, without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>'} />
+                
+                <span class="block mt-3 border-t border-red-500/20 pt-3">
+                  {t('privacy:terms.help_guidance') !== 'privacy:terms.help_guidance' ? t('privacy:terms.help_guidance') : 'If you need guidance, consult our'} 
+                  <a href={`${langPrefix}/help`} class="text-white underline hover:text-accent font-semibold">
+                    {t('common:help') !== 'common:help' ? t('common:help') : 'Help Center'}
+                  </a>.
+                </span>
+              </p>
+            </div>
+
+            <ul class="list-disc pl-5 space-y-4">
+              <li set:html={t('privacy:terms.gating') !== 'privacy:terms.gating' ? t('privacy:terms.gating') : '<strong>Trust-Tier Gating:</strong> To protect the network, unverified accounts are placed in a restricted &quot;Sandbox Mode&quot;. Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.'} />
+              <li set:html={t('privacy:terms.abuse') !== 'privacy:terms.abuse' ? t('privacy:terms.abuse') : '<strong>Zero-Tolerance Abuse Policy:</strong> You agree not to utilize the NYX network for illicit activities, automated API abuse (botting), or distributing malware. Violations will result in immediate network bans.'} />
+            </ul>
+          </div>
+        </section>
+
+        <section id="licensing" class="mb-12 scroll-mt-24 content-section">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 rounded-lg bg-accent/10 text-accent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2)]"><FiShield size={24} /></div>
+            <h2 class="text-2xl font-bold text-text-primary tracking-tight">{t('privacy:licensing.title')}</h2>
+          </div>
+          <div class="prose dark:prose-invert max-w-none text-text-secondary leading-relaxed">
+            <p set:html={t('privacy:licensing.intro') !== 'privacy:licensing.intro' ? t('privacy:licensing.intro') : 'The NYX source code is proudly open-source and fiercely protected under the <strong>GNU Affero General Public License v3.0 (AGPL-3.0)</strong>.'} />
+            <h3 class="text-lg font-bold text-text-primary mt-6 mb-3">{t('privacy:licensing.agpl_title')}</h3>
+            <p set:html={t('privacy:licensing.agpl_desc') !== 'privacy:licensing.agpl_desc' ? t('privacy:licensing.agpl_desc') : 'If you modify the NYX codebase and allow users to interact with it over a network (e.g., hosting it as a SaaS), you are legally obligated to release your modified source code to the public. <strong>Closed-source SaaS deployments of NYX under this license are strictly prohibited and constitute copyright infringement.</strong>'} />
+            
+            <div class="bg-bg-surface border border-white/10 rounded-xl p-5 mt-6 not-prose">
+              <h3 class="font-bold text-text-primary mb-2">{t('privacy:licensing.commercial_title')}</h3>
+              <p class="text-sm mb-4 text-text-secondary">
+                {t('privacy:licensing.commercial_desc')}
+              </p>
+              <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 text-xs font-bold bg-white text-black px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors">
+                {t('privacy:licensing.contact_btn')}
+              </a>
+            </div>
+          </div>
+        </section>
+
+        <section id="cookies" class="mb-12 scroll-mt-24 content-section">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 rounded-lg bg-accent/10 text-accent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2)]"><FiDatabase size={24} /></div>
+            <h2 class="text-2xl font-bold text-text-primary tracking-tight">{t('privacy:cookies.title')}</h2>
+          </div>
+          <div class="prose dark:prose-invert max-w-none text-text-secondary leading-relaxed">
+            <p class="mb-4">{t('privacy:cookies.intro')}</p>
+            
+            <div class="overflow-x-auto rounded-xl border border-white/5 shadow-sm not-prose">
+              <table class="w-full text-left text-sm whitespace-nowrap">
+                <thead class="bg-black/20 text-text-secondary text-xs uppercase tracking-wider">
+                  <tr>
+                    <th class="p-4 font-bold">{t('privacy:cookies.table_type')}</th>
+                    <th class="p-4 font-bold">{t('privacy:cookies.table_item')}</th>
+                    <th class="p-4 font-bold">{t('privacy:cookies.table_purpose')}</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-white/5 text-text-secondary">
+                  <tr class="hover:bg-white/5 transition-colors">
+                    <td class="p-4"><span class="px-2 py-1 rounded bg-blue-500/10 text-blue-400 text-xs">HttpOnly Cookie</span></td>
+                    <td class="p-4 font-mono text-accent">at / rt / csrf</td>
+                    <td class="p-4">{t('privacy:cookies.cookie_desc')}</td>
+                  </tr>
+                  <tr class="hover:bg-white/5 transition-colors">
+                    <td class="p-4"><span class="px-2 py-1 rounded bg-purple-500/10 text-purple-400 text-xs">IndexedDB</span></td>
+                    <td class="p-4 font-mono text-accent">nyx_vault / keys</td>
+                    <td class="p-4">{t('privacy:cookies.idb_keys_desc')}</td>
+                  </tr>
+                  <tr class="hover:bg-white/5 transition-colors">
+                    <td class="p-4"><span class="px-2 py-1 rounded bg-purple-500/10 text-purple-400 text-xs">IndexedDB</span></td>
+                    <td class="p-4 font-mono text-accent">shadow_vault</td>
+                    <td class="p-4">{t('privacy:cookies.idb_vault_desc')}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="ai" class="mb-12 scroll-mt-24 content-section">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 rounded-lg bg-accent/10 text-accent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2)]"><FiCpu size={24} /></div>
+            <h2 class="text-2xl font-bold text-text-primary tracking-tight">{t('privacy:ai.title')}</h2>
+          </div>
+          <div class="prose dark:prose-invert max-w-none text-text-secondary leading-relaxed">
+            <p set:html={t('privacy:ai.intro') !== 'privacy:ai.intro' ? t('privacy:ai.intro') : 'NYX operates with <strong>Zero Telemetry</strong>. We do not track your clicks, screen time, or feature usage.'} />
+            
+            <h3 class="text-lg font-bold text-text-primary mt-6 mb-3">{t('privacy:ai.smart_reply_title')}</h3>
+            <p set:html={t('privacy:ai.smart_reply_desc') !== 'privacy:ai.smart_reply_desc' ? t('privacy:ai.smart_reply_desc') : 'We provide an experimental &quot;Smart Reply&quot; feature utilizing the Google Gemini API. This feature is <strong>strictly Opt-In</strong>.'} />
+            <ul class="list-disc pl-5 space-y-2 mt-2">
+              <li>{t('privacy:ai.smart_reply_1')}</li>
+              <li>{t('privacy:ai.smart_reply_2')}</li>
+              <li>{t('privacy:ai.smart_reply_3')}</li>
+            </ul>
+          </div>
+        </section>
+
+        <section id="security" class="mb-12 scroll-mt-24 content-section">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 rounded-lg bg-accent/10 text-accent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2)]"><FiShield size={24} /></div>
+            <h2 class="text-2xl font-bold text-text-primary tracking-tight">{t('privacy:security.title')}</h2>
+          </div>
+          <div class="prose dark:prose-invert max-w-none text-text-secondary leading-relaxed">
+            <p>{t('privacy:security.intro')}</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6 not-prose">
+              <div class="bg-bg-surface p-4 rounded-xl border border-white/5">
+                <h3 class="font-bold text-text-primary mb-1">{t('privacy:security.signal_title')}</h3>
+                <p class="text-xs text-text-secondary">{t('privacy:security.signal_desc')}</p>
+              </div>
+              <div class="bg-bg-surface p-4 rounded-xl border border-white/5">
+                <h3 class="font-bold text-text-primary mb-1">{t('privacy:security.webauthn_title')}</h3>
+                <p class="text-xs text-text-secondary">{t('privacy:security.webauthn_desc')}</p>
+              </div>
+              <div class="bg-bg-surface p-4 rounded-xl border border-white/5">
+                <h3 class="font-bold text-text-primary mb-1">{t('privacy:security.memory_title')}</h3>
+                <p class="text-xs text-text-secondary">{t('privacy:security.memory_desc')}</p>
+              </div>
+              <div class="bg-bg-surface p-4 rounded-xl border border-white/5">
+                <h3 class="font-bold text-text-primary mb-1">{t('privacy:security.migration_title')}</h3>
+                <p class="text-xs text-text-secondary">{t('privacy:security.migration_desc')}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+
+    <footer class="border-t border-white/5 py-12 bg-black/20">
+      <div class="max-w-5xl mx-auto px-6 text-center">
+        <div class="inline-flex items-center gap-2 text-text-secondary font-mono text-xs uppercase tracking-widest mb-4">
+          <FiShield /> {t('privacy:footer.tagline', { defaultValue: 'Military-Grade Privacy' })}
+        </div>
+        <p class="text-text-secondary text-sm">
+          {t('privacy:footer.copyright', { 
+            year: new Date().getFullYear().toString(),
+            defaultValue: `© ${new Date().getFullYear()} NYX. All rights reserved under AGPL-3.0.` 
+          })}
+        </p>
+        <p class="mt-2 text-xs opacity-50 font-mono">
+          {t('privacy:footer.quote', { defaultValue: '"In an era of total surveillance, obfuscation is the only true liberty."' })}
+        </p>
+      </div>
+    </footer>
+  </div>
+</MainLayout>
+
+<script>
+  const sections = document.querySelectorAll('.content-section');
+  const navLinks = document.querySelectorAll('.nav-link');
+
+  function updateActiveLink() {
+    let currentId = 'privacy';
+    sections.forEach(section => {
+      const sectionTop = (section as HTMLElement).offsetTop;
+      if (window.scrollY >= sectionTop - 150) {
+        currentId = section.getAttribute('id') || 'privacy';
+      }
+    });
+
+    navLinks.forEach(link => {
+      link.classList.remove('bg-accent/10', 'border-accent/20', 'text-accent', 'shadow-inner');
+      link.classList.add('text-text-secondary', 'border-transparent');
+      
+      if (link.getAttribute('href') === `#${currentId}`) {
+        link.classList.remove('text-text-secondary', 'border-transparent');
+        link.classList.add('bg-accent/10', 'border-accent/20', 'text-accent', 'shadow-inner');
+      }
+    });
+  }
+
+  window.addEventListener('scroll', updateActiveLink);
+  window.addEventListener('load', updateActiveLink);
+</script>

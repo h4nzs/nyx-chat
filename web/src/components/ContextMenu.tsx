@@ -142,7 +142,8 @@ export default function ContextMenu() {
                   <button
                     onClick={() => setShowAllEmojis(true)}
                     className="p-2.5 rounded-full hover:bg-white/10 hover:scale-110 active:scale-95 transition-all text-text-secondary shadow-neumorphic-convex-sm flex items-center justify-center ml-1 bg-white/5"
-                    title="More Reactions"
+                    title={t('common:actions.more_reactions', 'More Reactions')}
+                    aria-label={t('common:actions.more_reactions', 'More Reactions')}
                   >
                     <FiPlus size={16} />
                   </button>

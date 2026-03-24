@@ -23,9 +23,23 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
     e.preventDefault();
     setIsLoading(true);
     try {
+      const { encryptGroupMetadata } = await import('@utils/crypto');
+      const { useConversationStore } = await import('@store/conversation');
+      
+      const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+      const currentMetadata = conversation?.decryptedMetadata || {};
+      
+      const newMetadata = {
+          ...currentMetadata,
+          title: title.trim(),
+          description: description.trim()
+      };
+      
+      const encryptedMetadata = await encryptGroupMetadata(newMetadata, conversationId);
+
       await api(`/api/conversations/${conversationId}/details`, {
         method: 'PUT',
-        body: JSON.stringify({ title, description }),
+        body: JSON.stringify({ encryptedMetadata }),
       });
       toast.success(t('modals:edit_group.success'));
       onClose();
