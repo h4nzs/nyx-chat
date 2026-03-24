@@ -4,7 +4,8 @@ import LanguageSwitcher from '../components/LanguageSwitcher';
 import { getLangFromUrl, useTranslations } from '../utils/i18n';
 import { FiGithub, FiUserPlus, FiMessageSquare, FiShield, FiArrowRight, FiHash, FiEyeOff, FiCheck, FiX, FiCpu, FiSun, FiMoon } from 'react-icons/fi';
 
-const lang = getLangFromUrl(Astro.url);
+const { lang: propLang } = Astro.props;
+const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
 const t = useTranslations(lang);
 
 const APP_URL = "https://app.nyx-app.my.id";

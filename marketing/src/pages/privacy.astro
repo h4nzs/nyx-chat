@@ -3,7 +3,8 @@ import MainLayout from '../layouts/MainLayout.astro';
 import { getLangFromUrl, useTranslations } from '../utils/i18n';
 import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiCpu, FiGlobe, FiAlertTriangle } from 'react-icons/fi';
 
-const lang = getLangFromUrl(Astro.url);
+const { lang: propLang } = Astro.props;
+const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
 const t = useTranslations(lang);
 
 const title = t('privacy:seo.title') !== 'privacy:seo.title' ? t('privacy:seo.title') : 'Legal & Privacy | NYX';

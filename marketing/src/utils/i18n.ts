@@ -25,11 +25,14 @@ for (const path in localeFiles) {
 export function getLangFromUrl(url: URL) {
   // Pecah URL (contoh: '/id/privacy' menjadi ['id', 'privacy'])
   const parts = url.pathname.split('/').filter(Boolean);
-  const lang = parts[0];
   
-  if (lang && translations[lang]) {
-    return lang;
+  // Pindai seluruh bagian URL. Jika ada 'id', 'es', atau 'pt-BR', langsung gunakan!
+  for (const part of parts) {
+    if (translations[part]) {
+      return part;
+    }
   }
+  
   return 'en'; // Fallback aman
 }
 

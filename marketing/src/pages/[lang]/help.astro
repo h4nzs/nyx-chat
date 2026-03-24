@@ -8,5 +8,7 @@ export function getStaticPaths() {
     { params: { lang: 'pt-BR' } },
   ];
 }
+
+const { lang } = Astro.params;
 ---
 <BaseHelp />

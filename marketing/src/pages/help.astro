@@ -6,7 +6,8 @@ import {
   FiUserCheck, FiKey, FiCloudOff, FiAlertCircle
 } from 'react-icons/fi';
 
-const lang = getLangFromUrl(Astro.url);
+const { lang: propLang } = Astro.props;
+const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
 const t = useTranslations(lang);
 
 const title = t('help:title');
