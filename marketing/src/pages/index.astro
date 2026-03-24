@@ -74,7 +74,7 @@ const landingSchema = JSON.stringify({
             {t('landing:header.login')}
           </a>
           <div class="relative z-[100]">
-            <LanguageSwitcher client:load />
+            <LanguageSwitcher currentLangCode={lang} client:load />
           </div>
         </div>
       </header>
