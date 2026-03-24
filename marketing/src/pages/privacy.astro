@@ -1,8 +1,150 @@
 ---
 import MainLayout from '../layouts/MainLayout.astro';
-import PrivacyEntry from '../entries/PrivacyEntry';
+import { getLangFromUrl, useTranslations } from '../utils/i18n';
+import { FiArrowLeft, FiShield, FiLock, FiDatabase, FiCpu, FiGlobe, FiAlertTriangle } from 'react-icons/fi';
+
+const lang = getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+
+const title = t('privacy:seo.title') !== 'privacy:seo.title' ? t('privacy:seo.title') : 'Legal & Privacy | NYX';
+const description = t('privacy:seo.description') !== 'privacy:seo.description' ? t('privacy:seo.description') : 'Read about our Zero-Knowledge architecture...';
+
+const schemaMarkup = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "NYX Security Architecture & Zero-Knowledge Protocol",
+  "author": { "@type": "Organization", "name": "NYX Project" },
+  "datePublished": "2026-03-01"
+});
+
+const navItems = [
+  { id: 'privacy', label: t('privacy:nav.privacy') },
+  { id: 'terms', label: t('privacy:nav.terms') },
+  { id: 'licensing', label: t('privacy:nav.licensing') },
+  { id: 'cookies', label: t('privacy:nav.cookies') },
+  { id: 'ai', label: t('privacy:nav.ai') },
+  { id: 'security', label: t('privacy:nav.security') },
+];
 ---
 
-<MainLayout title="Privacy policy">
-    <PrivacyEntry client:load />
+<MainLayout title={title} description={description} canonicalUrl={Astro.url.pathname} schemaMarkup={schemaMarkup}>
+  <div class="min-h-screen bg-bg-main text-text-primary font-sans selection:bg-accent selection:text-white">
+    
+    <header class="sticky top-0 z-50 bg-bg-main/80 backdrop-blur-xl border-b border-white/5 shadow-sm">
+      <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+        <a href="/" class="flex items-center gap-2 text-text-secondary hover:text-accent transition-colors text-sm font-bold tracking-wide uppercase">
+          <FiArrowLeft size={16} /> {t('privacy:back')}
+        </a>
+        <div class="font-mono text-[10px] text-text-secondary uppercase tracking-[0.2em] flex items-center gap-2">
+          <FiShield className="text-accent" /> {t('privacy:title')}
+        </div>
+      </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-6 py-12 flex flex-col md:flex-row gap-12">
+      <aside class="md:w-64 flex-shrink-0 hidden md:block">
+        <nav class="sticky top-28 space-y-2" id="toc-nav">
+          {navItems.map((item) => (
+            <a href={`#${item.id}`} class="nav-link block w-full text-left px-4 py-3 rounded-xl text-sm font-bold transition-all duration-300 text-text-secondary hover:bg-white/5 border border-transparent">
+              {item.label}
+            </a>
+          ))}
+        </nav>
+      </aside>
+
+      <div class="flex-1 min-w-0">
+        <div class="mb-16">
+          <h1 class="text-4xl sm:text-5xl font-black mb-4 tracking-tighter bg-gradient-to-r from-white to-text-secondary bg-clip-text text-transparent">{t('privacy:title')}</h1>
+          <p class="text-lg text-text-secondary max-w-2xl">{t('privacy:subtitle')}</p>
+          <div class="mt-6 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent/10 text-accent text-xs font-mono font-bold border border-accent/20">
+            <span class="w-2 h-2 rounded-full bg-accent animate-pulse"></span>
+            {t('privacy:last_updated')}
+          </div>
+        </div>
+
+        <section id="privacy" class="mb-12 scroll-mt-24 content-section">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 rounded-lg bg-accent/10 text-accent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2)]"><FiLock size={24} /></div>
+            <h2 class="text-2xl font-bold text-text-primary tracking-tight">{t('privacy:privacy.title')}</h2>
+          </div>
+          <p class="text-lg text-text-primary font-medium mb-4">{t('privacy:privacy.intro')}</p>
+          <h3 class="text-lg font-bold mt-8 mb-3 border-b border-white/5 pb-2">{t('privacy:privacy.minimization_title')}</h3>
+          <ul class="list-disc pl-5 space-y-3 text-text-secondary">
+            <li><strong>Blind Identity Protocol:</strong> We do not store your raw username, email, or phone number. We utilize client-side Argon2id hashing. The server only stores a cryptographic hash (`usernameHash`), rendering your identity mathematically irreversible to us.</li>
+            <li><strong>Encrypted Metadata:</strong> Your display name, bio, and avatar are symmetrically encrypted on your device. To our infrastructure, your profile is an opaque blob of ciphertext.</li>
+            <li><strong>E2EE Communication:</strong> All direct messages, voice notes, and file attachments are End-to-End Encrypted using the Signal Protocol. We act solely as a blind relay network.</li>
+          </ul>
+        </section>
+
+        <section id="terms" class="mb-12 scroll-mt-24 content-section">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 rounded-lg bg-accent/10 text-accent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2)]"><FiGlobe size={24} /></div>
+            <h2 class="text-2xl font-bold text-text-primary tracking-tight">{t('privacy:terms.title')}</h2>
+          </div>
+          <div class="bg-red-500/10 border border-red-500/20 rounded-xl p-5 mb-6">
+            <h4 class="flex items-center gap-2 text-red-400 font-bold mb-2"><FiAlertTriangle /> {t('privacy:terms.liability_title')}</h4>
+            <p class="text-sm text-red-200/80 m-0 leading-relaxed">
+              NYX is provided "AS IS", without warranty of any kind. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible.</strong>
+              <span class="block mt-3 border-t border-red-500/20 pt-3">
+                If you need guidance, consult our <a href="/help" class="text-white underline hover:text-accent">Help Center</a>.
+              </span>
+            </p>
+          </div>
+          <ul class="list-disc pl-5 space-y-4 text-text-secondary">
+            <li><strong>Trust-Tier Gating:</strong> To protect the network, unverified accounts are placed in a restricted "Sandbox Mode".</li>
+            <li><strong>Zero-Tolerance Abuse Policy:</strong> You agree not to utilize the NYX network for illicit activities. Violations will result in immediate network bans.</li>
+          </ul>
+        </section>
+
+        <section id="licensing" class="mb-12 scroll-mt-24 content-section">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 rounded-lg bg-accent/10 text-accent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2)]"><FiShield size={24} /></div>
+            <h2 class="text-2xl font-bold text-text-primary tracking-tight">{t('privacy:licensing.title')}</h2>
+          </div>
+          <p class="text-text-secondary">The NYX source code is proudly open-source and fiercely protected under the <strong>GNU Affero General Public License v3.0 (AGPL-3.0)</strong>.</p>
+          <div class="bg-bg-surface border border-white/10 rounded-xl p-5 mt-6">
+            <h4 class="font-bold text-text-primary mb-2">{t('privacy:licensing.commercial_title')}</h4>
+            <p class="text-sm text-text-secondary mb-4">{t('privacy:licensing.commercial_desc')}</p>
+            <a href="https://github.com/h4nzs/nyx-chat" class="inline-flex items-center px-4 py-2 bg-white text-black text-xs font-bold rounded-lg hover:bg-gray-200 transition-colors">
+              {t('privacy:licensing.contact_btn')}
+            </a>
+          </div>
+        </section>
+
+        <section id="cookies" class="mb-12 scroll-mt-24 content-section">
+           <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 rounded-lg bg-accent/10 text-accent shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2)]"><FiDatabase size={24} /></div>
+            <h2 class="text-2xl font-bold text-text-primary tracking-tight">{t('privacy:cookies.title')}</h2>
+          </div>
+          <p class="text-text-secondary">{t('privacy:cookies.intro')}</p>
+        </section>
+        
+      </div>
+    </main>
+  </div>
 </MainLayout>
+
+<script>
+  const sections = document.querySelectorAll('.content-section');
+  const navLinks = document.querySelectorAll('.nav-link');
+
+  window.addEventListener('scroll', () => {
+    let currentId = 'privacy';
+    sections.forEach(section => {
+      const sectionTop = (section as HTMLElement).offsetTop;
+      if (scrollY >= sectionTop - 150) {
+        currentId = section.getAttribute('id') || 'privacy';
+      }
+    });
+
+    navLinks.forEach(link => {
+      link.classList.remove('bg-accent/10', 'border-accent/20', 'text-accent', 'shadow-inner');
+      link.classList.add('text-text-secondary', 'border-transparent');
+      
+      if (link.getAttribute('href') === `#${currentId}`) {
+        link.classList.remove('text-text-secondary', 'border-transparent');
+        link.classList.add('bg-accent/10', 'border-accent/20', 'text-accent', 'shadow-inner');
+      }
+    });
+  });
+</script>

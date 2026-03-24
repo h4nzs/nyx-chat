@@ -1,8 +1,76 @@
 ---
 import MainLayout from '../layouts/MainLayout.astro';
-import HelpEntry from '../entries/HelpEntry'; // 👈 Import entry terpadu
+import { getLangFromUrl, useTranslations } from '../utils/i18n';
+import { FiChevronLeft, FiHelpCircle } from 'react-icons/fi';
+
+const lang = getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+
+const title = t('help:title');
+const description = t('help:seo.description') !== 'help:seo.description' ? t('help:seo.description') : 'Get help with NYX E2EE chat, account recovery, and security features.';
 ---
 
-<MainLayout title="Pusat Bantuan">
-  <HelpEntry client:load />
+<MainLayout title={title} description={description} canonicalUrl={Astro.url.pathname}>
+  <div class="min-h-screen w-screen flex flex-col items-center justify-center bg-bg-main text-text-primary p-4">
+    <div class="w-full max-w-2xl bg-bg-surface shadow-[8px_8px_16px_rgba(0,0,0,0.2),-8px_-8px_16px_rgba(255,255,255,0.05)] rounded-2xl p-8 overflow-y-auto max-h-[90vh] border border-white/5">
+      
+      <div class="flex items-center gap-4 mb-6 pb-4 border-b border-white/10">
+        <a href="/" aria-label="Back" class="p-2.5 rounded-full text-text-secondary bg-bg-main shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.1)] hover:text-accent transition-all">
+          <FiChevronLeft size={24} />
+        </a>
+        <FiHelpCircle className="text-accent text-3xl" />
+        <h1 class="text-2xl font-bold text-text-primary">{title}</h1>
+      </div>
+
+      <div class="space-y-6 text-text-secondary leading-relaxed">
+        
+        <section>
+          <h2 class="text-xl font-semibold text-text-primary mb-3">{t('help:move_account.title')}</h2>
+          <p class="mb-2">{t('help:move_account.desc')}</p>
+          <ul class="list-disc list-inside ml-4 space-y-2">
+            <li><span class="font-bold text-text-primary">{t('help:move_account.migration_label')}</span> Go to <span class="font-mono bg-black/30 p-1 rounded">Settings &gt; Transfer to New Device</span>. This creates a secure, direct tunnel to your new phone via QR code.</li>
+            <li><span class="font-bold text-text-primary">{t('help:move_account.backup_label')}</span> Go to <span class="font-mono bg-black/30 p-1 rounded">Settings &gt; Export Vault</span>. Save the `.nyxvault` file and import it on your new device login screen.</li>
+          </ul>
+        </section>
+
+        <div class="border-b border-white/5 my-6"></div>
+
+        <section>
+          <h2 class="text-xl font-semibold text-text-primary mb-3">{t('help:sandbox_mode.title')}</h2>
+          <p class="mb-2">To prevent spam bots without collecting personal data (like phone numbers), new accounts start in <strong>Sandbox Mode</strong> with limited messaging quotas.</p>
+          <p>You can upgrade to <strong>VIP Status</strong> instantly for free by verifying you are human. Go to <span class="font-mono bg-black/30 p-1 rounded">Settings &gt; Upgrade to VIP</span> and choose either <strong>Biometric Verification</strong> (Fingerprint/FaceID) or <strong>Proof of Work</strong> (CPU Mining).</p>
+        </section>
+
+        <div class="border-b border-white/5 my-6"></div>
+
+        <section>
+          <h2 class="text-xl font-semibold text-text-primary mb-3">{t('help:forgot_password.title')}</h2>
+          <p class="mb-2">Because we don't have your email, we cannot send you a reset link. You must use your <strong>Recovery Phrase</strong>.</p>
+          <ul class="list-disc list-inside ml-4 space-y-1">
+            <li>{t('help:forgot_password.step1')}</li>
+            <li>{t('help:forgot_password.step2')}</li>
+            <li>{t('help:forgot_password.step3')}</li>
+          </ul>
+          <p class="mt-2 text-yellow-500 text-sm">Note: Restoring from a phrase resets your identity keys. You will regain access to your account ID, but <strong>chat history will be lost</strong> unless you have a Vault Backup.</p>
+        </section>
+
+        <div class="border-b border-white/5 my-6"></div>
+
+        <section>
+          <h2 class="text-xl font-semibold text-text-primary mb-3">{t('help:sync_issues.title')}</h2>
+          <p class="mb-2">NYX is <strong>Local-First</strong>. Messages live on your device, not the cloud. If you use NYX on multiple devices (e.g. Phone + Laptop), they act as independent clients.</p>
+          <p>{t('help:sync_issues.future_text')}</p>
+        </section>
+
+        <div class="border-b border-white/5 my-6"></div>
+
+        <section>
+          <h2 class="text-xl font-semibold text-text-primary mb-3">{t('help:lost_phrase.title')}</h2>
+          <p class="mb-2 font-semibold text-red-400">{t('help:lost_phrase.irrecoverable')}</p>
+          <p>{t('help:lost_phrase.desc')}</p>
+        </section>
+
+      </div>
+    </div>
+  </div>
 </MainLayout>

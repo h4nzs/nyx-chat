@@ -19,15 +19,23 @@ export default function LanguageSwitcher({ isAbsolute = true }: LanguageSwitcher
   const { i18n } = useTranslation();
 
   const changeLanguage = (lng: string) => {
-    i18n.changeLanguage(lng);
+    // 👇 UBAH LOGIKA DI SINI: Navigasi URL alih-alih ganti state
+    const currentPath = window.location.pathname;
+    
+    // Hapus prefix bahasa saat ini (jika ada)
+    let newPath = currentPath.replace(/^\/(id|es|pt-BR)(\/|$)/, '/');
+    
+    // Tambahkan prefix bahasa baru (kecuali untuk English / default)
+    if (lng !== 'en') {
+      newPath = `/${lng}${newPath === '/' ? '' : newPath}`;
+    }
+    
+    // Pindah halaman
+    window.location.assign(newPath || '/');
   };
 
   const currentLang = LANGUAGES.find(l => l.code === i18n.language) || LANGUAGES[0];
-
-  // Logic untuk menentukan class berdasarkan posisi
-  const containerClass = isAbsolute 
-    ? "absolute top-4 right-4 z-50" 
-    : "relative z-50";
+  const containerClass = isAbsolute ? "absolute top-4 right-4 z-50" : "relative z-50";
 
   return (
     <div className={containerClass}>

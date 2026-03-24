@@ -12,6 +12,13 @@ export default defineConfig({
   build: {
     format: 'file'
   },
+  i18n: {
+    defaultLocale: 'en',
+    locales: ['en', 'id', 'es', 'pt-BR'],
+    routing: {
+      prefixDefaultLocale: false, // 'en' akan ada di root (/), bahasa lain di /id, /es, dll.
+    }
+  },
   // Aktifkan integrasi React
   integrations: [react()],
   
