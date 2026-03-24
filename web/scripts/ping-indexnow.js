@@ -1,13 +1,14 @@
-const HOST = "nyx-app.my.id";
+const HOST = "app.nyx-app.my.id";
+const PUBLIC_HOST = "nyx-app.my.id";
 // Kunci hex 32 karakter yang baru
 const KEY = "nyx-live-index-5bUFU-DpfATyDQAczXwbvGVOHxx2VTHzUhfwJLhaVX3I4FtEQU2vGHaLoefa2lwI"; 
 
 const URL_LIST = [
-  `https://${HOST}/`,
+  `https://${PUBLIC_HOST}/`,
   `https://${HOST}/login`,
   `https://${HOST}/register`,
-  `https://${HOST}/privacy`,
-  `https://${HOST}/help`,
+  `https://${PUBLIC_HOST}/privacy`,
+  `https://${PUBLIC_HOST}/help`,
   `https://${HOST}/migrate-receive`,
   `https://${HOST}/migrate-send`
 ];
@@ -18,6 +19,7 @@ async function pingIndexNow() {
   // Format JSON persis sesuai Dokumentasi "Submitting set of URLs" Option 1
   const payload = {
     host: HOST,
+    publicHost: PUBLIC_HOST,
     key: KEY,
     urlList: URL_LIST
   };
