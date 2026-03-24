@@ -11,6 +11,8 @@ export default [
       parser: tsParser,
       parserOptions: {
         ecmaVersion: 'latest',
+        project: ['./tsconfig.json'], 
+        tsconfigRootDir: import.meta.dirname,
         sourceType: 'module'
       },
       globals: {
@@ -18,11 +20,6 @@ export default [
         process: 'readonly',
         Buffer: 'readonly'
       },
-      parserOptions: {
-        // Sesuaikan array ini jika file tsconfig Anda namanya berbeda (misal hanya ['tsconfig.json'])
-        project: ['./tsconfig.json'], 
-        tsconfigRootDir: import.meta.dirname,
-      }
     },
     plugins: {
       '@typescript-eslint': tsPlugin

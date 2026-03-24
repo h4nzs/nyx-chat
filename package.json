@@ -38,6 +38,12 @@
       "socket.io-parser": "^4.2.6"
     },
     "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "prisma",
+      "argon2",
+      "esbuild",
+      "unrs-resolver",
+      "puppeteer",
       "sharp",
       "supabase"
     ]

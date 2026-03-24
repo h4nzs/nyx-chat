@@ -124,7 +124,7 @@ type Actions = {
   searchUsers: (query: string) => Promise<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>;
   addOrUpdateConversation: (conversation: Conversation) => void;
   removeConversation: (conversationId: string) => void;
-  updateConversation: (conversationId: string, updates: Partial<Conversation>) => void;
+  updateConversation: (conversationId: string, updates: Partial<Conversation>) => Promise<void>;
   updateParticipantDetails: (user: Partial<User>) => void;
   addParticipants: (conversationId: string, participants: Participant[]) => void;
   removeParticipant: (conversationId: string, userId: string) => void;
@@ -400,49 +400,52 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     const { user } = useAuthStore.getState();
     if (!user) throw new Error("Not authenticated");
 
-    // 1. We create the group first to get an ID
-    // But to encrypt metadata we need the ID. Chicken and egg?
-    // Actually, we can assume the server allows creating with encryptedMetadata.
-    // BUT we need the conversationID to encrypt the metadata (as context).
-    // Solution: Create group -> Get ID -> Encrypt Metadata -> Update Group?
-    // OR: Use a temporary ID? No.
-    // CORRECT TNO WAY: 
-    // The server generates the ID.
-    // We can't encrypt with ID context before we have it.
-    // So we must do 2 steps or use a predictable ID (not safe).
-    // Let's do: Create with placeholder or null metadata -> Encrypt -> Update.
-    
-    // Step 1: Create Group with NO metadata
-    const conv = await authFetch<Conversation>("/api/conversations", {
-        method: "POST",
-        body: JSON.stringify({
-            userIds,
-            isGroup: true,
-            encryptedMetadata: null 
-        })
-    });
-    
-    // Step 2: Now we have ID, encrypt the metadata
-    const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl }, conv.id);
-    
-    // Step 3: Update the group with encrypted metadata
-    await authFetch(`/api/conversations/${conv.id}/details`, {
-        method: 'PUT',
-        body: JSON.stringify({ encryptedMetadata })
-    });
-    
-    // Step 4: Optimistically update local state with decrypted data
-    const updatedConv: Conversation = {
-        ...conv,
-        decryptedMetadata: { title: name, avatarUrl },
-        encryptedMetadata
-    };
-    
-    getSocket().emit("conversation:join", conv.id);
-    get().addOrUpdateConversation(updatedConv);
-    set({ activeId: conv.id, isSidebarOpen: false });
-    
-    return conv.id;
+    let conv: Conversation | null = null;
+
+    try {
+        // Step 1: Create Group with NO metadata
+        conv = await authFetch<Conversation>("/api/conversations", {
+            method: "POST",
+            body: JSON.stringify({
+                userIds,
+                isGroup: true,
+                encryptedMetadata: null 
+            })
+        });
+        
+        // Step 2: Encrypt the metadata
+        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl }, conv.id);
+        
+        // Step 3: Update the group with encrypted metadata
+        await authFetch(`/api/conversations/${conv.id}/details`, {
+            method: 'PUT',
+            body: JSON.stringify({ encryptedMetadata })
+        });
+        
+        // Step 4: Optimistically update local state with decrypted data
+        const updatedConv: Conversation = {
+            ...conv,
+            decryptedMetadata: { title: name, avatarUrl },
+            encryptedMetadata
+        };
+        
+        getSocket().emit("conversation:join", conv.id);
+        get().addOrUpdateConversation(updatedConv);
+        set({ activeId: conv.id, isSidebarOpen: false });
+        
+        return conv.id;
+    } catch (e) {
+        // ROLLBACK
+        if (conv) {
+             console.error("Create group failed during setup. Rolling back...", e);
+             try {
+                 await authFetch(`/api/conversations/${conv!.id}`, { method: 'DELETE' });
+             } catch (rollbackError) {
+                 console.error("Rollback failed", rollbackError);
+             }
+        }
+        throw e;
+    }
   },
 
   addOrUpdateConversation: async (conversation) => {
@@ -497,28 +500,41 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     });
   },
 
-  updateConversation: (id, data) => set((state) => {
-    const oldConv = state.conversations.find((c) => c.id === id);
-    
-    // Check for membership changes in groups to trigger Key Rotation
-    if (oldConv && oldConv.isGroup && data.participants) {
-      const oldIds = oldConv.participants.map(p => p.id).sort().join(',');
-      const newIds = data.participants.map(p => p.id).sort().join(',');
-      if (oldIds !== newIds) {
-        forceRotateGroupSenderKey(id).catch(() => { console.warn('Key rotation deferred'); });
-      }
+  updateConversation: async (id, data) => {
+    // Decrypt metadata if it changed
+    let decryptedMetadata = undefined;
+    if (data.encryptedMetadata) {
+         try {
+             const dec = await decryptGroupMetadata(data.encryptedMetadata, id);
+             if (dec) decryptedMetadata = dec;
+         } catch (e) {
+             console.warn("Failed to decrypt updated metadata", e);
+         }
     }
-    
-    // If metadata updated, we should probably try to decrypt it if we can? 
-    // But here we just store it. The UI should trigger decryption if needed or we assume it's passed in.
-    // Ideally updateConversation should handle this, but for now we rely on the component or load loop.
 
-    return {
-      conversations: state.conversations.map((c) =>
-        c.id === id ? { ...c, ...data } : c
-      ),
-    };
-  }),
+    set((state) => {
+        const oldConv = state.conversations.find((c) => c.id === id);
+        
+        // Check for membership changes in groups to trigger Key Rotation
+        if (oldConv && oldConv.isGroup && data.participants) {
+          const oldIds = oldConv.participants.map(p => p.id).sort().join(',');
+          const newIds = data.participants.map(p => p.id).sort().join(',');
+          if (oldIds !== newIds) {
+            forceRotateGroupSenderKey(id).catch(() => { console.warn('Key rotation deferred'); });
+          }
+        }
+
+        return {
+          conversations: state.conversations.map((c) =>
+            c.id === id ? { 
+                ...c, 
+                ...data,
+                decryptedMetadata: decryptedMetadata || c.decryptedMetadata 
+            } : c
+          ),
+        };
+    });
+  },
 
   updateParticipantDetails: (user) => {
     // Destructure role to exclude it, preventing conflict with Participant role type

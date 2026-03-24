@@ -1,4 +1,9 @@
-const KEY = "nyx-live-index-5bUFU-DpfATyDQAczXwbvGVOHxx2VTHzUhfwJLhaVX3I4FtEQU2vGHaLoefa2lwI"; 
+const KEY = process.env.INDEXNOW_API_KEY;
+
+if (!KEY) {
+  console.warn('⚠️ [IndexNow] INDEXNOW_API_KEY not set, skipping ping.');
+  process.exit(0);
+}
 
 // Pisahkan URL berdasarkan Host masing-masing
 const SITES = [

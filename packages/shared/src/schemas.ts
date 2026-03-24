@@ -36,7 +36,16 @@ export const IncomingMessageSchema = z.object({
   senderId: UserIdSchema,
   content: z.string().nullable().optional(),
   timestamp: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as any); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
-  createdAt: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as any); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().default(() => new Date().toISOString())),
+  createdAt: z.preprocess((val) => { 
+    if (val === null || val === undefined) return undefined; 
+    try { 
+      const d = new Date(val as any); 
+      if (isNaN(d.getTime())) throw new Error("Invalid date");
+      return d.toISOString(); 
+    } catch { 
+      throw new Error("Invalid date"); 
+    } 
+  }, z.string().default(() => new Date().toISOString())),
 }).passthrough();
 
 // --- WebRTC Signaling Schemas ---
