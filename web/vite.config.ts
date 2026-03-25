@@ -21,7 +21,7 @@ export default defineConfig(({ mode }) => {
         srcDir: 'src',
         filename: 'sw.ts',
         registerType: 'autoUpdate',
-        injectRegister: 'auto',
+        injectRegister: 'script-defer',
         devOptions: {
           enabled: true, // Aktifkan PWA di mode dev juga
           type: 'module',
