@@ -149,6 +149,7 @@ async (req, res, next) => {
       message: 'Registration successful.',
       user: {
         id: user.id,
+        usernameHash: user.usernameHash,
         encryptedProfile: user.encryptedProfile,
         isVerified: user.isVerified
       },
@@ -199,6 +200,7 @@ async (req, res, next) => {
 
     const safeUser = {
         id: user.id,
+        usernameHash: user.usernameHash,
         encryptedProfile: user.encryptedProfile,
         isVerified: user.isVerified,
         role: user.role
@@ -243,6 +245,7 @@ router.post('/refresh', async (req, res, next) => {
       where: { id: payload.sub },
       select: {
         id: true,
+        usernameHash: true,
         encryptedProfile: true,
         isVerified: true,
         role: true,
@@ -625,6 +628,7 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
         where: { id: userAuthenticator.user.id },
         select: {
           id: true,
+          usernameHash: true,
           encryptedProfile: true,
           isVerified: true,
           encryptedPrivateKey: true,
