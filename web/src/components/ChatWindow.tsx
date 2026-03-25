@@ -28,7 +28,6 @@ import MessageInput from './MessageInput';
 import MessageSkeleton from './MessageSkeleton';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
-import { startCall } from '@lib/webrtc';
 import { useSettingsStore } from '@store/settings';
 import type { MinimalProfile } from '@store/callStore';
 import { asConversationId } from '@nyx/shared';
@@ -102,14 +101,17 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
     return isOnline ? t('header.online') : t('header.offline');
   };
 
-  const handleVoiceCall = () => {
+  const handleVoiceCall = async () => {
     if (peerUser) {
+      // ✅ DYNAMIC IMPORT: Muat modul WebRTC hanya saat tombol ditelepon!
+      const { startCall } = await import('@lib/webrtc');
       startCall(peerUser.id, false, (user as unknown as MinimalProfile) || { id: user?.id || 'unknown' });
     }
   };
 
-  const handleVideoCall = () => {
+  const handleVideoCall = async () => {
     if (peerUser) {
+      const { startCall } = await import('@lib/webrtc');
       startCall(peerUser.id, true, (user as unknown as MinimalProfile) || { id: user?.id || 'unknown' });
     }
   };
