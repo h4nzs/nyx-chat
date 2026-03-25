@@ -115,9 +115,9 @@ const UserProfile = memo(function UserProfile() {
 
 const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (user: User) => void }) => {
   const { t } = useTranslation(['common']);
-  const profile = useUserProfile(user);
-  // Prioritize the direct user property which might contain the optimistic rawQuery
-  const displayName = user.name || profile.name || t('common:defaults.user');
+  
+  // Ambil data langsung dari objek user, bukan dari hook global
+  const displayName = user.name || t('common:defaults.user');
   const displayUsername = user.username || t('common:defaults.unknown');
 
   return (
@@ -129,7 +129,7 @@ const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (user: Use
         shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5
       "
     >
-      <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${displayName}`} alt={t('common:defaults.avatar', 'Avatar')} className="w-10 h-10 rounded-full bg-secondary object-cover" />
+      <img src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${displayName}`} alt={t('common:defaults.avatar', 'Avatar')} className="w-10 h-10 rounded-full bg-secondary object-cover" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
            <p className="font-bold text-sm text-text-primary">{displayName}</p>
@@ -185,10 +185,14 @@ const ConversationItem = memo(function ConversationItem({
 }) {
   const { t, i18n } = useTranslation(['chat', 'common']);
   const peerUser = !conversation.isGroup ? conversation.participants?.find(p => p.id !== meId) : null;
-  const peerProfile = useUserProfile(peerUser as { id: string; encryptedProfile?: string | null });
+  
+  // Ambil nama dan avatar langsung dari objek peerUser!
+  const profileName = peerUser?.name || t('common:defaults.user');
+  const profileAvatarUrl = peerUser?.avatarUrl;
+
   const title = conversation.isGroup 
     ? (conversation.decryptedMetadata?.title || t('common:defaults.group_unknown', 'Unknown Group')) 
-    : (peerProfile.name || t('common:defaults.conversation', 'Conversation'));
+    : (profileName || t('common:defaults.conversation', 'Conversation'));
   const isUnread = conversation.unreadCount > 0;
   const isPinnedByMe = Boolean(conversation.participants?.some(p => p.id === meId && p.isPinned));
   const openMenu = useContextMenuStore(s => s.openMenu);
@@ -197,7 +201,7 @@ const ConversationItem = memo(function ConversationItem({
 
   const avatarSrc = conversation.isGroup 
     ? (conversation.decryptedMetadata?.avatarUrl ? `${toAbsoluteUrl(conversation.decryptedMetadata.avatarUrl)}?t=${conversation.lastUpdated}` : `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.decryptedMetadata?.title || 'group'}`)
-    : (peerProfile.avatarUrl ? toAbsoluteUrl(peerProfile.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${title}`);
+    : (profileAvatarUrl ? toAbsoluteUrl(profileAvatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${title}`);
 
   const formatConversationTime = useCallback((timestamp: string) => {
     const date = new Date(timestamp);

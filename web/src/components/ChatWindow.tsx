@@ -1,4 +1,4 @@
-import { useCallback, useRef, ChangeEvent, useState, useEffect, useMemo } from "react";
+import { useCallback, useRef, useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { useAuthStore } from "@store/auth";
 import { useTranslation } from "react-i18next";
 import { getSocket } from "@lib/socket";
@@ -11,13 +11,9 @@ import { useMessageStore } from '@store/message';
 import { useMessageInputStore } from '@store/messageInput';
 import { useMessageSearchStore } from '@store/messageSearch';
 import { usePresenceStore } from "@store/presence";
-import useDynamicIslandStore from "@store/dynamicIsland";
 import { toAbsoluteUrl } from "@utils/url";
 import { useModalStore } from "@store/modal";
 import { useShallow } from 'zustand/react/shallow';
-import SearchMessages from './SearchMessages';
-import Lightbox from "./Lightbox";
-import GroupInfoPanel from './GroupInfoPanel';
 import clsx from "clsx";
 import { useVerificationStore } from '@store/verification';
 import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers, FiPhone, FiVideo, FiX, FiTrash2 } from 'react-icons/fi';
@@ -31,6 +27,11 @@ import { useEdgeSwipe } from '@hooks/useEdgeSwipe';
 import { useSettingsStore } from '@store/settings';
 import type { MinimalProfile } from '@store/callStore';
 import { asConversationId } from '@nyx/shared';
+
+// ✅ 1. DYNAMIC IMPORTS: Komponen berat tidak perlu didownload di awal
+const SearchMessages = lazy(() => import('./SearchMessages'));
+const Lightbox = lazy(() => import('./Lightbox'));
+const GroupInfoPanel = lazy(() => import('./GroupInfoPanel'));
 
 const KeyRotationBanner = () => {
   const { t } = useTranslation(['chat']);
@@ -103,7 +104,6 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
 
   const handleVoiceCall = async () => {
     if (peerUser) {
-      // ✅ DYNAMIC IMPORT: Muat modul WebRTC hanya saat tombol ditelepon!
       const { startCall } = await import('@lib/webrtc');
       startCall(peerUser.id, false, (user as unknown as MinimalProfile) || { id: user?.id || 'unknown' });
     }
@@ -189,7 +189,12 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
             </button>
           </>
         )}
-        <SearchMessages conversationId={conversation.id} />
+        
+        {/* ✅ SUSPENSE: Jaring pengaman saat fitur Search dimuat */}
+        <Suspense fallback={<div className="w-9 h-9"></div>}>
+            <SearchMessages conversationId={conversation.id} />
+        </Suspense>
+
         <button
           onClick={openChatInfoModal}
           aria-label={t('actions.info')}
@@ -237,7 +242,6 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     highlightedMessageId: state.highlightedMessageId,
     setHighlightedMessageId: state.setHighlightedMessageId,
   })));
-  const clearSearch = useMessageSearchStore(s => s.clearSearch);
 
   const handleStopRecording = useMessageInputStore(state => state.handleStopRecording);
   
@@ -272,31 +276,25 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
       confirmMessage,
       async () => {
           await removeMessages(conversation.id, selectedMessageIds);
-          // clearMessageSelection is already handled inside removeMessages now
           toast.success(t('messages.processed', { count: selectedMessageIds.length }));
       }
     );
   };
+  
   useEffect(() => {
     if (!highlightedMessageId) return;
 
     const handleJump = async () => {
-      // 1. Check if the message is already rendered in the DOM
       let el = document.getElementById(`msg-${highlightedMessageId}`);
       
-      // 2. If not in DOM, we need to fetch its context from the server
       if (!el) {
         await loadMessageContext(highlightedMessageId);
-        // Wait for React to re-render the new messages
         await new Promise(resolve => setTimeout(resolve, 300));
         el = document.getElementById(`msg-${highlightedMessageId}`);
       }
 
-      // 3. Scroll and Highlight
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        
-        // Add a temporary highlight class
         el.classList.add('ring-2', 'ring-accent', 'ring-offset-2', 'ring-offset-bg-main', 'scale-[1.02]', 'transition-all', 'duration-500', 'z-10');
         
         setTimeout(() => {
@@ -304,12 +302,12 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
         }, 2000);
       }
       
-      // Clear the highlight state so it can be triggered again later
-      useMessageSearchStore.getState().setHighlightedMessageId(null);
+      setHighlightedMessageId(null);
     };
 
     handleJump();
-  }, [highlightedMessageId, messages, loadMessageContext, setHighlightedMessageId]);
+  // ✅ 2. FIX DEPENDENCY: Hapus `messages` agar tidak re-render saat pesan baru masuk
+  }, [highlightedMessageId, loadMessageContext, setHighlightedMessageId]);
 
   const typingUsersInThisConvo = typingIndicators.filter(i => i.conversationId === id && i.id !== meId && i.isTyping);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -333,30 +331,32 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     handleStopRecording(id, blob, duration);
   };
 
-  // Memoize stable conversation parts to prevent list re-renders
   const participants = useMemo(() => conversation?.participants || [], [conversation?.participants]);
   const isGroup = conversation?.isGroup || false;
 
+  // ✅ 3. FIX RE-RENDER MASSAL: Hapus `messages` dari dependency array
   const itemContent = useCallback((index: number, message: Message) => {
-    const prevMessage = messages[index - 1];
-    const nextMessage = messages[index + 1];
-    const isFirstInSequence = !prevMessage || prevMessage.senderId !== message.senderId;
-    const isLastInSequence = !nextMessage || nextMessage.senderId !== message.senderId;
-
-    return (
-      <div className="px-1 md:px-4 py-0.5" key={message.id}>
-        <MessageItem 
-          message={message} 
-          isGroup={isGroup}
-          participants={participants}
-          isHighlighted={message.id === highlightedMessageId}
-          onImageClick={handleImageClick}
-          isFirstInSequence={isFirstInSequence}
-          isLastInSequence={isLastInSequence}
-        />
-      </div>
-    );
-  }, [messages, isGroup, participants, highlightedMessageId, handleImageClick]);
+      // Cek pesan sebelum dan sesudahnya untuk menentukan bentuk gelembung chat
+      const prevMessage = messages[index - 1];
+      const nextMessage = messages[index + 1];
+      
+      const isFirstInSequence = !prevMessage || prevMessage.senderId !== message.senderId;
+      const isLastInSequence = !nextMessage || nextMessage.senderId !== message.senderId;
+  
+      return (
+        <div className="px-1 md:px-4 py-0.5" key={message.id}>
+          <MessageItem 
+            message={message} 
+            isGroup={isGroup}
+            participants={participants}
+            isHighlighted={message.id === highlightedMessageId}
+            onImageClick={handleImageClick}
+            isFirstInSequence={isFirstInSequence} // 👈 Props ini wajib ada
+            isLastInSequence={isLastInSequence}   // 👈 Props ini wajib ada
+          />
+        </div>
+      );
+    }, [messages, isGroup, participants, highlightedMessageId, handleImageClick]); // 👈 'messages' dikembalikan
 
   return (
     <AnimatePresence mode="wait">
@@ -465,8 +465,11 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                 conversation={conversation}
               />
 
-              {lightboxMessage && <Lightbox message={lightboxMessage} onClose={() => setLightboxMessage(null)} />}
-              {isGroupInfoOpen && <GroupInfoPanel conversationId={asConversationId(id)} onClose={() => setIsGroupInfoOpen(false)} />}
+              {/* ✅ SUSPENSE: Jaring pengaman saat Lightbox atau Info Grup dipanggil */}
+              <Suspense fallback={null}>
+                {lightboxMessage && <Lightbox message={lightboxMessage} onClose={() => setLightboxMessage(null)} />}
+                {isGroupInfoOpen && <GroupInfoPanel conversationId={asConversationId(id)} onClose={() => setIsGroupInfoOpen(false)} />}
+              </Suspense>
             </>
           );
         })()}
