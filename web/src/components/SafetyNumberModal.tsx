@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react';
-import * as QRCodeModule from 'react-qr-code';
+import QRCodeRaw from 'react-qr-code';
 import { FiShield, FiX, FiCheck } from 'react-icons/fi';
 import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
 
-const QRCode = QRCodeModule.default || QRCodeModule;
+const QRCode = (
+  (QRCodeRaw as unknown as { default?: { default?: typeof QRCodeRaw } }).default?.default ||
+  (QRCodeRaw as unknown as { default?: typeof QRCodeRaw }).default ||
+  QRCodeRaw
+) as typeof QRCodeRaw;
 
 interface SafetyNumberModalProps {
   safetyNumber: string;

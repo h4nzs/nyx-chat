@@ -1,13 +1,17 @@
 import { FiX, FiCopy, FiCheck } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
-import * as QRCodeModule from 'react-qr-code';
+import QRCodeRaw from 'react-qr-code';
 import { useAuthStore } from '@store/auth';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 
-const QRCode = QRCodeModule.default || QRCodeModule;
+const QRCode = (
+  (QRCodeRaw as unknown as { default?: { default?: typeof QRCodeRaw } }).default?.default ||
+  (QRCodeRaw as unknown as { default?: typeof QRCodeRaw }).default ||
+  QRCodeRaw
+) as typeof QRCodeRaw;
 
 interface Props {
   onClose: () => void;

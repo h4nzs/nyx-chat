@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 // Obati isu impor Vite (CommonJS ke ESM)
-import * as QRCodeModule from 'react-qr-code';
-const QRCode = (QRCodeModule as { default: React.ComponentType<{ value: string; size?: number; level?: string } & React.HTMLAttributes<HTMLElement>> }).default || QRCodeModule;
+import QRCodeRaw from 'react-qr-code';
+const QRCode = (
+  (QRCodeRaw as unknown as { default?: { default?: typeof QRCodeRaw } }).default?.default ||
+  (QRCodeRaw as unknown as { default?: typeof QRCodeRaw }).default ||
+  QRCodeRaw
+) as typeof QRCodeRaw;
 
 import { FiDownloadCloud, FiCheckCircle } from 'react-icons/fi';
 import { getSocket, connectSocket } from '@lib/socket';
