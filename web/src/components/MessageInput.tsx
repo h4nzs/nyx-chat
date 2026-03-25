@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, ChangeEvent, Suspense, lazy } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { FiSmile, FiMic, FiSquare, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2, FiEdit2, FiCpu, FiVolumeX, FiCrop } from 'react-icons/fi';
+import { FiSmile, FiMic, FiAlertTriangle, FiPaperclip, FiSend, FiX, FiClock, FiPlus, FiEye, FiTrash2, FiEdit2, FiCpu, FiVolumeX, FiCrop } from 'react-icons/fi';
 import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react';
 import clsx from 'clsx';
 import toast from 'react-hot-toast';
@@ -24,7 +24,7 @@ interface MessageInputProps {
   onSend: (data: { content: string }) => void;
   onTyping: () => void;
   onVoiceSend: (blob: Blob, duration: number) => void;
-  conversation: { id: string, isGroup: boolean, participants?: { id: string }[] }; // Using typed subset
+  conversation: { id: string, isGroup: boolean, participants?: { id: string }[] };
 }
 
 // --- Helper: Debounce ---
@@ -81,19 +81,12 @@ const ReplyPreview = () => {
       exit={{ opacity: 0, y: 10 }}
       className="px-4 pb-2"
     >
-      <div className="
-        relative flex items-center justify-between
-        bg-bg-main rounded-t-xl p-3 border-b border-accent/20
-        shadow-neumorphic-concave
-      ">
+      <div className="relative flex items-center justify-between bg-bg-main rounded-t-xl p-3 border-b border-accent/20 shadow-neumorphic-concave">
         <div className="flex flex-col border-l-2 border-accent pl-3">
           <span className="text-[10px] font-mono uppercase tracking-widest text-accent">{t('input.replying_to', { name: authorName })}</span>
           <span className="text-xs text-text-secondary truncate max-w-[200px]">{contentPreview}</span>
         </div>
-        <button
-          onClick={() => setReplyingTo(null)}
-          className="p-1 rounded-full hover:bg-red-500/10 hover:text-red-500 transition-colors"
-        >
+        <button onClick={() => setReplyingTo(null)} className="p-1 rounded-full hover:bg-red-500/10 hover:text-red-500 transition-colors">
           <FiX size={14} />
         </button>
       </div>
@@ -103,11 +96,19 @@ const ReplyPreview = () => {
 
 export default function MessageInput({ onSend, onTyping, onVoiceSend, conversation }: MessageInputProps) {
   const { t } = useTranslation(['chat', 'common']);
-  const [text, setText] = useState('');
+  
+  // ✅ SUPER OPTIMIZATION: Uncontrolled Input
+  // Hapus `const [text, setText] = useState('')`! Kita gunakan `inputRef` untuk 
+  // mengakses DOM secara langsung agar komponen tidak di-render ulang setiap kali mengetik.
+  const inputRef = useRef<HTMLInputElement>(null);
+  
+  // State ini HANYA digunakan untuk mengubah tampilan tombol (Mic ke Send).
+  const [hasTextUI, setHasTextUI] = useState(false); 
+
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [showTimerMenu, setShowTimerMenu] = useState(false); // Timer Menu State
-  const [showPlusMenu, setShowPlusMenu] = useState(false); // Mobile Plus Menu State
-  const [showSilentMenu, setShowSilentMenu] = useState(false); // Silent Drop Menu State
+  const [showTimerMenu, setShowTimerMenu] = useState(false);
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
+  const [showSilentMenu, setShowSilentMenu] = useState(false);
 
   const DURATIONS = [
     { label: t('chat:input.timer_off', 'Off'), value: null },
@@ -146,19 +147,16 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
     isVoiceAnonymized: s.isVoiceAnonymized, setIsVoiceAnonymized: s.setIsVoiceAnonymized,
     editingMessage: s.editingMessage, setEditingMessage: s.setEditingMessage, sendEdit: s.sendEdit
   })));
+  
   const { status: connectionStatus } = useConnectionStore(useShallow(s => ({ status: s.status })));
   const blockedUserIds = useAuthStore(state => state.blockedUserIds);
   const user = useAuthStore(state => state.user);
   const messages = useMessageStore(state => state.messages[conversation.id] || []);
   const theme = useThemeStore(state => state.theme);
 
-  // Crop State
   const [cropTarget, setCropTarget] = useState<{ id: string, url: string, file: File } | null>(null);
-  
-  // Paint State
   const [paintTarget, setPaintTarget] = useState<{ id: string, file: File } | null>(null);
 
-  // Voice State
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const recordingTimeRef = useRef(0);
@@ -167,63 +165,56 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
   const audioChunksRef = useRef<Blob[]>([]);
   const shouldSendVoiceRef = useRef<boolean>(true);
 
-  // Permissions & Logic
   const isOneToOne = !conversation.isGroup;
   const otherParticipant = isOneToOne && (conversation.participants as { id: string }[] | undefined)?.find(p => p.id !== useAuthStore.getState().user?.id);
   const isOtherParticipantBlocked = isOneToOne && otherParticipant && blockedUserIds.includes(otherParticipant.id);
   const isConnected = connectionStatus === 'connected';
-  const hasText = text.trim().length > 0;
   const isInputDisabled = !isConnected || isOtherParticipantBlocked;
 
-  // Smart Reply Logic
   const absoluteLastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
   const isLastMessageFromOther = absoluteLastMessage?.senderId !== user?.id;
   const isValidTextMessage = absoluteLastMessage && !absoluteLastMessage.fileUrl && !absoluteLastMessage.imageUrl && absoluteLastMessage.content;
   const lastDecryptedText = (isLastMessageFromOther && isValidTextMessage) ? (absoluteLastMessage.content || null) : null;
 
+  // Set nilai awal jika sedang membalas/mengedit
   useEffect(() => {
-    if (editingMessage && editingMessage.content) {
-        setText(editingMessage.content);
+    if (editingMessage && editingMessage.content && inputRef.current) {
+        inputRef.current.value = editingMessage.content;
+        setHasTextUI(true);
+        inputRef.current.focus();
     }
   }, [editingMessage]);
 
-  // Debounced Link Preview
+  // ✅ SUPER OPTIMIZATION: Debounce untuk emit Socket (Mencegah jaringan tersedak)
+  const debouncedTypingSignal = useCallback(
+    debounce(() => { if (isConnected) onTyping(); }, 1500),
+    [isConnected, onTyping]
+  );
+
   const debouncedFetchPreview = useCallback(
-    debounce((inputText: string) => fetchTypingLinkPreview(inputText), 500),
+    debounce((inputText: string) => fetchTypingLinkPreview(inputText), 800),
     [fetchTypingLinkPreview]
   );
 
-  // Close Popovers on Click Outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
-        setShowEmojiPicker(false);
-      }
-      if (timerMenuRef.current && !timerMenuRef.current.contains(event.target as Node)) {
-        setShowTimerMenu(false);
-      }
-      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) {
-        setShowPlusMenu(false);
-      }
-      if (sendButtonRef.current && !sendButtonRef.current.contains(event.target as Node)) {
-        setShowSilentMenu(false);
-      }
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) setShowEmojiPicker(false);
+      if (timerMenuRef.current && !timerMenuRef.current.contains(event.target as Node)) setShowTimerMenu(false);
+      if (plusMenuRef.current && !plusMenuRef.current.contains(event.target as Node)) setShowPlusMenu(false);
+      if (sendButtonRef.current && !sendButtonRef.current.contains(event.target as Node)) setShowSilentMenu(false);
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // --- Preview URL Management ---
   const [filePreviews, setFilePreviews] = useState<Map<string, string>>(new Map());
   const previewsRef = useRef<Map<string, string>>(new Map());
 
-  // Sync effect
   useEffect(() => {
     const currentMap = previewsRef.current;
     let changed = false;
     const activeIds = new Set(stagedFiles.map(sf => sf.id));
 
-    // Remove old
     for (const [id, url] of currentMap.entries()) {
         if (!activeIds.has(id)) {
             URL.revokeObjectURL(url);
@@ -232,7 +223,6 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
         }
     }
 
-    // Add new
     stagedFiles.forEach(sf => {
         if (sf.file.type.startsWith('image/') && !currentMap.has(sf.id)) {
             const url = URL.createObjectURL(sf.file);
@@ -241,12 +231,9 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
         }
     });
 
-    if (changed) {
-        setFilePreviews(new Map(currentMap));
-    }
+    if (changed) setFilePreviews(new Map(currentMap));
   }, [stagedFiles]);
 
-  // Unmount cleanup
   useEffect(() => {
       return () => {
           previewsRef.current.forEach(url => URL.revokeObjectURL(url));
@@ -254,94 +241,86 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
       };
   }, []);
 
+
   // --- Handlers ---
 
   const handleTextChange = (e: ChangeEvent<HTMLInputElement>) => {
     const newText = e.target.value;
-    setText(newText);
+    
+    // Hanya perbarui UI state jika berubah dari kosong ke ada teks (atau sebaliknya)
+    const currentHasText = newText.trim().length > 0;
+    if (currentHasText !== hasTextUI) {
+      setHasTextUI(currentHasText);
+    }
+
     if (isConnected) {
-      onTyping();
+      debouncedTypingSignal();
       debouncedFetchPreview(newText);
     }
   };
 
   const handleEmojiClick = (emojiData: EmojiClickData) => {
-    setText(prev => prev + emojiData.emoji);
+    if (inputRef.current) {
+        inputRef.current.value += emojiData.emoji;
+        setHasTextUI(true);
+    }
     setShowEmojiPicker(false);
-    setShowPlusMenu(false); // Close plus menu if open
+    setShowPlusMenu(false);
   };
 
   const handleLocalFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const selectedFiles = Array.from(e.target.files);
       const validFiles: File[] = [];
-      const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB matching server limits
+      const MAX_FILE_SIZE = 100 * 1024 * 1024;
       const MAX_FILES_PER_MESSAGE = 10;
-      
       const restrictedExtensions = ['.exe', '.sh', '.bat', '.cmd', '.msi', '.vbs', '.js', '.ts', '.html', '.php', '.phtml', '.php5', '.py', '.rb', '.pl', '.jar', '.com', '.scr', '.cpl', '.msc'];
 
       if (stagedFiles.length + selectedFiles.length > MAX_FILES_PER_MESSAGE) {
-toast.error(t('chat:messages.max_files', { 
-  count: MAX_FILES_PER_MESSAGE, 
-  defaultValue: `You can only send up to ${MAX_FILES_PER_MESSAGE} files at once.` 
-}));        
-
-if (fileInputRef.current) fileInputRef.current.value = '';
+        toast.error(t('chat:messages.max_files', { count: MAX_FILES_PER_MESSAGE, defaultValue: `You can only send up to ${MAX_FILES_PER_MESSAGE} files at once.` }));        
+        if (fileInputRef.current) fileInputRef.current.value = '';
         return;
       }
 
       for (const file of selectedFiles) {
         if (file.size > MAX_FILE_SIZE) {
-toast.error(t('chat:messages.file_too_large', { 
-  name: file.name, 
-  defaultValue: `"${file.name}" is too large (Max: 100MB)` 
-}));
+           toast.error(t('chat:messages.file_too_large', { name: file.name, defaultValue: `"${file.name}" is too large (Max: 100MB)` }));
            continue;
         }
-
         const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
         if (restrictedExtensions.includes(ext)) {
-toast.error(t('chat:messages.file_restricted', { 
-  name: file.name, 
-  defaultValue: `"${file.name}" has a restricted file type and cannot be sent.` 
-}));
+           toast.error(t('chat:messages.file_restricted', { name: file.name, defaultValue: `"${file.name}" has a restricted file type and cannot be sent.` }));
            continue;
         }
-
         validFiles.push(file);
       }
 
-      if (validFiles.length > 0) {
-        addStagedFiles(validFiles);
-      }
+      if (validFiles.length > 0) addStagedFiles(validFiles);
     }
-    if (fileInputRef.current) fileInputRef.current.value = ''; // Reset input to allow selecting the same file again
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const hasContentToSend = hasText || stagedFiles.length > 0;
+  const hasContentToSend = hasTextUI || stagedFiles.length > 0;
 
   const handleSubmit = async (e?: React.FormEvent, forceSilent = false) => {
     if (e) e.preventDefault();
-    if (!hasContentToSend || !isConnected) return;
+    const currentText = inputRef.current?.value || '';
     
-    // Only trigger feedback if not forcing silent
+    if ((!currentText.trim() && stagedFiles.length === 0) || !isConnected) return;
+    
     if (!forceSilent) triggerSendFeedback();
     setShowSilentMenu(false);
     
     if (editingMessage) {
-        await sendEdit(conversation.id, editingMessage.id, text);
-        setText('');
+        await sendEdit(conversation.id, editingMessage.id, currentText);
+        if (inputRef.current) inputRef.current.value = '';
+        setHasTextUI(false);
         return;
     }
     
-    // 1. Process Staged Files
     if (stagedFiles.length > 0) {
-       // Capture the files to send and immediately clear the UI state for snappy UX
        const filesToProcess = [...stagedFiles];
        clearStagedFiles();
-       
-       // Process files sequentially in the background to prevent CPU/RAM overload
-       // (Image compression and Sodium encryption are extremely CPU-heavy)
        (async () => {
            for (const staged of filesToProcess) {
                await useMessageInputStore.getState().uploadFile(conversation.id, staged.file);
@@ -349,14 +328,16 @@ toast.error(t('chat:messages.file_restricted', {
        })();
     }
 
-    // 2. Process Text
-    if (hasText) {
-      let finalContent = text;
+    if (currentText.trim()) {
+      let finalContent = currentText;
       if (forceSilent) {
-          finalContent = JSON.stringify({ type: 'silent', text: text });
+          finalContent = JSON.stringify({ type: 'silent', text: currentText });
       }
       onSend({ content: finalContent });
-      setText('');
+      
+      // Reset input secara langsung
+      if (inputRef.current) inputRef.current.value = '';
+      setHasTextUI(false);
       setIsHD(false);
       setIsVoiceAnonymized(false);
     }
@@ -368,10 +349,11 @@ toast.error(t('chat:messages.file_restricted', {
   };
 
   const handleSmartReplySelect = (reply: string) => {
-    setText(reply);
-    if (isConnected) {
-        onTyping();
+    if (inputRef.current) {
+        inputRef.current.value = reply;
+        setHasTextUI(true);
     }
+    if (isConnected) onTyping();
   };
 
   const handleStartRecording = async () => {
@@ -385,28 +367,19 @@ toast.error(t('chat:messages.file_restricted', {
           const audioCtx = new AudioContextClass();
           audioContextRef.current = audioCtx;
           const source = audioCtx.createMediaStreamSource(stream);
-
-          // 1. Lowpass Filter (Muffles the voice, removes identifying high frequencies)
           const filter = audioCtx.createBiquadFilter();
           filter.type = 'lowpass';
-          filter.frequency.value = 800; // Hz
-
-          // 2. Ring Modulator (Robotic/Dalek vibration)
+          filter.frequency.value = 800;
           const oscillator = audioCtx.createOscillator();
           oscillator.type = 'sine';
-          oscillator.frequency.value = 40; // 40Hz vibration
-
+          oscillator.frequency.value = 40;
           const ringModulator = audioCtx.createGain();
           ringModulator.gain.value = 0;
-
-          // Wire it up: oscillator modulates the gain, source goes through the gain, then through filter
           oscillator.connect(ringModulator.gain);
           source.connect(ringModulator);
           ringModulator.connect(filter);
-
           const destination = audioCtx.createMediaStreamDestination();
           filter.connect(destination);
-          
           oscillator.start();
           finalStream = destination.stream;
       }
@@ -470,17 +443,9 @@ toast.error(t('chat:messages.file_restricted', {
   // --- Render ---
 
   return (
-    <div className="
-      bg-bg-main border-t border-white/10
-      z-20 relative
-    ">
-      {/* Previews Stack */}
+    <div className="bg-bg-main border-t border-white/10 z-20 relative">
       <div className="absolute bottom-full left-0 w-full">
-        <SmartReply 
-          lastMessage={lastDecryptedText} 
-          isFromMe={!isLastMessageFromOther} 
-          onSelectReply={handleSmartReplySelect} 
-        />
+        <SmartReply lastMessage={lastDecryptedText} isFromMe={!isLastMessageFromOther} onSelectReply={handleSmartReplySelect} />
         <div className="px-4">
             <EditPreview />
             <ReplyPreview />
@@ -491,13 +456,8 @@ toast.error(t('chat:messages.file_restricted', {
             </div>
             )}
             
-            {/* STAGED FILES CAROUSEL */}
             {stagedFiles.length > 0 && (
-                <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="mb-2 p-3 bg-bg-surface backdrop-blur-md rounded-2xl shadow-neumorphic-convex border border-white/5 flex gap-3 overflow-x-auto scrollbar-hide"
-                >
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-2 p-3 bg-bg-surface backdrop-blur-md rounded-2xl shadow-neumorphic-convex border border-white/5 flex gap-3 overflow-x-auto scrollbar-hide">
                     {stagedFiles.map((staged) => {
                         const isImage = staged.file.type.startsWith('image/');
                         const url = isImage ? filePreviews.get(staged.id) : null;
@@ -507,12 +467,8 @@ toast.error(t('chat:messages.file_restricted', {
                                     <>
                                       <img src={url} alt="preview" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
                                       <div className="absolute top-1 left-1 flex items-center gap-1 z-10">
-                                          <button type="button" onClick={(e) => { e.preventDefault(); setPaintTarget({ id: staged.id, file: staged.file }); }} className="bg-black/60 hover:bg-accent text-white p-1 rounded-full backdrop-blur-md transition-colors">
-                                            <FiEdit3 size={12} />
-                                          </button>
-                                          <button type="button" onClick={(e) => { e.preventDefault(); setCropTarget({ id: staged.id, url, file: staged.file }); }} className="bg-black/60 hover:bg-accent text-white p-1 rounded-full backdrop-blur-md transition-colors">
-                                            <FiCrop size={12} />
-                                          </button>
+                                          <button type="button" onClick={(e) => { e.preventDefault(); setPaintTarget({ id: staged.id, file: staged.file }); }} className="bg-black/60 hover:bg-accent text-white p-1 rounded-full backdrop-blur-md transition-colors"><FiEdit3 size={12} /></button>
+                                          <button type="button" onClick={(e) => { e.preventDefault(); setCropTarget({ id: staged.id, url, file: staged.file }); }} className="bg-black/60 hover:bg-accent text-white p-1 rounded-full backdrop-blur-md transition-colors"><FiCrop size={12} /></button>
                                       </div>
                                     </>
                                 ) : (
@@ -521,13 +477,7 @@ toast.error(t('chat:messages.file_restricted', {
                                         <span className="text-[8px] mt-1 px-1 truncate w-full text-center">{staged.file.name}</span>
                                     </div>
                                 )}
-                                <button 
-                                    type="button"
-                                    onClick={() => removeStagedFile(staged.id)} 
-                                    className="absolute top-1 right-1 bg-black/60 hover:bg-red-500 text-white p-1 rounded-full backdrop-blur-md transition-colors"
-                                >
-                                    <FiX size={12} />
-                                </button>
+                                <button type="button" onClick={() => removeStagedFile(staged.id)} className="absolute top-1 right-1 bg-black/60 hover:bg-red-500 text-white p-1 rounded-full backdrop-blur-md transition-colors"><FiX size={12} /></button>
                             </div>
                         );
                     })}
@@ -536,33 +486,19 @@ toast.error(t('chat:messages.file_restricted', {
         </div>
       </div>
 
-      {/* Emoji Picker Popover */}
       {showEmojiPicker && (
         <div ref={emojiPickerRef} className="absolute bottom-24 left-4 z-50 shadow-2xl rounded-xl overflow-hidden">
           <Suspense fallback={<div className="w-[350px] h-[450px] bg-bg-surface flex items-center justify-center text-text-secondary">{t('common:actions.loading')}</div>}>
-            <EmojiPicker
-              onEmojiClick={handleEmojiClick}
-              autoFocusSearch={false}
-              lazyLoadEmojis={true}
-              theme={theme === 'dark' ? Theme.DARK : Theme.LIGHT}
-            />
+            <EmojiPicker onEmojiClick={handleEmojiClick} autoFocusSearch={false} lazyLoadEmojis={true} theme={theme === 'dark' ? Theme.DARK : Theme.LIGHT} />
           </Suspense>
         </div>
       )}
 
-      {/* Disappearing Messages Menu */}
       {showTimerMenu && (
         <div ref={timerMenuRef} className="absolute bottom-full left-10 mb-2 z-50 bg-bg-surface border border-white/10 rounded-xl shadow-xl overflow-hidden min-w-[120px]">
           <div className="p-2 text-[10px] uppercase font-bold text-text-secondary border-b border-white/5">{t('chat:input.auto_delete', 'Auto-Delete')}</div>
           {DURATIONS.map((opt) => (
-            <button
-              key={opt.label}
-              onClick={() => { setExpiresIn(opt.value); setShowTimerMenu(false); setShowPlusMenu(false); }}
-              className={clsx(
-                "w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors flex items-center justify-between",
-                expiresIn === opt.value ? "text-orange-500 font-bold" : "text-text-primary"
-              )}
-            >
+            <button key={opt.label} onClick={() => { setExpiresIn(opt.value); setShowTimerMenu(false); setShowPlusMenu(false); }} className={clsx("w-full text-left px-4 py-2 text-sm hover:bg-white/5 transition-colors flex items-center justify-between", expiresIn === opt.value ? "text-orange-500 font-bold" : "text-text-primary")}>
               {opt.label}
               {expiresIn === opt.value && <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />}
             </button>
@@ -570,308 +506,82 @@ toast.error(t('chat:messages.file_restricted', {
         </div>
       )}
 
-      {/* Mobile Plus Menu */}
       {showPlusMenu && (
         <div ref={plusMenuRef} className="absolute bottom-full left-4 mb-2 z-50 bg-bg-surface border border-white/10 rounded-xl shadow-xl overflow-hidden min-w-[160px] flex flex-col p-1">
-          <button
-            onClick={() => { fileInputRef.current?.click(); setShowPlusMenu(false); }}
-            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
-          >
-            <FiPaperclip size={18} />
-            <span>{t('input.attach_file')}</span>
-          </button>
-          <button
-            onClick={() => { setShowTimerMenu(true); setShowPlusMenu(false); }}
-            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
-          >
-            <FiClock size={18} className={expiresIn ? "text-orange-500" : ""} />
-            <span>{t('input.set_timer')}</span>
-          </button>
-          <button
-            onClick={() => { setIsViewOnce(!isViewOnce); setShowPlusMenu(false); }}
-            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
-          >
-            <FiEye size={18} className={isViewOnce ? "text-accent" : ""} />
-            <span>{t('input.toggle_view_once')}</span>
-          </button>
-          <button
-            onClick={() => { setIsHD(!isHD); setShowPlusMenu(false); }}
-            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary font-bold"
-          >
-            <span className={isHD ? "text-accent" : "text-text-secondary"}>HD</span>
-            <span>{isHD ? t('chat:input.hd_on', 'HD Quality: ON') : t('chat:input.hd_off', 'Standard Quality')}</span>
-          </button>
-          <button
-            onClick={() => { setIsVoiceAnonymized(!isVoiceAnonymized); setShowPlusMenu(false); }}
-            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary font-bold"
-          >
-            <FiCpu size={18} className={isVoiceAnonymized ? "text-red-500" : "text-text-secondary"} />
-            <span className={isVoiceAnonymized ? "text-red-500" : ""}>{isVoiceAnonymized ? t('chat:input.anon_on', 'Anon Voice: ON') : t('chat:input.anon_off', 'Anon Voice: OFF')}</span>
-          </button>
-          <button
-            onClick={() => { setShowEmojiPicker(true); setShowPlusMenu(false); }}
-            className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"
-          >
-            <FiSmile size={18} />
-            <span>{t('input.insert_emoji')}</span>
-          </button>
+          <button onClick={() => { fileInputRef.current?.click(); setShowPlusMenu(false); }} className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"><FiPaperclip size={18} /><span>{t('input.attach_file')}</span></button>
+          <button onClick={() => { setShowTimerMenu(true); setShowPlusMenu(false); }} className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"><FiClock size={18} className={expiresIn ? "text-orange-500" : ""} /><span>{t('input.set_timer')}</span></button>
+          <button onClick={() => { setIsViewOnce(!isViewOnce); setShowPlusMenu(false); }} className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"><FiEye size={18} className={isViewOnce ? "text-accent" : ""} /><span>{t('input.toggle_view_once')}</span></button>
+          <button onClick={() => { setIsHD(!isHD); setShowPlusMenu(false); }} className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary font-bold"><span className={isHD ? "text-accent" : "text-text-secondary"}>HD</span><span>{isHD ? t('chat:input.hd_on', 'HD Quality: ON') : t('chat:input.hd_off', 'Standard Quality')}</span></button>
+          <button onClick={() => { setIsVoiceAnonymized(!isVoiceAnonymized); setShowPlusMenu(false); }} className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary font-bold"><FiCpu size={18} className={isVoiceAnonymized ? "text-red-500" : "text-text-secondary"} /><span className={isVoiceAnonymized ? "text-red-500" : ""}>{isVoiceAnonymized ? t('chat:input.anon_on', 'Anon Voice: ON') : t('chat:input.anon_off', 'Anon Voice: OFF')}</span></button>
+          <button onClick={() => { setShowEmojiPicker(true); setShowPlusMenu(false); }} className="flex items-center gap-3 w-full text-left px-4 py-3 text-sm hover:bg-white/5 rounded-lg transition-colors text-text-primary"><FiSmile size={18} /><span>{t('input.insert_emoji')}</span></button>
         </div>
       )}
 
-      {/* Input Module */}
       {isOtherParticipantBlocked ? (
         <div className="flex items-center justify-between p-4 bg-red-500/10 rounded-xl border border-red-500/20 m-4">
-          <div className="flex items-center gap-3 text-red-500">
-            <FiAlertTriangle size={20} />
-            <span className="font-bold text-sm">{t('input.transmission_blocked')}</span>
-          </div>
-          <button
-             onClick={() => useAuthStore.getState().unblockUser(otherParticipant.id)}
-             className="text-xs font-mono uppercase bg-red-500 text-white px-3 py-1.5 rounded-lg shadow-sm hover:bg-red-600"
-          >
-            {t('input.unblock_signal')}
-          </button>
+          <div className="flex items-center gap-3 text-red-500"><FiAlertTriangle size={20} /><span className="font-bold text-sm">{t('input.transmission_blocked')}</span></div>
+          <button onClick={() => useAuthStore.getState().unblockUser(otherParticipant.id)} className="text-xs font-mono uppercase bg-red-500 text-white px-3 py-1.5 rounded-lg shadow-sm hover:bg-red-600">{t('input.unblock_signal')}</button>
         </div>
       ) : isRecording ? (
-        // Voice Recording Mode
         <div className="flex items-center gap-2 md:gap-4 animate-fade-in p-2 md:p-4 w-full">
-          <button 
-            onClick={handleCancelRecording} 
-            className="
-              p-3 rounded-full text-text-secondary 
-              hover:text-red-500 hover:bg-red-500/10 transition-all flex-shrink-0
-            "
-            title={t('input.cancel_voice')}
-          >
-             <FiTrash2 size={20} />
-          </button>
+          <button onClick={handleCancelRecording} className="p-3 rounded-full text-text-secondary hover:text-red-500 hover:bg-red-500/10 transition-all flex-shrink-0" title={t('input.cancel_voice')}><FiTrash2 size={20} /></button>
           <div className="flex-1 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark rounded-full h-12 flex items-center px-4 md:px-6 gap-3 min-w-0">
              <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_red] flex-shrink-0"></div>
-             <span className="font-mono text-sm md:text-lg text-text-primary tracking-widest flex-shrink-0">
-                {new Date(recordingTime * 1000).toISOString().substr(14, 5)}
-             </span>
+             <span className="font-mono text-sm md:text-lg text-text-primary tracking-widest flex-shrink-0">{new Date(recordingTime * 1000).toISOString().substr(14, 5)}</span>
              <span className="hidden md:inline text-xs text-text-secondary uppercase tracking-wider ml-auto truncate">{t('input.recording_state')}</span>
           </div>
-          <button 
-            onClick={handleStopRecording} 
-            className="
-              p-3 rounded-full bg-accent text-white 
-              shadow-[0_0_15px_rgba(var(--accent),0.5)]
-              hover:scale-110 active:scale-95 transition-all flex-shrink-0
-            "
-            title={t('input.send_voice')}
-          >
-             <FiSend size={20} />
-          </button>
+          <button onClick={handleStopRecording} className="p-3 rounded-full bg-accent text-white shadow-[0_0_15px_rgba(var(--accent),0.5)] hover:scale-110 active:scale-95 transition-all flex-shrink-0" title={t('input.send_voice')}><FiSend size={20} /></button>
         </div>
       ) : (
-        // Text Input Mode - TRENCH DESIGN
-        <form onSubmit={handleSubmit} className="
-          relative flex items-center gap-2 p-2 rounded-2xl
-          bg-bg-main w-full m-4
-          shadow-neu-pressed dark:shadow-neu-pressed-dark
-          max-w-[calc(100%-2rem)]
-        ">
-          
-          {/* Action Buttons (Desktop) */}
+        <form onSubmit={handleSubmit} className="relative flex items-center gap-2 p-2 rounded-2xl bg-bg-main w-full m-4 shadow-neu-pressed dark:shadow-neu-pressed-dark max-w-[calc(100%-2rem)]">
           <div className="hidden md:flex items-center gap-1">
-            <button 
-              type="button" 
-              onClick={() => fileInputRef.current?.click()} 
-              disabled={isInputDisabled}
-              aria-label={t('input.attach_file')}
-              className="
-                p-3 rounded-xl text-text-secondary transition-all
-                hover:text-accent active:scale-95
-                shadow-neu-icon dark:shadow-neu-icon-dark
-              "
-            >
-              <FiPaperclip size={18} />
-            </button>
-            <button 
-              type="button" 
-              onClick={() => setShowTimerMenu(!showTimerMenu)} 
-              disabled={isInputDisabled}
-              aria-label={t('input.set_timer')}
-              className={clsx(
-                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark",
-                expiresIn ? "text-orange-500 bg-orange-500/10" : "text-text-secondary hover:text-orange-500"
-              )}
-            >
-              <FiClock size={18} />
-            </button>
-            <button 
-              type="button" 
-              onClick={() => setIsViewOnce(!isViewOnce)} 
-              disabled={isInputDisabled}
-              aria-label={t('input.toggle_view_once')}
-              className={clsx(
-                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark",
-                isViewOnce ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent"
-              )}
-            >
-              <FiEye size={18} />
-            </button>
-            <button 
-              type="button" 
-              onClick={() => setIsHD(!isHD)} 
-              disabled={isInputDisabled}
-              aria-label={t('input.toggle_hd')}
-              className={clsx(
-                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center justify-center",
-                isHD ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent"
-              )}
-            >
-              HD
-            </button>
-            <button 
-              type="button" 
-              onClick={() => setIsVoiceAnonymized(!isVoiceAnonymized)} 
-              disabled={isInputDisabled}
-              aria-label={t('input.toggle_anon_voice')}
-              className={clsx(
-                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center gap-1 justify-center",
-                isVoiceAnonymized ? "text-red-500 bg-red-500/10 shadow-[inset_2px_2px_4px_rgba(0,0,0,0.4)]" : "text-text-secondary hover:text-red-400"
-              )}
-            >
-              <FiCpu size={14} /> ANON
-            </button>
-            <button 
-              type="button" 
-              onClick={() => setShowEmojiPicker(!showEmojiPicker)} 
-              disabled={isInputDisabled}
-              aria-label={t('input.insert_emoji')}
-              className="
-                p-3 rounded-xl text-text-secondary transition-all
-                hover:text-yellow-500 active:scale-95
-                shadow-neu-icon dark:shadow-neu-icon-dark
-              "
-            >
-              <FiSmile size={18} />
-            </button>
+            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={isInputDisabled} className="p-3 rounded-xl text-text-secondary transition-all hover:text-accent active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark"><FiPaperclip size={18} /></button>
+            <button type="button" onClick={() => setShowTimerMenu(!showTimerMenu)} disabled={isInputDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark", expiresIn ? "text-orange-500 bg-orange-500/10" : "text-text-secondary hover:text-orange-500")}><FiClock size={18} /></button>
+            <button type="button" onClick={() => setIsViewOnce(!isViewOnce)} disabled={isInputDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark", isViewOnce ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent")}><FiEye size={18} /></button>
+            <button type="button" onClick={() => setIsHD(!isHD)} disabled={isInputDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center justify-center", isHD ? "text-accent bg-accent/10" : "text-text-secondary hover:text-accent")}>HD</button>
+            <button type="button" onClick={() => setIsVoiceAnonymized(!isVoiceAnonymized)} disabled={isInputDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark font-bold text-xs flex items-center gap-1 justify-center", isVoiceAnonymized ? "text-red-500 bg-red-500/10 shadow-[inset_2px_2px_4px_rgba(0,0,0,0.4)]" : "text-text-secondary hover:text-red-400")}><FiCpu size={14} /> ANON</button>
+            <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} disabled={isInputDisabled} className="p-3 rounded-xl text-text-secondary transition-all hover:text-yellow-500 active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark"><FiSmile size={18} /></button>
           </div>
-
-          {/* Action Button (Mobile) - Plus Menu Trigger */}
           <div className="md:hidden flex items-center">
-            <button 
-              type="button" 
-              onClick={() => setShowPlusMenu(!showPlusMenu)}
-              disabled={isInputDisabled}
-              aria-label={t('input.more_actions')}
-              className={clsx(
-                "p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark",
-                showPlusMenu ? "text-accent bg-accent/10" : "text-text-secondary"
-              )}
-            >
-              <motion.div animate={{ rotate: showPlusMenu ? 45 : 0 }} transition={{ duration: 0.2 }}>
-                <FiPlus size={20} />
-              </motion.div>
-            </button>
+            <button type="button" onClick={() => setShowPlusMenu(!showPlusMenu)} disabled={isInputDisabled} className={clsx("p-3 rounded-xl transition-all active:scale-95 shadow-neu-icon dark:shadow-neu-icon-dark", showPlusMenu ? "text-accent bg-accent/10" : "text-text-secondary")}><motion.div animate={{ rotate: showPlusMenu ? 45 : 0 }} transition={{ duration: 0.2 }}><FiPlus size={20} /></motion.div></button>
           </div>
 
           <input type="file" multiple ref={fileInputRef} className="hidden" onChange={handleLocalFileChange} disabled={isInputDisabled} />
 
-          {/* Main Transmission Slot */}
           <div className="flex-1 relative group">
+            {/* ✅ UNCONTROLLED INPUT: Hapus `value={text}`! */}
             <input
+              ref={inputRef}
               type="text"
-              value={text}
               onChange={handleTextChange}
               disabled={isInputDisabled}
-              aria-label={t('input.message_text')}
               placeholder={isConnected ? (expiresIn ? t('input.placeholder_disappearing') : t('input.placeholder_default')) : t('input.placeholder_offline')}
-              className="
-                w-full bg-transparent border-none outline-none 
-                text-text-primary placeholder:text-text-secondary/50
-                h-10 px-2 font-medium
-              "
+              className="w-full bg-transparent border-none outline-none text-text-primary placeholder:text-text-secondary/50 h-10 px-2 font-medium"
             />
           </div>
 
-          {/* Send / Mic Button */}
           <div className="relative">
             <AnimatePresence>
                {showSilentMenu && (
-                  <motion.div 
-                     initial={{ opacity: 0, y: 10, scale: 0.9 }}
-                     animate={{ opacity: 1, y: 0, scale: 1 }}
-                     exit={{ opacity: 0, y: 10, scale: 0.9 }}
-                     className="absolute bottom-full right-0 mb-2 p-2 bg-bg-surface backdrop-blur-xl border border-white/10 rounded-xl shadow-neumorphic-convex z-50 whitespace-nowrap"
-                  >
-                     <button 
-                       type="button"
-                       onClick={(e) => {
-                           e.preventDefault();
-                           e.stopPropagation();
-                           handleSubmit(undefined, true);
-                       }}
-                       className="flex items-center gap-2 px-3 py-2 text-sm font-bold text-text-primary hover:bg-white/5 rounded-lg transition-colors w-full"
-                     >
-                       <FiVolumeX className="text-accent" size={16} /> {t('input.send_silent')}
-                     </button>
+                  <motion.div initial={{ opacity: 0, y: 10, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 10, scale: 0.9 }} className="absolute bottom-full right-0 mb-2 p-2 bg-bg-surface backdrop-blur-xl border border-white/10 rounded-xl shadow-neumorphic-convex z-50 whitespace-nowrap">
+                     <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleSubmit(undefined, true); }} className="flex items-center gap-2 px-3 py-2 text-sm font-bold text-text-primary hover:bg-white/5 rounded-lg transition-colors w-full"><FiVolumeX className="text-accent" size={16} /> {t('input.send_silent')}</button>
                   </motion.div>
                )}
             </AnimatePresence>
             {hasContentToSend ? (
-               <button
-                ref={sendButtonRef}
-                type="submit"
-                onMouseDown={handleSendTouchStart}
-                onMouseUp={handleSendTouchEnd}
-                onMouseLeave={handleSendTouchEnd}
-                onTouchStart={handleSendTouchStart}
-                onTouchEnd={handleSendTouchEnd}
-                disabled={isInputDisabled}
-                aria-label={t('input.send_message')}
-                className="
-                  p-3 rounded-xl bg-accent text-white
-                  shadow-neu-flat dark:shadow-neu-flat-dark
-                  hover:-translate-y-0.5 active:translate-y-0 transition-all
-                "
-               >
-                 <FiSend size={18} className={hasContentToSend ? 'translate-x-0.5' : ''} />
-               </button>
+               <button ref={sendButtonRef} type="submit" onMouseDown={handleSendTouchStart} onMouseUp={handleSendTouchEnd} onMouseLeave={handleSendTouchEnd} onTouchStart={handleSendTouchStart} onTouchEnd={handleSendTouchEnd} disabled={isInputDisabled} className="p-3 rounded-xl bg-accent text-white shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5 active:translate-y-0 transition-all"><FiSend size={18} className={hasContentToSend ? 'translate-x-0.5' : ''} /></button>
             ) : (
-               <button
-                type="button"
-                onClick={handleStartRecording}
-                disabled={isInputDisabled}
-                aria-label={t('input.record_voice')}
-                className="
-                  p-3 rounded-xl text-text-secondary
-                  shadow-neu-icon dark:shadow-neu-icon-dark
-                  hover:text-red-500 active:scale-95 transition-all
-                "
-               >
-                 <FiMic size={18} />
-               </button>
+               <button type="button" onClick={handleStartRecording} disabled={isInputDisabled} className="p-3 rounded-xl text-text-secondary shadow-neu-icon dark:shadow-neu-icon-dark hover:text-red-500 active:scale-95 transition-all"><FiMic size={18} /></button>
             )}
           </div>
-
         </form>
       )}
 
       {cropTarget && (
-        <AttachmentCropperModal 
-          file={cropTarget.file} 
-          url={cropTarget.url} 
-          onClose={() => setCropTarget(null)} 
-          onSave={(newFile) => {
-            updateStagedFile(cropTarget.id, newFile);
-            setCropTarget(null);
-          }} 
-        />
+        <AttachmentCropperModal file={cropTarget.file} url={cropTarget.url} onClose={() => setCropTarget(null)} onSave={(newFile) => { updateStagedFile(cropTarget.id, newFile); setCropTarget(null); }} />
       )}
-
       {paintTarget && (
-        <ImageEditorModal 
-          file={paintTarget.file}
-          onSave={(newFile) => {
-            updateStagedFile(paintTarget.id, newFile);
-            setPaintTarget(null);
-          }}
-          onCancel={() => setPaintTarget(null)}
-        />
+        <ImageEditorModal file={paintTarget.file} onSave={(newFile) => { updateStagedFile(paintTarget.id, newFile); setPaintTarget(null); }} onCancel={() => setPaintTarget(null)} />
       )}
     </div>
   );

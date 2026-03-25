@@ -5,8 +5,8 @@ import { useKeychainStore } from '@store/keychain';
 import { useConversationStore } from '@store/conversation';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
-import { FiClock, FiAlertTriangle, FiImage, FiRefreshCw } from 'react-icons/fi';
-import { getSocket } from '@lib/socket'; // Pastikan import socket helper
+import { FiAlertTriangle, FiImage, FiRefreshCw } from 'react-icons/fi';
+import { getSocket } from '@lib/socket'; 
 
 interface LazyImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src'> {
   message: Message;
@@ -23,13 +23,24 @@ export default function LazyImage({
   const [decryptionStatus, setDecryptionStatus] = useState<DecryptionStatus>('pending');
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [retryCount, setRetryCount] = useState(0); // State untuk memaksa re-run useEffect
+  const [retryCount, setRetryCount] = useState(0); 
   
+  // ✅ OPTIMASI 1: Kunci agar tidak re-download berkali-kali!
+  const hasDecryptedSuccessfully = useRef(false);
+
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
-  const conversations = useConversationStore(s => s.conversations);
+  
+  // ✅ OPTIMASI 2: Surgical Subscription (Hanya pantau boolean isGroup)
+  const isGroup = useConversationStore(s => 
+    s.conversations.find(c => c.id === message.conversationId)?.isGroup || false
+  );
+
   const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
+    // Jika sudah sukses, jangan pernah jalankan effect ini lagi
+    if (hasDecryptedSuccessfully.current) return;
+
     let objectUrl: string | null = null;
     let isMounted = true;
     let retryTimeout: NodeJS.Timeout;
@@ -42,20 +53,23 @@ export default function LazyImage({
       }
 
       // 2. Cek Enkripsi
-      const isEncrypted = message.fileType?.includes('encrypted') || message.isBlindAttachment || (!message.fileUrl && !message.imageUrl);
+      const isEncrypted = message.fileType?.includes('encrypted') || message.isBlindAttachment || !message.fileUrl;
 
       if (!isEncrypted) {
         if (isMounted) {
           const absoluteUrl = toAbsoluteUrl(message.fileUrl);
           setImageUrl(absoluteUrl || null);
           setDecryptionStatus('succeeded');
+          hasDecryptedSuccessfully.current = true;
         }
         return;
       }
 
       // 3. Ambil Kunci
-      const encryptedFileKey = '';
-      if (!encryptedFileKey) {
+      const encryptedFileKey = message.fileKey || ''; // Menggunakan fileKey dari message
+      
+      // Jika ini bukan blind attachment dan tidak ada kunci, maka tunggu kunci
+      if (!message.isBlindAttachment && !encryptedFileKey) {
         if (isMounted) { setDecryptionStatus('waiting_for_key'); setError("Waiting for key..."); }
         return;
       }
@@ -70,20 +84,16 @@ export default function LazyImage({
 
         // CHECK BLIND ATTACHMENT (Raw Key)
         if (message.isBlindAttachment) {
-             rawFileKey = encryptedFileKey;
+             rawFileKey = encryptedFileKey; // Untuk V2 blind attachment
         } else {
-            // LEGACY: DEKRIPSI KUNCI (DENGAN AUTO-RETRY LOGIC)
-            const conversation = conversations.find(c => c.id === message.conversationId);
-            const isGroup = conversation ? conversation.isGroup : false;
-            
-            // [FIX] Max Retry Limit
+            // DEKRIPSI KUNCI (DENGAN AUTO-RETRY LOGIC)
             const MAX_KEY_RETRIES = 5;
 
             const keyResult = await decryptMessage(
                 encryptedFileKey,
                 message.conversationId,
                 isGroup,
-                /* sessionId removed */ ''
+                message.sessionId || ''
             );
 
             if (keyResult.status === 'pending') {
@@ -98,10 +108,10 @@ export default function LazyImage({
                     setError(keyResult.reason || "Key not found yet");
                     
                     const socket = getSocket();
-                    if (socket && socket.connected && /* sessionId removed */ '') {
+                    if (socket && socket.connected && message.sessionId) {
                         socket.emit('session:request_key', {
                             conversationId: message.conversationId,
-                            sessionId: /* sessionId removed */ ''
+                            sessionId: message.sessionId
                         });
                     }
 
@@ -118,7 +128,7 @@ export default function LazyImage({
             rawFileKey = keyResult.value;
         }
 
-        // B. DEKRIPSI FILE BLOB
+        // DEKRIPSI FILE BLOB
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
         if (!absoluteUrl) throw new Error("Invalid URL");
 
@@ -133,6 +143,7 @@ export default function LazyImage({
           objectUrl = URL.createObjectURL(decryptedBlob);
           setImageUrl(objectUrl);
           setDecryptionStatus('succeeded');
+          hasDecryptedSuccessfully.current = true; // KUNCI!
         }
       } catch (e: unknown) {
         console.error("Image load/decrypt failed:", e);
@@ -147,10 +158,23 @@ export default function LazyImage({
 
     return () => {
       isMounted = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      // Jangan revoke URL jika komponen hanya re-render karena Virtuoso
+      if (objectUrl && !hasDecryptedSuccessfully.current) {
+          URL.revokeObjectURL(objectUrl);
+      }
       clearTimeout(retryTimeout);
     };
-  }, [message.fileUrl, message.fileType, /* sessionId removed */ '', lastKeychainUpdate, retryCount, message.conversationId, message.isBlindAttachment, conversations]); // Tambah retryCount
+  // ✅ OPTIMASI 3: Bersihkan dependency array
+  }, [message.fileUrl, message.fileType, message.fileKey, message.sessionId, lastKeychainUpdate, retryCount, message.conversationId, message.isBlindAttachment, isGroup]);
+
+  // Clean up Object URL when the component completely unmounts from the DOM
+  useEffect(() => {
+    return () => {
+       if (imageUrl && imageUrl.startsWith('blob:')) {
+           URL.revokeObjectURL(imageUrl);
+       }
+    };
+  }, [imageUrl]);
 
   // --- RENDER HELPERS ---
   const renderOverlay = () => {
@@ -175,7 +199,10 @@ export default function LazyImage({
       return (
         <div 
             className={`${baseClasses} bg-red-500/10 text-red-500 cursor-pointer`}
-            onClick={() => setRetryCount(c => c + 1)} // Manual Retry Click
+            onClick={() => {
+                hasDecryptedSuccessfully.current = false; // Buka kunci
+                setRetryCount(c => c + 1); // Coba lagi
+            }}
         >
           <FiAlertTriangle className="mb-1 text-xl" />
           <span className="text-[10px] font-medium">Failed. Click to retry.</span>

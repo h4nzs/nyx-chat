@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Message } from "@store/conversation";
 import { toAbsoluteUrl } from "@utils/url";
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -36,10 +36,21 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   const [retryCount, setRetryCount] = useState(0);
   const [numPages, setNumPages] = useState<number | null>(null);
 
+  // ✅ OPTIMASI 1: Kunci agar tidak re-download berkali-kali!
+  const hasDecryptedSuccessfully = useRef(false);
+
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
-  const conversations = useConversationStore(s => s.conversations);
+  
+  // ✅ OPTIMASI 2: Surgical Subscription (Hanya pantau boolean isGroup untuk obrolan ini)
+  const isGroup = useConversationStore(s => 
+    s.conversations.find(c => c.id === message.conversationId)?.isGroup || false
+  );
 
   useEffect(() => {
+    // Jika sudah sukses terdekripsi, JANGAN PERNAH jalankan effect ini lagi 
+    // meskipun lastKeychainUpdate atau variabel lain berubah!
+    if (hasDecryptedSuccessfully.current) return;
+
     let objectUrl: string | null = null;
     let isMounted = true;
     let retryTimeout: NodeJS.Timeout;
@@ -50,7 +61,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         return;
       }
 
-      // Cek apakah file terenkripsi
       const isEncrypted = message.fileType?.includes('encrypted=true') || message.isBlindAttachment || !message.fileUrl;
       
       if (!isEncrypted) {
@@ -58,6 +68,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         if (isMounted) {
           setDecryptedUrl(absoluteUrl || null);
           setStatus('success');
+          hasDecryptedSuccessfully.current = true; // Kunci status sukses
         }
         return;
       }
@@ -80,9 +91,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         } else if (message.isBlindAttachment) {
              rawFileKey = ''; 
         } else {
-            const conversation = conversations.find(c => c.id === message.conversationId);
-            const isGroup = conversation?.isGroup || false;
-
+            // Menggunakan isGroup dari Surgical Subscription di atas
             const keyResult = await decryptMessage(
               '',
               message.conversationId,
@@ -130,6 +139,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
           objectUrl = URL.createObjectURL(decryptedBlob);
           setDecryptedUrl(objectUrl);
           setStatus('success');
+          hasDecryptedSuccessfully.current = true; // Kunci status sukses!
         }
       } catch (e: unknown) {
         console.error("Decrypt failed:", e);
@@ -145,10 +155,23 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
 
     return () => {
       isMounted = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      clearTimeout(retryTimeout);
+      // Jangan revoke URL jika komponen hanya re-render. Revoke hanya dibolehkan
+      // jika komponen benar-benar dihancurkan dari DOM oleh Virtuoso.
+      if (objectUrl && !hasDecryptedSuccessfully.current) {
+         URL.revokeObjectURL(objectUrl);
+      }
     };
-  }, [message, lastKeychainUpdate, retryCount, t]);
+  }, [message, lastKeychainUpdate, retryCount, isGroup, t]);
+
+  // Clean up Object URL when the component completely unmounts from the DOM
+  useEffect(() => {
+    return () => {
+       if (decryptedUrl && decryptedUrl.startsWith('blob:')) {
+           URL.revokeObjectURL(decryptedUrl);
+       }
+    };
+  }, [decryptedUrl]);
+
 
   const getFileType = (): string => {
     if (message.fileType) {
@@ -191,7 +214,10 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
     return (
       <div
         className={`${containerClass} border border-red-500/30 text-red-500 cursor-pointer hover:bg-red-500/10`}
-        onClick={() => setRetryCount(c => c + 1)}
+        onClick={() => {
+            hasDecryptedSuccessfully.current = false; // Buka kunci agar bisa retry
+            setRetryCount(c => c + 1);
+        }}
       >
         <FiAlertTriangle />
         <span className="text-sm">{t('chat:media.decrypt_failed', { error: errorMsg })}. {t('chat:media.retry')}</span>
