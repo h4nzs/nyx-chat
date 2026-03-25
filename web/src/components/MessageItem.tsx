@@ -98,12 +98,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
   const isSelectionMode = selectedMessageIds.length > 0;
   const isSelected = selectedMessageIds.includes(message.id);
 
-  // ✅ PERBAIKAN PERFORMA: JANGAN GUNAKAN useUserProfile DI DALAM LIST!
-  // Cari profil dari props 'participants' yang sudah stabil dari komponen induk.
-  const senderParticipant = participants.find(p => p.id === message.senderId);
-  const profileName = senderParticipant?.name || t('common:defaults.user');
-  const profileAvatarUrl = senderParticipant?.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${profileName}`;
-
+  const profile = useUserProfile(message.sender as { id: string; encryptedProfile?: string | null });
   const mine = message.senderId === meId;
   const ref = useRef<HTMLDivElement>(null);
   const openMenu = useContextMenuStore(s => s.openMenu);
@@ -304,7 +299,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
             <div className="w-8 flex-shrink-0 mb-1 self-end">
               {isLastInSequence && (
                 <img 
-                  src={toAbsoluteUrl(profileAvatarUrl) || `${t('common:defaults.user')}`} 
+                  src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('common:defaults.user')}`} 
                   alt={t('common:defaults.avatar', 'Avatar')} 
                   className="w-8 h-8 rounded-full bg-secondary object-cover shadow-sm cursor-pointer hover:scale-105 transition-transform pointer-events-auto" 
                 />
@@ -313,9 +308,9 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
           )}
           
           <div className={clsx("flex flex-col max-w-[85%] sm:max-w-[70%]", mine ? "items-end" : "items-start")}>
-            {!mine && isGroup && isFirstInSequence && (
+            {!mine && isGroup && profile.name && isFirstInSequence && (
               <p className="text-[10px] font-bold mb-1 ml-1 user-color-name cursor-pointer hover:underline uppercase tracking-wide pointer-events-auto" style={{ '--user-color': getUserColor(message.senderId) } as React.CSSProperties}>
-                {profileName || t('common:defaults.user')}
+                {profile.name || t('common:defaults.user')}
               </p>
             )}
             
