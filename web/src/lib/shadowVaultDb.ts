@@ -61,7 +61,7 @@ class NyxShadowVaultProxy {
 
   async upsertMessages(messages: Message[]) {
     // Filter messages: Allow if it has content OR it is a tombstone
-    const validMessages = messages.filter(m => (m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('[')) || m.isDeletedLocal);
+    const validMessages = messages.filter(m => (m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('[')) || m.isDeletedLocal || m.fileUrl || m.isBlindAttachment);
     if (validMessages.length === 0) return;
 
     try {
@@ -75,6 +75,7 @@ class NyxShadowVaultProxy {
         let encryptedSenderName: string | undefined = undefined;
         let encryptedSenderUsername: string | undefined = undefined;
         let encryptedSenderAvatarUrl: string | undefined = undefined;
+        let encryptedFileMeta: string | undefined = undefined;
 
         if (m.content && !m.isDeletedLocal) {
             encryptedContent = await encryptVaultText(m.content);
@@ -107,6 +108,17 @@ class NyxShadowVaultProxy {
         } else if (mSender?.avatarUrl) {
             encryptedSenderAvatarUrl = await encryptVaultText(mSender.avatarUrl);
         }
+        if (m.fileUrl || m.isBlindAttachment) {
+            encryptedFileMeta = await encryptVaultText(JSON.stringify({
+                fileUrl: m.fileUrl,
+                fileKey: m.fileKey,
+                fileName: m.fileName,
+                fileType: m.fileType,
+                fileSize: m.fileSize,
+                duration: m.duration,
+                isBlindAttachment: m.isBlindAttachment
+            }));
+        }
         
         records.push({
           id: m.id,
@@ -120,7 +132,8 @@ class NyxShadowVaultProxy {
           senderUsername: encryptedSenderUsername,
           senderAvatarUrl: encryptedSenderAvatarUrl,
           isViewOnce: m.isViewOnce,
-          isDeletedLocal: m.isDeletedLocal
+          isDeletedLocal: m.isDeletedLocal,
+          fileMeta: encryptedFileMeta || existing?.fileMeta
         });
       }
       await db.messages.bulkPut(records);
@@ -175,6 +188,7 @@ class NyxShadowVaultProxy {
         let decryptedSenderName = undefined;
         let decryptedSenderUsername = undefined;
         let decryptedSenderAvatarUrl = undefined;
+        let decryptedFileMeta = undefined;
 
         if (r.content && !r.isDeletedLocal) plainText = await decryptVaultText(r.content);
         if (r.repliedTo) {
@@ -184,6 +198,11 @@ class NyxShadowVaultProxy {
         if (r.senderName) decryptedSenderName = await decryptVaultText(r.senderName) || undefined;
         if (r.senderUsername) decryptedSenderUsername = await decryptVaultText(r.senderUsername) || undefined;
         if (r.senderAvatarUrl) decryptedSenderAvatarUrl = await decryptVaultText(r.senderAvatarUrl) || undefined;
+
+        if (r.fileMeta) {
+            const rawMeta = await decryptVaultText(r.fileMeta);
+            if (rawMeta) { try { decryptedFileMeta = JSON.parse(rawMeta); } catch {} }
+        }
 
         messages.push({
           id: asMessageId(r.id),
@@ -200,7 +219,14 @@ class NyxShadowVaultProxy {
               avatarUrl: decryptedSenderAvatarUrl
           } as unknown as Message['sender'],
           isViewOnce: r.isViewOnce,
-          isDeletedLocal: r.isDeletedLocal
+          isDeletedLocal: r.isDeletedLocal,
+          fileUrl: decryptedFileMeta?.fileUrl,
+          fileKey: decryptedFileMeta?.fileKey,
+          fileName: decryptedFileMeta?.fileName,
+          fileType: decryptedFileMeta?.fileType,
+          fileSize: decryptedFileMeta?.fileSize,
+          duration: decryptedFileMeta?.duration,
+          isBlindAttachment: decryptedFileMeta?.isBlindAttachment
         });
       }
       return messages;

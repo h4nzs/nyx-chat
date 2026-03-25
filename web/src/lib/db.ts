@@ -16,6 +16,7 @@ export interface DecryptedMessageRecord {
   senderAvatarUrl?: string; // Encrypted avatar URL
   isViewOnce?: boolean;
   isDeletedLocal?: boolean;
+  fileMeta?: string;
 }
 
 // --- Interfaces for OfflineQueue ---

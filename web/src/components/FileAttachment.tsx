@@ -167,7 +167,13 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   useEffect(() => {
     return () => {
        if (decryptedUrl && decryptedUrl.startsWith('blob:')) {
-           URL.revokeObjectURL(decryptedUrl);
+           // ✅ FIX VIDEO CRASH: Beri jeda 10 detik sebelum menghancurkan Blob di memori.
+           // Ini mencegah "Security Error: may not load data from blob" saat video 
+           // sedang asyik buffering tetapi komponen ini tidak sengaja ter-unmount sesaat 
+           // oleh Virtuoso Scrolling atau Strict Mode.
+           setTimeout(() => {
+               URL.revokeObjectURL(decryptedUrl);
+           }, 10000);
        }
     };
   }, [decryptedUrl]);

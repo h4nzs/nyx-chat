@@ -74,4 +74,5 @@ export const ShadowVaultMessageSchema = z.object({
   senderAvatarUrl: z.string().optional(),
   isViewOnce: z.boolean().optional(),
   isDeletedLocal: z.boolean().optional(),
+  fileMeta: z.string().optional(),
 }).passthrough();
