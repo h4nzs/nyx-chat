@@ -1,11 +1,13 @@
 import { FiX, FiCopy, FiCheck } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
-import QRCode from 'react-qr-code';
+import * as QRCodeModule from 'react-qr-code';
 import { useAuthStore } from '@store/auth';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
+
+const QRCode = QRCodeModule.default || QRCodeModule;
 
 interface Props {
   onClose: () => void;

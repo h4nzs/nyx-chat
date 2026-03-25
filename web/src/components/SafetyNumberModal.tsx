@@ -1,9 +1,10 @@
-
 import { useState, useEffect } from 'react';
-import QRCode from 'react-qr-code';
+import * as QRCodeModule from 'react-qr-code';
 import { FiShield, FiX, FiCheck } from 'react-icons/fi';
 import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
+
+const QRCode = QRCodeModule.default || QRCodeModule;
 
 interface SafetyNumberModalProps {
   safetyNumber: string;
