@@ -6,6 +6,7 @@ import { prisma } from '../lib/prisma.js'
 import { Prisma } from '@prisma/client';
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
+import type { Conversation, ConversationId, User } from '@nyx/shared'
 import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
 import { ApiError } from '../utils/errors.js'
 import { redisClient } from '../lib/redis.js'
@@ -209,7 +210,7 @@ router.post('/', async (req, res, next) => {
       lastMessage: null
     }
 
-    getIo().to(allUserIds.filter(uid => uid !== creatorId)).emit('conversation:new', transformedConversation)
+    getIo().to(allUserIds.filter(uid => uid !== creatorId)).emit('conversation:new', transformedConversation as unknown as Conversation)
     res.status(201).json({ ...transformedConversation, unreadCount: 0 })
   } catch (error) {
     next(error)
@@ -261,7 +262,7 @@ router.put('/:id/details', async (req, res, next) => {
       data: { encryptedMetadata }
     })
     getIo().to(id).emit('conversation:updated', {
-      id,
+      id: id as ConversationId,
       encryptedMetadata: updatedConversation.encryptedMetadata
     })
     res.json(updatedConversation)
@@ -308,10 +309,10 @@ router.post('/:id/participants', async (req, res, next) => {
       include: { participants: { include: { user: true } }, creator: true }
     })
 
-    getIo().to(conversationId).emit('conversation:participants_added', { conversationId, newParticipants })
+    getIo().to(conversationId).emit('conversation:participants_added', { conversationId, newParticipants: newParticipants as unknown as { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[] })
     getIo().to(conversationId).emit('group:participants_changed', { conversationId })
     newParticipants.forEach(p => {
-      if (conversation) getIo().to(p.userId).emit('conversation:new', conversation)
+      if (conversation) getIo().to(p.userId).emit('conversation:new', conversation as unknown as Conversation)
     })
     res.status(201).json(newParticipants)
   } catch (error) {

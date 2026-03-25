@@ -7,48 +7,12 @@ import { useMessageStore, decryptMessageObject } from "./message";
 import { getSocket, emitSessionKeyRequest, fireGhostSync, emitGroupKeyDistribution } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
-import type { ConversationId, UserId, MessageId } from '@nyx/shared';
+import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage, Message, Participant, Conversation } from '@nyx/shared';
 // Removed all crypto imports
 import toast from 'react-hot-toast';
 
-// --- Type Definitions ---
-export type MessageStatus = {
-  id: string;
-  messageId: MessageId;
-  userId: UserId;
-  status: 'SENT' | 'DELIVERED' | 'READ';
-  updatedAt: string;
-};
-
-export interface RawServerMessage {
-  id: MessageId;
-  tempId?: number;
-  type?: 'USER' | 'SYSTEM';
-  conversationId: ConversationId;
-  senderId: UserId;
-  sender?: { 
-    id: UserId; 
-    encryptedProfile?: string | null;
-    name?: string;
-    username?: string;
-    avatarUrl?: string | null;
-  };
-  ciphertext?: string | null;
-  content?: string | null; // Some legacy or raw content
-  fileKey?: string | null;
-  sessionId?: string | null;
-  encryptedSessionKey?: string | null;
-  createdAt: string;
-  repliedTo?: RawServerMessage;
-  repliedToId?: MessageId;
-  linkPreview?: unknown;
-  expiresAt?: string | null;
-  isViewOnce?: boolean;
-}
-
-import type { Message, Participant, Conversation } from '@nyx/shared';
 import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, ensureGroupSession } from "@utils/crypto";
-export type { Message, Participant, Conversation };
+export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
 
 // --- Helper Functions ---
 

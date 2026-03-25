@@ -1,7 +1,7 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
-import type { UserId, ConversationId, MessageId } from '@nyx/shared';
+import type { UserId, ConversationId, MessageId, MessageSendPayload } from '@nyx/shared';
 import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api"; // Added authFetch
@@ -1057,7 +1057,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         return;
       }
 
-      socket?.emit("message:send", { ...payload, conversationId: asConversationId(conversationId), tempId: actualTempId }, async (res: { ok: boolean, msg?: Message, error?: string }) => {
+      socket?.emit("message:send", { ...payload, conversationId: asConversationId(conversationId), tempId: actualTempId } as unknown as MessageSendPayload, async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
         if (res.ok && res.msg) {
             if (!isReactionPayload) {
                 // Get the existing optimistic message to preserve its decrypted text and repliedTo object
@@ -1150,7 +1150,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           updateQueueAttempt(tempId, attempt + 1).then(() => resolve());
         }, 5000);
 
-        socket.emit("message:send", data, async (res: { ok: boolean, msg?: Message, error?: string }) => {
+        socket.emit("message:send", data as unknown as MessageSendPayload, async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
           clearTimeout(timeoutId);
           if (res.ok && res.msg) {
             await removeFromQueue(tempId);

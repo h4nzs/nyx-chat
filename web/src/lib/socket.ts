@@ -13,7 +13,7 @@ import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGrou
 import { useKeychainStore } from "@store/keychain";
 import { asUserId } from '@nyx/shared';
 import { IncomingMessageSchema } from '@nyx/shared';
-import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
+import type { ServerToClientEvents, ClientToServerEvents } from "@nyx/shared";
 import { triggerReceiveFeedback } from "@utils/feedback";
 
 const WS_URL = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL;
@@ -191,7 +191,7 @@ export function getSocket() {
     });
 
     socket.on("message:updated", (updatedMessage) => {
-      updateMessage(updatedMessage.conversationId, updatedMessage.id, updatedMessage);
+      if (updatedMessage.conversationId) updateMessage(updatedMessage.conversationId, updatedMessage.id, updatedMessage as Partial<Message>);
     });
 
     socket.on("message:deleted", ({ conversationId, id }) => {

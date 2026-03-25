@@ -16,62 +16,25 @@ import crypto from "crypto";
 // --- REDIS ADAPTER IMPORTS ---
 import { createClient } from "redis";
 import { createAdapter } from "@socket.io/redis-adapter";
-
-// --- Type Definitions for Socket Payloads ---
-interface TypingPayload {
-  conversationId: string;
-}
-
-interface DistributeKeysPayload {
-  conversationId: string;
-  keys: { userId: string; key: string }[];
-}
-
-interface MessageSendPayload {
-  conversationId: string;
-  content: string;
-  sessionId?: string;
-  tempId: number;
-  expiresAt?: string; // New field for Disappearing Messages
-  pushPayloads?: Record<string, string>; // { userId: encryptedPushPayload }
-  repliedToId?: string; // New field for Replies
-}
-
-interface PushSubscribePayload {
-  endpoint: string;
-  keys: {
-    p256dh: string;
-    auth: string;
-  };
-}
-
-interface MarkAsReadPayload {
-  messageId: string;
-  conversationId: string;
-}
-
-interface KeyRequestPayload {
-  conversationId: string;
-  sessionId: string;
-}
-
-interface GroupKeyRequestPayload {
-  conversationId: string;
-}
-
-interface KeyFulfillmentPayload {
-  requesterId: string;
-  conversationId: string;
-  sessionId?: string;
-  encryptedKey: string;
-}
+import type { 
+  ServerToClientEvents, 
+  ClientToServerEvents, 
+  TypingPayload,
+  DistributeKeysPayload,
+  MessageSendPayload,
+  PushSubscribePayload,
+  MarkAsReadPayload,
+  KeyRequestPayload,
+  GroupKeyRequestPayload,
+  KeyFulfillmentPayload
+} from "@nyx/shared";
 
 // Extend the Socket type from Socket.IO to include our custom user property
-interface AuthenticatedSocket extends Socket {
+interface AuthenticatedSocket extends Socket<ClientToServerEvents, ServerToClientEvents> {
   user?: AuthPayload & { publicKey?: string | null };
 }
 
-export let io: Server;
+export let io: Server<ClientToServerEvents, ServerToClientEvents>;
 
 export function getIo() {
   if (!io) {
@@ -81,7 +44,7 @@ export function getIo() {
 }
 
 export function registerSocket(httpServer: HttpServer) {
-  io = new Server(httpServer, {
+  io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: {
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
@@ -214,7 +177,7 @@ export function registerSocket(httpServer: HttpServer) {
          await socket.join(`linking:${linkingToken}`);
          
          if (typeof callback === 'function') {
-            callback({ token: linkingToken });
+            callback({ ok: true, qrData: linkingToken });
          }
       });
 
@@ -348,7 +311,7 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
-    socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: Message, error?: string }) => void) => {
+    socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: any, error?: string }) => void) => {
       // 1. Sandbox Rate Limit (Strict)
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
 
@@ -438,7 +401,7 @@ export function registerSocket(httpServer: HttpServer) {
         const finalMessage = { ...newMessage, tempId };
         
         conversation.participants.forEach(participant => {
-          io.to(participant.userId).emit('message:new', finalMessage);
+          io.to(participant.userId).emit('message:new', finalMessage as any);
           
           if (participant.userId !== userId) {
              const encryptedPushPayload = pushPayloads ? pushPayloads[participant.userId] : null;
@@ -560,7 +523,7 @@ export function registerSocket(httpServer: HttpServer) {
       });
     });
 
-    socket.on("session:request_missing", async ({ conversationId, sessionId }) => {
+    socket.on("session:request_missing", async ({ conversationId, sessionId }: { conversationId: string, sessionId: string }) => {
       try {
         const userId = socket.user?.id;
         if (!userId) return;
@@ -593,7 +556,7 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
-    socket.on('session:request_key', async (data: any) => {
+    socket.on('session:request_key', async (data: KeyRequestPayload) => {
       const { conversationId, sessionId, targetId } = data;
       if (!conversationId) return;
 

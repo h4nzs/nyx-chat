@@ -1,0 +1,732 @@
+diff --git a/packages/shared/src/index.ts b/packages/shared/src/index.ts
+index e98ff889..2d8ed4a6 100644
+--- a/packages/shared/src/index.ts
++++ b/packages/shared/src/index.ts
+@@ -1,3 +1,4 @@
+ export * from './brands';
+ export * from './schemas';
+ export * from './types';
++export * from './socket';
+diff --git a/packages/shared/src/types.ts b/packages/shared/src/types.ts
+index 0890ad3f..7e7d7558 100644
+--- a/packages/shared/src/types.ts
++++ b/packages/shared/src/types.ts
+@@ -32,6 +32,32 @@ export type MessageStatus = {
+   updatedAt: string;
+ };
+ 
++export interface RawServerMessage {
++  id: MessageId;
++  tempId?: number;
++  type?: 'USER' | 'SYSTEM';
++  conversationId: ConversationId;
++  senderId: UserId;
++  sender?: { 
++    id: UserId; 
++    encryptedProfile?: string | null;
++    name?: string;
++    username?: string;
++    avatarUrl?: string | null;
++  };
++  ciphertext?: string | null;
++  content?: string | null;
++  fileKey?: string | null;
++  sessionId?: string | null;
++  encryptedSessionKey?: string | null;
++  createdAt: string;
++  repliedTo?: RawServerMessage;
++  repliedToId?: MessageId;
++  linkPreview?: unknown;
++  expiresAt?: string | null;
++  isViewOnce?: boolean;
++}
++
+ export type Message = z.infer<typeof IncomingMessageSchema> & {
+   tempId?: number;
+   type?: 'USER' | 'SYSTEM';
+diff --git a/scripts/refactor-catch.js b/scripts/refactor-catch.js
+deleted file mode 100644
+index 5c7a154d..00000000
+--- a/scripts/refactor-catch.js
++++ /dev/null
+@@ -1,72 +0,0 @@
+-const fs = require('fs');
+-const path = require('path');
+-
+-function processDir(dir) {
+-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+-    const fullPath = path.join(dir, entry.name);
+-    if (entry.isDirectory()) {
+-      processDir(fullPath);
+-    } else if (fullPath.endsWith('.ts') || fullPath.endsWith('.tsx')) {
+-      let content = fs.readFileSync(fullPath, 'utf8');
+-      let originalContent = content;
+-
+-      const vars = ['e', 'error', 'err'];
+-      for (const v of vars) {
+-        // Regex to find 'catch (v: any) {' or 'catch (v: any)'
+-        // We'll search for the index of 'catch (v: any)'
+-        const catchStr = `catch (${v}: any)`;
+-        let searchIdx = 0;
+-        while (true) {
+-          const catchIdx = content.indexOf(catchStr, searchIdx);
+-          if (catchIdx === -1) break;
+-
+-          // Replace 'catch (v: any)' with 'catch (v: unknown)'
+-          content = content.substring(0, catchIdx) + `catch (${v}: unknown)` + content.substring(catchIdx + catchStr.length);
+-          
+-          // Now we find the block following the catch
+-          // The block might start with '{' or it might be a single statement (though TS format usually has '{')
+-          const blockStartIdx = content.indexOf('{', catchIdx);
+-          if (blockStartIdx !== -1) {
+-            let braceCount = 1;
+-            let currentIdx = blockStartIdx + 1;
+-            while (currentIdx < content.length && braceCount > 0) {
+-              if (content[currentIdx] === '{') braceCount++;
+-              if (content[currentIdx] === '}') braceCount--;
+-              currentIdx++;
+-            }
+-            
+-            if (braceCount === 0) {
+-              const blockEndIdx = currentIdx;
+-              const blockBody = content.substring(blockStartIdx, blockEndIdx);
+-              
+-              // Replace v.message in the block body
+-              // Use regex to avoid replacing v.messages or other subsets
+-              const messagePattern = new RegExp(`\\b${v}\\.message\\b`, 'g');
+-              const newBlockBody = blockBody.replace(messagePattern, (match, offset, str) => {
+-                 // Check if it's already wrapped
+-                 const chunkBefore = str.substring(Math.max(0, offset - 150), offset);
+-                 if (chunkBefore.includes(`${v} instanceof Error`)) {
+-                   return match;
+-                 }
+-                 return `(${v} instanceof Error ? ${v}.message : 'Unknown error')`;
+-              });
+-              
+-              content = content.substring(0, blockStartIdx) + newBlockBody + content.substring(blockEndIdx);
+-              searchIdx = blockStartIdx + newBlockBody.length;
+-            } else {
+-              searchIdx = catchIdx + `catch (${v}: unknown)`.length;
+-            }
+-          } else {
+-             searchIdx = catchIdx + `catch (${v}: unknown)`.length;
+-          }
+-        }
+-      }
+-      if (content !== originalContent) {
+-        fs.writeFileSync(fullPath, content);
+-        console.log(`Updated ${fullPath}`);
+-      }
+-    }
+-  }
+-}
+-
+-processDir(path.resolve('web/src'));
+diff --git a/server/src/app.ts b/server/src/app.ts
+index 71bb099c..1d057722 100644
+--- a/server/src/app.ts
++++ b/server/src/app.ts
+@@ -324,7 +324,7 @@ app.get("/health", (_req: Request, res: Response) => {
+ });
+ 
+ // === ERROR HANDLING ===
+-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
++app.use((err: Error & { type?: string, status?: number, code?: string }, _req: Request, res: Response, _next: NextFunction) => {
+   if (err.code === 'EBADCSRFTOKEN') {
+     return res.status(403).json({ error: 'Invalid CSRF token' });
+   }
+diff --git a/server/src/routes/conversations.ts b/server/src/routes/conversations.ts
+index 932fa3c4..9e587552 100644
+--- a/server/src/routes/conversations.ts
++++ b/server/src/routes/conversations.ts
+@@ -6,6 +6,7 @@ import { prisma } from '../lib/prisma.js'
+ import { Prisma } from '@prisma/client';
+ import { requireAuth } from '../middleware/auth.js'
+ import { getIo } from '../socket.js'
++import type { Conversation, ConversationId, User } from '@nyx/shared'
+ import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
+ import { ApiError } from '../utils/errors.js'
+ import { redisClient } from '../lib/redis.js'
+@@ -209,7 +210,7 @@ router.post('/', async (req, res, next) => {
+       lastMessage: null
+     }
+ 
+-    getIo().to(allUserIds.filter(uid => uid !== creatorId)).emit('conversation:new', transformedConversation)
++    getIo().to(allUserIds.filter(uid => uid !== creatorId)).emit('conversation:new', transformedConversation as unknown as Conversation)
+     res.status(201).json({ ...transformedConversation, unreadCount: 0 })
+   } catch (error) {
+     next(error)
+@@ -261,7 +262,7 @@ router.put('/:id/details', async (req, res, next) => {
+       data: { encryptedMetadata }
+     })
+     getIo().to(id).emit('conversation:updated', {
+-      id,
++      id: id as ConversationId,
+       encryptedMetadata: updatedConversation.encryptedMetadata
+     })
+     res.json(updatedConversation)
+@@ -308,10 +309,10 @@ router.post('/:id/participants', async (req, res, next) => {
+       include: { participants: { include: { user: true } }, creator: true }
+     })
+ 
+-    getIo().to(conversationId).emit('conversation:participants_added', { conversationId, newParticipants })
++    getIo().to(conversationId).emit('conversation:participants_added', { conversationId, newParticipants: newParticipants as unknown as { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[] })
+     getIo().to(conversationId).emit('group:participants_changed', { conversationId })
+     newParticipants.forEach(p => {
+-      if (conversation) getIo().to(p.userId).emit('conversation:new', conversation)
++      if (conversation) getIo().to(p.userId).emit('conversation:new', conversation as unknown as Conversation)
+     })
+     res.status(201).json(newParticipants)
+   } catch (error) {
+diff --git a/server/src/routes/messages.ts b/server/src/routes/messages.ts
+index 3079ce53..8a62cd81 100644
+--- a/server/src/routes/messages.ts
++++ b/server/src/routes/messages.ts
+@@ -6,6 +6,7 @@ import { prisma } from '../lib/prisma.js'
+ import { Prisma } from '@prisma/client'
+ import { requireAuth } from '../middleware/auth.js'
+ import { getIo } from '../socket.js'
++import type { RawServerMessage } from '@nyx/shared'
+ import { ApiError } from '../utils/errors.js'
+ import { sendPushNotification } from '../utils/sendPushNotification.js'
+ import { deleteR2File } from '../utils/r2.js'
+@@ -233,7 +234,7 @@ router.post('/', zodValidate({
+ 
+     // 6. SOCKET & PUSH (Background / Fire & Forget)
+     // Socket emit
+-    getIo().to(conversationId).emit('message:new', messageToBroadcast)
++    getIo().to(conversationId).emit('message:new', messageToBroadcast as unknown as RawServerMessage)
+ 
+     // Push Notification (JANGAN DI-AWAIT)
+     const pushRecipients = participants.filter(p => p.userId !== senderId)
+diff --git a/server/src/routes/sessions.ts b/server/src/routes/sessions.ts
+index f96162ce..dd452e28 100644
+--- a/server/src/routes/sessions.ts
++++ b/server/src/routes/sessions.ts
+@@ -110,7 +110,7 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
+       // We need a way to map jti to a socket id. This is a complex problem.
+       // For now, we will broadcast to all sockets for this user.
+       // A better solution would involve a mapping of jti -> socket.id in Redis or memory.
+-      socketServer.to(userId).emit('force_logout', { jti })
++      socketServer.to(userId).emit('force_logout', { jti: jti as string })
+     }
+ 
+     res.status(204).send()
+diff --git a/server/src/routes/users.ts b/server/src/routes/users.ts
+index cf6f0bb7..d9a379a4 100644
+--- a/server/src/routes/users.ts
++++ b/server/src/routes/users.ts
+@@ -8,6 +8,7 @@ import { z } from 'zod'
+ import { zodValidate } from '../utils/validate.js'
+ import { ApiError } from '../utils/errors.js'
+ import { getIo } from '../socket.js'
++import type { UserId } from '@nyx/shared'
+ 
+ const router = Router()
+ 
+@@ -118,7 +119,7 @@ router.put('/me',
+       // If encryptedProfile was updated, notify the user and their contacts
+       if (encryptedProfile !== undefined && (!existingUser || encryptedProfile !== existingUser.encryptedProfile)) {
+         // Notify the user themselves (all their active devices)
+-        getIo().to(userId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
++        getIo().to(userId).emit('user:updated', { id: updatedUser.id as UserId, encryptedProfile: updatedUser.encryptedProfile })
+ 
+         // Notify contacts
+         const conversations = await prisma.conversation.findMany({
+@@ -136,7 +137,7 @@ router.put('/me',
+         }
+ 
+         recipients.forEach(recipientId => {
+-          getIo().to(recipientId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
++          getIo().to(recipientId).emit('user:updated', { id: updatedUser.id as UserId, encryptedProfile: updatedUser.encryptedProfile })
+         })
+       }
+ 
+diff --git a/server/src/socket.ts b/server/src/socket.ts
+index d4058c32..fb5345a1 100644
+--- a/server/src/socket.ts
++++ b/server/src/socket.ts
+@@ -16,62 +16,25 @@ import crypto from "crypto";
+ // --- REDIS ADAPTER IMPORTS ---
+ import { createClient } from "redis";
+ import { createAdapter } from "@socket.io/redis-adapter";
+-
+-// --- Type Definitions for Socket Payloads ---
+-interface TypingPayload {
+-  conversationId: string;
+-}
+-
+-interface DistributeKeysPayload {
+-  conversationId: string;
+-  keys: { userId: string; key: string }[];
+-}
+-
+-interface MessageSendPayload {
+-  conversationId: string;
+-  content: string;
+-  sessionId?: string;
+-  tempId: number;
+-  expiresAt?: string; // New field for Disappearing Messages
+-  pushPayloads?: Record<string, string>; // { userId: encryptedPushPayload }
+-  repliedToId?: string; // New field for Replies
+-}
+-
+-interface PushSubscribePayload {
+-  endpoint: string;
+-  keys: {
+-    p256dh: string;
+-    auth: string;
+-  };
+-}
+-
+-interface MarkAsReadPayload {
+-  messageId: string;
+-  conversationId: string;
+-}
+-
+-interface KeyRequestPayload {
+-  conversationId: string;
+-  sessionId: string;
+-}
+-
+-interface GroupKeyRequestPayload {
+-  conversationId: string;
+-}
+-
+-interface KeyFulfillmentPayload {
+-  requesterId: string;
+-  conversationId: string;
+-  sessionId?: string;
+-  encryptedKey: string;
+-}
++import type { 
++  ServerToClientEvents, 
++  ClientToServerEvents, 
++  TypingPayload,
++  DistributeKeysPayload,
++  MessageSendPayload,
++  PushSubscribePayload,
++  MarkAsReadPayload,
++  KeyRequestPayload,
++  GroupKeyRequestPayload,
++  KeyFulfillmentPayload
++} from "@nyx/shared";
+ 
+ // Extend the Socket type from Socket.IO to include our custom user property
+-interface AuthenticatedSocket extends Socket {
++interface AuthenticatedSocket extends Socket<ClientToServerEvents, ServerToClientEvents> {
+   user?: AuthPayload & { publicKey?: string | null };
+ }
+ 
+-export let io: Server;
++export let io: Server<ClientToServerEvents, ServerToClientEvents>;
+ 
+ export function getIo() {
+   if (!io) {
+@@ -81,7 +44,7 @@ export function getIo() {
+ }
+ 
+ export function registerSocket(httpServer: HttpServer) {
+-  io = new Server(httpServer, {
++  io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
+     cors: {
+       origin: (origin, callback) => {
+         if (!origin) return callback(null, true);
+@@ -214,7 +177,7 @@ export function registerSocket(httpServer: HttpServer) {
+          await socket.join(`linking:${linkingToken}`);
+          
+          if (typeof callback === 'function') {
+-            callback({ token: linkingToken });
++            callback({ ok: true, qrData: linkingToken });
+          }
+       });
+ 
+@@ -348,7 +311,7 @@ export function registerSocket(httpServer: HttpServer) {
+       }
+     });
+ 
+-    socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: Message, error?: string }) => void) => {
++    socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: any, error?: string }) => void) => {
+       // 1. Sandbox Rate Limit (Strict)
+       const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
+ 
+@@ -438,7 +401,7 @@ export function registerSocket(httpServer: HttpServer) {
+         const finalMessage = { ...newMessage, tempId };
+         
+         conversation.participants.forEach(participant => {
+-          io.to(participant.userId).emit('message:new', finalMessage);
++          io.to(participant.userId).emit('message:new', finalMessage as any);
+           
+           if (participant.userId !== userId) {
+              const encryptedPushPayload = pushPayloads ? pushPayloads[participant.userId] : null;
+@@ -560,7 +523,7 @@ export function registerSocket(httpServer: HttpServer) {
+       });
+     });
+ 
+-    socket.on("session:request_missing", async ({ conversationId, sessionId }) => {
++    socket.on("session:request_missing", async ({ conversationId, sessionId }: { conversationId: string, sessionId: string }) => {
+       try {
+         const userId = socket.user?.id;
+         if (!userId) return;
+@@ -593,7 +556,7 @@ export function registerSocket(httpServer: HttpServer) {
+       }
+     });
+ 
+-    socket.on('session:request_key', async (data: any) => {
++    socket.on('session:request_key', async (data: KeyRequestPayload) => {
+       const { conversationId, sessionId, targetId } = data;
+       if (!conversationId) return;
+ 
+diff --git a/web/src/components/AddParticipantModal.tsx b/web/src/components/AddParticipantModal.tsx
+index aaaa0929..f4027788 100644
+--- a/web/src/components/AddParticipantModal.tsx
++++ b/web/src/components/AddParticipantModal.tsx
+@@ -6,23 +6,17 @@ import { useConversationStore } from '@store/conversation';
+ import { useShallow } from 'zustand/react/shallow';
+ import { hashUsername } from '@lib/crypto-worker-proxy';
+ import { asUserId } from '@nyx/shared';
++import type { MinimalProfile } from '@nyx/shared';
+ import ModalBase from './ui/ModalBase';
+ import { useTranslation } from 'react-i18next';
+ 
+-interface UserSearchResult {
+-  id: string;
+-  username: string;
+-  name: string;
+-  avatarUrl?: string | null;
+-}
+-
+ const AddParticipantModal = ({ conversationId, onClose }: {
+   conversationId: string;
+   onClose: () => void;
+ }) => {
+   const { t } = useTranslation(['modals', 'common']);
+   const [searchTerm, setSearchTerm] = useState('');
+-  const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
++  const [searchResults, setSearchResults] = useState<MinimalProfile[]>([]);
+   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+   const [isLoading, setIsLoading] = useState(false);
+   const [isSearching, setIsSearching] = useState(false);
+@@ -41,7 +35,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
+         try {
+           const hashedQuery = await hashUsername(rawQuery);
+           const safeQuery = encodeURIComponent(hashedQuery);
+-          const users = await api<UserSearchResult[]>(`/api/users/search?q=${safeQuery}`);
++          const users = await api<MinimalProfile[]>(`/api/users/search?q=${safeQuery}`);
+           
+           // Inject optimistic query as username/name since it was an exact hash match
+           // Guard: Check known users
+diff --git a/web/src/components/CreateGroupChat.tsx b/web/src/components/CreateGroupChat.tsx
+index e5a0065e..e858d1cb 100644
+--- a/web/src/components/CreateGroupChat.tsx
++++ b/web/src/components/CreateGroupChat.tsx
+@@ -9,22 +9,15 @@ import { hashUsername } from '@lib/crypto-worker-proxy';
+ import toast from 'react-hot-toast';
+ import ModalBase from './ui/ModalBase';
+ import { FiCheck } from 'react-icons/fi';
+-import type { UserId } from '@nyx/shared';
++import type { UserId, MinimalProfile } from '@nyx/shared';
+ import { useTranslation } from 'react-i18next';
+ 
+-type UserSearchResult = {
+-  id: UserId;
+-  username: string;
+-  name: string;
+-  avatarUrl?: string | null;
+-};
+-
+ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
+   const { t } = useTranslation(['modals', 'common']);
+   const [title, setTitle] = useState('');
+-  const [selectedUsers, setSelectedUsers] = useState<UserSearchResult[]>([]);
++  const [selectedUsers, setSelectedUsers] = useState<MinimalProfile[]>([]);
+   const [searchQuery, setSearchQuery] = useState('');
+-  const [userList, setUserList] = useState<UserSearchResult[]>([]);
++  const [userList, setUserList] = useState<MinimalProfile[]>([]);
+   const [loading, setLoading] = useState(false);
+   const me = useAuthStore(s => s.user);
+   const { createGroup, openConversation } = useConversationStore(useShallow(state => ({
+@@ -42,7 +35,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
+       try {
+         const hashedQuery = await hashUsername(rawQuery);
+         const safeQuery = encodeURIComponent(hashedQuery);
+-        const results = await authFetch<UserSearchResult[]>(`/api/users/search?q=${safeQuery}`);
++        const results = await authFetch<MinimalProfile[]>(`/api/users/search?q=${safeQuery}`);
+         
+         // Inject optimistic query as username/name since it was an exact hash match
+         // Guard: Check known users
+@@ -65,7 +58,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
+     return () => clearTimeout(timer);
+   }, [searchQuery, me?.id, selectedUsers]);
+ 
+-  const handleSelectUser = (user: UserSearchResult) => {
++  const handleSelectUser = (user: MinimalProfile) => {
+     setSelectedUsers(prev => [...prev, user]);
+     setSearchQuery('');
+   };
+diff --git a/web/src/lib/socket.ts b/web/src/lib/socket.ts
+index 24b95406..d6c86517 100644
+--- a/web/src/lib/socket.ts
++++ b/web/src/lib/socket.ts
+@@ -13,7 +13,7 @@ import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGrou
+ import { useKeychainStore } from "@store/keychain";
+ import { asUserId } from '@nyx/shared';
+ import { IncomingMessageSchema } from '@nyx/shared';
+-import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
++import type { ServerToClientEvents, ClientToServerEvents } from "@nyx/shared";
+ import { triggerReceiveFeedback } from "@utils/feedback";
+ 
+ const WS_URL = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL;
+@@ -191,7 +191,7 @@ export function getSocket() {
+     });
+ 
+     socket.on("message:updated", (updatedMessage) => {
+-      updateMessage(updatedMessage.conversationId, updatedMessage.id, updatedMessage);
++      if (updatedMessage.conversationId) updateMessage(updatedMessage.conversationId, updatedMessage.id, updatedMessage as Partial<Message>);
+     });
+ 
+     socket.on("message:deleted", ({ conversationId, id }) => {
+diff --git a/web/src/pages/Register.tsx b/web/src/pages/Register.tsx
+index 28a8a053..62237adf 100644
+--- a/web/src/pages/Register.tsx
++++ b/web/src/pages/Register.tsx
+@@ -109,8 +109,7 @@ export default function Register() {
+       const options = await api<unknown>("/api/auth/webauthn/register/options");
+       
+       // 2. Browser Prompt
+-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+-      const attResp = await startRegistration(options as any);
++      const attResp = await startRegistration(options as Parameters<typeof startRegistration>[0]);
+       
+       // 3. Verify on Server
+       const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {
+diff --git a/web/src/store/conversation.ts b/web/src/store/conversation.ts
+index c2356ad1..8a93b0f2 100644
+--- a/web/src/store/conversation.ts
++++ b/web/src/store/conversation.ts
+@@ -7,48 +7,12 @@ import { useMessageStore, decryptMessageObject } from "./message";
+ import { getSocket, emitSessionKeyRequest, fireGhostSync, emitGroupKeyDistribution } from "@lib/socket";
+ import { useVerificationStore } from './verification';
+ import { useAuthStore, User } from './auth';
+-import type { ConversationId, UserId, MessageId } from '@nyx/shared';
++import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage, Message, Participant, Conversation } from '@nyx/shared';
+ // Removed all crypto imports
+ import toast from 'react-hot-toast';
+ 
+-// --- Type Definitions ---
+-export type MessageStatus = {
+-  id: string;
+-  messageId: MessageId;
+-  userId: UserId;
+-  status: 'SENT' | 'DELIVERED' | 'READ';
+-  updatedAt: string;
+-};
+-
+-export interface RawServerMessage {
+-  id: MessageId;
+-  tempId?: number;
+-  type?: 'USER' | 'SYSTEM';
+-  conversationId: ConversationId;
+-  senderId: UserId;
+-  sender?: { 
+-    id: UserId; 
+-    encryptedProfile?: string | null;
+-    name?: string;
+-    username?: string;
+-    avatarUrl?: string | null;
+-  };
+-  ciphertext?: string | null;
+-  content?: string | null; // Some legacy or raw content
+-  fileKey?: string | null;
+-  sessionId?: string | null;
+-  encryptedSessionKey?: string | null;
+-  createdAt: string;
+-  repliedTo?: RawServerMessage;
+-  repliedToId?: MessageId;
+-  linkPreview?: unknown;
+-  expiresAt?: string | null;
+-  isViewOnce?: boolean;
+-}
+-
+-import type { Message, Participant, Conversation } from '@nyx/shared';
+ import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, ensureGroupSession } from "@utils/crypto";
+-export type { Message, Participant, Conversation };
++export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
+ 
+ // --- Helper Functions ---
+ 
+diff --git a/web/src/store/message.ts b/web/src/store/message.ts
+index d37ddea8..0526450e 100644
+--- a/web/src/store/message.ts
++++ b/web/src/store/message.ts
+@@ -1,7 +1,7 @@
+ // Copyright (c) 2026 [han]. All rights reserved.
+ // This file is part of NYX, licensed under the AGPL-3.0.
+ // For commercial licensing, contact [admin@nyx-app.my.id].
+-import type { UserId, ConversationId, MessageId } from '@nyx/shared';
++import type { UserId, ConversationId, MessageId, MessageSendPayload } from '@nyx/shared';
+ import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
+ import { createWithEqualityFn } from "zustand/traditional";
+ import { api, authFetch } from "@lib/api"; // Added authFetch
+@@ -1057,7 +1057,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+         return;
+       }
+ 
+-      socket?.emit("message:send", { ...payload, conversationId: asConversationId(conversationId), tempId: actualTempId }, async (res: { ok: boolean, msg?: Message, error?: string }) => {
++      socket?.emit("message:send", { ...payload, conversationId: asConversationId(conversationId), tempId: actualTempId } as unknown as MessageSendPayload, async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
+         if (res.ok && res.msg) {
+             if (!isReactionPayload) {
+                 // Get the existing optimistic message to preserve its decrypted text and repliedTo object
+@@ -1150,7 +1150,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+           updateQueueAttempt(tempId, attempt + 1).then(() => resolve());
+         }, 5000);
+ 
+-        socket.emit("message:send", data, async (res: { ok: boolean, msg?: Message, error?: string }) => {
++        socket.emit("message:send", data as unknown as MessageSendPayload, async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
+           clearTimeout(timeoutId);
+           if (res.ok && res.msg) {
+             await removeFromQueue(tempId);
+diff --git a/web/src/types/declarations.d.ts b/web/src/types/declarations.d.ts
+index fe618ded..6451c0ea 100644
+--- a/web/src/types/declarations.d.ts
++++ b/web/src/types/declarations.d.ts
+@@ -16,18 +16,18 @@ declare module 'react-window' {
+     direction?: 'horizontal' | 'vertical';
+     height: number | string;
+     initialScrollOffset?: number;
+-    innerRef?: Ref<any>;
++    innerRef?: Ref<unknown>;
+     itemCount: number;
+-    itemKey?: (index: number, data: any) => any;
++    itemKey?: (index: number, data: unknown) => unknown;
+     itemSize: number;
+     layout?: 'vertical' | 'horizontal';
+-    onItemsRendered?: (props: any) => any;
+-    onScroll?: (props: ListOnScrollProps) => any;
+-    outerRef?: Ref<any>;
++    onItemsRendered?: (props: unknown) => unknown;
++    onScroll?: (props: ListOnScrollProps) => unknown;
++    outerRef?: Ref<unknown>;
+     style?: CSSProperties;
+     useIsScrolling?: boolean;
+     width: number | string;
+-    [key: string]: any;
++    [key: string]: unknown;
+   }
+ 
+   export class FixedSizeList extends Component<FixedSizeListProps> {
+diff --git a/web/src/types/socket.d.ts b/web/src/types/socket.d.ts
+deleted file mode 100644
+index d9572f59..00000000
+--- a/web/src/types/socket.d.ts
++++ /dev/null
+@@ -1,108 +0,0 @@
+-import type { Conversation, Message } from '@store/conversation';
+-import type { User } from '@store/auth';
+-
+-export interface ServerToClientEvents {
+-    connect: () => void;
+-    disconnect: (reason: string) => void;
+-    "message:new": (message: Message) => void;
+-    "message:updated": (message: Message) => void;
+-    "message:deleted": (payload: { conversationId: string; id: string }) => void;
+-    "message:viewed": (payload: { messageId: string; conversationId: string }) => void;
+-    "messages:expired": (payload: { messageIds: string[] }) => void; // New event for disappearing messages
+-    "reaction:new": (payload: { conversationId: string; messageId: string; reaction: { id: string; userId: string; emoji: string; isMessage?: boolean; tempId?: string } }) => void;
+-    "reaction:deleted": (payload: { conversationId: string; messageId: string; reactionId: string }) => void;
+-    "conversation:new": (conversation: Conversation) => void;
+-    "conversation:updated": (conversation: Partial<Conversation> & { id: string }) => void;
+-    "conversation:deleted": (payload: { id: string }) => void;
+-    "conversation:participants_added": (payload: { conversationId: string; newParticipants: { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[] }) => void;
+-    "conversation:participant_removed": (payload: { conversationId: string; userId: string }) => void;
+-    "user:updated": (user: Partial<User> & { id: string }) => void;
+-    "message:status_updated": (payload: {
+-        conversationId: string;
+-        messageId: string;
+-        deliveredTo?: string;
+-        readBy?: string;
+-        status: 'SENT' | 'DELIVERED' | 'READ';
+-    }) => void;
+-    "presence:init": (onlineUserIds: string[]) => void;
+-    "presence:user_joined": (userId: string) => void;
+-    "presence:user_left": (userId: string) => void;
+-    "typing:update": (payload: { userId: string; conversationId: string; isTyping: boolean }) => void;
+-    "session:new_key": (payload: {
+-        conversationId: string;
+-        sessionId?: string;
+-        encryptedKey: string;
+-        type?: 'GROUP_KEY' | 'SESSION_KEY';
+-    }) => void;
+-    "session:fulfill_request": (payload: {
+-        conversationId: string;
+-        sessionId: string;
+-        requesterId: string;
+-        requesterPublicKey: string;
+-    }) => void;
+-    "group:fulfill_key_request": (payload: {
+-        conversationId: string;
+-        requesterId: string;
+-        requesterPublicKey: string;
+-    }) => void;
+-    force_logout: () => void;
+-    'user:identity_changed': (data: { userId: string; name: string }) => void;
+-    "group:participants_changed": (payload: { conversationId: string }) => void;
+-    "session:request_key": (payload: { conversationId: string; requesterId: string; sessionId: string }) => void;
+-
+-    // --- WEBRTC E2EE SIGNALING ---
+-    "webrtc:secure_signal": (payload: { from: string; type: string; payload: string }) => void;
+-
+-    // --- DEVICE MIGRATION TUNNEL (SERVER -> CLIENT) ---
+-    "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
+-    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
+-    "migration:ack": (payload: { roomId: string; success: boolean }) => void;
+-}
+-
+-export interface ClientToServerEvents {
+-    "presence:update": (payload: { userId: string; online: boolean }) => void;
+-    "user:active": () => void;
+-    "user:away": () => void;
+-    "message:send": (message: Partial<Message>, callback: (res: { ok: boolean, msg?: Message, error?: string }) => void) => void;
+-    "message:ack_delivered": (payload: { messageId: string; conversationId: string }) => void;
+-    "message:mark_as_read": (payload: { messageId: string; conversationId: string }) => void;
+-    "typing:start": (payload: { conversationId: string }) => void;
+-    "typing:stop": (payload: { conversationId: string }) => void;
+-    "conversation:join": (conversationId: string) => void;
+-    "session:request_key": (payload: { 
+-        conversationId: string; 
+-        sessionId: string; 
+-        targetId?: string;
+-        requesterId?: string;
+-    }) => void;
+-    "session:fulfill_response": (payload: {
+-        requesterId: string;
+-        conversationId: string;
+-        sessionId: string;
+-        encryptedKey: string;
+-    }) => void;
+-    "messages:distribute_keys": (payload: {
+-        conversationId: string;
+-        keys: { userId: string; key: string }[];
+-    }) => void;
+-    "group:request_key": (payload: { conversationId: string }) => void;
+-    "group:fulfilled_key": (payload: {
+-        requesterId: string;
+-        conversationId: string;
+-        encryptedKey: string;
+-    }) => void;
+-    "push:subscribe": (payload: {
+-        endpoint: string;
+-        keys: { p256dh: string; auth: string };
+-    }) => void;
+-    "push:unsubscribe": () => void;
+-    
+-    // --- WEBRTC E2EE SIGNALING ---
+-    "webrtc:secure_signal": (payload: { to: string; type: string; payload: string }) => void;
+-    
+-    // --- DEVICE MIGRATION TUNNEL (CLIENT -> SERVER) ---
+-    "migration:join": (roomId: string) => void;
+-    "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
+-    "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
+-    "migration:ack": (payload: { roomId: string; success: boolean }) => void;
+-}
+\ No newline at end of file

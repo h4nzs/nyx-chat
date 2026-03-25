@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
 import { getIo } from '../socket.js'
+import type { UserId } from '@nyx/shared'
 
 const router = Router()
 
@@ -118,7 +119,7 @@ router.put('/me',
       // If encryptedProfile was updated, notify the user and their contacts
       if (encryptedProfile !== undefined && (!existingUser || encryptedProfile !== existingUser.encryptedProfile)) {
         // Notify the user themselves (all their active devices)
-        getIo().to(userId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
+        getIo().to(userId).emit('user:updated', { id: updatedUser.id as UserId, encryptedProfile: updatedUser.encryptedProfile })
 
         // Notify contacts
         const conversations = await prisma.conversation.findMany({
@@ -136,7 +137,7 @@ router.put('/me',
         }
 
         recipients.forEach(recipientId => {
-          getIo().to(recipientId).emit('user:updated', { id: updatedUser.id, encryptedProfile: updatedUser.encryptedProfile })
+          getIo().to(recipientId).emit('user:updated', { id: updatedUser.id as UserId, encryptedProfile: updatedUser.encryptedProfile })
         })
       }
 

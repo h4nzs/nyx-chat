@@ -6,6 +6,7 @@ import { prisma } from '../lib/prisma.js'
 import { Prisma } from '@prisma/client'
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
+import type { RawServerMessage } from '@nyx/shared'
 import { ApiError } from '../utils/errors.js'
 import { sendPushNotification } from '../utils/sendPushNotification.js'
 import { deleteR2File } from '../utils/r2.js'
@@ -233,7 +234,7 @@ router.post('/', zodValidate({
 
     // 6. SOCKET & PUSH (Background / Fire & Forget)
     // Socket emit
-    getIo().to(conversationId).emit('message:new', messageToBroadcast)
+    getIo().to(conversationId).emit('message:new', messageToBroadcast as unknown as RawServerMessage)
 
     // Push Notification (JANGAN DI-AWAIT)
     const pushRecipients = participants.filter(p => p.userId !== senderId)
