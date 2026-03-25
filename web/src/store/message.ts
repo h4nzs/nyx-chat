@@ -1068,6 +1068,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                     content: existingMsg !== undefined ? existingMsg.content : res.msg!.content, 
                     repliedTo: existingMsg?.repliedTo,
                     isBlindAttachment: existingMsg?.isBlindAttachment,
+                    fileUrl: existingMsg?.fileUrl,
+                    fileName: existingMsg?.fileName,
+                    fileType: existingMsg?.fileType,
+                    fileSize: existingMsg?.fileSize,
+                    duration: existingMsg?.duration,
                     status: 'SENT' as const
                 };
                 
@@ -1158,6 +1163,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 content: existingMsg !== undefined ? existingMsg.content : res.msg!.content, 
                 repliedTo: existingMsg?.repliedTo,
                 isBlindAttachment: existingMsg?.isBlindAttachment,
+                fileUrl: existingMsg?.fileUrl,
+                fileName: existingMsg?.fileName,
+                fileType: existingMsg?.fileType,
+                fileSize: existingMsg?.fileSize,
+                duration: existingMsg?.duration,
                 status: 'SENT' as const
             };
             
