@@ -16,9 +16,72 @@ import { IncomingMessageSchema } from '@nyx/shared';
 import type { ServerToClientEvents, ClientToServerEvents } from "../types/socket";
 import { triggerReceiveFeedback } from "@utils/feedback";
 
-// FIX: Gunakan VITE_WS_URL (Koyeb) jika ada, kalau tidak ada (dev) baru pakai API_URL
 const WS_URL = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL;
 let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
+
+// ✅ OPTIMASI: Mekanisme Batching untuk Mencegah "Socket Storm" (Offline Catch-up)
+// Keranjang untuk menampung pesan masuk yang bertubi-tubi
+const incomingMessageBuffer: Message[] = [];
+let isProcessingBuffer = false;
+let batchTimer: NodeJS.Timeout | null = null;
+
+const processMessageBuffer = async () => {
+    if (isProcessingBuffer || incomingMessageBuffer.length === 0) return;
+    
+    isProcessingBuffer = true;
+    
+    // Ambil isi keranjang dan kosongkan keranjangnya agar bisa menampung yang baru
+    const messagesToProcess = [...incomingMessageBuffer];
+    incomingMessageBuffer.length = 0;
+    
+    const { addIncomingMessage } = useMessageStore.getState();
+    const meId = useAuthStore.getState().user?.id;
+
+    // Proses semua pesan dalam keranjang secara teratur (sekuensial untuk menjaga Mutex & State)
+    for (const safeMessage of messagesToProcess) {
+        try {
+            // THE SHIELD: Intelligent Echo Cancellation
+            if (meId && safeMessage.senderId === meId) {
+                const isOptimisticEcho = useMessageStore.getState().messages[safeMessage.conversationId]?.some(
+                    m => m.tempId && String(m.tempId) === String(safeMessage.tempId)
+                );
+                if (isOptimisticEcho) continue; // It's an echo of our own msg
+            }
+
+            const convExists = useConversationStore.getState().conversations.some(c => c.id === safeMessage.conversationId);
+            if (!convExists) continue;
+
+            const decryptedMessage = await addIncomingMessage(safeMessage.conversationId, safeMessage);
+              
+            if (!decryptedMessage) continue; 
+
+            if (!decryptedMessage.isSilent) {
+               // Hanya putar notifikasi suara jika kita menerima kurang dari 3 pesan 
+               // (Mencegah suara notifikasi bertumpuk-tumpuk saat offline catchup)
+               if (messagesToProcess.length < 3) {
+                   triggerReceiveFeedback();
+               }
+            }
+
+            socket?.emit('message:ack_delivered', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
+            
+            // Jeda sejenak setiap 5 pesan untuk membiarkan UI bernapas (mencegah Freeze)
+            if (messagesToProcess.indexOf(safeMessage) % 5 === 0) {
+                await new Promise(r => setTimeout(r, 20));
+            }
+            
+        } catch (e: unknown) {
+            console.error(`Failed to process buffered message ${safeMessage.id}`, e);
+        }
+    }
+    
+    isProcessingBuffer = false;
+    
+    // Jika selama pemrosesan tadi ada pesan baru yang masuk ke keranjang, proses lagi
+    if (incomingMessageBuffer.length > 0) {
+        processMessageBuffer();
+    }
+};
 
 const handleKeyRotation = async (conversationId: string) => {
   const MAX_RETRIES = 3;
@@ -62,20 +125,17 @@ export const fireGhostSync = (conversationId: string, baseDelay: number = 1000) 
 
 export function getSocket() {
   if (!socket) {
-    // Inisialisasi awal (token mungkin masih null, tidak apa-apa)
     const token = useAuthStore.getState().accessToken;
 
     socket = io(WS_URL, {
       withCredentials: true,
-      transports: ['websocket', 'polling'], // Prioritaskan WebSocket
+      transports: ['websocket', 'polling'],
       autoConnect: false,
       reconnection: true,
       reconnectionAttempts: 20,
       reconnectionDelay: 2000,
       path: "/socket.io",
-      auth: {
-        token: token 
-      }
+      auth: { token }
     });
 
     const { setStatus } = useConnectionStore.getState();
@@ -91,18 +151,9 @@ export function getSocket() {
         socket?.emit("presence:update", { userId: user.id, online: true });
 
         try {
-          // === THE SYNC PROTOCOL: Sync data on connect/reconnect ===
-          // 1. Refetch Conversation List (Biar urutan chat bener & snippet update)
           await useConversationStore.getState().loadConversations();
-
-          // 2. Process Offline Queue (Kirim pesan yg pending saat offline)
           await useMessageStore.getState().processOfflineQueue();
-
-          // 3. Resend pending messages that might have failed during disconnection (InMemory Fallback)
           useMessageStore.getState().resendPendingMessages();
-
-          // 4. Update Status Online User Lain
-          // (Handled by presence:init event that's already implemented)
         } catch (error) {
           console.error("socket connect sync failed", error);
         }
@@ -111,7 +162,6 @@ export function getSocket() {
 
     socket.on("disconnect", (reason) => {
       setStatus('disconnected');
-      // Jangan toast jika disconnect manual/navigasi
       if (reason !== "io client disconnect") toast.error("Disconnected. Reconnecting...");
     });
 
@@ -121,62 +171,23 @@ export function getSocket() {
     });
 
     // --- Application-specific Listeners ---
-    socket.on("message:new", async (rawPayload: unknown) => {
-      // 1. Zod memeriksa dan mengubah data mentah menjadi Branded Types
+    socket.on("message:new", (rawPayload: unknown) => {
       const parsed = IncomingMessageSchema.safeParse(rawPayload);
 
-      // 2. Fail Gracefully (Jangan biarkan aplikasi crash)
       if (!parsed.success) {
           console.error("[Zod Shield] Dropping invalid incoming message:", parsed.error.format());
           return; 
       }
 
-      // 3. Data sudah dijamin aman dan memiliki Opaque Types yang benar
-      const safeMessage = parsed.data;
-
-      const meId = useAuthStore.getState().user?.id;
+      // ✅ FIX: Lempar ke keranjang Batching alih-alih langsung dieksekusi!
+      incomingMessageBuffer.push(parsed.data as Message);
       
-      // THE SHIELD: Intelligent Echo Cancellation
-      // Only block messages from ourselves IF they match a pending optimistic update on this device.
-      // This allows messages from our *other* devices to pass through and be synced.
-      if (meId && safeMessage.senderId === meId) {
-        const isOptimisticEcho = useMessageStore.getState().messages[safeMessage.conversationId]?.some(
-            m => m.tempId && String(m.tempId) === String(safeMessage.tempId)
-        );
-        
-        if (isOptimisticEcho) {
-            // It's an echo of a message we just sent from this tab. Ignore it.
-            return;
-        }
-        // If no match, it's a sync from another device (or a re-send we lost track of). Process it.
-      }
-
-      const convExists = useConversationStore.getState().conversations.some(c => c.id === safeMessage.conversationId);
-      if (!convExists) {
-        return;
-      }
-
-      try {
-        const { addIncomingMessage } = useMessageStore.getState();
-        
-        // Delegate EVERYTHING to the store. 
-        // The store handles decryption, reaction parsing, and optimistic replacement internally.
-        const decryptedMessage = await addIncomingMessage(safeMessage.conversationId, safeMessage);
-          
-        if (!decryptedMessage) return; // Message intercepted (e.g. STORY_KEY)
-
-        if (!decryptedMessage.isSilent) {
-           triggerReceiveFeedback();
-        }
-
-        // Update notification/preview using decrypted content
-        // TODO: Trigger Desktop/Push Notification here using decryptedMessage.content or decryptedMessage.fileName
-        // e.g. showNotification(decryptedMessage.sender.name, decryptedMessage.content || "Sent a file");
-        
-        socket?.emit('message:ack_delivered', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
-      } catch (e: unknown) {
-        console.error("Failed to process incoming message", e);
-      }
+      // Reset timer. Kita tunggu "badai" reda selama 100ms. 
+      // Jika dalam 100ms tidak ada pesan baru lagi yang masuk, proses semua yang ada di keranjang.
+      if (batchTimer) clearTimeout(batchTimer);
+      batchTimer = setTimeout(() => {
+          processMessageBuffer();
+      }, 100);
     });
 
     socket.on("message:updated", (updatedMessage) => {
@@ -190,7 +201,6 @@ export function getSocket() {
 
     socket.on("messages:expired", ({ messageIds }: { messageIds: string[] }) => {
       const { messages, removeMessage } = useMessageStore.getState();
-      // Optimization: create a set for faster lookup
       const expiredSet = new Set(messageIds);
       
       Object.keys(messages).forEach(conversationId => {
@@ -227,12 +237,9 @@ export function getSocket() {
       conversationStore.addOrUpdateConversation(newConversation);
       socket?.emit("conversation:join", newConversation.id);
 
-      // Jika ini adalah percakapan grup, jadwalkan rotasi kunci berkala
       if (newConversation.isGroup) {
         useConversationStore.getState().markKeyRotationNeeded(newConversation.id, true);
         schedulePeriodicGroupKeyRotation(newConversation.id);
-        // The new user fires a Ghost Sync too, but with a slightly longer base delay 
-        // to ensure they have fully joined the socket room first.
         fireGhostSync(newConversation.id, 3000);
       }
 
@@ -243,18 +250,12 @@ export function getSocket() {
     socket.on("conversation:deleted", ({ id }) => conversationStore.removeConversation(id));
 
     socket.on('group:participants_changed', (data: { conversationId: string }) => {
-        // Force key rotation on the next message sent
         useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
-        // Also reload conversation details to get the new participant list
         useConversationStore.getState().loadConversations();
-
-        // [NEW] GHOST SYNC: Trigger a silent message to settle ratchet state
         fireGhostSync(data.conversationId, 1000);
     });
 
     socket.on('session:request_key', async (data: { conversationId: string, requesterId: string }) => {
-        // Someone failed to decrypt our message, they need our sender key.
-        // By marking rotation needed, our next message will force a fresh key distribution to them.
         useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
     });
 
@@ -318,18 +319,11 @@ export function getSocket() {
 }
 
 export function connectSocket() {
-  // 1. Pastikan instance ada
   if (!socket) getSocket();
-
-  // 2. AMBIL TOKEN TERBARU DARI STORE
   const token = useAuthStore.getState().accessToken;
 
   if (socket) {
-    // 3. UPDATE TOKEN DI SOCKET AUTH (FIX UTAMA)
-    // Ini memastikan socket menggunakan token baru hasil refresh, bukan token null saat init
     socket.auth = { token };
-
-    // 4. Connect hanya jika belum connect
     if (!socket.connected) {
       socket.connect();
     }

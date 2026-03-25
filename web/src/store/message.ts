@@ -1296,7 +1296,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   loadMessagesForConversation: async (id) => {
-    // THE DISGUISE
     if (sessionStorage.getItem('nyx_decoy_mode') === 'true') {
        set(state => ({
           messages: { ...state.messages, [id]: [{ id: 'msg-1', content: 'Welcome to NYX. No active chats found.', senderId: 'bot-1', createdAt: new Date().toISOString(), conversationId: id, type: 'SYSTEM' } as Message] },
@@ -1306,52 +1305,43 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
        return;
     }
 
-    if (get().hasLoadedHistory[id]) return;
+    // Jika sudah di-load, jangan paksa load ulang
+    if (get().hasLoadedHistory[id] && (get().messages[id]?.length || 0) > 0) return;
 
     try {
       set(state => ({ hasMore: { ...state.hasMore, [id]: true }, isFetchingMore: { ...state.isFetchingMore, [id]: false } }));
       
-      // 1. Load from local vault (including tombstones)
-      const localMessages = await shadowVault.getMessagesByConversation(id);
+      // 1. Load dari Dexie HANYA 50 TERBARU! (Bukan seluruh vault)
+      const localMessages = await shadowVault.getMessagesByConversation(id, 50);
       const localMap = new Map(localMessages.map(m => [m.id, m]));
 
-      // 2. Fetch from server
-      const res = await api<{ items: Message[] }>(`/api/messages/${id}`);
+      // 2. Fetch 50 terbaru dari server
+      const res = await api<{ items: Message[] }>(`/api/messages/${id}?limit=50`);
       const fetchedMessages = res.items || [];
       const processedMessages: Message[] = [];
       
       for (const message of fetchedMessages) {
         if (localMap.has(message.id)) {
-            // ZK-Safe Merge: Keep local decrypted content and hydrated sender (avatar/name),
-            // but update dynamic metadata from the fresh server fetch.
             const localMsg = localMap.get(message.id)!;
             processedMessages.push({
                 ...localMsg,
                 statuses: message.statuses,
                 reactions: message.reactions,
                 isEdited: message.isEdited,
-                // Ensure repliedToId is present from server if local vault missed it
                 repliedToId: message.repliedToId || localMsg.repliedToId,
-                // If local message lost the decrypted repliedTo, but server has it, we should ideally decrypt it. 
-                // For safety in ZK merge, we preserve the local one if it's valid.
                 repliedTo: localMsg.repliedTo
             });
         } else {
-            // Not in vault, decrypt it
             processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
         }
       }
 
       set(state => {
-        const existingMessages = state.messages[id] || [];
-        const allMessages = processMessagesAndReactions(processedMessages, existingMessages);
+        // Karena ini adalah inisialisasi awal, kita replace existingMessages, bukan di-append
+        const allMessages = processMessagesAndReactions(processedMessages, []);
         const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
         
-        // Update vault with everything we just processed (if not already there)
         shadowVault.upsertMessages(enrichedMessages); 
-
-        // [UI UPDATE] Keep tombstones in the UI state so we can render "Message Deleted" bubbles
-        // const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
 
         return {
           messages: { ...state.messages, [id]: enrichedMessages },
@@ -1367,15 +1357,20 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   loadPreviousMessages: async (conversationId) => {
     const { isFetchingMore, hasMore, messages } = get();
     if (isFetchingMore[conversationId] || !hasMore[conversationId]) return;
-    const oldestMessage = messages[conversationId]?.[0];
+    
+    const currentMessages = messages[conversationId] || [];
+    const oldestMessage = currentMessages[0];
     if (!oldestMessage) return;
+    
     set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: true } }));
+    
     try {
-      const res = await api<{ items: Message[] }>(`/api/messages/${conversationId}?cursor=${oldestMessage.id}`);
+      // Fetch 50 pesan sebelumnya dari server
+      const res = await api<{ items: Message[] }>(`/api/messages/${conversationId}?cursor=${oldestMessage.id}&limit=50`);
       const fetchedItems = res.items || [];
       
-      // Load local cache to skip decryption
-      const localMessages = await shadowVault.getMessagesByConversation(conversationId);
+      // Ambil 50 pesan dari local cache sebelum cursor oldestMessage
+      const localMessages = await shadowVault.getMessagesByConversation(conversationId, 50, oldestMessage.createdAt);
       const localMap = new Map(localMessages.map(m => [m.id, m]));
 
       const processedItems: Message[] = [];
@@ -1387,10 +1382,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   statuses: m.statuses,
                   reactions: m.reactions,
                   isEdited: m.isEdited,
-                  // Ensure repliedToId is present from server if local vault missed it
                   repliedToId: m.repliedToId || localMsg.repliedToId,
-                  // If local message lost the decrypted repliedTo, but server has it, we should ideally decrypt it. 
-                  // For safety in ZK merge, we preserve the local one if it's valid.
                   repliedTo: localMsg.repliedTo
               });
           } else {
@@ -1403,12 +1395,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const allMessages = processMessagesAndReactions(processedItems, existingMessages);
         const enrichedMessages = enrichMessagesWithSenderProfile(conversationId, allMessages);
 
-        shadowVault.upsertMessages(enrichedMessages); // Archive to shadow vault
+        shadowVault.upsertMessages(enrichedMessages); 
 
-        // [UI UPDATE] Keep tombstones visible
-        // const visibleMessages = allMessages.filter(m => !m.isDeletedLocal);
+        // ✅ SLIDING WINDOW MAGIC: Jaga agar RAM tidak lebih dari 150 pesan
+        const MAX_MESSAGES_IN_RAM = 150;
+        let prunedMessages = enrichedMessages;
+        
+        if (enrichedMessages.length > MAX_MESSAGES_IN_RAM) {
+           // Karena kita mengambil pesan LAMA (di awal array), kita buang pesan TERBARU (di akhir array)
+           // Pengguna bisa men-scroll ke bawah lagi nanti untuk memuat ulang jika perlu.
+           prunedMessages = enrichedMessages.slice(0, MAX_MESSAGES_IN_RAM);
+        }
 
-        const newState: Partial<State> = { messages: { ...state.messages, [conversationId]: enrichedMessages } };
+        const newState: Partial<State> = { messages: { ...state.messages, [conversationId]: prunedMessages } };
 
         if (fetchedItems.length < 50) {
             newState.hasMore = { ...state.hasMore, [conversationId]: false };

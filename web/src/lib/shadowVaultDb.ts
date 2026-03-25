@@ -129,16 +129,45 @@ class NyxShadowVaultProxy {
     }
   }
 
-  async getMessagesByConversation(conversationId: string): Promise<Message[]> {
+  async getMessagesByConversation(conversationId: string, limit: number = 50, beforeDate?: string): Promise<Message[]> {
     try {
-      const records = await db.messages.where('conversationId').equals(conversationId).toArray();
-      const messages: Message[] = [];
+      const query = db.messages.where('conversationId').equals(conversationId);
+      
+      // Jika ada kursor (beforeDate), ambil pesan yang lebih tua dari tanggal tersebut
+      if (beforeDate) {
+        // Karena kita tidak memiliki compound index (conversationId, createdAt) yang proper di V1,
+        // kita ambil semua untuk convo ini, filter manual, lalu sort & slice. 
+        // (Ini aman karena Dexie sangat cepat, tapi idealnya di-upgrade skemanya nanti).
+        const records = await query.toArray();
+        const beforeTime = new Date(beforeDate).getTime();
+        
+        const filteredRecords = records
+          .filter(r => new Date(r.createdAt).getTime() < beforeTime)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) // Sort DESC
+          .slice(0, limit);
+          
+        return this.parseRecordsToMessages(filteredRecords.reverse()); // Reverse back to ASC for UI
+      }
+
+      // Jika tidak ada kursor, ambil N pesan terbaru
+      const records = await query.toArray();
+      const latestRecords = records
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) // Sort DESC
+        .slice(0, limit);
+
+      return this.parseRecordsToMessages(latestRecords.reverse()); // Reverse back to ASC for UI
+    } catch (e: unknown) {
+      console.error("Vault Query Error:", e);
+      return [];
+    }
+  }
+
+  // Helper terpisah agar kode bersih
+  private async parseRecordsToMessages(records: DecryptedMessageRecord[]): Promise<Message[]> {
+     const messages: Message[] = [];
       for (const rawRecord of records) {
         const parsed = ShadowVaultMessageSchema.safeParse(rawRecord);
-        if (!parsed.success) {
-            console.warn("[ShadowVault Shield] Skipping corrupted local message record:", rawRecord.id, parsed.error.format());
-            continue;
-        }
+        if (!parsed.success) continue;
         
         const r = parsed.data;
         let plainText = null;
@@ -147,28 +176,14 @@ class NyxShadowVaultProxy {
         let decryptedSenderUsername = undefined;
         let decryptedSenderAvatarUrl = undefined;
 
-        if (r.content && !r.isDeletedLocal) {
-          plainText = await decryptVaultText(r.content);
-        }
-
+        if (r.content && !r.isDeletedLocal) plainText = await decryptVaultText(r.content);
         if (r.repliedTo) {
             const rawRepliedTo = await decryptVaultText(r.repliedTo);
-            if (rawRepliedTo) {
-                try {
-                    decryptedRepliedTo = JSON.parse(rawRepliedTo);
-                } catch {}
-            }
+            if (rawRepliedTo) { try { decryptedRepliedTo = JSON.parse(rawRepliedTo); } catch {} }
         }
-
-        if (r.senderName) {
-            decryptedSenderName = await decryptVaultText(r.senderName) || undefined;
-        }
-        if (r.senderUsername) {
-            decryptedSenderUsername = await decryptVaultText(r.senderUsername) || undefined;
-        }
-        if (r.senderAvatarUrl) {
-            decryptedSenderAvatarUrl = await decryptVaultText(r.senderAvatarUrl) || undefined;
-        }
+        if (r.senderName) decryptedSenderName = await decryptVaultText(r.senderName) || undefined;
+        if (r.senderUsername) decryptedSenderUsername = await decryptVaultText(r.senderUsername) || undefined;
+        if (r.senderAvatarUrl) decryptedSenderAvatarUrl = await decryptVaultText(r.senderAvatarUrl) || undefined;
 
         messages.push({
           id: asMessageId(r.id),
@@ -189,10 +204,6 @@ class NyxShadowVaultProxy {
         });
       }
       return messages;
-    } catch (e: unknown) {
-      console.error("Vault Query Error:", e);
-      return [];
-    }
   }
 
   async getMessage(id: string): Promise<Message | null> {

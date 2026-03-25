@@ -604,18 +604,39 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     set(state => {
       const conversation = state.conversations.find(c => c.id === conversationId);
       if (!conversation) return state;
-      
+
       const meId = useAuthStore.getState().user?.id;
       const isMine = message.senderId === meId;
+
+      // ✅ OPTIMASI: Jangan update atau re-sort jika pesan yang masuk ternyata lebih TUA 
+      // dari lastMessage yang sudah ada di UI. (Terjadi saat offline catch-up 
+      // dimana batch messages masuk secara beruntun).
+      const newMsgTime = new Date(message.createdAt).getTime();
+      const currentLastMsgTime = new Date(conversation.lastMessage?.createdAt || 0).getTime();
       
-      // Don't increment unread if the message is from the current user
+      // Jika pesan ini lebih tua, JANGAN lakukan re-sort atau timpa lastMessage.
+      // CUKUP tambahkan unread count saja.
+      if (newMsgTime < currentLastMsgTime && !isMine && state.activeId !== conversationId) {
+          return {
+              conversations: state.conversations.map(c => 
+                  c.id === conversationId 
+                      ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } 
+                      : c
+              )
+          };
+      }
+
+      // Jika pesan ini lebih baru, lakukan update utuh (Preview & Resort)
       const shouldIncrementUnread = !isMine && state.activeId !== conversationId;
       
       const updatedConversation = {
         ...conversation,
         lastMessage: withPreview(message),
-        unreadCount: state.activeId === conversationId ? 0 : (shouldIncrementUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
+        unreadCount: state.activeId === conversationId 
+            ? 0 
+            : (shouldIncrementUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
       };
+      
       const otherConversations = state.conversations.filter(c => c.id !== conversationId);
       return { conversations: sortConversations([updatedConversation, ...otherConversations], meId) };
     });
