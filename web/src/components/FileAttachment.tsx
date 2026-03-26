@@ -71,6 +71,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         return;
       }
 
+      // 1. Cek apakah ini file terenkripsi (E2EE)
       const isEncrypted = !!message.fileKey || message.fileType?.includes('encrypted=true') || message.isBlindAttachment || !message.fileUrl;
       
       if (!isEncrypted) {
@@ -83,10 +84,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         return;
       }
 
-      if (!message.isBlindAttachment) {
-         if(isMounted) setStatus('waiting');
-         return;
-      }
+      // ✅ FIX: Hapus blok `if (!message.isBlindAttachment)` yang menjebak status menjadi 'waiting' selamanya!
 
       if (isMounted) {
         setStatus('decrypting');
@@ -94,13 +92,10 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
       }
 
       try {
-        let rawFileKey: string;
+        let rawFileKey: string | undefined = message.fileKey || undefined;
 
-        if (message.fileKey) {
-             rawFileKey = message.fileKey;
-        } else if (message.isBlindAttachment) {
-             rawFileKey = ''; 
-        } else {
+        // 2. Fallback: Jika tidak ada fileKey tapi ini adalah Blind Attachment, coba minta dari sesi ratchet
+        if (!rawFileKey && message.isBlindAttachment) {
             const keyResult = await decryptMessage('', message.conversationId, isGroup, '');
 
             if (keyResult.status === 'pending') {
@@ -124,11 +119,13 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             rawFileKey = keyResult.value;
         }
 
+        // Jika setelah semua usaha tetap tidak ada kunci, maka gagal.
         if (!rawFileKey) {
              if(isMounted) setStatus('waiting');
              return;
         }
 
+        // 3. Kunci sudah di tangan! Unduh file terenkripsi dari server R2
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
         if (!absoluteUrl) throw new Error("Invalid file URL");
         
@@ -136,11 +133,11 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const encryptedBlob = await response.blob();
 
-        // ✅ FIX UTAMA: Gunakan getFileType() untuk menentukan MIME Type asli dari Blob
-        // Ini mencegah browser mengira video sebagai 'application/octet-stream'
-        const originalType = getFileType(); 
+        // 4. Dekripsi file dengan kunci yang valid
+        const originalType = getFileType(); // Fungsi getFileType() yang sudah kita buat sebelumnya
         const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
 
+        // 5. Render ke layar!
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);
           setDecryptedUrl(objectUrl);
