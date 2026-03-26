@@ -1,4 +1,4 @@
-import type { Conversation, Message, User, RawServerMessage } from './types';
+import type { Conversation, Message, User, RawServerMessage } from './types.js';
 
 // --- Type Definitions for Socket Payloads (Zero-Knowledge) ---
 export interface TypingPayload {

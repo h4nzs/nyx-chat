@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { asUserId, asConversationId, asMessageId, asStoryId } from './brands';
+import { asUserId, asConversationId, asMessageId, asStoryId } from './brands.js';
 
 // --- Base ID Schemas (Transforming to Branded Types) ---
 export const UserIdSchema = z.string().min(1).transform((val) => asUserId(val));

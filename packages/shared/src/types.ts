@@ -3,8 +3,8 @@ import {
   MinimalUserSchema, 
   IncomingMessageSchema, 
   MinimalConversationSchema 
-} from './schemas';
-import type { UserId, ConversationId, MessageId, StoryId } from './brands';
+} from './schemas.js';
+import type { UserId, ConversationId, MessageId, StoryId } from './brands.js';
 
 // 1. Ekspor Branded Types
 export type { UserId, ConversationId, MessageId, StoryId };
