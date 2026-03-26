@@ -36,19 +36,29 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   const [retryCount, setRetryCount] = useState(0);
   const [numPages, setNumPages] = useState<number | null>(null);
 
-  // ✅ OPTIMASI 1: Kunci agar tidak re-download berkali-kali!
   const hasDecryptedSuccessfully = useRef(false);
-
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
   
-  // ✅ OPTIMASI 2: Surgical Subscription (Hanya pantau boolean isGroup untuk obrolan ini)
   const isGroup = useConversationStore(s => 
     s.conversations.find(c => c.id === message.conversationId)?.isGroup || false
   );
 
+  // ✅ FIX: Pindahkan getFileType ke atas agar bisa digunakan oleh useEffect
+  const getFileType = (): string => {
+    if (message.fileType && message.fileType.trim() !== '') {
+      return message.fileType.split(';')[0];
+    }
+    if (message.fileName) {
+      const ext = message.fileName.split('.').pop()?.toLowerCase();
+      if (ext === 'pdf') return 'application/pdf';
+      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext!)) return 'image/' + ext!;
+      if (['mp4', 'webm', 'ogg', 'mov'].includes(ext!)) return 'video/' + ext!;
+      if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext!)) return 'audio/' + ext!;
+    }
+    return 'application/octet-stream';
+  };
+
   useEffect(() => {
-    // Jika sudah sukses terdekripsi, JANGAN PERNAH jalankan effect ini lagi 
-    // meskipun lastKeychainUpdate atau variabel lain berubah!
     if (hasDecryptedSuccessfully.current) return;
 
     let objectUrl: string | null = null;
@@ -68,7 +78,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         if (isMounted) {
           setDecryptedUrl(absoluteUrl || null);
           setStatus('success');
-          hasDecryptedSuccessfully.current = true; // Kunci status sukses
+          hasDecryptedSuccessfully.current = true; 
         }
         return;
       }
@@ -91,13 +101,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         } else if (message.isBlindAttachment) {
              rawFileKey = ''; 
         } else {
-            // Menggunakan isGroup dari Surgical Subscription di atas
-            const keyResult = await decryptMessage(
-              '',
-              message.conversationId,
-              isGroup,
-              ''
-            );
+            const keyResult = await decryptMessage('', message.conversationId, isGroup, '');
 
             if (keyResult.status === 'pending') {
                 if (isMounted) {
@@ -132,14 +136,16 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const encryptedBlob = await response.blob();
 
-        const originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
+        // ✅ FIX UTAMA: Gunakan getFileType() untuk menentukan MIME Type asli dari Blob
+        // Ini mencegah browser mengira video sebagai 'application/octet-stream'
+        const originalType = getFileType(); 
         const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
 
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);
           setDecryptedUrl(objectUrl);
           setStatus('success');
-          hasDecryptedSuccessfully.current = true; // Kunci status sukses!
+          hasDecryptedSuccessfully.current = true;
         }
       } catch (e: unknown) {
         console.error("Decrypt failed:", e);
@@ -155,22 +161,16 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
 
     return () => {
       isMounted = false;
-      // Jangan revoke URL jika komponen hanya re-render. Revoke hanya dibolehkan
-      // jika komponen benar-benar dihancurkan dari DOM oleh Virtuoso.
       if (objectUrl && !hasDecryptedSuccessfully.current) {
          URL.revokeObjectURL(objectUrl);
       }
     };
+  // Tambahkan getFileType ke dependency array eslint jika diminta (opsional)
   }, [message, lastKeychainUpdate, retryCount, isGroup, t]);
 
-  // Clean up Object URL when the component completely unmounts from the DOM
   useEffect(() => {
     return () => {
        if (decryptedUrl && decryptedUrl.startsWith('blob:')) {
-           // ✅ FIX VIDEO CRASH: Beri jeda 10 detik sebelum menghancurkan Blob di memori.
-           // Ini mencegah "Security Error: may not load data from blob" saat video 
-           // sedang asyik buffering tetapi komponen ini tidak sengaja ter-unmount sesaat 
-           // oleh Virtuoso Scrolling atau Strict Mode.
            setTimeout(() => {
                URL.revokeObjectURL(decryptedUrl);
            }, 10000);
@@ -178,21 +178,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
     };
   }, [decryptedUrl]);
 
-
-  const getFileType = (): string => {
-    if (message.fileType) {
-      return message.fileType.split(';')[0];
-    }
-    if (message.fileName) {
-      const ext = message.fileName.split('.').pop()?.toLowerCase();
-      if (ext === 'pdf') return 'application/pdf';
-      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext!)) return 'image/' + ext!;
-      if (['mp4', 'webm', 'ogg'].includes(ext!)) return 'video/' + ext!;
-      if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext!)) return 'audio/' + ext!;
-    }
-    return 'application/octet-stream';
-  };
-
+  // Eksekusi ulang setelah getFileType dipindahkan ke atas
   const fileType = getFileType();
   const isPdf = fileType === 'application/pdf';
   const isImage = fileType.startsWith('image/');
