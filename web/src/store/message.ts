@@ -1073,12 +1073,25 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             if (!isReactionPayload) {
                 const existingMsg = get().messages[conversationId]?.find(m => m.id === `temp_${actualTempId}` || m.tempId === actualTempId || m.id === res.msg!.id);
                 
+                let realFileUrl = existingMsg?.fileUrl;
+                 let realFileKey = existingMsg?.fileKey;
+                 try {
+                     if (data.content && typeof data.content === 'string' && data.content.startsWith('{')) {
+                         const meta = JSON.parse(data.content);
+                         if (meta.type === 'file' && meta.url) {
+                             realFileUrl = meta.url;
+                             realFileKey = meta.key;
+                         }
+                     }
+                 } catch (e) {}
+
                 const updatedMsg = { 
                     ...res.msg, 
                     content: existingMsg !== undefined ? existingMsg.content : res.msg!.content, 
                     repliedTo: existingMsg?.repliedTo,
                     isBlindAttachment: existingMsg?.isBlindAttachment,
-                    fileUrl: existingMsg?.fileUrl,
+                    fileUrl: realFileUrl,
+                    fileKey: realFileKey,
                     fileName: existingMsg?.fileName,
                     fileType: existingMsg?.fileType,
                     fileSize: existingMsg?.fileSize,
@@ -1180,12 +1193,25 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
             const existingMsg = get().messages[conversationId]?.find(m => m.id === `temp_${tempId}` || m.tempId === tempId || m.id === res.msg!.id);
             
+            let realFileUrl = existingMsg?.fileUrl;
+             let realFileKey = existingMsg?.fileKey;
+             try {
+                 if (payloadData.content && typeof payloadData.content === 'string' && payloadData.content.startsWith('{')) {
+                     const meta = JSON.parse(payloadData.content);
+                     if (meta.type === 'file' && meta.url) {
+                         realFileUrl = meta.url;
+                         realFileKey = meta.key;
+                     }
+                 }
+             } catch (e) {}
+
             const updatedMsg = { 
                 ...res.msg, 
                 content: existingMsg !== undefined ? existingMsg.content : res.msg!.content, 
                 repliedTo: existingMsg?.repliedTo,
                 isBlindAttachment: existingMsg?.isBlindAttachment,
-                fileUrl: existingMsg?.fileUrl,
+                fileUrl: realFileUrl,
+                fileKey: realFileKey,
                 fileName: existingMsg?.fileName,
                 fileType: existingMsg?.fileType,
                 fileSize: existingMsg?.fileSize,
@@ -1736,12 +1762,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             ...m,
             ...newMessage,
             content: m.content !== undefined ? m.content : newMessage.content,
-            fileUrl: m.fileUrl || newMessage.fileUrl,
-            fileName: m.fileName || newMessage.fileName,
-            fileType: m.fileType || newMessage.fileType,
-            fileSize: m.fileSize || newMessage.fileSize,
-            isBlindAttachment: m.isBlindAttachment || newMessage.isBlindAttachment,
-            repliedTo: m.repliedTo || newMessage.repliedTo,
+            fileUrl: newMessage.fileUrl !== undefined ? newMessage.fileUrl : m.fileUrl,
+            fileKey: newMessage.fileKey !== undefined ? newMessage.fileKey : m.fileKey,
+            fileName: newMessage.fileName !== undefined ? newMessage.fileName : m.fileName,
+            fileType: newMessage.fileType !== undefined ? newMessage.fileType : m.fileType,
+            fileSize: newMessage.fileSize !== undefined ? newMessage.fileSize : m.fileSize,
+            duration: newMessage.duration !== undefined ? newMessage.duration : m.duration,
+            isBlindAttachment: newMessage.isBlindAttachment !== undefined ? newMessage.isBlindAttachment : m.isBlindAttachment,
+            repliedTo: newMessage.repliedTo !== undefined ? newMessage.repliedTo : m.repliedTo,
             tempId: undefined,
             optimistic: false
           };
