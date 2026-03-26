@@ -71,7 +71,7 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         return;
       }
 
-      const isEncrypted = message.fileType?.includes('encrypted=true') || message.isBlindAttachment || !message.fileUrl;
+      const isEncrypted = !!message.fileKey || message.fileType?.includes('encrypted=true') || message.isBlindAttachment || !message.fileUrl;
       
       if (!isEncrypted) {
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
