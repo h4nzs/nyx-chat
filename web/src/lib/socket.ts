@@ -191,7 +191,26 @@ export function getSocket() {
     });
 
     socket.on("message:updated", (updatedMessage) => {
-      if (updatedMessage.conversationId) updateMessage(updatedMessage.conversationId, updatedMessage.id, updatedMessage as Partial<Message>);
+      if (!updatedMessage.conversationId || !updatedMessage.id) return;
+
+      // FILTER KEAMANAN E2EE:
+      // Kita pisahkan (destructure) field yang berpotensi merusak plaintext lokal.
+      // 'content', 'ciphertext', dan 'fileKey' dari server adalah data mentah/terenkripsi, 
+      // jadi kita BUNGKAM dan tidak memasukkannya ke dalam safeUpdates.
+      const { 
+        content: _rawContent, 
+        ciphertext: _rawCiphertext, 
+        fileKey: _rawFileKey,
+        encryptedSessionKey: _rawSessionKey,
+        ...safeUpdates 
+      } = updatedMessage;
+
+      // Sekarang safeUpdates hanya berisi metadata yang aman (seperti status, isViewed, dll)
+      updateMessage(
+        updatedMessage.conversationId, 
+        updatedMessage.id, 
+        safeUpdates as Partial<Message>
+      );
     });
 
     socket.on("message:deleted", ({ conversationId, id }) => {
