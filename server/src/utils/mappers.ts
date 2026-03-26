@@ -16,6 +16,8 @@ export interface PrismaUserProfileInput {
   name?: string | null;
   avatarUrl?: string | null;
   encryptedProfile?: string | null;
+  publicKey?: string | null; // ✅ Tambahkan ini untuk E2EE
+  signingKey?: string | null; // ✅ Tambahkan ini untuk E2EE
 }
 
 export interface PrismaParticipantInput {
@@ -23,7 +25,7 @@ export interface PrismaParticipantInput {
   userId: string;
   role: string;
   isPinned?: boolean;
-  user?: PrismaUserProfileInput | null; // Strict typing untuk relasi user
+  user?: PrismaUserProfileInput | null; 
 }
 
 export interface PrismaMessageInput {
@@ -41,8 +43,8 @@ export interface PrismaMessageInput {
   expiresAt?: Date | null;
   isViewOnce?: boolean | null;
   repliedToId?: string | null;
-  sender?: PrismaUserProfileInput | null; // Strict typing untuk pengirim
-  repliedTo?: PrismaMessageInput | null;  // Strict typing REKURSIF untuk pesan balasan
+  sender?: PrismaUserProfileInput | null; 
+  repliedTo?: PrismaMessageInput | null;  
 }
 
 export interface PrismaConversationInput {
@@ -53,9 +55,8 @@ export interface PrismaConversationInput {
   creatorId?: string | null;
   createdAt: Date;
   updatedAt: Date;
-  participants?: PrismaParticipantInput[]; // Strict typing untuk array participant
+  participants?: PrismaParticipantInput[]; 
 }
-
 
 // --- 2. MAPPER FUNCTIONS ---
 
@@ -68,20 +69,22 @@ export const toMinimalProfile = (user: PrismaUserProfileInput): MinimalProfile =
 });
 
 export const toParticipant = (p: PrismaParticipantInput): Participant => ({
-  id: asUserId(p.id),
-  userId: asUserId(p.userId),
+  // ✅ FIX UTAMA: Frontend butuh `id` yang merepresentasikan User ID, bukan Participant ID!
+  id: asUserId(p.userId || p.user?.id || p.id), 
+  userId: asUserId(p.userId || p.user?.id || p.id),
   role: (p.role === 'ADMIN' || p.role === 'MEMBER' || p.role === 'admin' || p.role === 'member') ? p.role as Participant['role'] : 'MEMBER',
   isPinned: p.isPinned ?? false,
-  // Mapping langsung yang aman karena p.user sudah sesuai interface
   name: p.user?.name ?? undefined,
   username: p.user?.username ?? undefined,
   avatarUrl: p.user?.avatarUrl ?? undefined,
   encryptedProfile: p.user?.encryptedProfile ?? undefined,
+  // ✅ FIX: Kembalikan public keys agar sistem E2EE tidak rusak
+  publicKey: p.user?.publicKey ?? undefined,
+  signingKey: p.user?.signingKey ?? undefined,
 });
 
 export const toConversation = (conv: PrismaConversationInput): Conversation => ({
   id: asConversationId(conv.id),
-  // Cek isGroup langsung, atau fallback ke logic type 'GROUP'
   isGroup: conv.isGroup ?? (conv.type === 'GROUP'), 
   encryptedMetadata: conv.encryptedMetadata ?? undefined,
   creatorId: conv.creatorId ? asUserId(conv.creatorId) : undefined,
@@ -108,6 +111,5 @@ export const toRawServerMessage = (msg: PrismaMessageInput): RawServerMessage =>
   expiresAt: msg.expiresAt ? msg.expiresAt.toISOString() : undefined,
   isViewOnce: msg.isViewOnce ?? false,
   repliedToId: msg.repliedToId ? asMessageId(msg.repliedToId) : undefined,
-  // Pemanggilan rekursif yang aman karena msg.repliedTo sesuai dengan PrismaMessageInput
   repliedTo: msg.repliedTo ? toRawServerMessage(msg.repliedTo) : undefined,
 });
