@@ -154,11 +154,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   loadConversations: async () => {
-    // THE DISGUISE
     if (sessionStorage.getItem('nyx_decoy_mode') === 'true') {
       const dummyConvo = {
          id: 'decoy-1', isGroup: false, unreadCount: 0,
-         participants: [{ id: 'bot-1', username: 'system_bot', displayName: 'NYX Service', avatarUrl: null }],
+         participants: [{ id: 'bot-1', username: 'system_bot', name: 'NYX Service' }],
          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
          lastMessage: { id: 'msg-1', content: 'Welcome to NYX. No active chats found.', senderId: 'bot-1', createdAt: new Date().toISOString(), conversationId: 'decoy-1', type: 'SYSTEM' }
       };
@@ -175,19 +174,15 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     if (!shouldProceed) return;
 
     try {
-      const rawConversations = await api<{ participants: { user: Record<string, unknown>, role?: string, id: string }[], [key: string]: unknown }[]>("/api/conversations");
+      // ✅ FIX: Gunakan tipe data Conversation[] yang sempurna dari @nyx/shared
+      const rawConversations = await api<Conversation[]>("/api/conversations");
       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 
       const conversations = await Promise.all(rawConversations.map(async c => {
-        const participants = c.participants.map((p: { user?: { description?: string, id?: string, [key: string]: unknown }, role?: string, id?: string, isPinned?: boolean }) => ({
-          ...p.user,
-          id: p.id || p.user?.id,
-          description: p.user?.description,
-          role: p.role,
-          isPinned: p.isPinned
-        } as unknown as Participant));
+        // ✅ FIX: Tidak perlu lagi mapping p.user! Backend sudah mengirim data yang rata dan sempurna.
+        const participants = c.participants;
 
-        let lastMessage = (c.messages as unknown as Message[])?.[0] || null;
+        let lastMessage = c.lastMessage || null;
         if (lastMessage) {
           try {
             lastMessage = await decryptMessageObject(lastMessage);
@@ -199,27 +194,22 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           }
           
           if (lastMessage) {
-              // Hydrate sender info for the chat list snippet
-              const pInfo = participants.find((p: { id: string, [key: string]: unknown }) => p.id === lastMessage!.senderId);
+              const pInfo = participants.find(p => p.id === lastMessage!.senderId);
               if (pInfo) {
                   lastMessage.sender = {
                       ...(lastMessage.sender || { id: lastMessage.senderId }),
                       ...pInfo
                   };
               }
-
               lastMessage = withPreview(lastMessage);
           }
         }
         
-        // DECRYPT METADATA
         let decryptedMetadata = undefined;
         if (c.isGroup && c.encryptedMetadata) {
              try {
-                 const decrypted = await decryptGroupMetadata(c.encryptedMetadata as string, c.id as string);
-                 if (decrypted) {
-                     decryptedMetadata = decrypted;
-                 }
+                 const decrypted = await decryptGroupMetadata(c.encryptedMetadata, c.id);
+                 if (decrypted) decryptedMetadata = decrypted;
              } catch (e) {
                  console.warn(`Failed to decrypt metadata for group ${c.id}`);
              }
@@ -233,21 +223,14 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         };
       }));
 
-      // [NEW] Offline Catch-up / Diff Detection
-      // Check if group participants changed while we were offline/disconnected
       const existingConversations = get().conversations;
-      const reconciledConversations = conversations.map(fetchedObj => {
-          const fetched = fetchedObj as unknown as Conversation;
+      const reconciledConversations = conversations.map(fetched => {
           if (fetched.isGroup) {
               const existing = existingConversations.find(e => e.id === fetched.id);
               if (existing) {
-                  // Compare participant lists (simple ID comparison)
-                  const existingIds = existing.participants.map((p: { id: string, [key: string]: unknown }) => p.id).sort().join(',');
-                  const fetchedIds = fetched.participants.map((p: { id: string, [key: string]: unknown }) => p.id).sort().join(',');
-                  
+                  const existingIds = existing.participants.map(p => p.id).sort().join(',');
+                  const fetchedIds = fetched.participants.map(p => p.id).sort().join(',');
                   if (existingIds !== fetchedIds) {
-                      console.log(`[Ratchet] Membership change detected for group ${fetched.id} while offline. Proactive healing...`);
-                      // Trigger ghost sync from this device to settle state with new/removed members
                       fireGhostSync(fetched.id, 2000);
                       return { ...fetched, requiresKeyRotation: true };
                   }
@@ -256,11 +239,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           return fetched;
       });
 
-      set({ conversations: sortConversations(reconciledConversations as unknown as Conversation[], useAuthStore.getState().user?.id) });
-      useVerificationStore.getState().loadInitialStatus(conversations as unknown as Conversation[]);
+      set({ conversations: sortConversations(reconciledConversations, useAuthStore.getState().user?.id) });
+      useVerificationStore.getState().loadInitialStatus(conversations);
 
       const socket = getSocket();
-      (conversations as unknown as Conversation[]).forEach(c => socket.emit("conversation:join", c.id));
+      conversations.forEach(c => socket.emit("conversation:join", c.id));
     } catch (error) {
       console.error("Failed to load conversations", error);
       set({ error: "Failed to load conversations." });
@@ -525,16 +508,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
-          const newParticipants = participants.map((p: { user?: { description?: string, id?: string, [key: string]: unknown }, role?: string, id?: string, isPinned?: boolean }) => ({
-            ...p.user,
-            id: p.id || p.user?.id,
-            description: p.user?.description,
-            role: p.role,
-            isPinned: p.isPinned
-          } as unknown as Participant));
           return {
             ...c,
-            participants: [...c.participants, ...newParticipants],
+            // ✅ FIX: Gabungkan array langsung, tanpa perlu ekstrak p.user
+            participants: [...c.participants, ...participants],
           };
         }
         return c;
