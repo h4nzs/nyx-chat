@@ -313,69 +313,805 @@ index 71bb099c..1d057722 100644
      return res.status(403).json({ error: 'Invalid CSRF token' });
    }
 diff --git a/server/src/routes/conversations.ts b/server/src/routes/conversations.ts
-index 932fa3c4..9e587552 100644
+index 932fa3c4..505b5149 100644
 --- a/server/src/routes/conversations.ts
 +++ b/server/src/routes/conversations.ts
-@@ -6,6 +6,7 @@ import { prisma } from '../lib/prisma.js'
+@@ -6,6 +6,8 @@ import { prisma } from '../lib/prisma.js'
  import { Prisma } from '@prisma/client';
  import { requireAuth } from '../middleware/auth.js'
  import { getIo } from '../socket.js'
-+import type { Conversation, ConversationId, User } from '@nyx/shared'
++import { asConversationId, asUserId, type ConversationId, type User } from '@nyx/shared'
++import { toConversation, toParticipant } from '../utils/mappers.js';
  import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
  import { ApiError } from '../utils/errors.js'
  import { redisClient } from '../lib/redis.js'
-@@ -209,7 +210,7 @@ router.post('/', async (req, res, next) => {
-       lastMessage: null
-     }
+@@ -29,9 +31,9 @@ router.get('/', async (req, res, next) => {
+       include: {
+         participants: {
+           select: {
+-            user: {
+-              select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true }
+-            },
++            user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } },
++            id: true,
++            userId: true,
+             isPinned: true,
+             role: true
+           }
+@@ -39,42 +41,32 @@ router.get('/', async (req, res, next) => {
+         messages: {
+           orderBy: { createdAt: 'desc' },
+           take: 1,
+-          include: {
+-            sender: {
+-              select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true }
+-            }
+-          }
++          include: { sender: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } }
+         },
+-        creator: {
+-          select: { id: true, publicKey: true, signingKey: true, encryptedProfile: true }
+-        }
++        creator: { select: { id: true, publicKey: true, signingKey: true, encryptedProfile: true } }
+       },
+-      orderBy: {
+-        lastMessageAt: 'desc'
+-      }
++      orderBy: { lastMessageAt: 'desc' }
+     })
  
--    getIo().to(allUserIds.filter(uid => uid !== creatorId)).emit('conversation:new', transformedConversation)
-+    getIo().to(allUserIds.filter(uid => uid !== creatorId)).emit('conversation:new', transformedConversation as unknown as Conversation)
-     res.status(201).json({ ...transformedConversation, unreadCount: 0 })
+     const unreadCounts: { conversationId: string; unreadCount: number }[] = await prisma.$queryRaw`
+-      SELECT
+-        p."conversationId" AS "conversationId",
+-        COUNT(m.id)::int AS "unreadCount"
++      SELECT p."conversationId" AS "conversationId", COUNT(m.id)::int AS "unreadCount"
+       FROM "Participant" p
+       LEFT JOIN "Message" last_read_message ON p."lastReadMsgId" = last_read_message.id
+       JOIN "Message" m ON m."conversationId" = p."conversationId"
+-      WHERE
+-        p."userId" = ${userId}
+-        AND m."senderId" != ${userId}
+-        AND m."createdAt" > COALESCE(last_read_message."createdAt", p."joinedAt")
++      WHERE p."userId" = ${userId} AND m."senderId" != ${userId} AND m."createdAt" > COALESCE(last_read_message."createdAt", p."joinedAt")
+       GROUP BY p."conversationId";
+     `
+ 
+     const unreadMap = new Map(unreadCounts.map(item => [item.conversationId, item.unreadCount]))
+-    const conversations = conversationsData.map(convo => ({
+-      ...convo,
+-      unreadCount: unreadMap.get(convo.id) || 0
+-    }))
++    
++    // MAPPING KE SAFE TYPE (Tanpa any)
++    const safeConversations = conversationsData.map(convo => {
++      const safeConv = toConversation(convo);
++      safeConv.unreadCount = unreadMap.get(convo.id) || 0;
++      return safeConv;
++    })
+ 
+-    res.json(conversations)
++    res.json(safeConversations)
    } catch (error) {
      next(error)
-@@ -261,7 +262,7 @@ router.put('/:id/details', async (req, res, next) => {
-       data: { encryptedMetadata }
-     })
-     getIo().to(id).emit('conversation:updated', {
--      id,
-+      id: id as ConversationId,
-       encryptedMetadata: updatedConversation.encryptedMetadata
-     })
-     res.json(updatedConversation)
-@@ -308,10 +309,10 @@ router.post('/:id/participants', async (req, res, next) => {
-       include: { participants: { include: { user: true } }, creator: true }
+   }
+@@ -87,62 +79,35 @@ router.post('/', async (req, res, next) => {
+     const { encryptedMetadata, userIds, isGroup, initialSession } = req.body
+     const creatorId = req.user.id
+ 
+-    if (!Array.isArray(userIds)) {
+-      return res.status(400).json({ error: 'userIds must be an array.' })
+-    }
++    if (!Array.isArray(userIds)) return res.status(400).json({ error: 'userIds must be an array.' })
+ 
+-    // SANDBOX CHECK
+     const user = await prisma.user.findUnique({ where: { id: creatorId }, select: { isVerified: true } });
+     const isVerified = user?.isVerified ?? false;
+ 
+-    if (!isVerified && isGroup) {
+-        throw new ApiError(403, 'SANDBOX_GROUP_RESTRICTION: Unverified users cannot create groups.');
+-    }
+-
+-    if (userIds.length > MAX_GROUP_MEMBERS) {
+-      return res.status(400).json({ error: `Group cannot have more than ${MAX_GROUP_MEMBERS} members.` })
+-    }
++    if (!isVerified && isGroup) throw new ApiError(403, 'SANDBOX_GROUP_RESTRICTION: Unverified users cannot create groups.');
++    if (userIds.length > MAX_GROUP_MEMBERS) return res.status(400).json({ error: `Group cannot have more than ${MAX_GROUP_MEMBERS} members.` })
+ 
+     if (!isGroup) {
+       const otherUserId = userIds.find((id: string) => id !== creatorId)
+       if (!otherUserId) return res.status(400).json({ error: 'Another user ID is required for a private chat.' })
+ 
+       const existingConversation = await prisma.conversation.findFirst({
+-        where: {
+-          isGroup: false,
+-          AND: [
+-            { participants: { some: { userId: creatorId } } },
+-            { participants: { some: { userId: otherUserId } } }
+-          ]
+-        },
++        where: { isGroup: false, AND: [{ participants: { some: { userId: creatorId } } }, { participants: { some: { userId: otherUserId } } }] },
+         include: { participants: { include: { user: true } }, creator: true }
+       })
+ 
+-      if (existingConversation) return res.status(200).json(existingConversation)
++      // Bebas any
++      if (existingConversation) return res.status(200).json(toConversation(existingConversation))
+         
+-      // SANDBOX DM LIMIT CHECK (Only for NEW conversations)
+       if (!isVerified) {
+           const today = new Date().toISOString().split('T')[0];
+           const key = `sandbox:newchat:${creatorId}:${today}`;
+-          
+-          // Atomic INCR + EXPIRE via Lua Script
+-          // Returns the new count. Sets TTL only on first increment (count == 1).
+-          const count = await redisClient.eval(
+-            "local c = redis.call('INCR', KEYS[1]); if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end; return c",
+-            {
+-              keys: [key],
+-              arguments: ['86400'] // 24 hours
+-            }
+-          ) as number;
+-
+-          if (count > 3) {
+-              throw new ApiError(429, 'SANDBOX_NEW_CHAT_LIMIT: Max 3 new conversations per day.');
+-          }
++          const count = await redisClient.eval("local c = redis.call('INCR', KEYS[1]); if c == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end; return c", { keys: [key], arguments: ['86400'] }) as number;
++          if (count > 3) throw new ApiError(429, 'SANDBOX_NEW_CHAT_LIMIT: Max 3 new conversations per day.');
+       }
+     }
+ 
+     const allUserIds = Array.from(new Set([...userIds, creatorId]))
+-
+     let newConversation;
+     try {
+       newConversation = await prisma.$transaction(async (tx) => {
+@@ -151,66 +116,37 @@ router.post('/', async (req, res, next) => {
+             encryptedMetadata: isGroup ? encryptedMetadata : null,
+             isGroup,
+             creatorId: isGroup ? creatorId : null,
+-            participants: {
+-              create: allUserIds.map((userId: string) => ({
+-                user: { connect: { id: userId } },
+-                role: userId === creatorId ? 'ADMIN' : 'MEMBER'
+-              }))
+-            }
++            participants: { create: allUserIds.map((userId: string) => ({ user: { connect: { id: userId } }, role: userId === creatorId ? 'ADMIN' : 'MEMBER' })) }
+           },
+           include: {
+-            participants: {
+-              select: {
+-                role: true,
+-                user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }
+-              }
+-            },
+-            creator: { 
+-              select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } 
+-            }
++            participants: { select: { id: true, userId: true, role: true, isPinned: true, user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } } },
++            creator: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }
+           }
+         })
+ 
+         if (initialSession) {
+           const { sessionId, initialKeys, ephemeralPublicKey } = initialSession
+           if (!sessionId || !initialKeys || !ephemeralPublicKey) throw new Error('Incomplete initial session data provided.')
+-          const keyRecords = initialKeys.map((ik: { userId: string; key: string; }) => ({
+-            sessionId,
+-            encryptedKey: ik.key,
+-            userId: ik.userId,
+-            conversationId: conversation.id,
+-            initiatorEphemeralKey: ephemeralPublicKey,
+-            isInitiator: ik.userId === creatorId
+-          }))
++          const keyRecords = initialKeys.map((ik: { userId: string; key: string; }) => ({ sessionId, encryptedKey: ik.key, userId: ik.userId, conversationId: conversation.id, initiatorEphemeralKey: ephemeralPublicKey, isInitiator: ik.userId === creatorId }))
+           await tx.sessionKey.createMany({ data: keyRecords })
+         } else if (isGroup) {
+-          // Only generate server-side keys for groups if no initial session provided.
+-          // For 1-on-1, we want Lazy X3DH, so we skip this.
+           await rotateAndDistributeSessionKeys(conversation.id, creatorId, tx)
+         }
+-
+         return conversation
+       })
+     } catch (dbError) {
+-      // Rollback atomic counter if db fails
+       if (!isVerified && !isGroup) {
+         const today = new Date().toISOString().split('T')[0];
+-        const key = `sandbox:newchat:${creatorId}:${today}`;
+-        try { await redisClient.decr(key); } catch (_e) { /* ignore */ }
++        try { await redisClient.decr(`sandbox:newchat:${creatorId}:${today}`); } catch (_e) { }
+       }
+       throw dbError;
+     }
+ 
+-    const transformedConversation = {
+-      ...newConversation,
+-      isGroup: newConversation.isGroup,
+-      participants: newConversation.participants.map(p => ({ ...p.user, role: p.role })),
+-      unreadCount: 1,
+-      lastMessage: null
+-    }
+-
+-    getIo().to(allUserIds.filter(uid => uid !== creatorId)).emit('conversation:new', transformedConversation)
+-    res.status(201).json({ ...transformedConversation, unreadCount: 0 })
++    // MAPPING KE SAFE TYPE (Tanpa any)
++    const safeConversation = toConversation(newConversation);
++    
++    getIo().to(allUserIds.filter(uid => uid !== creatorId)).emit('conversation:new', safeConversation)
++    res.status(201).json({ ...safeConversation, unreadCount: 0 })
+   } catch (error) {
+     next(error)
+   }
+@@ -220,26 +156,17 @@ router.post('/', async (req, res, next) => {
+ router.get('/:id', async (req, res, next) => {
+   try {
+     if (!req.user) throw new ApiError(401, 'Authentication required.')
+-    const { id } = req.params
+     const conversation = await prisma.conversation.findFirst({
+-      where: {
+-        id,
+-        participants: { some: { userId: req.user.id } }
+-      },
++      where: { id: req.params.id, participants: { some: { userId: req.user.id } } },
+       include: {
+-        participants: {
+-          select: {
+-            user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } },
+-            isPinned: true,
+-            role: true
+-          }
+-        },
++        participants: { select: { id: true, userId: true, user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }, isPinned: true, role: true } },
+         creator: { select: { id: true, publicKey: true, signingKey: true, encryptedProfile: true } }
+       }
      })
  
--    getIo().to(conversationId).emit('conversation:participants_added', { conversationId, newParticipants })
-+    getIo().to(conversationId).emit('conversation:participants_added', { conversationId, newParticipants: newParticipants as unknown as { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[] })
-     getIo().to(conversationId).emit('group:participants_changed', { conversationId })
-     newParticipants.forEach(p => {
--      if (conversation) getIo().to(p.userId).emit('conversation:new', conversation)
-+      if (conversation) getIo().to(p.userId).emit('conversation:new', conversation as unknown as Conversation)
-     })
-     res.status(201).json(newParticipants)
+     if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+-    res.json(conversation)
++    // Bebas any
++    res.json(toConversation(conversation))
    } catch (error) {
+     next(error)
+   }
+@@ -251,19 +178,11 @@ router.put('/:id/details', async (req, res, next) => {
+     if (!req.user) throw new ApiError(401, 'Authentication required.')
+     const { id } = req.params
+     const { encryptedMetadata } = req.body
+-    const participant = await prisma.participant.findFirst({
+-      where: { conversationId: id, userId: req.user.id }
+-    })
++    const participant = await prisma.participant.findFirst({ where: { conversationId: id, userId: req.user.id } })
+     if (!participant || participant.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden: You are not an admin of this group.' })
+ 
+-    const updatedConversation = await prisma.conversation.update({
+-      where: { id },
+-      data: { encryptedMetadata }
+-    })
+-    getIo().to(id).emit('conversation:updated', {
+-      id,
+-      encryptedMetadata: updatedConversation.encryptedMetadata
+-    })
++    const updatedConversation = await prisma.conversation.update({ where: { id }, data: { encryptedMetadata } })
++    getIo().to(id).emit('conversation:updated', { id: asConversationId(id), encryptedMetadata: updatedConversation.encryptedMetadata ?? undefined })
+     res.json(updatedConversation)
+   } catch (error) {
+     next(error)
+@@ -276,44 +195,43 @@ router.post('/:id/participants', async (req, res, next) => {
+     if (!req.user) throw new ApiError(401, 'Authentication required.')
+     const { id: conversationId } = req.params
+     const { userIds } = req.body
+-    const adminParticipant = await prisma.participant.findFirst({
+-      where: { conversationId, userId: req.user.id, role: 'ADMIN' }
+-    })
++    const adminParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: req.user.id, role: 'ADMIN' } })
+     if (!adminParticipant) return res.status(403).json({ error: 'Forbidden: You are not an admin of this group.' })
+-
+     if (!Array.isArray(userIds)) return res.status(400).json({ error: 'userIds must be an array.' })
+ 
+     const currentCount = await prisma.participant.count({ where: { conversationId } })
+-    if (currentCount + userIds.length > MAX_GROUP_MEMBERS) {
+-      return res.status(400).json({ error: `Group limit reached (${MAX_GROUP_MEMBERS} members max).` })
+-    }
++    if (currentCount + userIds.length > MAX_GROUP_MEMBERS) return res.status(400).json({ error: `Group limit reached (${MAX_GROUP_MEMBERS} members max).` })
+ 
+-    const newParticipants = await prisma.$transaction(async (tx) => {
+-      await Promise.all(userIds.map((userId: string) =>
+-        tx.participant.upsert({
+-          where: { userId_conversationId: { userId, conversationId } },
+-          create: { userId, conversationId, joinedAt: new Date() },
+-          update: { joinedAt: new Date() }
+-        })
+-      ))
++    const newParticipantsRaw = await prisma.$transaction(async (tx) => {
++      await Promise.all(userIds.map((userId: string) => tx.participant.upsert({ where: { userId_conversationId: { userId, conversationId } }, create: { userId, conversationId, joinedAt: new Date() }, update: { joinedAt: new Date() } })))
+       await rotateAndDistributeSessionKeys(conversationId, req.user!.id, tx)
+-      return await tx.participant.findMany({
+-        where: { conversationId, userId: { in: userIds } },
+-        include: { user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } }
+-      })
++      return await tx.participant.findMany({ where: { conversationId, userId: { in: userIds } }, include: { user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } } })
+     })
+ 
+-    const conversation = await prisma.conversation.findUnique({
+-      where: { id: conversationId },
+-      include: { participants: { include: { user: true } }, creator: true }
+-    })
++    const conversationRaw = await prisma.conversation.findUnique({ where: { id: conversationId }, include: { participants: { include: { user: true } }, creator: true } })
++
++    // MAPPING KE SAFE TYPE
++    const safeParticipants = newParticipantsRaw.map(toParticipant);
++    const safeConversationId = asConversationId(conversationId);
+ 
+-    getIo().to(conversationId).emit('conversation:participants_added', { conversationId, newParticipants })
+-    getIo().to(conversationId).emit('group:participants_changed', { conversationId })
+-    newParticipants.forEach(p => {
+-      if (conversation) getIo().to(p.userId).emit('conversation:new', conversation)
++    // Casting ke unknown lalu ke expected interface socket untuk menghindari any
++    getIo().to(conversationId).emit('conversation:participants_added', { 
++      conversationId: safeConversationId, 
++      newParticipants: safeParticipants as unknown as { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[] 
+     })
+-    res.status(201).json(newParticipants)
++    getIo().to(conversationId).emit('group:participants_changed', { conversationId: safeConversationId })
++    
++    if (conversationRaw) {
++      const safeConv = toConversation(conversationRaw);
++      safeParticipants.forEach(p => {
++        // FIX: Pengecekan p.userId memastikan tipe undefined tidak masuk ke fungsi .to()
++        if (p.userId) {
++          getIo().to(p.userId).emit('conversation:new', safeConv)
++        }
++      })
++    }
++    
++    res.status(201).json(safeParticipants)
+   } catch (error) {
+     next(error)
+   }
+@@ -328,16 +246,13 @@ router.put('/:id/participants/:userId/role', async (req, res, next) => {
+     if (role !== 'ADMIN' && role !== 'MEMBER') return res.status(400).json({ error: 'Invalid role specified.' })
+ 
+     const adminParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: req.user.id } })
+-    if (!adminParticipant || adminParticipant.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden: You are not an admin of this group.' })
++    if (!adminParticipant || adminParticipant.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden.' })
+     if (req.user.id === userToModifyId) return res.status(400).json({ error: 'You cannot change your own role.' })
+ 
+-    const updatedParticipant = await prisma.participant.updateMany({
+-      where: { conversationId, userId: userToModifyId },
+-      data: { role }
+-    })
++    const updatedParticipant = await prisma.participant.updateMany({ where: { conversationId, userId: userToModifyId }, data: { role } })
+     if (updatedParticipant.count === 0) return res.status(404).json({ error: 'Participant not found.' })
+ 
+-    getIo().to(conversationId).emit('conversation:participant_updated', { conversationId, userId: userToModifyId, role })
++    getIo().to(conversationId).emit('conversation:participant_updated', { conversationId: asConversationId(conversationId), userId: asUserId(userToModifyId), role })
+     res.json({ userId: userToModifyId, role })
+   } catch (error) {
+     next(error)
+@@ -350,19 +265,18 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
+     if (!req.user) throw new ApiError(401, 'Authentication required.')
+     const { id: conversationId, userId: userToRemoveId } = req.params
+     const adminParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: req.user.id } })
+-    if (!adminParticipant || adminParticipant.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden: You are not an admin of this group.' })
+-    if (req.user.id === userToRemoveId) return res.status(400).json({ error: 'You cannot remove yourself from the group.' })
++    if (!adminParticipant || adminParticipant.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden.' })
++    if (req.user.id === userToRemoveId) return res.status(400).json({ error: 'Cannot remove yourself.' })
+ 
+     await prisma.participant.delete({ where: { userId_conversationId: { userId: userToRemoveId, conversationId } } })
+-    getIo().to(conversationId).emit('conversation:participant_removed', { conversationId, userId: userToRemoveId })
+-    getIo().to(conversationId).emit('group:participants_changed', { conversationId })
+-    getIo().to(userToRemoveId).emit('conversation:deleted', { id: conversationId })
++    
++    getIo().to(conversationId).emit('conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userToRemoveId) })
++    getIo().to(conversationId).emit('group:participants_changed', { conversationId: asConversationId(conversationId) })
++    getIo().to(userToRemoveId).emit('conversation:deleted', { id: asConversationId(conversationId) })
++    
+     await rotateAndDistributeSessionKeys(conversationId, req.user.id)
+     res.status(204).send()
+   } catch (error) {
+-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+-      return res.status(404).json({ error: 'Participant not found in this group.' })
+-    }
+     next(error)
+   }
+ })
+@@ -374,28 +288,20 @@ router.delete('/:id/leave', async (req, res, next) => {
+     const { id: conversationId } = req.params
+     const userId = req.user.id
+     const participant = await prisma.participant.findFirst({ where: { conversationId, userId } })
+-    if (!participant) return res.status(404).json({ error: 'You are not a member of this group.' })
++    if (!participant) return res.status(404).json({ error: 'Not a member.' })
+ 
+     const conversation = await prisma.conversation.findUnique({ where: { id: conversationId } })
+-    if (conversation?.creatorId === userId) return res.status(400).json({ error: 'Group creator cannot leave; please delete it instead.' })
++    if (conversation?.creatorId === userId) return res.status(400).json({ error: 'Creator cannot leave.' })
+ 
+     await prisma.participant.delete({ where: { userId_conversationId: { userId, conversationId } } })
+-    getIo().to(conversationId).emit('conversation:participant_removed', { conversationId, userId })
+-    getIo().to(conversationId).emit('group:participants_changed', { conversationId })
+-    getIo().to(userId).emit('conversation:deleted', { id: conversationId })
+-
+-    const remainingAdmin = await prisma.participant.findFirst({
+-      where: { conversationId, role: 'ADMIN', userId: { not: userId } }
+-    })
+-    if (remainingAdmin) {
+-      try {
+-        await rotateAndDistributeSessionKeys(conversationId, remainingAdmin.userId)
+-      } catch (error) {
+-        console.error('Failed to rotate keys for:', conversationId, 'after user', userId, 'left:', error)
+-      }
+-    } else {
+-      console.warn('Could not rotate keys for:', conversationId, 'after user left: no remaining admin found.')
+-    }
++    
++    getIo().to(conversationId).emit('conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userId) })
++    getIo().to(conversationId).emit('group:participants_changed', { conversationId: asConversationId(conversationId) })
++    getIo().to(userId).emit('conversation:deleted', { id: asConversationId(conversationId) })
++
++    const remainingAdmin = await prisma.participant.findFirst({ where: { conversationId, role: 'ADMIN', userId: { not: userId } } })
++    if (remainingAdmin) await rotateAndDistributeSessionKeys(conversationId, remainingAdmin.userId)
++    
+     res.status(204).send()
+   } catch (error) {
+     next(error)
+@@ -408,19 +314,16 @@ router.delete('/:id', async (req, res, next) => {
+     if (!req.user) throw new ApiError(401, 'Authentication required.')
+     const { id } = req.params
+     const userId = req.user.id
+-    const conversation = await prisma.conversation.findUnique({
+-      where: { id },
+-      include: { participants: { select: { userId: true } } }
+-    })
+-    if (!conversation || !conversation.participants.some(p => p.userId === userId)) return res.status(404).json({ error: 'Conversation not found or you are not a participant.' })
++    const conversation = await prisma.conversation.findUnique({ where: { id }, include: { participants: { select: { userId: true } } } })
++    if (!conversation || !conversation.participants.some(p => p.userId === userId)) return res.status(404).json({ error: 'Not found or not participant.' })
+ 
+     if (conversation.isGroup) {
+-      if (conversation.creatorId !== userId) return res.status(403).json({ error: 'Only the group creator can delete the group.' })
++      if (conversation.creatorId !== userId) return res.status(403).json({ error: 'Only creator can delete.' })
+       await prisma.conversation.delete({ where: { id } })
+-      getIo().to(conversation.participants.map(p => p.userId)).emit('conversation:deleted', { id })
++      getIo().to(conversation.participants.map(p => p.userId)).emit('conversation:deleted', { id: asConversationId(id) })
+     } else {
+       await prisma.userHiddenConversation.create({ data: { userId, conversationId: id } })
+-      getIo().to(userId).emit('conversation:deleted', { id })
++      getIo().to(userId).emit('conversation:deleted', { id: asConversationId(id) })
+     }
+     res.status(204).send()
+   } catch (error) {
+@@ -435,7 +338,7 @@ router.post('/:id/pin', async (req, res, next) => {
+     const { id: conversationId } = req.params
+     const userId = req.user.id
+     const participant = await prisma.participant.findUnique({ where: { userId_conversationId: { userId, conversationId } } })
+-    if (!participant) return res.status(404).json({ error: 'You are not a participant of this conversation.' })
++    if (!participant) return res.status(404).json({ error: 'Not a participant.' })
+ 
+     const updatedParticipant = await prisma.participant.update({
+       where: { userId_conversationId: { userId, conversationId } },
+@@ -465,87 +368,24 @@ router.post('/:id/read', async (req, res, next) => {
+   }
+ })
+ 
+-// GET media for a conversation (LEGACY - Disabled due to Blind Attachments)
+-/*
+-router.get('/:id/media', requireAuth, async (req, res, next) => {
+-  try {
+-    if (!req.user) throw new ApiError(401, 'Authentication required.')
+-    const { id } = req.params
+-    const conversation = await prisma.conversation.findFirst({
+-      where: { id, participants: { some: { userId: req.user.id } } }
+-    })
+-    if (!conversation) return res.status(404).json({ message: 'Conversation not found or you are not a member.' })
+-
+-    const mediaResults = await prisma.message.findMany({
+-      where: { conversationId: id, OR: [{ imageUrl: { not: null } }, { fileUrl: { not: null } }] },
+-      orderBy: { createdAt: 'desc' },
+-      select: { id: true, imageUrl: true, fileUrl: true, fileName: true, fileType: true }
+-    })
+-
+-    const formattedMedia = mediaResults.map(msg => {
+-      const isImage = !!msg.imageUrl
+-      let type = 'DOCUMENT'
+-      if (isImage) type = 'IMAGE'
+-      else if (msg.fileType?.startsWith('video')) type = 'VIDEO'
+-      else if (msg.fileType?.startsWith('audio')) type = 'AUDIO'
+-
+-      return {
+-        id: msg.id,
+-        content: msg.imageUrl || msg.fileUrl,
+-        type,
+-        fileName: msg.fileName
+-      }
+-    })
+-    res.json(formattedMedia)
+-  } catch (error) {
+-    console.error('Failed to fetch media:', error)
+-    next(error)
+-  }
+-})
+-*/
+-
+ // Record key rotation event
+ router.post('/:id/key-rotation', async (req, res, next) => {
+   try {
+     if (!req.user) throw new ApiError(401, 'Authentication required.')
+     const { id: conversationId } = req.params
+-    // const { reason } = req.body
++    const participant = await prisma.participant.findFirst({ where: { conversationId, userId: req.user!.id } })
++    if (!participant) return res.status(404).json({ error: "Not a participant" })
+ 
+-    // Validasi bahwa pengguna adalah anggota percakapan
+-    const participant = await prisma.participant.findFirst({
+-      where: {
+-        conversationId,
+-        userId: req.user!.id
+-      }
+-    })
+-
+-    if (!participant) {
+-      return res.status(404).json({ error: "Conversation not found or you're not a participant" })
+-    }
+-
+-    // Catat bahwa rotasi kunci telah terjadi
+     const updatedConversation = await prisma.conversation.update({
+       where: { id: conversationId },
+-      data: {
+-        updatedAt: new Date() // Ini akan memperbarui timestamp terakhir
+-        // Di sini kita bisa menambahkan field khusus untuk melacak kapan kunci terakhir dirotasi
+-      }
++      data: { updatedAt: new Date() }
+     })
+ 
+-    // Di sini kita bisa menambahkan logika tambahan seperti:
+-    // - Mencatat rotasi kunci di tabel khusus
+-    // - Memberi tahu anggota lain bahwa kunci telah dirotasi
+-    // - Menandai kunci lama sebagai tidak valid
+-
+-    res.json({
+-      success: true,
+-      message: 'Key rotation recorded successfully',
+-      conversation: updatedConversation
+-    })
++    // Bebas any
++    res.json({ success: true, message: 'Key rotation recorded successfully', conversation: toConversation(updatedConversation) })
+   } catch (error) {
+-    console.error('Failed to record key rotation:', error)
+     next(error)
+   }
+ })
+ 
+-export default router
++export default router
+\ No newline at end of file
 diff --git a/server/src/routes/messages.ts b/server/src/routes/messages.ts
-index 3079ce53..8a62cd81 100644
+index 3079ce53..311d0f10 100644
 --- a/server/src/routes/messages.ts
 +++ b/server/src/routes/messages.ts
-@@ -6,6 +6,7 @@ import { prisma } from '../lib/prisma.js'
+@@ -6,6 +6,8 @@ import { prisma } from '../lib/prisma.js'
  import { Prisma } from '@prisma/client'
  import { requireAuth } from '../middleware/auth.js'
  import { getIo } from '../socket.js'
-+import type { RawServerMessage } from '@nyx/shared'
++import { asConversationId, asMessageId } from '@nyx/shared'
++import { toRawServerMessage } from '../utils/mappers.js'
  import { ApiError } from '../utils/errors.js'
  import { sendPushNotification } from '../utils/sendPushNotification.js'
  import { deleteR2File } from '../utils/r2.js'
-@@ -233,7 +234,7 @@ router.post('/', zodValidate({
+@@ -38,7 +40,7 @@ router.get('/:conversationId', async (req, res, next) => {
+     const messages = await prisma.message.findMany({
+       where: {
+         conversationId,
+-        // Hanya ambil pesan setelah user join (opsional, tergantung kebutuhan bisnis)
++        // Hanya ambil pesan setelah user join
+         createdAt: { gte: participant.joinedAt }
+       },
+       take: 50, // Ubah jadi positive jika pakai cursor ID yang benar, atau negative untuk "latest"
+@@ -58,8 +60,11 @@ router.get('/:conversationId', async (req, res, next) => {
+       }
+     })
  
-     // 6. SOCKET & PUSH (Background / Fire & Forget)
-     // Socket emit
++    // MAPPING KE SAFE TYPE (Bebas dari any)
++    const safeMessages = messages.map(toRawServerMessage);
++
+     // Reverse biar di frontend urutannya bener (Oldest -> Newest)
+-    res.json({ items: messages.reverse() })
++    res.json({ items: safeMessages.reverse() })
+   } catch (error) {
+     next(error)
+   }
+@@ -68,12 +73,12 @@ router.get('/:conversationId', async (req, res, next) => {
+ // GET Context (Surrounding Messages)
+ router.get('/context/:id', requireAuth, async (req, res, next) => {
+   try {
+-    const targetId = req.params.id;
++    const targetId = req.params.id as string;
+ 
+     // Get the target message first to find its timestamp and conversationId
+     const targetMsg = await prisma.message.findUnique({
+-      where: { id: targetId as string },
+-      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
++      where: { id: targetId },
++      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }, statuses: true }
+     });
+ 
+     if (!targetMsg) {
+@@ -91,7 +96,7 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
+       where: { conversationId: targetMsg.conversationId, createdAt: { lt: targetMsg.createdAt, gte: participation.joinedAt } },
+       orderBy: { createdAt: 'desc' },
+       take: 20,
+-      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
++      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }, statuses: true }
+     });
+ 
+     // Fetch newer messages (after target)
+@@ -99,13 +104,16 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
+       where: { conversationId: targetMsg.conversationId, createdAt: { gt: targetMsg.createdAt, gte: participation.joinedAt } },
+       orderBy: { createdAt: 'asc' },
+       take: 20,
+-      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
++      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }, statuses: true }
+     });
+ 
+     // Combine and sort chronologically
+-    const allMessages = [...older.reverse(), targetMsg, ...newer];
++    const allMessagesRaw = [...older.reverse(), targetMsg, ...newer];
++
++    // MAPPING KE SAFE TYPE
++    const safeMessages = allMessagesRaw.map(toRawServerMessage);
+ 
+-    res.json({ items: allMessages, conversationId: targetMsg.conversationId });
++    res.json({ items: safeMessages, conversationId: asConversationId(targetMsg.conversationId) });
+   } catch (error) {
+     next(error);
+   }
+@@ -148,7 +156,6 @@ router.post('/', zodValidate({
+     }
+ 
+     // 2. BLOCKING CHECK & REPLY DEPTH (Parallel)
+-    // Jalankan pengecekan berat secara paralel
+     const checks = []
+ 
+     // Cek Blocking (Khusus 1-on-1)
+@@ -159,8 +166,8 @@ router.post('/', zodValidate({
+           prisma.blockedUser.findFirst({
+             where: {
+               OR: [
+-                { blockerId: senderId, blockedId: otherUserId }, // Sender ngeblok Receiver
+-                { blockerId: otherUserId, blockedId: senderId } // Receiver ngeblok Sender
++                { blockerId: senderId, blockedId: otherUserId },
++                { blockerId: otherUserId, blockedId: senderId }
+               ]
+             }
+           }).then(block => {
+@@ -192,14 +199,13 @@ router.post('/', zodValidate({
+     // Tunggu validasi selesai
+     await Promise.all(checks)
+ 
+-    // 4. DATABASE TRANSACTION (Critical Path)
+-    // Buat array status insert
++    // 4. DATABASE TRANSACTION
+     const statusData: Prisma.MessageStatusCreateManyMessageInput[] = participants.map(p => ({
+       userId: p.userId,
+-      status: p.userId === senderId ? 'READ' : 'SENT' // Pakai string literal enum
++      status: p.userId === senderId ? 'READ' : 'SENT'
+     }))
+ 
+-    const [newMessage] = await prisma.$transaction([
++    const [newMessageRaw] = await prisma.$transaction([
+       prisma.message.create({
+         data: {
+           conversationId,
+@@ -207,10 +213,10 @@ router.post('/', zodValidate({
+           content,
+           sessionId,
+           repliedToId,
+-          expiresAt, // Store expiration time
++          expiresAt, 
+           isViewOnce: isViewOnce === true,
+           statuses: {
+-            createMany: { data: statusData } // createMany lebih cepat dari nested create
++            createMany: { data: statusData } 
+           }
+         },
+         include: {
+@@ -221,28 +227,32 @@ router.post('/', zodValidate({
+       }),
+       prisma.conversation.update({
+         where: { id: conversationId },
+-        data: { lastMessageAt: new Date() } // Pakai new Date() langsung
++        data: { lastMessageAt: new Date() }
+       })
+     ])
+ 
+-    // 5. REALTIME RESPONSE (Prioritas Tinggi)
+-    const messageToBroadcast = { ...newMessage, tempId }
++    // MAPPING KE SAFE TYPE
++    const safeMessage = toRawServerMessage(newMessageRaw);
++
++    // Inject tempId dari client agar UI tahu pesan mana yang sudah sukses (Optimistic UI)
++    if (tempId !== undefined) {
++      safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
++    }
+ 
+     // Kirim response HTTP dulu biar UI user sender update
+-    res.status(201).json(messageToBroadcast)
++    res.status(201).json(safeMessage)
+ 
+-    // 6. SOCKET & PUSH (Background / Fire & Forget)
+-    // Socket emit
 -    getIo().to(conversationId).emit('message:new', messageToBroadcast)
-+    getIo().to(conversationId).emit('message:new', messageToBroadcast as unknown as RawServerMessage)
++    // 6. SOCKET & PUSH
++    // Emit ke socket dengan tipe yang valid
++    getIo().to(conversationId).emit('message:new', safeMessage)
  
-     // Push Notification (JANGAN DI-AWAIT)
+-    // Push Notification (JANGAN DI-AWAIT)
++    // Push Notification
      const pushRecipients = participants.filter(p => p.userId !== senderId)
+     if (pushRecipients.length > 0) {
+       const payload = {
+-        data: { conversationId, messageId: newMessage.id }
++        data: { conversationId, messageId: safeMessage.id }
+       }
+ 
+-      // Jalankan loop push secara paralel tanpa nunggu
+       Promise.all(
+         pushRecipients.map(p => sendPushNotification(p.userId, payload))
+       ).catch(err => console.error('[Push] Failed:', err))
+@@ -264,10 +274,7 @@ router.delete('/:id', async (req, res, next) => {
+     if (!message) return res.status(404).json({ error: 'Message not found' })
+     if (message.senderId !== userId) return res.status(403).json({ error: 'You can only delete your own messages' })
+ 
+-    // Hapus file dari R2 (Blind Attachment via Query Param)
+     if (r2Key) {
+-       // [SECURITY] Validate ownership via filename convention
+-       // Format: folder/userId-uuid.ext
+        const parts = r2Key.split('/');
+        const filename = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+ 
+@@ -281,10 +288,10 @@ router.delete('/:id', async (req, res, next) => {
+ 
+     await prisma.message.delete({ where: { id } })
+ 
+-    // Emit event
++    // Emit event menggunakan branded ID
+     getIo().to(message.conversationId).emit('message:deleted', {
+-      conversationId: message.conversationId,
+-      id: message.id
++      conversationId: asConversationId(message.conversationId),
++      id: asMessageId(message.id)
+     })
+ 
+     res.status(204).send()
+@@ -303,7 +310,6 @@ router.put('/:id/viewed', async (req, res, next) => {
+     const message = await prisma.message.findUnique({ where: { id: messageId }, include: { conversation: { include: { participants: true } } } });
+     if (!message || !message.isViewOnce || message.senderId === userId) return res.status(400).json({ error: 'Invalid operation' });
+ 
+-    // NEW: Check participation
+     const isParticipant = message.conversation.participants.some(p => p.userId === userId);
+     if (!isParticipant) return res.status(403).json({ error: 'Not a participant' });
+ 
+@@ -312,14 +318,16 @@ router.put('/:id/viewed', async (req, res, next) => {
+       data: { isViewed: true }
+     });
+ 
+-    // Notify sender and receiver
+-    const io = getIo();
+-    io.to(message.conversationId).emit('message:viewed', { messageId, conversationId: message.conversationId });
++    // Notify sender and receiver dengan branded IDs
++    getIo().to(message.conversationId).emit('message:viewed', { 
++      messageId: asMessageId(messageId), 
++      conversationId: asConversationId(message.conversationId) 
++    });
+ 
+-    res.json(updated);
++    res.json(updated); // atau mapping ke format baru jika diperlukan
+   } catch (error) {
+     next(error);
+   }
+ });
+ 
+-export default router
++export default router
+\ No newline at end of file
 diff --git a/server/src/routes/sessions.ts b/server/src/routes/sessions.ts
 index f96162ce..dd452e28 100644
 --- a/server/src/routes/sessions.ts
@@ -420,10 +1156,22 @@ index cf6f0bb7..d9a379a4 100644
        }
  
 diff --git a/server/src/socket.ts b/server/src/socket.ts
-index d4058c32..fb5345a1 100644
+index d4058c32..970e2458 100644
 --- a/server/src/socket.ts
 +++ b/server/src/socket.ts
-@@ -16,62 +16,25 @@ import crypto from "crypto";
+@@ -5,10 +5,9 @@ import { Server, Socket } from "socket.io";
+ import type { Server as HttpServer } from "http";
+ import { env } from "./config.js";
+ import { prisma } from "./lib/prisma.js";
+-import { verifyJwt, signAccessToken, newJti, refreshExpiryDate } from "./utils/jwt.js";
++import { verifyJwt } from "./utils/jwt.js";
+ import { sendPushNotification } from "./utils/sendPushNotification.js";
+ import { redisClient } from "./lib/redis.js"; // Client untuk data aplikasi (Presence, dll)
+-import type { Message } from "@prisma/client";
+ import { AuthPayload } from "./types/auth.js";
+ import cookie from "cookie"; 
+ import crypto from "crypto";
+@@ -16,62 +15,27 @@ import crypto from "crypto";
  // --- REDIS ADAPTER IMPORTS ---
  import { createClient } from "redis";
  import { createAdapter } from "@socket.io/redis-adapter";
@@ -476,6 +1224,7 @@ index d4058c32..fb5345a1 100644
 -  sessionId?: string;
 -  encryptedKey: string;
 -}
++import { toRawServerMessage } from './utils/mappers.js';
 +import type { 
 +  ServerToClientEvents, 
 +  ClientToServerEvents, 
@@ -486,7 +1235,8 @@ index d4058c32..fb5345a1 100644
 +  MarkAsReadPayload,
 +  KeyRequestPayload,
 +  GroupKeyRequestPayload,
-+  KeyFulfillmentPayload
++  KeyFulfillmentPayload,
++  RawServerMessage
 +} from "@nyx/shared";
  
  // Extend the Socket type from Socket.IO to include our custom user property
@@ -500,7 +1250,7 @@ index d4058c32..fb5345a1 100644
  
  export function getIo() {
    if (!io) {
-@@ -81,7 +44,7 @@ export function getIo() {
+@@ -81,16 +45,16 @@ export function getIo() {
  }
  
  export function registerSocket(httpServer: HttpServer) {
@@ -509,7 +1259,18 @@ index d4058c32..fb5345a1 100644
      cors: {
        origin: (origin, callback) => {
          if (!origin) return callback(null, true);
-@@ -214,7 +177,7 @@ export function registerSocket(httpServer: HttpServer) {
+         
+-        // 👇 PERBAIKAN: Ratakan array
++        // Ratakan array
+         const baseOrigins = Array.isArray(env.corsOrigin) ? env.corsOrigin : [env.corsOrigin];
+ 
+         const allowedOrigins = [
+-          ...baseOrigins, // 👈 PERBAIKAN: Gunakan spread operator (...)
++          ...baseOrigins, 
+           "http://localhost:5173", 
+           "http://localhost:4173",
+           // Tambahkan domain HTTP untuk support Cloudflare Tunnel
+@@ -214,7 +178,7 @@ export function registerSocket(httpServer: HttpServer) {
           await socket.join(`linking:${linkingToken}`);
           
           if (typeof callback === 'function') {
@@ -518,34 +1279,260 @@ index d4058c32..fb5345a1 100644
           }
        });
  
-@@ -348,7 +311,7 @@ export function registerSocket(httpServer: HttpServer) {
+@@ -263,8 +227,8 @@ export function registerSocket(httpServer: HttpServer) {
+     }
+ 
+     // --- RATE LIMITER HELPER ---
+-    const checkRateLimit = async (userId: string, event: string, limit: number, windowSeconds: number): Promise<boolean> => {
+-      const key = `rate_limit:socket:${event}:${userId}`;
++    const checkRateLimit = async (userIdStr: string, event: string, limit: number, windowSeconds: number): Promise<boolean> => {
++      const key = `rate_limit:socket:${event}:${userIdStr}`;
+       const current = await redisClient.incr(key);
+       if (current === 1) {
+         await redisClient.expire(key, windowSeconds);
+@@ -276,7 +240,7 @@ export function registerSocket(httpServer: HttpServer) {
+ 
+     socket.on("conversation:join", async (conversationId: string) => {
+       // 1. Rate Limit
+-      if (!await checkRateLimit(userId, 'join', 10, 60)) { // 10 joins / minute
++      if (!await checkRateLimit(userId, 'join', 10, 60)) { 
+         return socket.emit("error", { message: "Rate limit exceeded" });
+       }
+ 
+@@ -293,10 +257,6 @@ export function registerSocket(httpServer: HttpServer) {
+ 
+         if (participant) {
+           socket.join(conversationId);
+-        } else {
+-          // Silent fail or emit error? Silent is better for security (anti-guessing)
+-          // But for UX, maybe a generic error.
+-          // socket.emit("error", { message: "Unauthorized" });
+         }
+       } catch (e) {
+         console.error("Error joining conversation:", e);
+@@ -304,26 +264,21 @@ export function registerSocket(httpServer: HttpServer) {
+     });
+ 
+     socket.on("typing:start", async ({ conversationId }: TypingPayload) => {
+-      if (!await checkRateLimit(userId, 'typing', 20, 10)) return; // 20 typing events / 10s (prevent spam)
++      if (!await checkRateLimit(userId, 'typing', 20, 10)) return; 
+ 
+       if (conversationId && socket.user) {
+-        // Optional: Check membership if you want to be super paranoid, 
+-        // but since typing only goes to the room (which is secured above), it's less critical.
+-        // However, if they bypass join, they can't emit to the room unless they are IN it.
+-        // Socket.IO rooms require the socket to be joined.
+         socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: true });
+       }
+     });
+ 
+     socket.on("typing:stop", ({ conversationId }: TypingPayload) => {
+-       // Rate limit not strictly needed for stop, but good practice.
+        if (conversationId && socket.user) {
+         socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: false });
+       }
+     });
+ 
+     socket.on('messages:distribute_keys', async ({ conversationId, keys }: DistributeKeysPayload) => {
+-      if (!await checkRateLimit(userId, 'keys', 50, 60)) return; // 50 key distributions / minute
++      if (!await checkRateLimit(userId, 'keys', 50, 60)) return; 
+       
+       if (!keys || !Array.isArray(keys) || !conversationId) return;
+       
+@@ -348,7 +303,7 @@ export function registerSocket(httpServer: HttpServer) {
        }
      });
  
 -    socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: Message, error?: string }) => void) => {
-+    socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: any, error?: string }) => void) => {
++    socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => void) => {
        // 1. Sandbox Rate Limit (Strict)
        const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
  
-@@ -438,7 +401,7 @@ export function registerSocket(httpServer: HttpServer) {
-         const finalMessage = { ...newMessage, tempId };
+@@ -358,7 +313,6 @@ export function registerSocket(httpServer: HttpServer) {
+           try {
+               const key = `sandbox:msg:${userId}`;
+               
+-              // Atomic Lua script: INCR + conditional EXPIRE in one operation
+               const luaScript = `
+                 local c = redis.call("INCR", KEYS[1]);
+                 if c == 1 then redis.call("EXPIRE", KEYS[1], ARGV[1]) end;
+@@ -382,17 +336,16 @@ export function registerSocket(httpServer: HttpServer) {
+               }
+           } catch (redisError) {
+               console.error(`[SANDBOX] Redis error:`, redisError);
+-              // If Redis fails, still enforce the limit by blocking (fail-safe)
+               return callback?.({ ok: false, error: "Service unavailable. Try again later." });
+           }
+       }
+ 
+       // 2. Standard Rate Limit
+-      if (!await checkRateLimit(userId, 'message', 15, 60)) { // 15 messages / minute
++      if (!await checkRateLimit(userId, 'message', 15, 60)) { 
+          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
+       }
+ 
+-      const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId } = message as any;
++      const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId } = message;
+ 
+       if (!content || typeof content !== 'string' || content.length > 10000) {
+         return callback?.({ ok: false, error: "Invalid message content." });
+@@ -407,7 +360,6 @@ export function registerSocket(httpServer: HttpServer) {
+           return callback?.({ ok: false, error: "Conversation not found." });
+         }
+ 
+-        // Validate reply target belongs to the same conversation
+         if (repliedToId) {
+           const targetMessage = await prisma.message.findUnique({
+             where: { id: repliedToId },
+@@ -419,37 +371,43 @@ export function registerSocket(httpServer: HttpServer) {
+           }
+         }
+         
+-        const newMessage = await prisma.message.create({
++        // --- TYPE SAFE DB TRANSACTION ---
++        const newMessageRaw = await prisma.message.create({
+           data: { 
+               conversationId, 
+               senderId: userId, 
+               content, 
+-              sessionId,
+-              repliedToId,
+-              expiresAt: expiresAt ? new Date(expiresAt) : null, // Save expiration
++              sessionId: sessionId || null,
++              repliedToId: repliedToId || null,
++              expiresAt: expiresAt ? new Date(expiresAt) : null, 
+               isViewOnce: isViewOnce === true
+           },
+           include: { 
+               sender: { select: { id: true, encryptedProfile: true } },
+-              repliedTo: true
++              repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }
+           }
+         });
+         
+-        const finalMessage = { ...newMessage, tempId };
++        // Mapping ke Type-Safe RawServerMessage
++        const safeMessage = toRawServerMessage(newMessageRaw);
++        
++        if (tempId !== undefined) {
++          safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
++        }
          
          conversation.participants.forEach(participant => {
 -          io.to(participant.userId).emit('message:new', finalMessage);
-+          io.to(participant.userId).emit('message:new', finalMessage as any);
++          io.to(participant.userId).emit('message:new', safeMessage);
            
            if (participant.userId !== userId) {
               const encryptedPushPayload = pushPayloads ? pushPayloads[participant.userId] : null;
-@@ -560,7 +523,7 @@ export function registerSocket(httpServer: HttpServer) {
+              sendPushNotification(participant.userId, {
+                  type: encryptedPushPayload ? 'ENCRYPTED_MESSAGE' : 'GENERIC_MESSAGE',
+-                 data: { conversationId, messageId: newMessage.id, encryptedPushPayload }
++                 data: { conversationId, messageId: safeMessage.id, encryptedPushPayload: encryptedPushPayload || undefined }
+              }).catch(console.error);
+           }
+         });
+         
+-        callback?.({ ok: true, msg: finalMessage });
++        callback?.({ ok: true, msg: safeMessage });
+       } catch (error) {
+         console.error("Failed to process message:", error);
+         callback?.({ ok: false, error: "Failed to send." });
+@@ -471,38 +429,36 @@ export function registerSocket(httpServer: HttpServer) {
+ 
+     socket.on('message:mark_as_read', async ({ messageId, conversationId }: MarkAsReadPayload) => {
+       if (!messageId || !socket.user) return;
+-      const userId = socket.user.id;
++      const uid = socket.user.id; // Aliased to avoid closure confusion
+ 
+       try {
+         const msg = await prisma.message.findUnique({ select: { id: true, conversationId: true }, where: { id: messageId } });
+         if (!msg || msg.conversationId !== conversationId) return;
+ 
+-        const isParticipant = await prisma.participant.findFirst({ where: { conversationId, userId } });
++        const isParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: uid } });
+         if (!isParticipant) return;
+ 
+         await prisma.messageStatus.upsert({
+-          where: { messageId_userId: { messageId, userId } },
++          where: { messageId_userId: { messageId, userId: uid } },
+           update: { status: 'READ' },
+-          create: { messageId, userId, status: 'READ' },
++          create: { messageId, userId: uid, status: 'READ' },
+         });
+         
+-        // Fix Unread Count Reappearing: Update the participant's last read message
+         await prisma.participant.update({
+-          where: { userId_conversationId: { userId, conversationId } },
++          where: { userId_conversationId: { userId: uid, conversationId } },
+           data: { lastReadMsgId: messageId }
+         });
+         
+-        // Fetch full message metadata only if needed for broadcast
+-        const message = await prisma.message.findUnique({
++        const messageInfo = await prisma.message.findUnique({
+           where: { id: messageId },
+           select: { senderId: true, conversationId: true },
+         });
+         
+-        if (message && message.senderId !== userId) {
+-          io.to(message.senderId).emit('message:status_updated', {
++        if (messageInfo && messageInfo.senderId !== uid) {
++          io.to(messageInfo.senderId).emit('message:status_updated', {
+             messageId,
+-            conversationId: message.conversationId,
+-            readBy: userId,
++            conversationId: messageInfo.conversationId,
++            readBy: uid,
+             status: 'READ',
+           });
+         }
+@@ -534,7 +490,6 @@ export function registerSocket(httpServer: HttpServer) {
+         
+         if (onlineParticipants.length > 0) {
+           const fulfillerId = onlineParticipants[0].userId;
+-          // OPTIMIZATION: Use socket.user.publicKey instead of DB query
+           const requesterPublicKey = socket.user?.publicKey;
+           
+           if (requesterPublicKey) {
+@@ -560,30 +515,26 @@ export function registerSocket(httpServer: HttpServer) {
        });
      });
  
 -    socket.on("session:request_missing", async ({ conversationId, sessionId }) => {
 +    socket.on("session:request_missing", async ({ conversationId, sessionId }: { conversationId: string, sessionId: string }) => {
        try {
-         const userId = socket.user?.id;
-         if (!userId) return;
-@@ -593,7 +556,7 @@ export function registerSocket(httpServer: HttpServer) {
+-        const userId = socket.user?.id;
+-        if (!userId) return;
++        const uid = socket.user?.id;
++        if (!uid) return;
+ 
+-        // Validate membership to prevent IDOR/Spam
+         const isParticipant = await prisma.participant.findFirst({
+-          where: { conversationId, userId }
++          where: { conversationId, userId: uid }
+         });
+ 
+         if (!isParticipant) {
+-          console.warn(`[Socket] Unauthorized session key request from ${userId} to ${conversationId}`);
++          console.warn(`[Socket] Unauthorized session key request from ${uid} to ${conversationId}`);
+           return;
+         }
+ 
+-        // Rate Limit (e.g. 10 requests / 60 seconds)
+-        if (!await checkRateLimit(userId, 'session_request_missing', 10, 60)) {
++        if (!await checkRateLimit(uid, 'session_request_missing', 10, 60)) {
+           return socket.emit("error", { message: "Rate limit exceeded for missing key requests." });
+         }
+ 
+-        // Broadcast ke semua member di room percakapan
+-        // "Hei, ada user (userId) yang butuh kunci sesi (sessionId) nih!"
+         socket.to(conversationId).emit("session:key_requested", {
+-          requesterId: userId,
++          requesterId: uid,
+           conversationId,
+           sessionId
+         });
+@@ -593,11 +544,10 @@ export function registerSocket(httpServer: HttpServer) {
        }
      });
  
@@ -554,6 +1541,197 @@ index d4058c32..fb5345a1 100644
        const { conversationId, sessionId, targetId } = data;
        if (!conversationId) return;
  
+-      // [NEW] Targeted Key Request (Auto-Heal Relay)
+       if (targetId) {
+           try {
+             const participants = await prisma.participant.findMany({
+@@ -625,7 +575,6 @@ export function registerSocket(httpServer: HttpServer) {
+           return;
+       }
+ 
+-      // Legacy/Broadcast Fallback
+       if (!sessionId) return;
+ 
+       const isParticipant = await prisma.participant.findFirst({
+@@ -646,7 +595,6 @@ export function registerSocket(httpServer: HttpServer) {
+         
+         if (onlineParticipants.length > 0) {
+           const fulfillerId = onlineParticipants[0].userId;
+-          // OPTIMIZATION: Use socket.user.publicKey instead of DB query
+           const requesterPublicKey = socket.user?.publicKey;
+           
+           if (requesterPublicKey) {
+@@ -677,13 +625,11 @@ export function registerSocket(httpServer: HttpServer) {
+     // === WEBRTC E2EE SIGNALING (P2P CALLS) ===
+     socket.on('webrtc:secure_signal', (data: { to: string, type: string, payload: string }) => {
+       if (!data || !data.to) return;
+-      // Server is completely blind to the payload (contains offer/answer/ice/profile)
+       socket.to(data.to).emit('webrtc:secure_signal', { from: userId, type: data.type, payload: data.payload });
+     });
+ 
+     // === DEVICE MIGRATION TUNNEL ===
+     socket.on('migration:join', (roomId: string) => {
+-      // Allow logged-in user to join a migration room (just in case they are the receiver somehow)
+       if (typeof roomId === 'string' && roomId.startsWith('mig_') && roomId.length > 20) {
+         socket.join(roomId);
+       } else {
+@@ -697,15 +643,14 @@ export function registerSocket(httpServer: HttpServer) {
+         return;
+       }
+       
+-      // Mark ownership of this room to the current authenticated user
+       await redisClient.setEx(`migration_owner:${data.roomId}`, 3600, userId);
+       socket.to(data.roomId).emit('migration:start', data);
+     });
+ 
+-    socket.on('migration:chunk', async (data: { roomId: string, chunkIndex: number, chunk: any }) => {
++    // PENGHAPUSAN ANY DI SINI: ganti "chunk: any" dengan tipe yang valid (misalnya ArrayBuffer untuk binary)
++    socket.on('migration:chunk', async (data: { roomId: string, chunkIndex: number, chunk: ArrayBuffer }) => {
+       if (!data || !data.roomId || typeof data.roomId !== 'string') return;
+       
+-      // Verify ownership
+       const ownerId = await redisClient.get(`migration_owner:${data.roomId}`);
+       if (ownerId !== userId) {
+         socket.emit("error", { message: "Permission denied for this migration room" });
+@@ -740,7 +685,7 @@ export function registerSocket(httpServer: HttpServer) {
+       }
+     });
+ 
+-    // Disconnect Handler (Untuk User)
++    // Disconnect Handler
+     socket.on("disconnect", async () => {
+        const userSocketsKey = `user:${userId}:sockets`;
+        await redisClient.sRem(userSocketsKey, socket.id);
+@@ -754,7 +699,7 @@ export function registerSocket(httpServer: HttpServer) {
+        }, 5000);
+     });
+ 
+-  }); // End io.on connection
++  }); 
+ 
+   return io;
+ }
+\ No newline at end of file
+diff --git a/server/src/utils/mappers.ts b/server/src/utils/mappers.ts
+new file mode 100644
+index 00000000..7887f03a
+--- /dev/null
++++ b/server/src/utils/mappers.ts
+@@ -0,0 +1,113 @@
++import { 
++  asUserId,
++  asConversationId,
++  asMessageId,
++  type RawServerMessage, 
++  type Conversation, 
++  type Participant, 
++  type MinimalProfile
++} from '@nyx/shared';
++
++// --- 1. DEFINISI INPUT (Murni tanpa any) ---
++
++export interface PrismaUserProfileInput {
++  id: string;
++  username?: string | null;
++  name?: string | null;
++  avatarUrl?: string | null;
++  encryptedProfile?: string | null;
++}
++
++export interface PrismaParticipantInput {
++  id: string;
++  userId: string;
++  role: string;
++  isPinned?: boolean;
++  user?: PrismaUserProfileInput | null; // Strict typing untuk relasi user
++}
++
++export interface PrismaMessageInput {
++  id: string;
++  tempId?: number | null;
++  type?: string;
++  conversationId: string;
++  senderId: string;
++  ciphertext?: string | null;
++  content?: string | null;
++  fileKey?: string | null;
++  sessionId?: string | null;
++  encryptedSessionKey?: string | null;
++  createdAt: Date;
++  expiresAt?: Date | null;
++  isViewOnce?: boolean | null;
++  repliedToId?: string | null;
++  sender?: PrismaUserProfileInput | null; // Strict typing untuk pengirim
++  repliedTo?: PrismaMessageInput | null;  // Strict typing REKURSIF untuk pesan balasan
++}
++
++export interface PrismaConversationInput {
++  id: string;
++  isGroup?: boolean | null;
++  type?: string | null;
++  encryptedMetadata?: string | null;
++  creatorId?: string | null;
++  createdAt: Date;
++  updatedAt: Date;
++  participants?: PrismaParticipantInput[]; // Strict typing untuk array participant
++}
++
++
++// --- 2. MAPPER FUNCTIONS ---
++
++export const toMinimalProfile = (user: PrismaUserProfileInput): MinimalProfile => ({
++  id: asUserId(user.id),
++  username: user.username ?? '',
++  name: user.name ?? '',
++  avatarUrl: user.avatarUrl,
++  encryptedProfile: user.encryptedProfile,
++});
++
++export const toParticipant = (p: PrismaParticipantInput): Participant => ({
++  id: asUserId(p.id),
++  userId: asUserId(p.userId),
++  role: (p.role === 'ADMIN' || p.role === 'MEMBER' || p.role === 'admin' || p.role === 'member') ? p.role as Participant['role'] : 'MEMBER',
++  isPinned: p.isPinned ?? false,
++  // Mapping langsung yang aman karena p.user sudah sesuai interface
++  name: p.user?.name ?? undefined,
++  username: p.user?.username ?? undefined,
++  avatarUrl: p.user?.avatarUrl ?? undefined,
++  encryptedProfile: p.user?.encryptedProfile ?? undefined,
++});
++
++export const toConversation = (conv: PrismaConversationInput): Conversation => ({
++  id: asConversationId(conv.id),
++  // Cek isGroup langsung, atau fallback ke logic type 'GROUP'
++  isGroup: conv.isGroup ?? (conv.type === 'GROUP'), 
++  encryptedMetadata: conv.encryptedMetadata ?? undefined,
++  creatorId: conv.creatorId ? asUserId(conv.creatorId) : undefined,
++  createdAt: conv.createdAt.toISOString(),
++  updatedAt: conv.updatedAt.toISOString(),
++  participants: conv.participants ? conv.participants.map(toParticipant) : [],
++  unreadCount: 0,
++  lastMessage: null,
++});
++
++export const toRawServerMessage = (msg: PrismaMessageInput): RawServerMessage => ({
++  id: asMessageId(msg.id),
++  tempId: msg.tempId ?? undefined,
++  type: (msg.type === 'USER' || msg.type === 'SYSTEM') ? msg.type : 'USER',
++  conversationId: asConversationId(msg.conversationId),
++  senderId: asUserId(msg.senderId),
++  sender: msg.sender ? toMinimalProfile(msg.sender) : undefined,
++  ciphertext: msg.ciphertext,
++  content: msg.content,
++  fileKey: msg.fileKey,
++  sessionId: msg.sessionId,
++  encryptedSessionKey: msg.encryptedSessionKey,
++  createdAt: msg.createdAt.toISOString(),
++  expiresAt: msg.expiresAt ? msg.expiresAt.toISOString() : undefined,
++  isViewOnce: msg.isViewOnce ?? false,
++  repliedToId: msg.repliedToId ? asMessageId(msg.repliedToId) : undefined,
++  // Pemanggilan rekursif yang aman karena msg.repliedTo sesuai dengan PrismaMessageInput
++  repliedTo: msg.repliedTo ? toRawServerMessage(msg.repliedTo) : undefined,
++});
+\ No newline at end of file
 diff --git a/web/src/components/AddParticipantModal.tsx b/web/src/components/AddParticipantModal.tsx
 index aaaa0929..f4027788 100644
 --- a/web/src/components/AddParticipantModal.tsx
@@ -642,7 +1820,7 @@ index e5a0065e..e858d1cb 100644
      setSearchQuery('');
    };
 diff --git a/web/src/lib/socket.ts b/web/src/lib/socket.ts
-index 24b95406..d6c86517 100644
+index 24b95406..171f55a0 100644
 --- a/web/src/lib/socket.ts
 +++ b/web/src/lib/socket.ts
 @@ -13,7 +13,7 @@ import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGrou
@@ -654,12 +1832,31 @@ index 24b95406..d6c86517 100644
  import { triggerReceiveFeedback } from "@utils/feedback";
  
  const WS_URL = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL;
-@@ -191,7 +191,7 @@ export function getSocket() {
+@@ -191,7 +191,26 @@ export function getSocket() {
      });
  
      socket.on("message:updated", (updatedMessage) => {
 -      updateMessage(updatedMessage.conversationId, updatedMessage.id, updatedMessage);
-+      if (updatedMessage.conversationId) updateMessage(updatedMessage.conversationId, updatedMessage.id, updatedMessage as Partial<Message>);
++      if (!updatedMessage.conversationId || !updatedMessage.id) return;
++
++      // FILTER KEAMANAN E2EE:
++      // Kita pisahkan (destructure) field yang berpotensi merusak plaintext lokal.
++      // 'content', 'ciphertext', dan 'fileKey' dari server adalah data mentah/terenkripsi, 
++      // jadi kita BUNGKAM dan tidak memasukkannya ke dalam safeUpdates.
++      const { 
++        content: _rawContent, 
++        ciphertext: _rawCiphertext, 
++        fileKey: _rawFileKey,
++        encryptedSessionKey: _rawSessionKey,
++        ...safeUpdates 
++      } = updatedMessage;
++
++      // Sekarang safeUpdates hanya berisi metadata yang aman (seperti status, isViewed, dll)
++      updateMessage(
++        updatedMessage.conversationId, 
++        updatedMessage.id, 
++        safeUpdates as Partial<Message>
++      );
      });
  
      socket.on("message:deleted", ({ conversationId, id }) => {
