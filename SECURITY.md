@@ -34,4 +34,11 @@ We are particularly interested in finding flaws in:
 ## 🎖️ Hall of Fame / Bounty
 At this current stage, NYX is a highly specialized open-source project and does not offer financial bug bounties. However, researchers who submit valid, critical vulnerability reports will receive **immense respect, public credit in our release notes (Hall of Fame), and written endorsements** for their professional portfolios.
 
+### 🏆 The Elite Operatives
+We deeply appreciate the following researchers who have successfully breached our defenses and helped make NYX more secure. Your names are permanently etched into the NYX architecture:
+
+| Operative (Name / Handle) | Date | Vulnerability Class | Portfolio / Social Link |
+| :--- | :--- | :--- | :--- |
+| *[Available for the finder!]* | - | - | - |
+
 > *"Security is a continuous operation, not a state of rest."*

@@ -5,12 +5,18 @@
 </p>
 <h1 align="center">NYX - Zero-Knowledge Messenger</h1>
 
-![Version](https://img.shields.io/badge/version-2.5.4-blue?style=for-the-badge)
-![License](https://img.shields.io/badge/License-AGPLv3-red?style=for-the-badge)
-![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
-![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
-![Tailwind](https://img.shields.io/badge/Tailwind_v4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)
-![pnpm](https://img.shields.io/badge/pnpm-F69220?style=for-the-badge&logo=pnpm&logoColor=white)
+<p align="center">
+  <a href="https://nyx-app.my.id"><strong>🌐 Access the Official Web Client: nyx-app.my.id</strong></a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-2.5.4-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/License-AGPLv3-red?style=for-the-badge" alt="License">
+  <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="Typescript">
+  <img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React">
+  <img src="https://img.shields.io/badge/Tailwind_v4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white" alt="Tailwind">
+  <img src="https://img.shields.io/badge/pnpm-F69220?style=for-the-badge&logo=pnpm&logoColor=white" alt="pnpm">
+</p>
 
 > **"Privacy is not a feature. It's the architecture."**
 
@@ -131,6 +137,26 @@ Please check the `CONTRIBUTING.md` and use the provided PR templates.
 
 ---
 
+## 👨‍💻 Author
+
+**Han**
+*Creator & Lead Architect of NYX*
+- 🐙 GitHub: [@h4nzs](https://github.com/h4nzs)
+- 💼 LinkedIn: [han](https://linkedin.com/in/muhammad-dehan-amada)
+- 🌐 Website: [portfolio](https://h4nzs.github.io/portofolio)
+
+## ✨ Contributors
+
+NYX wouldn't be the fortress it is today without the support and code from our open-source community. Thank you to everyone who has helped build and secure this project!
+
+<a href="https://github.com/h4nzs/nyx-chat/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=h4nzs/nyx-chat" alt="NYX Contributors" />
+</a>
+
+> **Want to join the ranks?** Check out the [Contributing Guide](CONTRIBUTING.md) to get started!
+
+---
+
 ## ⚖️ License & Commercial Use
 
 NYX is distributed under the **[AGPL-3.0 License](LICENSE)**.
@@ -145,9 +171,9 @@ If you are a corporation, startup, or enterprise looking to integrate NYX into a
 
 ---
 
-## 🦉 Branding & Anti-Impersonation Policy
+## 🌙 Branding & Anti-Impersonation Policy
 
-While the term "NYX" may be used broadly in various contexts, the **specific visual identity, custom logos (including the owl insignia), and the direct reputation of this specific repository** are the intellectual property of the core maintainer.
+While the term "NYX" may be used broadly in various contexts, the **specific visual identity, custom logos, and the direct reputation of this specific repository** are the intellectual property of the core maintainer.
 
  The AGPL-3.0 license grants you the freedom to use, modify, and distribute the source code. However, it **does not** grant you the right to impersonate this official project.
 

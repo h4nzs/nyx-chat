@@ -93,13 +93,5 @@
     "workbox-routing": "^7.4.0",
     "workbox-strategies": "^7.4.0",
     "workbox-window": "^7.4.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "picomatch@<2.3.2": ">=2.3.2",
-      "picomatch@>=3.0.0 <3.0.2": ">=3.0.2",
-      "picomatch@>=4.0.0 <4.0.4": ">=4.0.4",
-      "effect": ">=3.20.0"
-    }
   }
 }
