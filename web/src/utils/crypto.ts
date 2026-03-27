@@ -1212,6 +1212,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
 const IV_LENGTH = 12;
 
 export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; key: string }> {
+  // Legacy / Sync version (Used by older components)
   const fileData = await blob.arrayBuffer();
   const sodium = await getSodiumLib();
   const { worker_file_encrypt } = await getWorkerProxy();
@@ -1228,12 +1229,46 @@ export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; ke
   return { encryptedBlob, key: keyB64 };
 }
 
+// ✅ OPTIMASI: Varian Asinkron murni untuk File Besar (Digunakan oleh MessageInput.ts)
+export async function encryptFileViaWorker(blob: Blob): Promise<{ encryptedBlob: Blob; key: string }> {
+  // Membaca file sebagai chunk stream (jika browser mendukung) atau ArrayBuffer asinkron
+  // agar tidak memblokir Main Thread React sebelum dikirim ke Worker
+  const fileData = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsArrayBuffer(blob);
+  });
+
+  const sodium = await getSodiumLib();
+  const { worker_file_encrypt } = await getWorkerProxy();
+  
+  const { encryptedData, iv, key } = await worker_file_encrypt(fileData);
+
+  // Re-assemble di luar worker
+  const combined = new Uint8Array(iv.length + encryptedData.byteLength);
+  combined.set(iv);
+  combined.set(new Uint8Array(encryptedData), iv.length);
+  const encryptedBlob = new Blob([combined], { type: 'application/octet-stream' });
+
+  const keyB64 = sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+  return { encryptedBlob, key: keyB64 };
+}
+
 export async function decryptFile(encryptedBlob: Blob, keyB64: string, originalType: string): Promise<Blob> {
   const sodium = await getSodiumLib();
   const { worker_file_decrypt } = await getWorkerProxy();
 
   const keyBytes = sodium.from_base64(keyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const combinedData = await encryptedBlob.arrayBuffer();
+  
+  const combinedData = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(new Error("Failed to read encrypted file"));
+      reader.readAsArrayBuffer(encryptedBlob);
+  });
+
   if (combinedData.byteLength < IV_LENGTH) throw new Error("Encrypted file is too short.");
 
   const decryptedData = await worker_file_decrypt(combinedData, keyBytes);

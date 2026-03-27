@@ -1,20 +1,18 @@
 import { useEffect, useState } from "react";
 import { Message, MessageStatus } from "@store/conversation";
 import { useAuthStore } from "@store/auth";
-import classNames from "classnames";
 import { FaCheck, FaCheckDouble } from "react-icons/fa";
 import { FiClock, FiEyeOff, FiCamera, FiVideo, FiMic, FiEye, FiVolumeX } from "react-icons/fi";
 import FileAttachment from "./FileAttachment";
 import LinkPreviewCard from "./LinkPreviewCard";
 import LazyImage from "./LazyImage";
-import { useMessageStore } from "@store/message";
-import { useShallow } from 'zustand/react/shallow';
 import { formatTime } from "@utils/date";
 import MarkdownMessage from "./MarkdownMessage";
 import VoiceMessagePlayer from "./VoiceMessagePlayer";
 import clsx from 'clsx'; 
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useSettingsStore } from '@store/settings';
+import { useMessageStore } from "@store/message";
 
 const ReplyQuote = ({ message }: { message: Message }) => {
   const profile = useUserProfile(message.sender as { id: string; encryptedProfile?: string | null });
@@ -22,15 +20,17 @@ const ReplyQuote = ({ message }: { message: Message }) => {
   const isMe = message.senderId === currentUser?.id;
   const authorName = isMe ? 'You' : (profile.name || 'Unknown');
   let contentPreview: string;
+  
   if (message.duration) contentPreview = 'Voice Message';
   else if (message.fileName) contentPreview = message.fileName;
   else if (message.fileUrl) contentPreview = 'File';
   else contentPreview = message.content || '...';
+  
   return (
     <div className="mb-1.5 p-2 rounded-lg bg-black/20 border-l-4 border-accent/50">
       <p className="text-xs font-bold text-accent/80">{authorName}</p>
       <div className="text-text-primary/70 truncate text-sm">
-        <MarkdownMessage content={contentPreview} />
+        <MarkdownMessage content={contentPreview} isOwn={isMe} />
       </div>
     </div>
   );
@@ -39,26 +39,27 @@ const ReplyQuote = ({ message }: { message: Message }) => {
 interface Props {
   message: Message;
   isOwn: boolean;
-  // Props lain seperti showAvatar, showName, isGroup tidak lagi dipakai di sini
-  // karena Bubble ini hanya merender kontennya saja.
   onImageClick?: (message: Message) => void;
   isLastInSequence?: boolean;
-  participants?: Record<string, unknown>[];
 }
 
-export default function MessageBubble({ message, isOwn, onImageClick, isLastInSequence = true, participants = [] }: Props) {
-  const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
+// ✅ OPTIMASI: Hapus 'participants' dari props jika tidak digunakan
+export default function MessageBubble({ message, isOwn, onImageClick, isLastInSequence = true }: Props) {
+  // Ambil ID saja secara statis untuk menghindari re-render berlebih
+  const myId = useAuthStore.getState().user?.id; 
+  
   const privacyCloak = useSettingsStore(s => s.privacyCloak);
   const [timeLeft, setTimeLeft] = useState<string | null>(null);
   const [isTextExpanded, setIsTextExpanded] = useState(false);
 
   const content = message.content || '';
-  // Trigger Read More if > 800 chars OR > 12 lines
   const isLongMessage = content.length > 800 || content.split('\n').length > 12;
   const isPlaceholder = content === 'waiting_for_key' || content.startsWith('[') || content === 'Decryption failed';
 
   const cloakClass = privacyCloak ? "blur-[6px] opacity-75 hover:blur-none hover:opacity-100 active:blur-none active:opacity-100 transition-all duration-300 select-none" : "";
 
+  // ✅ OPTIMASI TIMER: Hitung mundur dengan sangat pelan (setiap 60 detik) 
+  // atau biarkan backend / efek global yang menghapus pesannya.
   useEffect(() => {
     if (!message.expiresAt || message.deletedAt) {
       setTimeLeft(null);
@@ -71,25 +72,28 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
       const diff = expireTime - now;
 
       if (diff <= 0) {
+        // Jika sudah habis, minta store untuk menghapusnya
         useMessageStore.getState().removeMessage(message.conversationId, message.id);
         setTimeLeft(null);
       } else {
         const hours = Math.floor(diff / 3600000);
         const minutes = Math.floor((diff % 3600000) / 60000);
-        const seconds = Math.floor((diff % 60000) / 1000);
         
+        // Jangan render detik untuk menghemat CPU
         if (hours > 0) {
            setTimeLeft(`${hours}h ${minutes}m`);
         } else if (minutes > 0) {
-           setTimeLeft(`${minutes}m ${seconds}s`);
+           setTimeLeft(`${minutes}m`);
         } else {
-           setTimeLeft(`${seconds}s`);
+           setTimeLeft(`< 1m`);
         }
       }
     };
 
-    checkExpiration();
-    const interval = setInterval(checkExpiration, 1000);
+    checkExpiration(); // Jalankan sekali saat render
+    
+    // Perbarui hanya setiap 1 Menit (60.000 ms), bukan setiap 1 detik (1.000 ms)!
+    const interval = setInterval(checkExpiration, 30000); 
     return () => clearInterval(interval);
   }, [message.expiresAt, message.deletedAt, message.id, message.conversationId]);
 
@@ -97,11 +101,9 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
     if (!isOwn) return null;
     const statuses = message.statuses || [];
     
-    // Logic from original code: check if read by ANYONE other than self
-    const readCount = statuses.filter((s: MessageStatus) => s.status === 'READ' && s.userId !== user?.id).length;
+    const readCount = statuses.filter((s: MessageStatus) => s.status === 'READ' && s.userId !== myId).length;
     const deliveredCount = statuses.filter((s: MessageStatus) => s.status === 'DELIVERED').length;
 
-    // Restore green color for Read status
     if (readCount > 0) return <FaCheckDouble size={14} className="text-green-400" />;
     if (deliveredCount > 0) return <FaCheckDouble size={14} className="text-white/70" />;
     return <FaCheck size={14} className="text-white/70" />;
@@ -111,7 +113,7 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
   const isVoiceMessage = message.fileType?.startsWith('audio/webm');
   const isDeleted = !!message.deletedAt;
 
-  const hasBubbleStyle = !isPlaceholder && !message.fileUrl || message.fileUrl && !isImage && !isVoiceMessage;
+  const hasBubbleStyle = !isPlaceholder && (!message.fileUrl || (message.fileUrl && !isImage && !isVoiceMessage));
 
   const bubbleClasses = clsx(
     'relative max-w-md md:max-w-lg shadow-neumorphic-bubble rounded-2xl',
@@ -137,7 +139,8 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
           </span>
         ) : (
           <>
-            {message.isViewOnce && message.fileUrl ? (
+            {/* ✅ FIX LOGIKA VIEW ONCE: Tidak perlu mensyaratkan message.fileUrl! */}
+            {message.isViewOnce ? (
               <div className="p-3 bg-black/20 rounded-xl flex items-center justify-center min-w-[160px] my-1 mx-2 border border-white/5">
                 {message.isViewed ? (
                   <div className="flex items-center gap-2 text-text-secondary/50 italic select-none">
@@ -151,13 +154,14 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
                   >
                     {message.fileType?.startsWith('video/') ? <FiVideo size={20} /> : 
                      message.fileType?.startsWith('audio/') ? <FiMic size={20} /> : 
-                     <FiCamera size={20} />}
+                     message.fileUrl ? <FiCamera size={20} /> : <FiEye size={20} />}
                     <span className="text-sm font-bold tracking-wider uppercase">View Once</span>
                   </button>
                 )}
               </div>
             ) : (
               <>
+                {/* Rendering Konten Biasa */}
                 {isVoiceMessage && message.fileUrl && (
                   <div className="p-2 w-[250px]">
                     <VoiceMessagePlayer message={message} />
@@ -177,37 +181,42 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
                 {message.fileUrl && !isImage && !isVoiceMessage && (
                   <FileAttachment message={message} isOwn={isOwn} />
                 )}
+
+                {/* Text Content */}
+                {!message.fileUrl && (
+                  isPlaceholder ? (
+                    <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
+                  ) : (
+                    <div className={clsx("text-base break-words w-full", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
+                      <div 
+                        className={clsx("relative overflow-hidden transition-all duration-300", {
+                          "max-h-[250px]": isLongMessage && !isTextExpanded,
+                          "max-h-none": !isLongMessage || isTextExpanded
+                        })}
+                        style={isLongMessage && !isTextExpanded ? { maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)' } : {}}
+                      >
+                        <MarkdownMessage content={content} isOwn={isOwn} />
+                      </div>                  
+                      
+                      {isLongMessage && (
+                        <button
+                          onClick={() => setIsTextExpanded(!isTextExpanded)}
+                          className={clsx("mt-2 text-xs font-bold uppercase tracking-wider block active:scale-95 transition-all", {
+                            "text-white/80 hover:text-white": isOwn,
+                            "text-accent hover:text-indigo-400": !isOwn
+                          })}
+                        >
+                          {isTextExpanded ? "Show Less" : "Read More"}
+                        </button>
+                      )}
+                    </div>
+                  )
+                )}
               </>
             )}
-            
-            {!message.fileUrl && (
-              isPlaceholder ? (
-                <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
-              ) : (
-                <div className={classNames("text-base break-words w-full", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
-                  <div 
-                    className={classNames("relative overflow-hidden transition-all duration-300", {
-                      "max-h-[250px]": isLongMessage && !isTextExpanded,
-                      "max-h-none": !isLongMessage || isTextExpanded
-                    })}
-                    style={isLongMessage && !isTextExpanded ? { maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)' } : {}}
-                  >
-                    <MarkdownMessage content={content} isOwn={isOwn} />
-                  </div>                  {isLongMessage && (
-                    <button
-                      onClick={() => setIsTextExpanded(!isTextExpanded)}
-                      className={classNames("mt-2 text-xs font-bold uppercase tracking-wider block active:scale-95 transition-all", {
-                        "text-white/80 hover:text-white": isOwn,
-                        "text-accent hover:text-indigo-400": !isOwn
-                      })}
-                    >
-                      {isTextExpanded ? "Show Less" : "Read More"}
-                    </button>
-                  )}
-                </div>
-              )
-            )}
-            {message.linkPreview && !message.fileUrl && (
+
+            {/* Link Preview (Berlaku untuk semua tipe pesan) */}
+            {message.linkPreview && !message.fileUrl && !message.isViewOnce && (
               <div className="mt-2">
                 <LinkPreviewCard preview={message.linkPreview as { url: string; title: string; description: string; image: string; siteName: string }} />
               </div>
@@ -218,15 +227,15 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
 
       {/* Metadata Footer */}
       <div className={clsx("text-xs mt-1.5 flex items-center gap-1.5 select-none", {
-        "absolute bottom-2 right-2 bg-black/40 backdrop-blur-sm px-1.5 py-0.5 rounded text-white shadow-sm": isImage && !message.content,
-        "justify-end": !isImage || message.content,
-        "text-white/80": isOwn && (!isImage || message.content), // Fix contrast for own messages
-        "text-text-secondary/80": !isOwn && (!isImage || message.content)
+        "absolute bottom-2 right-2 bg-black/40 backdrop-blur-sm px-1.5 py-0.5 rounded text-white shadow-sm": isImage && !message.content && !message.isViewOnce,
+        "justify-end": !isImage || message.content || message.isViewOnce,
+        "text-white/80": isOwn && (!isImage || message.content || message.isViewOnce),
+        "text-text-secondary/80": !isOwn && (!isImage || message.content || message.isViewOnce)
       })}>
         {message.isViewOnce && <FiEye size={12} className="opacity-70" />}
         {message.isSilent && <FiVolumeX size={12} className="opacity-60 text-text-secondary" title="Sent Silently" />}
         {timeLeft && (
-          <span className="flex items-center gap-1 text-[9px] font-bold text-red-500 bg-red-500/10 px-1 rounded animate-pulse mr-1">
+          <span className="flex items-center gap-1 text-[9px] font-bold text-red-500 bg-red-500/10 px-1 rounded mr-1">
             <FiClock size={10} /> {timeLeft}
           </span>
         )}

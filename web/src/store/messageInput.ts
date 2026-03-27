@@ -5,7 +5,7 @@ import type { UserId, ConversationId, MessageId } from '@nyx/shared';
 import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, handleApiError } from "@lib/api";
-import { ensureGroupSession, encryptFile } from "@utils/crypto";
+import { ensureGroupSession } from "@utils/crypto";
 import { emitGroupKeyDistribution } from "@lib/socket";
 import toast from "react-hot-toast";
 import { useAuthStore } from "./auth";
@@ -134,18 +134,14 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const { sendMessage: coreSendMessage } = useMessageStore.getState();
     const { replyingTo, expiresIn, isViewOnce } = get();
 
-    // Delegate to Core Logic in message.ts (Centralized X3DH & Queue handling)
     await coreSendMessage(conversationId, {
       ...data,
       repliedToId: replyingTo?.id,
-      // [FIX] Pass full object for optimistic UI
       repliedTo: replyingTo || undefined,
       expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
       isViewOnce,
-      // Pass original content. message.ts handles encryption.
     }, tempId, isSilent);
 
-    // Clear Input State
     set({ replyingTo: null, isViewOnce: false });
   },
   
@@ -156,6 +152,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const { replyingTo, expiresIn, isViewOnce, isHD } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
+    
     if (!me) {
       removeActivity(activityId);
       toast.error("User not authenticated.");
@@ -167,12 +164,10 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       return;
     }
 
-    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
-
     const tempId = generateTempId();
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
-    // Optimistic UI (We keep this here to have access to File blob for preview)
+    // Optimistic UI 
     const optimisticMessage: Message = {
       id: asMessageId(`temp-${tempId}`),
       tempId,
@@ -190,6 +185,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       isViewOnce,
     };
     addOptimisticMessage(conversationId, optimisticMessage);
+    
+    // Clear Input state early for UX
     set({ replyingTo: null, isViewOnce: false, isHD: false });
 
     try {
@@ -200,15 +197,16 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       }
 
       updateActivity(activityId, { progress: 25, fileName: `Encrypting ${file.name}...` });
-      const { encryptedBlob, key: rawFileKey } = await encryptFile(fileToProcess);
+      
+      // ✅ OPTIMASI: Delegasikan Enkripsi File ke Web Worker!
+      // Tidak akan lagi membekukan UI / Animasi meskipun file berukuran 100MB.
+      const { encryptFileViaWorker } = await import('@utils/crypto');
+      const { encryptedBlob, key: rawFileKey } = await encryptFileViaWorker(fileToProcess);
       
       updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
       
-      // 1. Get Presigned URL
-      // [UPDATE] Calculate retention for disappearing messages / view once
-      const fileRetention = expiresIn 
-          ? expiresIn // Disappearing Message: Delete when message expires
-          : (isViewOnce ? 1209600 : 0); // View Once: Keep for 14 days max if not viewed, then purge. (Avoids forever-storage)
+      // Calculate retention
+      const fileRetention = expiresIn ? expiresIn : (isViewOnce ? 1209600 : 0);
 
       const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
           method: 'POST',
@@ -221,7 +219,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           })
       });
 
-      // 2. Upload to R2 via XHR for progress
+      // Upload to R2 via XHR for progress
       await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', presignedRes.uploadUrl, true);
@@ -241,11 +239,11 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
       updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
 
-      // 3. Send Metadata via Message (Blind Attachment)
+      // Send Metadata via Message (Blind Attachment)
       const metadata = {
           type: 'file',
           url: presignedRes.publicUrl,
-          key: rawFileKey, // Will be encrypted by sendMessage
+          key: rawFileKey, 
           name: file.name,
           size: file.size,
           mimeType: file.type,
@@ -278,6 +276,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const { replyingTo, expiresIn, isViewOnce } = get();
     const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
+    
     if (!me) {
       removeActivity(activityId);
       return;
@@ -288,8 +287,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       return;
     }
 
-    const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId)!;
-    
     const tempId = Date.now();
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
@@ -310,20 +307,21 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       repliedTo: replyingTo || undefined,
       isViewOnce,
     };
+    
     addOptimisticMessage(conversationId, optimisticMessage);
     set({ replyingTo: null, isViewOnce: false });
 
     try {
       updateActivity(activityId, { progress: 20, fileName: 'Encrypting voice...' });
-      const { encryptedBlob, key: rawFileKey } = await encryptFile(blob);
+      
+      // ✅ OPTIMASI: Delegasikan Enkripsi Suara ke Web Worker
+      const { encryptFileViaWorker } = await import('@utils/crypto');
+      const { encryptedBlob, key: rawFileKey } = await encryptFileViaWorker(blob);
 
       updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
       
-      const fileRetention = expiresIn 
-          ? expiresIn 
-          : (isViewOnce ? 1209600 : 0);
+      const fileRetention = expiresIn ? expiresIn : (isViewOnce ? 1209600 : 0);
 
-      // Get Presigned
       const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
           method: 'POST',
           body: JSON.stringify({
@@ -335,7 +333,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           })
       });
 
-      // Upload
       await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', presignedRes.uploadUrl, true);
@@ -353,7 +350,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
       updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
 
-      // Send Metadata
       const metadata = {
           type: 'file',
           url: presignedRes.publicUrl,

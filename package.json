@@ -31,15 +31,23 @@
       "bn.js": ">=5.2.3",
       "qs": ">=6.14.2",
       "hono": ">=4.12.7",
-      "lodash": ">=4.17.23",
       "@hono/node-server": ">=1.19.10",
       "flatted": ">=3.4.2",
       "undici": ">=7.24.0",
-      "socket.io-parser": "^4.2.6"
+      "socket.io-parser": "^4.2.6",
+      "picomatch@<2.3.2": ">=2.3.2",
+      "picomatch@>=3.0.0 <3.0.2": ">=3.0.2",
+      "picomatch@>=4.0.0 <4.0.4": ">=4.0.4",
+      "effect": ">=3.20.0"
     },
     "onlyBuiltDependencies": [
-      "sharp",
-      "supabase"
+      "@prisma/engines",
+      "prisma",
+      "argon2",
+      "esbuild",
+      "unrs-resolver",
+      "puppeteer",
+      "sharp"
     ]
   }
 }

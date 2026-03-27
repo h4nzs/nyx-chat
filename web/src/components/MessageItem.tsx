@@ -93,7 +93,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
       sendReaction: s.sendReaction,
       removeLocalReaction: s.removeLocalReaction
   })));
-  const user = useAuthStore((s) => s.user);
+  const user = useAuthStore(useShallow((s) => s.user));
 
   const isSelectionMode = selectedMessageIds.length > 0;
   const isSelected = selectedMessageIds.includes(message.id);

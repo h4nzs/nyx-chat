@@ -7,14 +7,15 @@ import AuthForm from "../components/AuthForm";
 import RecoveryPhraseModal from "@components/RecoveryPhraseModal";
 import { Turnstile } from '@marsidev/react-turnstile';
 import toast from "react-hot-toast";
-import { hashUsername, generateProfileKey, encryptProfile } from "@lib/crypto-worker-proxy";
-import { saveProfileKey } from "@lib/keychainDb";
-import { startRegistration, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api } from "@lib/api";
 import { FiShield, FiSkipForward } from "react-icons/fi";
 import { IoFingerPrint } from "react-icons/io5";
 import SEO from '../components/SEO';
 import LanguageSwitcher from '../components/LanguageSwitcher';
+
+// 🚨 PERHATIAN: 
+// Import '@lib/crypto-worker-proxy', '@lib/keychainDb', dan '@simplewebauthn/browser' 
+// SENGAJA DIHAPUS DARI SINI UNTUK MENCEGAH RENDER-BLOCKING 5 DETIK!
 
 export default function Register() {
   const { t } = useTranslation(['auth', 'common']);
@@ -26,10 +27,18 @@ export default function Register() {
   const [isVerifyingBio, setIsVerifyingBio] = useState(false);
 
   const navigate = useNavigate();
-  const { registerAndGeneratePhrase, user } = useAuthStore(useShallow(s => ({ registerAndGeneratePhrase: s.registerAndGeneratePhrase, user: s.user })));
+  const { registerAndGeneratePhrase, user } = useAuthStore(useShallow(s => ({ 
+    registerAndGeneratePhrase: s.registerAndGeneratePhrase, 
+    user: s.user 
+  })));
 
+  // ✅ DYNAMIC IMPORT: Cek dukungan biometrik secara asinkron di latar belakang
   useEffect(() => {
-    platformAuthenticatorIsAvailable().then(setIsBiometricsSupported);
+    import('@simplewebauthn/browser')
+      .then(({ platformAuthenticatorIsAvailable }) => {
+        platformAuthenticatorIsAvailable().then(setIsBiometricsSupported);
+      })
+      .catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -57,6 +66,11 @@ export default function Register() {
 
     try {
       sessionStorage.setItem('nyx_registration_in_progress', 'true');
+      
+      // ✅ DYNAMIC IMPORT: Unduh mesin Kripto (libsodium) HANYA SAAT tombol daftar diklik!
+      const { hashUsername, generateProfileKey, encryptProfile } = await import("@lib/crypto-worker-proxy");
+      const { saveProfileKey } = await import("@lib/keychainDb");
+
       const usernameHash = await hashUsername(username);
       const profileKeyB64 = await generateProfileKey();
       const profileJson = JSON.stringify({ name, description: "", avatarUrl: "" });
@@ -88,12 +102,14 @@ export default function Register() {
   const handleBiometricRegister = async () => {
     setIsVerifyingBio(true);
     try {
+      // ✅ DYNAMIC IMPORT: Unduh logika WebAuthn HANYA SAAT user setuju memakai sidik jari!
+      const { startRegistration } = await import('@simplewebauthn/browser');
+
       // 1. Get Options
       const options = await api<unknown>("/api/auth/webauthn/register/options");
       
       // 2. Browser Prompt
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const attResp = await startRegistration(options as any);
+      const attResp = await startRegistration(options as Parameters<typeof startRegistration>[0]);
       
       // 3. Verify on Server
       const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {

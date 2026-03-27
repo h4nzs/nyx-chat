@@ -2,11 +2,9 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 // web/src/workers/crypto.worker.ts
-import { Buffer } from 'buffer/';
-(self as unknown as { Buffer: typeof Buffer }).Buffer = Buffer;
-
 import sodium from 'libsodium-wrappers';
-import * as bip39 from 'bip39';
+import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { argon2id } from 'hash-wasm';
 import type { DoubleRatchetState } from '@nyx/shared';
 import type { 
@@ -423,7 +421,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             masterSeed: masterSeed
           }, password);
 
-          const phrase = await bip39.entropyToMnemonic(Buffer.from(masterSeed) as unknown as string);
+          // @scure/bip39 accepts Uint8Array directly
+          const phrase = entropyToMnemonic(masterSeed, wordlist);
           
           result = {
               encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
@@ -645,7 +644,14 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const { encryptedDataStr, password } = payload;
         const resultData = await retrievePrivateKeys(encryptedDataStr, password);
         if (resultData.success && resultData.keys.masterSeed) {
-          result = await bip39.entropyToMnemonic(Buffer.from(resultData.keys.masterSeed) as unknown as string);
+          // @scure/bip39 accepts Uint8Array directly. No Hex/Buffer conversion needed.
+          const mnemonic = entropyToMnemonic(resultData.keys.masterSeed, wordlist);
+          
+          if (!mnemonic || mnemonic.trim().length === 0) {
+              throw new Error(`Mnemonic generation failed. Output length: ${mnemonic?.length}`);
+          }
+          
+          result = mnemonic;
         } else {
           throw new Error("Failed to retrieve master seed. Incorrect password or invalid bundle.");
         }
@@ -653,8 +659,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'restoreFromPhrase': {
         const { phrase, password } = payload;
-        const masterSeedHex = bip39.mnemonicToEntropy(phrase);
-        const masterSeed = sodium.from_hex(masterSeedHex);
+        // @scure/bip39 returns Uint8Array directly
+        const masterSeed = mnemonicToEntropy(phrase, wordlist);
 
         const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
         const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));
@@ -690,8 +696,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'recoverAccountWithSignature': {
         const { phrase, newPassword, identifier, timestamp, nonce } = payload;
-        const masterSeedHex = bip39.mnemonicToEntropy(phrase);
-        const masterSeed = sodium.from_hex(masterSeedHex);
+        const masterSeed = mnemonicToEntropy(phrase, wordlist);
 
         const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
         const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));

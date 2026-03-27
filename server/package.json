@@ -30,8 +30,6 @@
     "@simplewebauthn/server": "^13.3.0",
     "@socket.io/redis-adapter": "^8.3.0",
     "@supabase/supabase-js": "^2.99.3",
-    "@types/ua-parser-js": "^0.7.39",
-    "@types/web-push": "^3.6.4",
     "argon2": "^0.44.0",
     "cookie": "^1.1.1",
     "cookie-parser": "^1.4.6",
@@ -51,9 +49,7 @@
     "node-cron": "^4.2.1",
     "rate-limit-redis": "^4.3.1",
     "redis": "^5.11.0",
-    "resend": "^6.9.3",
     "socket.io": "^4.8.3",
-    "supabase": "^2.76.16",
     "ua-parser-js": "^2.0.9",
     "web-push": "^3.6.7",
     "ws": "^8.20.0",
@@ -71,9 +67,10 @@
     "@types/morgan": "^1.9.9",
     "@types/node": "^25.5.0",
     "@types/node-cron": "^3.0.11",
-    "@types/nodemailer": "^7.0.11",
     "@types/qs": "^6.15.0",
     "@types/supertest": "^7.2.0",
+    "@types/ua-parser-js": "^0.7.39",
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.0",
     "@typescript-eslint/eslint-plugin": "^8.57.0",
     "@typescript-eslint/parser": "^8.57.0",
@@ -89,10 +86,17 @@
     "tsx": "^4.21.0",
     "typescript": "^5.4.5"
   },
+  "pnpm": {
+    "overrides": {
+      "picomatch@<2.3.2": ">=2.3.2",
+      "picomatch@>=3.0.0 <3.0.2": ">=3.0.2",
+      "picomatch@>=4.0.0 <4.0.4": ">=4.0.4",
+      "effect": ">=3.20.0"
+    }
+  },
   "onlyBuiltDependencies": [
     "@prisma/engines",
     "prisma",
-    "argon2",
-    "supabase"
+    "argon2"
   ]
 }

@@ -1,19 +1,21 @@
+import { lazy, Suspense, useEffect, useState, useCallback } from 'react';
 import ChatList from '@components/ChatList';
 import ChatWindow from '@components/ChatWindow';
-import GroupInfoPanel from '@components/GroupInfoPanel';
-import UserInfoPanel from '@components/UserInfoPanel';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
-import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useOrientation } from '@hooks/useOrientation';
-import OnboardingTour from '@components/OnboardingTour';
 import { useParams, useNavigate } from 'react-router-dom';
 import ConnectionStatusBanner from '@components/ConnectionStatusBanner';
 import { FiMessageSquare } from 'react-icons/fi';
 import { asConversationId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+
+// ✅ DYNAMIC IMPORTS
+const GroupInfoPanel = lazy(() => import('@components/GroupInfoPanel'));
+const UserInfoPanel = lazy(() => import('@components/UserInfoPanel'));
+const OnboardingTour = lazy(() => import('@components/OnboardingTour'));
 
 export default function Chat() {
   const { t } = useTranslation('chat');
@@ -21,12 +23,12 @@ export default function Chat() {
   const conversationId = rawConversationId ? asConversationId(rawConversationId) : undefined;
   const navigate = useNavigate();
 
+  // ✅ OPTIMASI ZUSTAND: Kita HAPUS pengambilan `conversations` utuh dari sini
   const {
     activeId,
     openConversation,
     loadConversations,
     isSidebarOpen,
-    conversations,
     toggleSidebar,
     loading,
     initialLoadCompleted,
@@ -35,17 +37,21 @@ export default function Chat() {
     openConversation: state.openConversation,
     loadConversations: state.loadConversations,
     isSidebarOpen: state.isSidebarOpen,
-    conversations: state.conversations,
     toggleSidebar: state.toggleSidebar,
     loading: state.loading,
     initialLoadCompleted: state.initialLoadCompleted,
   })));
 
+  // ✅ OPTIMASI ZUSTAND: Ambil HANYA obrolan aktif. 
+  // Jika ada chat baru dari orang lain masuk, halaman ini TIDAK AKAN re-render!
+  const activeConversation = useConversationStore(state => 
+    state.conversations.find(c => c.id === activeId)
+  );
+
   const user = useAuthStore(state => state.user);
   const { isLandscape } = useOrientation();
   const [isTourOpen, setIsTourOpen] = useState(false);
 
-  const activeConversation = conversations.find(c => c.id === activeId);
   const peerUser =
     user && activeConversation && !activeConversation.isGroup
       ? activeConversation.participants.find(p => p.id !== user.id)
@@ -64,7 +70,6 @@ export default function Chat() {
       openConversation(conversationId);
     } else if (!conversationId && activeId) {
         // Optional: clear active conversation if URL is empty? 
-        // For now, let's just respect the URL if present.
     }
   }, [conversationId, activeId, openConversation]);
 
@@ -175,16 +180,22 @@ export default function Chat() {
               shadow-[-5px_0_15px_rgba(0,0,0,0.05)] z-20
             "
           >
-            {activeConversation.isGroup ? (
-              <GroupInfoPanel conversationId={asConversationId(activeId)} onClose={() => {}} />
-            ) : ( peerUser && 
-              <UserInfoPanel userId={peerUser.id} />
-            )}
+            {/* ✅ SUSPENSE: Tambahkan jaring pengaman untuk komponen Lazy */}
+            <Suspense fallback={<div className="w-full h-full flex items-center justify-center"><div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin"></div></div>}>
+              {activeConversation.isGroup ? (
+                <GroupInfoPanel conversationId={asConversationId(activeId)} onClose={() => {}} />
+              ) : ( peerUser && 
+                <UserInfoPanel userId={peerUser.id} />
+              )}
+            </Suspense>
           </motion.aside>
         )}
       </AnimatePresence>
 
-      <OnboardingTour isOpen={isTourOpen} onClose={handleCloseTour} />
+      {/* ✅ SUSPENSE: Tambahkan jaring pengaman untuk Onboarding Tour */}
+      <Suspense fallback={null}>
+        <OnboardingTour isOpen={isTourOpen} onClose={handleCloseTour} />
+      </Suspense>
     </div>
   );
 }

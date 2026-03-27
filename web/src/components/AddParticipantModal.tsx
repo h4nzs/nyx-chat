@@ -6,15 +6,9 @@ import { useConversationStore } from '@store/conversation';
 import { useShallow } from 'zustand/react/shallow';
 import { hashUsername } from '@lib/crypto-worker-proxy';
 import { asUserId } from '@nyx/shared';
+import type { MinimalProfile } from '@nyx/shared';
 import ModalBase from './ui/ModalBase';
 import { useTranslation } from 'react-i18next';
-
-interface UserSearchResult {
-  id: string;
-  username: string;
-  name: string;
-  avatarUrl?: string | null;
-}
 
 const AddParticipantModal = ({ conversationId, onClose }: {
   conversationId: string;
@@ -22,7 +16,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
 }) => {
   const { t } = useTranslation(['modals', 'common']);
   const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState<UserSearchResult[]>([]);
+  const [searchResults, setSearchResults] = useState<MinimalProfile[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
@@ -41,7 +35,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
         try {
           const hashedQuery = await hashUsername(rawQuery);
           const safeQuery = encodeURIComponent(hashedQuery);
-          const users = await api<UserSearchResult[]>(`/api/users/search?q=${safeQuery}`);
+          const users = await api<MinimalProfile[]>(`/api/users/search?q=${safeQuery}`);
           
           // Inject optimistic query as username/name since it was an exact hash match
           // Guard: Check known users

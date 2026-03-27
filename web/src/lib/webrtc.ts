@@ -302,7 +302,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
 
     try {
         const { decryptCallSignal } = await import('../utils/crypto');
-        const decryptedPayload = (await decryptCallSignal(data.payload, callKey)) as SignalingPayload;
+        const decryptedPayload = (await decryptCallSignal(data.payload as string, callKey)) as SignalingPayload;
         const iceServers = await getDynamicIceServers();
 
         let pc = peerConnections.get(data.from as string);

@@ -9,22 +9,15 @@ import { hashUsername } from '@lib/crypto-worker-proxy';
 import toast from 'react-hot-toast';
 import ModalBase from './ui/ModalBase';
 import { FiCheck } from 'react-icons/fi';
-import type { UserId } from '@nyx/shared';
+import type { UserId, MinimalProfile } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
-
-type UserSearchResult = {
-  id: UserId;
-  username: string;
-  name: string;
-  avatarUrl?: string | null;
-};
 
 export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation(['modals', 'common']);
   const [title, setTitle] = useState('');
-  const [selectedUsers, setSelectedUsers] = useState<UserSearchResult[]>([]);
+  const [selectedUsers, setSelectedUsers] = useState<MinimalProfile[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [userList, setUserList] = useState<UserSearchResult[]>([]);
+  const [userList, setUserList] = useState<MinimalProfile[]>([]);
   const [loading, setLoading] = useState(false);
   const me = useAuthStore(s => s.user);
   const { createGroup, openConversation } = useConversationStore(useShallow(state => ({
@@ -42,7 +35,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
       try {
         const hashedQuery = await hashUsername(rawQuery);
         const safeQuery = encodeURIComponent(hashedQuery);
-        const results = await authFetch<UserSearchResult[]>(`/api/users/search?q=${safeQuery}`);
+        const results = await authFetch<MinimalProfile[]>(`/api/users/search?q=${safeQuery}`);
         
         // Inject optimistic query as username/name since it was an exact hash match
         // Guard: Check known users
@@ -65,7 +58,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(timer);
   }, [searchQuery, me?.id, selectedUsers]);
 
-  const handleSelectUser = (user: UserSearchResult) => {
+  const handleSelectUser = (user: MinimalProfile) => {
     setSelectedUsers(prev => [...prev, user]);
     setSearchQuery('');
   };

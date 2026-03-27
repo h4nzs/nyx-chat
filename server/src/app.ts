@@ -324,7 +324,7 @@ app.get("/health", (_req: Request, res: Response) => {
 });
 
 // === ERROR HANDLING ===
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+app.use((err: Error & { type?: string, status?: number, code?: string }, _req: Request, res: Response, _next: NextFunction) => {
   if (err.code === 'EBADCSRFTOKEN') {
     return res.status(403).json({ error: 'Invalid CSRF token' });
   }

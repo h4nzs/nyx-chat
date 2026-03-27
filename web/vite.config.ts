@@ -21,7 +21,7 @@ export default defineConfig(({ mode }) => {
         srcDir: 'src',
         filename: 'sw.ts',
         registerType: 'autoUpdate',
-        injectRegister: 'auto',
+        injectRegister: 'script-defer',
         devOptions: {
           enabled: true, // Aktifkan PWA di mode dev juga
           type: 'module',
@@ -89,7 +89,7 @@ export default defineConfig(({ mode }) => {
     __APP_VERSION__: JSON.stringify(packageJson.version),
   },
   server: {
-    allowedHosts: true,
+    allowedHosts: true as const,
     fs: {
       allow: ['..']
     },
@@ -114,7 +114,7 @@ export default defineConfig(({ mode }) => {
   },
   // FIX: Konfigurasi untuk npm run build && npm run preview (Port 4173)
   preview: {
-    allowedHosts: true, 
+    allowedHosts: true as const,
     port: 4173,
     // Tambahkan Proxy di sini agar preview bisa bicara ke backend lokal
     proxy: {
@@ -141,18 +141,45 @@ export default defineConfig(({ mode }) => {
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
-              return 'react-vendor';
+            // 1. CORE: Wajib ada, jarang berubah, cache abadi (Sangat Cepat)
+            if (id.includes('react/') || id.includes('react-dom') || id.includes('react-router-dom')) {
+              return 'core-react';
             }
-            if (id.includes('framer-motion') || id.includes('react-icons') || id.includes('clsx') || id.includes('classnames')) {
-              return 'ui-vendor';
+            if (id.includes('zustand') || id.includes('dexie') || id.includes('idb')) {
+              return 'core-data';
             }
-            if (id.includes('libsodium-wrappers') || id.includes('bip39') || id.includes('@simplewebauthn/browser')) {
-              return 'crypto-vendor';
+            if (id.includes('i18next')) {
+              return 'core-i18n';
             }
-            if (id.includes('lodash') || id.includes('uuid') || id.includes('axios') || id.includes('zustand')) {
-              return 'utils-vendor';
+
+            // 2. CRYPTO ENGINE: Berat, tapi vital untuk E2EE
+            if (id.includes('libsodium') || id.includes('hash-wasm')) {
+              return 'engine-crypto';
             }
+
+            // 3. ISOLASI FITUR RAKSASA (Hanya didownload saat fitur dipakai)
+            if (id.includes('@simplewebauthn')) {
+              return 'feature-passkey'; // Didownload SAAT tombol "Login with Passkey" diklik
+            }
+            if (id.includes('@scure/bip39')) {
+              return 'feature-bip39'; // Didownload SAAT membuka menu Recovery Phrase
+            }
+            if (id.includes('wavesurfer.js')) {
+              return 'feature-audio'; // Didownload SAAT memutar Voice Note
+            }
+            if (id.includes('react-pdf')) {
+              return 'feature-pdf'; // Didownload SAAT membuka dokumen PDF
+            }
+            if (id.includes('react-sketch-canvas') || id.includes('react-advanced-cropper') || id.includes('browser-image-compression')) {
+              return 'feature-editor'; // Didownload SAAT membuat Stories / Edit Foto
+            }
+            if (id.includes('emoji-picker-react')) {
+              return 'feature-emoji'; // Didownload SAAT membuka panel Emoji
+            }
+            
+            // Catatan: react-icons dan framer-motion sengaja TIDAK KITA MASUKKAN ke manualChunks.
+            // Biarkan Vite yang memotong-motong (Tree-Shaking) ikon/animasi secara otomatis 
+            // sesuai komponen yang membutuhkannya di halaman tersebut.
           }
         }
       }

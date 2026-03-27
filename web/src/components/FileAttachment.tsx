@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { Message } from "@store/conversation";
 import { toAbsoluteUrl } from "@utils/url";
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -36,10 +36,31 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   const [retryCount, setRetryCount] = useState(0);
   const [numPages, setNumPages] = useState<number | null>(null);
 
+  const hasDecryptedSuccessfully = useRef(false);
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
-  const conversations = useConversationStore(s => s.conversations);
+  
+  const isGroup = useConversationStore(s => 
+    s.conversations.find(c => c.id === message.conversationId)?.isGroup || false
+  );
+
+  // ✅ FIX: Pindahkan getFileType ke atas agar bisa digunakan oleh useEffect
+  const getFileType = (): string => {
+    if (message.fileType && message.fileType.trim() !== '') {
+      return message.fileType.split(';')[0];
+    }
+    if (message.fileName) {
+      const ext = message.fileName.split('.').pop()?.toLowerCase();
+      if (ext === 'pdf') return 'application/pdf';
+      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext!)) return 'image/' + ext!;
+      if (['mp4', 'webm', 'ogg', 'mov'].includes(ext!)) return 'video/' + ext!;
+      if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext!)) return 'audio/' + ext!;
+    }
+    return 'application/octet-stream';
+  };
 
   useEffect(() => {
+    if (hasDecryptedSuccessfully.current) return;
+
     let objectUrl: string | null = null;
     let isMounted = true;
     let retryTimeout: NodeJS.Timeout;
@@ -50,22 +71,20 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         return;
       }
 
-      // Cek apakah file terenkripsi
-      const isEncrypted = message.fileType?.includes('encrypted=true') || message.isBlindAttachment || !message.fileUrl;
+      // 1. Cek apakah ini file terenkripsi (E2EE)
+      const isEncrypted = !!message.fileKey || message.fileType?.includes('encrypted=true') || message.isBlindAttachment || !message.fileUrl;
       
       if (!isEncrypted) {
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
         if (isMounted) {
           setDecryptedUrl(absoluteUrl || null);
           setStatus('success');
+          hasDecryptedSuccessfully.current = true; 
         }
         return;
       }
 
-      if (!message.isBlindAttachment) {
-         if(isMounted) setStatus('waiting');
-         return;
-      }
+      // ✅ FIX: Hapus blok `if (!message.isBlindAttachment)` yang menjebak status menjadi 'waiting' selamanya!
 
       if (isMounted) {
         setStatus('decrypting');
@@ -73,22 +92,11 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
       }
 
       try {
-        let rawFileKey: string;
+        let rawFileKey: string | undefined = message.fileKey || undefined;
 
-        if (message.fileKey) {
-             rawFileKey = message.fileKey;
-        } else if (message.isBlindAttachment) {
-             rawFileKey = ''; 
-        } else {
-            const conversation = conversations.find(c => c.id === message.conversationId);
-            const isGroup = conversation?.isGroup || false;
-
-            const keyResult = await decryptMessage(
-              '',
-              message.conversationId,
-              isGroup,
-              ''
-            );
+        // 2. Fallback: Jika tidak ada fileKey tapi ini adalah Blind Attachment, coba minta dari sesi ratchet
+        if (!rawFileKey && message.isBlindAttachment) {
+            const keyResult = await decryptMessage('', message.conversationId, isGroup, '');
 
             if (keyResult.status === 'pending') {
                 if (isMounted) {
@@ -111,11 +119,13 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             rawFileKey = keyResult.value;
         }
 
+        // Jika setelah semua usaha tetap tidak ada kunci, maka gagal.
         if (!rawFileKey) {
              if(isMounted) setStatus('waiting');
              return;
         }
 
+        // 3. Kunci sudah di tangan! Unduh file terenkripsi dari server R2
         const absoluteUrl = toAbsoluteUrl(message.fileUrl);
         if (!absoluteUrl) throw new Error("Invalid file URL");
         
@@ -123,13 +133,16 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const encryptedBlob = await response.blob();
 
-        const originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
+        // 4. Dekripsi file dengan kunci yang valid
+        const originalType = getFileType(); // Fungsi getFileType() yang sudah kita buat sebelumnya
         const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
 
+        // 5. Render ke layar!
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);
           setDecryptedUrl(objectUrl);
           setStatus('success');
+          hasDecryptedSuccessfully.current = true;
         }
       } catch (e: unknown) {
         console.error("Decrypt failed:", e);
@@ -145,25 +158,24 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
 
     return () => {
       isMounted = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      clearTimeout(retryTimeout);
+      if (objectUrl && !hasDecryptedSuccessfully.current) {
+         URL.revokeObjectURL(objectUrl);
+      }
     };
-  }, [message, lastKeychainUpdate, retryCount, t]);
+  // Tambahkan getFileType ke dependency array eslint jika diminta (opsional)
+  }, [message, lastKeychainUpdate, retryCount, isGroup, t]);
 
-  const getFileType = (): string => {
-    if (message.fileType) {
-      return message.fileType.split(';')[0];
-    }
-    if (message.fileName) {
-      const ext = message.fileName.split('.').pop()?.toLowerCase();
-      if (ext === 'pdf') return 'application/pdf';
-      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext!)) return 'image/' + ext!;
-      if (['mp4', 'webm', 'ogg'].includes(ext!)) return 'video/' + ext!;
-      if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext!)) return 'audio/' + ext!;
-    }
-    return 'application/octet-stream';
-  };
+  useEffect(() => {
+    return () => {
+       if (decryptedUrl && decryptedUrl.startsWith('blob:')) {
+           setTimeout(() => {
+               URL.revokeObjectURL(decryptedUrl);
+           }, 10000);
+       }
+    };
+  }, [decryptedUrl]);
 
+  // Eksekusi ulang setelah getFileType dipindahkan ke atas
   const fileType = getFileType();
   const isPdf = fileType === 'application/pdf';
   const isImage = fileType.startsWith('image/');
@@ -191,7 +203,10 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
     return (
       <div
         className={`${containerClass} border border-red-500/30 text-red-500 cursor-pointer hover:bg-red-500/10`}
-        onClick={() => setRetryCount(c => c + 1)}
+        onClick={() => {
+            hasDecryptedSuccessfully.current = false; // Buka kunci agar bisa retry
+            setRetryCount(c => c + 1);
+        }}
       >
         <FiAlertTriangle />
         <span className="text-sm">{t('chat:media.decrypt_failed', { error: errorMsg })}. {t('chat:media.retry')}</span>

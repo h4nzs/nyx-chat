@@ -24,11 +24,17 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
   const [audioSrc, setAudioSrc] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ✅ OPTIMASI: Kunci agar tidak re-download berkali-kali!
+  const hasDecryptedSuccessfully = useRef(false);
   
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
 
-  // 1. Decrypt audio and create ObjectURL (same logic as before)
+  // 1. Decrypt audio and create ObjectURL
   useEffect(() => {
+    // Jika sudah sukses terdekripsi, JANGAN PERNAH jalankan effect ini lagi 
+    if (hasDecryptedSuccessfully.current) return;
+
     let objectUrl: string | null = null;
     let isMounted = true;
 
@@ -49,7 +55,6 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
          
          if (message.isBlindAttachment) {
              if (isMounted) setIsLoading(true);
-             // We can't proceed without key.
              return;
          }
          
@@ -82,6 +87,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);
           setAudioSrc(objectUrl);
+          hasDecryptedSuccessfully.current = true; // ✅ KUNCI STATUS SUKSES!
         }
       } catch (e: unknown) {
         console.error("Voice message decryption failed:", e);
@@ -97,6 +103,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
       const absoluteUrl = toAbsoluteUrl(message.fileUrl);
       if (absoluteUrl) {
         setAudioSrc(absoluteUrl);
+        hasDecryptedSuccessfully.current = true; // ✅ KUNCI STATUS SUKSES!
       } else {
         setError(t('media.invalid_audio_url'));
       }
@@ -104,9 +111,23 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
 
     return () => {
       isMounted = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      // Jangan revoke URL jika komponen hanya re-render (misal karena parent Virtuoso).
+      if (objectUrl && !hasDecryptedSuccessfully.current) {
+          URL.revokeObjectURL(objectUrl);
+      }
     };
-  }, [message.fileUrl, message.fileType, message.content, lastKeychainUpdate, t]);
+  // ✅ OPTIMASI: Bersihkan dependency array, hapus message.content karena tidak relevan dengan dekripsi URL
+  }, [message.fileUrl, message.fileType, message.fileKey, message.isBlindAttachment, lastKeychainUpdate, t]);
+
+  // Clean up Object URL when the component completely unmounts from the DOM
+  useEffect(() => {
+    return () => {
+       if (audioSrc && audioSrc.startsWith('blob:')) {
+           URL.revokeObjectURL(audioSrc);
+       }
+    };
+  }, [audioSrc]);
+
 
   // 2. Initialize WaveSurfer once we have the audioSrc
   useEffect(() => {

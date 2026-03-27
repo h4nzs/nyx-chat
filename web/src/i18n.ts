@@ -22,8 +22,9 @@ i18n
       loadPath: '/locales/{{lng}}/{{ns}}.json',
     },
     // Pisahin file berdasarkan konteks biar enteng
-    ns: ['common', 'auth', 'errors', 'chat', 'settings', 'landing', 'modals', 'privacy', 'help'],
+    ns: ['common', 'auth', 'errors'],
     defaultNS: 'common',
+    partialBundledLanguages: true,
   });
 
 export default i18n;

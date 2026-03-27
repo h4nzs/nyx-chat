@@ -6,6 +6,8 @@ import { prisma } from '../lib/prisma.js'
 import { Prisma } from '@prisma/client'
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
+import { asConversationId, asMessageId } from '@nyx/shared'
+import { toRawServerMessage } from '../utils/mappers.js'
 import { ApiError } from '../utils/errors.js'
 import { sendPushNotification } from '../utils/sendPushNotification.js'
 import { deleteR2File } from '../utils/r2.js'
@@ -38,7 +40,7 @@ router.get('/:conversationId', async (req, res, next) => {
     const messages = await prisma.message.findMany({
       where: {
         conversationId,
-        // Hanya ambil pesan setelah user join (opsional, tergantung kebutuhan bisnis)
+        // Hanya ambil pesan setelah user join
         createdAt: { gte: participant.joinedAt }
       },
       take: 50, // Ubah jadi positive jika pakai cursor ID yang benar, atau negative untuk "latest"
@@ -58,8 +60,11 @@ router.get('/:conversationId', async (req, res, next) => {
       }
     })
 
+    // MAPPING KE SAFE TYPE (Bebas dari any)
+    const safeMessages = messages.map(toRawServerMessage);
+
     // Reverse biar di frontend urutannya bener (Oldest -> Newest)
-    res.json({ items: messages.reverse() })
+    res.json({ items: safeMessages.reverse() })
   } catch (error) {
     next(error)
   }
@@ -68,12 +73,12 @@ router.get('/:conversationId', async (req, res, next) => {
 // GET Context (Surrounding Messages)
 router.get('/context/:id', requireAuth, async (req, res, next) => {
   try {
-    const targetId = req.params.id;
+    const targetId = req.params.id as string;
 
     // Get the target message first to find its timestamp and conversationId
     const targetMsg = await prisma.message.findUnique({
-      where: { id: targetId as string },
-      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+      where: { id: targetId },
+      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }, statuses: true }
     });
 
     if (!targetMsg) {
@@ -91,7 +96,7 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
       where: { conversationId: targetMsg.conversationId, createdAt: { lt: targetMsg.createdAt, gte: participation.joinedAt } },
       orderBy: { createdAt: 'desc' },
       take: 20,
-      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }, statuses: true }
     });
 
     // Fetch newer messages (after target)
@@ -99,13 +104,16 @@ router.get('/context/:id', requireAuth, async (req, res, next) => {
       where: { conversationId: targetMsg.conversationId, createdAt: { gt: targetMsg.createdAt, gte: participation.joinedAt } },
       orderBy: { createdAt: 'asc' },
       take: 20,
-      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: true, statuses: true }
+      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }, statuses: true }
     });
 
     // Combine and sort chronologically
-    const allMessages = [...older.reverse(), targetMsg, ...newer];
+    const allMessagesRaw = [...older.reverse(), targetMsg, ...newer];
 
-    res.json({ items: allMessages, conversationId: targetMsg.conversationId });
+    // MAPPING KE SAFE TYPE
+    const safeMessages = allMessagesRaw.map(toRawServerMessage);
+
+    res.json({ items: safeMessages, conversationId: asConversationId(targetMsg.conversationId) });
   } catch (error) {
     next(error);
   }
@@ -148,7 +156,6 @@ router.post('/', zodValidate({
     }
 
     // 2. BLOCKING CHECK & REPLY DEPTH (Parallel)
-    // Jalankan pengecekan berat secara paralel
     const checks = []
 
     // Cek Blocking (Khusus 1-on-1)
@@ -159,8 +166,8 @@ router.post('/', zodValidate({
           prisma.blockedUser.findFirst({
             where: {
               OR: [
-                { blockerId: senderId, blockedId: otherUserId }, // Sender ngeblok Receiver
-                { blockerId: otherUserId, blockedId: senderId } // Receiver ngeblok Sender
+                { blockerId: senderId, blockedId: otherUserId },
+                { blockerId: otherUserId, blockedId: senderId }
               ]
             }
           }).then(block => {
@@ -192,14 +199,13 @@ router.post('/', zodValidate({
     // Tunggu validasi selesai
     await Promise.all(checks)
 
-    // 4. DATABASE TRANSACTION (Critical Path)
-    // Buat array status insert
+    // 4. DATABASE TRANSACTION
     const statusData: Prisma.MessageStatusCreateManyMessageInput[] = participants.map(p => ({
       userId: p.userId,
-      status: p.userId === senderId ? 'READ' : 'SENT' // Pakai string literal enum
+      status: p.userId === senderId ? 'READ' : 'SENT'
     }))
 
-    const [newMessage] = await prisma.$transaction([
+    const [newMessageRaw] = await prisma.$transaction([
       prisma.message.create({
         data: {
           conversationId,
@@ -207,10 +213,10 @@ router.post('/', zodValidate({
           content,
           sessionId,
           repliedToId,
-          expiresAt, // Store expiration time
+          expiresAt, 
           isViewOnce: isViewOnce === true,
           statuses: {
-            createMany: { data: statusData } // createMany lebih cepat dari nested create
+            createMany: { data: statusData } 
           }
         },
         include: {
@@ -221,28 +227,32 @@ router.post('/', zodValidate({
       }),
       prisma.conversation.update({
         where: { id: conversationId },
-        data: { lastMessageAt: new Date() } // Pakai new Date() langsung
+        data: { lastMessageAt: new Date() }
       })
     ])
 
-    // 5. REALTIME RESPONSE (Prioritas Tinggi)
-    const messageToBroadcast = { ...newMessage, tempId }
+    // MAPPING KE SAFE TYPE
+    const safeMessage = toRawServerMessage(newMessageRaw);
+
+    // Inject tempId dari client agar UI tahu pesan mana yang sudah sukses (Optimistic UI)
+    if (tempId !== undefined) {
+      safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
+    }
 
     // Kirim response HTTP dulu biar UI user sender update
-    res.status(201).json(messageToBroadcast)
+    res.status(201).json(safeMessage)
 
-    // 6. SOCKET & PUSH (Background / Fire & Forget)
-    // Socket emit
-    getIo().to(conversationId).emit('message:new', messageToBroadcast)
+    // 6. SOCKET & PUSH
+    // Emit ke socket dengan tipe yang valid
+    getIo().to(conversationId).emit('message:new', safeMessage)
 
-    // Push Notification (JANGAN DI-AWAIT)
+    // Push Notification
     const pushRecipients = participants.filter(p => p.userId !== senderId)
     if (pushRecipients.length > 0) {
       const payload = {
-        data: { conversationId, messageId: newMessage.id }
+        data: { conversationId, messageId: safeMessage.id }
       }
 
-      // Jalankan loop push secara paralel tanpa nunggu
       Promise.all(
         pushRecipients.map(p => sendPushNotification(p.userId, payload))
       ).catch(err => console.error('[Push] Failed:', err))
@@ -264,10 +274,7 @@ router.delete('/:id', async (req, res, next) => {
     if (!message) return res.status(404).json({ error: 'Message not found' })
     if (message.senderId !== userId) return res.status(403).json({ error: 'You can only delete your own messages' })
 
-    // Hapus file dari R2 (Blind Attachment via Query Param)
     if (r2Key) {
-       // [SECURITY] Validate ownership via filename convention
-       // Format: folder/userId-uuid.ext
        const parts = r2Key.split('/');
        const filename = parts.length > 1 ? parts[parts.length - 1] : parts[0];
 
@@ -281,10 +288,10 @@ router.delete('/:id', async (req, res, next) => {
 
     await prisma.message.delete({ where: { id } })
 
-    // Emit event
+    // Emit event menggunakan branded ID
     getIo().to(message.conversationId).emit('message:deleted', {
-      conversationId: message.conversationId,
-      id: message.id
+      conversationId: asConversationId(message.conversationId),
+      id: asMessageId(message.id)
     })
 
     res.status(204).send()
@@ -303,7 +310,6 @@ router.put('/:id/viewed', async (req, res, next) => {
     const message = await prisma.message.findUnique({ where: { id: messageId }, include: { conversation: { include: { participants: true } } } });
     if (!message || !message.isViewOnce || message.senderId === userId) return res.status(400).json({ error: 'Invalid operation' });
 
-    // NEW: Check participation
     const isParticipant = message.conversation.participants.some(p => p.userId === userId);
     if (!isParticipant) return res.status(403).json({ error: 'Not a participant' });
 
@@ -312,11 +318,13 @@ router.put('/:id/viewed', async (req, res, next) => {
       data: { isViewed: true }
     });
 
-    // Notify sender and receiver
-    const io = getIo();
-    io.to(message.conversationId).emit('message:viewed', { messageId, conversationId: message.conversationId });
+    // Notify sender and receiver dengan branded IDs
+    getIo().to(message.conversationId).emit('message:viewed', { 
+      messageId: asMessageId(messageId), 
+      conversationId: asConversationId(message.conversationId) 
+    });
 
-    res.json(updated);
+    res.json(updated); // atau mapping ke format baru jika diperlukan
   } catch (error) {
     next(error);
   }

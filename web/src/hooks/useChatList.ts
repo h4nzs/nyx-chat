@@ -5,7 +5,7 @@ import { usePresenceStore } from '@store/presence';
 import { useAuthStore, type User } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
 import { authFetch } from '@lib/api';
-import { debounce } from 'lodash';
+import { debounce } from 'lodash-es';
 import { hashUsername } from '@lib/crypto-worker-proxy';
 
 export function useChatList() {

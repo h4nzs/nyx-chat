@@ -110,7 +110,7 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
       // We need a way to map jti to a socket id. This is a complex problem.
       // For now, we will broadcast to all sockets for this user.
       // A better solution would involve a mapping of jti -> socket.id in Redis or memory.
-      socketServer.to(userId).emit('force_logout', { jti })
+      socketServer.to(userId).emit('force_logout', { jti: jti as string })
     }
 
     res.status(204).send()

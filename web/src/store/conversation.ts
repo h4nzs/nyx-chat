@@ -4,51 +4,15 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api";
 import { useMessageStore, decryptMessageObject } from "./message";
-import { getSocket, emitSessionKeyRequest, fireGhostSync } from "@lib/socket";
+import { getSocket, emitSessionKeyRequest, fireGhostSync, emitGroupKeyDistribution } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
-import type { ConversationId, UserId, MessageId } from '@nyx/shared';
+import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage, Message, Participant, Conversation } from '@nyx/shared';
 // Removed all crypto imports
 import toast from 'react-hot-toast';
 
-// --- Type Definitions ---
-export type MessageStatus = {
-  id: string;
-  messageId: MessageId;
-  userId: UserId;
-  status: 'SENT' | 'DELIVERED' | 'READ';
-  updatedAt: string;
-};
-
-export interface RawServerMessage {
-  id: MessageId;
-  tempId?: number;
-  type?: 'USER' | 'SYSTEM';
-  conversationId: ConversationId;
-  senderId: UserId;
-  sender?: { 
-    id: UserId; 
-    encryptedProfile?: string | null;
-    name?: string;
-    username?: string;
-    avatarUrl?: string | null;
-  };
-  ciphertext?: string | null;
-  content?: string | null; // Some legacy or raw content
-  fileKey?: string | null;
-  sessionId?: string | null;
-  encryptedSessionKey?: string | null;
-  createdAt: string;
-  repliedTo?: RawServerMessage;
-  repliedToId?: MessageId;
-  linkPreview?: unknown;
-  expiresAt?: string | null;
-  isViewOnce?: boolean;
-}
-
-import type { Message, Participant, Conversation } from '@nyx/shared';
-import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey } from "@utils/crypto";
-export type { Message, Participant, Conversation };
+import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, ensureGroupSession } from "@utils/crypto";
+export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
 
 // --- Helper Functions ---
 
@@ -124,7 +88,7 @@ type Actions = {
   searchUsers: (query: string) => Promise<{ id: string; encryptedProfile?: string | null; isVerified?: boolean; publicKey?: string }[]>;
   addOrUpdateConversation: (conversation: Conversation) => void;
   removeConversation: (conversationId: string) => void;
-  updateConversation: (conversationId: string, updates: Partial<Conversation>) => void;
+  updateConversation: (conversationId: string, updates: Partial<Conversation>) => Promise<void>;
   updateParticipantDetails: (user: Partial<User>) => void;
   addParticipants: (conversationId: string, participants: Participant[]) => void;
   removeParticipant: (conversationId: string, userId: string) => void;
@@ -190,11 +154,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   loadConversations: async () => {
-    // THE DISGUISE
     if (sessionStorage.getItem('nyx_decoy_mode') === 'true') {
       const dummyConvo = {
          id: 'decoy-1', isGroup: false, unreadCount: 0,
-         participants: [{ id: 'bot-1', username: 'system_bot', displayName: 'NYX Service', avatarUrl: null }],
+         participants: [{ id: 'bot-1', username: 'system_bot', name: 'NYX Service' }],
          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
          lastMessage: { id: 'msg-1', content: 'Welcome to NYX. No active chats found.', senderId: 'bot-1', createdAt: new Date().toISOString(), conversationId: 'decoy-1', type: 'SYSTEM' }
       };
@@ -211,19 +174,15 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     if (!shouldProceed) return;
 
     try {
-      const rawConversations = await api<{ participants: { user: Record<string, unknown>, role?: string, id: string }[], [key: string]: unknown }[]>("/api/conversations");
+      // ✅ FIX: Gunakan tipe data Conversation[] yang sempurna dari @nyx/shared
+      const rawConversations = await api<Conversation[]>("/api/conversations");
       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 
       const conversations = await Promise.all(rawConversations.map(async c => {
-        const participants = c.participants.map((p: { user?: { description?: string, id?: string, [key: string]: unknown }, role?: string, id?: string, isPinned?: boolean }) => ({
-          ...p.user,
-          id: p.id || p.user?.id,
-          description: p.user?.description,
-          role: p.role,
-          isPinned: p.isPinned
-        } as unknown as Participant));
+        // ✅ FIX: Tidak perlu lagi mapping p.user! Backend sudah mengirim data yang rata dan sempurna.
+        const participants = c.participants;
 
-        let lastMessage = (c.messages as unknown as Message[])?.[0] || null;
+        let lastMessage = c.lastMessage || null;
         if (lastMessage) {
           try {
             lastMessage = await decryptMessageObject(lastMessage);
@@ -235,27 +194,22 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           }
           
           if (lastMessage) {
-              // Hydrate sender info for the chat list snippet
-              const pInfo = participants.find((p: { id: string, [key: string]: unknown }) => p.id === lastMessage!.senderId);
+              const pInfo = participants.find(p => p.id === lastMessage!.senderId);
               if (pInfo) {
                   lastMessage.sender = {
                       ...(lastMessage.sender || { id: lastMessage.senderId }),
                       ...pInfo
                   };
               }
-
               lastMessage = withPreview(lastMessage);
           }
         }
         
-        // DECRYPT METADATA
         let decryptedMetadata = undefined;
         if (c.isGroup && c.encryptedMetadata) {
              try {
-                 const decrypted = await decryptGroupMetadata(c.encryptedMetadata as string, c.id as string);
-                 if (decrypted) {
-                     decryptedMetadata = decrypted;
-                 }
+                 const decrypted = await decryptGroupMetadata(c.encryptedMetadata, c.id);
+                 if (decrypted) decryptedMetadata = decrypted;
              } catch (e) {
                  console.warn(`Failed to decrypt metadata for group ${c.id}`);
              }
@@ -269,21 +223,14 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         };
       }));
 
-      // [NEW] Offline Catch-up / Diff Detection
-      // Check if group participants changed while we were offline/disconnected
       const existingConversations = get().conversations;
-      const reconciledConversations = conversations.map(fetchedObj => {
-          const fetched = fetchedObj as unknown as Conversation;
+      const reconciledConversations = conversations.map(fetched => {
           if (fetched.isGroup) {
               const existing = existingConversations.find(e => e.id === fetched.id);
               if (existing) {
-                  // Compare participant lists (simple ID comparison)
-                  const existingIds = existing.participants.map((p: { id: string, [key: string]: unknown }) => p.id).sort().join(',');
-                  const fetchedIds = fetched.participants.map((p: { id: string, [key: string]: unknown }) => p.id).sort().join(',');
-                  
+                  const existingIds = existing.participants.map(p => p.id).sort().join(',');
+                  const fetchedIds = fetched.participants.map(p => p.id).sort().join(',');
                   if (existingIds !== fetchedIds) {
-                      console.log(`[Ratchet] Membership change detected for group ${fetched.id} while offline. Proactive healing...`);
-                      // Trigger ghost sync from this device to settle state with new/removed members
                       fireGhostSync(fetched.id, 2000);
                       return { ...fetched, requiresKeyRotation: true };
                   }
@@ -292,11 +239,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           return fetched;
       });
 
-      set({ conversations: sortConversations(reconciledConversations as unknown as Conversation[], useAuthStore.getState().user?.id) });
-      useVerificationStore.getState().loadInitialStatus(conversations as unknown as Conversation[]);
+      set({ conversations: sortConversations(reconciledConversations, useAuthStore.getState().user?.id) });
+      useVerificationStore.getState().loadInitialStatus(conversations);
 
       const socket = getSocket();
-      (conversations as unknown as Conversation[]).forEach(c => socket.emit("conversation:join", c.id));
+      conversations.forEach(c => socket.emit("conversation:join", c.id));
     } catch (error) {
       console.error("Failed to load conversations", error);
       set({ error: "Failed to load conversations." });
@@ -400,49 +347,60 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     const { user } = useAuthStore.getState();
     if (!user) throw new Error("Not authenticated");
 
-    // 1. We create the group first to get an ID
-    // But to encrypt metadata we need the ID. Chicken and egg?
-    // Actually, we can assume the server allows creating with encryptedMetadata.
-    // BUT we need the conversationID to encrypt the metadata (as context).
-    // Solution: Create group -> Get ID -> Encrypt Metadata -> Update Group?
-    // OR: Use a temporary ID? No.
-    // CORRECT TNO WAY: 
-    // The server generates the ID.
-    // We can't encrypt with ID context before we have it.
-    // So we must do 2 steps or use a predictable ID (not safe).
-    // Let's do: Create with placeholder or null metadata -> Encrypt -> Update.
-    
-    // Step 1: Create Group with NO metadata
-    const conv = await authFetch<Conversation>("/api/conversations", {
-        method: "POST",
-        body: JSON.stringify({
-            userIds,
-            isGroup: true,
-            encryptedMetadata: null 
-        })
-    });
-    
-    // Step 2: Now we have ID, encrypt the metadata
-    const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl }, conv.id);
-    
-    // Step 3: Update the group with encrypted metadata
-    await authFetch(`/api/conversations/${conv.id}/details`, {
-        method: 'PUT',
-        body: JSON.stringify({ encryptedMetadata })
-    });
-    
-    // Step 4: Optimistically update local state with decrypted data
-    const updatedConv: Conversation = {
-        ...conv,
-        decryptedMetadata: { title: name, avatarUrl },
-        encryptedMetadata
-    };
-    
-    getSocket().emit("conversation:join", conv.id);
-    get().addOrUpdateConversation(updatedConv);
-    set({ activeId: conv.id, isSidebarOpen: false });
-    
-    return conv.id;
+    let conv: Conversation | null = null;
+
+    try {
+        // Step 1: Create Group with NO metadata
+        conv = await authFetch<Conversation>("/api/conversations", {
+            method: "POST",
+            body: JSON.stringify({
+                userIds,
+                isGroup: true,
+                encryptedMetadata: null 
+            })
+        });
+
+        // Step 1.5: Initialize Group Sender Key (Zero-Knowledge)
+        // We must generate and distribute our Sender Key so we can encrypt the metadata (which uses the Sender Key protocol)
+        // The participants list from the server includes public keys.
+        const distributionKeys = await ensureGroupSession(conv.id, conv.participants as unknown as Participant[], true);
+        if (distributionKeys) {
+            emitGroupKeyDistribution(conv.id, distributionKeys as { userId: string; key: string }[]);
+        }
+        
+        // Step 2: Encrypt the metadata
+        const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl }, conv.id);
+        
+        // Step 3: Update the group with encrypted metadata
+        await authFetch(`/api/conversations/${conv.id}/details`, {
+            method: 'PUT',
+            body: JSON.stringify({ encryptedMetadata })
+        });
+        
+        // Step 4: Optimistically update local state with decrypted data
+        const updatedConv: Conversation = {
+            ...conv,
+            decryptedMetadata: { title: name, avatarUrl },
+            encryptedMetadata
+        };
+        
+        getSocket().emit("conversation:join", conv.id);
+        get().addOrUpdateConversation(updatedConv);
+        set({ activeId: conv.id, isSidebarOpen: false });
+        
+        return conv.id;
+    } catch (e) {
+        // ROLLBACK
+        if (conv) {
+             console.error("Create group failed during setup. Rolling back...", e);
+             try {
+                 await authFetch(`/api/conversations/${conv!.id}`, { method: 'DELETE' });
+             } catch (rollbackError) {
+                 console.error("Rollback failed", rollbackError);
+             }
+        }
+        throw e;
+    }
   },
 
   addOrUpdateConversation: async (conversation) => {
@@ -497,28 +455,41 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     });
   },
 
-  updateConversation: (id, data) => set((state) => {
-    const oldConv = state.conversations.find((c) => c.id === id);
-    
-    // Check for membership changes in groups to trigger Key Rotation
-    if (oldConv && oldConv.isGroup && data.participants) {
-      const oldIds = oldConv.participants.map(p => p.id).sort().join(',');
-      const newIds = data.participants.map(p => p.id).sort().join(',');
-      if (oldIds !== newIds) {
-        forceRotateGroupSenderKey(id).catch(() => { console.warn('Key rotation deferred'); });
-      }
+  updateConversation: async (id, data) => {
+    // Decrypt metadata if it changed
+    let decryptedMetadata = undefined;
+    if (data.encryptedMetadata) {
+         try {
+             const dec = await decryptGroupMetadata(data.encryptedMetadata, id);
+             if (dec) decryptedMetadata = dec;
+         } catch (e) {
+             console.warn("Failed to decrypt updated metadata", e);
+         }
     }
-    
-    // If metadata updated, we should probably try to decrypt it if we can? 
-    // But here we just store it. The UI should trigger decryption if needed or we assume it's passed in.
-    // Ideally updateConversation should handle this, but for now we rely on the component or load loop.
 
-    return {
-      conversations: state.conversations.map((c) =>
-        c.id === id ? { ...c, ...data } : c
-      ),
-    };
-  }),
+    set((state) => {
+        const oldConv = state.conversations.find((c) => c.id === id);
+        
+        // Check for membership changes in groups to trigger Key Rotation
+        if (oldConv && oldConv.isGroup && data.participants) {
+          const oldIds = oldConv.participants.map(p => p.id).sort().join(',');
+          const newIds = data.participants.map(p => p.id).sort().join(',');
+          if (oldIds !== newIds) {
+            forceRotateGroupSenderKey(id).catch(() => { console.warn('Key rotation deferred'); });
+          }
+        }
+
+        return {
+          conversations: state.conversations.map((c) =>
+            c.id === id ? { 
+                ...c, 
+                ...data,
+                decryptedMetadata: decryptedMetadata || c.decryptedMetadata 
+            } : c
+          ),
+        };
+    });
+  },
 
   updateParticipantDetails: (user) => {
     // Destructure role to exclude it, preventing conflict with Participant role type
@@ -537,16 +508,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
-          const newParticipants = participants.map((p: { user?: { description?: string, id?: string, [key: string]: unknown }, role?: string, id?: string, isPinned?: boolean }) => ({
-            ...p.user,
-            id: p.id || p.user?.id,
-            description: p.user?.description,
-            role: p.role,
-            isPinned: p.isPinned
-          } as unknown as Participant));
           return {
             ...c,
-            participants: [...c.participants, ...newParticipants],
+            // ✅ FIX: Gabungkan array langsung, tanpa perlu ekstrak p.user
+            participants: [...c.participants, ...participants],
           };
         }
         return c;
@@ -580,18 +545,39 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     set(state => {
       const conversation = state.conversations.find(c => c.id === conversationId);
       if (!conversation) return state;
-      
+
       const meId = useAuthStore.getState().user?.id;
       const isMine = message.senderId === meId;
+
+      // ✅ OPTIMASI: Jangan update atau re-sort jika pesan yang masuk ternyata lebih TUA 
+      // dari lastMessage yang sudah ada di UI. (Terjadi saat offline catch-up 
+      // dimana batch messages masuk secara beruntun).
+      const newMsgTime = new Date(message.createdAt).getTime();
+      const currentLastMsgTime = new Date(conversation.lastMessage?.createdAt || 0).getTime();
       
-      // Don't increment unread if the message is from the current user
+      // Jika pesan ini lebih tua, JANGAN lakukan re-sort atau timpa lastMessage.
+      // CUKUP tambahkan unread count saja.
+      if (newMsgTime < currentLastMsgTime && !isMine && state.activeId !== conversationId) {
+          return {
+              conversations: state.conversations.map(c => 
+                  c.id === conversationId 
+                      ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } 
+                      : c
+              )
+          };
+      }
+
+      // Jika pesan ini lebih baru, lakukan update utuh (Preview & Resort)
       const shouldIncrementUnread = !isMine && state.activeId !== conversationId;
       
       const updatedConversation = {
         ...conversation,
         lastMessage: withPreview(message),
-        unreadCount: state.activeId === conversationId ? 0 : (shouldIncrementUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
+        unreadCount: state.activeId === conversationId 
+            ? 0 
+            : (shouldIncrementUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
       };
+      
       const otherConversations = state.conversations.filter(c => c.id !== conversationId);
       return { conversations: sortConversations([updatedConversation, ...otherConversations], meId) };
     });
