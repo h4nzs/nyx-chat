@@ -93,17 +93,28 @@ export async function decryptMessageObject(
 ): Promise<Message> {
   const currentUser = useAuthStore.getState().user;
 
-  // Base message object derived from raw payload
+  // ✅ FIX: Parse tempId agar selalu menjadi number | undefined
+  let parsedTempId: number | undefined = undefined;
+  if (typeof rawMsg.tempId === 'number') {
+      parsedTempId = rawMsg.tempId;
+  } else if (typeof rawMsg.tempId === 'string' && /^\d+$/.test(rawMsg.tempId)) {
+      parsedTempId = parseInt(rawMsg.tempId, 10);
+  }
+
+  // ✅ FIX: Konversi string mentah menjadi Branded Types
   let finalMessage: Message = {
-    id: rawMsg.id,
-    tempId: rawMsg.tempId,
+    id: asMessageId(rawMsg.id),
+    tempId: parsedTempId,
     type: rawMsg.type,
-    conversationId: rawMsg.conversationId,
-    senderId: rawMsg.senderId,
-    sender: rawMsg.sender,
+    conversationId: asConversationId(rawMsg.conversationId),
+    senderId: asUserId(rawMsg.senderId),
+    sender: rawMsg.sender ? {
+        ...rawMsg.sender,
+        id: asUserId(rawMsg.sender.id) // Lindungi ID di dalam objek sender
+    } : undefined,
     createdAt: rawMsg.createdAt,
     content: rawMsg.content,
-    repliedToId: rawMsg.repliedToId,
+    repliedToId: rawMsg.repliedToId ? asMessageId(rawMsg.repliedToId) : undefined,
     linkPreview: rawMsg.linkPreview,
     expiresAt: rawMsg.expiresAt,
     isViewOnce: rawMsg.isViewOnce,

@@ -33,8 +33,6 @@ export type MessageStatus = {
   updatedAt: string;
 };
 
-export type RawServerMessage = z.infer<typeof RawServerMessageSchema>;
-
 export type Message = z.infer<typeof IncomingMessageSchema> & {
   tempId?: number;
   type?: 'USER' | 'SYSTEM';
