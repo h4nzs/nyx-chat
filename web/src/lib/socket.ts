@@ -12,7 +12,7 @@ import { usePresenceStore } from "@store/presence";
 import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest, schedulePeriodicGroupKeyRotation } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
 import { asUserId } from '@nyx/shared';
-import { IncomingMessageSchema } from '@nyx/shared';
+import { IncomingMessageSchema, RawServerMessageSchema } from '@nyx/shared';
 import type { ServerToClientEvents, ClientToServerEvents } from "@nyx/shared";
 import { triggerReceiveFeedback } from "@utils/feedback";
 
@@ -47,9 +47,6 @@ const processMessageBuffer = async () => {
                 );
                 if (isOptimisticEcho) continue; // It's an echo of our own msg
             }
-
-            const convExists = useConversationStore.getState().conversations.some(c => c.id === safeMessage.conversationId);
-            if (!convExists) continue;
 
             const decryptedMessage = await addIncomingMessage(safeMessage.conversationId, safeMessage);
               
@@ -172,15 +169,25 @@ export function getSocket() {
 
     // --- Application-specific Listeners ---
     socket.on("message:new", (rawPayload: unknown) => {
-      const parsed = IncomingMessageSchema.safeParse(rawPayload);
+      // ✅ FIX 1: Gunakan RawServerMessageSchema karena ini adalah format pasti dari server sekarang
+      const parsed = RawServerMessageSchema.safeParse(rawPayload);
 
       if (!parsed.success) {
           console.error("[Zod Shield] Dropping invalid incoming message:", parsed.error.format());
           return; 
       }
 
-      // ✅ FIX: Lempar ke keranjang Batching alih-alih langsung dieksekusi!
-      incomingMessageBuffer.push(parsed.data as Message);
+      const safeMessage = parsed.data;
+
+      // ✅ FIX 2: Kirim ACK "Delivered" ke server segera setelah diterima dengan aman!
+      // Server butuh kepastian ini agar tidak menembakkan pesan yang sama berulang kali.
+      socket?.emit("message:ack_delivered", { 
+          messageId: safeMessage.id, 
+          conversationId: safeMessage.conversationId 
+      });
+
+      // ✅ FIX 3: Lempar ke keranjang Batching
+      incomingMessageBuffer.push(safeMessage as Message);
       
       // Reset timer. Kita tunggu "badai" reda selama 100ms. 
       // Jika dalam 100ms tidak ada pesan baru lagi yang masuk, proses semua yang ada di keranjang.

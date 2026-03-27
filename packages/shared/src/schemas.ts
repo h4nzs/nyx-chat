@@ -36,16 +36,15 @@ export const IncomingMessageSchema = z.object({
   senderId: UserIdSchema,
   content: z.string().nullable().optional(),
   timestamp: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as string | number | Date); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
-  createdAt: z.preprocess((val) => { 
-    if (val === null || val === undefined) return undefined; 
-    try { 
-      const d = new Date(val as string | number | Date); 
-      if (isNaN(d.getTime())) throw new Error("Invalid date");
-      return d.toISOString(); 
-    } catch { 
-      throw new Error("Invalid date"); 
-    } 
-  }, z.string().default(() => new Date().toISOString())),
+  createdAt: z.preprocess((val) => {
+    if (val === null || val === undefined) return undefined;
+    if (val instanceof Date) return val.toISOString();
+    if (typeof val === 'number') return new Date(val).toISOString();
+    if (typeof val === 'string') return val;
+    return String(val); // Fallback ke string agar bisa dicek oleh refine
+  }, z.string().default(() => new Date().toISOString()).refine((val) => !isNaN(Date.parse(val)), {
+    message: "Invalid date format",
+  })),
 }).passthrough();
 
 // --- WebRTC Signaling Schemas ---
@@ -59,13 +58,49 @@ export const WebRTCSignalingSchema = z.object({
   payload: z.unknown().optional(), 
 }).passthrough();
 
+export const RawServerMessageSchema: z.ZodType<any> = z.lazy(() =>
+  z.object({
+    id: z.string(),
+    tempId: z.number().optional(),
+    type: z.enum(['USER', 'SYSTEM']).optional(),
+    conversationId: z.string(),
+    senderId: z.string(),
+    sender: z.object({
+      id: z.string(),
+      encryptedProfile: z.string().nullable().optional(),
+      name: z.string().optional(),
+      username: z.string().optional(),
+      avatarUrl: z.string().nullable().optional(),
+    }).optional(),
+    ciphertext: z.string().nullable().optional(),
+    content: z.string().nullable().optional(),
+    fileKey: z.string().nullable().optional(),
+    sessionId: z.string().nullable().optional(),
+    encryptedSessionKey: z.string().nullable().optional(),
+    createdAt: z.string(),
+    repliedTo: RawServerMessageSchema.optional(), // Recursive
+    repliedToId: z.string().optional(),
+    linkPreview: z.unknown().optional(),
+    expiresAt: z.string().nullable().optional(),
+    isViewOnce: z.boolean().optional(),
+  })
+);
+
 // --- Local Database Schemas ---
 export const ShadowVaultMessageSchema = z.object({
   id: MessageIdSchema,
   conversationId: ConversationIdSchema,
   senderId: UserIdSchema,
   content: z.string().nullable().optional(),
-  createdAt: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as string | number | Date); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()), 
+createdAt: z.preprocess((val) => {
+    if (val === null || val === undefined) return undefined;
+    if (val instanceof Date) return val.toISOString();
+    if (typeof val === 'number') return new Date(val).toISOString();
+    if (typeof val === 'string') return val;
+    return String(val);
+  }, z.string().default(() => new Date().toISOString()).refine((val) => !isNaN(Date.parse(val)), {
+    message: "Invalid date format",
+  })),
   status: z.enum(['sending', 'sent', 'delivered', 'read', 'failed']).optional().default('sent'),
   repliedToId: z.string().optional(),
   repliedTo: z.string().optional(),

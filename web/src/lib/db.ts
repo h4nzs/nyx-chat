@@ -10,6 +10,7 @@ export interface DecryptedMessageRecord {
   repliedToId?: MessageId;
   repliedTo?: string; // Encrypted JSON string of the replied message
   createdAt: string | Date;
+  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   senderId: UserId;
   senderName?: string; // Encrypted sender name
   senderUsername?: string; // Encrypted sender username
@@ -128,7 +129,7 @@ export class NyxDatabase extends Dexie {
     // Define schema
     this.version(1).stores({
       // ShadowVault
-      messages: 'id, conversationId, createdAt',
+      messages: 'id, conversationId, [conversationId+createdAt], senderId, isDeletedLocal',
       storyKeys: 'storyId',
 
       // OfflineQueue

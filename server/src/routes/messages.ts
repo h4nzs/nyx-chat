@@ -236,8 +236,13 @@ router.post('/', zodValidate({
 
     // Inject tempId dari client agar UI tahu pesan mana yang sudah sukses (Optimistic UI)
     if (tempId !== undefined) {
-      safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
+    if (typeof tempId === 'string' && /^\d+$/.test(tempId)) {
+        safeMessage.tempId = parseInt(tempId, 10);
+    } else if (typeof tempId === 'number') {
+        safeMessage.tempId = tempId;
     }
+    // Jika formatnya selain itu, tempId dibiarkan undefined / tidak di-set
+}
 
     // Kirim response HTTP dulu biar UI user sender update
     res.status(201).json(safeMessage)

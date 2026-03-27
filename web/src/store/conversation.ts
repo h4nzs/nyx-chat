@@ -504,15 +504,25 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     }));
   },
 
-  addParticipants: (conversationId, participants) => {
+  addParticipants: (conversationId, newParticipants) => {
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
-          return {
-            ...c,
-            // ✅ FIX: Gabungkan array langsung, tanpa perlu ekstrak p.user
-            participants: [...c.participants, ...participants],
-          };
+          const merged = [...c.participants, ...newParticipants];
+          
+          // ✅ FIX: Hapus duplikat tanpa 'any', menggunakan strict Map
+          const uniqueMap = new Map<string, typeof merged[0]>();
+          
+          merged.forEach(p => {
+             // Type Guard yang aman: cek apakah 'userId' ada di dalam objek 'p'
+             const pid = ('userId' in p && p.userId) ? String(p.userId) : String(p.id);
+             
+             if (!uniqueMap.has(pid)) {
+                 uniqueMap.set(pid, p);
+             }
+          });
+
+          return { ...c, participants: Array.from(uniqueMap.values()) };
         }
         return c;
       }),
@@ -550,21 +560,27 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const isMine = message.senderId === meId;
 
       // ✅ OPTIMASI: Jangan update atau re-sort jika pesan yang masuk ternyata lebih TUA 
-      // dari lastMessage yang sudah ada di UI. (Terjadi saat offline catch-up 
-      // dimana batch messages masuk secara beruntun).
+      // dari lastMessage yang sudah ada di UI.
       const newMsgTime = new Date(message.createdAt).getTime();
-      const currentLastMsgTime = new Date(conversation.lastMessage?.createdAt || 0).getTime();
+      const currentLastMsgTime = conversation.lastMessage ? new Date(conversation.lastMessage.createdAt).getTime() : 0;
       
-      // Jika pesan ini lebih tua, JANGAN lakukan re-sort atau timpa lastMessage.
-      // CUKUP tambahkan unread count saja.
-      if (newMsgTime < currentLastMsgTime && !isMine && state.activeId !== conversationId) {
-          return {
-              conversations: state.conversations.map(c => 
-                  c.id === conversationId 
-                      ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } 
-                      : c
-              )
-          };
+      // ✅ FIX: Cek langsung dari URL browser apakah pengguna sedang membuka chat ini
+      const isViewingChat = typeof window !== 'undefined' && window.location.pathname.includes(`/chat/${conversationId}`);
+
+      if (newMsgTime < currentLastMsgTime) {
+          // Jika pesan ini lebih tua dari preview yang ada di layar, JANGAN timpa lastMessage.
+          // Cukup tambahkan unread count JIKA pengirimnya BUKAN kita, dan kita TIDAK sedang membuka chat-nya.
+          if (!isMine && !isViewingChat) {
+              return {
+                  conversations: state.conversations.map(c => 
+                      c.id === conversationId 
+                          ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } 
+                          : c
+                  )
+              };
+          }
+          // Jika ini pesan kita sendiri, atau kita sedang buka chatnya, abaikan.
+          return state; 
       }
 
       // Jika pesan ini lebih baru, lakukan update utuh (Preview & Resort)

@@ -203,7 +203,7 @@ router.post('/:id/participants', async (req, res, next) => {
     if (currentCount + userIds.length > MAX_GROUP_MEMBERS) return res.status(400).json({ error: `Group limit reached (${MAX_GROUP_MEMBERS} members max).` })
 
     const newParticipantsRaw = await prisma.$transaction(async (tx) => {
-      await Promise.all(userIds.map((userId: string) => tx.participant.upsert({ where: { userId_conversationId: { userId, conversationId } }, create: { userId, conversationId, joinedAt: new Date() }, update: { joinedAt: new Date() } })))
+      await Promise.all(userIds.map((userId: string) => tx.participant.upsert({ where: { userId_conversationId: { userId, conversationId } }, create: { userId, conversationId, joinedAt: new Date() }, update: {} })))
       await rotateAndDistributeSessionKeys(conversationId, req.user!.id, tx)
       return await tx.participant.findMany({ where: { conversationId, userId: { in: userIds } }, include: { user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } } })
     })
@@ -268,7 +268,16 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
     if (!adminParticipant || adminParticipant.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden.' })
     if (req.user.id === userToRemoveId) return res.status(400).json({ error: 'Cannot remove yourself.' })
 
-    await prisma.participant.delete({ where: { userId_conversationId: { userId: userToRemoveId, conversationId } } })
+    const result = await prisma.participant.deleteMany({
+    where: { 
+        userId: userToRemoveId, 
+        conversationId 
+    }
+});
+
+if (result.count === 0) {
+    return res.status(404).json({ error: 'Participant not found in this conversation' });
+}
     
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userToRemoveId) })
     getIo().to(conversationId).emit('group:participants_changed', { conversationId: asConversationId(conversationId) })

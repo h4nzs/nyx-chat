@@ -1452,7 +1452,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         let prunedMessages = enrichedMessages;
         
         if (enrichedMessages.length > MAX_MESSAGES_IN_RAM) {
-           prunedMessages = enrichedMessages.slice(0, MAX_MESSAGES_IN_RAM);
+           prunedMessages = enrichedMessages.slice(-MAX_MESSAGES_IN_RAM);
         }
 
         const newState: Partial<State> = { messages: { ...state.messages, [conversationId]: prunedMessages } };

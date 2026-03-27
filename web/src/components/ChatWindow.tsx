@@ -299,10 +299,9 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
         
         setTimeout(() => {
           el?.classList.remove('ring-2', 'ring-accent', 'ring-offset-2', 'ring-offset-bg-main', 'scale-[1.02]', 'z-10');
+          setHighlightedMessageId(null);
         }, 2000);
       }
-      
-      setHighlightedMessageId(null);
     };
 
     handleJump();

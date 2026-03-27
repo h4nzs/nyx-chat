@@ -236,21 +236,26 @@ class NyxShadowVaultProxy {
     try {
       const r = await db.messages.get(id);
       if (!r) return null;
-      let plainText = null;
-      let decryptedRepliedTo = undefined;
-      let decryptedSenderName = undefined;
-      let decryptedSenderUsername = undefined;
-      let decryptedSenderAvatarUrl = undefined;
+      
+      let plainText: string | undefined = undefined;
+      let decryptedRepliedTo: Message | undefined = undefined;
+      let decryptedSenderName: string | undefined = undefined;
+      let decryptedSenderUsername: string | undefined = undefined;
+      let decryptedSenderAvatarUrl: string | undefined = undefined;
+      // ✅ FIX: Deklarasi fileMeta tanpa 'any'
+      let fileMetaObj: Partial<Message> | undefined = undefined;
 
       if (r.content && !r.isDeletedLocal) {
-        plainText = await decryptVaultText(r.content);
+        const decrypted = await decryptVaultText(r.content);
+        if (decrypted) plainText = decrypted;
       }
 
       if (r.repliedTo) {
           const rawRepliedTo = await decryptVaultText(r.repliedTo);
           if (rawRepliedTo) {
               try {
-                  decryptedRepliedTo = JSON.parse(rawRepliedTo);
+                  // ✅ FIX: Casting ketat ke Message
+                  decryptedRepliedTo = JSON.parse(rawRepliedTo) as Message;
               } catch {}
           }
       }
@@ -265,23 +270,44 @@ class NyxShadowVaultProxy {
           decryptedSenderAvatarUrl = await decryptVaultText(r.senderAvatarUrl) || undefined;
       }
 
+      // ✅ FIX: Eksekusi dekripsi fileMeta
+      if (r.fileMeta) {
+          const decMeta = await decryptVaultText(r.fileMeta);
+          if (decMeta) {
+              try { 
+                  fileMetaObj = JSON.parse(decMeta) as Partial<Message>; 
+              } catch (e) {
+                  console.error("Failed to parse file meta in IndexedDB", e);
+              }
+          }
+      }
+
       return {
         id: asMessageId(r.id),
         conversationId: asConversationId(r.conversationId),
-        content: plainText,
+        content: plainText ?? null,
         repliedToId: r.repliedToId ? asMessageId(r.repliedToId) : undefined,
         repliedTo: decryptedRepliedTo,
         createdAt: r.createdAt as string,
         senderId: asUserId(r.senderId),
+        // ✅ FIX: Buat objek sender yang bersih tanpa casting berantai yang aneh
         sender: {
-            id: r.senderId,
+            id: asUserId(r.senderId),
             name: decryptedSenderName,
             username: decryptedSenderUsername,
-            avatarUrl: decryptedSenderAvatarUrl
-        } as unknown as Message['sender'],
+            avatarUrl: decryptedSenderAvatarUrl,
+            encryptedProfile: undefined
+        },
+        status: (r.status === 'sending' || r.status === 'sent' || r.status === 'delivered' || r.status === 'read' || r.status === 'failed') 
+            ? r.status 
+            : 'sent',
         isViewOnce: r.isViewOnce,
-        isDeletedLocal: r.isDeletedLocal
-      };
+        isDeletedLocal: r.isDeletedLocal,
+        // ✅ SUNTIKKAN PROPERTI FILE:
+        ...(fileMetaObj || {})
+      } as Message; 
+      // (as Message di akhir aman karena kita menggabungkan objek base dengan Partial<Message>)
+      
     } catch (_e) {
       return null;
     }

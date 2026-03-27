@@ -110,8 +110,10 @@ export async function takeGroupSkippedKey(conversationId: string, senderId: stri
 }
 
 export async function deleteGroupStates(conversationId: string): Promise<void> {
-  return enqueueWrite(async () => {
-      await db.groupSenderStates.delete(conversationId);
+  await enqueueWrite(async () => {
+      db.groupSenderStates.delete(conversationId);
+      db.groupReceiverStates.delete(conversationId); // ✅ Tambahkan
+      db.groupSkippedKeys.delete(conversationId);
   });
 }
 

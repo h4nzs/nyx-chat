@@ -39,6 +39,7 @@ export default function LazyImage({
 
   useEffect(() => {
     // Jika sudah sukses, jangan pernah jalankan effect ini lagi
+    hasDecryptedSuccessfully.current = false;
     if (hasDecryptedSuccessfully.current) return;
 
     let objectUrl: string | null = null;
