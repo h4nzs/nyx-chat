@@ -59,8 +59,6 @@ const processMessageBuffer = async () => {
                    triggerReceiveFeedback();
                }
             }
-
-            socket?.emit('message:ack_delivered', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
             
             // Jeda sejenak setiap 5 pesan untuk membiarkan UI bernapas (mencegah Freeze)
             if (messagesToProcess.indexOf(safeMessage) % 5 === 0) {

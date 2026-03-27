@@ -62,7 +62,7 @@ We recently underwent a nuclear dependency upgrade to ensure NYX is future-proof
 * **State Management:** Zustand v5 (Strict Mode + Persist middleware)
 * **Styling:** Tailwind CSS v4 (Rust-powered Lightning CSS engine)
 * **Crypto Engine:** `libsodium-wrappers` (Pinned at v0.8.x for backward compatibility)
-* **Storage:** IndexedDB (`idb-keyval`) for "The Shadow Vault"
+* **Storage:** IndexedDB (`dexie`) for "The Unified Storage"
 
 ### Backend (Server)
 

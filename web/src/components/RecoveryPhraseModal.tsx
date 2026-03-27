@@ -107,7 +107,7 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
         <div className={`grid grid-cols-3 gap-3 transition-all duration-300 ${!showPhrase ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
           {words.length === 0 && showPhrase && (
              <div className="col-span-3 text-center text-red-500 font-mono text-xs p-4 border border-red-500/20 rounded bg-red-500/10 break-all">
-               Recovery phrase unavailable
+               {t('modals:recovery.unavailable', 'Recovery phrase unavailable')}
              </div>
           )}
           {words.map((word, index) => (

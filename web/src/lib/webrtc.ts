@@ -304,18 +304,16 @@ export const initWebRTCListeners = (socket: Socket | null) => {
         
         let decryptedPayload: SignalingPayload;
 
-        // ✅ FIX UTAMA: Pastikan payload adalah string sebelum didekripsi
-        // Jika payload dikirim "telanjang" (unencrypted object), kita bisa memprosesnya langsung
-        // Atau jika sistem E2EE ketat, kita bisa menolaknya. Di sini kita bersikap fleksibel.
         if (typeof data.payload === 'string') {
             decryptedPayload = (await decryptCallSignal(data.payload, callKey)) as SignalingPayload;
-        } else if (typeof data.payload === 'object' && data.payload !== null) {
-            // Jika payload bukan string terenkripsi, anggap saja ini adalah payload plain-text
-            // (Berguna jika Anda mendebug tanpa enkripsi di localhost)
+        } else if (import.meta.env.DEV && typeof data.payload === 'object' && data.payload !== null) {
+            // ✅ HANYA UNTUK DEVELOPMENT: Mengizinkan debugging lokal tanpa enkripsi
+            console.warn(`[WebRTC] DEV MODE: Menerima payload tidak terenkripsi untuk tipe ${data.type}`);
             decryptedPayload = data.payload as SignalingPayload;
         } else {
-            console.warn(`[WebRTC] Dropping signal ${data.type} with invalid payload type:`, typeof data.payload);
-            return; // Berhenti jika payload bukan string atau objek
+            // 🚨 PRODUCTION SHIELD: Tolak mentah-mentah jika bukan string terenkripsi!
+            console.warn(`[WebRTC] SECURITY BLOCK: Dropping signal ${data.type} with unencrypted payload.`);
+            return; // Berhenti memproses!
         }
 
         const iceServers = await getDynamicIceServers();

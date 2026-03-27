@@ -50,7 +50,8 @@
     "verify_success": "Verificação bem-sucedida! Seu backup está confirmado.",
     "verify_fail": "A verificação falhou. Por favor, tente novamente.",
     "aria_toggle_visibility": "Alternar visibilidade da frase",
-    "aria_copy_phrase": "Copiar frase de recuperação"
+    "aria_copy_phrase": "Copiar frase de recuperação",
+    "unavailable": "Frase de recuperação indisponível. Por favor, certifique-se de ter uma chave para continuar."
   },
   "edit_group": {
     "title": "Editar Info do Grupo",
