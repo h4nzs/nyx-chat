@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "title": "Security Architecture | NYX Chat",
+    "description": "Discover the zero-knowledge architecture and military-grade encryption powering NYX Chat."
+  },
+  "hero": {
+    "title": "Zero-Knowledge Fortress",
+    "subtitle": "Privacy is not a feature. It's our architecture. Explore the mathematical guarantees that keep your messages strictly yours."
+  },
+  "threat": {
+    "badge": "01 / THREAT MODEL",
+    "title": "We Assume Our Servers Are Compromised.",
+    "p1": "Traditional messaging apps focus on protecting their server walls. NYX takes a more radical approach: <strong>Trust No One (TNO)</strong>.",
+    "p2": "We designed this architecture assuming hackers are already inside our servers. However, since there are no decryption keys on the server, a data breach yields nothing but cryptographically useless random characters."
+  },
+  "blind": {
+    "badge": "02 / BLIND INDEXING",
+    "title": "Absolute Server Blindness.",
+    "p1": "If we don't ask for your phone number or email, how can your friends find you?",
+    "p2": "NYX uses a cryptographic technique called <strong>Blind Indexing</strong>. When you register, your username is heavily hashed using the <code>Argon2id</code> algorithm directly on your device.",
+    "p3": "The server only receives a random string of code (a hash). We literally don't know who you are, and there is no mathematical formula in the universe to reverse that hash back into your real name."
+  },
+  "ratchet": {
+    "badge": "03 / THE DOUBLE RATCHET",
+    "title": "Every Message, A New Key.",
+    "p1": "NYX is built upon the world's most respected encryption protocol: <strong>The Signal Protocol</strong>. But we don't just encrypt the connection, we encrypt <i>every single message individually</i>.",
+    "pfs": "<strong>Perfect Forward Secrecy (PFS):</strong> If your device is compromised tomorrow, your messages sent <i>yesterday</i> remain unreadable because the old keys have already been destroyed.",
+    "pcs": "<strong>Post-Compromise Security (PCS):</strong> If your key leaks today, you only need to send one new message. The system will automatically \"ratchet\" a new key and restore your security."
+  },
+  "vault": {
+    "badge": "04 / LOCAL VAULT & PROFILES",
+    "title": "Your Data, On Your Device.",
+    "p1": "Most chat apps sync your entire history to their cloud. We don't. Your entire NYX chat history lives <strong>exclusively</strong> inside your device's <i>IndexedDB</i>.",
+    "p2": "Even your profile picture and display name are encrypted locally. The key to unlock them is only sent to your approved contacts. To our servers, you have no face and no name—just an encrypted blob of data."
+  },
+  "webrtc": {
+    "badge": "05 / WEBRTC TUNNELS",
+    "title": "Wiretap-Proof Calls.",
+    "p1": "When you make a voice or video call, our architecture shifts from Client-Server to a true <strong>Peer-to-Peer (P2P)</strong> network.",
+    "p2": "The NYX server only acts as a signaling pathfinder. But even the connection signals (SDP/ICE) are wrapped in E2EE encryption. Once connected, voice and video packets flow directly between devices. <strong>The server is completely bypassed.</strong>"
+  },
+  "cta": {
+    "title": "Are you a Security Researcher?",
+    "subtitle": "We welcome independent audits. Read our Coordinated Disclosure Protocol and earn your place in the NYX Hall of Fame.",
+    "button": "View Bug Bounty Protocol"
+  }
+}

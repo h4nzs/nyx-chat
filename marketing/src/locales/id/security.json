@@ -1,0 +1,47 @@
+{
+  "meta": {
+    "title": "Arsitektur Keamanan | NYX Chat",
+    "description": "Pelajari arsitektur zero-knowledge dan enkripsi tingkat militer yang menggerakkan NYX Chat."
+  },
+  "hero": {
+    "title": "Benteng Zero-Knowledge",
+    "subtitle": "Privasi bukanlah sebuah fitur. Itu adalah arsitektur kami. Pelajari jaminan matematis yang memastikan pesan Anda tetap menjadi milik Anda."
+  },
+  "threat": {
+    "badge": "01 / THREAT MODEL",
+    "title": "Kami Selalu Berasumsi Server Kami Telah Diretas.",
+    "p1": "Aplikasi perpesanan tradisional fokus melindungi dinding server mereka. NYX memiliki pendekatan yang lebih radikal: <strong>Trust No One (TNO)</strong>.",
+    "p2": "Kami merancang arsitektur ini dengan asumsi bahwa peretas sudah berada di dalam server kami. Namun, karena tidak ada kunci dekripsi di server, jika terjadi kebocoran data, peretas hanya akan menemukan tumpukan karakter acak yang secara matematis mustahil untuk dipecahkan."
+  },
+  "blind": {
+    "badge": "02 / BLIND INDEXING",
+    "title": "Kebutaan Server Mutlak.",
+    "p1": "Jika kami tidak meminta nomor telepon atau email, bagaimana teman Anda bisa menemukan Anda?",
+    "p2": "NYX menggunakan teknik kriptografi bernama <strong>Blind Indexing</strong>. Saat Anda mendaftar, nama pengguna Anda langsung di-hash menggunakan algoritma berat <code>Argon2id</code> langsung di perangkat Anda.",
+    "p3": "Server hanya menerima serangkaian kode acak (hash). Kami secara harfiah tidak tahu siapa Anda, dan tidak ada rumus matematika di alam semesta ini untuk mengubah hash tersebut kembali menjadi nama asli Anda."
+  },
+  "ratchet": {
+    "badge": "03 / THE DOUBLE RATCHET",
+    "title": "Setiap Pesan, Kunci Baru.",
+    "p1": "NYX dibangun di atas protokol enkripsi paling dihormati di dunia: <strong>The Signal Protocol</strong>. Namun, kami tidak sekadar mengenkripsi jalur koneksi, kami mengenkripsi <i>setiap pesan secara individu</i>.",
+    "pfs": "<strong>Perfect Forward Secrecy (PFS):</strong> Jika perangkat Anda diretas besok, pesan Anda yang dikirim <i>kemarin</i> tetap tidak bisa dibaca, karena kunci lamanya sudah dihancurkan.",
+    "pcs": "<strong>Post-Compromise Security (PCS):</strong> Jika kunci Anda bocor hari ini, Anda hanya perlu mengirim satu pesan baru. Sistem akan otomatis memutar kunci baru (ratcheting) dan memulihkan keamanan Anda."
+  },
+  "vault": {
+    "badge": "04 / LOCAL VAULT & PROFILES",
+    "title": "Data Anda, Di Perangkat Anda.",
+    "p1": "Sebagian besar aplikasi obrolan menyinkronkan seluruh riwayat Anda ke server mereka. Kami tidak. Seluruh riwayat percakapan NYX hidup <strong>secara eksklusif</strong> di dalam <i>IndexedDB</i> perangkat Anda.",
+    "p2": "Bahkan foto profil dan nama tampilan Anda dienkripsi secara lokal. Kunci untuk membukanya hanya dikirimkan kepada kontak yang Anda setujui. Di mata server kami, Anda tidak memiliki wajah dan nama, hanya seonggok data terenkripsi."
+  },
+  "webrtc": {
+    "badge": "05 / WEBRTC TUNNELS",
+    "title": "Panggilan Tahan Sadap.",
+    "p1": "Saat Anda melakukan panggilan suara atau video, arsitektur kami berubah dari Client-Server menjadi jaringan <strong>Peer-to-Peer (P2P)</strong> sejati.",
+    "p2": "Server NYX hanya bertindak sebagai pencari jalan. Namun, bahkan sinyal koneksinya (SDP/ICE) dibungkus dengan enkripsi E2EE. Setelah terhubung, paket suara dan video mengalir langsung antar perangkat. <strong>Server benar-benar dilewati.</strong>"
+  },
+  "cta": {
+    "title": "Apakah Anda seorang Peneliti Keamanan?",
+    "subtitle": "Kami menyambut baik audit independen. Baca Protokol Pelaporan Kerentanan kami dan raih tempat Anda di Hall of Fame NYX.",
+    "button": "Lihat Protokol Bug Bounty"
+  }
+}

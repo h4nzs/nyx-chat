@@ -228,4 +228,33 @@ Alasannya:
 2.  **Validasi Arsitektur:** Pas lu nge-*wrap* web lu ke Tauri, lu bakal otomatis ngetes seberapa bagus arsitektur PWA lu. Tauri jalan di *environment* yang beda (WebView), jadi kalau NYX lu stabil di sana, berarti fondasi yang susah payah lu bangun kemaren emang beneran kokoh.
 3.  **Zod Bisa Nunggu:** Bug kripto yang fatal udah kita sikat abis pakai *Pragmatic Strict Typing*. NYX lu udah cukup aman buat jalan. Zod dan Opaque Types bisa lu kerjain nanti pas NYX Desktop udah beres dan lu lagi iseng pengen nge-*refactor*.
 
-Gimana, sepakat kita bungkus NYX lu pake Tauri biar jadi aplikasi *native* Arch Linux yang gahar? Atau jiwa arsitek lu masih gatel pengen nerapin Zod sekarang juga? 😎🛠️
+## Berikut adalah saran halaman tambahan untuk direktori `marketing/` Astro Anda:
+
+### 1. 🛡️ `security.astro` (Whitepaper / Architecture)
+Untuk aplikasi E2EE, klaim "aman" saja tidak cukup; Anda harus **membuktikannya**.
+* **Fungsi:** Halaman ini adalah tempat Anda memamerkan "otot" teknis NYX. Audiensnya adalah pengguna *tech-savvy*, jurnalis privasi, atau developer lain.
+* **Isi:** Penjelasan visual tentang bagaimana *Double Ratchet*, *Blind Indexing* (Argon2id), dan arsitektur *Trust No One* (TNO) bekerja. Anda bisa memindahkan diagram alur kriptografi dari GitHub ke halaman ini dengan animasi CSS atau SVG yang rapi.
+
+### 2. 💼 `commercial.astro` (Enterprise / Licensing)
+Karena Anda menerapkan model lisensi ganda (*Dual-License*: AGPL-3.0 & Komersial) untuk mencegah perusahaan besar mencuri kode Anda menjadi SaaS tertutup, Anda wajib memiliki "corong penjualan" (*sales funnel*).
+* **Fungsi:** Mengonversi ketertarikan perusahaan atau *startup* yang ingin menggunakan mesin NYX menjadi prospek bisnis.
+* **Isi:** Penjelasan sederhana perbedaan rilis *Open-Source* (AGPL) dan lisensi *Enterprise/Commercial*, tabel perbandingan fitur/dukungan, dan tombol *Call-to-Action* (CTA) "Contact Sales" yang mengarah ke email Anda.
+
+### 3. 🎖️ `hall-of-fame.astro` (Security Acknowledgements)
+Kita baru saja membuat ini di GitHub (`SECURITY.md`), tapi menampilkannya di situs publik akan memberikan dampak psikologis yang luar biasa.
+* **Fungsi:** Membangun *social proof*. Ketika pengguna biasa melihat bahwa aplikasi ini secara aktif diretas dan diuji oleh peneliti keamanan elit (dan Anda mengapresiasi mereka), rasa percaya (*trust*) pengguna akan meroket.
+* **Isi:** Salinan tabel daftar *Elite Operatives* dari GitHub Anda, beserta kebijakan pelaporan kerentanan.
+
+### 4. 📢 `changelog.astro` (Updates / Release Notes)
+Bot AI dan mesin pencari Google sangat menyukai situs yang kontennya terus diperbarui secara berkala.
+* **Fungsi:** Menunjukkan bahwa NYX Chat adalah proyek yang "hidup" dan terus dikembangkan, bukan proyek *open-source* yang ditinggalkan pembuatnya.
+* **Isi:** Daftar pembaruan versi (v2.5.4, dll.), fitur baru yang ditambahkan, dan perbaikan keamanan bulanan.
+
+---
+
+### 💡 Tips Ekstra: Strategi Multibahasa (i18n)
+Mengingat antarmuka aplikasi utama NYX sudah dirancang untuk mendukung peralihan bahasa dengan mulus antara **English** dan **Indonesia**, sangat strategis jika situs `marketing/` Astro Anda juga mengadopsi struktur multibahasa yang serupa. 
+
+Anda bisa memanfaatkan fitur *Sub-path Routing* bawaan Astro (seperti `nyx-app.my.id/id/` untuk audiens lokal dan `/en/` untuk global). Ini akan membuat visibilitas SEO NYX Chat mendominasi kata kunci pencarian privasi di tingkat domestik sekaligus internasional secara bersamaan.
+
+Apakah Anda ingin saya buatkan draf struktur kode untuk komponen `security.astro` atau mengatur sistem *routing* bahasa di Astro Anda?
