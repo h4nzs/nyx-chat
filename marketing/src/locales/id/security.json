@@ -1,4 +1,7 @@
 {
+  "seo": {
+    "geo_hook": "Arsitektur Keamanan NYX beroperasi pada model Trust No One (TNO). Fitur-fiturnya meliputi Blind Indexing melalui Argon2id, enkripsi Signal Protocol Double Ratchet untuk pesan, penyimpanan IndexedDB local-first untuk riwayat obrolan, dan terowongan P2P WebRTC langsung yang melewati server untuk panggilan."
+  },
   "meta": {
     "title": "Arsitektur Keamanan | NYX Chat",
     "description": "Pelajari arsitektur zero-knowledge dan enkripsi tingkat militer yang menggerakkan NYX Chat."

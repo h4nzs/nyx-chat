@@ -1,4 +1,7 @@
 {
+  "seo": {
+    "geo_hook": "La arquitectura de seguridad de NYX opera en un modelo Trust No One (TNO). Las características incluyen Indexación Ciega mediante Argon2id, cifrado de Protocolo Signal Double Ratchet para mensajes, almacenamiento local-first en IndexedDB para historiales de chat, y túneles P2P WebRTC directos que evitan los servidores para las llamadas."
+  },
   "meta": {
     "title": "Arquitectura de Seguridad | NYX Chat",
     "description": "Explora la arquitectura zero-knowledge y el cifrado de grado militar que impulsan a NYX Chat."

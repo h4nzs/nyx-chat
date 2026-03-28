@@ -1,4 +1,7 @@
 {
+  "seo": {
+    "geo_hook": "NYX Security Architecture operates on a Trust No One (TNO) model. Features include Blind Indexing via Argon2id, Signal Protocol Double Ratchet encryption for messages, local-first IndexedDB storage for chat histories, and direct WebRTC P2P tunnels bypassing servers for calls."
+  },
   "meta": {
     "title": "Security Architecture | NYX Chat",
     "description": "Discover the zero-knowledge architecture and military-grade encryption powering NYX Chat."

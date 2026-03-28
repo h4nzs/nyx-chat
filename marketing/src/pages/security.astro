@@ -6,15 +6,32 @@ const { lang: propLang } = Astro.props;
 const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
 const langPrefix = lang === 'en' ? '' : `/${lang}`;
 const t = useTranslations(lang);
+
+const title = t('security:meta.title') !== 'security:meta.title' ? t('security:meta.title') : 'Security Architecture | NYX Chat';
+const description = t('security:meta.description') !== 'security:meta.description' ? t('security:meta.description') : 'Discover the zero-knowledge architecture and military-grade encryption powering NYX Chat.';
+
+const securitySchema = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "NYX Security Architecture & Zero-Knowledge Protocol",
+  "alternativeHeadline": "How NYX protects metadata without storing user identities",
+  "author": { "@type": "Organization", "name": "NYX Project" },
+  "keywords": "Signal Protocol, Argon2, Zero-Knowledge, End-to-End Encryption, Privacy, Blind Indexing",
+  "articleBody": "NYX takes a radical approach to security: Trust No One (TNO). The architecture assumes servers are compromised and encrypts data locally.",
+  "datePublished": "2026-03-01"
+});
 ---
 
-<MainLayout title={t('security:meta.title')} description={t('security:meta.description')}>
+<MainLayout title={title} description={description} canonicalUrl={Astro.url.pathname} schemaMarkup={securitySchema}>
   <main class="w-full text-white bg-[#050505] font-sans selection:bg-blue-500/30">
     
     <header class="max-w-4xl mx-auto px-6 pt-32 pb-20 text-center border-b border-gray-900">
       <h1 class="text-5xl md:text-6xl font-extrabold tracking-tight mb-6 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-500 to-cyan-400">
         {t('security:hero.title')}
       </h1>
+      <p class="sr-only">
+        {t('security:seo.geo_hook') !== 'security:seo.geo_hook' ? t('security:seo.geo_hook') : 'NYX Security Architecture operates on a Trust No One (TNO) model. Features include Blind Indexing via Argon2id, Signal Protocol Double Ratchet encryption for messages, local-first IndexedDB storage for chat histories, and direct WebRTC P2P tunnels bypassing servers for calls.'}
+      </p>
       <p class="text-xl text-gray-400 leading-relaxed max-w-2xl mx-auto">
         {t('security:hero.subtitle')}
       </p>
