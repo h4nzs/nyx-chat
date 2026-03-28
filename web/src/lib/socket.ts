@@ -196,7 +196,7 @@ export function getSocket() {
 
       // ✅ FIX 2: Kirim ACK "Delivered" ke server segera setelah diterima dengan aman!
       // Server butuh kepastian ini agar tidak menembakkan pesan yang sama berulang kali.
-      socket?.emit("message:mark_as_read", { 
+      socket?.emit("message:ack_delivered", { 
           messageId: safeMessage.id, 
           conversationId: safeMessage.conversationId 
       });
