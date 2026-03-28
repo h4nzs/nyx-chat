@@ -9,23 +9,36 @@ export const startMessageSweeper = () => {
   cron.schedule('* * * * *', async () => {
     try {
       const now = new Date();
-      const BATCH_SIZE = 100;
-      let processedCount = 0;
+        const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+        
+        const BATCH_SIZE = 100;
+        let processedCount = 0;
 
-      while (true) {
-        // 1. Cari pesan yang waktunya udah kelewat (Batching)
-        const expiredMessages = await prisma.message.findMany({
-          where: {
-            expiresAt: {
-              not: null,
-              lte: now
-            }
-          },
-          select: { id: true, conversationId: true },
-          take: BATCH_SIZE
-        });
+        while (true) {
+          // 1. Cari pesan dengan DUA kondisi (Disappearing Message ATAU Server TTL)
+          const expiredMessages = await prisma.message.findMany({
+            where: {
+              OR: [
+                {
+                  // Kondisi 1: Fitur Disappearing Message (expiresAt habis)
+                  expiresAt: {
+                    not: null,
+                    lte: now
+                  }
+                },
+                {
+                  // Kondisi 2: Server Store-and-Forward TTL (Umur pesan > 14 hari)
+                  createdAt: {
+                    lte: fourteenDaysAgo
+                  }
+                }
+              ]
+            },
+            select: { id: true, conversationId: true },
+            take: BATCH_SIZE
+          });
 
-        if (expiredMessages.length === 0) break; // Selesai
+          if (expiredMessages.length === 0) break; // Selesai
 
         const messageIds = expiredMessages.map(m => m.id);
 

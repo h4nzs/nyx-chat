@@ -370,7 +370,7 @@ export function registerSocket(httpServer: HttpServer) {
             return callback?.({ ok: false, error: "Invalid reply target." });
           }
         }
-        
+
         // --- TYPE SAFE DB TRANSACTION ---
         const newMessageRaw = await prisma.message.create({
           data: { 
@@ -429,39 +429,58 @@ export function registerSocket(httpServer: HttpServer) {
 
     socket.on('message:mark_as_read', async ({ messageId, conversationId }: MarkAsReadPayload) => {
       if (!messageId || !socket.user) return;
-      const uid = socket.user.id; // Aliased to avoid closure confusion
+      const uid = socket.user.id;
 
       try {
-        const msg = await prisma.message.findUnique({ select: { id: true, conversationId: true }, where: { id: messageId } });
+        // 1. Ambil data pesan SEKALIGUS dengan info grup (hanya 1x query)
+        const msg = await prisma.message.findUnique({
+          where: { id: messageId },
+          select: { 
+            id: true, 
+            conversationId: true, 
+            senderId: true,
+            conversation: { select: { isGroup: true } } // Join ringan untuk cek tipe chat
+          }
+        });
         if (!msg || msg.conversationId !== conversationId) return;
 
-        const isParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: uid } });
+        // 2. Validasi apakah user tergabung dalam percakapan
+        const isParticipant = await prisma.participant.findUnique({ 
+          where: { userId_conversationId: { userId: uid, conversationId } } 
+        });
         if (!isParticipant) return;
 
-        await prisma.messageStatus.upsert({
-          where: { messageId_userId: { messageId, userId: uid } },
-          update: { status: 'READ' },
-          create: { messageId, userId: uid, status: 'READ' },
-        });
-        
+        // 3. Update penanda baca terakhir dari participant
         await prisma.participant.update({
           where: { userId_conversationId: { userId: uid, conversationId } },
           data: { lastReadMsgId: messageId }
         });
-        
-        const messageInfo = await prisma.message.findUnique({
-          where: { id: messageId },
-          select: { senderId: true, conversationId: true },
-        });
-        
-        if (messageInfo && messageInfo.senderId !== uid) {
-          io.to(messageInfo.senderId).emit('message:status_updated', {
+
+        // 4. Beritahu pengirim bahwa pesan sudah dibaca (Centang Biru) via Socket
+        if (msg.senderId !== uid) {
+          io.to(msg.senderId).emit('message:status_updated', {
             messageId,
-            conversationId: messageInfo.conversationId,
+            conversationId: msg.conversationId,
             readBy: uid,
             status: 'READ',
           });
         }
+
+        // 5. Store-and-Forward: Hancurkan vs Simpan Status
+        if (!msg.conversation.isGroup) {
+           // Jika ini chat pribadi (1-on-1), HANCURKAN pesan dari server
+           await prisma.message.delete({
+             where: { id: messageId }
+           });
+        } else {
+           // Jika ini Grup, simpan status READ (penghapusan ditangani oleh messageSweeper setelah 14 hari)
+           await prisma.messageStatus.upsert({
+             where: { messageId_userId: { messageId, userId: uid } },
+             update: { status: 'READ' },
+             create: { messageId, userId: uid, status: 'READ' },
+           });
+        }
+
       } catch (error) {
         console.error('Failed to mark message as read:', error);
       }
