@@ -48,17 +48,17 @@ router.get('/', async (req, res, next) => {
       orderBy: { lastMessageAt: 'desc' }
     })
 
-    const unreadCounts: { conversationId: string; unreadCount: number }[] = await prisma.$queryRaw`
-      SELECT p."conversationId" AS "conversationId", COUNT(m.id)::int AS "unreadCount"
-      FROM "Participant" p
-      LEFT JOIN "Message" last_read_message ON p."lastReadMsgId" = last_read_message.id
-      JOIN "Message" m ON m."conversationId" = p."conversationId"
-      WHERE p."userId" = ${userId} AND m."senderId" != ${userId} AND m."createdAt" > COALESCE(last_read_message."createdAt", p."joinedAt")
-      GROUP BY p."conversationId";
-    `
+    const unreadCountsData = await prisma.message.groupBy({
+      by: ['conversationId'],
+      where: {
+        conversationId: { in: conversationsData.map(c => c.id) },
+        senderId: { not: userId }
+      },
+      _count: { id: true }
+    });
 
-    const unreadMap = new Map(unreadCounts.map(item => [item.conversationId, item.unreadCount]))
-    
+    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, item._count.id]));
+
     // MAPPING KE SAFE TYPE (Tanpa any)
     const safeConversations = conversationsData.map(convo => {
       const safeConv = toConversation(convo);
@@ -354,24 +354,6 @@ router.post('/:id/pin', async (req, res, next) => {
       data: { isPinned: !participant.isPinned }
     })
     res.json({ isPinned: updatedParticipant.isPinned })
-  } catch (error) {
-    next(error)
-  }
-})
-
-// Mark as read
-router.post('/:id/read', async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const { id } = req.params
-    const lastMessage = await prisma.message.findFirst({ where: { conversationId: id }, orderBy: { createdAt: 'desc' } })
-    if (lastMessage) {
-      await prisma.participant.updateMany({
-        where: { conversationId: id, userId: req.user.id },
-        data: { lastReadMsgId: lastMessage.id }
-      })
-    }
-    res.status(204).send()
   } catch (error) {
     next(error)
   }

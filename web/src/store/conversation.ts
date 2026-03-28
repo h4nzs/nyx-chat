@@ -178,31 +178,49 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const rawConversations = await api<Conversation[]>("/api/conversations");
       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 
+      // IMPORT SHADOW VAULT UNTUK MENCARI LAST MESSAGE LOKAL
+      const { shadowVault } = await import('@lib/shadowVaultDb');
+
       const conversations = await Promise.all(rawConversations.map(async c => {
-        // ✅ FIX: Tidak perlu lagi mapping p.user! Backend sudah mengirim data yang rata dan sempurna.
         const participants = c.participants;
 
-        let lastMessage = c.lastMessage || null;
-        if (lastMessage) {
-          try {
-            lastMessage = await decryptMessageObject(lastMessage);
-          } catch (_e) {
-            if (lastMessage.sessionId) {
-              emitSessionKeyRequest(lastMessage.conversationId, lastMessage.sessionId);
+        // 1. Coba cari lastMessage dari Local Vault (IndexedDB) dulu
+        let localLastMessage: Message | null = null;
+        try {
+            const localMsgs = await shadowVault.getMessagesByConversation(c.id, 1);
+            if (localMsgs.length > 0) {
+                localLastMessage = localMsgs[0];
             }
-            lastMessage.content = '[Requesting key to decrypt...]';
-          }
-          
-          if (lastMessage) {
-              const pInfo = participants.find(p => p.id === lastMessage!.senderId);
-              if (pInfo) {
-                  lastMessage.sender = {
-                      ...(lastMessage.sender || { id: lastMessage.senderId }),
-                      ...pInfo
-                  };
-              }
-              lastMessage = withPreview(lastMessage);
-          }
+        } catch (_e) {}
+
+        // 2. Bandingkan dengan lastMessage dari Server (jika ada pesan pending yang lebih baru)
+        let lastMessage = c.lastMessage || null;
+        
+        if (lastMessage) {
+            try {
+              lastMessage = await decryptMessageObject(lastMessage);
+            } catch (_e) {
+              if (lastMessage.sessionId) emitSessionKeyRequest(lastMessage.conversationId, lastMessage.sessionId);
+              lastMessage.content = '[Requesting key to decrypt...]';
+            }
+        }
+
+        // 3. Tentukan pemenang (Pesan mana yang paling baru)
+        const serverMsgTime = lastMessage ? new Date(lastMessage.createdAt).getTime() : 0;
+        const localMsgTime = localLastMessage ? new Date(localLastMessage.createdAt).getTime() : 0;
+
+        let finalLastMessage = localMsgTime > serverMsgTime ? localLastMessage : lastMessage;
+
+        // 4. Proses Preview & Profile
+        if (finalLastMessage) {
+            const pInfo = participants.find(p => p.id === finalLastMessage!.senderId);
+            if (pInfo) {
+                finalLastMessage.sender = {
+                    ...(finalLastMessage.sender || { id: finalLastMessage.senderId }),
+                    ...pInfo
+                };
+            }
+            finalLastMessage = withPreview(finalLastMessage);
         }
         
         let decryptedMetadata = undefined;
@@ -264,7 +282,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         c.id === id ? { ...c, unreadCount: 0 } : c
       ),
     }));
-    authFetch(`/api/conversations/${id}/read`, { method: 'POST' }).catch(console.error);
   },
 
   deleteConversation: async (id) => {
@@ -565,7 +582,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const currentLastMsgTime = conversation.lastMessage ? new Date(conversation.lastMessage.createdAt).getTime() : 0;
       
       // ✅ FIX: Cek langsung dari URL browser apakah pengguna sedang membuka chat ini
-      const isViewingChat = typeof window !== 'undefined' && window.location.pathname.includes(`/chat/${conversationId}`);
+      const isViewingChat = typeof window !== 'undefined' && window.location.pathname.includes(`/chat/${conversationId}`) && document.visibilityState === 'visible';
 
       if (newMsgTime < currentLastMsgTime) {
           // Jika pesan ini lebih tua dari preview yang ada di layar, JANGAN timpa lastMessage.
@@ -584,12 +601,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       }
 
       // Jika pesan ini lebih baru, lakukan update utuh (Preview & Resort)
-      const shouldIncrementUnread = !isMine && state.activeId !== conversationId;
+      const shouldIncrementUnread = !isMine && !isViewingChat && state.activeId !== conversationId;
       
       const updatedConversation = {
         ...conversation,
         lastMessage: withPreview(message),
-        unreadCount: state.activeId === conversationId 
+        unreadCount: isViewingChat 
             ? 0 
             : (shouldIncrementUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
       };
