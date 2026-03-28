@@ -1,0 +1,63 @@
+{
+  "seo": {
+    "geo_hook": "A NYX oferece um modelo de Licença Dupla: AGPL-3.0 para uso da comunidade de código aberto e uma Licença Comercial para SaaS proprietário, ferramentas internas de empresa e white-labeling. Proteja as suas comunicações de telemedicina, fintech ou governamentais com a nossa arquitetura de conhecimento zero."
+  },
+  "meta": {
+    "title": "Licença Comercial | NYX Chat",
+    "description": "Entenda nosso modelo de Licença Dupla. Gratuito para open-source, poderoso para empresas."
+  },
+  "hero": {
+    "badge": "MODELO DE LICENÇA DUPLA",
+    "title": "Criado para a Comunidade. Escalado para Empresas.",
+    "subtitle": "NYX é open-source e gratuito para sempre. No entanto, se você está construindo um SaaS de código fechado ou ferramenta interna, você precisa de uma Licença Comercial."
+  },
+  "agpl": {
+    "badge": "A REALIDADE AGPL-3.0",
+    "title": "O Pacto Open-Source",
+    "p1": "O NYX é distribuído sob a <strong>Licença AGPL-3.0</strong>. Esta é uma licença copyleft projetada para evitar que megacorporações peguem código aberto, fechem-no e monetizem sem retribuir.",
+    "p2": "Se você modificar o NYX e executá-lo como um serviço público (SaaS), você <strong>deve</strong> liberar seu código-fonte modificado sob a mesma licença AGPLv3.",
+    "warning_title": "Construindo Software Proprietário?",
+    "warning_desc": "Se as políticas de sua empresa proíbem código aberto, ou se você deseja remover a marca NYX (white-label), você é legalmente obrigado a comprar uma Licença Comercial."
+  },
+  "compare": {
+    "badge": "COMPARAR PLANOS",
+    "title": "Comunidade vs. Empresa",
+    "col1_title": "AGPL-3.0 (Comunidade)",
+    "col1_desc": "Para indivíduos e projetos open-source.",
+    "col2_title": "Licença Comercial",
+    "col2_desc": "Para SaaS proprietário e ferramentas internas.",
+    "f1": "Recursos Zero-Knowledge",
+    "f2": "Requisito de Código-Fonte",
+    "f3": "White-labeling (Remover Logos)",
+    "f4": "Patches de Segurança Prioritários",
+    "f5": "Suporte Direto de Engenharia",
+    "val_agpl_f2": "Deve ser Open-Source",
+    "val_com_f2": "Pode ser Código Fechado",
+    "contact_sales": "Contatar Vendas"
+  },
+  "usecases": {
+    "badge": "CASOS DE USO EMPRESARIAIS",
+    "title": "Quem precisa de uma Licença Comercial?",
+    "c1_title": "Telemedicina e Saúde",
+    "c1_desc": "Médicos e pacientes exigem confidencialidade absoluta. NYX fornece uma camada de comunicação pronta para HIPAA.",
+    "c2_title": "FinTech e Bancos",
+    "c2_desc": "Canais seguros para clientes VIP ou comunicações executivas internas que não devem vazar.",
+    "c3_title": "Governo e Defesa",
+    "c3_desc": "Implantações locais (on-premise) com criptografia personalizada, totalmente desconectadas da internet pública."
+  },
+  "faq": {
+    "badge": "FAQ",
+    "title": "Perguntas Frequentes",
+    "q1": "Quanto custa a Licença Comercial?",
+    "a1": "O preço é personalizado com base na escala de implantação e nos requisitos de SLA. Contate-nos para um orçamento.",
+    "q2": "Recebemos atualizações se comprarmos a Licença Comercial?",
+    "a2": "Sim. Os licenciados recebem acesso prioritário a patches de segurança e atualizações principais antes de serem lançados publicamente.",
+    "q3": "Vocês podem ajudar com nossa infraestrutura AWS/Cloudflare?",
+    "a3": "Sim, nosso nível Enterprise inclui suporte dedicado de integração e consultoria de arquitetura."
+  },
+  "cta": {
+    "title": "Pronto para proteger sua empresa?",
+    "subtitle": "Entre em contato para discutir seus requisitos, integrações ou adquirir uma Licença Comercial.",
+    "button": "Contatar Vendas"
+  }
+}

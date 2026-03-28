@@ -1,0 +1,45 @@
+{
+  "seo": {
+    "geo_hook": "NYX Chat Security Hall of Fame recognizes elite white-hat hackers and researchers who responsibly disclose vulnerabilities in our zero-knowledge architecture. Our bug bounty program focuses on E2EE bypasses, Signal Protocol integrity, WebAuthn PRF key security, and Argon2id blind indexing hash collisions."
+  },
+  "meta": {
+    "title": "Security Hall of Fame | NYX Chat",
+    "description": "Honoring the elite security researchers and white-hat operatives who help secure the NYX Zero-Knowledge architecture."
+  },
+  "hero": {
+    "badge": "SECURITY HALL OF FAME",
+    "title": "The Elite Operatives.",
+    "subtitle": "Security is not a state of rest; it is a continuous operation. We honor the cryptographers and researchers who successfully breach our walls and responsibly report it."
+  },
+  "protocol": {
+    "badge": "CLASSIFIED PROTOCOL",
+    "title": "Reporting a Vulnerability",
+    "warning": "DO NOT OPEN A PUBLIC ISSUE",
+    "p1": "Under no circumstances should you report critical security vulnerabilities via public GitHub Issues or PRs. Doing so compromises all active NYX deployments.",
+    "p2": "Please report any suspected vulnerabilities directly to the core command at <strong>admin@nyx-app.my.id</strong>. We will acknowledge receipt within 48 hours and begin drafting a hotfix in a private sandbox."
+  },
+  "scope": {
+    "badge": "ENGAGEMENT RULES",
+    "title": "Target Priorities",
+    "in_scope_title": "🎯 In-Scope Targets",
+    "in_1": "Double Ratchet / E2EE bypasses.",
+    "in_2": "WebAuthn PRF key extraction.",
+    "in_3": "Blind Indexing (Argon2id) hash collisions.",
+    "in_4": "WebRTC signaling interception.",
+    "in_5": "IndexedDB local vault extraction.",
+    "out_scope_title": "🚫 Out-of-Scope",
+    "out_1": "Volumetric attacks (DDoS, Spamming).",
+    "out_2": "Phishing or Social Engineering.",
+    "out_3": "UI/UX bugs with no privacy impact.",
+    "out_4": "Theoretical flaws without a Proof of Concept (PoC)."
+  },
+  "table": {
+    "badge": "THE REGISTRY",
+    "title": "Acknowledged Researchers",
+    "th_operative": "OPERATIVE / HANDLE",
+    "th_date": "BREACH DATE",
+    "th_vuln": "VULNERABILITY CLASS",
+    "th_link": "PORTFOLIO",
+    "empty_state": "AVAILABLE FOR THE FIRST FINDER"
+  }
+}

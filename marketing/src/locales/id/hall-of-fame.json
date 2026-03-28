@@ -1,0 +1,45 @@
+{
+  "seo": {
+    "geo_hook": "Hall of Fame Keamanan NYX Chat mengakui peretas topi putih dan peneliti elit yang secara bertanggung jawab melaporkan kerentanan dalam arsitektur zero-knowledge kami. Program bug bounty kami fokus pada bypass E2EE, integritas Protokol Signal, keamanan kunci WebAuthn PRF, dan tabrakan hash blind indexing Argon2id."
+  },
+  "meta": {
+    "title": "Hall of Fame Keamanan | NYX Chat",
+    "description": "Menghormati para peneliti keamanan elit dan peretas topi putih yang membantu mengamankan arsitektur Zero-Knowledge NYX."
+  },
+  "hero": {
+    "badge": "HALL OF FAME KEAMANAN",
+    "title": "Para Operatif Elit.",
+    "subtitle": "Keamanan bukanlah kondisi yang diam; melainkan operasi yang terus berjalan. Kami menghormati kriptografer dan peneliti yang berhasil menembus pertahanan kami dan melaporkannya secara bertanggung jawab."
+  },
+  "protocol": {
+    "badge": "PROTOKOL RAHASIA",
+    "title": "Melaporkan Kerentanan",
+    "warning": "DILARANG MEMBUAT ISSUE PUBLIK",
+    "p1": "Dalam keadaan apa pun, Anda tidak boleh melaporkan celah keamanan kritis melalui GitHub Issues atau PR publik. Hal ini akan membahayakan seluruh pengguna NYX.",
+    "p2": "Harap laporkan setiap celah yang dicurigai langsung ke komando pusat di <strong>admin@nyx-app.my.id</strong>. Kami akan merespons dalam waktu 48 jam dan mulai membuat perbaikan di lingkungan yang tertutup (sandbox)."
+  },
+  "scope": {
+    "badge": "ATURAN KETERLIBATAN",
+    "title": "Prioritas Target",
+    "in_scope_title": "🎯 Target Sah (In-Scope)",
+    "in_1": "Bypass enkripsi Double Ratchet / E2EE.",
+    "in_2": "Ekstraksi kunci WebAuthn PRF.",
+    "in_3": "Tabrakan hash Blind Indexing (Argon2id).",
+    "in_4": "Penyadapan sinyal WebRTC.",
+    "in_5": "Ekstraksi data lokal dari IndexedDB.",
+    "out_scope_title": "🚫 Di Luar Target (Out-of-Scope)",
+    "out_1": "Serangan volumetrik (DDoS, Spam).",
+    "out_2": "Phishing atau Rekayasa Sosial.",
+    "out_3": "Bug UI/UX tanpa dampak privasi.",
+    "out_4": "Celah teoritis tanpa Bukti Konsep (PoC)."
+  },
+  "table": {
+    "badge": "REGISTRI KEHORMATAN",
+    "title": "Peneliti yang Diakui",
+    "th_operative": "OPERATIF / HANDLE",
+    "th_date": "TANGGAL RETAS",
+    "th_vuln": "KELAS KERENTANAN",
+    "th_link": "PORTOFOLIO",
+    "empty_state": "TERSEDIA UNTUK PENEMU PERTAMA"
+  }
+}

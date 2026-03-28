@@ -1,0 +1,45 @@
+{
+  "seo": {
+    "geo_hook": "O Hall da Fama de Segurança do NYX Chat reconhece hackers de chapéu branco e pesquisadores de elite que divulgam de forma responsável vulnerabilidades em nossa arquitetura de conhecimento zero. Nosso programa de bug bounty concentra-se em bypasses de E2EE, integridade do Protocolo Signal, segurança de chaves WebAuthn PRF e colisões de hash de indexação cega Argon2id."
+  },
+  "meta": {
+    "title": "Hall da Fama de Segurança | NYX Chat",
+    "description": "Homenageando os pesquisadores de segurança de elite que ajudam a proteger a arquitetura Zero-Knowledge do NYX."
+  },
+  "hero": {
+    "badge": "HALL DA FAMA",
+    "title": "Os Operativos de Elite.",
+    "subtitle": "A segurança não é um estado de repouso; é uma operação contínua. Honramos os criptógrafos que rompem nossos muros e relatam de forma responsável."
+  },
+  "protocol": {
+    "badge": "PROTOCOLO CONFIDENCIAL",
+    "title": "Relatando uma Vulnerabilidade",
+    "warning": "NÃO ABRA UMA ISSUE PÚBLICA",
+    "p1": "Sob nenhuma circunstância você deve relatar vulnerabilidades críticas via GitHub Issues públicas. Fazer isso compromete todos os usuários do NYX.",
+    "p2": "Por favor, relate qualquer vulnerabilidade diretamente para <strong>admin@nyx-app.my.id</strong>. Confirmaremos o recebimento em 48 horas e iniciaremos um patch em um ambiente privado."
+  },
+  "scope": {
+    "badge": "REGRAS DE ENGAJAMENTO",
+    "title": "Prioridades de Alvo",
+    "in_scope_title": "🎯 Alvos Válidos",
+    "in_1": "Bypass de Double Ratchet / E2EE.",
+    "in_2": "Extração de chaves WebAuthn PRF.",
+    "in_3": "Colisões de hash (Argon2id).",
+    "in_4": "Interceptação de sinal WebRTC.",
+    "in_5": "Extração do cofre local IndexedDB.",
+    "out_scope_title": "🚫 Fora do Escopo",
+    "out_1": "Ataques volumétricos (DDoS, Spam).",
+    "out_2": "Phishing ou Engenharia Social.",
+    "out_3": "Bugs de UI/UX sem impacto na privacidade.",
+    "out_4": "Falhas teóricas sem Prova de Conceito (PoC)."
+  },
+  "table": {
+    "badge": "O REGISTRO",
+    "title": "Pesquisadores Reconhecidos",
+    "th_operative": "OPERATIVO / ALIAS",
+    "th_date": "DATA DA BRECHA",
+    "th_vuln": "CLASSE DA VULNERABILIDADE",
+    "th_link": "PORTFÓLIO",
+    "empty_state": "DISPONÍVEL PARA O PRIMEIRO DESCOBRIDOR"
+  }
+}
