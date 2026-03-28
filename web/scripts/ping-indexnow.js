@@ -12,7 +12,10 @@ const SITES = [
     urls: [
       "https://nyx-app.my.id/",
       "https://nyx-app.my.id/privacy",
-      "https://nyx-app.my.id/help"
+      "https://nyx-app.my.id/help",
+      "https://nyx-app.my.id/security",
+      "https://nyx-app.my.id/hall-of-fame",
+      "https://nyx-app.my.id/commercial"
     ]
   },
   {
@@ -20,8 +23,7 @@ const SITES = [
     urls: [
       "https://app.nyx-app.my.id/login",
       "https://app.nyx-app.my.id/register",
-      "https://app.nyx-app.my.id/migrate-receive",
-      "https://app.nyx-app.my.id/migrate-send"
+      "https://app.nyx-app.my.id/migrate-receive"
     ]
   }
 ];
