@@ -461,7 +461,7 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
   return null;
 }
 
-function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string, storyId?: string } | null {
+function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string, storyId?: string, targetMessageId?: string, emoji?: string } | null {
   if (!content) return null;
   try {
     let trimmed = content.trim();
@@ -470,7 +470,7 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
     }
     if (!trimmed.startsWith('{')) return null;
     const payload = JSON.parse(trimmed);
-    // DO NOT treat story_reply as silent. Let processMessagesAndReactions keep it.
+    
     if (payload.type === 'story_reply') {
       return null;
     }
@@ -484,20 +484,34 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
       return payload;
     }
     if (payload.type === 'STORY_KEY') {
-      return payload; // Should contain storyId and key
+      return payload;
+    }
+    // Tambahan untuk E2EE Unsend & Cabut Reaksi
+    if (payload.type === 'UNSEND' || payload.type === 'reaction_remove') {
+      return payload;
     }
   } catch (_e) {}
   return null;
 }
 
 // Helper to separate messages and reactions
+// Helper to separate messages and reactions
 function processMessagesAndReactions(decryptedItems: Message[], existingMessages: Message[] = []) {
   const chatMessages: Message[] = [];
+  
   interface ReactionPayload { id: string; messageId: string; emoji: string; userId: string; createdAt: string; user?: unknown; isMessage: boolean; }
   const reactions: ReactionPayload[] = [];
+  
   interface EditPayload { targetMessageId: string; text: string; timestamp: number; }
   const edits: EditPayload[] = [];
 
+  // Keranjang penampung sinyal E2EE baru
+  const unsends: { targetMessageId: string; senderId: string; createdAt: string; conversationId: string }[] = [];
+  const reactionRemoves: { targetMessageId: string; emoji: string; senderId: string }[] = [];
+
+  // ==========================================
+  // TAHAP 1: EKSTRAKSI & PENGELOMPOKAN
+  // ==========================================
   for (const msg of decryptedItems) {
     const reactionPayload = parseReaction(msg.content);
     const editPayload = parseEdit(msg.content);
@@ -522,12 +536,32 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
           if (silentPayload.type === 'STORY_KEY' && silentPayload.key && silentPayload.storyId) {
               // Save the story key
               saveStoryKey(silentPayload.storyId, silentPayload.key).catch(e => console.error("Failed to save story key from history", e));
-              // Ignore this message in the UI completely
               continue;
           }
+          
+          // Masukkan ke keranjang reactionRemoves
+          if (silentPayload.type === 'reaction_remove' && silentPayload.targetMessageId && silentPayload.emoji) {
+              reactionRemoves.push({
+                  targetMessageId: silentPayload.targetMessageId,
+                  emoji: silentPayload.emoji,
+                  senderId: msg.senderId
+              });
+              continue; 
+          }
+
+          // Masukkan ke keranjang unsends
+          if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {
+             unsends.push({
+                 targetMessageId: silentPayload.targetMessageId,
+                 senderId: msg.senderId,
+                 createdAt: msg.createdAt,
+                 conversationId: msg.conversationId
+             });
+             continue;
+          }
+          
           msg.content = silentPayload.text;
           msg.isSilent = true;
-          // [FIX] Filter out signaling messages (like CALL_INIT) that have no text content
           if (!msg.content) {
               continue; 
           }
@@ -536,8 +570,16 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     }
   }
 
+  // ==========================================
+  // TAHAP 2: MEMBUAT PETA PESAN
+  // ==========================================
   const messageMap = new Map([...existingMessages, ...chatMessages].map(m => [m.id, m]));
   
+  // ==========================================
+  // TAHAP 3: MENERAPKAN SEMUA PERUBAHAN
+  // ==========================================
+  
+  // 1. Terapkan Reaksi Baru
   for (const reaction of reactions) {
     const target = messageMap.get(asMessageId(reaction.messageId));
     if (target) {
@@ -548,7 +590,15 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     }
   }
 
-  // APPLY EDITS (Sort by timestamp so latest edit wins)
+  // 2. Terapkan Cabut Reaksi (Reaction Remove)
+  for (const rr of reactionRemoves) {
+      const target = messageMap.get(asMessageId(rr.targetMessageId));
+      if (target && target.reactions) {
+          target.reactions = target.reactions.filter(r => r.userId !== rr.senderId || r.emoji !== rr.emoji);
+      }
+  }
+
+  // 3. Terapkan Editan (Diurutkan dari yang terbaru)
   edits.sort((a, b) => a.timestamp - b.timestamp);
   for (const edit of edits) {
      const target = messageMap.get(asMessageId(edit.targetMessageId));
@@ -556,6 +606,30 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
         target.content = edit.text;
         target.isEdited = true;
      }
+  }
+
+  // 4. Terapkan Tarik Pesan (Unsend Tombstones)
+  for (const un of unsends) {
+      const targetId = asMessageId(un.targetMessageId);
+      const target = messageMap.get(targetId);
+      
+      // Keamanan E2EE: Hanya pengirim asli yang berhak menarik pesannya
+      if (target && target.senderId === un.senderId) {
+          target.content = null;
+          target.fileUrl = undefined;
+          target.isDeletedLocal = true;
+          target.reactions = [];
+      } else if (!target) {
+          // Jika pesan aslinya belum ter-load ke UI, suntikkan nisannya langsung ke DB
+          import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([{ 
+              id: targetId, 
+              conversationId: asConversationId(un.conversationId), 
+              isDeletedLocal: true, 
+              content: null, 
+              createdAt: un.createdAt, 
+              senderId: asUserId(un.senderId) 
+          } as Message]));
+      }
   }
 
   return Array.from(messageMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
@@ -1373,48 +1447,75 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
        return;
     }
 
-    if (get().hasLoadedHistory[id] && (get().messages[id]?.length || 0) > 0) return;
-
+    // 1. TAMPILKAN DARI LOCAL VAULT (INDEXEDDB) DULU (Instan 0ms!)
     try {
-      set(state => ({ hasMore: { ...state.hasMore, [id]: true }, isFetchingMore: { ...state.isFetchingMore, [id]: false } }));
-      
-      const localMessages = await shadowVault.getMessagesByConversation(id, 50);
-      const localMap = new Map(localMessages.map(m => [m.id, m]));
+      const localMessagesRaw = await shadowVault.getMessagesByConversation(id, 50);
+      if (localMessagesRaw.length > 0) {
+          const localProcessed = processMessagesAndReactions(localMessagesRaw, []);
+          const localEnriched = enrichMessagesWithSenderProfile(id, localProcessed);
+          set(state => ({
+              messages: { ...state.messages, [id]: localEnriched },
+              hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
+          }));
+      }
+    } catch (e) {
+      console.error("[Local Vault] Gagal memuat dari IndexedDB:", e);
+    }
 
+    // 2. SINKRONISASI BACKGROUND: Cek apakah ada surat tertunda di server
+    try {
+      set(state => ({ isFetchingMore: { ...state.isFetchingMore, [id]: true } }));
+      
       const res = await api<{ items: Message[] }>(`/api/messages/${id}?limit=50`);
       const fetchedMessages = res.items || [];
-      const processedMessages: Message[] = [];
       
-      for (const message of fetchedMessages) {
-        if (localMap.has(message.id)) {
-            const localMsg = localMap.get(message.id)!;
-            processedMessages.push({
-                ...localMsg,
-                statuses: message.statuses,
-                reactions: message.reactions,
-                isEdited: message.isEdited,
-                repliedToId: message.repliedToId || localMsg.repliedToId,
-                repliedTo: localMsg.repliedTo
-            });
-        } else {
-            processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
+      if (fetchedMessages.length > 0) {
+        const processedMessages: Message[] = [];
+        const socket = getSocket();
+        const { user } = useAuthStore.getState();
+
+        for (const message of fetchedMessages) {
+          // A. Dekripsi pesan dari server
+          const decrypted = await decryptMessageObject(message, undefined, 0, { skipRetries: true });
+          processedMessages.push(decrypted);
+
+          // B. THE KILL SWITCH: Perintahkan server menghancurkan pesan ini!
+          if (socket?.connected && user && decrypted.senderId !== user.id) {
+              socket.emit('message:mark_as_read', {
+                  messageId: decrypted.id,
+                  conversationId: id
+              });
+          }
         }
+
+        set(state => {
+          const existingMessages = state.messages[id] || [];
+          const combined = [...existingMessages, ...processedMessages];
+          
+          // Hapus duplikasi berdasarkan ID
+          const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
+
+          const allMessages = processMessagesAndReactions(uniqueMessages, []);
+          const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
+          
+          // C. Simpan aman ke dalam IndexedDB
+          shadowVault.upsertMessages(enrichedMessages); 
+
+          return {
+            messages: { ...state.messages, [id]: enrichedMessages },
+            hasMore: { ...state.hasMore, [id]: enrichedMessages.length >= 50 }, // Gunakan jumlah lokal sebagai patokan
+            hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
+          };
+        });
+      } else {
+         // Jika server kosong, jangan sentuh state.messages agar UI tidak hilang
+         // (Cukup tandai hasLoadedHistory)
+         set(state => ({ hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true } }));
       }
-
-      set(state => {
-        const allMessages = processMessagesAndReactions(processedMessages, []);
-        const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
-        
-        shadowVault.upsertMessages(enrichedMessages); 
-
-        return {
-          messages: { ...state.messages, [id]: enrichedMessages },
-          hasMore: { ...state.hasMore, [id]: fetchedMessages.length >= 50 },
-          hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
-        };
-      });
     } catch (error) {
-      console.error(`Failed to load messages for ${id}`, error);
+      console.error(`Failed to sync pending messages for ${id}`, error);
+    } finally {
+      set(state => ({ isFetchingMore: { ...state.isFetchingMore, [id]: false } }));
     }
   },
 
@@ -1429,104 +1530,79 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: true } }));
     
     try {
-      const res = await api<{ items: Message[] }>(`/api/messages/${conversationId}?cursor=${oldestMessage.id}&limit=50`);
-      const fetchedItems = res.items || [];
-      
+      // PAGINATION LOKAL: Server sudah tidak punya pesan lama kita (karena dihapus saat dibaca), 
+      // jadi kita gulir ke atas murni mengambil dari Shadow Vault (IndexedDB).
       const localMessages = await shadowVault.getMessagesByConversation(conversationId, 50, oldestMessage.createdAt);
-      const localMap = new Map(localMessages.map(m => [m.id, m]));
-
-      const processedItems: Message[] = [];
-      for (const m of fetchedItems) {
-          if (localMap.has(m.id)) {
-              const localMsg = localMap.get(m.id)!;
-              processedItems.push({
-                  ...localMsg,
-                  statuses: m.statuses,
-                  reactions: m.reactions,
-                  isEdited: m.isEdited,
-                  repliedToId: m.repliedToId || localMsg.repliedToId,
-                  repliedTo: localMsg.repliedTo
-              });
-          } else {
-              processedItems.push(await decryptMessageObject(m, undefined, 0, { skipRetries: true }));
-          }
-      }
       
       set(state => {
         const existingMessages = state.messages[conversationId] || [];
-        const allMessages = processMessagesAndReactions(processedItems, existingMessages);
-        const enrichedMessages = enrichMessagesWithSenderProfile(conversationId, allMessages);
+        
+        // Gabungkan dan filter
+        const combined = [...localMessages, ...existingMessages];
+        const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
 
-        shadowVault.upsertMessages(enrichedMessages); 
+        const allMessages = processMessagesAndReactions(uniqueMessages, []);
+        const enrichedMessages = enrichMessagesWithSenderProfile(conversationId, allMessages);
 
         const MAX_MESSAGES_IN_RAM = 150;
         let prunedMessages = enrichedMessages;
         
         if (enrichedMessages.length > MAX_MESSAGES_IN_RAM) {
-           prunedMessages = enrichedMessages.slice(0, MAX_MESSAGES_IN_RAM);
+           prunedMessages = enrichedMessages.slice(enrichedMessages.length - MAX_MESSAGES_IN_RAM);
         }
 
-        const newState: Partial<State> = { messages: { ...state.messages, [conversationId]: prunedMessages } };
-
-        if (fetchedItems.length < 50) {
-            newState.hasMore = { ...state.hasMore, [conversationId]: false };
-        }
-        
-        return newState;
+        return { 
+            messages: { ...state.messages, [conversationId]: prunedMessages },
+            // Jika IndexedDB mengembalikan kurang dari 50, berarti sudah sampai ujung (habis)
+            hasMore: { ...state.hasMore, [conversationId]: localMessages.length === 50 } 
+        };
       });
     } catch (error) {
-      console.error("Failed to load previous messages", error);
+      console.error("Failed to load previous messages from Local Vault", error);
     } finally {
       set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: false } }));
     }
   },
 
   loadMessageContext: async (messageId: string) => {
-    const state = get();
     try {
-      const res = await api<{ items: Message[], conversationId: string }>(`/api/messages/context/${messageId}`);
-      const fetchedMessages = res.items || [];
-      const convoId = res.conversationId;
-
-      if (!convoId) return;
-
-      const localMessages = await shadowVault.getMessagesByConversation(convoId);
-      const localMap = new Map(localMessages.map(m => [m.id, m]));
-
-      const processedMessages: Message[] = [];
-      for (const message of fetchedMessages) {
-          if (localMap.has(message.id)) {
-              const localMsg = localMap.get(message.id)!;
-              processedMessages.push({
-                  ...localMsg,
-                  statuses: message.statuses,
-                  reactions: message.reactions,
-                  isEdited: message.isEdited,
-                  repliedToId: message.repliedToId || localMsg.repliedToId,
-                  repliedTo: localMsg.repliedTo
-              });
-          } else {
-              processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
-          }
+      // 1. Cari pesan target langsung di dalam IndexedDB (Local Vault)
+      const targetMessage = await shadowVault.getMessage(messageId);
+      
+      if (!targetMessage || !targetMessage.conversationId) {
+        console.warn(`[Local Vault] Pesan ${messageId} tidak ditemukan di database lokal.`);
+        return;
       }
 
+      const convoId = targetMessage.conversationId;
+
+      // 2. Ambil pesan di sekitarnya dari IndexedDB.
+      // (Bisa memuat ulang 50-100 pesan terakhir atau membuat fungsi khusus di shadowVault
+      // untuk mengambil pesan berdasarkan rentang waktu targetMessage.createdAt)
+      // Untuk amannya, kita muat porsi yang mencukupi dari memori lokal:
+      const localMessages = await shadowVault.getMessagesByConversation(convoId, 100);
+
+      // 3. Proses dan tampilkan ke UI secara instan
       set(state => {
         const existingMessages = state.messages[convoId] || [];
-        const combined = [...existingMessages, ...processedMessages];
+        
+        // Gabungkan pesan yang sedang tampil dengan pesan konteks yang baru ditarik dari IndexedDB
+        const combined = [...existingMessages, ...localMessages];
+        
+        // Hilangkan duplikasi
         const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
         
         const finalMessages = processMessagesAndReactions(uniqueMessages, []);
         const enrichedMessages = enrichMessagesWithSenderProfile(convoId, finalMessages);
-
-        shadowVault.upsertMessages(enrichedMessages);
 
         return {
           messages: { ...state.messages, [convoId]: enrichedMessages },
           hasMore: { ...state.hasMore, [convoId]: true } 
         };
       });
+
     } catch (error) {
-      console.error(`Failed to load context for message ${messageId}`, error);
+      console.error(`Failed to load context for message ${messageId} from Local Vault`, error);
     }
   },
 
@@ -1719,6 +1795,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 shadowVault.upsertMessages([finalDecrypted]); 
                 return { messages: { ...state.messages, [conversationId]: [...currentMessages, finalDecrypted] } };
               });
+              
+              // === TAMBAHKAN KODE KILL SWITCH DI SINI ===
+              // Beritahu server bahwa pesan LIVE ini sudah aman di brankas, hancurkan dari server!
+              const socket = getSocket();
+              if (socket?.connected && currentUser && finalDecrypted.senderId !== currentUser.id && !finalDecrypted.isSilent) {
+                  socket.emit('message:mark_as_read', {
+                      messageId: finalDecrypted.id,
+                      conversationId: conversationId
+                  });
+              }
               
               const isViewingChat = window.location.pathname.includes(`/chat/${finalDecrypted.conversationId}`);
               if (!isViewingChat && !finalDecrypted.isSilent && finalDecrypted.senderId !== currentUser?.id) {

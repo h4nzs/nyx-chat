@@ -162,7 +162,23 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
       t('chat:actions.delete_message_title'), 
       t('chat:actions.delete_message_desc'), 
       () => {
+      // 1. Hapus dari UI dan Local Vault secara instan
       removeMessage(message.conversationId, message.id);
+
+      const socket = getSocket();
+      if (socket?.connected) {
+          // 2. Beritahu Server untuk memusnahkannya (jika pesan masih nyangkut/belum dibaca)
+          socket.emit("message:unsend", { messageId: message.id, conversationId: message.conversationId });
+
+          // 3. E2EE TOMBSTONE: Kirim sinyal terenkripsi ke lawan bicara agar mereka menghapusnya dari IndexedDB mereka
+          const unsendPayload = { type: "UNSEND", targetMessageId: message.id };
+          useMessageStore.getState().sendMessage(message.conversationId, {
+              content: JSON.stringify(unsendPayload),
+              isSilent: true
+          });
+      }
+
+      // 4. Bersihkan file dari Cloudflare R2 (Storage) jika ini adalah file gambar/media
       let query = '';
       let targetUrl = message.fileUrl;
       try {
@@ -177,16 +193,12 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
               const url = new URL(targetUrl);
               const key = url.pathname.substring(1);
               if (key) query = `?r2Key=${encodeURIComponent(key)}`;
+              // Panggil API hanya untuk hapus objek storage, bukan hapus pesan DB
+              api(`/api/uploads/file${query}`, { method: 'DELETE' }).catch(() => {});
           } catch (e) {
               console.error("Failed to parse file URL for deletion:", e);
           }
       }
-
-      api(`/api/messages/${message.id}${query}`, { method: 'DELETE' }).catch((error) => {
-        console.error("Failed to delete message:", error);
-        toast.error(t('chat:messages.delete_failed', 'Failed to delete message.'));
-        addOptimisticMessage(message.conversationId, message);
-      });
     });
   };
 
@@ -213,28 +225,30 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     if (!user) return;
     const userReaction = message.reactions?.find(r => r.userId === user.id);
     
+    // SKENARIO 1: Pengguna mengklik emoji yang sama (HAPUS REAKSI)
     if (userReaction?.emoji === emoji) {
       removeLocalReaction(message.conversationId, message.id, userReaction.id);
-      try {
-        if ((userReaction as unknown as { isMessage?: boolean }).isMessage) {
-            await api(`/api/messages/${userReaction.id}`, { method: 'DELETE' });
-        } else {
-            await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
-        }
-      } catch (e) {
-        console.error("Failed to remove reaction:", e);
-      }
+      
+      // E2EE Tombstone: Kirim sinyal hapus reaksi ke lawan bicara
+      const removeReactPayload = { type: "reaction_remove", targetMessageId: message.id, emoji: emoji };
+      useMessageStore.getState().sendMessage(message.conversationId, {
+          content: JSON.stringify(removeReactPayload),
+          isSilent: true
+      });
       return;
     }
 
+    // SKENARIO 2: Pengguna mengganti emoji (HAPUS YANG LAMA DULU)
     if (userReaction) {
         removeLocalReaction(message.conversationId, message.id, userReaction.id);
-        const deletePromise = (userReaction as unknown as { isMessage?: boolean }).isMessage
-            ? api(`/api/messages/${userReaction.id}`, { method: 'DELETE' })
-            : api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
-        deletePromise.catch(console.error);
+        const removeReactPayload = { type: "reaction_remove", targetMessageId: message.id, emoji: userReaction.emoji };
+        useMessageStore.getState().sendMessage(message.conversationId, {
+            content: JSON.stringify(removeReactPayload),
+            isSilent: true
+        });
     }
 
+    // SKENARIO 3: Kirim Reaksi Baru
     try {
         await sendReaction(message.conversationId, message.id, emoji);
     } catch (e) {

@@ -360,17 +360,6 @@ export function registerSocket(httpServer: HttpServer) {
           return callback?.({ ok: false, error: "Conversation not found." });
         }
 
-        if (repliedToId) {
-          const targetMessage = await prisma.message.findUnique({
-            where: { id: repliedToId },
-            select: { conversationId: true }
-          });
-          
-          if (!targetMessage || targetMessage.conversationId !== conversationId) {
-            return callback?.({ ok: false, error: "Invalid reply target." });
-          }
-        }
-
         // --- TYPE SAFE DB TRANSACTION ---
         const newMessageRaw = await prisma.message.create({
           data: { 
@@ -383,8 +372,7 @@ export function registerSocket(httpServer: HttpServer) {
               isViewOnce: isViewOnce === true
           },
           include: { 
-              sender: { select: { id: true, encryptedProfile: true } },
-              repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }
+              sender: { select: { id: true, encryptedProfile: true } }
           }
         });
         
@@ -411,6 +399,41 @@ export function registerSocket(httpServer: HttpServer) {
       } catch (error) {
         console.error("Failed to process message:", error);
         callback?.({ ok: false, error: "Failed to send." });
+      }
+    });
+
+    socket.on('message:unsend', async ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
+      if (!messageId || !socket.user) return;
+      const uid = socket.user.id;
+
+      try {
+        // 1. Cek apakah pesan itu ada dan memang milik si pengirim
+        const msg = await prisma.message.findUnique({
+          where: { id: messageId },
+          select: { senderId: true, conversationId: true }
+        });
+
+        if (!msg || msg.conversationId !== conversationId || msg.senderId !== uid) {
+          return; // Abaikan jika bukan pesan miliknya
+        }
+
+        // 2. HANCURKAN DARI SERVER (Jika pesan masih belum terbaca/terkirim oleh penerima)
+        await prisma.message.delete({
+          where: { id: messageId }
+        });
+        
+        console.log(`[Zero-Knowledge] Pesan ${messageId} ditarik oleh pengirim dan dihapus dari server.`);
+
+        // 3. Beri tahu Klien yang Sedang Online (Tombstone Relay)
+        // Kita menggunakan socket untuk memberi sinyal real-time agar UI frontend langsung merespons
+        socket.to(conversationId).emit('message:deleted_remotely', { 
+          messageId, 
+          conversationId,
+          deletedBy: uid
+        });
+
+      } catch (error) {
+        console.error('Failed to unsend message on server:', error);
       }
     });
 

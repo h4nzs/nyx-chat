@@ -42,10 +42,27 @@ const processMessageBuffer = async () => {
         try {
             // THE SHIELD: Intelligent Echo Cancellation
             if (meId && safeMessage.senderId === meId) {
+                // 1. Blokir echo dari pesan normal
                 const isOptimisticEcho = useMessageStore.getState().messages[safeMessage.conversationId]?.some(
                     m => m.tempId && String(m.tempId) === String(safeMessage.tempId)
                 );
-                if (isOptimisticEcho) continue; // It's an echo of our own msg
+                if (isOptimisticEcho) {
+                    // Emit ACK agar server langsung membakarnya (karena ini pesan kita sendiri yang echo)
+                    socket?.emit('message:mark_as_read', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
+                    continue; 
+                }
+
+                // 2. Blokir echo dari pesan SILENT (seperti Reaction/Edit/GhostSync yang kita kirim sendiri)
+                if (safeMessage.content && safeMessage.content.startsWith('{')) {
+                     try {
+                         const meta = JSON.parse(safeMessage.content);
+                         if (meta.type === 'reaction' || meta.type === 'edit' || meta.type === 'silent' || meta.type === 'GHOST_SYNC' || meta.type === 'UNSEND') {
+                             // Langsung bakar dari server, ini punya kita sendiri!
+                             socket?.emit('message:mark_as_read', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
+                             continue;
+                         }
+                     } catch (_e) {}
+                }
             }
 
             const decryptedMessage = await addIncomingMessage(safeMessage.conversationId, safeMessage);
@@ -179,7 +196,7 @@ export function getSocket() {
 
       // ✅ FIX 2: Kirim ACK "Delivered" ke server segera setelah diterima dengan aman!
       // Server butuh kepastian ini agar tidak menembakkan pesan yang sama berulang kali.
-      socket?.emit("message:ack_delivered", { 
+      socket?.emit("message:mark_as_read", { 
           messageId: safeMessage.id, 
           conversationId: safeMessage.conversationId 
       });
@@ -325,6 +342,23 @@ export function getSocket() {
       toast.error("This session has been logged out remotely.");
       useAuthStore.getState().logout();
       disconnectSocket();
+    });
+
+    socket.on("message:deleted_remotely", async ({ conversationId, messageId }) => {
+      
+      const { removeMessage } = useMessageStore.getState();
+      // Ini akan langsung menghapus pesan dari UI dan mengubahnya menjadi Tombstone di IndexedDB lokal
+      removeMessage(conversationId, messageId);
+      
+      // Opsional: Berikan feedback visual kecil jika user sedang melihat chat
+      const isViewingChat = window.location.pathname.includes(`/chat/${conversationId}`);
+      if (isViewingChat) {
+          toast.success("Sebuah pesan telah ditarik oleh pengirim.", {
+              icon: '🗑️',
+              duration: 3000,
+              position: 'bottom-center'
+          });
+      }
     });
 
     socket.on("user:identity_changed", (data) => {

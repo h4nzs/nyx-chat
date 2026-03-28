@@ -3,7 +3,6 @@ import { useAuthStore } from '@store/auth';
 import { useMessageStore } from '@store/message';
 import { useShallow } from 'zustand/react/shallow';
 import type { Message } from '@store/conversation';
-import { api } from '@lib/api';
 
 interface ReactionPopoverProps {
   message: Message;
@@ -14,9 +13,12 @@ const COMMON_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
 
 export default function ReactionPopover({ message, children }: ReactionPopoverProps) {
   const me = useAuthStore((s) => s.user);
-  const { sendReaction, removeLocalReaction } = useMessageStore(useShallow(s => ({ 
+  
+  // Tambahkan sendMessage ke dalam hook useShallow
+  const { sendReaction, removeLocalReaction, sendMessage } = useMessageStore(useShallow(s => ({ 
     sendReaction: s.sendReaction, 
-    removeLocalReaction: s.removeLocalReaction 
+    removeLocalReaction: s.removeLocalReaction,
+    sendMessage: s.sendMessage
   })));
 
   const handleSelectReaction = async (emoji: string) => {
@@ -25,40 +27,33 @@ export default function ReactionPopover({ message, children }: ReactionPopoverPr
     // Check if I already reacted
     const userReaction = message.reactions?.find(r => r.userId === me.id);
 
-    // 1. TOGGLE OFF (If clicking same emoji)
+    // 1. TOGGLE OFF (Jika mengklik emoji yang sama = Hapus Reaksi)
     if (userReaction?.emoji === emoji) {
-      // Optimistic remove
       removeLocalReaction(message.conversationId, message.id, userReaction.id);
       
-      // Server remove
-      try {
-        if (userReaction.isMessage) {
-            // New "Reactions as Messages"
-            await api(`/api/messages/${userReaction.id}`, { method: 'DELETE' });
-        } else {
-            // Legacy "MessageReaction" table
-            await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
-        }
-      } catch (e) {
-        console.error("Failed to remove reaction:", e);
-      }
+      // E2EE Tombstone: Kirim sinyal hapus reaksi ke lawan bicara
+      const removeReactPayload = { type: "reaction_remove", targetMessageId: message.id, emoji: emoji };
+      sendMessage(message.conversationId, {
+          content: JSON.stringify(removeReactPayload),
+          isSilent: true
+      });
       return;
     }
 
-    // 2. REPLACE (If clicking different emoji)
+    // 2. REPLACE (Jika mengklik emoji berbeda = Hapus yang lama, kirim yang baru)
     if (userReaction) {
-        // Remove old one first
+        // Hapus yang lama di UI Lokal
         removeLocalReaction(message.conversationId, message.id, userReaction.id);
         
-        const deletePromise = userReaction.isMessage
-            ? api(`/api/messages/${userReaction.id}`, { method: 'DELETE' })
-            : api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
-            
-        deletePromise.catch(console.error);
+        // E2EE Tombstone: Kirim sinyal hapus emoji lama
+        const removeReactPayload = { type: "reaction_remove", targetMessageId: message.id, emoji: userReaction.emoji };
+        sendMessage(message.conversationId, {
+            content: JSON.stringify(removeReactPayload),
+            isSilent: true
+        });
     }
 
-    // 3. ADD NEW (Send as message)
-    // Optimistic update is handled inside sendReaction store action
+    // 3. ADD NEW (Kirim Reaksi Baru)
     try {
         await sendReaction(message.conversationId, message.id, emoji);
     } catch (e) {
