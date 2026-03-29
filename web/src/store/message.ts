@@ -1861,6 +1861,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         return; 
     }
 
+    await shadowVault.deleteMessage(tempIdStr);
+
     set(state => {
       const currentMessages = state.messages[conversationId] || [];
       
@@ -1891,7 +1893,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         optimistic: false
       };
 
-      // 4. Simpan ke IndexedDB
+      // Simpan ke IndexedDB
       shadowVault.upsertMessages([finalMessage]); 
 
       // 5. Kembalikan array yang bersih dan terurut
@@ -2011,20 +2013,55 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             return { messages: newMessages };
             }),
 
-            updateMessageStatus: (conversationId, messageId, userId, status) => set(state => {
-            const newMessages = { ...state.messages };
-            const convoMessages = newMessages[conversationId];
-            if (!convoMessages) return state;
-            newMessages[conversationId] = convoMessages.map(m => {
-            if (m.id === messageId) {
-            const existingStatus = m.statuses?.find(s => s.userId === userId);
-            if (existingStatus) return { ...m, statuses: m.statuses!.map(s => s.userId === userId ? { ...s, status, updatedAt: new Date().toISOString() } : s) };
-            else return { ...m, statuses: [...(m.statuses || []), { userId, status, messageId, id: `temp-status-${Date.now()}`, updatedAt: new Date().toISOString() }] };
-            }
-            return m;
-            }) as Message[];
-            return { messages: newMessages };
-            }),
+            updateMessageStatus: (conversationId, messageId, userId, status) => {
+            set(state => {
+              const newMessages = { ...state.messages };
+              const convoMessages = newMessages[conversationId];
+              if (!convoMessages) return state;
+            
+              let msgToSave: Message | null = null;
+              
+              // 1. Pastikan status adalah tipe literal (bukan sembarang string)
+              const validStatus = status as 'SENT' | 'DELIVERED' | 'READ';
+            
+              newMessages[conversationId] = convoMessages.map(m => {
+                if (m.id === messageId) {
+                  const existingStatus = m.statuses?.find(s => s.userId === userId);
+                  const updatedMsg = { ...m };
+                  
+                  if (existingStatus) {
+                     updatedMsg.statuses = updatedMsg.statuses!.map(s => 
+                       s.userId === userId 
+                         ? { ...s, status: validStatus, updatedAt: new Date().toISOString() } 
+                         : s
+                     );
+                  } else {
+                     // 2. Bungkus parameter string ke dalam Branded Type menggunakan asUserId dan asMessageId
+                     updatedMsg.statuses = [
+                       ...(updatedMsg.statuses || []), 
+                       { 
+                         userId: asUserId(userId), 
+                         status: validStatus, 
+                         messageId: asMessageId(messageId), 
+                         id: `temp-status-${Date.now()}`, 
+                         updatedAt: new Date().toISOString() 
+                       }
+                     ];
+                  }
+                  
+                  msgToSave = updatedMsg;
+                  return updatedMsg;
+                }
+                return m;
+              }) as Message[];
+            
+              if (msgToSave) {
+                 import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([msgToSave!]));
+              }
+            
+              return { messages: newMessages };
+            });
+          },
 
             clearMessagesForConversation: (conversationId) => {
             shadowVault.deleteConversationMessages(conversationId).catch(console.error);
