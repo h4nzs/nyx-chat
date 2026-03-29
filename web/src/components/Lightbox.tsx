@@ -23,9 +23,14 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
   const handleClose = () => {
     if (message.isViewOnce && !message.isViewed) {
       useMessageStore.getState().updateMessage(message.conversationId, message.id, { isViewed: true });
-      import('@lib/api').then(({ authFetch }) => {
-        authFetch(`/api/messages/${message.id}/viewed`, { method: 'PUT' }).catch(console.error);
+      import('@lib/socket').then(({ getSocket }) => {
+          const socket = getSocket();
+          if (socket?.connected) {
+              socket.emit('message:view_once_opened', { messageId: message.id, conversationId: message.conversationId });
+          }
       });
+      // Optionally clean up the file object locally so it can't be re-opened:
+      useMessageStore.getState().updateMessage(message.conversationId, message.id, { fileUrl: undefined, content: null });
     }
     onClose();
   };

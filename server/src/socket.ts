@@ -437,6 +437,11 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
+    socket.on('message:view_once_opened', ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
+        if (!messageId || !conversationId || !socket.user) return;
+        socket.to(conversationId).emit('message:viewed', { messageId, conversationId });
+    });
+
     socket.on("push:subscribe", async (data: PushSubscribePayload) => {
       if (!data.endpoint || !data.keys?.p256dh || !data.keys?.auth) return;
       try {

@@ -231,6 +231,9 @@ export async function decryptMessageObject(
         }
         if (rawMsg.repliedTo) {
             finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
+        } else if (rawMsg.repliedToId) {
+            const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
+            if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
         }
         return finalMessage;
     }
@@ -423,6 +426,9 @@ export async function decryptMessageObject(
 
     if (rawMsg.repliedTo) {
         finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
+    } else if (rawMsg.repliedToId) {
+        const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
+        if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
     }
 
     return finalMessage;
@@ -1673,6 +1679,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           decrypted = await decryptMessageObject(message);
       }
 
+      if (decrypted.repliedToId && !decrypted.repliedTo) {
+          try {
+              const repliedMessage = await shadowVault.getMessage(decrypted.repliedToId);
+              if (repliedMessage) {
+                  decrypted.repliedTo = repliedMessage;
+              }
+          } catch (e) {
+              console.error('[Vault] Failed to fetch replied message locally', e);
+          }
+      }
+
       if ((decrypted as Record<string, unknown>).type === 'STORY_KEY' || (decrypted.content && decrypted.content.startsWith('STORY_KEY:'))) {
           try {
               const payloadStr = decrypted.content ? decrypted.content.replace('STORY_KEY:', '') : '';
@@ -1745,6 +1762,45 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           if (silentPayload.type === 'GHOST_SYNC') {
               console.log(`[Ghost Sync] Received sync from ${decrypted.senderId}. Settle ratchet state silently.`);
               return decrypted; 
+          }
+
+          if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {
+              const targetId = asMessageId(silentPayload.targetMessageId);
+              // Pastikan hanya pengirim yang bisa menghapus pesannya sendiri
+              const currentMessages = get().messages[conversationId] || [];
+              const target = currentMessages.find(m => m.id === targetId);
+              
+              if (target && target.senderId === decrypted.senderId) {
+                  get().removeMessage(conversationId, targetId);
+              } else if (!target) {
+                  // Jika pesan belum di-load di memori, inject nisannya langsung ke DB
+                  import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([{ 
+                      id: targetId, 
+                      conversationId: asConversationId(conversationId), 
+                      isDeletedLocal: true, 
+                      content: null, 
+                      createdAt: decrypted.createdAt, 
+                      senderId: asUserId(decrypted.senderId) 
+                  } as Message]));
+              }
+              return null;
+          }
+
+          if (silentPayload.type === 'reaction_remove' && silentPayload.targetMessageId && silentPayload.emoji) {
+              set(state => {
+                  const currentMessages = state.messages[conversationId] || [];
+                  const updatedMessages = currentMessages.map(m => {
+                      if (m.id === silentPayload.targetMessageId) {
+                          const newReactions = m.reactions?.filter(r => r.userId !== decrypted.senderId || r.emoji !== silentPayload.emoji) || [];
+                          const updatedMsg = { ...m, reactions: newReactions };
+                          shadowVault.upsertMessages([updatedMsg]).catch(console.error);
+                          return updatedMsg;
+                      }
+                      return m;
+                  });
+                  return { messages: { ...state.messages, [conversationId]: updatedMessages } };
+              });
+              return null;
           }
 
           decrypted.content = silentPayload.text || '';

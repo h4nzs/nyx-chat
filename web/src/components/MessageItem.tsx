@@ -165,17 +165,20 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
       // 1. Hapus dari UI dan Local Vault secara instan
       removeMessage(message.conversationId, message.id);
 
-      const socket = getSocket();
-      if (socket?.connected) {
-          // 2. Beritahu Server untuk memusnahkannya (jika pesan masih nyangkut/belum dibaca)
-          socket.emit("message:unsend", { messageId: message.id, conversationId: message.conversationId });
+      // Hanya kirim instruksi hapus ke server dan lawan bicara JIKA ini pesan milik kita
+      if (mine) {
+          const socket = getSocket();
+          if (socket?.connected) {
+              // 2. Beritahu Server untuk memusnahkannya (jika pesan masih nyangkut/belum dibaca)
+              socket.emit("message:unsend", { messageId: message.id, conversationId: message.conversationId });
 
-          // 3. E2EE TOMBSTONE: Kirim sinyal terenkripsi ke lawan bicara agar mereka menghapusnya dari IndexedDB mereka
-          const unsendPayload = { type: "UNSEND", targetMessageId: message.id };
-          useMessageStore.getState().sendMessage(message.conversationId, {
-              content: JSON.stringify(unsendPayload),
-              isSilent: true
-          });
+              // 3. E2EE TOMBSTONE: Kirim sinyal terenkripsi ke lawan bicara agar mereka menghapusnya dari IndexedDB mereka
+              const unsendPayload = { type: "UNSEND", targetMessageId: message.id };
+              useMessageStore.getState().sendMessage(message.conversationId, {
+                  content: JSON.stringify(unsendPayload),
+                  isSilent: true
+              });
+          }
       }
 
       // 4. Bersihkan file dari Cloudflare R2 (Storage) jika ini adalah file gambar/media

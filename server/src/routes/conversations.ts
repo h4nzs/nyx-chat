@@ -52,7 +52,13 @@ router.get('/', async (req, res, next) => {
       by: ['conversationId'],
       where: {
         conversationId: { in: conversationsData.map(c => c.id) },
-        senderId: { not: userId }
+        senderId: { not: userId },
+        statuses: {
+          none: {
+            userId: userId,
+            status: 'READ'
+          }
+        }
       },
       _count: { id: true }
     });

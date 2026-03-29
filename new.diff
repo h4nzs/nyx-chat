@@ -911,21 +911,20 @@ index 6aa70810..a1233ba9 100644
          await sendReaction(message.conversationId, message.id, emoji);
      } catch (e) {
 diff --git a/web/src/lib/socket.ts b/web/src/lib/socket.ts
-index ea3e7be1..36afe32c 100644
+index ea3e7be1..0d77d910 100644
 --- a/web/src/lib/socket.ts
 +++ b/web/src/lib/socket.ts
-@@ -42,10 +42,27 @@ const processMessageBuffer = async () => {
+@@ -42,10 +42,23 @@ const processMessageBuffer = async () => {
          try {
              // THE SHIELD: Intelligent Echo Cancellation
              if (meId && safeMessage.senderId === meId) {
 +                // 1. Blokir echo dari pesan normal
                  const isOptimisticEcho = useMessageStore.getState().messages[safeMessage.conversationId]?.some(
-                     m => m.tempId && String(m.tempId) === String(safeMessage.tempId)
+-                    m => m.tempId && String(m.tempId) === String(safeMessage.tempId)
++                    m => m.id === safeMessage.id || (m.tempId && String(m.tempId) === String(safeMessage.tempId))
                  );
 -                if (isOptimisticEcho) continue; // It's an echo of our own msg
 +                if (isOptimisticEcho) {
-+                    // Emit ACK agar server langsung membakarnya (karena ini pesan kita sendiri yang echo)
-+                    socket?.emit('message:mark_as_read', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
 +                    continue; 
 +                }
 +
@@ -934,8 +933,6 @@ index ea3e7be1..36afe32c 100644
 +                     try {
 +                         const meta = JSON.parse(safeMessage.content);
 +                         if (meta.type === 'reaction' || meta.type === 'edit' || meta.type === 'silent' || meta.type === 'GHOST_SYNC' || meta.type === 'UNSEND') {
-+                             // Langsung bakar dari server, ini punya kita sendiri!
-+                             socket?.emit('message:mark_as_read', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
 +                             continue;
 +                         }
 +                     } catch (_e) {}
@@ -943,7 +940,7 @@ index ea3e7be1..36afe32c 100644
              }
  
              const decryptedMessage = await addIncomingMessage(safeMessage.conversationId, safeMessage);
-@@ -327,6 +344,23 @@ export function getSocket() {
+@@ -327,6 +340,23 @@ export function getSocket() {
        disconnectSocket();
      });
  
@@ -1073,7 +1070,7 @@ index 72c9f684..f9500fc6 100644
              : (shouldIncrementUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
        };
 diff --git a/web/src/store/message.ts b/web/src/store/message.ts
-index f0d08a88..9a0df4dd 100644
+index f0d08a88..07c223fb 100644
 --- a/web/src/store/message.ts
 +++ b/web/src/store/message.ts
 @@ -461,7 +461,7 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
@@ -1230,7 +1227,16 @@ index f0d08a88..9a0df4dd 100644
    return Array.from(messageMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
  }
  
-@@ -1082,8 +1156,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+@@ -619,6 +693,8 @@ const initialState: State = {
+   selectedMessageIds: [],
+ };
+ 
++const pendingStatuses: Record<string, { userId: string, status: string }> = {};
++
+ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) => ({
+   ...initialState,
+ 
+@@ -1082,8 +1158,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
          async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
            if (res.ok && res.msg) {
              if (!isReactionPayload) {
@@ -1244,7 +1250,7 @@ index f0d08a88..9a0df4dd 100644
                  let realFileUrl = existingMsg?.fileUrl;
                   let realFileKey = existingMsg?.fileKey;
                   try {
-@@ -1110,6 +1187,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+@@ -1110,6 +1189,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
                      status: 'SENT' as const
                  } as Partial<Message>;
                  
@@ -1252,7 +1258,7 @@ index f0d08a88..9a0df4dd 100644
                  get().replaceOptimisticMessage(conversationId, actualTempId, updatedMsg);
              } else {
                  const reactionData = parseReaction(contentToEncrypt);
-@@ -1373,48 +1451,75 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+@@ -1373,48 +1453,75 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
         return;
      }
  
@@ -1360,7 +1366,7 @@ index f0d08a88..9a0df4dd 100644
      }
    },
  
-@@ -1429,104 +1534,79 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+@@ -1429,104 +1536,79 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
      set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: true } }));
      
      try {
@@ -1502,7 +1508,7 @@ index f0d08a88..9a0df4dd 100644
      }
    },
  
-@@ -1577,8 +1657,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+@@ -1577,8 +1659,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
                    isSilent: optimistic.isSilent,
                    id: message.id,
                    createdAt: message.createdAt,
@@ -1512,7 +1518,7 @@ index f0d08a88..9a0df4dd 100644
            } else {
                decrypted = await decryptMessageObject(message);
            }
-@@ -1720,6 +1799,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+@@ -1720,6 +1801,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
                  return { messages: { ...state.messages, [conversationId]: [...currentMessages, finalDecrypted] } };
                });
                
@@ -1529,7 +1535,7 @@ index f0d08a88..9a0df4dd 100644
                const isViewingChat = window.location.pathname.includes(`/chat/${finalDecrypted.conversationId}`);
                if (!isViewingChat && !finalDecrypted.isSilent && finalDecrypted.senderId !== currentUser?.id) {
                    import('@store/dynamicIsland').then(({ default: useDynamicIslandStore }) => {
-@@ -1750,47 +1839,77 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+@@ -1750,47 +1841,89 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
    },
  
    replaceOptimisticMessage: async (conversationId, tempId, newMessage) => {
@@ -1590,9 +1596,10 @@ index f0d08a88..9a0df4dd 100644
 +      const currentMessages = state.messages[conversationId] || [];
 +      
 +      const oldMsg = currentMessages.find(m => 
-+          String(m.tempId) === String(tempId) || 
++          (tempId && String(m.tempId) === String(tempId)) || 
 +          m.id === tempIdStr || 
-+          m.id === tempIdDashStr
++          m.id === tempIdDashStr ||
++          m.id === newMessage.id
 +      );
 +      
 +      const filteredMessages = currentMessages.filter(m => 
@@ -1602,11 +1609,22 @@ index f0d08a88..9a0df4dd 100644
 +          m.id !== newMessage.id
 +      );
 +
++      const pending = pendingStatuses[newMessage.id!];
++      const validPendingStatus = pending?.status as 'SENT' | 'DELIVERED' | 'READ' | undefined;
++      
++      const finalStatuses = pending
++          ? [{ userId: asUserId(pending.userId), status: validPendingStatus!, messageId: asMessageId(newMessage.id!), id: `temp-status-${Date.now()}`, updatedAt: new Date().toISOString() }]
++          : (newMessage.statuses && newMessage.statuses.length > 0) ? newMessage.statuses : (oldMsg?.statuses || []);
++
++      if (pending) {
++          delete pendingStatuses[newMessage.id!];
++      }
++
 +      const finalMessage: Message = {
 +        ...(oldMsg || {}), 
 +        ...(newMessage as Message), 
 +        // === FIX CENTANG BIRU HILANG ===
-+        statuses: (newMessage.statuses && newMessage.statuses.length > 0) ? newMessage.statuses : (oldMsg?.statuses || []),
++        statuses: finalStatuses,
 +        content: oldMsg?.content !== undefined ? oldMsg.content : newMessage.content,
 +        fileUrl: newMessage.fileUrl !== undefined ? newMessage.fileUrl : oldMsg?.fileUrl,
 +        fileKey: newMessage.fileKey !== undefined ? newMessage.fileKey : oldMsg?.fileKey,
@@ -1632,7 +1650,7 @@ index f0d08a88..9a0df4dd 100644
        };
      })
    },
-@@ -1902,20 +2021,55 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+@@ -1902,20 +2035,62 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
              return { messages: newMessages };
              }),
  
@@ -1657,12 +1675,14 @@ index f0d08a88..9a0df4dd 100644
 +              if (!convoMessages) return state;
 +            
 +              let msgToSave: Message | null = null;
++              let found = false;
 +              
 +              // 1. Pastikan status adalah tipe literal (bukan sembarang string)
 +              const validStatus = status as 'SENT' | 'DELIVERED' | 'READ';
 +            
 +              newMessages[conversationId] = convoMessages.map(m => {
 +                if (m.id === messageId) {
++                  found = true;
 +                  const existingStatus = m.statuses?.find(s => s.userId === userId);
 +                  const updatedMsg = { ...m };
 +                  
@@ -1692,6 +1712,11 @@ index f0d08a88..9a0df4dd 100644
 +                return m;
 +              }) as Message[];
 +            
++              if (!found) {
++                  // Jika pesan belum ditemukan (masih berstatus temp_id), simpan ke pendingStatuses
++                  pendingStatuses[messageId] = { userId, status: validStatus };
++              }
++
 +              if (msgToSave) {
 +                 import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([msgToSave!]));
 +              }

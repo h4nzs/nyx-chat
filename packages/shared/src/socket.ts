@@ -150,4 +150,5 @@ export interface ClientToServerEvents {
     "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
     'message:unsend': (payload: { messageId: string; conversationId: string }) => void;
+    'message:view_once_opened': (payload: { messageId: string; conversationId: string }) => void;
 }

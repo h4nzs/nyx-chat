@@ -18,6 +18,7 @@ export interface DecryptedMessageRecord {
   isViewOnce?: boolean;
   isDeletedLocal?: boolean;
   fileMeta?: string;
+  expiresAt?: string | null;
 }
 
 // --- Interfaces for OfflineQueue ---

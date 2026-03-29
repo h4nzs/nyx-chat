@@ -136,4 +136,5 @@ export const ShadowVaultMessageSchema = z.object({
   isViewOnce: z.boolean().optional(),
   isDeletedLocal: z.boolean().optional(),
   fileMeta: z.string().optional(),
+  expiresAt: z.string().nullable().optional(),
 }).passthrough();
