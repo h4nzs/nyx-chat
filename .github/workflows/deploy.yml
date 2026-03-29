@@ -113,6 +113,7 @@ jobs:
             # 2. Siapkan direktori utama (Jika belum ada)
             TARGET_DIR="/root/nyx-app"
             mkdir -p $TARGET_DIR
+            rm -rf $TARGET_DIR/node_modules
             rm -rf $TARGET_DIR/server
             rm -rf $TARGET_DIR/web
             rm -rf $TARGET_DIR/marketing
@@ -125,14 +126,16 @@ jobs:
             
             # 4. INSTALL DI VPS PAKAI PNPM (Di Root Monorepo)
             echo "📦 Installing backend dependencies with PNPM..."
-            cp $TARGET_DIR/.env.example $TARGET_DIR/server/.env || true
+            if [ ! -f "$TARGET_DIR/server/.env" ]; then
+                cp $TARGET_DIR/.env.example $TARGET_DIR/server/.env || true
+            fi
             cd $TARGET_DIR
             CI=true NODE_OPTIONS="--max-old-space-size=512" pnpm install --no-frozen-lockfile
             
             # 5. GENERATE PRISMA ENGINE (Wajib di dalam server/)
             echo "⚙️ Generating Prisma Engine..."
             cd $TARGET_DIR/server
-            rm -rf ../node_modules/.prisma ../node_modules/@prisma/client || true
+            sed -i '/PRISMA_CLIENT_ENGINE_TYPE/d' .env || true
             pnpm exec prisma generate
             
             # 6. DEPLOY FRONTEND
