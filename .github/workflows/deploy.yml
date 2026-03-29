@@ -134,11 +134,6 @@ jobs:
             cd $TARGET_DIR/server
             rm -rf ../node_modules/.prisma ../node_modules/@prisma/client || true
             pnpm exec prisma generate
-
-            # 5.5 PRUNE (Hapus DevDependencies biar RAM server gak penuh)
-            echo "🧹 Pruning dev dependencies..."
-            cd $TARGET_DIR
-            CI=true pnpm prune --prod
             
             # 6. DEPLOY FRONTEND
             echo "🌐 Deploying Frontend..."
