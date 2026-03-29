@@ -1657,8 +1657,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   isSilent: optimistic.isSilent,
                   id: message.id,
                   createdAt: message.createdAt,
-                  statuses: message.statuses
-              };
+                  statuses: (message.statuses && message.statuses.length > 0) ? message.statuses : (optimistic.statuses || [])              };
           } else {
               decrypted = await decryptMessageObject(message);
           }
@@ -1840,20 +1839,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   replaceOptimisticMessage: async (conversationId, tempId, newMessage) => {
+    // Tangkap kedua jenis Typo ID
     const tempIdStr = `temp_${tempId}`;
-    const existingTombstone = await shadowVault.getMessage(tempIdStr);
+    const tempIdDashStr = `temp-${tempId}`;
+
+    const existingTombstone = await shadowVault.getMessage(tempIdStr) || await shadowVault.getMessage(tempIdDashStr);
     
     if (existingTombstone && existingTombstone.isDeletedLocal) {
         await shadowVault.deleteMessage(tempIdStr);
+        await shadowVault.deleteMessage(tempIdDashStr);
         await shadowVault.upsertMessages([{ ...newMessage, id: newMessage.id!, conversationId, isDeletedLocal: true, content: null, fileUrl: undefined } as Message]);
         
         set(state => ({
             messages: {
                 ...state.messages,
-                // Cegah duplikasi: Buang tempId dan id asli
                 [conversationId]: (state.messages[conversationId] || []).filter(m => 
                     String(m.tempId) !== String(tempId) && 
                     m.id !== tempIdStr && 
+                    m.id !== tempIdDashStr &&
                     m.id !== newMessage.id
                 )
             }
@@ -1861,25 +1864,31 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         return; 
     }
 
+    // === BASMI HANTU DARI INDEXEDDB ===
     await shadowVault.deleteMessage(tempIdStr);
+    await shadowVault.deleteMessage(tempIdDashStr);
 
     set(state => {
       const currentMessages = state.messages[conversationId] || [];
       
-      // 1. Cari pesan sementara untuk menyelamatkan data lokalnya (seperti blob fileUrl)
-      const oldMsg = currentMessages.find(m => String(m.tempId) === String(tempId) || m.id === tempIdStr);
+      const oldMsg = currentMessages.find(m => 
+          String(m.tempId) === String(tempId) || 
+          m.id === tempIdStr || 
+          m.id === tempIdDashStr
+      );
       
-      // 2. THE SHIELD: Hapus pesan sementara DAN pesan asli (jika sudah terlanjur dirender oleh Socket)
       const filteredMessages = currentMessages.filter(m => 
           String(m.tempId) !== String(tempId) && 
           m.id !== tempIdStr && 
+          m.id !== tempIdDashStr && 
           m.id !== newMessage.id
       );
 
-      // 3. Rakit pesan final yang sempurna
       const finalMessage: Message = {
-        ...(oldMsg || {}), // Wariskan data lokal
-        ...(newMessage as Message), // Timpa dengan data pasti dari server
+        ...(oldMsg || {}), 
+        ...(newMessage as Message), 
+        // === FIX CENTANG BIRU HILANG ===
+        statuses: (newMessage.statuses && newMessage.statuses.length > 0) ? newMessage.statuses : (oldMsg?.statuses || []),
         content: oldMsg?.content !== undefined ? oldMsg.content : newMessage.content,
         fileUrl: newMessage.fileUrl !== undefined ? newMessage.fileUrl : oldMsg?.fileUrl,
         fileKey: newMessage.fileKey !== undefined ? newMessage.fileKey : oldMsg?.fileKey,
@@ -1889,14 +1898,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         duration: newMessage.duration !== undefined ? newMessage.duration : oldMsg?.duration,
         isBlindAttachment: newMessage.isBlindAttachment !== undefined ? newMessage.isBlindAttachment : oldMsg?.isBlindAttachment,
         repliedTo: newMessage.repliedTo !== undefined ? newMessage.repliedTo : oldMsg?.repliedTo,
-        tempId: undefined, // Hapus tempId agar tidak meninggalkan jejak
+        tempId: undefined, 
         optimistic: false
       };
 
-      // Simpan ke IndexedDB
+      // Simpan pembaruan utuh ke IndexedDB
       shadowVault.upsertMessages([finalMessage]); 
 
-      // 5. Kembalikan array yang bersih dan terurut
       return {
         messages: { 
             ...state.messages, 
