@@ -1156,8 +1156,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
           if (res.ok && res.msg) {
             if (!isReactionPayload) {
-                const existingMsg = get().messages[conversationId]?.find(m => m.id === `temp_${actualTempId}` || m.tempId === actualTempId || m.id === res.msg!.id);
-                
+                const tempIdStr = `temp_${actualTempId}`;
+                const existingMsg = get().messages[conversationId]?.find(m => 
+                     m.id === tempIdStr || m.tempId === actualTempId
+                );
+
                 let realFileUrl = existingMsg?.fileUrl;
                  let realFileKey = existingMsg?.fileKey;
                  try {
@@ -1184,6 +1187,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                     status: 'SENT' as const
                 } as Partial<Message>;
                 
+                // Pastikan mengirim actualTempId (yang berupa angka) ke fungsi replace
                 get().replaceOptimisticMessage(conversationId, actualTempId, updatedMsg);
             } else {
                 const reactionData = parseReaction(contentToEncrypt);
@@ -1846,37 +1850,56 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         set(state => ({
             messages: {
                 ...state.messages,
-                [conversationId]: (state.messages[conversationId] || []).filter(m => String(m.tempId) !== String(tempId))
+                // Cegah duplikasi: Buang tempId dan id asli
+                [conversationId]: (state.messages[conversationId] || []).filter(m => 
+                    String(m.tempId) !== String(tempId) && 
+                    m.id !== tempIdStr && 
+                    m.id !== newMessage.id
+                )
             }
         }));
         return; 
     }
 
     set(state => {
-      const updatedMessages = (state.messages[conversationId] || []).map(m => {
-        if (m.tempId && String(m.tempId) === String(tempId)) {
-          return {
-            ...m,
-            ...newMessage,
-            content: m.content !== undefined ? m.content : newMessage.content,
-            fileUrl: newMessage.fileUrl !== undefined ? newMessage.fileUrl : m.fileUrl,
-            fileKey: newMessage.fileKey !== undefined ? newMessage.fileKey : m.fileKey,
-            fileName: newMessage.fileName !== undefined ? newMessage.fileName : m.fileName,
-            fileType: newMessage.fileType !== undefined ? newMessage.fileType : m.fileType,
-            fileSize: newMessage.fileSize !== undefined ? newMessage.fileSize : m.fileSize,
-            duration: newMessage.duration !== undefined ? newMessage.duration : m.duration,
-            isBlindAttachment: newMessage.isBlindAttachment !== undefined ? newMessage.isBlindAttachment : m.isBlindAttachment,
-            repliedTo: newMessage.repliedTo !== undefined ? newMessage.repliedTo : m.repliedTo,
-            tempId: undefined,
-            optimistic: false
-          };
-        }
-        return m;
-      });
-      const msg = updatedMessages.find(m => m.id === newMessage.id);
-      if (msg) shadowVault.upsertMessages([msg]); 
+      const currentMessages = state.messages[conversationId] || [];
+      
+      // 1. Cari pesan sementara untuk menyelamatkan data lokalnya (seperti blob fileUrl)
+      const oldMsg = currentMessages.find(m => String(m.tempId) === String(tempId) || m.id === tempIdStr);
+      
+      // 2. THE SHIELD: Hapus pesan sementara DAN pesan asli (jika sudah terlanjur dirender oleh Socket)
+      const filteredMessages = currentMessages.filter(m => 
+          String(m.tempId) !== String(tempId) && 
+          m.id !== tempIdStr && 
+          m.id !== newMessage.id
+      );
+
+      // 3. Rakit pesan final yang sempurna
+      const finalMessage: Message = {
+        ...(oldMsg || {}), // Wariskan data lokal
+        ...(newMessage as Message), // Timpa dengan data pasti dari server
+        content: oldMsg?.content !== undefined ? oldMsg.content : newMessage.content,
+        fileUrl: newMessage.fileUrl !== undefined ? newMessage.fileUrl : oldMsg?.fileUrl,
+        fileKey: newMessage.fileKey !== undefined ? newMessage.fileKey : oldMsg?.fileKey,
+        fileName: newMessage.fileName !== undefined ? newMessage.fileName : oldMsg?.fileName,
+        fileType: newMessage.fileType !== undefined ? newMessage.fileType : oldMsg?.fileType,
+        fileSize: newMessage.fileSize !== undefined ? newMessage.fileSize : oldMsg?.fileSize,
+        duration: newMessage.duration !== undefined ? newMessage.duration : oldMsg?.duration,
+        isBlindAttachment: newMessage.isBlindAttachment !== undefined ? newMessage.isBlindAttachment : oldMsg?.isBlindAttachment,
+        repliedTo: newMessage.repliedTo !== undefined ? newMessage.repliedTo : oldMsg?.repliedTo,
+        tempId: undefined, // Hapus tempId agar tidak meninggalkan jejak
+        optimistic: false
+      };
+
+      // 4. Simpan ke IndexedDB
+      shadowVault.upsertMessages([finalMessage]); 
+
+      // 5. Kembalikan array yang bersih dan terurut
       return {
-        messages: { ...state.messages, [conversationId]: updatedMessages }
+        messages: { 
+            ...state.messages, 
+            [conversationId]: [...filteredMessages, finalMessage].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        }
       };
     })
   },
