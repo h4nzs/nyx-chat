@@ -138,7 +138,7 @@ jobs:
             # 5.5 PRUNE (Hapus DevDependencies biar RAM server gak penuh)
             echo "🧹 Pruning dev dependencies..."
             cd $TARGET_DIR
-            pnpm prune --prod
+            CI=true pnpm prune --prod
             
             # 6. DEPLOY FRONTEND
             echo "🌐 Deploying Frontend..."
