@@ -127,12 +127,18 @@ jobs:
             echo "📦 Installing backend dependencies with PNPM..."
             cp $TARGET_DIR/.env.example $TARGET_DIR/server/.env || true
             cd $TARGET_DIR
-            NODE_OPTIONS="--max-old-space-size=512" pnpm install --prod --no-frozen-lockfile
+            NODE_OPTIONS="--max-old-space-size=512" pnpm install --no-frozen-lockfile
             
             # 5. GENERATE PRISMA ENGINE (Wajib di dalam server/)
             echo "⚙️ Generating Prisma Engine..."
             cd $TARGET_DIR/server
-            npx prisma generate
+            rm -rf ../node_modules/.prisma ../node_modules/@prisma/client || true
+            pnpm exec prisma generate
+
+            # 5.5 PRUNE (Hapus DevDependencies biar RAM server gak penuh)
+            echo "🧹 Pruning dev dependencies..."
+            cd $TARGET_DIR
+            pnpm prune --prod
             
             # 6. DEPLOY FRONTEND
             echo "🌐 Deploying Frontend..."
