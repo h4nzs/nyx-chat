@@ -44,11 +44,9 @@ const processMessageBuffer = async () => {
             if (meId && safeMessage.senderId === meId) {
                 // 1. Blokir echo dari pesan normal
                 const isOptimisticEcho = useMessageStore.getState().messages[safeMessage.conversationId]?.some(
-                    m => m.tempId && String(m.tempId) === String(safeMessage.tempId)
+                    m => m.id === safeMessage.id || (m.tempId && String(m.tempId) === String(safeMessage.tempId))
                 );
                 if (isOptimisticEcho) {
-                    // Emit ACK agar server langsung membakarnya (karena ini pesan kita sendiri yang echo)
-                    socket?.emit('message:mark_as_read', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
                     continue; 
                 }
 
@@ -57,8 +55,6 @@ const processMessageBuffer = async () => {
                      try {
                          const meta = JSON.parse(safeMessage.content);
                          if (meta.type === 'reaction' || meta.type === 'edit' || meta.type === 'silent' || meta.type === 'GHOST_SYNC' || meta.type === 'UNSEND') {
-                             // Langsung bakar dari server, ini punya kita sendiri!
-                             socket?.emit('message:mark_as_read', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
                              continue;
                          }
                      } catch (_e) {}

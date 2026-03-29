@@ -693,6 +693,8 @@ const initialState: State = {
   selectedMessageIds: [],
 };
 
+const pendingStatuses: Record<string, { userId: string, status: string }> = {};
+
 export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) => ({
   ...initialState,
 
@@ -1872,9 +1874,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const currentMessages = state.messages[conversationId] || [];
       
       const oldMsg = currentMessages.find(m => 
-          String(m.tempId) === String(tempId) || 
+          (tempId && String(m.tempId) === String(tempId)) || 
           m.id === tempIdStr || 
-          m.id === tempIdDashStr
+          m.id === tempIdDashStr ||
+          m.id === newMessage.id
       );
       
       const filteredMessages = currentMessages.filter(m => 
@@ -1884,11 +1887,22 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           m.id !== newMessage.id
       );
 
+      const pending = pendingStatuses[newMessage.id!];
+      const validPendingStatus = pending?.status as 'SENT' | 'DELIVERED' | 'READ' | undefined;
+      
+      const finalStatuses = pending
+          ? [{ userId: asUserId(pending.userId), status: validPendingStatus!, messageId: asMessageId(newMessage.id!), id: `temp-status-${Date.now()}`, updatedAt: new Date().toISOString() }]
+          : (newMessage.statuses && newMessage.statuses.length > 0) ? newMessage.statuses : (oldMsg?.statuses || []);
+
+      if (pending) {
+          delete pendingStatuses[newMessage.id!];
+      }
+
       const finalMessage: Message = {
         ...(oldMsg || {}), 
         ...(newMessage as Message), 
         // === FIX CENTANG BIRU HILANG ===
-        statuses: (newMessage.statuses && newMessage.statuses.length > 0) ? newMessage.statuses : (oldMsg?.statuses || []),
+        statuses: finalStatuses,
         content: oldMsg?.content !== undefined ? oldMsg.content : newMessage.content,
         fileUrl: newMessage.fileUrl !== undefined ? newMessage.fileUrl : oldMsg?.fileUrl,
         fileKey: newMessage.fileKey !== undefined ? newMessage.fileKey : oldMsg?.fileKey,
@@ -2028,12 +2042,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               if (!convoMessages) return state;
             
               let msgToSave: Message | null = null;
+              let found = false;
               
               // 1. Pastikan status adalah tipe literal (bukan sembarang string)
               const validStatus = status as 'SENT' | 'DELIVERED' | 'READ';
             
               newMessages[conversationId] = convoMessages.map(m => {
                 if (m.id === messageId) {
+                  found = true;
                   const existingStatus = m.statuses?.find(s => s.userId === userId);
                   const updatedMsg = { ...m };
                   
@@ -2063,6 +2079,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 return m;
               }) as Message[];
             
+              if (!found) {
+                  // Jika pesan belum ditemukan (masih berstatus temp_id), simpan ke pendingStatuses
+                  pendingStatuses[messageId] = { userId, status: validStatus };
+              }
+
               if (msgToSave) {
                  import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([msgToSave!]));
               }
