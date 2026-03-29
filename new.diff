@@ -1,1233 +1,256 @@
+diff --git a/packages/shared/src/schemas.ts b/packages/shared/src/schemas.ts
+index 04d96a91..78202ff0 100644
+--- a/packages/shared/src/schemas.ts
++++ b/packages/shared/src/schemas.ts
+@@ -136,4 +136,5 @@ export const ShadowVaultMessageSchema = z.object({
+   isViewOnce: z.boolean().optional(),
+   isDeletedLocal: z.boolean().optional(),
+   fileMeta: z.string().optional(),
++  expiresAt: z.string().nullable().optional(),
+ }).passthrough();
+\ No newline at end of file
 diff --git a/packages/shared/src/socket.ts b/packages/shared/src/socket.ts
-index f3b9067a..09b6fbcc 100644
+index 09b6fbcc..0aa5436b 100644
 --- a/packages/shared/src/socket.ts
 +++ b/packages/shared/src/socket.ts
-@@ -118,6 +118,7 @@ export interface ServerToClientEvents {
-     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
+@@ -150,4 +150,5 @@ export interface ClientToServerEvents {
      "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
      "migration:ack": (payload: { roomId: string; success: boolean }) => void;
-+    'message:deleted_remotely': (payload: { messageId: string; conversationId: string; deletedBy: string }) => void;
+     'message:unsend': (payload: { messageId: string; conversationId: string }) => void;
++    'message:view_once_opened': (payload: { messageId: string; conversationId: string }) => void;
  }
- 
- export interface ClientToServerEvents {
-@@ -148,4 +149,5 @@ export interface ClientToServerEvents {
-     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
-     "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
-     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
-+    'message:unsend': (payload: { messageId: string; conversationId: string }) => void;
- }
-diff --git a/server/prisma/schema.prisma b/server/prisma/schema.prisma
-index d1404985..f4646e08 100644
---- a/server/prisma/schema.prisma
-+++ b/server/prisma/schema.prisma
-@@ -135,8 +135,6 @@ model Message {
-   isViewed            Boolean         @default(false)
- 
-   repliedToId         String?         @map("replied_to_id")
--  repliedTo           Message?        @relation("Replies", fields: [repliedToId], references: [id], onDelete: SetNull, onUpdate: NoAction)
--  replies             Message[]       @relation("Replies")
- 
-   @@index([conversationId, createdAt(sort: Desc)])
-   @@index([senderId])
-diff --git a/server/src/jobs/messageSweeper.ts b/server/src/jobs/messageSweeper.ts
-index 531529b2..d709ec8b 100644
---- a/server/src/jobs/messageSweeper.ts
-+++ b/server/src/jobs/messageSweeper.ts
-@@ -9,23 +9,36 @@ export const startMessageSweeper = () => {
-   cron.schedule('* * * * *', async () => {
-     try {
-       const now = new Date();
--      const BATCH_SIZE = 100;
--      let processedCount = 0;
-+        const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-+        
-+        const BATCH_SIZE = 100;
-+        let processedCount = 0;
- 
--      while (true) {
--        // 1. Cari pesan yang waktunya udah kelewat (Batching)
--        const expiredMessages = await prisma.message.findMany({
--          where: {
--            expiresAt: {
--              not: null,
--              lte: now
--            }
--          },
--          select: { id: true, conversationId: true },
--          take: BATCH_SIZE
--        });
-+        while (true) {
-+          // 1. Cari pesan dengan DUA kondisi (Disappearing Message ATAU Server TTL)
-+          const expiredMessages = await prisma.message.findMany({
-+            where: {
-+              OR: [
-+                {
-+                  // Kondisi 1: Fitur Disappearing Message (expiresAt habis)
-+                  expiresAt: {
-+                    not: null,
-+                    lte: now
-+                  }
-+                },
-+                {
-+                  // Kondisi 2: Server Store-and-Forward TTL (Umur pesan > 14 hari)
-+                  createdAt: {
-+                    lte: fourteenDaysAgo
-+                  }
-+                }
-+              ]
-+            },
-+            select: { id: true, conversationId: true },
-+            take: BATCH_SIZE
-+          });
- 
--        if (expiredMessages.length === 0) break; // Selesai
-+          if (expiredMessages.length === 0) break; // Selesai
- 
-         const messageIds = expiredMessages.map(m => m.id);
- 
 diff --git a/server/src/routes/conversations.ts b/server/src/routes/conversations.ts
-index 949a3796..e45260a9 100644
+index e45260a9..a4017628 100644
 --- a/server/src/routes/conversations.ts
 +++ b/server/src/routes/conversations.ts
-@@ -48,17 +48,17 @@ router.get('/', async (req, res, next) => {
-       orderBy: { lastMessageAt: 'desc' }
-     })
- 
--    const unreadCounts: { conversationId: string; unreadCount: number }[] = await prisma.$queryRaw`
--      SELECT p."conversationId" AS "conversationId", COUNT(m.id)::int AS "unreadCount"
--      FROM "Participant" p
--      LEFT JOIN "Message" last_read_message ON p."lastReadMsgId" = last_read_message.id
--      JOIN "Message" m ON m."conversationId" = p."conversationId"
--      WHERE p."userId" = ${userId} AND m."senderId" != ${userId} AND m."createdAt" > COALESCE(last_read_message."createdAt", p."joinedAt")
--      GROUP BY p."conversationId";
--    `
--
--    const unreadMap = new Map(unreadCounts.map(item => [item.conversationId, item.unreadCount]))
--    
-+    const unreadCountsData = await prisma.message.groupBy({
-+      by: ['conversationId'],
-+      where: {
-+        conversationId: { in: conversationsData.map(c => c.id) },
-+        senderId: { not: userId }
-+      },
-+      _count: { id: true }
-+    });
-+
-+    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, item._count.id]));
-+
-     // MAPPING KE SAFE TYPE (Tanpa any)
-     const safeConversations = conversationsData.map(convo => {
-       const safeConv = toConversation(convo);
-@@ -359,24 +359,6 @@ router.post('/:id/pin', async (req, res, next) => {
-   }
- })
- 
--// Mark as read
--router.post('/:id/read', async (req, res, next) => {
--  try {
--    if (!req.user) throw new ApiError(401, 'Authentication required.')
--    const { id } = req.params
--    const lastMessage = await prisma.message.findFirst({ where: { conversationId: id }, orderBy: { createdAt: 'desc' } })
--    if (lastMessage) {
--      await prisma.participant.updateMany({
--        where: { conversationId: id, userId: req.user.id },
--        data: { lastReadMsgId: lastMessage.id }
--      })
--    }
--    res.status(204).send()
--  } catch (error) {
--    next(error)
--  }
--})
--
- // Record key rotation event
- router.post('/:id/key-rotation', async (req, res, next) => {
-   try {
-diff --git a/server/src/routes/messages.ts b/server/src/routes/messages.ts
-index bfd42d60..0efab9fa 100644
---- a/server/src/routes/messages.ts
-+++ b/server/src/routes/messages.ts
-@@ -3,7 +3,6 @@
- // For commercial licensing, contact [admin@nyx-app.my.id].
- import { Router } from 'express'
- import { prisma } from '../lib/prisma.js'
--import { Prisma } from '@prisma/client'
- import { requireAuth } from '../middleware/auth.js'
- import { getIo } from '../socket.js'
- import { asConversationId, asMessageId } from '@nyx/shared'
-@@ -17,52 +16,37 @@ import { zodValidate } from '../utils/validate.js'
- const router: Router = Router()
- router.use(requireAuth)
- 
--// GET Messages
-+// ==========================================
-+// 1. GET PENDING MESSAGES (Offline Catch-up)
-+// ==========================================
- router.get('/:conversationId', async (req, res, next) => {
-   try {
-     if (!req.user) throw new ApiError(401, 'Authentication required.')
-     const { conversationId } = req.params
-     const userId = req.user.id
--    const cursor = req.query.cursor as string | undefined
- 
--    // Cek participant
-+    // Validasi member grup
-     const participant = await prisma.participant.findUnique({
--      where: {
--        userId_conversationId: {
--          userId,
--          conversationId
--        }
--      }
-+      where: { userId_conversationId: { userId, conversationId } }
-     })
--
-     if (!participant) return res.status(403).json({ error: 'You are not a member of this conversation.' })
- 
-+    // AMBIL PESAN TERTUNDA (Hanya pesan setelah user join)
-     const messages = await prisma.message.findMany({
+@@ -52,7 +52,13 @@ router.get('/', async (req, res, next) => {
+       by: ['conversationId'],
        where: {
-         conversationId,
--        // Hanya ambil pesan setelah user join
-         createdAt: { gte: participant.joinedAt }
+         conversationId: { in: conversationsData.map(c => c.id) },
+-        senderId: { not: userId }
++        senderId: { not: userId },
++        statuses: {
++          none: {
++            userId: userId,
++            status: 'READ'
++          }
++        }
        },
--      take: 50, // Ubah jadi positive jika pakai cursor ID yang benar, atau negative untuk "latest"
--      skip: cursor ? 1 : 0,
--      cursor: cursor ? { id: cursor } : undefined,
--      orderBy: { createdAt: 'desc' }, // Ambil dari yang terbaru dulu
-+      take: 100, // Ambil cukup banyak untuk offline catch-up
-+      orderBy: { createdAt: 'desc' }, 
-       include: {
--        sender: {
--          select: { id: true, encryptedProfile: true }
--        },
--        statuses: true,
--        repliedTo: {
--          include: {
--            sender: { select: { id: true, encryptedProfile: true } }
--          }
--        }
-+        sender: { select: { id: true, encryptedProfile: true } },
-+        statuses: true // Biarkan untuk kompatibilitas tipe balikan (meskipun isinya mungkin kosong)
-       }
-     })
- 
--    // MAPPING KE SAFE TYPE (Bebas dari any)
-     const safeMessages = messages.map(toRawServerMessage);
--
-+    
-     // Reverse biar di frontend urutannya bener (Oldest -> Newest)
-     res.json({ items: safeMessages.reverse() })
-   } catch (error) {
-@@ -70,159 +54,67 @@ router.get('/:conversationId', async (req, res, next) => {
-   }
- })
- 
--// GET Context (Surrounding Messages)
--router.get('/context/:id', requireAuth, async (req, res, next) => {
--  try {
--    const targetId = req.params.id as string;
--
--    // Get the target message first to find its timestamp and conversationId
--    const targetMsg = await prisma.message.findUnique({
--      where: { id: targetId },
--      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }, statuses: true }
--    });
--
--    if (!targetMsg) {
--      throw new ApiError(404, 'Message not found');
--    }
--
--    // Verify participation
--    const participation = await prisma.participant.findUnique({
--      where: { userId_conversationId: { userId: req.user!.id, conversationId: targetMsg.conversationId } }
--    });
--    if (!participation) throw new ApiError(403, 'Not a participant');
--
--    // Fetch older messages (before target)
--    const older = await prisma.message.findMany({
--      where: { conversationId: targetMsg.conversationId, createdAt: { lt: targetMsg.createdAt, gte: participation.joinedAt } },
--      orderBy: { createdAt: 'desc' },
--      take: 20,
--      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }, statuses: true }
--    });
--
--    // Fetch newer messages (after target)
--    const newer = await prisma.message.findMany({
--      where: { conversationId: targetMsg.conversationId, createdAt: { gt: targetMsg.createdAt, gte: participation.joinedAt } },
--      orderBy: { createdAt: 'asc' },
--      take: 20,
--      include: { sender: { select: { id: true, encryptedProfile: true } }, repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }, statuses: true }
--    });
--
--    // Combine and sort chronologically
--    const allMessagesRaw = [...older.reverse(), targetMsg, ...newer];
--
--    // MAPPING KE SAFE TYPE
--    const safeMessages = allMessagesRaw.map(toRawServerMessage);
--
--    res.json({ items: safeMessages, conversationId: asConversationId(targetMsg.conversationId) });
--  } catch (error) {
--    next(error);
--  }
-+// ==========================================
-+// 2. GET CONTEXT (OBSOLETE IN E2EE)
-+// ==========================================
-+router.get('/context/:id', requireAuth, async (req, res) => {
-+  // Dalam arsitektur Zero-Knowledge Store-and-Forward, 
-+  // server tidak punya histori pesan. Frontend harus mencarinya di IndexedDB lokal.
-+  // Kita kembalikan array kosong agar aplikasi tidak crash.
-+  res.json({ items: [], conversationId: null });
- });
- 
--// SEND Message
-+// ==========================================
-+// 3. SEND MESSAGE (Store & Forward Courier)
-+// ==========================================
- router.post('/', zodValidate({
-   body: z.object({
-     conversationId: z.string().min(1),
-     content: z.string().max(20000).optional().nullable(),
--    // File fields removed (Blind Attachments)
-     sessionId: z.string().optional().nullable(),
--    repliedToId: z.string().optional().nullable(),
-     tempId: z.union([z.string(), z.number()]).optional(),
-     expiresIn: z.number().optional().nullable(),
-     isViewOnce: z.boolean().optional()
--  }).refine(data => data.content, {
--    message: "Message must contain content"
--  })
-+    // repliedToId dihapus validasinya karena relasi DB sudah diputus
-+  }).refine(data => data.content, { message: "Message must contain content" })
- }), async (req, res, next) => {
-   try {
-     if (!req.user) throw new ApiError(401, 'Authentication required.')
-     const senderId = req.user.id
--    const { conversationId, content, sessionId, repliedToId, tempId, expiresIn, isViewOnce } = req.body
-+    const { conversationId, content, sessionId, tempId, expiresIn, isViewOnce } = req.body
- 
--    // 1. Ambil Participants
-     const participants = await prisma.participant.findMany({
-       where: { conversationId },
--      select: { userId: true } // Select seperlunya aja biar ringan
-+      select: { userId: true } 
-     })
- 
--    // Calculate expiration time if provided
--    let expiresAt: Date | undefined
--    if (expiresIn && typeof expiresIn === 'number' && expiresIn > 0) {
--      expiresAt = new Date(Date.now() + expiresIn * 1000)
--    }
--
-     if (!participants.some(p => p.userId === senderId)) {
-       return res.status(403).json({ error: 'You are not a participant.' })
-     }
- 
--    // 2. BLOCKING CHECK & REPLY DEPTH (Parallel)
--    const checks = []
--
--    // Cek Blocking (Khusus 1-on-1)
--    if (participants.length === 2) {
--      const otherUserId = participants.find(p => p.userId !== senderId)?.userId
--      if (otherUserId) {
--        checks.push(
--          prisma.blockedUser.findFirst({
--            where: {
--              OR: [
--                { blockerId: senderId, blockedId: otherUserId },
--                { blockerId: otherUserId, blockedId: senderId }
--              ]
--            }
--          }).then(block => {
--            if (block) throw new ApiError(403, 'Messaging unavailable due to blocking.')
--          })
--        )
--      }
--    }
--
--    // Cek Reply Depth
--    if (repliedToId) {
--      checks.push((async () => {
--        let currentId: string | null = repliedToId
--        let depth = 0
--        const MAX_DEPTH = 10
--        while (currentId && depth < MAX_DEPTH) {
--          const parentMessage = await prisma.message.findUnique({
--            where: { id: currentId },
--            select: { repliedToId: true }
--          })
--          if (!parentMessage) break
--          currentId = parentMessage.repliedToId
--          depth++
--        }
--        if (depth >= MAX_DEPTH) throw new ApiError(400, 'Reply chain is too deep.')
--      })())
--    }
--
--    // Tunggu validasi selesai
--    await Promise.all(checks)
--
--    // 4. DATABASE TRANSACTION
--    const statusData: Prisma.MessageStatusCreateManyMessageInput[] = participants.map(p => ({
--      userId: p.userId,
--      status: p.userId === senderId ? 'READ' : 'SENT'
--    }))
-+    // HITUNG TTL (Umur Pesan di Server)
-+    // Jika tidak ada expiresIn, set otomatis dihancurkan dalam 14 Hari (Store-and-Forward rules)
-+    const defaultTTL = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); 
-+    const finalExpiresAt = (expiresIn && typeof expiresIn === 'number' && expiresIn > 0)
-+        ? new Date(Date.now() + expiresIn * 1000)
-+        : defaultTTL;
- 
-+    // SIMPAN KE "KANTOR POS" SEMENTARA
-     const [newMessageRaw] = await prisma.$transaction([
-       prisma.message.create({
-         data: {
-           conversationId,
-           senderId,
-           content,
--          sessionId,
--          repliedToId,
--          expiresAt, 
--          isViewOnce: isViewOnce === true,
--          statuses: {
--            createMany: { data: statusData } 
--          }
-+          sessionId: sessionId || null,
-+          expiresAt: finalExpiresAt, 
-+          isViewOnce: isViewOnce === true
-+          // Kita TIDAK menyimpan statuses: { createMany: ... } lagi,
-+          // biarkan Socket.IO (message:status_updated) yang menangani centang biru
-         },
-         include: {
-           sender: { select: { id: true, encryptedProfile: true } },
--          statuses: true,
--          repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }
-+          statuses: true
-         }
-       }),
-       prisma.conversation.update({
-@@ -231,108 +123,76 @@ router.post('/', zodValidate({
-       })
-     ])
- 
--    // MAPPING KE SAFE TYPE
-     const safeMessage = toRawServerMessage(newMessageRaw);
- 
--    // Inject tempId dari client agar UI tahu pesan mana yang sudah sukses (Optimistic UI)
-+    // Inject tempId (Optimistic UI)
-     if (tempId !== undefined) {
-           if (typeof tempId === 'number') {
-               safeMessage.tempId = tempId;
-           } else if (typeof tempId === 'string') {
--              // ✅ FIX: Parse string numerik jadi angka, sisanya biarkan utuh sebagai string!
-               safeMessage.tempId = /^\d+$/.test(tempId) ? parseInt(tempId, 10) : tempId;
-           }
-     }
- 
--    // Kirim response HTTP dulu biar UI user sender update
-     res.status(201).json(safeMessage)
- 
--    // 6. SOCKET & PUSH
--    // Emit ke socket dengan tipe yang valid
-+    // EMIT & PUSH NOTIFICATION
-     getIo().to(conversationId).emit('message:new', safeMessage)
- 
--    // Push Notification
-     const pushRecipients = participants.filter(p => p.userId !== senderId)
-     if (pushRecipients.length > 0) {
-       const payload = {
-         data: { conversationId, messageId: safeMessage.id }
-       }
--
--      Promise.all(
--        pushRecipients.map(p => sendPushNotification(p.userId, payload))
--      ).catch(err => console.error('[Push] Failed:', err))
-+      Promise.all(pushRecipients.map(p => sendPushNotification(p.userId, payload))).catch(err => console.error('[Push] Failed:', err))
-     }
-   } catch (error) {
-     next(error)
-   }
- })
- 
--// DELETE Message
-+// ==========================================
-+// 4. DELETE MESSAGE (FILE CLEANUP ONLY)
-+// ==========================================
- router.delete('/:id', async (req, res, next) => {
-   try {
-     if (!req.user) throw new ApiError(401, 'Authentication required.')
--    const { id } = req.params
-     const userId = req.user.id
-     const r2Key = req.query.r2Key as string | undefined
- 
--    const message = await prisma.message.findUnique({ where: { id } })
--    if (!message) return res.status(404).json({ error: 'Message not found' })
--    if (message.senderId !== userId) return res.status(403).json({ error: 'You can only delete your own messages' })
-+    // Dalam E2EE, server mungkin sudah menghapus pesannya dari DB.
-+    // Jadi kita abaikan pengecekan prisma.message.findUnique().
-+    // Tugas utama rute ini sekarang HANYA menghapus file fisik di Cloudflare R2.
- 
-     if (r2Key) {
-        const parts = r2Key.split('/');
-        const filename = parts.length > 1 ? parts[parts.length - 1] : parts[0];
- 
-+       // Keamanan sederhana: Pastikan user hanya menghapus file miliknya
-        if (!filename.startsWith(`${userId}-`)) {
-           console.warn('[Security] User', userId, 'attempted to delete unauthorized file:', r2Key);
-+          return res.status(403).json({ error: 'Unauthorized file deletion' });
-        } else {
-           console.log('[R2] Deleting blind attachment:', r2Key);
-           deleteR2File(r2Key).catch(err => console.error('[R2] Failed to delete blind file:', r2Key, ':', err))
-        }
-     }
- 
--    await prisma.message.delete({ where: { id } })
--
--    // Emit event menggunakan branded ID
--    getIo().to(message.conversationId).emit('message:deleted', {
--      conversationId: asConversationId(message.conversationId),
--      id: asMessageId(message.id)
--    })
--
-+    // Beritahu sukses, tidak peduli apakah pesan ada di DB server atau tidak
-     res.status(204).send()
-   } catch (error) {
-     next(error)
-   }
- })
- 
--// VIEW ONCE Message
--router.put('/:id/viewed', async (req, res, next) => {
--  try {
--    if (!req.user) throw new ApiError(401, 'Authentication required.')
--    const messageId = req.params.id;
--    const userId = req.user.id;
--
--    const message = await prisma.message.findUnique({ where: { id: messageId }, include: { conversation: { include: { participants: true } } } });
--    if (!message || !message.isViewOnce || message.senderId === userId) return res.status(400).json({ error: 'Invalid operation' });
--
--    const isParticipant = message.conversation.participants.some(p => p.userId === userId);
--    if (!isParticipant) return res.status(403).json({ error: 'Not a participant' });
--
--    const updated = await prisma.message.update({
--      where: { id: messageId },
--      data: { isViewed: true }
--    });
--
--    // Notify sender and receiver dengan branded IDs
--    getIo().to(message.conversationId).emit('message:viewed', { 
--      messageId: asMessageId(messageId), 
--      conversationId: asConversationId(message.conversationId) 
--    });
--
--    res.json(updated); // atau mapping ke format baru jika diperlukan
--  } catch (error) {
--    next(error);
--  }
-+// ==========================================
-+// 5. VIEW ONCE MESSAGE (OBSOLETE)
-+// ==========================================
-+router.put('/:id/viewed', async (req, res) => {
-+  // Dalam E2EE, pesan isViewOnce langsung dihancurkan saat dibaca.
-+  // Sinyal "Viewed" dikirim melalui payload E2EE silent message.
-+  // Rute HTTP ini bisa dibiarkan kosong dengan respon sukses palsu.
-+  res.json({ success: true, message: "E2EE Tombstone Processed" });
- });
- 
- export default router
-\ No newline at end of file
+       _count: { id: true }
+     });
 diff --git a/server/src/socket.ts b/server/src/socket.ts
-index 970e2458..aff14280 100644
+index aff14280..922592ee 100644
 --- a/server/src/socket.ts
 +++ b/server/src/socket.ts
-@@ -360,17 +360,6 @@ export function registerSocket(httpServer: HttpServer) {
-           return callback?.({ ok: false, error: "Conversation not found." });
-         }
- 
--        if (repliedToId) {
--          const targetMessage = await prisma.message.findUnique({
--            where: { id: repliedToId },
--            select: { conversationId: true }
--          });
--          
--          if (!targetMessage || targetMessage.conversationId !== conversationId) {
--            return callback?.({ ok: false, error: "Invalid reply target." });
--          }
--        }
--        
-         // --- TYPE SAFE DB TRANSACTION ---
-         const newMessageRaw = await prisma.message.create({
-           data: { 
-@@ -383,8 +372,7 @@ export function registerSocket(httpServer: HttpServer) {
-               isViewOnce: isViewOnce === true
-           },
-           include: { 
--              sender: { select: { id: true, encryptedProfile: true } },
--              repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }
-+              sender: { select: { id: true, encryptedProfile: true } }
-           }
-         });
-         
-@@ -414,6 +402,41 @@ export function registerSocket(httpServer: HttpServer) {
+@@ -437,6 +437,11 @@ export function registerSocket(httpServer: HttpServer) {
        }
      });
  
-+    socket.on('message:unsend', async ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
-+      if (!messageId || !socket.user) return;
-+      const uid = socket.user.id;
-+
-+      try {
-+        // 1. Cek apakah pesan itu ada dan memang milik si pengirim
-+        const msg = await prisma.message.findUnique({
-+          where: { id: messageId },
-+          select: { senderId: true, conversationId: true }
-+        });
-+
-+        if (!msg || msg.conversationId !== conversationId || msg.senderId !== uid) {
-+          return; // Abaikan jika bukan pesan miliknya
-+        }
-+
-+        // 2. HANCURKAN DARI SERVER (Jika pesan masih belum terbaca/terkirim oleh penerima)
-+        await prisma.message.delete({
-+          where: { id: messageId }
-+        });
-+        
-+        console.log(`[Zero-Knowledge] Pesan ${messageId} ditarik oleh pengirim dan dihapus dari server.`);
-+
-+        // 3. Beri tahu Klien yang Sedang Online (Tombstone Relay)
-+        // Kita menggunakan socket untuk memberi sinyal real-time agar UI frontend langsung merespons
-+        socket.to(conversationId).emit('message:deleted_remotely', { 
-+          messageId, 
-+          conversationId,
-+          deletedBy: uid
-+        });
-+
-+      } catch (error) {
-+        console.error('Failed to unsend message on server:', error);
-+      }
++    socket.on('message:view_once_opened', ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
++        if (!messageId || !conversationId || !socket.user) return;
++        socket.to(conversationId).emit('message:viewed', { messageId, conversationId });
 +    });
 +
      socket.on("push:subscribe", async (data: PushSubscribePayload) => {
        if (!data.endpoint || !data.keys?.p256dh || !data.keys?.auth) return;
        try {
-@@ -429,39 +452,58 @@ export function registerSocket(httpServer: HttpServer) {
- 
-     socket.on('message:mark_as_read', async ({ messageId, conversationId }: MarkAsReadPayload) => {
-       if (!messageId || !socket.user) return;
--      const uid = socket.user.id; // Aliased to avoid closure confusion
-+      const uid = socket.user.id;
- 
-       try {
--        const msg = await prisma.message.findUnique({ select: { id: true, conversationId: true }, where: { id: messageId } });
-+        // 1. Ambil data pesan SEKALIGUS dengan info grup (hanya 1x query)
-+        const msg = await prisma.message.findUnique({
-+          where: { id: messageId },
-+          select: { 
-+            id: true, 
-+            conversationId: true, 
-+            senderId: true,
-+            conversation: { select: { isGroup: true } } // Join ringan untuk cek tipe chat
+diff --git a/web/src/components/Lightbox.tsx b/web/src/components/Lightbox.tsx
+index a2038b18..6eeaf8a8 100644
+--- a/web/src/components/Lightbox.tsx
++++ b/web/src/components/Lightbox.tsx
+@@ -23,9 +23,14 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
+   const handleClose = () => {
+     if (message.isViewOnce && !message.isViewed) {
+       useMessageStore.getState().updateMessage(message.conversationId, message.id, { isViewed: true });
+-      import('@lib/api').then(({ authFetch }) => {
+-        authFetch(`/api/messages/${message.id}/viewed`, { method: 'PUT' }).catch(console.error);
++      import('@lib/socket').then(({ getSocket }) => {
++          const socket = getSocket();
++          if (socket?.connected) {
++              socket.emit('message:view_once_opened', { messageId: message.id, conversationId: message.conversationId });
 +          }
-+        });
-         if (!msg || msg.conversationId !== conversationId) return;
- 
--        const isParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: uid } });
-+        // 2. Validasi apakah user tergabung dalam percakapan
-+        const isParticipant = await prisma.participant.findUnique({ 
-+          where: { userId_conversationId: { userId: uid, conversationId } } 
-+        });
-         if (!isParticipant) return;
- 
--        await prisma.messageStatus.upsert({
--          where: { messageId_userId: { messageId, userId: uid } },
--          update: { status: 'READ' },
--          create: { messageId, userId: uid, status: 'READ' },
--        });
--        
-+        // 3. Update penanda baca terakhir dari participant
-         await prisma.participant.update({
-           where: { userId_conversationId: { userId: uid, conversationId } },
-           data: { lastReadMsgId: messageId }
-         });
--        
--        const messageInfo = await prisma.message.findUnique({
--          where: { id: messageId },
--          select: { senderId: true, conversationId: true },
--        });
--        
--        if (messageInfo && messageInfo.senderId !== uid) {
--          io.to(messageInfo.senderId).emit('message:status_updated', {
-+
-+        // 4. Beritahu pengirim bahwa pesan sudah dibaca (Centang Biru) via Socket
-+        if (msg.senderId !== uid) {
-+          io.to(msg.senderId).emit('message:status_updated', {
-             messageId,
--            conversationId: messageInfo.conversationId,
-+            conversationId: msg.conversationId,
-             readBy: uid,
-             status: 'READ',
-           });
-         }
-+
-+        // 5. Store-and-Forward: Hancurkan vs Simpan Status
-+        if (!msg.conversation.isGroup) {
-+           // Jika ini chat pribadi (1-on-1), HANCURKAN pesan dari server
-+           await prisma.message.delete({
-+             where: { id: messageId }
-+           });
-+        } else {
-+           // Jika ini Grup, simpan status READ (penghapusan ditangani oleh messageSweeper setelah 14 hari)
-+           await prisma.messageStatus.upsert({
-+             where: { messageId_userId: { messageId, userId: uid } },
-+             update: { status: 'READ' },
-+             create: { messageId, userId: uid, status: 'READ' },
-+           });
-+        }
-+
-       } catch (error) {
-         console.error('Failed to mark message as read:', error);
-       }
-diff --git a/web/src/components/ChatWindow.tsx b/web/src/components/ChatWindow.tsx
-index e01b999d..efb3d407 100644
---- a/web/src/components/ChatWindow.tsx
-+++ b/web/src/components/ChatWindow.tsx
-@@ -252,9 +252,40 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
-   const navigate = useNavigate();
- 
-   useEffect(() => {
--    if (id) loadMessagesForConversation(id);
-+    if (id) {
-+        // 1. Muat riwayat dan sinkronisasi pesan tertunda
-+        loadMessagesForConversation(id);
-+        
-+        // 2. Beritahu server (dan pengirim) bahwa pesan-pesan yang belum dibaca kini sedang dilihat
-+        const markUnreadAsRead = async () => {
-+             // Beri sedikit jeda agar pesan selesai di-render ke DOM (Virtuoso)
-+             await new Promise(r => setTimeout(r, 300));
-+             
-+             const socket = getSocket();
-+             if (!socket?.connected || !meId || !messages) return;
-+
-+             // Cari pesan dari orang lain yang statusnya belum "READ" oleh kita
-+             // (Atau bisa disederhanakan: Kirim ACK untuk X pesan terakhir dari lawan bicara untuk amannya)
-+             const unreadMessages = messages.filter(m => 
-+                 m.senderId !== meId && 
-+                 (!m.statuses || !m.statuses.some(s => s.userId === meId && s.status === 'READ'))
-+             );
-+
-+             // Batasi maksimal 20 pesan sekaligus untuk mencegah spam socket
-+             const msgsToAck = unreadMessages.slice(-20);
-+             
-+             msgsToAck.forEach(msg => {
-+                 socket.emit('message:mark_as_read', {
-+                     messageId: msg.id,
-+                     conversationId: id
-+                 });
-+             });
-+        };
-+
-+        markUnreadAsRead();
-+    }
-     clearMessageSelection();
--  }, [id, loadMessagesForConversation, clearMessageSelection]);
-+  }, [id, loadMessagesForConversation, clearMessageSelection, meId, messages.length]);
- 
-   const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);
- 
+       });
++      // Optionally clean up the file object locally so it can't be re-opened:
++      useMessageStore.getState().updateMessage(message.conversationId, message.id, { fileUrl: undefined, content: null });
+     }
+     onClose();
+   };
 diff --git a/web/src/components/MessageItem.tsx b/web/src/components/MessageItem.tsx
-index 16af49ec..381e4221 100644
+index 381e4221..93b4c7e0 100644
 --- a/web/src/components/MessageItem.tsx
 +++ b/web/src/components/MessageItem.tsx
-@@ -162,7 +162,23 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
-       t('chat:actions.delete_message_title'), 
-       t('chat:actions.delete_message_desc'), 
-       () => {
-+      // 1. Hapus dari UI dan Local Vault secara instan
+@@ -165,17 +165,20 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
+       // 1. Hapus dari UI dan Local Vault secara instan
        removeMessage(message.conversationId, message.id);
+ 
+-      const socket = getSocket();
+-      if (socket?.connected) {
+-          // 2. Beritahu Server untuk memusnahkannya (jika pesan masih nyangkut/belum dibaca)
+-          socket.emit("message:unsend", { messageId: message.id, conversationId: message.conversationId });
++      // Hanya kirim instruksi hapus ke server dan lawan bicara JIKA ini pesan milik kita
++      if (mine) {
++          const socket = getSocket();
++          if (socket?.connected) {
++              // 2. Beritahu Server untuk memusnahkannya (jika pesan masih nyangkut/belum dibaca)
++              socket.emit("message:unsend", { messageId: message.id, conversationId: message.conversationId });
+ 
+-          // 3. E2EE TOMBSTONE: Kirim sinyal terenkripsi ke lawan bicara agar mereka menghapusnya dari IndexedDB mereka
+-          const unsendPayload = { type: "UNSEND", targetMessageId: message.id };
+-          useMessageStore.getState().sendMessage(message.conversationId, {
+-              content: JSON.stringify(unsendPayload),
+-              isSilent: true
+-          });
++              // 3. E2EE TOMBSTONE: Kirim sinyal terenkripsi ke lawan bicara agar mereka menghapusnya dari IndexedDB mereka
++              const unsendPayload = { type: "UNSEND", targetMessageId: message.id };
++              useMessageStore.getState().sendMessage(message.conversationId, {
++                  content: JSON.stringify(unsendPayload),
++                  isSilent: true
++              });
++          }
+       }
+ 
+       // 4. Bersihkan file dari Cloudflare R2 (Storage) jika ini adalah file gambar/media
+diff --git a/web/src/lib/db.ts b/web/src/lib/db.ts
+index 7a9bd6e6..2d0467ad 100644
+--- a/web/src/lib/db.ts
++++ b/web/src/lib/db.ts
+@@ -18,6 +18,7 @@ export interface DecryptedMessageRecord {
+   isViewOnce?: boolean;
+   isDeletedLocal?: boolean;
+   fileMeta?: string;
++  expiresAt?: string | null;
+ }
+ 
+ // --- Interfaces for OfflineQueue ---
+diff --git a/web/src/lib/shadowVaultDb.ts b/web/src/lib/shadowVaultDb.ts
+index 12c83324..12f1e524 100644
+--- a/web/src/lib/shadowVaultDb.ts
++++ b/web/src/lib/shadowVaultDb.ts
+@@ -133,7 +133,8 @@ class NyxShadowVaultProxy {
+           senderAvatarUrl: encryptedSenderAvatarUrl,
+           isViewOnce: m.isViewOnce,
+           isDeletedLocal: m.isDeletedLocal,
+-          fileMeta: encryptedFileMeta || existing?.fileMeta
++          fileMeta: encryptedFileMeta || existing?.fileMeta,
++          expiresAt: m.expiresAt || existing?.expiresAt
+         });
+       }
+       await db.messages.bulkPut(records);
+@@ -146,15 +147,30 @@ class NyxShadowVaultProxy {
+     try {
+       const query = db.messages.where('conversationId').equals(conversationId);
+       
++      const allRecords = await query.toArray();
++      const now = Date.now();
 +
-+      const socket = getSocket();
-+      if (socket?.connected) {
-+          // 2. Beritahu Server untuk memusnahkannya (jika pesan masih nyangkut/belum dibaca)
-+          socket.emit("message:unsend", { messageId: message.id, conversationId: message.conversationId });
++      // THE SWEEPER: Eagerly find and destroy expired messages from Local DB
++      const validRecords: typeof allRecords = [];
++      const expiredIds: string[] = [];
 +
-+          // 3. E2EE TOMBSTONE: Kirim sinyal terenkripsi ke lawan bicara agar mereka menghapusnya dari IndexedDB mereka
-+          const unsendPayload = { type: "UNSEND", targetMessageId: message.id };
-+          useMessageStore.getState().sendMessage(message.conversationId, {
-+              content: JSON.stringify(unsendPayload),
-+              isSilent: true
-+          });
++      for (const r of allRecords) {
++        if (r.expiresAt && new Date(r.expiresAt).getTime() <= now) {
++           expiredIds.push(r.id);
++        } else {
++           validRecords.push(r);
++        }
 +      }
 +
-+      // 4. Bersihkan file dari Cloudflare R2 (Storage) jika ini adalah file gambar/media
-       let query = '';
-       let targetUrl = message.fileUrl;
-       try {
-@@ -177,16 +193,12 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
-               const url = new URL(targetUrl);
-               const key = url.pathname.substring(1);
-               if (key) query = `?r2Key=${encodeURIComponent(key)}`;
-+              // Panggil API hanya untuk hapus objek storage, bukan hapus pesan DB
-+              api(`/api/uploads/file${query}`, { method: 'DELETE' }).catch(() => {});
-           } catch (e) {
-               console.error("Failed to parse file URL for deletion:", e);
-           }
-       }
--
--      api(`/api/messages/${message.id}${query}`, { method: 'DELETE' }).catch((error) => {
--        console.error("Failed to delete message:", error);
--        toast.error(t('chat:messages.delete_failed', 'Failed to delete message.'));
--        addOptimisticMessage(message.conversationId, message);
--      });
-     });
-   };
- 
-@@ -213,28 +225,30 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
-     if (!user) return;
-     const userReaction = message.reactions?.find(r => r.userId === user.id);
-     
-+    // SKENARIO 1: Pengguna mengklik emoji yang sama (HAPUS REAKSI)
-     if (userReaction?.emoji === emoji) {
-       removeLocalReaction(message.conversationId, message.id, userReaction.id);
--      try {
--        if ((userReaction as unknown as { isMessage?: boolean }).isMessage) {
--            await api(`/api/messages/${userReaction.id}`, { method: 'DELETE' });
--        } else {
--            await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
--        }
--      } catch (e) {
--        console.error("Failed to remove reaction:", e);
--      }
-+      
-+      // E2EE Tombstone: Kirim sinyal hapus reaksi ke lawan bicara
-+      const removeReactPayload = { type: "reaction_remove", targetMessageId: message.id, emoji: emoji };
-+      useMessageStore.getState().sendMessage(message.conversationId, {
-+          content: JSON.stringify(removeReactPayload),
-+          isSilent: true
-+      });
-       return;
-     }
- 
-+    // SKENARIO 2: Pengguna mengganti emoji (HAPUS YANG LAMA DULU)
-     if (userReaction) {
-         removeLocalReaction(message.conversationId, message.id, userReaction.id);
--        const deletePromise = (userReaction as unknown as { isMessage?: boolean }).isMessage
--            ? api(`/api/messages/${userReaction.id}`, { method: 'DELETE' })
--            : api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
--        deletePromise.catch(console.error);
-+        const removeReactPayload = { type: "reaction_remove", targetMessageId: message.id, emoji: userReaction.emoji };
-+        useMessageStore.getState().sendMessage(message.conversationId, {
-+            content: JSON.stringify(removeReactPayload),
-+            isSilent: true
-+        });
-     }
- 
-+    // SKENARIO 3: Kirim Reaksi Baru
-     try {
-         await sendReaction(message.conversationId, message.id, emoji);
-     } catch (e) {
-diff --git a/web/src/components/Reactions.tsx b/web/src/components/Reactions.tsx
-index 6aa70810..a1233ba9 100644
---- a/web/src/components/Reactions.tsx
-+++ b/web/src/components/Reactions.tsx
-@@ -3,7 +3,6 @@ import { useAuthStore } from '@store/auth';
- import { useMessageStore } from '@store/message';
- import { useShallow } from 'zustand/react/shallow';
- import type { Message } from '@store/conversation';
--import { api } from '@lib/api';
- 
- interface ReactionPopoverProps {
-   message: Message;
-@@ -14,9 +13,12 @@ const COMMON_EMOJIS = ['❤️', '👍', '😂', '😮', '😢', '🙏'];
- 
- export default function ReactionPopover({ message, children }: ReactionPopoverProps) {
-   const me = useAuthStore((s) => s.user);
--  const { sendReaction, removeLocalReaction } = useMessageStore(useShallow(s => ({ 
-+  
-+  // Tambahkan sendMessage ke dalam hook useShallow
-+  const { sendReaction, removeLocalReaction, sendMessage } = useMessageStore(useShallow(s => ({ 
-     sendReaction: s.sendReaction, 
--    removeLocalReaction: s.removeLocalReaction 
-+    removeLocalReaction: s.removeLocalReaction,
-+    sendMessage: s.sendMessage
-   })));
- 
-   const handleSelectReaction = async (emoji: string) => {
-@@ -25,40 +27,33 @@ export default function ReactionPopover({ message, children }: ReactionPopoverPr
-     // Check if I already reacted
-     const userReaction = message.reactions?.find(r => r.userId === me.id);
- 
--    // 1. TOGGLE OFF (If clicking same emoji)
-+    // 1. TOGGLE OFF (Jika mengklik emoji yang sama = Hapus Reaksi)
-     if (userReaction?.emoji === emoji) {
--      // Optimistic remove
-       removeLocalReaction(message.conversationId, message.id, userReaction.id);
-       
--      // Server remove
--      try {
--        if (userReaction.isMessage) {
--            // New "Reactions as Messages"
--            await api(`/api/messages/${userReaction.id}`, { method: 'DELETE' });
--        } else {
--            // Legacy "MessageReaction" table
--            await api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
--        }
--      } catch (e) {
--        console.error("Failed to remove reaction:", e);
--      }
-+      // E2EE Tombstone: Kirim sinyal hapus reaksi ke lawan bicara
-+      const removeReactPayload = { type: "reaction_remove", targetMessageId: message.id, emoji: emoji };
-+      sendMessage(message.conversationId, {
-+          content: JSON.stringify(removeReactPayload),
-+          isSilent: true
-+      });
-       return;
-     }
- 
--    // 2. REPLACE (If clicking different emoji)
-+    // 2. REPLACE (Jika mengklik emoji berbeda = Hapus yang lama, kirim yang baru)
-     if (userReaction) {
--        // Remove old one first
-+        // Hapus yang lama di UI Lokal
-         removeLocalReaction(message.conversationId, message.id, userReaction.id);
++      if (expiredIds.length > 0) {
++          db.messages.bulkDelete(expiredIds).catch(e => console.error("Failed to delete expired messages:", e));
++      }
++
+       // Jika ada kursor (beforeDate), ambil pesan yang lebih tua dari tanggal tersebut
+       if (beforeDate) {
+-        // Karena kita tidak memiliki compound index (conversationId, createdAt) yang proper di V1,
+-        // kita ambil semua untuk convo ini, filter manual, lalu sort & slice. 
+-        // (Ini aman karena Dexie sangat cepat, tapi idealnya di-upgrade skemanya nanti).
+-        const records = await query.toArray();
+         const beforeTime = new Date(beforeDate).getTime();
          
--        const deletePromise = userReaction.isMessage
--            ? api(`/api/messages/${userReaction.id}`, { method: 'DELETE' })
--            : api(`/api/messages/reactions/${userReaction.id}`, { method: 'DELETE' });
--            
--        deletePromise.catch(console.error);
-+        // E2EE Tombstone: Kirim sinyal hapus emoji lama
-+        const removeReactPayload = { type: "reaction_remove", targetMessageId: message.id, emoji: userReaction.emoji };
-+        sendMessage(message.conversationId, {
-+            content: JSON.stringify(removeReactPayload),
-+            isSilent: true
-+        });
-     }
+-        const filteredRecords = records
++        const filteredRecords = validRecords
+           .filter(r => new Date(r.createdAt).getTime() < beforeTime)
+           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) // Sort DESC
+           .slice(0, limit);
+@@ -163,8 +179,7 @@ class NyxShadowVaultProxy {
+       }
  
--    // 3. ADD NEW (Send as message)
--    // Optimistic update is handled inside sendReaction store action
-+    // 3. ADD NEW (Kirim Reaksi Baru)
-     try {
-         await sendReaction(message.conversationId, message.id, emoji);
-     } catch (e) {
+       // Jika tidak ada kursor, ambil N pesan terbaru
+-      const records = await query.toArray();
+-      const latestRecords = records
++      const latestRecords = validRecords
+         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) // Sort DESC
+         .slice(0, limit);
+ 
+@@ -226,7 +241,8 @@ class NyxShadowVaultProxy {
+           fileType: decryptedFileMeta?.fileType,
+           fileSize: decryptedFileMeta?.fileSize,
+           duration: decryptedFileMeta?.duration,
+-          isBlindAttachment: decryptedFileMeta?.isBlindAttachment
++          isBlindAttachment: decryptedFileMeta?.isBlindAttachment,
++          expiresAt: r.expiresAt
+         });
+       }
+       return messages;
+@@ -303,6 +319,7 @@ class NyxShadowVaultProxy {
+             : 'sent',
+         isViewOnce: r.isViewOnce,
+         isDeletedLocal: r.isDeletedLocal,
++        expiresAt: r.expiresAt,
+         // ✅ SUNTIKKAN PROPERTI FILE:
+         ...(fileMetaObj || {})
+       } as Message; 
 diff --git a/web/src/lib/socket.ts b/web/src/lib/socket.ts
-index ea3e7be1..0d77d910 100644
+index 36afe32c..0d77d910 100644
 --- a/web/src/lib/socket.ts
 +++ b/web/src/lib/socket.ts
-@@ -42,10 +42,23 @@ const processMessageBuffer = async () => {
-         try {
-             // THE SHIELD: Intelligent Echo Cancellation
+@@ -44,11 +44,9 @@ const processMessageBuffer = async () => {
              if (meId && safeMessage.senderId === meId) {
-+                // 1. Blokir echo dari pesan normal
+                 // 1. Blokir echo dari pesan normal
                  const isOptimisticEcho = useMessageStore.getState().messages[safeMessage.conversationId]?.some(
 -                    m => m.tempId && String(m.tempId) === String(safeMessage.tempId)
 +                    m => m.id === safeMessage.id || (m.tempId && String(m.tempId) === String(safeMessage.tempId))
                  );
--                if (isOptimisticEcho) continue; // It's an echo of our own msg
-+                if (isOptimisticEcho) {
-+                    continue; 
-+                }
-+
-+                // 2. Blokir echo dari pesan SILENT (seperti Reaction/Edit/GhostSync yang kita kirim sendiri)
-+                if (safeMessage.content && safeMessage.content.startsWith('{')) {
-+                     try {
-+                         const meta = JSON.parse(safeMessage.content);
-+                         if (meta.type === 'reaction' || meta.type === 'edit' || meta.type === 'silent' || meta.type === 'GHOST_SYNC' || meta.type === 'UNSEND') {
-+                             continue;
-+                         }
-+                     } catch (_e) {}
-+                }
-             }
+                 if (isOptimisticEcho) {
+-                    // Emit ACK agar server langsung membakarnya (karena ini pesan kita sendiri yang echo)
+-                    socket?.emit('message:mark_as_read', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
+                     continue; 
+                 }
  
-             const decryptedMessage = await addIncomingMessage(safeMessage.conversationId, safeMessage);
-@@ -327,6 +340,23 @@ export function getSocket() {
-       disconnectSocket();
-     });
- 
-+    socket.on("message:deleted_remotely", async ({ conversationId, messageId }) => {
-+      
-+      const { removeMessage } = useMessageStore.getState();
-+      // Ini akan langsung menghapus pesan dari UI dan mengubahnya menjadi Tombstone di IndexedDB lokal
-+      removeMessage(conversationId, messageId);
-+      
-+      // Opsional: Berikan feedback visual kecil jika user sedang melihat chat
-+      const isViewingChat = window.location.pathname.includes(`/chat/${conversationId}`);
-+      if (isViewingChat) {
-+          toast.success("Sebuah pesan telah ditarik oleh pengirim.", {
-+              icon: '🗑️',
-+              duration: 3000,
-+              position: 'bottom-center'
-+          });
-+      }
-+    });
-+
-     socket.on("user:identity_changed", (data) => {
-       const message = `The security key for ${data.name} has changed. You may want to verify their identity.`;
-       toast.success(message, { duration: 10000, icon: '🛡️' });
-diff --git a/web/src/store/conversation.ts b/web/src/store/conversation.ts
-index 72c9f684..f9500fc6 100644
---- a/web/src/store/conversation.ts
-+++ b/web/src/store/conversation.ts
-@@ -178,31 +178,49 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
-       const rawConversations = await api<Conversation[]>("/api/conversations");
-       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
- 
-+      // IMPORT SHADOW VAULT UNTUK MENCARI LAST MESSAGE LOKAL
-+      const { shadowVault } = await import('@lib/shadowVaultDb');
-+
-       const conversations = await Promise.all(rawConversations.map(async c => {
--        // ✅ FIX: Tidak perlu lagi mapping p.user! Backend sudah mengirim data yang rata dan sempurna.
-         const participants = c.participants;
- 
-+        // 1. Coba cari lastMessage dari Local Vault (IndexedDB) dulu
-+        let localLastMessage: Message | null = null;
-+        try {
-+            const localMsgs = await shadowVault.getMessagesByConversation(c.id, 1);
-+            if (localMsgs.length > 0) {
-+                localLastMessage = localMsgs[0];
-+            }
-+        } catch (_e) {}
-+
-+        // 2. Bandingkan dengan lastMessage dari Server (jika ada pesan pending yang lebih baru)
-         let lastMessage = c.lastMessage || null;
-+        
-         if (lastMessage) {
--          try {
--            lastMessage = await decryptMessageObject(lastMessage);
--          } catch (_e) {
--            if (lastMessage.sessionId) {
--              emitSessionKeyRequest(lastMessage.conversationId, lastMessage.sessionId);
-+            try {
-+              lastMessage = await decryptMessageObject(lastMessage);
-+            } catch (_e) {
-+              if (lastMessage.sessionId) emitSessionKeyRequest(lastMessage.conversationId, lastMessage.sessionId);
-+              lastMessage.content = '[Requesting key to decrypt...]';
-             }
--            lastMessage.content = '[Requesting key to decrypt...]';
--          }
--          
--          if (lastMessage) {
--              const pInfo = participants.find(p => p.id === lastMessage!.senderId);
--              if (pInfo) {
--                  lastMessage.sender = {
--                      ...(lastMessage.sender || { id: lastMessage.senderId }),
--                      ...pInfo
--                  };
--              }
--              lastMessage = withPreview(lastMessage);
--          }
-+        }
-+
-+        // 3. Tentukan pemenang (Pesan mana yang paling baru)
-+        const serverMsgTime = lastMessage ? new Date(lastMessage.createdAt).getTime() : 0;
-+        const localMsgTime = localLastMessage ? new Date(localLastMessage.createdAt).getTime() : 0;
-+
-+        let finalLastMessage = localMsgTime > serverMsgTime ? localLastMessage : lastMessage;
-+
-+        // 4. Proses Preview & Profile
-+        if (finalLastMessage) {
-+            const pInfo = participants.find(p => p.id === finalLastMessage!.senderId);
-+            if (pInfo) {
-+                finalLastMessage.sender = {
-+                    ...(finalLastMessage.sender || { id: finalLastMessage.senderId }),
-+                    ...pInfo
-+                };
-+            }
-+            finalLastMessage = withPreview(finalLastMessage);
-         }
-         
-         let decryptedMetadata = undefined;
-@@ -264,7 +282,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
-         c.id === id ? { ...c, unreadCount: 0 } : c
-       ),
-     }));
--    authFetch(`/api/conversations/${id}/read`, { method: 'POST' }).catch(console.error);
-   },
- 
-   deleteConversation: async (id) => {
-@@ -565,7 +582,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
-       const currentLastMsgTime = conversation.lastMessage ? new Date(conversation.lastMessage.createdAt).getTime() : 0;
-       
-       // ✅ FIX: Cek langsung dari URL browser apakah pengguna sedang membuka chat ini
--      const isViewingChat = typeof window !== 'undefined' && window.location.pathname.includes(`/chat/${conversationId}`);
-+      const isViewingChat = typeof window !== 'undefined' && window.location.pathname.includes(`/chat/${conversationId}`) && document.visibilityState === 'visible';
- 
-       if (newMsgTime < currentLastMsgTime) {
-           // Jika pesan ini lebih tua dari preview yang ada di layar, JANGAN timpa lastMessage.
-@@ -584,12 +601,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
-       }
- 
-       // Jika pesan ini lebih baru, lakukan update utuh (Preview & Resort)
--      const shouldIncrementUnread = !isMine && state.activeId !== conversationId;
-+      const shouldIncrementUnread = !isMine && !isViewingChat && state.activeId !== conversationId;
-       
-       const updatedConversation = {
-         ...conversation,
-         lastMessage: withPreview(message),
--        unreadCount: state.activeId === conversationId 
-+        unreadCount: isViewingChat 
-             ? 0 
-             : (shouldIncrementUnread ? (conversation.unreadCount || 0) + 1 : conversation.unreadCount),
-       };
+@@ -57,8 +55,6 @@ const processMessageBuffer = async () => {
+                      try {
+                          const meta = JSON.parse(safeMessage.content);
+                          if (meta.type === 'reaction' || meta.type === 'edit' || meta.type === 'silent' || meta.type === 'GHOST_SYNC' || meta.type === 'UNSEND') {
+-                             // Langsung bakar dari server, ini punya kita sendiri!
+-                             socket?.emit('message:mark_as_read', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
+                              continue;
+                          }
+                      } catch (_e) {}
 diff --git a/web/src/store/message.ts b/web/src/store/message.ts
-index f0d08a88..07c223fb 100644
+index 36772d47..55a4b6fa 100644
 --- a/web/src/store/message.ts
 +++ b/web/src/store/message.ts
-@@ -461,7 +461,7 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
-   return null;
- }
- 
--function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string, storyId?: string } | null {
-+function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string, storyId?: string, targetMessageId?: string, emoji?: string } | null {
-   if (!content) return null;
-   try {
-     let trimmed = content.trim();
-@@ -470,7 +470,7 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
+@@ -231,6 +231,9 @@ export async function decryptMessageObject(
+         }
+         if (rawMsg.repliedTo) {
+             finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
++        } else if (rawMsg.repliedToId) {
++            const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
++            if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
+         }
+         return finalMessage;
      }
-     if (!trimmed.startsWith('{')) return null;
-     const payload = JSON.parse(trimmed);
--    // DO NOT treat story_reply as silent. Let processMessagesAndReactions keep it.
-+    
-     if (payload.type === 'story_reply') {
-       return null;
+@@ -423,6 +426,9 @@ export async function decryptMessageObject(
+ 
+     if (rawMsg.repliedTo) {
+         finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
++    } else if (rawMsg.repliedToId) {
++        const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
++        if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
      }
-@@ -484,20 +484,34 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
-       return payload;
-     }
-     if (payload.type === 'STORY_KEY') {
--      return payload; // Should contain storyId and key
-+      return payload;
-+    }
-+    // Tambahan untuk E2EE Unsend & Cabut Reaksi
-+    if (payload.type === 'UNSEND' || payload.type === 'reaction_remove') {
-+      return payload;
-     }
-   } catch (_e) {}
-   return null;
- }
  
-+// Helper to separate messages and reactions
- // Helper to separate messages and reactions
- function processMessagesAndReactions(decryptedItems: Message[], existingMessages: Message[] = []) {
-   const chatMessages: Message[] = [];
-+  
-   interface ReactionPayload { id: string; messageId: string; emoji: string; userId: string; createdAt: string; user?: unknown; isMessage: boolean; }
-   const reactions: ReactionPayload[] = [];
-+  
-   interface EditPayload { targetMessageId: string; text: string; timestamp: number; }
-   const edits: EditPayload[] = [];
- 
-+  // Keranjang penampung sinyal E2EE baru
-+  const unsends: { targetMessageId: string; senderId: string; createdAt: string; conversationId: string }[] = [];
-+  const reactionRemoves: { targetMessageId: string; emoji: string; senderId: string }[] = [];
-+
-+  // ==========================================
-+  // TAHAP 1: EKSTRAKSI & PENGELOMPOKAN
-+  // ==========================================
-   for (const msg of decryptedItems) {
-     const reactionPayload = parseReaction(msg.content);
-     const editPayload = parseEdit(msg.content);
-@@ -522,12 +536,32 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
-           if (silentPayload.type === 'STORY_KEY' && silentPayload.key && silentPayload.storyId) {
-               // Save the story key
-               saveStoryKey(silentPayload.storyId, silentPayload.key).catch(e => console.error("Failed to save story key from history", e));
--              // Ignore this message in the UI completely
-               continue;
-           }
-+          
-+          // Masukkan ke keranjang reactionRemoves
-+          if (silentPayload.type === 'reaction_remove' && silentPayload.targetMessageId && silentPayload.emoji) {
-+              reactionRemoves.push({
-+                  targetMessageId: silentPayload.targetMessageId,
-+                  emoji: silentPayload.emoji,
-+                  senderId: msg.senderId
-+              });
-+              continue; 
-+          }
-+
-+          // Masukkan ke keranjang unsends
-+          if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {
-+             unsends.push({
-+                 targetMessageId: silentPayload.targetMessageId,
-+                 senderId: msg.senderId,
-+                 createdAt: msg.createdAt,
-+                 conversationId: msg.conversationId
-+             });
-+             continue;
-+          }
-+          
-           msg.content = silentPayload.text;
-           msg.isSilent = true;
--          // [FIX] Filter out signaling messages (like CALL_INIT) that have no text content
-           if (!msg.content) {
-               continue; 
-           }
-@@ -536,8 +570,16 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
-     }
-   }
- 
-+  // ==========================================
-+  // TAHAP 2: MEMBUAT PETA PESAN
-+  // ==========================================
-   const messageMap = new Map([...existingMessages, ...chatMessages].map(m => [m.id, m]));
-   
-+  // ==========================================
-+  // TAHAP 3: MENERAPKAN SEMUA PERUBAHAN
-+  // ==========================================
-+  
-+  // 1. Terapkan Reaksi Baru
-   for (const reaction of reactions) {
-     const target = messageMap.get(asMessageId(reaction.messageId));
-     if (target) {
-@@ -548,7 +590,15 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
-     }
-   }
- 
--  // APPLY EDITS (Sort by timestamp so latest edit wins)
-+  // 2. Terapkan Cabut Reaksi (Reaction Remove)
-+  for (const rr of reactionRemoves) {
-+      const target = messageMap.get(asMessageId(rr.targetMessageId));
-+      if (target && target.reactions) {
-+          target.reactions = target.reactions.filter(r => r.userId !== rr.senderId || r.emoji !== rr.emoji);
-+      }
-+  }
-+
-+  // 3. Terapkan Editan (Diurutkan dari yang terbaru)
-   edits.sort((a, b) => a.timestamp - b.timestamp);
-   for (const edit of edits) {
-      const target = messageMap.get(asMessageId(edit.targetMessageId));
-@@ -558,6 +608,30 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
-      }
-   }
- 
-+  // 4. Terapkan Tarik Pesan (Unsend Tombstones)
-+  for (const un of unsends) {
-+      const targetId = asMessageId(un.targetMessageId);
-+      const target = messageMap.get(targetId);
-+      
-+      // Keamanan E2EE: Hanya pengirim asli yang berhak menarik pesannya
-+      if (target && target.senderId === un.senderId) {
-+          target.content = null;
-+          target.fileUrl = undefined;
-+          target.isDeletedLocal = true;
-+          target.reactions = [];
-+      } else if (!target) {
-+          // Jika pesan aslinya belum ter-load ke UI, suntikkan nisannya langsung ke DB
-+          import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([{ 
-+              id: targetId, 
-+              conversationId: asConversationId(un.conversationId), 
-+              isDeletedLocal: true, 
-+              content: null, 
-+              createdAt: un.createdAt, 
-+              senderId: asUserId(un.senderId) 
-+          } as Message]));
-+      }
-+  }
-+
-   return Array.from(messageMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
- }
- 
-@@ -619,6 +693,8 @@ const initialState: State = {
+     return finalMessage;
+@@ -693,6 +699,8 @@ const initialState: State = {
    selectedMessageIds: [],
  };
  
@@ -1236,279 +259,88 @@ index f0d08a88..07c223fb 100644
  export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) => ({
    ...initialState,
  
-@@ -1082,8 +1158,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-         async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
-           if (res.ok && res.msg) {
-             if (!isReactionPayload) {
--                const existingMsg = get().messages[conversationId]?.find(m => m.id === `temp_${actualTempId}` || m.tempId === actualTempId || m.id === res.msg!.id);
--                
-+                const tempIdStr = `temp_${actualTempId}`;
-+                const existingMsg = get().messages[conversationId]?.find(m => 
-+                     m.id === tempIdStr || m.tempId === actualTempId
-+                );
+@@ -1173,9 +1181,39 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+                      }
+                  } catch (e) {}
+ 
++                let finalContent = existingMsg !== undefined ? existingMsg.content : res.msg!.content;
++                
++                // Jaring pengaman: Jangan biarkan JSON terenkripsi masuk ke UI
++                if (finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
++                     finalContent = "🔒 You sent this message (Encrypted)";
++                     // Coba dekripsi mandiri jika memungkinkan
++                     import('@utils/crypto').then(async ({ retrieveMessageKeySecurely }) => {
++                         try {
++                             const mk = await retrieveMessageKeySecurely(`temp_${actualTempId}`);
++                             if (mk) {
++                                 const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
++                                 const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
++                                 
++                                 const parsed = JSON.parse(finalContent as string);
++                                 const ciphertext = parsed.ciphertext;
++                                 if (ciphertext) {
++                                     const combined = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
++                                     const nonce = combined.slice(0, 24);
++                                     const encrypted = combined.slice(24);
++                                     const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
++                                     const plainText = sodium.to_string(decryptedBytes);
++                                     get().updateMessage(conversationId, res.msg!.id, { content: plainText });
++                                 }
++                             }
++                         } catch (e) {
++                             console.error("Async self-decrypt failed in callback:", e);
++                         }
++                     }).catch(console.error);
++                }
 +
-                 let realFileUrl = existingMsg?.fileUrl;
-                  let realFileKey = existingMsg?.fileKey;
-                  try {
-@@ -1110,6 +1189,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-                     status: 'SENT' as const
-                 } as Partial<Message>;
-                 
-+                // Pastikan mengirim actualTempId (yang berupa angka) ke fungsi replace
-                 get().replaceOptimisticMessage(conversationId, actualTempId, updatedMsg);
-             } else {
-                 const reactionData = parseReaction(contentToEncrypt);
-@@ -1373,48 +1453,75 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-        return;
-     }
+                 const updatedMsg = { 
+                     ...res.msg, 
+-                    content: existingMsg !== undefined ? existingMsg.content : res.msg!.content, 
++                    content: finalContent,
+                     repliedTo: existingMsg?.repliedTo,
+                     isBlindAttachment: existingMsg?.isBlindAttachment,
+                     fileUrl: realFileUrl,
+@@ -1294,9 +1332,38 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+                  }
+              } catch (e) {}
  
--    if (get().hasLoadedHistory[id] && (get().messages[id]?.length || 0) > 0) return;
-+    // 1. TAMPILKAN DARI LOCAL VAULT (INDEXEDDB) DULU (Instan 0ms!)
-+    try {
-+      const localMessagesRaw = await shadowVault.getMessagesByConversation(id, 50);
-+      if (localMessagesRaw.length > 0) {
-+          const localProcessed = processMessagesAndReactions(localMessagesRaw, []);
-+          const localEnriched = enrichMessagesWithSenderProfile(id, localProcessed);
-+          set(state => ({
-+              messages: { ...state.messages, [id]: localEnriched },
-+              hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
-+          }));
-+      }
-+    } catch (e) {
-+      console.error("[Local Vault] Gagal memuat dari IndexedDB:", e);
-+    }
- 
-+    // 2. SINKRONISASI BACKGROUND: Cek apakah ada surat tertunda di server
-     try {
--      set(state => ({ hasMore: { ...state.hasMore, [id]: true }, isFetchingMore: { ...state.isFetchingMore, [id]: false } }));
-+      set(state => ({ isFetchingMore: { ...state.isFetchingMore, [id]: true } }));
-       
--      const localMessages = await shadowVault.getMessagesByConversation(id, 50);
--      const localMap = new Map(localMessages.map(m => [m.id, m]));
--
-       const res = await api<{ items: Message[] }>(`/api/messages/${id}?limit=50`);
-       const fetchedMessages = res.items || [];
--      const processedMessages: Message[] = [];
-       
--      for (const message of fetchedMessages) {
--        if (localMap.has(message.id)) {
--            const localMsg = localMap.get(message.id)!;
--            processedMessages.push({
--                ...localMsg,
--                statuses: message.statuses,
--                reactions: message.reactions,
--                isEdited: message.isEdited,
--                repliedToId: message.repliedToId || localMsg.repliedToId,
--                repliedTo: localMsg.repliedTo
--            });
--        } else {
--            processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
-+      if (fetchedMessages.length > 0) {
-+        const processedMessages: Message[] = [];
-+        const socket = getSocket();
-+        const { user } = useAuthStore.getState();
++            let finalContent = existingMsg !== undefined ? existingMsg.content : res.msg!.content;
++            
++            // Jaring pengaman: Jangan biarkan JSON terenkripsi masuk ke UI
++            if (finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
++                 finalContent = "🔒 You sent this message (Encrypted)";
++                 import('@utils/crypto').then(async ({ retrieveMessageKeySecurely }) => {
++                     try {
++                         const mk = await retrieveMessageKeySecurely(`temp_${tempId}`);
++                         if (mk) {
++                             const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
++                             const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
++                             
++                             const parsed = JSON.parse(finalContent as string);
++                             const ciphertext = parsed.ciphertext;
++                             if (ciphertext) {
++                                 const combined = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
++                                 const nonce = combined.slice(0, 24);
++                                 const encrypted = combined.slice(24);
++                                 const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
++                                 const plainText = sodium.to_string(decryptedBytes);
++                                 get().updateMessage(conversationId, res.msg!.id, { content: plainText });
++                             }
++                         }
++                     } catch (e) {
++                         console.error("Async self-decrypt failed in offline queue callback:", e);
++                     }
++                 }).catch(console.error);
++            }
 +
-+        for (const message of fetchedMessages) {
-+          // A. Dekripsi pesan dari server
-+          const decrypted = await decryptMessageObject(message, undefined, 0, { skipRetries: true });
-+          processedMessages.push(decrypted);
-+
-+          // B. THE KILL SWITCH: Perintahkan server menghancurkan pesan ini!
-+          if (socket?.connected && user && decrypted.senderId !== user.id) {
-+              socket.emit('message:mark_as_read', {
-+                  messageId: decrypted.id,
-+                  conversationId: id
-+              });
-+          }
-         }
--      }
- 
--      set(state => {
--        const allMessages = processMessagesAndReactions(processedMessages, []);
--        const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
--        
--        shadowVault.upsertMessages(enrichedMessages); 
-+        set(state => {
-+          const existingMessages = state.messages[id] || [];
-+          const combined = [...existingMessages, ...processedMessages];
-+          
-+          // Hapus duplikasi berdasarkan ID
-+          const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
- 
--        return {
--          messages: { ...state.messages, [id]: enrichedMessages },
--          hasMore: { ...state.hasMore, [id]: fetchedMessages.length >= 50 },
--          hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
--        };
--      });
-+          const allMessages = processMessagesAndReactions(uniqueMessages, []);
-+          const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
-+          
-+          // C. Simpan aman ke dalam IndexedDB
-+          shadowVault.upsertMessages(enrichedMessages); 
-+
-+          return {
-+            messages: { ...state.messages, [id]: enrichedMessages },
-+            hasMore: { ...state.hasMore, [id]: enrichedMessages.length >= 50 }, // Gunakan jumlah lokal sebagai patokan
-+            hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
-+          };
-+        });
-+      } else {
-+         // Jika server kosong, jangan sentuh state.messages agar UI tidak hilang
-+         // (Cukup tandai hasLoadedHistory)
-+         set(state => ({ hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true } }));
-+      }
-     } catch (error) {
--      console.error(`Failed to load messages for ${id}`, error);
-+      console.error(`Failed to sync pending messages for ${id}`, error);
-+    } finally {
-+      set(state => ({ isFetchingMore: { ...state.isFetchingMore, [id]: false } }));
-     }
-   },
- 
-@@ -1429,104 +1536,79 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-     set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: true } }));
-     
-     try {
--      const res = await api<{ items: Message[] }>(`/api/messages/${conversationId}?cursor=${oldestMessage.id}&limit=50`);
--      const fetchedItems = res.items || [];
--      
-+      // PAGINATION LOKAL: Server sudah tidak punya pesan lama kita (karena dihapus saat dibaca), 
-+      // jadi kita gulir ke atas murni mengambil dari Shadow Vault (IndexedDB).
-       const localMessages = await shadowVault.getMessagesByConversation(conversationId, 50, oldestMessage.createdAt);
--      const localMap = new Map(localMessages.map(m => [m.id, m]));
--
--      const processedItems: Message[] = [];
--      for (const m of fetchedItems) {
--          if (localMap.has(m.id)) {
--              const localMsg = localMap.get(m.id)!;
--              processedItems.push({
--                  ...localMsg,
--                  statuses: m.statuses,
--                  reactions: m.reactions,
--                  isEdited: m.isEdited,
--                  repliedToId: m.repliedToId || localMsg.repliedToId,
--                  repliedTo: localMsg.repliedTo
--              });
--          } else {
--              processedItems.push(await decryptMessageObject(m, undefined, 0, { skipRetries: true }));
--          }
--      }
-       
-       set(state => {
-         const existingMessages = state.messages[conversationId] || [];
--        const allMessages = processMessagesAndReactions(processedItems, existingMessages);
--        const enrichedMessages = enrichMessagesWithSenderProfile(conversationId, allMessages);
-+        
-+        // Gabungkan dan filter
-+        const combined = [...localMessages, ...existingMessages];
-+        const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
- 
--        shadowVault.upsertMessages(enrichedMessages); 
-+        const allMessages = processMessagesAndReactions(uniqueMessages, []);
-+        const enrichedMessages = enrichMessagesWithSenderProfile(conversationId, allMessages);
- 
-         const MAX_MESSAGES_IN_RAM = 150;
-         let prunedMessages = enrichedMessages;
-         
-         if (enrichedMessages.length > MAX_MESSAGES_IN_RAM) {
--           prunedMessages = enrichedMessages.slice(0, MAX_MESSAGES_IN_RAM);
-+           prunedMessages = enrichedMessages.slice(enrichedMessages.length - MAX_MESSAGES_IN_RAM);
-         }
- 
--        const newState: Partial<State> = { messages: { ...state.messages, [conversationId]: prunedMessages } };
--
--        if (fetchedItems.length < 50) {
--            newState.hasMore = { ...state.hasMore, [conversationId]: false };
--        }
--        
--        return newState;
-+        return { 
-+            messages: { ...state.messages, [conversationId]: prunedMessages },
-+            // Jika IndexedDB mengembalikan kurang dari 50, berarti sudah sampai ujung (habis)
-+            hasMore: { ...state.hasMore, [conversationId]: localMessages.length === 50 } 
-+        };
-       });
-     } catch (error) {
--      console.error("Failed to load previous messages", error);
-+      console.error("Failed to load previous messages from Local Vault", error);
-     } finally {
-       set(state => ({ isFetchingMore: { ...state.isFetchingMore, [conversationId]: false } }));
-     }
-   },
- 
-   loadMessageContext: async (messageId: string) => {
--    const state = get();
-     try {
--      const res = await api<{ items: Message[], conversationId: string }>(`/api/messages/context/${messageId}`);
--      const fetchedMessages = res.items || [];
--      const convoId = res.conversationId;
--
--      if (!convoId) return;
--
--      const localMessages = await shadowVault.getMessagesByConversation(convoId);
--      const localMap = new Map(localMessages.map(m => [m.id, m]));
--
--      const processedMessages: Message[] = [];
--      for (const message of fetchedMessages) {
--          if (localMap.has(message.id)) {
--              const localMsg = localMap.get(message.id)!;
--              processedMessages.push({
--                  ...localMsg,
--                  statuses: message.statuses,
--                  reactions: message.reactions,
--                  isEdited: message.isEdited,
--                  repliedToId: message.repliedToId || localMsg.repliedToId,
--                  repliedTo: localMsg.repliedTo
--              });
--          } else {
--              processedMessages.push(await decryptMessageObject(message, undefined, 0, { skipRetries: true }));
--          }
-+      // 1. Cari pesan target langsung di dalam IndexedDB (Local Vault)
-+      const targetMessage = await shadowVault.getMessage(messageId);
-+      
-+      if (!targetMessage || !targetMessage.conversationId) {
-+        console.warn(`[Local Vault] Pesan ${messageId} tidak ditemukan di database lokal.`);
-+        return;
-       }
- 
-+      const convoId = targetMessage.conversationId;
-+
-+      // 2. Ambil pesan di sekitarnya dari IndexedDB.
-+      // (Bisa memuat ulang 50-100 pesan terakhir atau membuat fungsi khusus di shadowVault
-+      // untuk mengambil pesan berdasarkan rentang waktu targetMessage.createdAt)
-+      // Untuk amannya, kita muat porsi yang mencukupi dari memori lokal:
-+      const localMessages = await shadowVault.getMessagesByConversation(convoId, 100);
-+
-+      // 3. Proses dan tampilkan ke UI secara instan
-       set(state => {
-         const existingMessages = state.messages[convoId] || [];
--        const combined = [...existingMessages, ...processedMessages];
-+        
-+        // Gabungkan pesan yang sedang tampil dengan pesan konteks yang baru ditarik dari IndexedDB
-+        const combined = [...existingMessages, ...localMessages];
-+        
-+        // Hilangkan duplikasi
-         const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
-         
-         const finalMessages = processMessagesAndReactions(uniqueMessages, []);
-         const enrichedMessages = enrichMessagesWithSenderProfile(convoId, finalMessages);
- 
--        shadowVault.upsertMessages(enrichedMessages);
--
-         return {
-           messages: { ...state.messages, [convoId]: enrichedMessages },
-           hasMore: { ...state.hasMore, [convoId]: true } 
-         };
-       });
-+
-     } catch (error) {
--      console.error(`Failed to load context for message ${messageId}`, error);
-+      console.error(`Failed to load context for message ${messageId} from Local Vault`, error);
-     }
-   },
- 
-@@ -1577,8 +1659,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+             const updatedMsg = { 
+                 ...res.msg, 
+-                content: existingMsg !== undefined ? existingMsg.content : res.msg!.content, 
++                content: finalContent,
+                 repliedTo: existingMsg?.repliedTo,
+                 isBlindAttachment: existingMsg?.isBlindAttachment,
+                 fileUrl: realFileUrl,
+@@ -1657,8 +1724,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
                    isSilent: optimistic.isSilent,
                    id: message.id,
                    createdAt: message.createdAt,
@@ -1518,24 +350,71 @@ index f0d08a88..07c223fb 100644
            } else {
                decrypted = await decryptMessageObject(message);
            }
-@@ -1720,6 +1801,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-                 return { messages: { ...state.messages, [conversationId]: [...currentMessages, finalDecrypted] } };
-               });
-               
-+              // === TAMBAHKAN KODE KILL SWITCH DI SINI ===
-+              // Beritahu server bahwa pesan LIVE ini sudah aman di brankas, hancurkan dari server!
-+              const socket = getSocket();
-+              if (socket?.connected && currentUser && finalDecrypted.senderId !== currentUser.id && !finalDecrypted.isSilent) {
-+                  socket.emit('message:mark_as_read', {
-+                      messageId: finalDecrypted.id,
-+                      conversationId: conversationId
-+                  });
+@@ -1672,6 +1738,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+           decrypted = await decryptMessageObject(message);
+       }
+ 
++      if (decrypted.repliedToId && !decrypted.repliedTo) {
++          try {
++              const repliedMessage = await shadowVault.getMessage(decrypted.repliedToId);
++              if (repliedMessage) {
++                  decrypted.repliedTo = repliedMessage;
 +              }
++          } catch (e) {
++              console.error('[Vault] Failed to fetch replied message locally', e);
++          }
++      }
++
+       if ((decrypted as Record<string, unknown>).type === 'STORY_KEY' || (decrypted.content && decrypted.content.startsWith('STORY_KEY:'))) {
+           try {
+               const payloadStr = decrypted.content ? decrypted.content.replace('STORY_KEY:', '') : '';
+@@ -1746,6 +1823,45 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+               return decrypted; 
+           }
+ 
++          if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {
++              const targetId = asMessageId(silentPayload.targetMessageId);
++              // Pastikan hanya pengirim yang bisa menghapus pesannya sendiri
++              const currentMessages = get().messages[conversationId] || [];
++              const target = currentMessages.find(m => m.id === targetId);
 +              
-               const isViewingChat = window.location.pathname.includes(`/chat/${finalDecrypted.conversationId}`);
-               if (!isViewingChat && !finalDecrypted.isSilent && finalDecrypted.senderId !== currentUser?.id) {
-                   import('@store/dynamicIsland').then(({ default: useDynamicIslandStore }) => {
-@@ -1750,47 +1841,89 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
++              if (target && target.senderId === decrypted.senderId) {
++                  get().removeMessage(conversationId, targetId);
++              } else if (!target) {
++                  // Jika pesan belum di-load di memori, inject nisannya langsung ke DB
++                  import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([{ 
++                      id: targetId, 
++                      conversationId: asConversationId(conversationId), 
++                      isDeletedLocal: true, 
++                      content: null, 
++                      createdAt: decrypted.createdAt, 
++                      senderId: asUserId(decrypted.senderId) 
++                  } as Message]));
++              }
++              return null;
++          }
++
++          if (silentPayload.type === 'reaction_remove' && silentPayload.targetMessageId && silentPayload.emoji) {
++              set(state => {
++                  const currentMessages = state.messages[conversationId] || [];
++                  const updatedMessages = currentMessages.map(m => {
++                      if (m.id === silentPayload.targetMessageId) {
++                          const newReactions = m.reactions?.filter(r => r.userId !== decrypted.senderId || r.emoji !== silentPayload.emoji) || [];
++                          const updatedMsg = { ...m, reactions: newReactions };
++                          shadowVault.upsertMessages([updatedMsg]).catch(console.error);
++                          return updatedMsg;
++                      }
++                      return m;
++                  });
++                  return { messages: { ...state.messages, [conversationId]: updatedMessages } };
++              });
++              return null;
++          }
++
+           decrypted.content = silentPayload.text || '';
+       }
+       
+@@ -1840,20 +1956,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
    },
  
    replaceOptimisticMessage: async (conversationId, tempId, newMessage) => {
@@ -1554,15 +433,15 @@ index f0d08a88..07c223fb 100644
          set(state => ({
              messages: {
                  ...state.messages,
--                [conversationId]: (state.messages[conversationId] || []).filter(m => String(m.tempId) !== String(tempId))
-+                [conversationId]: (state.messages[conversationId] || []).filter(m => 
-+                    String(m.tempId) !== String(tempId) && 
-+                    m.id !== tempIdStr && 
+-                // Cegah duplikasi: Buang tempId dan id asli
+                 [conversationId]: (state.messages[conversationId] || []).filter(m => 
+                     String(m.tempId) !== String(tempId) && 
+                     m.id !== tempIdStr && 
 +                    m.id !== tempIdDashStr &&
-+                    m.id !== newMessage.id
-+                )
+                     m.id !== newMessage.id
+                 )
              }
-         }));
+@@ -1861,23 +1981,43 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
          return; 
      }
  
@@ -1571,44 +450,26 @@ index f0d08a88..07c223fb 100644
 +    await shadowVault.deleteMessage(tempIdDashStr);
 +
      set(state => {
--      const updatedMessages = (state.messages[conversationId] || []).map(m => {
--        if (m.tempId && String(m.tempId) === String(tempId)) {
--          return {
--            ...m,
--            ...newMessage,
--            content: m.content !== undefined ? m.content : newMessage.content,
--            fileUrl: newMessage.fileUrl !== undefined ? newMessage.fileUrl : m.fileUrl,
--            fileKey: newMessage.fileKey !== undefined ? newMessage.fileKey : m.fileKey,
--            fileName: newMessage.fileName !== undefined ? newMessage.fileName : m.fileName,
--            fileType: newMessage.fileType !== undefined ? newMessage.fileType : m.fileType,
--            fileSize: newMessage.fileSize !== undefined ? newMessage.fileSize : m.fileSize,
--            duration: newMessage.duration !== undefined ? newMessage.duration : m.duration,
--            isBlindAttachment: newMessage.isBlindAttachment !== undefined ? newMessage.isBlindAttachment : m.isBlindAttachment,
--            repliedTo: newMessage.repliedTo !== undefined ? newMessage.repliedTo : m.repliedTo,
--            tempId: undefined,
--            optimistic: false
--          };
--        }
--        return m;
--      });
--      const msg = updatedMessages.find(m => m.id === newMessage.id);
--      if (msg) shadowVault.upsertMessages([msg]); 
-+      const currentMessages = state.messages[conversationId] || [];
-+      
+       const currentMessages = state.messages[conversationId] || [];
+       
+-      // 1. Cari pesan sementara untuk menyelamatkan data lokalnya (seperti blob fileUrl)
+-      const oldMsg = currentMessages.find(m => String(m.tempId) === String(tempId) || m.id === tempIdStr);
 +      const oldMsg = currentMessages.find(m => 
 +          (tempId && String(m.tempId) === String(tempId)) || 
 +          m.id === tempIdStr || 
 +          m.id === tempIdDashStr ||
 +          m.id === newMessage.id
 +      );
-+      
-+      const filteredMessages = currentMessages.filter(m => 
-+          String(m.tempId) !== String(tempId) && 
-+          m.id !== tempIdStr && 
+       
+-      // 2. THE SHIELD: Hapus pesan sementara DAN pesan asli (jika sudah terlanjur dirender oleh Socket)
+       const filteredMessages = currentMessages.filter(m => 
+           String(m.tempId) !== String(tempId) && 
+           m.id !== tempIdStr && 
 +          m.id !== tempIdDashStr && 
-+          m.id !== newMessage.id
-+      );
-+
+           m.id !== newMessage.id
+       );
+ 
+-      // 3. Rakit pesan final yang sempurna
 +      const pending = pendingStatuses[newMessage.id!];
 +      const validPendingStatus = pending?.status as 'SENT' | 'DELIVERED' | 'READ' | undefined;
 +      
@@ -1620,37 +481,34 @@ index f0d08a88..07c223fb 100644
 +          delete pendingStatuses[newMessage.id!];
 +      }
 +
-+      const finalMessage: Message = {
+       const finalMessage: Message = {
+-        ...(oldMsg || {}), // Wariskan data lokal
+-        ...(newMessage as Message), // Timpa dengan data pasti dari server
 +        ...(oldMsg || {}), 
 +        ...(newMessage as Message), 
 +        // === FIX CENTANG BIRU HILANG ===
 +        statuses: finalStatuses,
-+        content: oldMsg?.content !== undefined ? oldMsg.content : newMessage.content,
-+        fileUrl: newMessage.fileUrl !== undefined ? newMessage.fileUrl : oldMsg?.fileUrl,
-+        fileKey: newMessage.fileKey !== undefined ? newMessage.fileKey : oldMsg?.fileKey,
-+        fileName: newMessage.fileName !== undefined ? newMessage.fileName : oldMsg?.fileName,
-+        fileType: newMessage.fileType !== undefined ? newMessage.fileType : oldMsg?.fileType,
-+        fileSize: newMessage.fileSize !== undefined ? newMessage.fileSize : oldMsg?.fileSize,
-+        duration: newMessage.duration !== undefined ? newMessage.duration : oldMsg?.duration,
-+        isBlindAttachment: newMessage.isBlindAttachment !== undefined ? newMessage.isBlindAttachment : oldMsg?.isBlindAttachment,
-+        repliedTo: newMessage.repliedTo !== undefined ? newMessage.repliedTo : oldMsg?.repliedTo,
+         content: oldMsg?.content !== undefined ? oldMsg.content : newMessage.content,
+         fileUrl: newMessage.fileUrl !== undefined ? newMessage.fileUrl : oldMsg?.fileUrl,
+         fileKey: newMessage.fileKey !== undefined ? newMessage.fileKey : oldMsg?.fileKey,
+@@ -1887,14 +2027,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+         duration: newMessage.duration !== undefined ? newMessage.duration : oldMsg?.duration,
+         isBlindAttachment: newMessage.isBlindAttachment !== undefined ? newMessage.isBlindAttachment : oldMsg?.isBlindAttachment,
+         repliedTo: newMessage.repliedTo !== undefined ? newMessage.repliedTo : oldMsg?.repliedTo,
+-        tempId: undefined, // Hapus tempId agar tidak meninggalkan jejak
 +        tempId: undefined, 
-+        optimistic: false
-+      };
-+
-+      // Simpan pembaruan utuh ke IndexedDB
-+      shadowVault.upsertMessages([finalMessage]); 
-+
-       return {
--        messages: { ...state.messages, [conversationId]: updatedMessages }
-+        messages: { 
-+            ...state.messages, 
-+            [conversationId]: [...filteredMessages, finalMessage].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-+        }
+         optimistic: false
        };
-     })
-   },
-@@ -1902,20 +2035,62 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+ 
+-      // 4. Simpan ke IndexedDB
++      // Simpan pembaruan utuh ke IndexedDB
+       shadowVault.upsertMessages([finalMessage]); 
+ 
+-      // 5. Kembalikan array yang bersih dan terurut
+       return {
+         messages: { 
+             ...state.messages, 
+@@ -2011,20 +2150,62 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
              return { messages: newMessages };
              }),
  

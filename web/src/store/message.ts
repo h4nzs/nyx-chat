@@ -2001,16 +2001,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           m.id !== tempIdDashStr && 
           m.id !== newMessage.id
       );
-
-      const pending = pendingStatuses[newMessage.id!];
-      const validPendingStatus = pending?.status as 'SENT' | 'DELIVERED' | 'READ' | undefined;
+      
+      const newMsgIdStr = newMessage.id ? String(newMessage.id) : '';
+      const pending = newMsgIdStr ? pendingStatuses[newMsgIdStr] : undefined;
       
       const finalStatuses = pending
-          ? [{ userId: asUserId(pending.userId), status: validPendingStatus!, messageId: asMessageId(newMessage.id!), id: `temp-status-${Date.now()}`, updatedAt: new Date().toISOString() }]
-          : (newMessage.statuses && newMessage.statuses.length > 0) ? newMessage.statuses : (oldMsg?.statuses || []);
+          ? [{ 
+              userId: asUserId(pending.userId), 
+              status: pending.status as 'SENT' | 'DELIVERED' | 'READ', 
+              messageId: asMessageId(newMsgIdStr), 
+              id: `temp-status-${Date.now()}`, 
+              updatedAt: new Date().toISOString() 
+            }]
+          : (newMessage.statuses && newMessage.statuses.length > 0) 
+              ? newMessage.statuses 
+              : (oldMsg?.statuses || []);
 
-      if (pending) {
-          delete pendingStatuses[newMessage.id!];
+      if (pending && newMsgIdStr) {
+          delete pendingStatuses[newMsgIdStr];
       }
 
       const finalMessage: Message = {
@@ -2200,7 +2208,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               }
 
               if (msgToSave) {
-                 import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([msgToSave!]));
+                 // Ambil objeknya dengan aman, hindari operator '!'
+                 const savedObj = msgToSave as Message;
+                 import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([savedObj]));
               }
             
               return { messages: newMessages };
