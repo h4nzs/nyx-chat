@@ -1181,9 +1181,39 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                      }
                  } catch (e) {}
 
+                let finalContent = existingMsg !== undefined ? existingMsg.content : res.msg!.content;
+                
+                // Jaring pengaman: Jangan biarkan JSON terenkripsi masuk ke UI
+                if (finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
+                     finalContent = "🔒 You sent this message (Encrypted)";
+                     // Coba dekripsi mandiri jika memungkinkan
+                     import('@utils/crypto').then(async ({ retrieveMessageKeySecurely }) => {
+                         try {
+                             const mk = await retrieveMessageKeySecurely(`temp_${actualTempId}`);
+                             if (mk) {
+                                 const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
+                                 const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+                                 
+                                 const parsed = JSON.parse(finalContent as string);
+                                 const ciphertext = parsed.ciphertext;
+                                 if (ciphertext) {
+                                     const combined = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
+                                     const nonce = combined.slice(0, 24);
+                                     const encrypted = combined.slice(24);
+                                     const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
+                                     const plainText = sodium.to_string(decryptedBytes);
+                                     get().updateMessage(conversationId, res.msg!.id, { content: plainText });
+                                 }
+                             }
+                         } catch (e) {
+                             console.error("Async self-decrypt failed in callback:", e);
+                         }
+                     }).catch(console.error);
+                }
+
                 const updatedMsg = { 
                     ...res.msg, 
-                    content: existingMsg !== undefined ? existingMsg.content : res.msg!.content, 
+                    content: finalContent,
                     repliedTo: existingMsg?.repliedTo,
                     isBlindAttachment: existingMsg?.isBlindAttachment,
                     fileUrl: realFileUrl,
@@ -1302,9 +1332,38 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                  }
              } catch (e) {}
 
+            let finalContent = existingMsg !== undefined ? existingMsg.content : res.msg!.content;
+            
+            // Jaring pengaman: Jangan biarkan JSON terenkripsi masuk ke UI
+            if (finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
+                 finalContent = "🔒 You sent this message (Encrypted)";
+                 import('@utils/crypto').then(async ({ retrieveMessageKeySecurely }) => {
+                     try {
+                         const mk = await retrieveMessageKeySecurely(`temp_${tempId}`);
+                         if (mk) {
+                             const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
+                             const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+                             
+                             const parsed = JSON.parse(finalContent as string);
+                             const ciphertext = parsed.ciphertext;
+                             if (ciphertext) {
+                                 const combined = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
+                                 const nonce = combined.slice(0, 24);
+                                 const encrypted = combined.slice(24);
+                                 const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
+                                 const plainText = sodium.to_string(decryptedBytes);
+                                 get().updateMessage(conversationId, res.msg!.id, { content: plainText });
+                             }
+                         }
+                     } catch (e) {
+                         console.error("Async self-decrypt failed in offline queue callback:", e);
+                     }
+                 }).catch(console.error);
+            }
+
             const updatedMsg = { 
                 ...res.msg, 
-                content: existingMsg !== undefined ? existingMsg.content : res.msg!.content, 
+                content: finalContent,
                 repliedTo: existingMsg?.repliedTo,
                 isBlindAttachment: existingMsg?.isBlindAttachment,
                 fileUrl: realFileUrl,
