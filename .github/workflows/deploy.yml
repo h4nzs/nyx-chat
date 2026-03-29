@@ -127,7 +127,7 @@ jobs:
             echo "📦 Installing backend dependencies with PNPM..."
             cp $TARGET_DIR/.env.example $TARGET_DIR/server/.env || true
             cd $TARGET_DIR
-            NODE_OPTIONS="--max-old-space-size=512" pnpm install --no-frozen-lockfile
+            CI=true NODE_OPTIONS="--max-old-space-size=512" pnpm install --no-frozen-lockfile
             
             # 5. GENERATE PRISMA ENGINE (Wajib di dalam server/)
             echo "⚙️ Generating Prisma Engine..."
