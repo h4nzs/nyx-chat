@@ -129,6 +129,9 @@ jobs:
             if [ ! -f "$TARGET_DIR/server/.env" ]; then
                 cp $TARGET_DIR/.env.example $TARGET_DIR/server/.env || true
             fi
+            if [ ! -f "$TARGET_DIR/server/ca.pem" ]; then
+                cp $TARGET_DIR/ca.pem $TARGET_DIR/server/ca.pem || true
+            fi
             cd $TARGET_DIR
             CI=true NODE_OPTIONS="--max-old-space-size=512" pnpm install --no-frozen-lockfile
             
