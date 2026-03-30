@@ -162,7 +162,6 @@ jobs:
               --name "nyx-api" \
               -i max \
               --node-args="--max-old-space-size=768" \
-              --env NODE_TLS_REJECT_UNAUTHORIZED="0" \
               --cwd $TARGET_DIR/server
               
             pm2 save --force

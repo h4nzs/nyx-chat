@@ -1,8 +1,9 @@
 import 'dotenv/config';
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 import { PrismaClient } from '@prisma/client';
 import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import fs from 'fs'; // 1. Impor fs
+import path from 'path';
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -10,11 +11,14 @@ if (!connectionString) {
   throw new Error('DATABASE_URL is not defined in the environment variables.');
 }
 
+const caPath = path.resolve(process.cwd(), 'ca.pem');
+
 // 1. Buat connection pool standar PostgreSQL
 const pool = new Pool({ 
   connectionString,
   ssl: {
-    rejectUnauthorized: false // <--- INI OBATNYA!
+    rejectUnauthorized: true, // <--- INI OBATNYA!
+    ca: fs.readFileSync(caPath).toString()
   }
 });
 
