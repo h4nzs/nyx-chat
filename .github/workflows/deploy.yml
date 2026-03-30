@@ -135,7 +135,6 @@ jobs:
             # 5. GENERATE PRISMA ENGINE (Wajib di dalam server/)
             echo "⚙️ Generating Prisma Engine..."
             cd $TARGET_DIR/server
-            sed -i '/PRISMA_CLIENT_ENGINE_TYPE/d' .env || true
             pnpm exec prisma generate
             
             # 6. DEPLOY FRONTEND
