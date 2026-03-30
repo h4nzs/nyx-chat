@@ -1793,15 +1793,40 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       const editPayload = parseEdit(decrypted.content);
       const silentPayload = parseSilent(decrypted.content);
 
+      const cleanUpOptimisticBubble = () => {
+          if (message.tempId && currentUser && message.senderId === currentUser.id) {
+              const tempIdStr = `temp_${message.tempId}`;
+              const tempIdDashStr = `temp-${message.tempId}`;
+              
+              // Hapus bubble instruksi dari layar seketika
+              set(state => ({
+                  messages: {
+                      ...state.messages,
+                      [conversationId]: (state.messages[conversationId] || []).filter(m => 
+                          m.id !== tempIdStr && m.id !== tempIdDashStr
+                      )
+                  }
+              }));
+              
+              // Hapus nisan sementaranya dari IndexedDB
+              import('@lib/shadowVaultDb').then(({ shadowVault }) => {
+                  shadowVault.deleteMessage(tempIdStr).catch(() => {});
+                  shadowVault.deleteMessage(tempIdDashStr).catch(() => {});
+              });
+          }
+      };
+
       if (silentPayload) {
           decrypted.isSilent = true;
 
           if (silentPayload.type === 'STORY_KEY' && silentPayload.key && silentPayload.storyId) {
+            cleanUpOptimisticBubble();
              saveStoryKey(silentPayload.storyId, silentPayload.key).catch(e => console.error("Failed to save story key live", e));
              return null; 
           }
 
           if (silentPayload.type === 'CALL_INIT' && silentPayload.key) {
+            cleanUpOptimisticBubble();
              if (message.tempId) {
                  const tempIdStr = `temp_${message.tempId}`;
                  set(state => ({
@@ -1819,11 +1844,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           }
           
           if (silentPayload.type === 'GHOST_SYNC') {
+            cleanUpOptimisticBubble();
               console.log(`[Ghost Sync] Received sync from ${decrypted.senderId}. Settle ratchet state silently.`);
               return decrypted; 
           }
 
           if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {
+            cleanUpOptimisticBubble();
               const targetId = asMessageId(silentPayload.targetMessageId);
               // Pastikan hanya pengirim yang bisa menghapus pesannya sendiri
               const currentMessages = get().messages[conversationId] || [];
@@ -1846,6 +1873,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           }
 
           if (silentPayload.type === 'reaction_remove' && silentPayload.targetMessageId && silentPayload.emoji) {
+            cleanUpOptimisticBubble();
               set(state => {
                   const currentMessages = state.messages[conversationId] || [];
                   const updatedMessages = currentMessages.map(m => {
@@ -1866,6 +1894,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
       
       if (reactionPayload) {
+        cleanUpOptimisticBubble();
           const reaction = {
               id: decrypted.id,
               messageId: reactionPayload.targetMessageId,
@@ -1894,6 +1923,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               }).catch(console.error);
           });
       } else if (editPayload) {
+        cleanUpOptimisticBubble();
           set(state => {
               const currentMessages = state.messages[conversationId] || [];
               const updatedMessages = currentMessages.map(m => 

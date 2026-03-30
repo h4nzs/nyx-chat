@@ -253,39 +253,45 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
   useEffect(() => {
     if (id) {
-        // 1. Muat riwayat dan sinkronisasi pesan tertunda
+        // Muat riwayat dan sinkronisasi pesan tertunda DARI SERVER
         loadMessagesForConversation(id);
-        
-        // 2. Beritahu server (dan pengirim) bahwa pesan-pesan yang belum dibaca kini sedang dilihat
-        const markUnreadAsRead = async () => {
-             // Beri sedikit jeda agar pesan selesai di-render ke DOM (Virtuoso)
-             await new Promise(r => setTimeout(r, 300));
-             
-             const socket = getSocket();
-             if (!socket?.connected || !meId || !messages) return;
-
-             // Cari pesan dari orang lain yang statusnya belum "READ" oleh kita
-             // (Atau bisa disederhanakan: Kirim ACK untuk X pesan terakhir dari lawan bicara untuk amannya)
-             const unreadMessages = messages.filter(m => 
-                 m.senderId !== meId && 
-                 (!m.statuses || !m.statuses.some(s => s.userId === meId && s.status === 'READ'))
-             );
-
-             // Batasi maksimal 20 pesan sekaligus untuk mencegah spam socket
-             const msgsToAck = unreadMessages.slice(-20);
-             
-             msgsToAck.forEach(msg => {
-                 socket.emit('message:mark_as_read', {
-                     messageId: msg.id,
-                     conversationId: id
-                 });
-             });
-        };
-
-        markUnreadAsRead();
     }
+    // Bersihkan mode seleksi setiap kali pindah ruang chat
     clearMessageSelection();
-  }, [id, loadMessagesForConversation, clearMessageSelection, meId, messages.length]);
+  }, [id, loadMessagesForConversation, clearMessageSelection]);
+
+
+  // 2. MARK AS READ: Hanya bertugas membaca pesan, berjalan di background
+  // Aman menggunakan `messages.length` karena di sini TIDAK ADA pemanggilan API fetch
+  useEffect(() => {
+    if (!id || !messages || !meId) return;
+
+    const markUnreadAsRead = async () => {
+         // Beri sedikit jeda agar pesan selesai di-render ke DOM (Virtuoso)
+         await new Promise(r => setTimeout(r, 300));
+         
+         const socket = getSocket();
+         if (!socket?.connected) return;
+
+         // Cari pesan dari orang lain yang statusnya belum "READ" oleh kita
+         const unreadMessages = messages.filter(m => 
+             m.senderId !== meId && 
+             (!m.statuses || !m.statuses.some(s => s.userId === meId && s.status === 'READ'))
+         );
+
+         // Batasi maksimal 20 pesan sekaligus untuk mencegah spam socket
+         const msgsToAck = unreadMessages.slice(-20);
+         
+         msgsToAck.forEach(msg => {
+             socket.emit('message:mark_as_read', {
+                 messageId: msg.id,
+                 conversationId: id
+             });
+         });
+    };
+
+    markUnreadAsRead();
+  }, [id, meId, messages.length]);
 
   const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);
 
