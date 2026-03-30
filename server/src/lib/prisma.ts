@@ -10,7 +10,12 @@ if (!connectionString) {
 }
 
 // 1. Buat connection pool standar PostgreSQL
-const pool = new Pool({ connectionString });
+const pool = new Pool({ 
+  connectionString,
+  ssl: {
+    rejectUnauthorized: false // <--- INI OBATNYA!
+  }
+});
 
 // 2. Bungkus pool tersebut dengan Prisma Adapter
 const adapter = new PrismaPg(pool);
