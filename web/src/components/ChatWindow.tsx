@@ -372,6 +372,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
       
       const isFirstInSequence = !prevMessage || prevMessage.senderId !== message.senderId;
       const isLastInSequence = !nextMessage || nextMessage.senderId !== message.senderId;
+      const stableKey = message.tempId ? `t-${message.tempId}` : message.id;
   
       return (
         <div className="px-1 md:px-4 py-0.5" key={message.id}>
@@ -456,6 +457,8 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                     components={{ Header: () => isFetchingMore ? <ChatSpinner /> : <div className="h-4" /> }}
                     itemContent={itemContent}
                     followOutput="auto"
+                    increaseViewportBy={200} // 🔥 Optimasi scroll cepat
+                    computeItemKey={(index, item) => item.tempId ? `virtuoso-t-${item.tempId}` : `virtuoso-r-${item.id}`} // 🔥 Ini menghilangkan kedip/glitch dari framework list
                   />
                 </div>
 

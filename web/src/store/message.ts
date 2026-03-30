@@ -1882,6 +1882,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           } else {
               get().addLocalReaction(conversationId, reaction.messageId, reaction);
           }
+          import('@lib/shadowVaultDb').then(({ shadowVault }) => {
+              const targetId = String(reaction.messageId);
+              shadowVault.getMessage(targetId).then(targetMsg => {
+                  if (targetMsg) {
+                      const existingReactions = targetMsg.reactions || [];
+                      // Timpa reaksi dari user yang sama jika ada, lalu tambahkan reaksi baru
+                      const updatedReactions = [...existingReactions.filter(r => r.userId !== reaction.userId), reaction];
+                      shadowVault.upsertMessages([{ ...targetMsg, reactions: updatedReactions }]);
+                  }
+              }).catch(console.error);
+          });
       } else if (editPayload) {
           set(state => {
               const currentMessages = state.messages[conversationId] || [];
@@ -2035,7 +2046,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         duration: newMessage.duration !== undefined ? newMessage.duration : oldMsg?.duration,
         isBlindAttachment: newMessage.isBlindAttachment !== undefined ? newMessage.isBlindAttachment : oldMsg?.isBlindAttachment,
         repliedTo: newMessage.repliedTo !== undefined ? newMessage.repliedTo : oldMsg?.repliedTo,
-        tempId: undefined, 
+        tempId: oldMsg?.tempId || tempId, 
         optimistic: false
       };
 
