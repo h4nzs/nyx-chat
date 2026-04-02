@@ -1591,39 +1591,40 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       
       if (fetchedMessages.length > 0) {
         const processedMessages: Message[] = [];
-        const socket = getSocket();
-        const { user } = useAuthStore.getState();
 
+        // 1. HANYA DEKRIPSI DI DALAM LOOP
         for (const message of fetchedMessages) {
-          // A. Dekripsi pesan dari server
           const decrypted = await decryptMessageObject(message, undefined, 0, { skipRetries: true });
           processedMessages.push(decrypted);
+        }
 
-          // B. THE KILL SWITCH: Perintahkan server menghancurkan pesan ini!
-          if (socket?.connected && user && decrypted.senderId !== user.id) {
-              socket.emit('message:mark_as_read', {
-                  messageId: decrypted.id,
-                  conversationId: id
-              });
+        // 2. PROSES & GABUNGKAN DATA DI LUAR LOOP
+        const existingMessages = get().messages[id] || [];
+        const combined = [...existingMessages, ...processedMessages];
+        const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
+
+        const allMessages = processMessagesAndReactions(uniqueMessages, []);
+        const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
+        
+        // ✅ 3. AWAIT PENYIMPANAN LOKAL DULU (PENTING!)
+        await shadowVault.upsertMessages(enrichedMessages); 
+
+        // ✅ 4. BARU TEMBAK KILL SWITCH SETELAH DATA AMAN
+        const socket = getSocket();
+        const { user } = useAuthStore.getState();
+        if (socket?.connected && user) {
+          for (const msg of processedMessages) {
+            if (msg.senderId !== user.id) {
+              socket.emit('message:mark_as_read', { messageId: msg.id, conversationId: id });
+            }
           }
         }
 
+        // 5. UPDATE UI
         set(state => {
-          const existingMessages = state.messages[id] || [];
-          const combined = [...existingMessages, ...processedMessages];
-          
-          // Hapus duplikasi berdasarkan ID
-          const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
-
-          const allMessages = processMessagesAndReactions(uniqueMessages, []);
-          const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
-          
-          // C. Simpan aman ke dalam IndexedDB
-          shadowVault.upsertMessages(enrichedMessages); 
-
           return {
             messages: { ...state.messages, [id]: enrichedMessages },
-            hasMore: { ...state.hasMore, [id]: enrichedMessages.length >= 50 }, // Gunakan jumlah lokal sebagai patokan
+            hasMore: { ...state.hasMore, [id]: enrichedMessages.length >= 50 },
             hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
           };
         });
@@ -1773,7 +1774,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   isSilent: optimistic.isSilent,
                   id: message.id,
                   createdAt: message.createdAt,
-                  statuses: (message.statuses && message.statuses.length > 0) ? message.statuses : (optimistic.statuses || [])              };
+                  statuses: (message.statuses && message.statuses.length > 0) ? message.statuses : (optimistic.statuses || [])
+              };
           } else {
               decrypted = await decryptMessageObject(message);
           }
@@ -1983,21 +1985,23 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               return { messages: { ...state.messages, [conversationId]: updatedMessages } };
           });
       } else {
+          // ==========================================
+          // PESAN NORMAL (BUKAN SILENT, REAKSI, EDIT)
+          // ==========================================
           const [enriched] = enrichMessagesWithSenderProfile(conversationId, [decrypted]);
           const finalDecrypted = enriched;
 
+          // JIKA PESAN DARI DIRI SENDIRI (SINKRONISASI / OPTIMISTIC UI)
           if (message.tempId && currentUser && message.senderId === currentUser.id) {
               get().replaceOptimisticMessage(conversationId, message.tempId, finalDecrypted);
           } else {
-              set(state => {
-                const currentMessages = state.messages[conversationId] || [];
-                if (currentMessages.some(m => m.id === message.id)) return state;
-                shadowVault.upsertMessages([finalDecrypted]); 
-                return { messages: { ...state.messages, [conversationId]: [...currentMessages, finalDecrypted] } };
-              });
-              
-              // === TAMBAHKAN KODE KILL SWITCH DI SINI ===
-              // Beritahu server bahwa pesan LIVE ini sudah aman di brankas, hancurkan dari server!
+              // ✅ 1. AWAIT PENYIMPANAN LOKAL DULU (DI LUAR SET)
+              const currentMessagesBeforeSave = get().messages[conversationId] || [];
+              if (!currentMessagesBeforeSave.some(m => m.id === message.id)) {
+                  await shadowVault.upsertMessages([finalDecrypted]);
+              }
+
+              // ✅ 2. TEMBAK KILL SWITCH SETELAH AMAN DI LOKAL
               const socket = getSocket();
               if (socket?.connected && currentUser && finalDecrypted.senderId !== currentUser.id && !finalDecrypted.isSilent) {
                   socket.emit('message:mark_as_read', {
@@ -2005,7 +2009,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                       conversationId: conversationId
                   });
               }
+
+              // ✅ 3. UPDATE STATE UI ZUSTAND (Synchronous)
+              set(state => {
+                const currentMessages = state.messages[conversationId] || [];
+                if (currentMessages.some(m => m.id === message.id)) return state;
+                return { messages: { ...state.messages, [conversationId]: [...currentMessages, finalDecrypted] } };
+              });
               
+              // --- Logika Notifikasi Dynamic Island ---
               const isViewingChat = window.location.pathname.includes(`/chat/${finalDecrypted.conversationId}`);
               if (!isViewingChat && !finalDecrypted.isSilent && finalDecrypted.senderId !== currentUser?.id) {
                   import('@store/dynamicIsland').then(({ default: useDynamicIslandStore }) => {
@@ -2024,6 +2036,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   }).catch(console.error);
               }
 
+              // --- Logika Update Preview Chat List ---
               if (!finalDecrypted.isSilent) {
                   import('@store/conversation').then(m => {
                       m.useConversationStore.getState().updateConversationLastMessage(conversationId, finalDecrypted);

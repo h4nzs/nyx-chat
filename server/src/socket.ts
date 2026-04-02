@@ -418,8 +418,8 @@ export function registerSocket(httpServer: HttpServer) {
         }
 
         // 2. HANCURKAN DARI SERVER (Jika pesan masih belum terbaca/terkirim oleh penerima)
-        await prisma.message.delete({
-          where: { id: messageId }
+        await prisma.message.deleteMany({
+          where: { id: messageId, senderId: uid } // Gunakan deleteMany agar tidak crash jika ID tidak ada
         });
         
         console.log(`[Zero-Knowledge] Pesan ${messageId} ditarik oleh pengirim dan dihapus dari server.`);
