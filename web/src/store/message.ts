@@ -891,13 +891,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const actualTempId = tempId !== undefined ? tempId : generateTempId();
     const isReactionPayload = !!parseReaction(data.content);
     const silentPayload = parseSilent(data.content);
+    const isEditPayload = !!parseEdit(data.content);
     
     // [FIX] Detect CALL_INIT or GHOST_SYNC and force silence to prevent empty bubble
     const isCallInit = silentPayload?.type === 'CALL_INIT';
     const isGhostSync = silentPayload?.type === 'GHOST_SYNC';
-    const shouldBeSilent = isSilent || isCallInit || isGhostSync;
+    const isUnsend = silentPayload?.type === 'UNSEND';
+    const isReactionRemove = silentPayload?.type === 'reaction_remove';
+    const shouldBeSilent = isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload;
 
-    if (!isReactionPayload && !shouldBeSilent) {
+    if (!shouldBeSilent) {
         let optimisticContent = data.content;
         let isOptimisticSilent = false;
 
@@ -1184,7 +1187,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 let finalContent = existingMsg !== undefined ? existingMsg.content : res.msg!.content;
                 
                 // Jaring pengaman: Jangan biarkan JSON terenkripsi masuk ke UI
-                if (finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
+                if (!shouldBeSilent && finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
                      finalContent = "🔒 You sent this message (Encrypted)";
                      // Coba dekripsi mandiri jika memungkinkan
                      import('@utils/crypto').then(async ({ retrieveMessageKeySecurely }) => {
@@ -1335,8 +1338,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             let finalContent = existingMsg !== undefined ? existingMsg.content : res.msg!.content;
             
             // Jaring pengaman: Jangan biarkan JSON terenkripsi masuk ke UI
-            if (finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
-                 finalContent = "🔒 You sent this message (Encrypted)";
+            if (!shouldBeSilent && finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
+                     finalContent = "🔒 You sent this message (Encrypted)";
                  import('@utils/crypto').then(async ({ retrieveMessageKeySecurely }) => {
                      try {
                          const mk = await retrieveMessageKeySecurely(`temp_${tempId}`);
@@ -1820,23 +1823,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           decrypted.isSilent = true;
 
           if (silentPayload.type === 'STORY_KEY' && silentPayload.key && silentPayload.storyId) {
-            cleanUpOptimisticBubble();
+             cleanUpOptimisticBubble(); // ✅ Bersihkan
              saveStoryKey(silentPayload.storyId, silentPayload.key).catch(e => console.error("Failed to save story key live", e));
              return null; 
           }
 
           if (silentPayload.type === 'CALL_INIT' && silentPayload.key) {
-            cleanUpOptimisticBubble();
-             if (message.tempId) {
-                 const tempIdStr = `temp_${message.tempId}`;
-                 set(state => ({
-                     messages: {
-                         ...state.messages,
-                         [conversationId]: (state.messages[conversationId] || []).filter(m => m.id !== tempIdStr)
-                     }
-                 }));
-             }
-
+             cleanUpOptimisticBubble(); // ✅ Bersihkan
              import('@store/callStore').then(m => {
                 m.useCallStore.getState().setCallKey(silentPayload.key!);
              });
@@ -1844,13 +1837,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           }
           
           if (silentPayload.type === 'GHOST_SYNC') {
-            cleanUpOptimisticBubble();
+              cleanUpOptimisticBubble(); // ✅ Bersihkan
               console.log(`[Ghost Sync] Received sync from ${decrypted.senderId}. Settle ratchet state silently.`);
               return decrypted; 
           }
 
           if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {
-            cleanUpOptimisticBubble();
+              cleanUpOptimisticBubble(); // ✅ Bersihkan Bubble Hantu Hapus Pesan
               const targetId = asMessageId(silentPayload.targetMessageId);
               // Pastikan hanya pengirim yang bisa menghapus pesannya sendiri
               const currentMessages = get().messages[conversationId] || [];
@@ -1873,7 +1866,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           }
 
           if (silentPayload.type === 'reaction_remove' && silentPayload.targetMessageId && silentPayload.emoji) {
-            cleanUpOptimisticBubble();
+              cleanUpOptimisticBubble(); // ✅ Bersihkan
               set(state => {
                   const currentMessages = state.messages[conversationId] || [];
                   const updatedMessages = currentMessages.map(m => {
@@ -1894,7 +1887,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
       
       if (reactionPayload) {
-        cleanUpOptimisticBubble();
+          cleanUpOptimisticBubble(); // ✅ Bersihkan Bubble Hantu Reaksi
           const reaction = {
               id: decrypted.id,
               messageId: reactionPayload.targetMessageId,
@@ -1923,7 +1916,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               }).catch(console.error);
           });
       } else if (editPayload) {
-        cleanUpOptimisticBubble();
+          cleanUpOptimisticBubble(); // ✅ Bersihkan Bubble Hantu Edit Pesan
           set(state => {
               const currentMessages = state.messages[conversationId] || [];
               const updatedMessages = currentMessages.map(m => 
