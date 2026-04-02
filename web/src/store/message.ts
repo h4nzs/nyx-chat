@@ -1166,71 +1166,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         sendPayload, 
         async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
           if (res.ok && res.msg) {
-            if (!isReactionPayload) {
-                const tempIdStr = `temp_${actualTempId}`;
-                const existingMsg = get().messages[conversationId]?.find(m => 
-                     m.id === tempIdStr || m.tempId === actualTempId
-                );
-
-                let realFileUrl = existingMsg?.fileUrl;
-                 let realFileKey = existingMsg?.fileKey;
-                 try {
-                     if (data.content && typeof data.content === 'string' && data.content.startsWith('{')) {
-                         const meta = JSON.parse(data.content);
-                         if (meta.type === 'file' && meta.url) {
-                             realFileUrl = meta.url;
-                             realFileKey = meta.key;
-                         }
-                     }
-                 } catch (e) {}
-
-                let finalContent = existingMsg !== undefined ? existingMsg.content : res.msg!.content;
-                
-                // Jaring pengaman: Jangan biarkan JSON terenkripsi masuk ke UI
-                if (!shouldBeSilent && finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
-                     finalContent = "🔒 You sent this message (Encrypted)";
-                     // Coba dekripsi mandiri jika memungkinkan
-                     import('@utils/crypto').then(async ({ retrieveMessageKeySecurely }) => {
-                         try {
-                             const mk = await retrieveMessageKeySecurely(`temp_${actualTempId}`);
-                             if (mk) {
-                                 const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
-                                 const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
-                                 
-                                 const parsed = JSON.parse(finalContent as string);
-                                 const ciphertext = parsed.ciphertext;
-                                 if (ciphertext) {
-                                     const combined = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
-                                     const nonce = combined.slice(0, 24);
-                                     const encrypted = combined.slice(24);
-                                     const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
-                                     const plainText = sodium.to_string(decryptedBytes);
-                                     get().updateMessage(conversationId, res.msg!.id, { content: plainText });
-                                 }
-                             }
-                         } catch (e) {
-                             console.error("Async self-decrypt failed in callback:", e);
-                         }
-                     }).catch(console.error);
+              
+            // 1. Pindah Kunci Dekripsi Segera
+            const msgId = res.msg.id;
+            import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
+                const mk = await retrieveMessageKeySecurely(`temp_${actualTempId}`);
+                if (mk) {
+                    await storeMessageKeySecurely(msgId, mk);
+                    await deleteMessageKeySecurely(`temp_${actualTempId}`);
                 }
+            }).catch(console.error);
 
-                const updatedMsg = { 
-                    ...res.msg, 
-                    content: finalContent,
-                    repliedTo: existingMsg?.repliedTo,
-                    isBlindAttachment: existingMsg?.isBlindAttachment,
-                    fileUrl: realFileUrl,
-                    fileKey: realFileKey,
-                    fileName: existingMsg?.fileName,
-                    fileType: existingMsg?.fileType,
-                    fileSize: existingMsg?.fileSize,
-                    duration: existingMsg?.duration,
-                    status: 'SENT' as const
-                } as Partial<Message>;
-                
-                // Pastikan mengirim actualTempId (yang berupa angka) ke fungsi replace
-                get().replaceOptimisticMessage(conversationId, actualTempId, updatedMsg);
-            } else {
+            // 2. Tangani Reaksi (Tanpa Gelembung Chat)
+            if (isReactionPayload) {
                 const reactionData = parseReaction(contentToEncrypt);
                 if (reactionData) {
                     const tempReactionId = `temp_react_${actualTempId}`;
@@ -1241,26 +1189,88 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                         isMessage: true
                     });
                 }
+                return; // KELUAR DI SINI (Jangan buat bubble chat)
             }
-              
-            const msgId = res.msg.id;
-            import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
-                const mk = await retrieveMessageKeySecurely(`temp_${actualTempId}`);
-                if (mk) {
-                    await storeMessageKeySecurely(msgId, mk);
-                    await deleteMessageKeySecurely(`temp_${actualTempId}`);
+
+            // 3. Tangani Pesan Siluman (Edit/Unsend/Story/Call)
+            if (shouldBeSilent) {
+                return; // KELUAR DI SINI (Jangan buat bubble chat agar JSON mentah tidak bocor)
+            }
+
+            // 4. Proses Pesan Chat Normal
+            const tempIdStr = `temp_${actualTempId}`;
+            const existingMsg = get().messages[conversationId]?.find(m => 
+                 m.id === tempIdStr || m.tempId === actualTempId
+            );
+
+            let realFileUrl = existingMsg?.fileUrl;
+            let realFileKey = existingMsg?.fileKey;
+            try {
+                if (data.content && typeof data.content === 'string' && data.content.startsWith('{')) {
+                    const meta = JSON.parse(data.content);
+                    if (meta.type === 'file' && meta.url) {
+                        realFileUrl = meta.url;
+                        realFileKey = meta.key;
+                    }
                 }
-            }).catch(console.error);
-              
+            } catch (e) {}
+
+            let finalContent = existingMsg !== undefined ? existingMsg.content : res.msg!.content;
+            
+            // Jaring pengaman: Dekripsi Diri Sendiri
+            if (finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
+                 finalContent = "🔒 You sent this message (Encrypted)";
+                 import('@utils/crypto').then(async ({ retrieveMessageKeySecurely }) => {
+                     try {
+                         // Kita ambil dari msgId karena kunci sudah dipindah di langkah 1
+                         const mk = await retrieveMessageKeySecurely(msgId);
+                         if (mk) {
+                             const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
+                             const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+                             
+                             const parsed = JSON.parse(res.msg!.content as string);
+                             const ciphertext = parsed.ciphertext;
+                             if (ciphertext) {
+                                 const combined = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
+                                 const nonce = combined.slice(0, 24);
+                                 const encrypted = combined.slice(24);
+                                 const decryptedBytes = await worker_crypto_secretbox_xchacha20poly1305_open_easy(encrypted, nonce, mk);
+                                 const plainText = sodium.to_string(decryptedBytes);
+                                 get().updateMessage(conversationId, res.msg!.id, { content: plainText });
+                             }
+                         }
+                     } catch (e) {
+                         console.error("Async self-decrypt failed in callback:", e);
+                     }
+                 }).catch(console.error);
+            }
+
+            const updatedMsg = { 
+                ...res.msg, 
+                content: finalContent,
+                repliedTo: existingMsg?.repliedTo,
+                isBlindAttachment: existingMsg?.isBlindAttachment,
+                fileUrl: realFileUrl,
+                fileKey: realFileKey,
+                fileName: existingMsg?.fileName,
+                fileType: existingMsg?.fileType,
+                fileSize: existingMsg?.fileSize,
+                duration: existingMsg?.duration,
+                status: 'SENT' as const
+            } as Partial<Message>;
+            
+            // Ubah bubble optimistik menjadi bubble permanen
+            get().replaceOptimisticMessage(conversationId, actualTempId, updatedMsg);
+
           } else if (!res.ok) {
-              if (!isReactionPayload) {
+              if (!isReactionPayload && !shouldBeSilent) {
                   get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
                   if (res.error?.includes('SANDBOX_LIMIT_REACHED')) {
                       toast.error("Sandbox limit reached! Verify your account to unlock unlimited messaging.");
                   } else if (res.error) {
                       toast.error(res.error);
                   }
-              } else {
+              } else if (isReactionPayload) {
                   toast.error("Failed to send reaction");
               }
           }
@@ -1321,33 +1331,77 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           if (res.ok && res.msg) {
             await removeFromQueue(tempId);
 
+            // 1. Pindah Kunci Dekripsi
+            const msgId = res.msg.id;
+            import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
+                const mk = await retrieveMessageKeySecurely(`temp_${tempId}`);
+                if (mk) {
+                    await storeMessageKeySecurely(msgId, mk);
+                    await deleteMessageKeySecurely(`temp_${tempId}`);
+                }
+            }).catch(console.error);
+
+            // Tentukan status silent berdasarkan payload asli
+            const silentPayload = parseSilent(payloadData.content);
+            const isReactionPayload = !!parseReaction(payloadData.content);
+            const isEditPayload = !!parseEdit(payloadData.content);
+            
+            const isCallInit = silentPayload?.type === 'CALL_INIT';
+            const isGhostSync = silentPayload?.type === 'GHOST_SYNC';
+            const isUnsend = silentPayload?.type === 'UNSEND';
+            const isReactionRemove = silentPayload?.type === 'reaction_remove';
+            
+            const shouldBeSilent = payloadData.isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload;
+
+            // 2. Tangani Reaksi (Tanpa Bubble)
+            if (isReactionPayload) {
+                const reactionData = parseReaction(payloadData.content);
+                if (reactionData) {
+                    const tempReactionId = `temp_react_${tempId}`;
+                    get().replaceOptimisticReaction(conversationId, reactionData.targetMessageId, tempReactionId, {
+                        ...reactionData,
+                        id: res.msg.id, 
+                        userId: useAuthStore.getState().user!.id,
+                        isMessage: true
+                    });
+                }
+                resolve();
+                return;
+            }
+
+            // 3. Tangani Pesan Siluman (Keluarkan dari antrean layar)
+            if (shouldBeSilent) {
+                resolve();
+                return;
+            }
+
+            // 4. Proses Pesan Normal
             const existingMsg = get().messages[conversationId]?.find(m => m.id === `temp_${tempId}` || m.tempId === tempId || m.id === res.msg!.id);
             
             let realFileUrl = existingMsg?.fileUrl;
-             let realFileKey = existingMsg?.fileKey;
-             try {
-                 if (payloadData.content && typeof payloadData.content === 'string' && payloadData.content.startsWith('{')) {
-                     const meta = JSON.parse(payloadData.content);
-                     if (meta.type === 'file' && meta.url) {
-                         realFileUrl = meta.url;
-                         realFileKey = meta.key;
-                     }
-                 }
-             } catch (e) {}
+            let realFileKey = existingMsg?.fileKey;
+            try {
+                if (payloadData.content && typeof payloadData.content === 'string' && payloadData.content.startsWith('{')) {
+                    const meta = JSON.parse(payloadData.content);
+                    if (meta.type === 'file' && meta.url) {
+                        realFileUrl = meta.url;
+                        realFileKey = meta.key;
+                    }
+                }
+            } catch (e) {}
 
             let finalContent = existingMsg !== undefined ? existingMsg.content : res.msg!.content;
             
-            // Jaring pengaman: Jangan biarkan JSON terenkripsi masuk ke UI
             if (finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
-                     finalContent = "🔒 You sent this message (Encrypted)";
+                 finalContent = "🔒 You sent this message (Encrypted)";
                  import('@utils/crypto').then(async ({ retrieveMessageKeySecurely }) => {
                      try {
-                         const mk = await retrieveMessageKeySecurely(`temp_${tempId}`);
+                         const mk = await retrieveMessageKeySecurely(msgId);
                          if (mk) {
                              const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
                              const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
                              
-                             const parsed = JSON.parse(finalContent as string);
+                             const parsed = JSON.parse(res.msg!.content as string);
                              const ciphertext = parsed.ciphertext;
                              if (ciphertext) {
                                  const combined = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -1379,15 +1433,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             } as Partial<Message>;
             
             get().replaceOptimisticMessage(conversationId, tempId, updatedMsg);
-            
-            const msgId = res.msg.id;
-            import('@utils/crypto').then(async ({ retrieveMessageKeySecurely, storeMessageKeySecurely, deleteMessageKeySecurely }) => {
-                const mk = await retrieveMessageKeySecurely(`temp_${tempId}`);
-                if (mk) {
-                    await storeMessageKeySecurely(msgId, mk);
-                    await deleteMessageKeySecurely(`temp_${tempId}`);
-                }
-            }).catch(console.error);
+
           } else {
             console.error(`[Queue] Failed to send queued message ${tempId}:`, res.error);
             await updateQueueAttempt(tempId, attempt + 1);
