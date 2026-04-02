@@ -1338,7 +1338,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             let finalContent = existingMsg !== undefined ? existingMsg.content : res.msg!.content;
             
             // Jaring pengaman: Jangan biarkan JSON terenkripsi masuk ke UI
-            if (!shouldBeSilent && finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
+            if (finalContent && typeof finalContent === 'string' && finalContent.trim().startsWith('{') && finalContent.includes('"ciphertext"')) {
                      finalContent = "🔒 You sent this message (Encrypted)";
                  import('@utils/crypto').then(async ({ retrieveMessageKeySecurely }) => {
                      try {
