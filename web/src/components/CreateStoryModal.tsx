@@ -1,3 +1,4 @@
+import DefaultAvatar from "@/components/ui/DefaultAvatar";
 import { useState, useMemo, useEffect } from 'react';
 import ModalBase from './ui/ModalBase';
 import { useStoryStore } from '@store/story';
@@ -26,12 +27,16 @@ const ContactItem = ({ contact, isSelected, onToggle }: { contact: { id: string;
   }, [contact.id, contact.encryptedProfile, profile]);
 
   const name = profile?.name || contact.username || t('common:defaults.user');
-  const avatarUrl = profile?.avatarUrl || contact.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(name)}`;
+  const avatarUrl = profile?.avatarUrl || contact.avatarUrl;
 
   return (
     <label className="flex items-center justify-between p-2 rounded-xl hover:bg-white/5 cursor-pointer transition-colors group">
       <div className="flex items-center gap-3">
-        <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full border border-white/10 group-hover:border-accent/50 transition-colors object-cover" />
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="" className="w-9 h-9 rounded-full border border-white/10 group-hover:border-accent/50 transition-colors object-cover" />
+        ) : (
+          <DefaultAvatar name={name} id={contact.id} className="w-9 h-9 border border-white/10 group-hover:border-accent/50 transition-colors" />
+        )}
         <span className="text-sm font-medium text-text-primary">{name}</span>
       </div>
       <input 

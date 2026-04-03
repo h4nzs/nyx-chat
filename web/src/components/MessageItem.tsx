@@ -18,6 +18,7 @@ import MessageBubble from "./MessageBubble";
 import { useUserProfile } from '@hooks/useUserProfile';
 import SwipeableItem from "./SwipeableItem";
 import { useContextMenuStore } from "../store/contextMenu";
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useTranslation } from "react-i18next";
 
 const MessageStatusIcon = ({ message, participants }: { message: Message; participants: Participant[] }) => {
@@ -315,11 +316,15 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
           {!mine && (
             <div className="w-8 flex-shrink-0 mb-1 self-end">
               {isLastInSequence && (
-                <img 
-                  src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('common:defaults.user')}`} 
-                  alt={t('common:defaults.avatar', 'Avatar')} 
-                  className="w-8 h-8 rounded-full bg-secondary object-cover shadow-sm cursor-pointer hover:scale-105 transition-transform pointer-events-auto" 
-                />
+                profile.avatarUrl ? (
+                  <img 
+                    src={toAbsoluteUrl(profile.avatarUrl)} 
+                    alt={t('common:defaults.avatar', 'Avatar')} 
+                    className="w-8 h-8 rounded-full bg-secondary object-cover shadow-sm cursor-pointer hover:scale-105 transition-transform pointer-events-auto" 
+                  />
+                ) : (
+                  <DefaultAvatar name={profile.name || t('common:defaults.user')} id={message.senderId} className="w-8 h-8 bg-secondary shadow-sm cursor-pointer hover:scale-105 transition-transform pointer-events-auto" />
+                )
               )}
             </div>
           )}

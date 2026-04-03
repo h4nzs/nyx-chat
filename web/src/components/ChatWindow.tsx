@@ -1,3 +1,4 @@
+import DefaultAvatar from "@/components/ui/DefaultAvatar";
 import { useCallback, useRef, useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { useAuthStore } from "@store/auth";
 import { useTranslation } from "react-i18next";
@@ -148,11 +149,19 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
         >
           <div className="relative">
              <div className="w-10 h-10 rounded-full shadow-neu-pressed dark:shadow-neu-pressed-dark border-2 border-bg-main p-0.5">
-                <img
-                  src={toAbsoluteUrl(avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${title}`}
-                  alt={t('common:defaults.avatar', 'Avatar')}
-                  className={clsx("w-full h-full rounded-full object-cover", cloakClass)}
-                />
+                {avatarUrl ? (
+                  <img
+                    src={toAbsoluteUrl(avatarUrl)}
+                    alt={t('common:defaults.avatar', 'Avatar')}
+                    className={clsx("w-full h-full rounded-full object-cover", cloakClass)}
+                  />
+                ) : (
+                  <DefaultAvatar
+                    name={title}
+                    id={conversation.isGroup ? conversation.id : peerUser?.id}
+                    className={clsx("w-full h-full", cloakClass)}
+                  />
+                )}
              </div>
              {isOnline && <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-bg-surface shadow-sm"></div>}
           </div>

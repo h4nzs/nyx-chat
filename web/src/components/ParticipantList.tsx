@@ -1,3 +1,4 @@
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useAuthStore } from "@store/auth";
 import { Participant } from "@store/conversation";
 import { toAbsoluteUrl } from "@utils/url";
@@ -107,15 +108,15 @@ const ParticipantItem = ({ p, conversationId, amIAdmin, handleProfileClick }: { 
   return (
     <li className="flex items-center justify-between p-2 rounded-lg hover:bg-secondary">
       <button onClick={() => handleProfileClick(p)} className="flex items-center gap-3 text-left min-w-0">
-        <img
-          src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('common:defaults.user')}`}
-          alt={profile.name || t('common:defaults.user')}
-          className="w-10 h-10 rounded-full object-cover bg-bg-primary flex-shrink-0"
-          onError={(e) => {
-            const target = e.target as HTMLImageElement;
-            target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('common:defaults.user')}`;
-          }}
-        />
+        {profile.avatarUrl ? (
+          <img
+            src={toAbsoluteUrl(profile.avatarUrl)}
+            alt={profile.name || t('common:defaults.user')}
+            className="w-10 h-10 rounded-full object-cover bg-bg-primary flex-shrink-0"
+          />
+        ) : (
+          <DefaultAvatar name={profile.name || t('common:defaults.user')} id={p.id} className="w-10 h-10 bg-bg-primary flex-shrink-0" />
+        )}
         <div className="min-w-0 flex-1">
           <p className="font-semibold text-text-primary truncate">{profile.name || t('common:defaults.user')}</p>
           <p className="text-xs text-text-secondary truncate">{profile.description || t('modals:group_info.no_desc')}</p>

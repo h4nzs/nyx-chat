@@ -13,7 +13,7 @@ NYX is a privacy-first, zero-knowledge messenger designed with a "Trust No One" 
 
 ### Technology Stack
 This project is structured as a **pnpm monorepo** containing multiple workspaces:
-- **`web` (Frontend):** React 19, Vite 8, TypeScript, Zustand v5, Tailwind CSS v4, `dexie` (IndexedDB), and `socket.io-client`.
+- **`web` (Frontend):** React 19, Vite 8, TypeScript, Zustand v5, Tailwind CSS v4, `dexie`, and `socket.io-client`.
 - **`server` (Backend):** Node.js (Express), TypeScript, Prisma ORM v7 (with PostgreSQL), Socket.IO (with Redis adapter), and Zod.
 - **`marketing`:** Static site generated with Astro.
 - **`packages/shared`:** Shared TypeScript interfaces, types, and schemas.
@@ -56,6 +56,6 @@ pnpm lint
 
 1. **Strict Cryptography Constraints:** Do NOT update or touch `libsodium-wrappers`. It is pinned at `v0.8.x` to ensure critical cryptographic backward compatibility.
 2. **TypeScript Strictness:** Never use the `any` type under any circumstances. If a type is unknown, use `unknown`. Use safe type guards, Zod schemas, or double casting instead.
-3. **Linting:** Enforces ESLint Flat Config. Code must pass `pnpm run build` and `pnpm run lint` with zero warnings.
+3. **Linting:** Enforces ESLint Flat Config. Code must pass `pnpm run build` and `pnpm run lint` with zero warnings (except unused vars error just ignore it).
 4. **File Modifications:** ALWAYS use tools like `read_file` to inspect a file fully before making any edits, replacements, or rewrites. Never replace existing code with omission placeholders (e.g., `// ...rest of code`); always write the full output.
 5. **Infrastructure:** In production, the backend is designed for a Zero-Inbound Policy using Cloudflare Tunnels (ports 3000 for PWA, 4000 for API/Socket).

@@ -6,6 +6,7 @@ import { useUserProfile } from '@hooks/useUserProfile';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 
 const QRCode = (
   (QRCodeRaw as unknown as { default?: { default?: typeof QRCodeRaw } }).default?.default ||
@@ -74,13 +75,16 @@ export default function ShareProfileModal({ onClose }: Props) {
 
           <div className="text-center mb-6 flex flex-col items-center">
             <div className="w-16 h-16 rounded-full overflow-hidden shadow-neu-flat-light dark:shadow-neu-flat-dark border-2 border-accent mb-3">
-              <img 
-                src={profile?.avatarUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${profile?.name || 'Anonymous'}`} 
-                alt="Avatar" 
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <h3 className="font-bold text-lg text-text-primary">{profile?.name || t('common:defaults.encrypted_user')}</h3>
+              {profile?.avatarUrl ? (
+                <img 
+                  src={profile.avatarUrl} 
+                  alt="Avatar" 
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <DefaultAvatar name={profile?.name || 'Anonymous'} id={user?.id} className="w-full h-full" />
+              )}
+            </div>            <h3 className="font-bold text-lg text-text-primary">{profile?.name || t('common:defaults.encrypted_user')}</h3>
           </div>
 
           <button 

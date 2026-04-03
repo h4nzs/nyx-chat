@@ -11,6 +11,7 @@ import { toast } from 'react-hot-toast';
 import { useUserProfile } from '@hooks/useUserProfile';
 import type { UserId } from '@nyx/shared';
 import { asUserId } from '@nyx/shared';
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 
 type ProfileUser = User & {
   createdAt?: string;
@@ -151,11 +152,19 @@ export default function ProfilePage() {
               
               <div className="relative mx-auto w-40 h-40 mb-4">
                 <div className="w-full h-full rounded-full p-2 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark">
-                  <img 
-                    src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
-                    alt={profile.name || "Profile"} 
-                    className="w-full h-full rounded-full object-cover"
-                  />
+                  {profile.avatarUrl ? (
+                    <img 
+                      src={toAbsoluteUrl(profile.avatarUrl)}
+                      alt={profile.name || "Profile"} 
+                      className="w-full h-full rounded-full object-cover"
+                    />
+                  ) : (
+                    <DefaultAvatar 
+                      name={profile.name || "Profile"} 
+                      id={profileUser.id}
+                      className="w-full h-full" 
+                    />
+                  )}
                 </div>
               </div>
 

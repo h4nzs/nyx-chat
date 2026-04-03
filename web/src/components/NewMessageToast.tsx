@@ -1,3 +1,4 @@
+import DefaultAvatar from "@/components/ui/DefaultAvatar";
 import { toast, type Toast } from 'react-hot-toast';
 import { toAbsoluteUrl } from '@utils/url';
 import type { ConversationId } from '@nyx/shared';
@@ -28,11 +29,15 @@ const NewMessageToast = ({ t, senderName, senderAvatar, message, conversationId 
       onClick={handleClick}
     >
       <div className="flex items-center p-2 gap-3 w-full cursor-pointer">
-        <img
-          className="w-10 h-10 rounded-full object-cover bg-gray-700"
-          src={toAbsoluteUrl(senderAvatar) || `https://api.dicebear.com/8.x/initials/svg?seed=${senderName}`}
-          alt={senderName}
-        />
+        {senderAvatar ? (
+          <img
+            className="w-10 h-10 rounded-full object-cover bg-gray-700"
+            src={toAbsoluteUrl(senderAvatar)}
+            alt={senderName}
+          />
+        ) : (
+          <DefaultAvatar name={senderName} className="w-10 h-10 bg-gray-700" />
+        )}
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-white truncate">{senderName}</p>
           <p className="text-sm text-gray-400 truncate">{message}</p>

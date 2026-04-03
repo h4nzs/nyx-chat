@@ -8,6 +8,7 @@ import { hashUsername } from '@lib/crypto-worker-proxy';
 import { asUserId } from '@nyx/shared';
 import type { MinimalProfile } from '@nyx/shared';
 import ModalBase from './ui/ModalBase';
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useTranslation } from 'react-i18next';
 
 const AddParticipantModal = ({ conversationId, onClose }: {
@@ -140,15 +141,15 @@ const AddParticipantModal = ({ conversationId, onClose }: {
                 onClick={() => handleSelectUser(user.id)}
               >
                 <div className="flex items-center gap-3">
-                  <img
-                    src={toAbsoluteUrl(user.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(user.id)}`}
-                    alt={user.name}
-                    className="w-8 h-8 rounded-full object-cover bg-secondary"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(user.id)}`;
-                    }}
-                  />
+                  {user.avatarUrl ? (
+                    <img
+                      src={toAbsoluteUrl(user.avatarUrl)}
+                      alt={user.name}
+                      className="w-8 h-8 rounded-full object-cover bg-secondary"
+                    />
+                  ) : (
+                    <DefaultAvatar name={user.name} id={user.id} className="w-8 h-8 bg-secondary" />
+                  )}
                   <p className="text-text-primary">{user.name} (@{user.username})</p>
                 </div>
                 {selectedUserIds.includes(user.id) && (

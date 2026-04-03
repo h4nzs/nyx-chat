@@ -1,3 +1,4 @@
+import DefaultAvatar from "@/components/ui/DefaultAvatar";
 import { toAbsoluteUrl } from '@utils/url';
 import { useNavigate } from 'react-router-dom';
 import { useConversationStore } from '@store/conversation';
@@ -28,11 +29,15 @@ const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
   return (
     <div onClick={handleClick} className="w-full h-full flex items-center gap-3 px-1 cursor-pointer group">
       <div className="relative">
-        <img 
-          src={profile.avatarUrl ? toAbsoluteUrl(profile.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('common:defaults.user')}`}
-          alt={profile.name || t('common:defaults.avatar', 'Avatar')}
-          className="w-8 h-8 rounded-full object-cover border border-white/10"
-        />
+        {profile.avatarUrl ? (
+          <img 
+            src={toAbsoluteUrl(profile.avatarUrl)}
+            alt={profile.name || t('common:defaults.avatar', 'Avatar')}
+            className="w-8 h-8 rounded-full object-cover border border-white/10"
+          />
+        ) : (
+          <DefaultAvatar name={profile.name || t('common:defaults.user')} id={activity.sender?.id} className="w-8 h-8 border border-white/10" />
+        )}
         <div className="absolute -bottom-1 -right-1 bg-accent rounded-full p-0.5 border border-black">
            <FiMessageSquare size={8} className="text-white" />
         </div>

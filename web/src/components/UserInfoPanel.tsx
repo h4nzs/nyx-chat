@@ -1,3 +1,4 @@
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toAbsoluteUrl } from '@utils/url';
@@ -101,15 +102,15 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
       return (
         <div className="space-y-6">
           <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-6 text-center">
-            <img
-              src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
-              alt={profile.name}
-              className="w-24 h-24 rounded-full bg-secondary object-cover mb-4 mx-auto"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`;
-              }}
-            />
+            {profile.avatarUrl ? (
+              <img
+                src={toAbsoluteUrl(profile.avatarUrl)}
+                alt={profile.name}
+                className="w-24 h-24 rounded-full bg-secondary object-cover mb-4 mx-auto"
+              />
+            ) : (
+              <DefaultAvatar name={profile.name} id={userId} className="w-24 h-24 mb-4 mx-auto bg-secondary" />
+            )}
             <h3 className="text-xl font-bold text-text-primary">{profile.name}</h3>
             {user.isVerified && (
               <span className="inline-block mt-1 px-2 py-0.5 rounded bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-wider">{t('modals:user_info.verified')}</span>

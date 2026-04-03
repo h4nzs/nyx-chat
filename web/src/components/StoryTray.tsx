@@ -10,6 +10,7 @@ import { useUserProfile } from '@hooks/useUserProfile';
 import { toAbsoluteUrl } from '@utils/url';
 import clsx from 'clsx';
 import type { UserId } from '@nyx/shared';
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useTranslation } from 'react-i18next';
 
 const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId: UserId; onClick: () => void }) {
@@ -43,11 +44,15 @@ const UserStoryRing = memo(function UserStoryRing({ userId, onClick }: { userId:
         hasUnseen ? "bg-gradient-to-tr from-accent to-orange-400" : "bg-white/10"
       )}>
         <div className="w-full h-full rounded-full border-2 border-bg-main overflow-hidden bg-bg-main">
-          <img 
-            src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('common:defaults.user')}`} 
-            alt={profile.name || t('common:defaults.user')} 
-            className="w-full h-full object-cover" 
-          />
+          {profile.avatarUrl ? (
+            <img 
+              src={toAbsoluteUrl(profile.avatarUrl)} 
+              alt={profile.name || t('common:defaults.user')} 
+              className="w-full h-full object-cover" 
+            />
+          ) : (
+            <DefaultAvatar name={profile.name || t('common:defaults.user')} id={userId} className="w-full h-full" />
+          )}
         </div>
       </div>
       <span className="text-[10px] font-medium text-text-secondary truncate w-full text-center">
@@ -104,11 +109,15 @@ export default function StoryTray() {
                 myStories.length > 0 ? "bg-gradient-to-tr from-text-secondary to-text-secondary/50" : "bg-transparent"
               )}>
                  <div className="w-full h-full rounded-full border-2 border-bg-main overflow-hidden bg-bg-main relative">
-                  <img 
-                    src={toAbsoluteUrl(myProfile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${myProfile.name || t('common:defaults.me')}`} 
-                    alt={t('chat:stories.your_story')} 
-                    className={clsx("w-full h-full object-cover transition-all", myStories.length === 0 && "opacity-80")} 
-                  />
+                  {myProfile.avatarUrl ? (
+                    <img 
+                      src={toAbsoluteUrl(myProfile.avatarUrl)} 
+                      alt={t('chat:stories.your_story')} 
+                      className={clsx("w-full h-full object-cover transition-all", myStories.length === 0 && "opacity-80")} 
+                    />
+                  ) : (
+                    <DefaultAvatar name={myProfile.name || t('common:defaults.me')} id={me?.id} className={clsx("w-full h-full transition-all", myStories.length === 0 && "opacity-80")} />
+                  )}
                 </div>
               </div>
             </button>

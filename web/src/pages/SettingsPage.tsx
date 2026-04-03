@@ -1,3 +1,4 @@
+import DefaultAvatar from "@/components/ui/DefaultAvatar";
 import { useState, useRef, ChangeEvent, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation, Trans } from 'react-i18next';
@@ -489,11 +490,19 @@ export default function SettingsPage() {
                     flex items-center justify-center
                     bg-bg-main p-2
                   ">
-                    <img
-                      src={previewUrl || `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(user?.id || 'anonymous')}`}
-                      alt="ID"
-                      className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
-                    />
+                    {previewUrl ? (
+                      <img
+                        src={previewUrl}
+                        alt="ID"
+                        className="w-full h-full rounded-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500"
+                      />
+                    ) : (
+                      <DefaultAvatar 
+                        name={profile?.name || 'User'}
+                        id={user?.id}
+                        className="w-full h-full grayscale group-hover:grayscale-0 transition-all duration-500"
+                      />
+                    )}
                   </div>
                   <button
                     type="button"

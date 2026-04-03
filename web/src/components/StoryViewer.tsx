@@ -11,6 +11,7 @@ import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import type { UserId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 
 // Default durasi untuk Teks/Gambar
 const DEFAULT_STORY_DURATION_MS = 5000;
@@ -231,7 +232,11 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
       {/* Header */}
       <div className="absolute top-6 left-0 right-0 px-4 flex justify-between items-center z-20 bg-gradient-to-b from-black/60 to-transparent pb-4 pt-2 pointer-events-auto">
         <div className="flex items-center gap-2">
-          <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} alt="avatar" className="w-8 h-8 rounded-full border border-white/20 object-cover" />
+          {profile.avatarUrl ? (
+            <img src={toAbsoluteUrl(profile.avatarUrl)} alt="avatar" className="w-8 h-8 rounded-full border border-white/20 object-cover" />
+          ) : (
+            <DefaultAvatar name={profile.name} id={targetUser?.id} className="w-8 h-8 border border-white/20" />
+          )}
           <div>
             <p className="text-white text-sm font-bold shadow-sm drop-shadow-md">{profile.name}</p>
             <p className="text-white/80 text-[10px] font-medium drop-shadow-md">{new Date(currentStory.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>

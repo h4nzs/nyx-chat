@@ -29,6 +29,7 @@ import { useContextMenuStore } from '../store/contextMenu';
 import { useSettingsStore } from '@store/settings';
 import StoryTray from './StoryTray';
 import type { UserId } from '@nyx/shared';
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useTranslation } from 'react-i18next';
 
 // --- Sub-components ---
@@ -63,11 +64,15 @@ const UserProfile = memo(function UserProfile() {
       <div className="flex items-center justify-between px-6 py-6 bg-bg-main z-10">
         <div className="flex items-center gap-3 overflow-hidden cursor-pointer group" onClick={() => setShowShareModal(true)}>
           <div className="relative flex-shrink-0">
-            <img 
-              src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name || t('common:defaults.user')}`} 
-              alt={t('common:defaults.avatar', 'Avatar')} 
-              className="w-10 h-10 rounded-full object-cover shadow-neu-flat dark:shadow-neu-flat-dark border-2 border-bg-main group-hover:border-accent transition-colors" 
-            />
+            {profile.avatarUrl ? (
+              <img 
+                src={toAbsoluteUrl(profile.avatarUrl)} 
+                alt={t('common:defaults.avatar', 'Avatar')} 
+                className="w-10 h-10 rounded-full object-cover shadow-neu-flat dark:shadow-neu-flat-dark border-2 border-bg-main group-hover:border-accent transition-colors" 
+              />
+            ) : (
+              <DefaultAvatar name={profile.name || t('common:defaults.user')} id={user?.id} className="w-10 h-10 border-2 border-bg-main group-hover:border-accent transition-colors" />
+            )}
             <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border border-bg-surface"></div>
           </div>
           <div className="min-w-0">
@@ -129,7 +134,11 @@ const SearchResultItem = ({ user, onSelect }: { user: User, onSelect: (user: Use
         shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5
       "
     >
-      <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${displayName}`} alt={t('common:defaults.avatar', 'Avatar')} className="w-10 h-10 rounded-full bg-secondary object-cover" />
+      {profile.avatarUrl ? (
+        <img src={toAbsoluteUrl(profile.avatarUrl)} alt={t('common:defaults.avatar', 'Avatar')} className="w-10 h-10 rounded-full bg-secondary object-cover" />
+      ) : (
+        <DefaultAvatar name={displayName} id={user.id} className="w-10 h-10 shadow-sm" />
+      )}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
            <p className="font-bold text-sm text-text-primary">{displayName}</p>
@@ -196,8 +205,8 @@ const ConversationItem = memo(function ConversationItem({
   const cloakClass = privacyCloak ? "blur-[6px] opacity-70 group-hover:blur-none group-hover:opacity-100 group-active:blur-none group-active:opacity-100 transition-all duration-300 select-none" : "";
 
   const avatarSrc = conversation.isGroup 
-    ? (conversation.decryptedMetadata?.avatarUrl ? `${toAbsoluteUrl(conversation.decryptedMetadata.avatarUrl)}?t=${conversation.lastUpdated}` : `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.decryptedMetadata?.title || 'group'}`)
-    : (peerProfile.avatarUrl ? toAbsoluteUrl(peerProfile.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${title}`);
+    ? (conversation.decryptedMetadata?.avatarUrl ? `${toAbsoluteUrl(conversation.decryptedMetadata.avatarUrl)}?t=${conversation.lastUpdated}` : undefined)
+    : (peerProfile.avatarUrl ? toAbsoluteUrl(peerProfile.avatarUrl) : undefined);
 
   const formatConversationTime = useCallback((timestamp: string) => {
     const date = new Date(timestamp);
@@ -288,23 +297,27 @@ const ConversationItem = memo(function ConversationItem({
               disabled={!peerUser}
               className="block"
             >
-              <img
-                src={avatarSrc}
-                alt={t('common:defaults.avatar', 'Avatar')}
-                className={clsx(
-                  "w-12 h-12 rounded-full object-cover border-2 transition-all pointer-events-none",
-                  isActive ? "border-bg-surface shadow-inner" : "border-bg-main shadow-sm",
-                  cloakClass
-                )}
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  if (conversation.isGroup) {
-                    target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${conversation.decryptedMetadata?.title || 'group'}`;
-                  } else {
-                    target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${title}`;
-                  }
-                }}
-              />
+              {avatarSrc ? (
+                <img
+                  src={avatarSrc}
+                  alt={t('common:defaults.avatar', 'Avatar')}
+                  className={clsx(
+                    "w-12 h-12 rounded-full object-cover border-2 transition-all pointer-events-none",
+                    isActive ? "border-bg-surface shadow-inner" : "border-bg-main shadow-sm",
+                    cloakClass
+                  )}
+                />
+              ) : (
+                <DefaultAvatar
+                  name={conversation.isGroup ? (conversation.decryptedMetadata?.title || 'group') : title}
+                  id={conversation.isGroup ? conversation.id : peerUser?.id}
+                  className={clsx(
+                    "w-12 h-12 border-2 pointer-events-none",
+                    isActive ? "border-bg-surface shadow-inner" : "border-bg-main shadow-sm",
+                    cloakClass
+                  )}
+                />
+              )}
             </button>
             {peerUser && (
               <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-bg-surface ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
