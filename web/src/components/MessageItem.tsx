@@ -273,7 +273,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     const isEditable = mine && 
                        !message.optimistic && 
                        !message.fileUrl && 
-                       !message.type && 
+                       message.type !== 'SYSTEM' && 
                        !message.content?.startsWith('{') && 
                        !message.content?.startsWith('[') &&
                        isWithinEditWindow;

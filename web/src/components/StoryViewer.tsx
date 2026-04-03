@@ -10,16 +10,24 @@ import { decryptFile } from '@utils/crypto';
 import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import type { UserId } from '@nyx/shared';
-import { asUserId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+
+// Default durasi untuk Teks/Gambar
+const DEFAULT_STORY_DURATION_MS = 5000;
+const TICK_RATE_MS = 50;
 
 export default function StoryViewer({ userId, onClose, onReply }: { userId: UserId; onClose: () => void, onReply?: (text: string) => void }) {
   const { t } = useTranslation(['chat']);
   const stories = useStoryStore(state => state.stories[userId] || []);
   const [currentIndex, setCurrentIndex] = useState(0);
+  
+  // States progress & timer control
   const [progress, setProgress] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [isMediaReady, setIsMediaReady] = useState(false);
+  const [durationMs, setDurationMs] = useState(DEFAULT_STORY_DURATION_MS);
+
   const { user: me } = useAuthStore(state => ({ user: state.user }));
   
   // Find the actual user object from conversations to get encryptedProfile
@@ -42,56 +50,55 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
   const currentStory = stories[currentIndex];
   const isMe = me?.id === userId;
 
+  // 1. SIKLUS HIDUP MEDIA (DOWNLOAD & DECRYPT)
   useEffect(() => {
-    if (!currentStory) return;
-    
-    // Auto advance progress
-    if (isPaused || isTyping) return;
-    
-    const interval = setInterval(() => {
-      setProgress(p => {
-        if (p >= 100) {
-          if (currentIndex < stories.length - 1) {
-            setCurrentIndex(idx => idx + 1);
-            return 0;
-          } else {
-            onClose();
-            return 100;
-          }
-        }
-        return p + 2; // Roughly 5 seconds total (100 / 2 * 100ms)
-      });
-    }, 100);
-
-    return () => clearInterval(interval);
-  }, [currentIndex, isPaused, isTyping, stories.length, onClose, currentStory]);
-
-  useEffect(() => {
-    // Load decrypted media if available
     let isActive = true;
-    const loadMedia = async () => {
-      if (currentStory?.decryptedData?.mediaUrl && currentStory.decryptedData.fileKey) {
-        try {
-          const res = await fetch(currentStory.decryptedData.mediaUrl);
-          const encryptedBlob = await res.blob();
-          const decryptedBlob = await decryptFile(encryptedBlob, currentStory.decryptedData.fileKey, currentStory.decryptedData.mimeType || 'application/octet-stream');
-          if (isActive) {
-            const url = URL.createObjectURL(decryptedBlob);
-            setMediaBlobUrl(url);
-            mediaBlobUrlRef.current = url;
-          }
-        } catch (e) {
-          console.error("Failed to load story media", e);
-        }
-      }
-    };
     
-    setMediaBlobUrl(null);
+    // Reset ke kondisi awal saat pindah story
+    setProgress(0);
+    setIsMediaReady(false);
+    setDurationMs(DEFAULT_STORY_DURATION_MS);
+
+    // Hapus Blob URL sebelumnya untuk cegah memory leak
     if (mediaBlobUrlRef.current) {
         URL.revokeObjectURL(mediaBlobUrlRef.current);
         mediaBlobUrlRef.current = null;
     }
-    setProgress(0);
+    setMediaBlobUrl(null);
+
+    if (!currentStory) return;
+
+    const loadMedia = async () => {
+      // Jika story hanya teks, bisa langsung jalan (ready)
+      if (!currentStory.decryptedData?.mediaUrl) {
+         if (isActive) setIsMediaReady(true);
+         return;
+      }
+
+      if (currentStory.decryptedData.fileKey) {
+        try {
+          const res = await fetch(currentStory.decryptedData.mediaUrl);
+          const encryptedBlob = await res.blob();
+          const decryptedBlob = await decryptFile(encryptedBlob, currentStory.decryptedData.fileKey, currentStory.decryptedData.mimeType || 'application/octet-stream');
+          
+          if (isActive) {
+            const url = URL.createObjectURL(decryptedBlob);
+            mediaBlobUrlRef.current = url;
+            setMediaBlobUrl(url);
+            
+            // Jika gambar, langsung ready. 
+            // Jika video, biarkan false sampai onLoadedMetadata di-trigger oleh <video>
+            if (!currentStory.decryptedData.mimeType?.startsWith('video/')) {
+               setIsMediaReady(true);
+            }
+          }
+        } catch (e) {
+          console.error("Failed to load story media", e);
+          if (isActive) setIsMediaReady(true); // Paksa jalan agar story tidak membeku selamanya jika error
+        }
+      }
+    };
+    
     loadMedia();
 
     return () => {
@@ -102,6 +109,36 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
       }
     };
   }, [currentIndex, currentStory]);
+
+  // 2. SIKLUS HIDUP TIMER & PROGRESS BAR
+  useEffect(() => {
+    // Jangan jalan sebelum media diunduh & didekripsi
+    if (!currentStory || !isMediaReady) return;
+    
+    // Jangan jalan jika user menahan layar atau sedang mengetik balasan
+    if (isPaused || isTyping) return;
+    
+    const interval = setInterval(() => {
+      setProgress(prev => {
+        // Hitung penambahan proporsional berdasarkan durasi dinamis
+        const increment = (TICK_RATE_MS / durationMs) * 100;
+        const nextProgress = prev + increment;
+
+        if (nextProgress >= 100) {
+          if (currentIndex < stories.length - 1) {
+            setCurrentIndex(idx => idx + 1);
+            return 0; // Reset ke 0 untuk story berikutnya
+          } else {
+            onClose();
+            return 100; // Batas mentok 100
+          }
+        }
+        return nextProgress;
+      });
+    }, TICK_RATE_MS);
+
+    return () => clearInterval(interval);
+  }, [currentIndex, isPaused, isTyping, isMediaReady, durationMs, stories.length, onClose, currentStory]);
 
   if (!currentStory) {
     onClose();
@@ -157,22 +194,34 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
         }
       }));
       toast.success(t('stories.story_deleted'));
-      if (stories.length <= 1) onClose();
-      else handleNext();
+      if (stories.length <= 1) {
+          onClose();
+      } else {
+          // Tangani navigasi setelah menghapus
+          if (currentIndex >= stories.length - 1) {
+             setCurrentIndex(Math.max(0, currentIndex - 1));
+          } else {
+             setProgress(0); // Restart untuk story pengganti di posisi yang sama
+          }
+      }
     } catch (e) {
       toast.error(t('stories.delete_failed'));
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black flex flex-col" onPointerDown={() => setIsPaused(true)} onPointerUp={() => setIsPaused(false)}>
-      
+    <div 
+      className="fixed inset-0 z-[100] bg-black flex flex-col" 
+      onPointerDown={() => setIsPaused(true)} 
+      onPointerUp={() => setIsPaused(false)}
+      onPointerLeave={() => setIsPaused(false)}
+    >
       {/* Progress Bars */}
       <div className="absolute top-2 left-0 right-0 px-2 flex gap-1 z-20">
         {stories.map((s, idx) => (
           <div key={s.id} className="h-1 flex-1 bg-white/20 rounded-full overflow-hidden">
             <div 
-              className="h-full bg-white transition-all duration-100 ease-linear"
+              className="h-full bg-white transition-all duration-75 ease-linear"
               style={{ width: `${idx < currentIndex ? 100 : idx === currentIndex ? progress : 0}%` }}
             />
           </div>
@@ -180,21 +229,21 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
       </div>
 
       {/* Header */}
-      <div className="absolute top-6 left-0 right-0 px-4 flex justify-between items-center z-20 bg-gradient-to-b from-black/60 to-transparent pb-4">
+      <div className="absolute top-6 left-0 right-0 px-4 flex justify-between items-center z-20 bg-gradient-to-b from-black/60 to-transparent pb-4 pt-2 pointer-events-auto">
         <div className="flex items-center gap-2">
-          <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} alt="avatar" className="w-8 h-8 rounded-full border border-white/20" />
+          <img src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`} alt="avatar" className="w-8 h-8 rounded-full border border-white/20 object-cover" />
           <div>
-            <p className="text-white text-sm font-bold shadow-sm">{profile.name}</p>
-            <p className="text-white/60 text-[10px]">{new Date(currentStory.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+            <p className="text-white text-sm font-bold shadow-sm drop-shadow-md">{profile.name}</p>
+            <p className="text-white/80 text-[10px] font-medium drop-shadow-md">{new Date(currentStory.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
           </div>
         </div>
         <div className="flex items-center gap-4">
           {isMe && (
-            <button onClick={handleDelete} className="p-2 text-white/80 hover:text-red-500 transition-colors">
+            <button onClick={handleDelete} className="p-2 text-white/80 hover:text-red-500 transition-colors drop-shadow-md">
               <FiTrash2 size={20} />
             </button>
           )}
-          <button onClick={onClose} className="p-2 text-white/80 hover:text-white transition-colors">
+          <button onClick={onClose} className="p-2 text-white/80 hover:text-white transition-colors drop-shadow-md">
             <FiX size={24} />
           </button>
         </div>
@@ -203,26 +252,47 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
       {/* Main Content Area */}
       <div className="flex-1 relative flex items-center justify-center bg-stone-900 overflow-hidden">
         {/* Navigation Overlays */}
-        <div className="absolute inset-y-0 left-0 w-1/3 z-10 cursor-pointer" onClick={handlePrev} />
-        <div className="absolute inset-y-0 right-0 w-1/3 z-10 cursor-pointer" onClick={handleNext} />
+        <div className="absolute inset-y-0 left-0 w-1/3 z-10 cursor-pointer" onClick={(e) => { e.stopPropagation(); handlePrev(); }} />
+        <div className="absolute inset-y-0 right-0 w-1/3 z-10 cursor-pointer" onClick={(e) => { e.stopPropagation(); handleNext(); }} />
 
         {currentStory.decryptedData ? (
           <>
             {mediaBlobUrl ? (
               currentStory.decryptedData.mimeType?.startsWith('video/') ? (
-                 <video src={mediaBlobUrl} autoPlay playsInline loop className="w-full h-full object-contain" />
+                 <video 
+                    src={mediaBlobUrl} 
+                    autoPlay 
+                    playsInline 
+                    className="w-full h-full object-contain" 
+                    onLoadedMetadata={(e) => {
+                        // Tarik durasi aktual video (e.currentTarget.duration dalam detik)
+                        const vidDuration = e.currentTarget.duration;
+                        if (vidDuration && vidDuration > 0 && isFinite(vidDuration)) {
+                            setDurationMs(vidDuration * 1000);
+                        }
+                        setIsMediaReady(true);
+                    }}
+                    onEnded={() => {
+                        // Failsafe auto-next ketika pemutar video selesai murni
+                        if (!isPaused && !isTyping) handleNext();
+                    }}
+                 />
               ) : (
                  <img src={mediaBlobUrl} alt="Story" className="w-full h-full object-contain" />
               )
             ) : currentStory.decryptedData.mediaUrl ? (
-              <div className="animate-pulse w-16 h-16 rounded-full bg-white/10" />
+              // Loading state while decrypting
+              <div className="flex flex-col items-center justify-center gap-3">
+                 <div className="animate-spin w-8 h-8 border-4 border-white/20 border-t-white rounded-full" />
+                 <span className="text-white/60 text-xs font-medium uppercase tracking-wider">{t('media.decrypting', 'Decrypting...')}</span>
+              </div>
             ) : null}
 
             {currentStory.decryptedData.text && (
               <div className={
                 currentStory.decryptedData.mediaUrl
-                  ? "absolute bottom-16 left-0 right-0 p-6 flex justify-center items-end bg-gradient-to-t from-black/80 via-black/40 to-transparent z-10 pt-16"
-                  : "absolute inset-0 flex items-center justify-center p-8 z-0"
+                  ? "absolute bottom-16 left-0 right-0 p-6 flex justify-center items-end bg-gradient-to-t from-black/80 via-black/40 to-transparent z-10 pt-16 pointer-events-none"
+                  : "absolute inset-0 flex items-center justify-center p-8 z-0 pointer-events-none"
               }>
                 <h2 className={
                   currentStory.decryptedData.mediaUrl
@@ -235,31 +305,36 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
             )}
           </>
         ) : (
-          <div className="text-white/50 text-sm">{t('media.decrypting')}</div>
+          <div className="flex flex-col items-center justify-center gap-3">
+             <div className="animate-spin w-8 h-8 border-4 border-white/20 border-t-white rounded-full" />
+             <span className="text-white/60 text-xs font-medium uppercase tracking-wider">{t('media.decrypting', 'Decrypting...')}</span>
+          </div>
         )}
       </div>
 
       {/* Reply Bar */}
       {!isMe && (
-        <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent z-20">
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent z-20 pointer-events-auto">
            <form 
              onSubmit={(e) => { 
                e.preventDefault(); 
                handleSendReply(); 
                setIsTyping(false);
              }} 
-             className="flex items-center gap-2 max-w-lg mx-auto bg-white/10 backdrop-blur-md rounded-full px-4 py-2 border border-white/20"
+             className="flex items-center gap-2 max-w-lg mx-auto bg-black/40 backdrop-blur-xl rounded-full px-4 py-2 border border-white/10 shadow-lg"
+             // Hindari pause saat user memencet area ketik
+             onPointerDown={(e) => e.stopPropagation()}
            >
              <input 
                type="text" 
-               placeholder={t('stories.reply_placeholder')} 
+               placeholder={t('stories.reply_placeholder', 'Reply to story...')} 
                value={replyText}
                onChange={e => setReplyText(e.target.value)}
                onFocus={() => setIsTyping(true)}
                onBlur={() => setIsTyping(false)}
-               className="flex-1 bg-transparent border-none text-white text-sm focus:outline-none placeholder:text-white/50"
+               className="flex-1 bg-transparent border-none text-white text-sm focus:outline-none placeholder:text-white/60"
              />
-             <button type="submit" disabled={!replyText.trim()} className="text-white p-1 hover:text-accent disabled:opacity-50">
+             <button type="submit" disabled={!replyText.trim()} className="text-white p-1.5 hover:text-accent hover:scale-110 active:scale-95 transition-all disabled:opacity-30 disabled:hover:scale-100">
                <FiSend size={18} />
              </button>
            </form>
