@@ -1074,39 +1074,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     try {
       let ciphertext = '';
-      let x3dhHeader: Record<string, unknown> | null = null;
-
-      if (!conversation.isGroup && data.content) {
-          const state = await retrieveRatchetStateSecurely(conversationId);
-          if (!state) {
-             const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
-             if (peerId) {
-                 const theirBundle = await authFetch<PreKeyBundle>(`/api/keys/prekey-bundle/${peerId}`);
-                 const myKeyPair = await getMyEncryptionKeyPair();
-                 const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
-                 const sodium = await getSodium();
-                 
-                 const { worker_dr_init_alice } = await import('@lib/crypto-worker-proxy');
-                 const newState = await worker_dr_init_alice({
-                     sk: sessionKey,
-                     theirSignedPreKeyPublic: sodium.from_base64(theirBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING)
-                 });
-                 
-                 await storeRatchetStateSecurely(conversationId, newState);
-
-                 x3dhHeader = {
-                     ik: sodium.to_base64(myKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-                     ek: ephemeralPublicKey,
-                     otpkId: otpkId
-                 };
-             } else {
-                 console.error(`[X3DH] Peer not found in participants for ${conversationId}.`);
-                 toast.error("Encryption failed: Cannot identify recipient.");
-                 return;
-             }
-          }
-      }
-
       let mkToStore: Uint8Array | undefined;
       let contentToEncrypt = data.content;
 
@@ -1140,23 +1107,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                  storeMessageKeySecurely(`temp_${actualTempId}`, mkToStore!)
              );
         }
-        
-        if (!conversation.isGroup && result.drHeader) {
-            ciphertext = JSON.stringify({
-                dr: result.drHeader,
-                ciphertext: ciphertext
-            });
-        }
       }
-      
-      if (x3dhHeader) {
-          const payloadJson = JSON.stringify({
-              x3dh: x3dhHeader,
-              ciphertext: ciphertext 
-          });
-          ciphertext = payloadJson;
-      }
-      
+
       const pushPayloads: Record<string, string> = {};
       try {
         const { getSodium } = await import('@lib/sodiumInitializer');
