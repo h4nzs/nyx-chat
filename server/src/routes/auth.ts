@@ -279,9 +279,11 @@ router.post('/recover', authLimiter, zodValidate({
 
     const passwordHash = await hashPassword(newPassword);
 
-    const [updatedUser, newDevice] = await prisma.$transaction([
+    const [updatedUser, _, __, newDevice] = await prisma.$transaction([
         prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
-        prisma.device.create({
+        prisma.device.deleteMany({ where: { userId: user.id } }), // 1. Sapu bersih perangkat lama yang bocor
+        prisma.authenticator.deleteMany({ where: { userId: user.id } }), // 2. Bersihkan sesi biometrik lama
+        prisma.device.create({ // 3. Buat perangkat yang baru dipulihkan
           data: {
             userId: user.id,
             publicKey: publicKey || '',
@@ -289,9 +291,7 @@ router.post('/recover', authLimiter, zodValidate({
             encryptedPrivateKey: newEncryptedKeys,
             name: 'Recovered Device'
           }
-        }),
-        prisma.device.deleteMany({ where: { userId: user.id } }), 
-        prisma.authenticator.deleteMany({ where: { userId: user.id } })
+        })
     ]);
 
     const tokens = await issueTokens(updatedUser, newDevice.id, req);    

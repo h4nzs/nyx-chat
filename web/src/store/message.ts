@@ -975,7 +975,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       try {
         const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, forceRotate);
         if (distributionKeys && distributionKeys.length > 0) {
-          emitGroupKeyDistribution(conversationId, distributionKeys as any[]);
+          // ✅ FIX: Hapus any, gunakan tipe data ketat sesuai kembalian dari ensureGroupSession
+          emitGroupKeyDistribution(
+            conversationId, 
+            distributionKeys as { userId: string; targetDeviceId: string; key: string; type: string }[]
+          );
           if (forceRotate) {
               useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
           }
