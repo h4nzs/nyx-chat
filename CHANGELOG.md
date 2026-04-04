@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.5.5] - 2026-04-X
+
+### 🚀 Key Features & Architectural Changes
+- **Pure Store-and-Forward E2EE Architecture:** Completely eliminated long-term message storage on the server. Messages are now strictly ephemeral on the backend, existing only to be routed, and are instantly destroyed once the recipient acknowledges delivery.
+- **Unified Local Database (Dexie):** Refactored all raw IndexedDB usage to use `dexie`, vastly improving local query performance, code readability, and data integrity for the Shadow Vault.
+- **Zero-Knowledge Default Avatars:** Removed the third-party dependency on `dicebear.com` for generating default avatars. Avatars are now generated locally on the client using initials and deterministic colors, preventing metadata leaks and improving UI load times.
+- **Marketing Site Overhaul (Pure Astro):** Completely rebuilt the marketing pages (`/marketing`) using pure Astro. This drastically improves SEO, load speeds, and multi-language (i18n) handling.
+- **TypeScript 6.x Upgrade & Strict Mode:** Upgraded the entire monorepo to TypeScript 6.x. Eliminated the usage of `any` across the stack, introducing a Single Source of Truth (SSOT) for shared DTOs, Socket payloads, and database mappers.
+
+### 🛡️ Security & Privacy
+- **DOM-Based XSS Prevention:** Patched a critical vulnerability in the Markdown parser. Raw HTML inputs (e.g., `<h1>`) are now safely converted to literal text rather than being stripped out or executed.
+- **IDOR Prevention on View-Once Messages:** The server now strictly validates user participation before allowing `view_once_opened` socket events.
+- **Strict WebRTC Payload Validation:** Added rigid runtime type checking for all WebRTC signaling payloads (`offer`, `answer`, `candidate`) to prevent UI crashes from malformed packets.
+- **Legal & Compliance:** Removed inaccurate "HIPAA-ready" marketing claims to avoid compliance and legal risks, replacing them with accurate technical descriptors (e.g., *zero-knowledge, enterprise-grade security*).
+- **Hall of Fame:** Added `faiqalfaruq` to `SECURITY.md` for responsibly disclosing the DOM-based XSS vulnerability.
+- Updated multiple vulnerable dependencies including `serialize-javascript`, `lodash-es`, and `zod`.
+
+### 🐛 Bug Fixes
+- **E2EE Race Conditions:** Fixed a critical race condition where messages could be deleted from the server before being safely saved to the local IndexedDB.
+- **Unsend Paradox:** Fixed an issue where the "Unsend" socket event failed to broadcast because it attempted to query a message that had already been deleted by the Store-and-Forward mechanism.
+- **Story Viewer Timers:** Fixed bugs in the Story Viewer where the progress bar would run before the media was fully downloaded/decrypted. Video stories now correctly adapt their progress bar duration to the actual length of the video.
+- **Edit Message Button:** Fixed a bug in Optimistic UI where the "Edit" button would disappear immediately after sending a message due to a mismatch in the `type` state.
+- **Double Bubble & Desync:** Resolved various issues related to optimistic UI rendering, message bubble duplication, and read receipt (blue tick) synchronization between clients.
+- **Tailwind Scanner in Astro:** Fixed an issue where Tailwind CSS v4 failed to scan utility classes within the new Astro marketing pages.
+- **File Attachment Logic:** Improved file attachment handling for strict browsers (Firefox and Safari).
+
+### ⚡ Performance & Optimizations
+- **App Optimization Passes 1-6:** Conducted massive sweeps across the client application to reduce re-renders, optimize media loading, and improve React component lifecycles.
+- **Offline Queue Reliability:** Enhanced the robustness of the offline message queue, ensuring precise retries and preventing duplicates upon reconnection.
+- **Dependency Bumps:** Updated `pnpm/action-setup` to v5 and bumped various frontend and backend dependencies to their latest stable versions for better security and performance.
+
+
 ## [2.5.4] - 2026-03-24
 
 This massive update brings a complete rewrite of our public-facing infrastructure, major architectural security enhancements ("The Grand Unification"), native WebRTC calls, the new Stories feature, and full internationalization. 
