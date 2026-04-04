@@ -29,11 +29,19 @@ router.get('/search', async (req, res, next) => {
     
     const users = await prisma.user.findMany({
       where: { AND: [{ id: { not: req.user!.id } }, { usernameHash: q }] },
-      select: { id: true, encryptedProfile: true, isVerified: true, publicKey: true },
+      select: { id: true, encryptedProfile: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true } } },
       take: 20
     })
 
-    res.json(users)
+    const mappedUsers = users.map(u => ({
+      id: u.id,
+      encryptedProfile: u.encryptedProfile,
+      isVerified: u.isVerified,
+      publicKey: u.devices[0]?.publicKey
+    }))
+
+    res.json(mappedUsers)
+
   } catch (e) { next(e) }
 })
 
@@ -170,13 +178,18 @@ router.put('/me/keys',
   async (req, res, next) => {
     try {
       if (!req.user) throw new ApiError(401, 'Authentication required.')
-      const userId = req.user.id
+      
+      // ✅ FIX: Update kunci E2EE di tabel Device, bukan di tabel User
+      const authUser = req.user as AuthJwtPayload;
+      const deviceId = authUser.deviceId;
+      if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
+        
+      const userId = authUser.id
       const { publicKey, signingKey } = req.body
 
-      const user = await prisma.user.update({
-        where: { id: userId },
-        data: { publicKey, signingKey },
-        select: { id: true }
+      await prisma.device.update({
+        where: { id: deviceId },
+        data: { publicKey, signingKey }
       })
 
       const conversations = await prisma.conversation.findMany({
@@ -190,7 +203,7 @@ router.put('/me/keys',
       }))
 
       recipients.forEach(recipientId => {
-        getIo().to(recipientId).emit('user:identity_changed', { userId: user.id })
+        getIo().to(recipientId).emit('user:identity_changed', { userId })
       })
 
       res.status(200).json({ message: 'Keys updated successfully.' })
@@ -266,11 +279,21 @@ router.get('/:userId', async (req, res, next) => {
     const { userId } = req.params
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, encryptedProfile: true, createdAt: true, publicKey: true, isVerified: true }
+      // ✅ FIX: Ambil publicKey dari device terakhir
+      select: { id: true, encryptedProfile: true, createdAt: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true } } }
     })
 
     if (!user) return res.status(404).json({ error: 'User not found' })
-    res.json(user)
+    
+    const mappedUser = {
+        id: user.id,
+        encryptedProfile: user.encryptedProfile,
+        createdAt: user.createdAt,
+        isVerified: user.isVerified,
+        publicKey: user.devices[0]?.publicKey
+    }
+    
+    res.json(mappedUser)
   } catch (error) { next(error) }
 })
 
