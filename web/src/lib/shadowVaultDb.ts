@@ -145,17 +145,18 @@ class NyxShadowVaultProxy {
 
   async getMessagesByConversation(conversationId: string, limit: number = 50, beforeDate?: string): Promise<Message[]> {
     try {
-      // ✅ FIX: Use IndexedDB reverse cursor for efficient pagination instead of toArray()
-      const collection = db.messages.where('conversationId').equals(conversationId);
-
       // Background expiry sweep — non-blocking
       const sweepExpired = async () => {
         try {
           const now = Date.now();
-          const expired = await collection.filter(r => {
-            const expiresAt = r.expiresAt as string | undefined;
-            return !!expiresAt && new Date(expiresAt).getTime() <= now;
-          }).primaryKeys();
+          const expired = await db.messages
+            .where('conversationId')
+            .equals(conversationId)
+            .filter(r => {
+              const expiresAt = r.expiresAt as string | undefined;
+              return !!expiresAt && new Date(expiresAt).getTime() <= now;
+            })
+            .primaryKeys();
           if (expired.length > 0) {
             db.messages.bulkDelete(expired as string[]).catch(e => console.error("Failed to delete expired messages:", e));
           }
@@ -163,22 +164,37 @@ class NyxShadowVaultProxy {
       };
       sweepExpired(); // Fire and forget
 
-      // Use reverse() + limit for efficient DESC fetch, then reverse back to ASC
-      let query = collection.reverse();
+      // ✅ FIX: Use the compound index [conversationId+createdAt] for efficient range query
+      // We need the LATEST messages, so we fetch all for this conversation,
+      // sort DESC by createdAt, take the limit, then reverse to ASC for UI.
+      // Dexie's compound index orders by conversationId first, then createdAt.
+      const allRecords = await db.messages
+        .where('conversationId')
+        .equals(conversationId)
+        .toArray();
+
+      // Sort DESC by createdAt (newest first)
+      allRecords.sort((a, b) => {
+        const timeA = new Date(a.createdAt).getTime();
+        const timeB = new Date(b.createdAt).getTime();
+        return timeB - timeA;
+      });
+
+      let filteredRecords: typeof allRecords;
 
       if (beforeDate) {
         const beforeTime = new Date(beforeDate).getTime();
-        // Filter by createdAt < beforeDate using cursor
-        const allRecords = await query.toArray();
-        const filteredRecords = allRecords
-          .filter(r => new Date(r.createdAt).getTime() < beforeTime)
-          .slice(0, limit);
-        return this.parseRecordsToMessages(filteredRecords.reverse());
+        // Filter messages older than the cursor date
+        filteredRecords = allRecords.filter(r => new Date(r.createdAt).getTime() < beforeTime);
+      } else {
+        filteredRecords = allRecords;
       }
 
-      // Take only the latest N messages
-      const latestRecords = await query.limit(limit).toArray();
-      return this.parseRecordsToMessages(latestRecords.reverse());
+      // Take only the requested window
+      const windowedRecords = filteredRecords.slice(0, limit);
+
+      // Reverse back to ASC (oldest first) for UI display
+      return this.parseRecordsToMessages(windowedRecords.reverse());
     } catch (e: unknown) {
       console.error("Vault Query Error:", e);
       return [];

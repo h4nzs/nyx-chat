@@ -440,10 +440,13 @@ export type { VaultEntry };
 export async function exportDatabaseToJson(): Promise<string> {
   const exportData: Record<string, unknown[]> = {};
 
+  // ✅ FIX: Include ALL tables from unified Dexie schema
   const tables = [
     'sessionKeys', 'groupKeys', 'preKeys', 'pendingHeaders',
     'ratchetSessions', 'skippedKeys', 'messageKeys', 'identityKeys',
-    'groupSenderStates', 'groupReceiverStates', 'groupSkippedKeys'
+    'groupSenderStates', 'groupReceiverStates', 'groupSkippedKeys',
+    // Unified vault tables (previously missing)
+    'messages', 'storyKeys', 'offlineQueue', 'kvStore'
   ];
 
   for (const tableName of tables) {
@@ -452,7 +455,7 @@ export async function exportDatabaseToJson(): Promise<string> {
          exportData[tableName] = await table.toArray();
      }
   }
-  
+
   return JSON.stringify(exportData, (key, value) => {
     if (value instanceof Uint8Array) {
       return { __type: 'Uint8Array', data: Array.from(value) };
@@ -478,12 +481,15 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
           throw new Error("Invalid vault file format.");
       }
 
+      // ✅ FIX: Include ALL tables from unified Dexie schema
       const tables = [
         'sessionKeys', 'groupKeys', 'preKeys', 'pendingHeaders',
         'ratchetSessions', 'skippedKeys', 'messageKeys', 'identityKeys',
-        'groupSenderStates', 'groupReceiverStates', 'groupSkippedKeys'
+        'groupSenderStates', 'groupReceiverStates', 'groupSkippedKeys',
+        // Unified vault tables (previously missing)
+        'messages', 'storyKeys', 'offlineQueue', 'kvStore'
       ];
-      
+
       await db.transaction('rw', tables.map(t => db.table(t)), async () => {
           for (const tableName of tables) {
               const table = db.table(tableName);
