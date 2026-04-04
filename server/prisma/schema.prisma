@@ -14,8 +14,6 @@ model User {
   usernameHash       String    @unique
   passwordHash       String
   encryptedProfile   String?   @db.Text
-  publicKey          String?   // Encryption/Identity Key
-  signingKey         String?   // Verification Key
   
   hasCompletedOnboarding Boolean @default(false)
   isVerified         Boolean   @default(false) // WebAuthn / Trust Tier status
@@ -25,59 +23,127 @@ model User {
   role               String    @default("USER") 
   bannedAt           DateTime? 
   banReason          String?   
+  lastActiveAt       DateTime  @default(now())
+  autoDestructDays   Int?
+  currentChallenge   String?
 
+  // --- RELASI MULTI-DEVICE ---
+  devices              Device[]
+
+  // --- RELASI PENGGUNA ---
   messages             Message[]
   participants         Participant[]
   messageStatuses      MessageStatus[]
   stories              Story[]
-  refreshTokens        RefreshToken[]
-  // reactions removed
-  pushSubscriptions    PushSubscription[]
   hiddenConversations  UserHiddenConversation[]
   createdConversations Conversation[]           @relation("CreatedConversations")
   authenticators       Authenticator[]
-  currentChallenge     String?
-  encryptedPrivateKey  String?    @db.Text
-
-  // Relation to the simplified pre-key bundle
-  preKeyBundle         PreKeyBundle?
-  oneTimePreKeys       OneTimePreKey[]
-  sessionKeys          SessionKey[]
-  lastActiveAt       DateTime  @default(now())
-  autoDestructDays   Int?
-
-  // Relasi Blocking
-  blockedUsers BlockedUser[] @relation("Blocker") 
-  blockedBy    BlockedUser[] @relation("Blocked") 
+  blockedUsers         BlockedUser[]            @relation("Blocker") 
+  blockedBy            BlockedUser[]            @relation("Blocked") 
 
   @@index([createdAt])
   @@index([autoDestructDays, lastActiveAt])
 }
 
+// ==========================================
+// 📱 TABEL BARU: DEVICE (PERANGKAT)
+// ==========================================
+model Device {
+  id                  String   @id @default(cuid())
+  userId              String
+  name                String?  // e.g., "Chrome on MacOS", "iPhone 15"
+  
+  // Identitas Kriptografi (Pindahan dari tabel User)
+  publicKey           String   // Encryption/Identity Key
+  signingKey          String   // Verification Key
+  encryptedPrivateKey String?  @db.Text
+  
+  createdAt           DateTime @default(now())
+  lastActiveAt        DateTime @default(now())
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Relasi Sesi & Kriptografi terikat pada Perangkat
+  preKeyBundle        PreKeyBundle?
+  oneTimePreKeys      OneTimePreKey[]
+  sessionKeys         SessionKey[]
+  refreshTokens       RefreshToken[]
+  pushSubscriptions   PushSubscription[]
+
+  @@index([userId])
+  @@index([lastActiveAt])
+}
+
 model OneTimePreKey {
   id        String   @id @default(cuid())
   keyId     Int
-  userId    String
+  deviceId  String   // Diubah dari userId
   publicKey String   @db.Text
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
-  @@unique([userId, keyId])
+  @@index([deviceId])
+  @@unique([deviceId, keyId])
 }
 
-// Simplified PreKeyBundle model
 model PreKeyBundle {
   id          Int      @id @default(autoincrement())
-  identityKey String   // User's long-term public identity key
+  identityKey String   // Device's long-term public identity key
   key         String   // The public part of the signed pre-key
   signature   String   // Signature of the 'key'
   
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId      String   @unique
+  deviceId    String   @unique // Diubah dari userId
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 }
 
+model RefreshToken {
+  id           String   @id @default(cuid())
+  jti          String   @unique
+  deviceId     String   // Sesi login diikat ke Perangkat
+  device       Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  userAgent    String?
+  ipAddress    String?
+  revokedAt    DateTime?
+  replacedById String?
+  createdAt    DateTime @default(now())
+  lastUsedAt   DateTime @updatedAt
+  expiresAt    DateTime
+
+  @@index([deviceId])
+  @@index([expiresAt])
+  @@index([jti])
+  @@index([revokedAt])
+}
+
+model SessionKey {
+  id                    String   @id @default(cuid())
+  conversationId        String
+  sessionId             String
+  deviceId              String   // Session key E2EE diikat antar perangkat
+  device                Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  isInitiator           Boolean  @default(false)
+  encryptedKey          String
+  initiatorEphemeralKey String?  
+  createdAt             DateTime @default(now())
+  expiresAt             DateTime?
+
+  @@index([conversationId, deviceId, sessionId])
+  @@unique([deviceId, sessionId])
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  deviceId  String   // Push Token Notifikasi diikat per-Perangkat
+  createdAt DateTime @default(now())
+
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  
+  @@index([deviceId])
+}
 
 model Conversation {
   id            String         @id @default(cuid())
@@ -115,16 +181,13 @@ model Participant {
   @@index([lastReadMsgId])
 }
 
-
 model Message {
   id                  String          @id @default(cuid())
   conversation        Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   conversationId      String
   sender              User            @relation(fields: [senderId], references: [id], onDelete: Cascade)
   senderId            String
-  content             String?      @db.Text
-  // File metadata removed (Blind Attachments)
-  // Reactions removed (Reactions as Messages)
+  content             String?         @db.Text
   
   sessionId           String?
   encryptedSessionKey String?
@@ -143,13 +206,11 @@ model Message {
   @@index([repliedToId])
 }
 
-
 enum DeliveryStatus {
   SENT
   DELIVERED
   READ
 }
-
 
 model MessageStatus {
   id        String          @id @default(cuid())
@@ -165,55 +226,6 @@ model MessageStatus {
   @@index([messageId])
   @@index([status])
   @@index([updatedAt])
-}
-
-// MessageReaction model removed
-
-model RefreshToken {
-  id           String   @id @default(cuid())
-  jti          String   @unique
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId       String
-  userAgent    String?
-  ipAddress    String?
-  revokedAt    DateTime?
-  replacedById String?
-  createdAt    DateTime @default(now())
-  lastUsedAt   DateTime @updatedAt
-  expiresAt    DateTime
-
-  @@index([userId])
-  @@index([expiresAt])
-  @@index([jti])
-  @@index([revokedAt])
-}
-
-
-model SessionKey {
-  id                    String   @id @default(cuid())
-  conversationId        String
-  sessionId             String
-  userId                String
-  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  isInitiator           Boolean  @default(false)
-  encryptedKey          String
-  initiatorEphemeralKey String?  // For the recipient to derive the initial shared secret
-  createdAt             DateTime @default(now())
-  expiresAt             DateTime?
-
-  @@index([conversationId, userId, sessionId])
-  @@unique([userId, sessionId])
-}
-
-model PushSubscription {
-  id        String   @id @default(cuid())
-  endpoint  String   @unique
-  p256dh    String
-  auth      String
-  userId    String
-  createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model UserHiddenConversation {
@@ -240,7 +252,6 @@ model Authenticator {
   @@index([userId])
 }
 
-// Model untuk menyimpan informasi blocking antar pengguna
 model BlockedUser {
   id        String   @id @default(cuid())
   blockerId String
@@ -250,7 +261,7 @@ model BlockedUser {
   blocker   User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
   blocked   User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
 
-  @@unique([blockerId, blockedId]) // Mencegah duplikasi (blokir orang yang sama 2x)
+  @@unique([blockerId, blockedId]) 
   @@index([blockerId])
   @@index([blockedId])
 }

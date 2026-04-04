@@ -59,6 +59,28 @@ class NyxShadowVaultProxy {
     return db.storyKeys;
   }
 
+  async exportDatabase(): Promise<string> {
+    try {
+      const messages = await db.messages.toArray();
+      return JSON.stringify({ messages });
+    } catch (e) {
+      console.error("Export DB failed:", e);
+      return "{}";
+    }
+  }
+
+  async importDatabase(jsonString: string): Promise<void> {
+    try {
+      const data = JSON.parse(jsonString);
+      if (data.messages && Array.isArray(data.messages)) {
+        await db.messages.bulkPut(data.messages);
+        console.log(`[ShadowVault] Successfully imported ${data.messages.length} messages.`);
+      }
+    } catch (e) {
+      console.error("Import DB failed:", e);
+    }
+  }
+
   async upsertMessages(messages: Message[]) {
     // Filter messages: Allow if it has content OR it is a tombstone
     const validMessages = messages.filter(m => (m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('[')) || m.isDeletedLocal || m.fileUrl || m.isBlindAttachment);

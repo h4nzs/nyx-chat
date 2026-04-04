@@ -17,7 +17,9 @@ export async function sendPushNotification (userId: string, payload: PushNotific
   }
 
   try {
-    const subscriptions = await prisma.pushSubscription.findMany({ where: { userId } })
+    const subscriptions = await prisma.pushSubscription.findMany({
+        where: { device: { userId } }
+    });
     if (subscriptions.length === 0) return
 
     let encryptedPushPayload = payload['data']?.encryptedPushPayload;

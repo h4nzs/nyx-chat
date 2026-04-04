@@ -115,6 +115,12 @@ export interface EncryptedPayload {
   nonce: string;
 }
 
+export interface AuthJwtPayload {
+  id: string;
+  role?: string;
+  deviceId?: string; // Sekarang resmi menjadi bagian dari JWT Payload aplikasi
+}
+
 export interface DoubleRatchetState {
   DHs: { publicKey: string; privateKey: string } | null;
   DHr: string | null;

@@ -29,6 +29,7 @@ import { useSettingsStore } from '@store/settings';
 import { setupBiometricUnlock } from '@lib/biometricUnlock';
 import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib/keyStorage';
 import { useMessageStore } from '@store/message';
+import { LinkedDevicesPanel } from '@components/LinkedDevicesPanel';
 import ImageCropperModal from '../components/ImageCropperModal';
 
 /* --- MICRO-COMPONENTS --- */
@@ -802,6 +803,13 @@ export default function SettingsPage() {
             </div>
             </div>
           </ControlModule>
+        </div>
+
+        {/* ========================================== */}
+        {/* ✅ FASE 5: MULTI-DEVICE MANAGEMENT SLOT */}
+        {/* ========================================== */}
+        <div className="col-span-1 md:col-span-12 lg:col-span-8">
+           <LinkedDevicesPanel />
         </div>
 
         {/* 5. DATA PORT (Sessions & Keys) */}

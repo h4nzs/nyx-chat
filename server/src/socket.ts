@@ -465,15 +465,19 @@ export function registerSocket(httpServer: HttpServer) {
     });
 
     socket.on("push:subscribe", async (data: PushSubscribePayload) => {
-      if (!data.endpoint || !data.keys?.p256dh || !data.keys?.auth) return;
+      if (!socket.user) return;
+      const authUser = socket.user as { id: string; deviceId?: string };
+      const deviceId = authUser.deviceId;
+      if (!deviceId) return;
+
       try {
         await prisma.pushSubscription.upsert({
           where: { endpoint: data.endpoint },
-          update: { p256dh: data.keys.p256dh, auth: data.keys.auth },
-          create: { endpoint: data.endpoint, p256dh: data.keys.p256dh, auth: data.keys.auth, userId },
+          update: { p256dh: data.keys.p256dh, auth: data.keys.auth, deviceId },
+          create: { endpoint: data.endpoint, p256dh: data.keys.p256dh, auth: data.keys.auth, deviceId },
         });
       } catch (error) {
-        console.error("Failed to save push subscription:", error);
+        console.error('Failed to save push subscription:', error);
       }
     });
 

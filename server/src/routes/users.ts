@@ -8,7 +8,7 @@ import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
 import { getIo } from '../socket.js'
-import type { UserId } from '@nyx/shared'
+import type { UserId, AuthJwtPayload } from '@nyx/shared'
 
 const router = Router()
 
@@ -60,6 +60,54 @@ router.get('/me/blocked', async (req, res, next) => {
     res.json(blocked.map(b => b.blocked))
   } catch (error) { next(error) }
 })
+
+router.get('/me/devices', requireAuth, async (req, res, next) => {
+  try {
+    const authUser = req.user as AuthJwtPayload;
+    
+    const devices = await prisma.device.findMany({
+      where: { userId: authUser.id },
+      orderBy: { lastActiveAt: 'desc' },
+      select: { id: true, name: true, lastActiveAt: true, createdAt: true }
+    });
+    
+    // Tandai perangkat mana yang sedang digunakan saat ini
+    const mapped = devices.map(d => ({ 
+        ...d, 
+        isCurrent: d.id === authUser.deviceId 
+    }));
+    
+    res.json(mapped);
+  } catch (e) { 
+      next(e); 
+  }
+});
+
+// DELETE: Cabut akses (Logout) perangkat tertentu dari jarak jauh
+router.delete('/me/devices/:deviceId', requireAuth, async (req, res, next) => {
+  try {
+    const authUser = req.user as AuthJwtPayload;
+    const targetDeviceId = String(req.params.deviceId);
+
+    if (targetDeviceId === authUser.deviceId) {
+       throw new ApiError(400, "Cannot revoke the current device from here. Use the Logout button instead.");
+    }
+
+    // 1. Hapus device (Cascade akan menghapus PreKeys, SessionKeys, dll)
+    await prisma.device.deleteMany({
+      where: { id: targetDeviceId, userId: authUser.id }
+    });
+
+    // 2. Hapus Refresh Token (Memutus sesi JWT perangkat tersebut secara paksa)
+    await prisma.refreshToken.deleteMany({
+        where: { deviceId: targetDeviceId }
+    });
+
+    res.json({ message: "Device access revoked successfully." });
+  } catch (e) { 
+      next(e); 
+  }
+});
 
 // UPDATE User Profile (Me)
 router.put('/me',

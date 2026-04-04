@@ -45,6 +45,14 @@ import type { Participant } from '@store/conversation';
 
 // --- Group Metadata Helpers ---
 
+interface ExtendedParticipant extends Participant {
+  user?: {
+    id: string;
+    signingKey?: string;
+    publicKey?: string;
+  };
+}
+
 export async function encryptGroupMetadata(
   metadata: { title?: string; description?: string; avatarUrl?: string },
   conversationId: string
@@ -53,15 +61,9 @@ export async function encryptGroupMetadata(
   // Encrypt as a group message
   const result = await encryptMessage(payload, conversationId, true);
   
-  // We must embed the senderId so receivers know whose key to use for decryption
   const myId = useAuthStore.getState().user?.id;
   if (!myId) throw new Error("Cannot encrypt metadata: User not authenticated");
 
-  // The result from encryptMessage for groups is already a JSON string containing header, ciphertext, signature
-  // We need to parse it to inject senderId, or wrap it.
-  // encryptMessage returns: { ciphertext: string (JSON), mk: Uint8Array } for groups
-  
-  // Let's wrap it to be safe and consistent
   const wrapper = {
     ...JSON.parse(result.ciphertext), // { header, ciphertext, signature }
     senderId: myId
@@ -182,6 +184,36 @@ export async function deleteMessageKeySecurely(messageId: string): Promise<void>
   await deleteMessageKey(messageId);
 }
 
+// --- PreKey Download Implementation ---
+
+export interface PreKeyBundle {
+  deviceId: string;
+  identityKey: string;
+  signingKey: string;
+  signedPreKey: {
+    key: string;
+    signature: string;
+  };
+  oneTimePreKey?: {
+    keyId: number;
+    key: string;
+  };
+}
+
+export const fetchPreKeyBundle = async (userId: string): Promise<PreKeyBundle[]> => {
+  try {
+      const bundles = await authFetch<PreKeyBundle[]>(`/api/keys/prekey-bundle/${userId}`);
+      
+      if (!bundles || !Array.isArray(bundles) || bundles.length === 0) {
+           throw new Error(`No pre-key bundles found for user ${userId}`);
+      }
+      return bundles;
+  } catch (error) {
+      console.error(`Failed to fetch pre-key bundles for ${userId}:`, error);
+      throw error;
+  }
+};
+
 export async function checkAndRefillOneTimePreKeys(): Promise<void> {
   try {
     const { count } = await authFetch<{ count: number }>('/api/keys/count-otpk');
@@ -285,19 +317,6 @@ export type DecryptResult =
   | { status: 'success'; value: string }
   | { status: 'pending'; reason: string }
   | { status: 'error'; error: Error };
-
-export type PreKeyBundle = {
-  identityKey: string;
-  signingKey: string;
-  signedPreKey: {
-    key: string;
-    signature: string;
-  };
-  oneTimePreKey?: {
-    keyId: number;
-    key: string;
-  };
-};
 
 // --- Module-level state for managing key requests ---
 const pendingGroupKeyRequests = new Map<string, { timerId: number }>();
@@ -438,6 +457,7 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
 
 // --- Group Key Management & Recovery ---
 
+// ✅ FASE 3: FAN-OUT GROUP SESSION BUILDER
 export async function ensureGroupSession(conversationId: string, participants: Participant[], forceRotate: boolean = false): Promise<Record<string, unknown>[] | null> {
   const pending = pendingGroupSessionPromises.get(conversationId);
   if (pending) return pending;
@@ -457,7 +477,6 @@ export async function ensureGroupSession(conversationId: string, participants: P
 
   const promise = (async () => {
     try {
-      // PHASE 2: Sender Key Protocol
       if (forceRotate) {
           const { deleteGroupSenderState } = await import('@lib/keychainDb');
           await deleteGroupSenderState(conversationId);
@@ -469,37 +488,50 @@ export async function ensureGroupSession(conversationId: string, participants: P
 
       const sodium = await getSodiumLib();
       const { groupInitSenderKey, worker_crypto_box_seal } = await getWorkerProxy();
+      const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
+      const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       // 1. Generate NEW Sender Key (Chain Key)
       const { senderKeyB64 } = await groupInitSenderKey();
 
       const myId = useAuthStore.getState().user?.id;
-      const otherParticipants = participants.filter(p => p.id !== myId);
+      const distributionKeys: Record<string, unknown>[] = [];
       const missingKeys: string[] = [];
 
-      // 2. Encrypt Sender Key for EACH participant (Fan-out)
-      const distributionKeys = await Promise.all(
-        otherParticipants.map(async (p) => {
-          if (!p.publicKey) {
-            missingKeys.push(p.id);
-            return null;
-          }
-          const theirPublicKey = sodium.from_base64(p.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-          const encryptedKey = await worker_crypto_box_seal(
-              sodium.from_base64(senderKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING), 
-              theirPublicKey
-          );
+      // 2. ✅ FAN-OUT (Looping Nested): Untuk setiap Partisipan, enkripsi ke setiap Perangkatnya
+      for (const p of participants) {
+          // Gunakan tipe ketat (ExtendedParticipant)
+          const extP = p as ExtendedParticipant;
+          const uId = extP.userId || extP.user?.id || extP.id;
           
-          return {
-            userId: p.id,
-            key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-            type: 'GROUP_KEY'
-          };
-        })
-      );
+          if (!uId) continue;
+          
+          try {
+              const bundles = await fetchPreKeyBundle(uId);
+              
+              for (const bundle of bundles) {
+                  // Bypass pengenkripsian ke perangkat yang sedang kita gunakan saat ini
+                  if (uId === myId && bundle.identityKey === myIdentityKeyB64) {
+                      continue;
+                  }
 
-      if (missingKeys.length > 0) {
-          throw new Error(`Cannot initialize group session. Missing public keys for participants: ${missingKeys.join(', ')}`);
+                  const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  const encryptedKey = await worker_crypto_box_seal(
+                      sodium.from_base64(senderKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING), 
+                      theirPublicKey
+                  );
+                  
+                  distributionKeys.push({
+                      userId: uId,
+                      targetDeviceId: bundle.deviceId, 
+                      key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+                      type: 'GROUP_KEY'
+                  });
+              }
+          } catch (e) {
+              console.warn(`Missing or failed keys for user ${uId}`, e);
+              missingKeys.push(uId);
+          }
       }
 
       // 3. Save Initial Sender State ONLY after successful encryption fan-out
@@ -509,7 +541,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
           N: 0
       });
 
-      return distributionKeys.filter(Boolean) as Record<string, unknown>[];
+      return distributionKeys.filter(Boolean);
     } finally {
       groupSessionLocks.delete(conversationId);
     }
@@ -693,17 +725,19 @@ async function doEncryptMessage(
         N: result.state.N
     });
     
-    // Construct Payload
+    const myId = useAuthStore.getState().user?.id;
+    // ✅ FIX: Menyisipkan senderId langsung ke dalam cipher agar Decryptor bisa Auto-Detect
     const payload = JSON.stringify({
         header: result.header,
         ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
-        signature: result.signature
+        signature: result.signature,
+        senderId: myId 
     });
     
     return { ciphertext: payload, mk: result.mk };
     
   } else {
-    // DOUBLE RATCHET
+    // DOUBLE RATCHET (Legacy Fallback)
     const state = await retrieveRatchetStateSecurely(conversationId);
     if (!state) throw new Error('Ratchet state not initialized for encryption.');
 
@@ -785,8 +819,13 @@ async function doDecryptMessage(
       }
   }
 
-  if (isGroup) {
-    const senderId = sessionId; 
+  // ✅ FASE 3: Deteksi Otomatis apakah ini pesan Sender Key Fan-Out atau Double Ratchet Klasik
+  let payloadObj;
+  try { payloadObj = JSON.parse(cipher); } catch {}
+  const isSenderKeyProtocol = payloadObj && payloadObj.signature !== undefined && payloadObj.header !== undefined;
+
+  if (isSenderKeyProtocol || isGroup) {
+    const senderId = (payloadObj && payloadObj.senderId) ? payloadObj.senderId : sessionId; 
     
     if (!senderId) return { status: 'error', error: new Error('Missing senderId for group decryption') };
     
@@ -802,8 +841,8 @@ async function doDecryptMessage(
         
         // --- Resolve Sender Signing Key First ---
         const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-        const sender = conversation?.participants.find(p => p.id === senderId);
-        const keyToUse = sender?.signingKey;
+        const sender = conversation?.participants.find(p => p.id === senderId || p.userId === senderId) as ExtendedParticipant | undefined;
+        const keyToUse = sender?.signingKey || sender?.user?.signingKey;
         
         if (!keyToUse) {
              return { status: 'error', error: new Error('Missing sender signing key') };
@@ -1149,15 +1188,16 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
       pendingGroupKeyRequests.delete(conversationId);
     }
     
-    // Use the NEW handler for Sender Key
-    await handleGroupKeyDistribution(conversationId, encryptedKey, senderId);
+    try {
+        await handleGroupKeyDistribution(conversationId, encryptedKey, senderId);
+        import('@store/message').then(({ useMessageStore }) => {
+            useMessageStore.getState().reDecryptPendingMessages(conversationId);
+        });
+    } catch (e) {
+        // FASE 3: Jika Sealed Box ini ditujukan untuk perangkat kita yang lain, abaikan secara diam-diam.
+    }
 
-    // Trigger reprocessing of pending messages
-    import('@store/message').then(({ useMessageStore }) => {
-        useMessageStore.getState().reDecryptPendingMessages(conversationId);
-    });
-
-    } else if (sessionId) {    let newSessionKey: Uint8Array | undefined;
+  } else if (sessionId) {    let newSessionKey: Uint8Array | undefined;
 
     if (encryptedKey.startsWith('{') && encryptedKey.includes('"x3dh":true')) {
         try {
@@ -1229,10 +1269,7 @@ export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; ke
   return { encryptedBlob, key: keyB64 };
 }
 
-// ✅ OPTIMASI: Varian Asinkron murni untuk File Besar (Digunakan oleh MessageInput.ts)
 export async function encryptFileViaWorker(blob: Blob): Promise<{ encryptedBlob: Blob; key: string }> {
-  // Membaca file sebagai chunk stream (jika browser mendukung) atau ArrayBuffer asinkron
-  // agar tidak memblokir Main Thread React sebelum dikirim ke Worker
   const fileData = await new Promise<ArrayBuffer>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as ArrayBuffer);
@@ -1245,7 +1282,6 @@ export async function encryptFileViaWorker(blob: Blob): Promise<{ encryptedBlob:
   
   const { encryptedData, iv, key } = await worker_file_encrypt(fileData);
 
-  // Re-assemble di luar worker
   const combined = new Uint8Array(iv.length + encryptedData.byteLength);
   combined.set(iv);
   combined.set(new Uint8Array(encryptedData), iv.length);

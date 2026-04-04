@@ -1,7 +1,7 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
-import { Router, Response, CookieOptions } from 'express'
+import { Router, Response, CookieOptions, Request } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { hashPassword, verifyPassword } from '../utils/password.js'
 import { ApiError } from '../utils/errors.js'
@@ -22,63 +22,40 @@ import {
 import { isoBase64URL } from '@simplewebauthn/server/helpers'
 import { Buffer } from 'buffer'
 import { redisClient } from '../lib/redis.js'
+// ✅ FIX: Import tipe JWT Payload dari shared
+import type { AuthJwtPayload } from '@nyx/shared'
 
 const router: Router = Router()
 
 const rpName = 'NYX'
 const getRpID = () => {
-  try {
-    return env.nodeEnv === 'production' ? 'nyx-app.my.id' : 'localhost'
-  } catch (_e) {
-    return 'localhost'
-  }
+  try { return env.nodeEnv === 'production' ? 'nyx-app.my.id' : 'localhost' } catch (_e) { return 'localhost' }
 }
 const rpID = getRpID()
 const expectedOrigin = env.corsOrigin || 'https://nyx-app.my.id'
 
 function setAuthCookies (res: Response, { access, refresh }: { access: string; refresh: string }) {
   const isProd = env.nodeEnv === 'production'
-
-  const cookieOptions: CookieOptions = {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    path: '/'
-  }
-
-  res.cookie('at', access, {
-    ...cookieOptions,
-    maxAge: 1000 * 60 * 15 // 15 mins
-  })
-
-  res.cookie('rt', refresh, {
-    ...cookieOptions,
-    maxAge: 1000 * 60 * 60 * 24 * 30 // 30 days
-  })
+  const cookieOptions: CookieOptions = { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax', path: '/' }
+  res.cookie('at', access, { ...cookieOptions, maxAge: 1000 * 60 * 15 })
+  res.cookie('rt', refresh, { ...cookieOptions, maxAge: 1000 * 60 * 60 * 24 * 30 })
 }
 
-import { Request } from 'express'
-
-async function issueTokens (user: { id: string, role?: string }, req: Request) {
-  // PURE ANONYMITY: Only store ID and Role in JWT. No Email/Username.
-  const access = signAccessToken({ 
-    id: user.id, 
-    role: user.role 
-  })
+async function issueTokens (user: { id: string, role?: string }, deviceId: string, req: Request) {
+  const access = signAccessToken({ id: user.id, role: user.role, deviceId })
   const jti = newJti()
-  const refresh = signAccessToken({ sub: user.id, jti }, { expiresIn: '30d' })
+  const refresh = signAccessToken({ sub: user.id, jti, deviceId }, { expiresIn: '30d' })
 
   const rawIp = req.ip || '';
   const ipAddress = crypto.createHash('sha256').update(rawIp).digest('hex').substring(0, 16);
   const userAgent = req.headers['user-agent']
 
   await prisma.refreshToken.create({
-    data: { jti, userId: user.id, expiresAt: refreshExpiryDate(), ipAddress, userAgent }
+    data: { jti, deviceId, expiresAt: refreshExpiryDate(), ipAddress, userAgent }
   })
   return { access, refresh }
 }
 
-// Helper Turnstile
 async function verifyTurnstileToken (token: string): Promise<boolean> {
   if (env.nodeEnv !== 'production' && !process.env.TURNSTILE_SECRET_KEY) return true
   if (!token) return false
@@ -88,71 +65,63 @@ async function verifyTurnstileToken (token: string): Promise<boolean> {
   formData.append('response', token)
 
   try {
-    const result = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-      method: 'POST',
-      body: formData
-    })
-    const outcome = await result.json()
+    const result = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: formData })
+    const outcome = await result.json() as { success: boolean }
     return outcome.success
   } catch (e) {
-    console.error('Turnstile error:', e)
     return false
   }
 }
 
-// === ANONYMOUS AUTH ROUTES ===
-
 router.post('/register', authLimiter, zodValidate({
   body: z.object({
-    usernameHash: z.string().min(10), // Blind Index
+    usernameHash: z.string().min(10),
     password: z.string().min(8).max(128),
     encryptedProfile: z.string().optional(),
     publicKey: z.string().optional(),
     signingKey: z.string().optional(),
     encryptedPrivateKeys: z.string().optional(),
+    deviceName: z.string().optional(),
     turnstileToken: z.string().optional()
   })
 }),
 async (req, res, next) => {
   try {
-    const { usernameHash, password, encryptedProfile, publicKey, signingKey, encryptedPrivateKeys, turnstileToken } = req.body
+    const { usernameHash, password, encryptedProfile, publicKey, signingKey, encryptedPrivateKeys, deviceName, turnstileToken } = req.body
 
-    // 1. Verifikasi Captcha
     const isHuman = await verifyTurnstileToken(turnstileToken || '')
     if (!isHuman) throw new ApiError(400, 'Bot detected. Please try again.')
 
-    // 2. Cek Duplikat (Hash Collision Check)
-    const existingUser = await prisma.user.findUnique({
-      where: { usernameHash }
-    })
+    const existingUser = await prisma.user.findUnique({ where: { usernameHash } })
     if (existingUser) throw new ApiError(409, 'Username already taken (Hash Collision).')
 
-    // 3. Buat User (Verified: False = Sandbox)
     const passwordHash = await hashPassword(password)
+    
     const user = await prisma.user.create({
       data: {
         usernameHash,
         passwordHash,
         encryptedProfile,
-        publicKey,
-        signingKey,
-        encryptedPrivateKey: encryptedPrivateKeys,
-        isVerified: false // Sandbox mode by default
-      }
+        isVerified: false,
+        devices: {
+          create: {
+            publicKey: publicKey || '',
+            signingKey: signingKey || '',
+            encryptedPrivateKey: encryptedPrivateKeys,
+            name: deviceName || 'Primary Device'
+          }
+        }
+      },
+      include: { devices: true }
     })
 
-    // 4. Issue Tokens Immediately (No OTP)
-    const tokens = await issueTokens(user, req)
+    const deviceId = user.devices[0].id
+    const tokens = await issueTokens(user, deviceId, req)
     setAuthCookies(res, tokens)
 
     res.status(201).json({
       message: 'Registration successful.',
-      user: {
-        id: user.id,
-        usernameHash: user.usernameHash,
-        encryptedProfile: user.encryptedProfile,
-        isVerified: user.isVerified
-      },
+      user: { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified },
       accessToken: tokens.access,
       needVerification: false
     })
@@ -165,54 +134,62 @@ async (req, res, next) => {
 })
 
 router.post('/login', authLimiter, zodValidate({
-  body: z.object({ usernameHash: z.string().min(10), password: z.string().min(8) })
+  body: z.object({ 
+    usernameHash: z.string().min(10), 
+    password: z.string().min(8),
+    publicKey: z.string().optional(),
+    signingKey: z.string().optional(),
+    encryptedPrivateKey: z.string().optional(),
+    deviceName: z.string().optional()
+  })
 }),
 async (req, res, next) => {
   try {
-    const { usernameHash, password } = req.body
+    const { usernameHash, password, publicKey, signingKey, encryptedPrivateKey, deviceName } = req.body
     
     const user = await prisma.user.findUnique({
       where: { usernameHash },
-      select: {
-        id: true,
-        usernameHash: true,
-        encryptedProfile: true,
-        isVerified: true,
-        passwordHash: true,
-        encryptedPrivateKey: true,
-        role: true,
-        bannedAt: true,
-        banReason: true
+      include: {
+        devices: { orderBy: { lastActiveAt: 'desc' } }
       }
     })
 
     if (!user) throw new ApiError(401, 'Invalid credentials')
-    
-    if (user.bannedAt) {
-      return res.status(403).json({ 
-        error: 'ACCESS DENIED: Your account has been suspended.',
-        reason: user.banReason 
-      })
-    }
+    if (user.bannedAt) return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.', reason: user.banReason })
 
     const ok = await verifyPassword(password, user.passwordHash)
     if (!ok) throw new ApiError(401, 'Invalid credentials')
 
-    const safeUser = {
-        id: user.id,
-        usernameHash: user.usernameHash,
-        encryptedProfile: user.encryptedProfile,
-        isVerified: user.isVerified,
-        role: user.role
+    let activeDeviceId = '';
+    let activeEncryptedPrivateKey = '';
+
+    if (publicKey && signingKey && encryptedPrivateKey) {
+      const newDevice = await prisma.device.create({
+        data: {
+          userId: user.id,
+          publicKey,
+          signingKey,
+          encryptedPrivateKey,
+          name: deviceName || 'New Device'
+        }
+      });
+      activeDeviceId = newDevice.id;
+      activeEncryptedPrivateKey = newDevice.encryptedPrivateKey!;
+    } else {
+      if (user.devices.length === 0) throw new ApiError(404, 'No device found. Please recover your account.');
+      activeDeviceId = user.devices[0].id;
+      activeEncryptedPrivateKey = user.devices[0].encryptedPrivateKey!;
     }
 
-    const tokens = await issueTokens(safeUser, req)
+    const safeUser = { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, role: user.role }
+
+    const tokens = await issueTokens(safeUser, activeDeviceId, req)
     setAuthCookies(res, tokens)
 
     res.json({ 
       user: safeUser, 
       accessToken: tokens.access,
-      encryptedPrivateKey: user.encryptedPrivateKey 
+      encryptedPrivateKey: activeEncryptedPrivateKey 
     })
   } catch (e) {
     next(e)
@@ -223,188 +200,141 @@ router.post('/refresh', async (req, res, next) => {
   try {
     const token = req.cookies?.rt
     if (!token) throw new ApiError(401, 'No refresh token')
-    const payload = verifyJwt(token)
-    if (typeof payload === 'string' || !payload?.jti || !payload?.sub) {
+    const payload = verifyJwt(token) as { jti?: string; sub?: string; deviceId?: string } | string | null;
+    if (typeof payload === 'string' || !payload?.jti || !payload?.sub || !payload?.deviceId) {
       const isProd = env.nodeEnv === 'production'
-      const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
-      res.clearCookie('at', cookieOpts)
-      res.clearCookie('rt', cookieOpts)
+      res.clearCookie('at', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
+      res.clearCookie('rt', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
       throw new ApiError(401, 'Invalid refresh token')
     }
 
     const stored = await prisma.refreshToken.findUnique({ where: { jti: payload.jti } })
     if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
       const isProd = env.nodeEnv === 'production'
-      const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
-      res.clearCookie('at', cookieOpts)
-      res.clearCookie('rt', cookieOpts)
+      res.clearCookie('at', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
+      res.clearCookie('rt', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
       throw new ApiError(401, 'Refresh token expired/revoked')
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: {
-        id: true,
-        usernameHash: true,
-        encryptedProfile: true,
-        isVerified: true,
-        role: true,
-        bannedAt: true,
-        banReason: true
-      }
-    })
+    const user = await prisma.user.findUnique({ where: { id: payload.sub } })
     if (!user) throw new ApiError(401, 'User not found')
-
-    if (user.bannedAt) {
-      throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
-    }
+    if (user.bannedAt) throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
 
     await prisma.refreshToken.deleteMany({ where: { jti: payload.jti } });
 
-    const tokens = await issueTokens(user, req)
+    const tokens = await issueTokens(user, stored.deviceId, req)
     setAuthCookies(res, tokens)
     res.json({ ok: true, accessToken: tokens.access })
   } catch (e) {
-    console.error('Refresh token error:', e)
     next(e)
   }
 })
 
-// === ZERO-KNOWLEDGE ACCOUNT RECOVERY ===
 router.get('/recover/challenge', authLimiter, async (req, res, next) => {
   try {
     const { identifier } = req.query;
-    if (!identifier || typeof identifier !== 'string') {
-      throw new ApiError(400, "Identifier is required.");
-    }
+    if (!identifier || typeof identifier !== 'string') throw new ApiError(400, "Identifier is required.");
     const nonce = crypto.randomBytes(32).toString('hex');
-    await redisClient.setEx(`recover_nonce:${identifier}`, 300, nonce); // 5 mins expiry
+    await redisClient.setEx(`recover_nonce:${identifier}`, 300, nonce);
     res.json({ nonce });
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 });
 
 router.post('/recover', authLimiter, zodValidate({
   body: z.object({
-    identifier: z.string().min(10), // usernameHash
+    identifier: z.string().min(10),
     newPassword: z.string().min(8),
     newEncryptedKeys: z.string(),
+    publicKey: z.string().optional(),
+    signingKey: z.string().optional(),
     signature: z.string(),
     timestamp: z.number(),
     nonce: z.string()
   })
 }), async (req, res, next) => {
   try {
-    const { identifier: usernameHash, newPassword, newEncryptedKeys, signature, timestamp, nonce } = req.body;
+    const { identifier: usernameHash, newPassword, newEncryptedKeys, publicKey, signingKey, signature, timestamp, nonce } = req.body;
 
     const now = Date.now();
-    if (Math.abs(now - timestamp) > 5 * 60 * 1000) {
-       throw new ApiError(400, "Recovery request expired.");
-    }
+    if (Math.abs(now - timestamp) > 5 * 60 * 1000) throw new ApiError(400, "Recovery request expired.");
 
-    // Verify and consume server-side nonce
     const cachedNonce = await redisClient.get(`recover_nonce:${usernameHash}`);
-    if (!cachedNonce || cachedNonce !== nonce) {
-       throw new ApiError(401, "Invalid or expired recovery challenge. Please try again.");
-    }
-    await redisClient.del(`recover_nonce:${usernameHash}`); // One-time use replay protection
+    if (!cachedNonce || cachedNonce !== nonce) throw new ApiError(401, "Invalid or expired recovery challenge.");
+    await redisClient.del(`recover_nonce:${usernameHash}`);
 
-    // Match by Hash
-    const user = await prisma.user.findUnique({
-      where: { usernameHash }
-    });
-    if (!user || !user.signingKey) throw new ApiError(404, "User not found or invalid keys.");
+    const user = await prisma.user.findUnique({ where: { usernameHash }, include: { devices: true } });
+    if (!user || user.devices.length === 0) throw new ApiError(404, "User not found or invalid keys.");
+
+    const oldSigningKey = user.devices[0].signingKey;
 
     const { getSodium } = await import('../lib/sodium.js');
     const sodium = await getSodium();
-    
-    // Canonicalize and concatenate full recovery payload
     const messageString = `${usernameHash}:${timestamp}:${nonce}:${newPassword}:${newEncryptedKeys}`;
     const messageBytes = Buffer.from(messageString, 'utf-8');
     const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
-    const publicKeyBytes = sodium.from_base64(user.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    const publicKeyBytes = sodium.from_base64(oldSigningKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
     const isValid = sodium.crypto_sign_verify_detached(signatureBytes, messageBytes, publicKeyBytes);
-    if (!isValid) {
-       throw new ApiError(401, "Cryptographic signature verification failed.");
-    }
+    if (!isValid) throw new ApiError(401, "Cryptographic signature verification failed.");
 
     const passwordHash = await hashPassword(newPassword);
 
-    const [updatedUser] = await prisma.$transaction([
-        prisma.user.update({
-          where: { id: user.id },
+    const [updatedUser, newDevice] = await prisma.$transaction([
+        prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
+        prisma.device.create({
           data: {
-            passwordHash,
-            encryptedPrivateKey: newEncryptedKeys
+            userId: user.id,
+            publicKey: publicKey || '',
+            signingKey: signingKey || '',
+            encryptedPrivateKey: newEncryptedKeys,
+            name: 'Recovered Device'
           }
         }),
-        prisma.refreshToken.deleteMany({ where: { userId: user.id } }),
+        prisma.device.deleteMany({ where: { userId: user.id } }), 
         prisma.authenticator.deleteMany({ where: { userId: user.id } })
     ]);
 
-    const tokens = await issueTokens(updatedUser, req);    setAuthCookies(res, tokens);
-
+    const tokens = await issueTokens(updatedUser, newDevice.id, req);    
+    setAuthCookies(res, tokens);
     res.json({ message: "Account recovered successfully.", accessToken: tokens.access });
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 });
 
 router.post('/logout-all', requireAuth, async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Unauthorized');
+    const userDevices = await prisma.device.findMany({ where: { userId: req.user.id }, select: { id: true } });
+    const deviceIds = userDevices.map(d => d.id);
     
-    // Nuke all sessions from DB
-    await prisma.refreshToken.deleteMany({
-      where: { userId: req.user.id }
-    });
+    await prisma.refreshToken.deleteMany({ where: { deviceId: { in: deviceIds } } });
     
-    // Clear cookies
     const isProd = env.nodeEnv === 'production'
-    const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
-    res.clearCookie('at', cookieOpts)
-    res.clearCookie('rt', cookieOpts)
-    
+    res.clearCookie('at', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
+    res.clearCookie('rt', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
     res.json({ message: "All sessions terminated." });
-  } catch (e) {
-    next(e);
-  }
+  } catch (e) { next(e); }
 });
 
 router.post('/logout', async (req, res) => {
   const { endpoint } = req.body
   if (endpoint) {
-    try {
-      await prisma.pushSubscription.deleteMany({ where: { endpoint } })
-    } catch (_e) {}
+    try { await prisma.pushSubscription.deleteMany({ where: { endpoint } }) } catch (_e) {}
   }
   try {
-    // CodeQL Fix: Do not branch on user-controlled data directly.
-    const payload = verifyJwt(String(req.cookies?.rt || ''))
+    const payload = verifyJwt(String(req.cookies?.rt || '')) as { jti?: string };
     if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
       await prisma.refreshToken.updateMany({ where: { jti: payload.jti }, data: { revokedAt: new Date() } })
     }
-  } catch (_e) {
-    // Ignore invalid token safely
-  }
+  } catch (_e) {}
   const isProd = env.nodeEnv === 'production'
-  const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
-  res.clearCookie('at', cookieOpts)
-  res.clearCookie('rt', cookieOpts)
+  res.clearCookie('at', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
+  res.clearCookie('rt', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
   res.json({ ok: true })
 })
-
-// === WEBAUTHN ROUTES ===
-
-// === PROOF OF WORK (PoW) ROUTES ===
 
 router.get('/pow/challenge', requireAuth, async (req, res, next) => {
   try {
     const salt = crypto.randomBytes(16).toString('hex');
-
-    // Dynamic Difficulty based on IP usage (anti-farm)
     const ip = req.ip || req.socket.remoteAddress;
     const userId = req.user?.id;
     
@@ -413,24 +343,15 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
     }
     
     const rateKey = ip ? `pow:ip_count:${ip}` : `pow:user_count:${userId}`;
-
-    // Get how many times this IP/User has requested PoW recently
     let count = await redisClient.incr(rateKey);
 
     if (count === 1) {
-        // If it's the first time (INCR returns 1), set the TTL to 24 hours
         await redisClient.expire(rateKey, 86400);
     } else if (Number.isNaN(count) || count < 0) {
-        // Fallback for corrupted redis types
         count = 0;
     }
 
-    // Base difficulty is 4 (e.g., '0000'). 
-    // Increase difficulty by 1 for every 2 requests from the same IP/User within a 24-hour window.
-    // Cap it at a reasonable maximum (e.g., 6, which is significantly harder and takes minutes)
     const difficulty = Math.min(4 + Math.floor(count / 2), 6);
-
-    // Store challenge in Redis (5 mins expiry)
     await redisClient.setEx(`pow:challenge:${req.user!.id}`, 300, JSON.stringify({ salt, difficulty }));
 
     res.json({ salt, difficulty });
@@ -438,6 +359,7 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
     next(e);
   }
 });
+
 router.post('/pow/verify', 
   requireAuth, 
   zodValidate({
@@ -454,20 +376,14 @@ router.post('/pow/verify',
       }
       
       const { salt, difficulty } = JSON.parse(challengeData as string);
-      
-      // Verify Hash: SHA256(salt + nonce)
       const hash = crypto.createHash('sha256').update(salt + nonce.toString()).digest('hex');
       
       if (hash.startsWith('0'.repeat(difficulty))) {
-          // Valid PoW!
           await redisClient.del(`pow:challenge:${userId}`);
-          
-          // Upgrade User
           await prisma.user.update({
               where: { id: userId },
               data: { isVerified: true }
           });
-          
           res.json({ success: true, message: 'Account verified via Proof of Work' });
       } else {
           throw new ApiError(400, 'Invalid Proof of Work. Hash does not meet difficulty target.');
@@ -487,9 +403,6 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) => 
     })
 
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
-    
-    // If force=true (e.g. upgrading to PRF or re-registering), don't exclude existing creds.
-    // This allows creating a NEW credential on the same device.
     const forceNew = req.query.force === 'true';
     
     type GenOpts = Parameters<typeof generateRegistrationOptions>[0];
@@ -565,9 +478,7 @@ router.post('/webauthn/register/verify', requireAuth, async (req, res, next) => 
         }
       })
 
-      // Upgrade Trust Tier to Verified (VIP)
       await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: null, isVerified: true } })
-
       res.json({ verified: true })
     } else {
       res.status(400).json({ verified: false, error: 'Verification failed' })
@@ -631,25 +542,28 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
           usernameHash: true,
           encryptedProfile: true,
           isVerified: true,
-          encryptedPrivateKey: true,
           role: true,
           bannedAt: true,
-          banReason: true
+          banReason: true,
+          devices: { orderBy: { lastActiveAt: 'desc' }, take: 1 }
         }
       })
 
       if (!safeUser) throw new ApiError(404, 'User not found')
       if (safeUser.bannedAt) return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.', reason: safeUser.banReason })
 
-      const tokens = await issueTokens(safeUser, req)
+      const activeDeviceId = safeUser.devices[0]?.id;
+      if (!activeDeviceId) throw new ApiError(404, 'No device found for this account.');
+
+      const tokens = await issueTokens({ id: safeUser.id, role: safeUser.role }, activeDeviceId, req)
       setAuthCookies(res, tokens)
       res.clearCookie('webauthn_challenge')
 
       res.json({ 
         verified: true, 
-        user: safeUser, 
+        user: { id: safeUser.id, usernameHash: safeUser.usernameHash, encryptedProfile: safeUser.encryptedProfile, isVerified: safeUser.isVerified, role: safeUser.role }, 
         accessToken: tokens.access,
-        encryptedPrivateKey: safeUser.encryptedPrivateKey 
+        encryptedPrivateKey: safeUser.devices[0]?.encryptedPrivateKey 
       })
     } else {
       res.status(400).json({ verified: false })

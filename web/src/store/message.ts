@@ -467,7 +467,7 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
   return null;
 }
 
-function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string, storyId?: string, targetMessageId?: string, emoji?: string } | null {
+function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string, storyId?: string, targetMessageId?: string, emoji?: string, url?: string } | null {
   if (!content) return null;
   try {
     let trimmed = content.trim();
@@ -490,6 +490,9 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
       return payload;
     }
     if (payload.type === 'STORY_KEY') {
+      return payload;
+    }
+    if (payload.type === 'HISTORY_SYNC' && payload.url && payload.key) {
       return payload;
     }
     // Tambahan untuk E2EE Unsend & Cabut Reaksi
@@ -725,6 +728,7 @@ type Actions = {
   toggleMessageSelection: (id: string) => void;
   clearMessageSelection: () => void;
   repairSecureSession: (conversationId: string, isGroup: boolean, isAuto?: boolean) => Promise<void>;
+  broadcastHistorySync: (selfConversationId: string) => Promise<void>;
 };
 
 let tempIdCounter = 0;
@@ -777,6 +781,61 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     } catch (error) {
       console.error("Failed to repair session:", error);
       if (!isAuto) toast.error("Failed to repair session.");
+    }
+  },
+
+  broadcastHistorySync: async (selfConversationId) => {
+    const { user } = useAuthStore.getState();
+    if (!user) return;
+    
+    const toastId = toast.loading('Preparing history sync for your linked devices...');
+    try {
+        const { shadowVault } = await import('@lib/shadowVaultDb');
+        const jsonStr = await shadowVault.exportDatabase();
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        
+        // Enkripsi JSON dengan kunci simetris rahasia
+        const { encryptFileViaWorker } = await import('@utils/crypto');
+        const { encryptedBlob, key } = await encryptFileViaWorker(blob);
+        
+        const { api } = await import('@lib/api');
+        const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
+            method: 'POST',
+            body: JSON.stringify({
+                fileName: `sync_${Date.now()}.enc`, 
+                fileType: 'application/octet-stream', 
+                folder: 'sync',
+                fileSize: encryptedBlob.size 
+            })
+        });
+
+        // Unggah ke Cloudflare R2
+        await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', presignedRes.uploadUrl, true);
+            xhr.setRequestHeader('Content-Type', 'application/octet-stream'); 
+            xhr.onload = () => { if (xhr.status === 200) resolve(); else reject(new Error('Upload failed')); };
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.send(encryptedBlob);
+        });
+
+        const payload = {
+            type: 'HISTORY_SYNC',
+            url: presignedRes.publicUrl,
+            key: key
+        };
+        
+        // Kirim E2EE payload ini ke "Self-Chat" (Pesan Tersimpan)
+        // Fan-Out Sender Key akan secara otomatis mendistribusikannya ke SEMUA perangkat Anda!
+        await get().sendMessage(selfConversationId, {
+            content: JSON.stringify(payload),
+            isSilent: true
+        });
+        
+        toast.success('History securely synced to your linked devices!', { id: toastId });
+    } catch (e) {
+        console.error(e);
+        toast.error('Failed to sync history.', { id: toastId });
     }
   },
 
@@ -906,27 +965,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
     if (!conversation) {
-      console.error(`[SendMessage] Conversation NOT FOUND: ${conversationId}`);
       toast.error("Conversation not found.");
       return;
     }
-    const isGroup = conversation.isGroup;
     const forceRotate = conversation.requiresKeyRotation === true;
 
-    if (isGroup && useConnectionStore.getState().status === 'connected') {
+    // ✅ FASE 3: Selalu gunakan protokol Fan-Out Sender Key untuk SEMUA tipe percakapan (termasuk 1-on-1)
+    if (useConnectionStore.getState().status === 'connected') {
       try {
-        // Pass forceRotate if we suspect new members or requested by another peer
         const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, forceRotate);
         if (distributionKeys && distributionKeys.length > 0) {
-          emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+          emitGroupKeyDistribution(conversationId, distributionKeys as any[]);
           if (forceRotate) {
               useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
           }
-          // Wait a tiny bit to ensure the socket emits the keys before the actual message
           await new Promise(r => setTimeout(r, 300)); 
         }
       } catch (e) {
-        console.error("Failed to ensure group session", e);
+        console.error("Failed to ensure session", e);
       }
     }
 
@@ -1016,7 +1072,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       let ciphertext = '';
       let x3dhHeader: Record<string, unknown> | null = null;
 
-      if (!isGroup && data.content) {
+      if (!conversation.isGroup && data.content) {
           const state = await retrieveRatchetStateSecurely(conversationId);
           if (!state) {
              const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
@@ -1070,7 +1126,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             console.error("Failed to inject profile key", e);
         }
 
-        const result = await encryptMessage(contentToEncrypt, conversationId, isGroup, undefined, `temp_${actualTempId}`);
+        const result = await encryptMessage(contentToEncrypt, conversationId, true, undefined, `temp_${actualTempId}`);
         ciphertext = result.ciphertext;
         
         // [FIX PERSISTENCE] Store MK for ALL chats (Group + 1on1)
@@ -1081,7 +1137,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
              );
         }
         
-        if (!isGroup && result.drHeader) {
+        if (!conversation.isGroup && result.drHeader) {
             ciphertext = JSON.stringify({
                 dr: result.drHeader,
                 ciphertext: ciphertext
@@ -1623,7 +1679,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           }));
       }
     } catch (e) {
-      console.error("[Local Vault] Gagal memuat dari IndexedDB:", e);
+      console.error("[Local Vault] Failed to load messages from IndexedDB:", e);
     }
 
     // 2. SINKRONISASI BACKGROUND: Cek apakah ada surat tertunda di server
@@ -1937,6 +1993,38 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               cleanUpOptimisticBubble(); // ✅ Bersihkan
               console.log(`[Ghost Sync] Received sync from ${decrypted.senderId}. Settle ratchet state silently.`);
               return decrypted; 
+          }
+
+          if (silentPayload.type === 'HISTORY_SYNC' && silentPayload.url && silentPayload.key) {
+              cleanUpOptimisticBubble();
+              console.log(`[History Sync] Received payload from ${decrypted.senderId}. Downloading...`);
+              
+              // Proses secara asinkron agar tidak membuat UI "freeze"
+              setTimeout(async () => {
+                  try {
+                      const { decryptFile } = await import('@utils/crypto');
+                      const res = await fetch(silentPayload.url!);
+                      const blob = await res.blob();
+                      
+                      const decryptedBlob = await decryptFile(blob, silentPayload.key!, 'application/json');
+                      const jsonText = await decryptedBlob.text();
+                      
+                      const { shadowVault } = await import('@lib/shadowVaultDb');
+                      await shadowVault.importDatabase(jsonText);
+                      
+                      // Paksa UI untuk mereload pesan dari IndexedDB yang baru saja diimpor
+                      const { useConversationStore } = await import('@store/conversation');
+                      const convos = useConversationStore.getState().conversations;
+                      for (const c of convos) {
+                          get().loadMessagesForConversation(c.id);
+                      }
+                      console.log('[History Sync] Sync complete! UI Refreshed.');
+                  } catch (e) {
+                      console.error('[History Sync] Failed to process history payload:', e);
+                  }
+              }, 1000);
+              
+              return null; 
           }
 
           if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {

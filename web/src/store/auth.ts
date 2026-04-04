@@ -14,6 +14,26 @@ import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDevic
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; 
 import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; 
 
+// ✅ Helper pendeteksi nama perangkat
+const getDeviceName = () => {
+    const ua = navigator.userAgent;
+    let browser = "Web Browser";
+    let os = "Unknown OS";
+    
+    if (ua.includes("Firefox")) browser = "Firefox";
+    else if (ua.includes("Edg")) browser = "Edge";
+    else if (ua.includes("Chrome")) browser = "Chrome";
+    else if (ua.includes("Safari") && !ua.includes("Chrome")) browser = "Safari";
+
+    if (ua.includes("Win")) os = "Windows";
+    else if (ua.includes("Mac")) os = "MacOS";
+    else if (ua.includes("Linux")) os = "Linux";
+    else if (ua.includes("Android")) os = "Android";
+    else if (ua.includes("like Mac")) os = "iOS";
+
+    return `${browser} on ${os}`;
+};
+
 /**
  * Retrieves the persisted signed pre-key, signs it with the identity signing key,
  * and uploads the bundle to the server.
@@ -274,7 +294,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       try {
         const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/login", {
           method: "POST",
-          body: JSON.stringify({ usernameHash, password }),
+          body: JSON.stringify({ 
+              usernameHash, 
+              password,
+              deviceName: getDeviceName() // 👈 Tambahkan baris ini
+          }),
         });
 
         if (res.encryptedPrivateKey) {
@@ -349,6 +373,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             publicKey: encryptionPublicKeyB64,
             signingKey: signingPublicKeyB64,
             encryptedPrivateKeys,
+            deviceName: getDeviceName(), // 👈 Mengirim nama perangkat
             turnstileToken
           }),
         });
