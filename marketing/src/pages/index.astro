@@ -302,17 +302,28 @@ const landingSchema = JSON.stringify({
           <p class="text-sm font-medium mb-3">
             {t('landing:footer.rights', { year: new Date().getFullYear().toString() })} <span class="font-bold text-white">AGPL-3.0</span>.
           </p>
+          
           <div class="flex flex-wrap justify-center items-center gap-3 text-xs font-bold mt-1 mb-8">
             <a href={`${langPrefix}/privacy`} class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.legal')}</a>
             <span class="text-white/10">•</span>
+            
             <a href={`${langPrefix}/help`} class="hover:text-accent transition-colors tracking-wide">
               {t('common:help') !== 'common:help' ? t('common:help') : 'Help Center'}
             </a>
             <span class="text-white/10">•</span>
+            
+            <a href={`${langPrefix}/security`} class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.security') || 'Security'}</a>
+            <span class="text-white/10">•</span>
+            
+            <a href={`${langPrefix}/hall-of-fame`} class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.hallOfFame') || 'Hall of Fame'}</a>
+            <span class="text-white/10">•</span>
+
             <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.source')}</a>
             <span class="text-white/10">•</span>
-            <a href="https://github.com/h4nzs/nyx-chat/blob/main/COMMERCIAL.md" target="_blank" rel="noopener noreferrer" class="text-accent hover:text-white transition-colors tracking-wide">{t('landing:footer.commercial')}</a>
+            
+            <a href={`${langPrefix}/commercial`} class="text-accent hover:text-white transition-colors tracking-wide">{t('landing:footer.commercial')}</a>
           </div>
+
           <p class="text-[10px] text-text-secondary/40 max-w-3xl mx-auto leading-relaxed font-mono">
             {t('landing:footer.disclaimer', { year: new Date().getFullYear().toString() })}
           </p>

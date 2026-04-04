@@ -27,6 +27,7 @@ export default function LazyImage({
   
   // ✅ OPTIMASI 1: Kunci agar tidak re-download berkali-kali!
   const hasDecryptedSuccessfully = useRef(false);
+  const lastAttachmentKey = useRef('');
 
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
   
@@ -38,7 +39,20 @@ export default function LazyImage({
   const imgRef = useRef<HTMLImageElement>(null);
 
   useEffect(() => {
-    // Jika sudah sukses, jangan pernah jalankan effect ini lagi
+    const attachmentKey = [
+      message.conversationId,
+      message.sessionId ?? '',
+      message.fileUrl ?? '',
+      message.isBlindAttachment ? 'blind' : 'normal',
+    ].join('|');
+
+    // Jika sidik jarinya BERBEDA dengan yang sebelumnya, barulah kita reset statusnya
+    if (lastAttachmentKey.current !== attachmentKey) {
+      hasDecryptedSuccessfully.current = false;
+      lastAttachmentKey.current = attachmentKey;
+    }
+
+    // Jika sudah sukses untuk sidik jari ini, JANGAN eksekusi ulang!
     if (hasDecryptedSuccessfully.current) return;
 
     let objectUrl: string | null = null;

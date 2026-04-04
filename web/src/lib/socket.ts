@@ -12,7 +12,7 @@ import { usePresenceStore } from "@store/presence";
 import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest, schedulePeriodicGroupKeyRotation } from "@utils/crypto";
 import { useKeychainStore } from "@store/keychain";
 import { asUserId } from '@nyx/shared';
-import { IncomingMessageSchema } from '@nyx/shared';
+import { IncomingMessageSchema, RawServerMessageSchema } from '@nyx/shared';
 import type { ServerToClientEvents, ClientToServerEvents } from "@nyx/shared";
 import { triggerReceiveFeedback } from "@utils/feedback";
 
@@ -42,14 +42,24 @@ const processMessageBuffer = async () => {
         try {
             // THE SHIELD: Intelligent Echo Cancellation
             if (meId && safeMessage.senderId === meId) {
+                // 1. Blokir echo dari pesan normal
                 const isOptimisticEcho = useMessageStore.getState().messages[safeMessage.conversationId]?.some(
-                    m => m.tempId && String(m.tempId) === String(safeMessage.tempId)
+                    m => m.id === safeMessage.id || (m.tempId && String(m.tempId) === String(safeMessage.tempId))
                 );
-                if (isOptimisticEcho) continue; // It's an echo of our own msg
-            }
+                if (isOptimisticEcho) {
+                    continue; 
+                }
 
-            const convExists = useConversationStore.getState().conversations.some(c => c.id === safeMessage.conversationId);
-            if (!convExists) continue;
+                // 2. Blokir echo dari pesan SILENT (seperti Reaction/Edit/GhostSync yang kita kirim sendiri)
+                if (safeMessage.content && safeMessage.content.startsWith('{')) {
+                     try {
+                         const meta = JSON.parse(safeMessage.content);
+                         if (meta.type === 'reaction' || meta.type === 'edit' || meta.type === 'silent' || meta.type === 'GHOST_SYNC' || meta.type === 'UNSEND') {
+                             continue;
+                         }
+                     } catch (_e) {}
+                }
+            }
 
             const decryptedMessage = await addIncomingMessage(safeMessage.conversationId, safeMessage);
               
@@ -62,8 +72,6 @@ const processMessageBuffer = async () => {
                    triggerReceiveFeedback();
                }
             }
-
-            socket?.emit('message:ack_delivered', { messageId: safeMessage.id, conversationId: safeMessage.conversationId });
             
             // Jeda sejenak setiap 5 pesan untuk membiarkan UI bernapas (mencegah Freeze)
             if (messagesToProcess.indexOf(safeMessage) % 5 === 0) {
@@ -172,15 +180,25 @@ export function getSocket() {
 
     // --- Application-specific Listeners ---
     socket.on("message:new", (rawPayload: unknown) => {
-      const parsed = IncomingMessageSchema.safeParse(rawPayload);
+      // ✅ FIX 1: Gunakan RawServerMessageSchema karena ini adalah format pasti dari server sekarang
+      const parsed = RawServerMessageSchema.safeParse(rawPayload);
 
       if (!parsed.success) {
           console.error("[Zod Shield] Dropping invalid incoming message:", parsed.error.format());
           return; 
       }
 
-      // ✅ FIX: Lempar ke keranjang Batching alih-alih langsung dieksekusi!
-      incomingMessageBuffer.push(parsed.data as Message);
+      const safeMessage = parsed.data;
+
+      // ✅ FIX 2: Kirim ACK "Delivered" ke server segera setelah diterima dengan aman!
+      // Server butuh kepastian ini agar tidak menembakkan pesan yang sama berulang kali.
+      socket?.emit("message:ack_delivered", { 
+          messageId: safeMessage.id, 
+          conversationId: safeMessage.conversationId 
+      });
+
+      // ✅ FIX 3: Lempar ke keranjang Batching
+      incomingMessageBuffer.push(safeMessage as Message);
       
       // Reset timer. Kita tunggu "badai" reda selama 100ms. 
       // Jika dalam 100ms tidak ada pesan baru lagi yang masuk, proses semua yang ada di keranjang.
@@ -320,6 +338,23 @@ export function getSocket() {
       toast.error("This session has been logged out remotely.");
       useAuthStore.getState().logout();
       disconnectSocket();
+    });
+
+    socket.on("message:deleted_remotely", async ({ conversationId, messageId }) => {
+      
+      const { removeMessage } = useMessageStore.getState();
+      // Ini akan langsung menghapus pesan dari UI dan mengubahnya menjadi Tombstone di IndexedDB lokal
+      removeMessage(conversationId, messageId);
+      
+      // Opsional: Berikan feedback visual kecil jika user sedang melihat chat
+      const isViewingChat = window.location.pathname.includes(`/chat/${conversationId}`);
+      if (isViewingChat) {
+          toast.success("Sebuah pesan telah ditarik oleh pengirim.", {
+              icon: '🗑️',
+              duration: 3000,
+              position: 'bottom-center'
+          });
+      }
     });
 
     socket.on("user:identity_changed", (data) => {

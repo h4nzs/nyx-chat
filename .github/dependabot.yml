@@ -30,6 +30,30 @@ updates:
           - "prisma" # Manually handle Prisma major updates
           - "@prisma/*"
 
+  - package-ecosystem: "npm"
+    directory: "/marketing"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+    open-pull-requests-limit: 5
+    groups:
+      frontend-updates:
+        patterns:
+          - "*" # Group all frontend updates into one PR
+
+  - package-ecosystem: "npm"
+    directory: "/packages/shared"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+    open-pull-requests-limit: 5
+    groups:
+      frontend-updates:
+        patterns:
+          - "*" # Group all frontend updates into one PR
+        exclude-patterns:
+          - "libsodium-wrappers"
+
   # Maintain GitHub Actions dependencies
   - package-ecosystem: "github-actions"
     directory: "/"

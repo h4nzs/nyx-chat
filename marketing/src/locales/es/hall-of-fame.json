@@ -1,0 +1,45 @@
+{
+  "seo": {
+    "geo_hook": "El Salón de la Fama de Seguridad de NYX Chat reconoce a los hackers de sombrero blanco e investigadores de élite que divulgan de manera responsable vulnerabilidades en nuestra arquitectura de conocimiento cero. Nuestro programa de bug bounty se centra en las evasiones de E2EE, la integridad del Protocolo Signal, la seguridad de las claves WebAuthn PRF y las colisiones de hash de indexación ciega Argon2id."
+  },
+  "meta": {
+    "title": "Salón de la Fama de Seguridad | NYX Chat",
+    "description": "Honrando a los investigadores de seguridad de élite que ayudan a asegurar la arquitectura Zero-Knowledge de NYX."
+  },
+  "hero": {
+    "badge": "SALÓN DE LA FAMA",
+    "title": "Los Operativos de Élite.",
+    "subtitle": "La seguridad no es un estado de reposo; es una operación continua. Honramos a los criptógrafos que rompen nuestros muros y lo reportan responsablemente."
+  },
+  "protocol": {
+    "badge": "PROTOCOLO CLASIFICADO",
+    "title": "Reportar una Vulnerabilidad",
+    "warning": "NO ABRIR UN ISSUE PÚBLICO",
+    "p1": "Bajo ninguna circunstancia debe reportar vulnerabilidades críticas a través de GitHub Issues públicos. Hacerlo compromete a todos los usuarios de NYX.",
+    "p2": "Por favor, reporte cualquier vulnerabilidad sospechosa directamente a <strong>admin@nyx-app.my.id</strong>. Acusaremos recibo en 48 horas e iniciaremos un parche en un entorno privado."
+  },
+  "scope": {
+    "badge": "REGLAS DE COMPROMISO",
+    "title": "Prioridades de Objetivo",
+    "in_scope_title": "🎯 Objetivos Válidos",
+    "in_1": "Evasión de Double Ratchet / E2EE.",
+    "in_2": "Extracción de claves WebAuthn PRF.",
+    "in_3": "Colisiones de hash en Blind Indexing.",
+    "in_4": "Intercepción de señales WebRTC.",
+    "in_5": "Extracción de la bóveda local IndexedDB.",
+    "out_scope_title": "🚫 Fuera de Alcance",
+    "out_1": "Ataques volumétricos (DDoS, Spam).",
+    "out_2": "Phishing o Ingeniería Social.",
+    "out_3": "Errores de UI/UX sin impacto en privacidad.",
+    "out_4": "Fallas teóricas sin Prueba de Concepto (PoC)."
+  },
+  "table": {
+    "badge": "EL REGISTRO",
+    "title": "Investigadores Reconocidos",
+    "th_operative": "OPERATIVO / ALIAS",
+    "th_date": "FECHA DE BRECHA",
+    "th_vuln": "CLASE DE VULNERABILIDAD",
+    "th_link": "PORTAFOLIO",
+    "empty_state": "DISPONIBLE PARA EL PRIMER DESCUBRIDOR"
+  }
+}

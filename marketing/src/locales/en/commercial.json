@@ -1,0 +1,63 @@
+{
+  "seo": {
+    "geo_hook": "NYX offers a Dual-License model: AGPL-3.0 for open-source community use and a Commercial License for proprietary SaaS, enterprise internal tools, and white-labeling. Secure your telemedicine, fintech, or government communications with our zero-knowledge architecture."
+  },
+  "meta": {
+    "title": "Commercial Licensing | NYX Chat",
+    "description": "Understand our Dual-License model. Free for open-source, powerful for enterprise."
+  },
+  "hero": {
+    "badge": "DUAL-LICENSE MODEL",
+    "title": "Built for the Community. Scaled for Enterprise.",
+    "subtitle": "NYX is proudly open-source and free forever. However, if you are building a closed-source SaaS or internal corporate tool, you need a Commercial License."
+  },
+  "agpl": {
+    "badge": "THE AGPL-3.0 REALITY",
+    "title": "The Open-Source Covenant",
+    "p1": "NYX is distributed under the <strong>AGPL-3.0 License</strong>. This is a strong copyleft license designed to prevent mega-corporations from taking open-source code, closing it up, and monetizing it without giving back.",
+    "p2": "If you modify NYX and run it as a public service (SaaS) over a network, you <strong>must</strong> release your modified source code to your users under the same AGPLv3 license.",
+    "warning_title": "Building Proprietary Software?",
+    "warning_desc": "If your company policies prohibit open-sourcing your product, or if you wish to remove NYX branding, you are legally required to purchase a Commercial License."
+  },
+  "compare": {
+    "badge": "COMPARE PLANS",
+    "title": "Community vs. Enterprise",
+    "col1_title": "AGPL-3.0 (Community)",
+    "col1_desc": "For individuals and open-source projects.",
+    "col2_title": "Commercial License",
+    "col2_desc": "For proprietary SaaS and enterprise internal tools.",
+    "f1": "Full Zero-Knowledge Features",
+    "f2": "Source Code Requirement",
+    "f3": "White-labeling (Remove Logos)",
+    "f4": "Priority Security Patches",
+    "f5": "Direct Engineering Support",
+    "val_agpl_f2": "Must be Open-Source",
+    "val_com_f2": "Keep it Closed-Source",
+    "contact_sales": "Contact Sales"
+  },
+  "usecases": {
+    "badge": "ENTERPRISE USE CASES",
+    "title": "Who Needs a Commercial License?",
+    "c1_title": "Telemedicine & Healthcare",
+    "c1_desc": "Doctors and patients require absolute confidentiality. NYX provides a HIPAA-ready communication layer.",
+    "c2_title": "FinTech & Banking",
+    "c2_desc": "Secure channels for high-net-worth clients or internal executive communications that must not leak.",
+    "c3_title": "Government & Defense",
+    "c3_desc": "On-premise deployments with custom cryptographic primitives, completely disconnected from the public internet."
+  },
+  "faq": {
+    "badge": "FAQ",
+    "title": "Frequently Asked Questions",
+    "q1": "How much does the Commercial License cost?",
+    "a1": "Pricing is customized based on your deployment scale (number of users) and specific SLA requirements. Contact us for a quote.",
+    "q2": "Do we get updates if we buy the Commercial License?",
+    "a2": "Yes. Commercial Licensees receive priority access to security patches and core updates before they are pushed to the public repository.",
+    "q3": "Can you help us deploy it on our AWS/Cloudflare infrastructure?",
+    "a3": "Yes, our Enterprise tier includes dedicated integration support and architecture consulting."
+  },
+  "cta": {
+    "title": "Ready to Secure Your Enterprise?",
+    "subtitle": "Reach out to discuss your specific requirements, custom integrations, or to acquire a Commercial License.",
+    "button": "Contact Sales"
+  }
+}

@@ -104,7 +104,9 @@
     "rights": "© {{year}} NYX Project. Open Source under",
     "legal": "Legal & Privacy",
     "source": "Source Code",
-    "commercial": "Commercial Licensing",
+    "security": "Security",
+    "hallOfFame": "Hall of Fame",
+    "commercial": "Commercial License",
     "disclaimer": "WhatsApp is a registered trademark of Meta Platforms, Inc. Telegram is a registered trademark of Telegram FZ-LLC. NYX is an independent open-source project and is not affiliated with, endorsed by, or sponsored by these corporate entities. Any architectural comparisons are made strictly for informational and cryptographic review purposes based on public technical documentation available as of {{year}}."
   },
   "schema": {

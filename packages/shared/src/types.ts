@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { 
   MinimalUserSchema, 
   IncomingMessageSchema, 
-  MinimalConversationSchema 
+  MinimalConversationSchema,
+  RawServerMessageSchema
 } from './schemas.js';
 import type { UserId, ConversationId, MessageId, StoryId } from './brands.js';
 
@@ -31,32 +32,6 @@ export type MessageStatus = {
   status: 'SENT' | 'DELIVERED' | 'READ';
   updatedAt: string;
 };
-
-export interface RawServerMessage {
-  id: MessageId;
-  tempId?: number;
-  type?: 'USER' | 'SYSTEM';
-  conversationId: ConversationId;
-  senderId: UserId;
-  sender?: { 
-    id: UserId; 
-    encryptedProfile?: string | null;
-    name?: string;
-    username?: string;
-    avatarUrl?: string | null;
-  };
-  ciphertext?: string | null;
-  content?: string | null;
-  fileKey?: string | null;
-  sessionId?: string | null;
-  encryptedSessionKey?: string | null;
-  createdAt: string;
-  repliedTo?: RawServerMessage;
-  repliedToId?: MessageId;
-  linkPreview?: unknown;
-  expiresAt?: string | null;
-  isViewOnce?: boolean;
-}
 
 export type Message = z.infer<typeof IncomingMessageSchema> & {
   tempId?: number;

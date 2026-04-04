@@ -1,3 +1,4 @@
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useEffect, useState } from 'react';
 import { useModalStore } from '@store/modal';
 import { useNavigate } from 'react-router-dom';
@@ -133,15 +134,19 @@ export default function UserInfoModal() {
           <div className="flex items-start gap-6">
             {/* Avatar: INSET (Pressed in) - Looks like a porthole */}
             <div className="relative w-24 h-24 rounded-full shadow-neu-pressed dark:shadow-neu-pressed-dark flex items-center justify-center p-1 bg-bg-main">
-               <img
-                 src={toAbsoluteUrl(profile.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`}
-                 alt={profile.name}
-                 className="w-full h-full rounded-full object-cover"
-                 onError={(e) => {
-                   const target = e.target as HTMLImageElement;
-                   target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${profile.name}`;
-                 }}
-               />
+               {profile.avatarUrl ? (
+                 <img
+                   src={toAbsoluteUrl(profile.avatarUrl)}
+                   alt={profile.name}
+                   className="w-full h-full rounded-full object-cover"
+                 />
+               ) : (
+                 <DefaultAvatar
+                   name={profile.name}
+                   id={user?.id}
+                   className="w-full h-full"
+                 />
+               )}
                <div className={`absolute bottom-1 right-1 w-4 h-4 border-2 border-bg-main rounded-full shadow-neu-flat dark:shadow-neu-flat-dark ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
             </div>
 

@@ -24,15 +24,15 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
-const ConfirmModal = lazy(() => import('./components/ConfirmModal'));
-const UserInfoModal = lazy(() => import('./components/UserInfoModal'));
-const PasswordPromptModal = lazy(() => import('./components/PasswordPromptModal'));
-const ChatInfoModal = lazy(() => import('./components/ChatInfoModal'));
-const DynamicIsland = lazy(() => import('./components/DynamicIsland'));
-const CommandPalette = lazy(() => import('./components/CommandPalette'));
-const ContextMenu = lazy(() => import('./components/ContextMenu'));
-const CallOverlay = lazy(() => import('./components/CallOverlay'));
-const SystemInitModal = lazy(() => import('./components/SystemInitModal'));
+import ConfirmModal from '@components/ConfirmModal';
+import UserInfoModal from '@components/UserInfoModal';
+import PasswordPromptModal from '@components/PasswordPromptModal';
+import ChatInfoModal from '@components/ChatInfoModal';
+import DynamicIsland from '@components/DynamicIsland';
+import CommandPalette from '@components/CommandPalette';
+import ContextMenu from '@components/ContextMenu';
+import CallOverlay from '@components/CallOverlay';
+import SystemInitModal from '@components/SystemInitModal';
 import PrivacyCloak from './components/PrivacyCloak';
 import { Spinner } from './components/Spinner';
 

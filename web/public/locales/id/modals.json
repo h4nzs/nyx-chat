@@ -50,7 +50,8 @@
     "verify_success": "Verifikasi berhasil! Cadangan Anda terkonfirmasi.",
     "verify_fail": "Verifikasi gagal. Silakan coba lagi.",
     "aria_toggle_visibility": "Ubah visibilitas frasa",
-    "aria_copy_phrase": "Salin frasa pemulihan"
+    "aria_copy_phrase": "Salin frasa pemulihan",
+    "unavailable": "Frasa pemulihan tidak tersedia. Harap pastikan Anda memiliki kunci untuk melanjutkan."
   },
   "edit_group": {
     "title": "Edit Info Grup",

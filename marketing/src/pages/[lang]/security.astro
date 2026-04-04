@@ -1,0 +1,14 @@
+---
+import BaseSecurity from '../security.astro';
+
+export function getStaticPaths() {
+  return [
+    { params: { lang: 'id' } },
+    { params: { lang: 'es' } },
+    { params: { lang: 'pt-BR' } },
+  ];
+}
+
+const { lang } = Astro.params;
+---
+<BaseSecurity />

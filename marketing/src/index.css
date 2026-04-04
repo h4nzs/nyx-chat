@@ -1,7 +1,5 @@
 @import "tailwindcss";
-
-/* 👇 INI KUNCI UTAMANYA: Beritahu Tailwind untuk scan folder web */
-@source "./src";
+@source ".";
 @source "../../web/src/components";
 @source "../../web/src/pages";
 
@@ -331,3 +329,4 @@
 .shadow-neumorphic-bubble {
   box-shadow: 3px 3px 6px hsl(var(--shadow-dark)), -3px -3px 6px hsl(var(--shadow-light));
 }
+@source ".";

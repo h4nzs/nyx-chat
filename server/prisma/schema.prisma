@@ -135,8 +135,6 @@ model Message {
   isViewed            Boolean         @default(false)
 
   repliedToId         String?         @map("replied_to_id")
-  repliedTo           Message?        @relation("Replies", fields: [repliedToId], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  replies             Message[]       @relation("Replies")
 
   @@index([conversationId, createdAt(sort: Desc)])
   @@index([senderId])

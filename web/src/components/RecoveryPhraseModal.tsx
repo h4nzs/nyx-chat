@@ -107,9 +107,7 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
         <div className={`grid grid-cols-3 gap-3 transition-all duration-300 ${!showPhrase ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}>
           {words.length === 0 && showPhrase && (
              <div className="col-span-3 text-center text-red-500 font-mono text-xs p-4 border border-red-500/20 rounded bg-red-500/10 break-all">
-               DEBUG: Phrase data is empty or invalid.<br/>
-               Length: {phrase?.length || 0}<br/>
-               Content (JSON): {JSON.stringify(phrase)}
+               {t('modals:recovery.unavailable', 'Recovery phrase unavailable')}
              </div>
           )}
           {words.map((word, index) => (
@@ -188,7 +186,7 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
           <button
             key={index}
             onClick={() => handleWordClick(word)}
-            disabled={userInput.includes(word) || userInput.length >= phrase.split(' ').length}
+            disabled={userInput.includes(word) || userInput.length >= words.length}
             className="
               px-3 py-2 rounded-lg 
               bg-bg-surface text-text-primary text-xs font-bold

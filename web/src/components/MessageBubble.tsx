@@ -183,37 +183,40 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
                 )}
 
                 {/* Text Content */}
-                {!message.fileUrl && (
-                  isPlaceholder ? (
-                    <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
-                  ) : (
-                    <div className={clsx("text-base break-words w-full", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
-                      <div 
-                        className={clsx("relative overflow-hidden transition-all duration-300", {
-                          "max-h-[250px]": isLongMessage && !isTextExpanded,
-                          "max-h-none": !isLongMessage || isTextExpanded
-                        })}
-                        style={isLongMessage && !isTextExpanded ? { maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)' } : {}}
-                      >
-                        <MarkdownMessage content={content} isOwn={isOwn} />
-                      </div>                  
-                      
-                      {isLongMessage && (
-                        <button
-                          onClick={() => setIsTextExpanded(!isTextExpanded)}
-                          className={clsx("mt-2 text-xs font-bold uppercase tracking-wider block active:scale-95 transition-all", {
-                            "text-white/80 hover:text-white": isOwn,
-                            "text-accent hover:text-indigo-400": !isOwn
+                {!!content && (
+                  <div className={message.fileUrl ? "mt-2" : ""}>
+                    {isPlaceholder ? (
+                      <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
+                    ) : (
+                      <div className={clsx("text-base break-words w-full", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
+                        <div 
+                          className={clsx("relative overflow-hidden transition-all duration-300", {
+                            "max-h-[250px]": isLongMessage && !isTextExpanded,
+                            "max-h-none": !isLongMessage || isTextExpanded
                           })}
+                          style={isLongMessage && !isTextExpanded ? { maskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)', WebkitMaskImage: 'linear-gradient(to bottom, black 60%, transparent 100%)' } : {}}
                         >
-                          {isTextExpanded ? "Show Less" : "Read More"}
-                        </button>
-                      )}
-                    </div>
-                  )
+                          <MarkdownMessage content={content} isOwn={isOwn} />
+                        </div>                  
+                        
+                        {isLongMessage && (
+                          <button
+                            onClick={() => setIsTextExpanded(!isTextExpanded)}
+                            className={clsx("mt-2 text-xs font-bold uppercase tracking-wider block active:scale-95 transition-all", {
+                              "text-white/80 hover:text-white": isOwn,
+                              "text-accent hover:text-indigo-400": !isOwn
+                            })}
+                          >
+                            {isTextExpanded ? "Show Less" : "Read More"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </>
             )}
+
 
             {/* Link Preview (Berlaku untuk semua tipe pesan) */}
             {message.linkPreview && !message.fileUrl && !message.isViewOnce && (

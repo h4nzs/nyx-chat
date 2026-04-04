@@ -110,8 +110,21 @@ export async function takeGroupSkippedKey(conversationId: string, senderId: stri
 }
 
 export async function deleteGroupStates(conversationId: string): Promise<void> {
-  return enqueueWrite(async () => {
+  await enqueueWrite(async () => {
+      // 1. Hapus Sender State (Ini aman menggunakan exact match karena key-nya adalah conversationId)
       await db.groupSenderStates.delete(conversationId);
+      
+      // 2. Hapus SEMUA Receiver States yang berawalan dari conversationId_
+      await db.groupReceiverStates
+          .where('id')
+          .between(conversationId + "_", conversationId + "_\uffff", true, true)
+          .delete();
+          
+      // 3. Hapus SEMUA Skipped Keys yang berawalan dari conversationId_
+      await db.groupSkippedKeys
+          .where('key')
+          .between(conversationId + "_", conversationId + "_\uffff", true, true)
+          .delete();
   });
 }
 

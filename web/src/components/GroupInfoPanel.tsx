@@ -1,3 +1,4 @@
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useState, useRef, useEffect } from 'react';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
@@ -128,7 +129,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
   const title = conversation.decryptedMetadata?.title || t('common:defaults.group_unknown', 'Unknown Group');
   const avatarSrc = conversation.decryptedMetadata?.avatarUrl 
     ? `${toAbsoluteUrl(conversation.decryptedMetadata.avatarUrl)}?t=${conversation.lastUpdated}` 
-    : `https://api.dicebear.com/8.x/initials/svg?seed=${title}`;
+    : undefined;
 
   return (
     <div className="fixed inset-0 z-40">
@@ -165,15 +166,15 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                   {/* Group Identity Card */}
                   <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-6 text-center relative">
                     <div className="relative w-24 h-24 mx-auto mb-4">
-                      <img
-                        src={avatarSrc}
-                        alt={title}
-                        className="w-full h-full rounded-full object-cover bg-bg-primary"
-                        onError={(e) => {
-                          const target = e.target as HTMLImageElement;
-                          target.src = `https://api.dicebear.com/8.x/initials/svg?seed=${title}`;
-                        }}
-                      />
+                      {avatarSrc ? (
+                        <img
+                          src={avatarSrc}
+                          alt={title}
+                          className="w-full h-full rounded-full object-cover bg-bg-primary"
+                        />
+                      ) : (
+                        <DefaultAvatar name={title} id={conversation.id} className="w-full h-full bg-bg-primary" />
+                      )}
                       {amIAdmin && (
                         <>
                           <button onClick={() => fileInputRef.current?.click()} className="absolute bottom-0 right-0 bg-accent-gradient rounded-full p-2 text-white hover:opacity-90" aria-label={t('modals:group_info.change_avatar')}>

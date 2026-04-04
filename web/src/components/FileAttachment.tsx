@@ -96,7 +96,8 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
 
         // 2. Fallback: Jika tidak ada fileKey tapi ini adalah Blind Attachment, coba minta dari sesi ratchet
         if (!rawFileKey && message.isBlindAttachment) {
-            const keyResult = await decryptMessage('', message.conversationId, isGroup, '');
+            const targetSessionId = isGroup ? message.senderId : message.sessionId;
+            const keyResult = await decryptMessage('', message.conversationId, isGroup, targetSessionId);
 
             if (keyResult.status === 'pending') {
                 if (isMounted) {

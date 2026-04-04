@@ -1,3 +1,4 @@
+import DefaultAvatar from "@/components/ui/DefaultAvatar";
 import { useState, useEffect } from 'react';
 import { useConversationStore, type Conversation } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
@@ -142,11 +143,15 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
                     `}
                   >
                     <div className="relative">
-                      <img
-                        src={user.avatarUrl ? toAbsoluteUrl(user.avatarUrl) : `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(user.id)}`}
-                        className={`w-10 h-10 rounded-full object-cover transition-all ${isSelected ? 'grayscale-0' : 'grayscale opacity-80'}`}
-                        alt={user.name}
-                      />
+                      {user.avatarUrl ? (
+                        <img
+                          src={toAbsoluteUrl(user.avatarUrl)}
+                          className={`w-10 h-10 rounded-full object-cover transition-all ${isSelected ? 'grayscale-0' : 'grayscale opacity-80'}`}
+                          alt={user.name}
+                        />
+                      ) : (
+                        <DefaultAvatar name={user.name} id={user.id} className={`w-10 h-10 transition-all ${isSelected ? 'grayscale-0' : 'grayscale opacity-80'}`} />
+                      )}
                       <div className={`
                         absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center transition-all duration-300
                         ${isSelected ? 'bg-accent scale-100 shadow-[0_0_10px_rgba(var(--accent),0.6)]' : 'bg-transparent scale-0'}

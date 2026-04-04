@@ -178,12 +178,15 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
 
   // Set nilai awal jika sedang membalas/mengedit
   useEffect(() => {
-    if (editingMessage && editingMessage.content && inputRef.current) {
-        inputRef.current.value = editingMessage.content;
-        setHasTextUI(true);
-        inputRef.current.focus();
-    }
-  }, [editingMessage]);
+  if (editingMessage && inputRef.current) {
+    inputRef.current.value = editingMessage.content || '';
+    setHasTextUI(!!editingMessage.content);
+    inputRef.current.focus();
+  } else if (inputRef.current) { // ✅ Tambahkan cabang ini
+    inputRef.current.value = '';
+    setHasTextUI(false);
+  }
+}, [editingMessage, setHasTextUI]);
 
   // ✅ SUPER OPTIMIZATION: Debounce untuk emit Socket (Mencegah jaringan tersedak)
   const debouncedTypingSignal = useCallback(

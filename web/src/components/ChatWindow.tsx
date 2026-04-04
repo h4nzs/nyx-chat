@@ -1,3 +1,4 @@
+import DefaultAvatar from "@/components/ui/DefaultAvatar";
 import { useCallback, useRef, useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { useAuthStore } from "@store/auth";
 import { useTranslation } from "react-i18next";
@@ -148,11 +149,19 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
         >
           <div className="relative">
              <div className="w-10 h-10 rounded-full shadow-neu-pressed dark:shadow-neu-pressed-dark border-2 border-bg-main p-0.5">
-                <img
-                  src={toAbsoluteUrl(avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${title}`}
-                  alt={t('common:defaults.avatar', 'Avatar')}
-                  className={clsx("w-full h-full rounded-full object-cover", cloakClass)}
-                />
+                {avatarUrl ? (
+                  <img
+                    src={toAbsoluteUrl(avatarUrl)}
+                    alt={t('common:defaults.avatar', 'Avatar')}
+                    className={clsx("w-full h-full rounded-full object-cover", cloakClass)}
+                  />
+                ) : (
+                  <DefaultAvatar
+                    name={title}
+                    id={conversation.isGroup ? conversation.id : peerUser?.id}
+                    className={clsx("w-full h-full", cloakClass)}
+                  />
+                )}
              </div>
              {isOnline && <div className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-green-500 rounded-full border-2 border-bg-surface shadow-sm"></div>}
           </div>
@@ -252,9 +261,46 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (id) loadMessagesForConversation(id);
+    if (id) {
+        // Muat riwayat dan sinkronisasi pesan tertunda DARI SERVER
+        loadMessagesForConversation(id);
+    }
+    // Bersihkan mode seleksi setiap kali pindah ruang chat
     clearMessageSelection();
   }, [id, loadMessagesForConversation, clearMessageSelection]);
+
+
+  // 2. MARK AS READ: Hanya bertugas membaca pesan, berjalan di background
+  // Aman menggunakan `messages.length` karena di sini TIDAK ADA pemanggilan API fetch
+  useEffect(() => {
+    if (!id || !messages || !meId) return;
+
+    const markUnreadAsRead = async () => {
+         // Beri sedikit jeda agar pesan selesai di-render ke DOM (Virtuoso)
+         await new Promise(r => setTimeout(r, 300));
+         
+         const socket = getSocket();
+         if (!socket?.connected) return;
+
+         // Cari pesan dari orang lain yang statusnya belum "READ" oleh kita
+         const unreadMessages = messages.filter(m => 
+             m.senderId !== meId && 
+             (!m.statuses || !m.statuses.some(s => s.userId === meId && s.status === 'READ'))
+         );
+
+         // Batasi maksimal 20 pesan sekaligus untuk mencegah spam socket
+         const msgsToAck = unreadMessages.slice(-20);
+         
+         msgsToAck.forEach(msg => {
+             socket.emit('message:mark_as_read', {
+                 messageId: msg.id,
+                 conversationId: id
+             });
+         });
+    };
+
+    markUnreadAsRead();
+  }, [id, meId, messages.length]);
 
   const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);
 
@@ -299,10 +345,9 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
         
         setTimeout(() => {
           el?.classList.remove('ring-2', 'ring-accent', 'ring-offset-2', 'ring-offset-bg-main', 'scale-[1.02]', 'z-10');
+          setHighlightedMessageId(null);
         }, 2000);
       }
-      
-      setHighlightedMessageId(null);
     };
 
     handleJump();
@@ -342,6 +387,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
       
       const isFirstInSequence = !prevMessage || prevMessage.senderId !== message.senderId;
       const isLastInSequence = !nextMessage || nextMessage.senderId !== message.senderId;
+      const stableKey = message.tempId ? `t-${message.tempId}` : message.id;
   
       return (
         <div className="px-1 md:px-4 py-0.5" key={message.id}>
@@ -426,6 +472,8 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                     components={{ Header: () => isFetchingMore ? <ChatSpinner /> : <div className="h-4" /> }}
                     itemContent={itemContent}
                     followOutput="auto"
+                    increaseViewportBy={200} // 🔥 Optimasi scroll cepat
+                    computeItemKey={(index, item) => item.tempId ? `virtuoso-t-${item.tempId}` : `virtuoso-r-${item.id}`} // 🔥 Ini menghilangkan kedip/glitch dari framework list
                   />
                 </div>
 

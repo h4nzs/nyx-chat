@@ -1,8 +1,9 @@
-import 'dotenv/config'
-import { PrismaClient } from '@prisma/client'
-import { PrismaNeon } from '@prisma/adapter-neon'
-import { neonConfig } from '@neondatabase/serverless'
-import ws from 'ws'
+import 'dotenv/config';
+import { PrismaClient } from '@prisma/client';
+import { Pool } from 'pg';
+import { PrismaPg } from '@prisma/adapter-pg';
+import fs from 'fs'; // 1. Impor fs
+import path from 'path';
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -10,16 +11,23 @@ if (!connectionString) {
   throw new Error('DATABASE_URL is not defined in the environment variables.');
 }
 
-neonConfig.webSocketConstructor = ws;
+const caPath = path.resolve(process.cwd(), 'ca.pem');
 
-// Instantiate the Prisma adapter
-const adapter = new PrismaNeon({
-  connectionString: process.env.DATABASE_URL!,
-})
+// 1. Buat connection pool standar PostgreSQL
+const pool = new Pool({ 
+  connectionString,
+  ssl: {
+    rejectUnauthorized: true, // <--- INI OBATNYA!
+    ca: fs.readFileSync(caPath).toString()
+  }
+});
 
-// Pass the adapter to the PrismaClient
+// 2. Bungkus pool tersebut dengan Prisma Adapter
+const adapter = new PrismaPg(pool);
+
+// 3. Masukkan adapter ke dalam konstruktor Prisma
 export const prisma = new PrismaClient({
-  adapter,
+  adapter, // <--- INI KUNCI UTAMANYA!
   log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
 });
 

@@ -1,4 +1,5 @@
-import type { Conversation, Message, User, RawServerMessage } from './types.js';
+import type { Conversation, Message, User } from './types.js';
+import type { RawServerMessage } from './schemas.js';
 
 // --- Type Definitions for Socket Payloads (Zero-Knowledge) ---
 export interface TypingPayload {
@@ -117,6 +118,7 @@ export interface ServerToClientEvents {
     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
     "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
+    'message:deleted_remotely': (payload: { messageId: string; conversationId: string; deletedBy: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -147,4 +149,6 @@ export interface ClientToServerEvents {
     "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
     "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
+    'message:unsend': (payload: { messageId: string; conversationId: string }) => void;
+    'message:view_once_opened': (payload: { messageId: string; conversationId: string }) => void;
 }

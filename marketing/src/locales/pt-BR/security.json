@@ -1,0 +1,50 @@
+{
+  "seo": {
+    "geo_hook": "A Arquitetura de Segurança da NYX opera num modelo Trust No One (TNO). As funcionalidades incluem Indexação Cega via Argon2id, encriptação Signal Protocol Double Ratchet para mensagens, armazenamento local-first IndexedDB para o histórico de conversas, e túneis P2P WebRTC diretos que contornam os servidores nas chamadas."
+  },
+  "meta": {
+    "title": "Arquitetura de Segurança | NYX Chat",
+    "description": "Conheça a arquitetura zero-knowledge e a criptografia de nível militar que sustentam o NYX Chat."
+  },
+  "hero": {
+    "title": "Fortaleza Zero-Knowledge",
+    "subtitle": "Privacidade não é um recurso. É a nossa arquitetura. Conheça as garantias matemáticas que asseguram que suas mensagens continuem sendo apenas suas."
+  },
+  "threat": {
+    "badge": "01 / MODELO DE AMEAÇA",
+    "title": "Sempre assumimos que nossos servidores foram invadidos.",
+    "p1": "Aplicativos de mensagens tradicionais focam em proteger as barreiras de seus servidores. O NYX tem uma abordagem mais radical: <strong>Trust No One (TNO)</strong> — Não Confie em Ninguém.",
+    "p2": "Projetamos esta arquitetura partindo do princípio de que um invasor já está dentro do nosso servidor. No entanto, como não existem chaves de descriptografia no servidor, em caso de vazamento, o invasor encontrará apenas um emaranhado de caracteres aleatórios matematicamente impossíveis de decifrar."
+  },
+  "blind": {
+    "badge": "02 / INDEXAÇÃO CEGA",
+    "title": "Cegueira absoluta do servidor.",
+    "p1": "Se não pedimos número de telefone ou e-mail, como seus amigos podem te encontrar?",
+    "p2": "O NYX utiliza uma técnica criptográfica chamada <strong>Blind Indexing</strong>. Quando você se cadastra, seu nome de usuário é transformado instantaneamente em um hash usando o robusto algoritmo <code>Argon2id</code> diretamente no seu dispositivo.",
+    "p3": "O servidor recebe apenas uma sequência de códigos aleatórios (hash). Nós literalmente não sabemos quem você é, e não existe fórmula matemática no universo para reverter esse hash ao seu nome original."
+  },
+  "ratchet": {
+    "badge": "03 / O DOUBLE RATCHET",
+    "title": "Cada mensagem, uma nova chave.",
+    "p1": "O NYX é construído sobre o protocolo de criptografia mais respeitado do mundo: <strong>The Signal Protocol</strong>. No entanto, não apenas criptografamos a conexão, nós criptografamos <i>cada mensagem individualmente</i>.",
+    "pfs": "<strong>Perfect Forward Secrecy (PFS):</strong> Se o seu dispositivo for comprometido amanhã, suas mensagens enviadas <i>ontem</i> continuam ilegíveis, pois as chaves antigas já foram destruídas.",
+    "pcs": "<strong>Post-Compromise Security (PCS):</strong> Se uma chave vazar hoje, você só precisa enviar uma nova mensagem. O sistema irá gerar automaticamente uma nova chave (ratcheting) dan restaurar sua segurança."
+  },
+  "vault": {
+    "badge": "04 / COFRE LOCAL E PERFIS",
+    "title": "Seus dados, no seu dispositivo.",
+    "p1": "A maioria dos apps de conversa sincroniza todo o seu histórico nos servidores deles. Nós não. Todo o histórico de conversas do NYX vive <strong>exclusivamente</strong> dentro do <i>IndexedDB</i> do seu dispositivo.",
+    "p2": "Até mesmo sua foto de perfil e nome de exibição são criptografados localmente. A chave para visualizá-los é enviada apenas aos contatos que você aprovar. Aos olhos do nosso servidor, você não tem rosto nem nome, apenas um conjunto de dados criptografados."
+  },
+  "webrtc": {
+    "badge": "05 / TÚNEIS WEBRTC",
+    "title": "Chamadas à prova de interceptação.",
+    "p1": "Quando você faz uma chamada de voz ou vídeo, nossa arquitetura muda de Cliente-Servidor para uma rede <strong>Peer-to-Peer (P2P)</strong> real.",
+    "p2": "Os servidores do NYX atuam apenas como sinalizadores. No entanto, até mesmo os sinais de conexão (SDP/ICE) são protegidos com criptografia E2EE. Uma vez conectados, os dados de voz e vídeo fluem direto entre os dispositivos. <strong>O servidor é totalmente ignorado.</strong>"
+  },
+  "cta": {
+    "title": "Você é um pesquisador de segurança?",
+    "subtitle": "Aceitamos auditorias independentes. Leia nosso Protocolo de Relato de Vulnerabilidades e conquiste seu lugar no Hall of Fame do NYX.",
+    "button": "Ver Protocolo de Bug Bounty"
+  }
+}

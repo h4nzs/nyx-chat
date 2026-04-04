@@ -48,17 +48,23 @@ router.get('/', async (req, res, next) => {
       orderBy: { lastMessageAt: 'desc' }
     })
 
-    const unreadCounts: { conversationId: string; unreadCount: number }[] = await prisma.$queryRaw`
-      SELECT p."conversationId" AS "conversationId", COUNT(m.id)::int AS "unreadCount"
-      FROM "Participant" p
-      LEFT JOIN "Message" last_read_message ON p."lastReadMsgId" = last_read_message.id
-      JOIN "Message" m ON m."conversationId" = p."conversationId"
-      WHERE p."userId" = ${userId} AND m."senderId" != ${userId} AND m."createdAt" > COALESCE(last_read_message."createdAt", p."joinedAt")
-      GROUP BY p."conversationId";
-    `
+    const unreadCountsData = await prisma.message.groupBy({
+      by: ['conversationId'],
+      where: {
+        conversationId: { in: conversationsData.map(c => c.id) },
+        senderId: { not: userId },
+        statuses: {
+          none: {
+            userId: userId,
+            status: 'READ'
+          }
+        }
+      },
+      _count: { id: true }
+    });
 
-    const unreadMap = new Map(unreadCounts.map(item => [item.conversationId, item.unreadCount]))
-    
+    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, item._count.id]));
+
     // MAPPING KE SAFE TYPE (Tanpa any)
     const safeConversations = conversationsData.map(convo => {
       const safeConv = toConversation(convo);
@@ -203,7 +209,7 @@ router.post('/:id/participants', async (req, res, next) => {
     if (currentCount + userIds.length > MAX_GROUP_MEMBERS) return res.status(400).json({ error: `Group limit reached (${MAX_GROUP_MEMBERS} members max).` })
 
     const newParticipantsRaw = await prisma.$transaction(async (tx) => {
-      await Promise.all(userIds.map((userId: string) => tx.participant.upsert({ where: { userId_conversationId: { userId, conversationId } }, create: { userId, conversationId, joinedAt: new Date() }, update: { joinedAt: new Date() } })))
+      await Promise.all(userIds.map((userId: string) => tx.participant.upsert({ where: { userId_conversationId: { userId, conversationId } }, create: { userId, conversationId, joinedAt: new Date() }, update: {} })))
       await rotateAndDistributeSessionKeys(conversationId, req.user!.id, tx)
       return await tx.participant.findMany({ where: { conversationId, userId: { in: userIds } }, include: { user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } } })
     })
@@ -268,7 +274,16 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
     if (!adminParticipant || adminParticipant.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden.' })
     if (req.user.id === userToRemoveId) return res.status(400).json({ error: 'Cannot remove yourself.' })
 
-    await prisma.participant.delete({ where: { userId_conversationId: { userId: userToRemoveId, conversationId } } })
+    const result = await prisma.participant.deleteMany({
+    where: { 
+        userId: userToRemoveId, 
+        conversationId 
+    }
+});
+
+if (result.count === 0) {
+    return res.status(404).json({ error: 'Participant not found in this conversation' });
+}
     
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userToRemoveId) })
     getIo().to(conversationId).emit('group:participants_changed', { conversationId: asConversationId(conversationId) })
@@ -345,24 +360,6 @@ router.post('/:id/pin', async (req, res, next) => {
       data: { isPinned: !participant.isPinned }
     })
     res.json({ isPinned: updatedParticipant.isPinned })
-  } catch (error) {
-    next(error)
-  }
-})
-
-// Mark as read
-router.post('/:id/read', async (req, res, next) => {
-  try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const { id } = req.params
-    const lastMessage = await prisma.message.findFirst({ where: { conversationId: id }, orderBy: { createdAt: 'desc' } })
-    if (lastMessage) {
-      await prisma.participant.updateMany({
-        where: { conversationId: id, userId: req.user.id },
-        data: { lastReadMsgId: lastMessage.id }
-      })
-    }
-    res.status(204).send()
   } catch (error) {
     next(error)
   }

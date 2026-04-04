@@ -288,7 +288,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
 
     if (!parsed.success) {
         console.error("[WebRTC Zod Shield] Dropping invalid signaling payload:", parsed.error.format());
-        return; // Stop eksekusi agar logic SDP/ICE tidak crash
+        return; 
     }
 
     const data = parsed.data;
@@ -296,15 +296,27 @@ export const initWebRTCListeners = (socket: Socket | null) => {
     const callKey = state.ephemeralCallKey;
 
     if (!callKey) {
-        // console.warn(`Received secure signal ${data.type} but missing call key. Dropping.`);
         return;
     }
 
     try {
         const { decryptCallSignal } = await import('../utils/crypto');
-        const decryptedPayload = (await decryptCallSignal(data.payload as string, callKey)) as SignalingPayload;
-        const iceServers = await getDynamicIceServers();
+        
+        let decryptedPayload: SignalingPayload;
 
+        if (typeof data.payload === 'string') {
+            decryptedPayload = (await decryptCallSignal(data.payload, callKey)) as SignalingPayload;
+        } else if (import.meta.env.DEV && typeof data.payload === 'object' && data.payload !== null) {
+            // ✅ HANYA UNTUK DEVELOPMENT: Mengizinkan debugging lokal tanpa enkripsi
+            console.warn(`[WebRTC] DEV MODE: Menerima payload tidak terenkripsi untuk tipe ${data.type}`);
+            decryptedPayload = data.payload as SignalingPayload;
+        } else {
+            // 🚨 PRODUCTION SHIELD: Tolak mentah-mentah jika bukan string terenkripsi!
+            console.warn(`[WebRTC] SECURITY BLOCK: Dropping signal ${data.type} with unencrypted payload.`);
+            return; // Berhenti memproses!
+        }
+
+        const iceServers = await getDynamicIceServers();
         let pc = peerConnections.get(data.from as string);
 
         switch (data.type) {
@@ -321,7 +333,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                 break;
             case 'accept':
                 useCallStore.getState().setCallState('connected');
-                useCallStore.getState().addRemoteUser({ id: data.from }); // Add if not present
+                useCallStore.getState().addRemoteUser({ id: data.from }); 
                 
                 if (!pc) pc = createPeerConnection(data.from as string, iceServers);
                 
@@ -343,8 +355,6 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                 store.removeRemoteStream(data.from);
                 store.removeRemoteUser(data.from);
                 
-                // ✔️ FIX: Kalo orang terakhir keluar atau nolak, langsung end call!
-                // Pake store.remoteUsers.length karena state bawaan bisa aja stale (belum update)
                 if (useCallStore.getState().remoteUsers.length === 0) {
                     cleanupCall();
                 }
@@ -361,7 +371,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                 }
                 break;
             case 'answer':
-                if (!pc) return; // Should exist if we sent offer
+                if (!pc) return; 
                 try {
                   await pc.setRemoteDescription(new RTCSessionDescription((decryptedPayload as { answer: RTCSessionDescriptionInit }).answer));
                 } catch (e) {

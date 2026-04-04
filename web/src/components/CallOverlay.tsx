@@ -1,3 +1,4 @@
+import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiPhone, FiVideo, FiVideoOff, FiMic, FiMicOff, FiPhoneOff, FiMinimize2, FiMaximize2, FiRefreshCw, FiWifi, FiVolume2, FiVolumeX, FiMonitor } from 'react-icons/fi';
@@ -25,7 +26,7 @@ const RemoteStream = ({ userId, stream, isVideo, profile }: { userId: UserId, st
   }, [stream, isVideo]);
 
   const name = (profile?.name as string) || t('defaults.user', 'User');
-  const avatar = toAbsoluteUrl(profile?.avatarUrl as string) || `https://api.dicebear.com/8.x/initials/svg?seed=${name}`;
+  const avatarUrl = profile?.avatarUrl as string | undefined;
 
   return (
     <div className="relative w-full h-full bg-gray-900 rounded-2xl overflow-hidden shadow-xl border border-white/10 group flex items-center justify-center">
@@ -42,7 +43,11 @@ const RemoteStream = ({ userId, stream, isVideo, profile }: { userId: UserId, st
         <div className="w-full h-full flex flex-col items-center justify-center bg-bg-surface">
            <audio ref={audioRef} autoPlay />
            <div className="relative">
-              <img src={avatar} alt={name} className="w-20 h-20 rounded-full object-cover mb-2 border-2 border-accent/30 shadow-lg" />
+              {avatarUrl ? (
+                <img src={toAbsoluteUrl(avatarUrl)} alt={name} className="w-20 h-20 rounded-full object-cover mb-2 border-2 border-accent/30 shadow-lg" />
+              ) : (
+                <DefaultAvatar name={name} id={userId} className="w-20 h-20 mb-2 border-2 border-accent/30 shadow-lg text-2xl" />
+              )}
               {stream && (
                 <div className="absolute -bottom-1 -right-1 bg-green-500 w-4 h-4 rounded-full border-2 border-bg-surface shadow-sm"></div>
               )}
@@ -245,7 +250,7 @@ export default function CallOverlay() {
 
   const mainRemoteUser = remoteUsers[0] || { id: 'unknown', name: t('common:defaults.someone', 'Someone') };
   const profileName = remoteUsers.length > 1 ? `Group (${remoteUsers.length})` : (mainRemoteUser.name || t('common:defaults.someone', 'Someone'));
-  const profileAvatar = toAbsoluteUrl(mainRemoteUser.avatarUrl) || `https://api.dicebear.com/8.x/initials/svg?seed=${profileName}`;
+  const profileAvatar = toAbsoluteUrl(mainRemoteUser.avatarUrl);
 
   return (
     <AnimatePresence>
@@ -263,7 +268,11 @@ export default function CallOverlay() {
           >
             <div className="relative mb-6">
               <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-accent/50">
-                <img src={profileAvatar} alt={profileName} className="w-full h-full object-cover" />
+                {profileAvatar ? (
+                  <img src={profileAvatar} alt={profileName} className="w-full h-full object-cover" />
+                ) : (
+                  <DefaultAvatar name={profileName} id={mainRemoteUser.id} className="w-full h-full text-3xl" />
+                )}
               </div>
               <div className="absolute inset-0 rounded-full border-4 border-accent animate-ping opacity-50"></div>
             </div>
@@ -346,7 +355,11 @@ export default function CallOverlay() {
             {callState === 'calling' && !isMinimized && (
                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10">
                   <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-accent animate-pulse shadow-2xl mb-6">
-                    <img src={profileAvatar} alt={profileName} className="w-full h-full object-cover" />
+                    {profileAvatar ? (
+                      <img src={profileAvatar} alt={profileName} className="w-full h-full object-cover" />
+                    ) : (
+                      <DefaultAvatar name={profileName} id={mainRemoteUser.id} className="w-full h-full" />
+                    )}
                   </div>
                   <h2 className="text-2xl font-black text-white uppercase tracking-widest">{profileName}</h2>
                   <p className="text-accent font-mono text-xs mt-2 animate-bounce">{t('chat:calls.dialing')}</p>

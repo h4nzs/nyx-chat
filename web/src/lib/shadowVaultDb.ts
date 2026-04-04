@@ -133,7 +133,8 @@ class NyxShadowVaultProxy {
           senderAvatarUrl: encryptedSenderAvatarUrl,
           isViewOnce: m.isViewOnce,
           isDeletedLocal: m.isDeletedLocal,
-          fileMeta: encryptedFileMeta || existing?.fileMeta
+          fileMeta: encryptedFileMeta || existing?.fileMeta,
+          expiresAt: m.expiresAt || existing?.expiresAt
         });
       }
       await db.messages.bulkPut(records);
@@ -146,15 +147,30 @@ class NyxShadowVaultProxy {
     try {
       const query = db.messages.where('conversationId').equals(conversationId);
       
+      const allRecords = await query.toArray();
+      const now = Date.now();
+
+      // THE SWEEPER: Eagerly find and destroy expired messages from Local DB
+      const validRecords: typeof allRecords = [];
+      const expiredIds: string[] = [];
+
+      for (const r of allRecords) {
+        if (r.expiresAt && new Date(r.expiresAt).getTime() <= now) {
+           expiredIds.push(r.id);
+        } else {
+           validRecords.push(r);
+        }
+      }
+
+      if (expiredIds.length > 0) {
+          db.messages.bulkDelete(expiredIds).catch(e => console.error("Failed to delete expired messages:", e));
+      }
+
       // Jika ada kursor (beforeDate), ambil pesan yang lebih tua dari tanggal tersebut
       if (beforeDate) {
-        // Karena kita tidak memiliki compound index (conversationId, createdAt) yang proper di V1,
-        // kita ambil semua untuk convo ini, filter manual, lalu sort & slice. 
-        // (Ini aman karena Dexie sangat cepat, tapi idealnya di-upgrade skemanya nanti).
-        const records = await query.toArray();
         const beforeTime = new Date(beforeDate).getTime();
         
-        const filteredRecords = records
+        const filteredRecords = validRecords
           .filter(r => new Date(r.createdAt).getTime() < beforeTime)
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) // Sort DESC
           .slice(0, limit);
@@ -163,8 +179,7 @@ class NyxShadowVaultProxy {
       }
 
       // Jika tidak ada kursor, ambil N pesan terbaru
-      const records = await query.toArray();
-      const latestRecords = records
+      const latestRecords = validRecords
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) // Sort DESC
         .slice(0, limit);
 
@@ -226,7 +241,8 @@ class NyxShadowVaultProxy {
           fileType: decryptedFileMeta?.fileType,
           fileSize: decryptedFileMeta?.fileSize,
           duration: decryptedFileMeta?.duration,
-          isBlindAttachment: decryptedFileMeta?.isBlindAttachment
+          isBlindAttachment: decryptedFileMeta?.isBlindAttachment,
+          expiresAt: r.expiresAt
         });
       }
       return messages;
@@ -236,21 +252,26 @@ class NyxShadowVaultProxy {
     try {
       const r = await db.messages.get(id);
       if (!r) return null;
-      let plainText = null;
-      let decryptedRepliedTo = undefined;
-      let decryptedSenderName = undefined;
-      let decryptedSenderUsername = undefined;
-      let decryptedSenderAvatarUrl = undefined;
+      
+      let plainText: string | undefined = undefined;
+      let decryptedRepliedTo: Message | undefined = undefined;
+      let decryptedSenderName: string | undefined = undefined;
+      let decryptedSenderUsername: string | undefined = undefined;
+      let decryptedSenderAvatarUrl: string | undefined = undefined;
+      // ✅ FIX: Deklarasi fileMeta tanpa 'any'
+      let fileMetaObj: Partial<Message> | undefined = undefined;
 
       if (r.content && !r.isDeletedLocal) {
-        plainText = await decryptVaultText(r.content);
+        const decrypted = await decryptVaultText(r.content);
+        if (decrypted) plainText = decrypted;
       }
 
       if (r.repliedTo) {
           const rawRepliedTo = await decryptVaultText(r.repliedTo);
           if (rawRepliedTo) {
               try {
-                  decryptedRepliedTo = JSON.parse(rawRepliedTo);
+                  // ✅ FIX: Casting ketat ke Message
+                  decryptedRepliedTo = JSON.parse(rawRepliedTo) as Message;
               } catch {}
           }
       }
@@ -265,23 +286,45 @@ class NyxShadowVaultProxy {
           decryptedSenderAvatarUrl = await decryptVaultText(r.senderAvatarUrl) || undefined;
       }
 
+      // ✅ FIX: Eksekusi dekripsi fileMeta
+      if (r.fileMeta) {
+          const decMeta = await decryptVaultText(r.fileMeta);
+          if (decMeta) {
+              try { 
+                  fileMetaObj = JSON.parse(decMeta) as Partial<Message>; 
+              } catch (e) {
+                  console.error("Failed to parse file meta in IndexedDB", e);
+              }
+          }
+      }
+
       return {
         id: asMessageId(r.id),
         conversationId: asConversationId(r.conversationId),
-        content: plainText,
+        content: plainText ?? null,
         repliedToId: r.repliedToId ? asMessageId(r.repliedToId) : undefined,
         repliedTo: decryptedRepliedTo,
         createdAt: r.createdAt as string,
         senderId: asUserId(r.senderId),
+        // ✅ FIX: Buat objek sender yang bersih tanpa casting berantai yang aneh
         sender: {
-            id: r.senderId,
+            id: asUserId(r.senderId),
             name: decryptedSenderName,
             username: decryptedSenderUsername,
-            avatarUrl: decryptedSenderAvatarUrl
-        } as unknown as Message['sender'],
+            avatarUrl: decryptedSenderAvatarUrl,
+            encryptedProfile: undefined
+        },
+        status: (r.status === 'sending' || r.status === 'sent' || r.status === 'delivered' || r.status === 'read' || r.status === 'failed') 
+            ? r.status 
+            : 'sent',
         isViewOnce: r.isViewOnce,
-        isDeletedLocal: r.isDeletedLocal
-      };
+        isDeletedLocal: r.isDeletedLocal,
+        expiresAt: r.expiresAt,
+        // ✅ SUNTIKKAN PROPERTI FILE:
+        ...(fileMetaObj || {})
+      } as Message; 
+      // (as Message di akhir aman karena kita menggabungkan objek base dengan Partial<Message>)
+      
     } catch (_e) {
       return null;
     }

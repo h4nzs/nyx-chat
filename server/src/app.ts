@@ -83,7 +83,6 @@ app.use(helmet({
         "'self'",
         "data:",
         "blob:",
-        "https://api.dicebear.com",
         "https://*.r2.dev",
         "https://cdn.jsdelivr.net",
         "https://*.cloudflarestorage.com",

@@ -3,6 +3,27 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
 
+// Definisikan tipe untuk node AST Markdown
+interface MarkdownNode {
+  type: string;
+  value?: string;
+  children?: MarkdownNode[];
+}
+
+// ✅ Custom Plugin: Mencegah HTML dibuang, dan mengubahnya menjadi plain text biasa
+const remarkHtmlToText = () => (tree: MarkdownNode) => {
+  const walk = (node: MarkdownNode) => {
+    if (node.type === 'html') {
+      // Ubah tipe node dari 'html' menjadi 'text' agar dirender sebagai teks literal
+      node.type = 'text';
+    }
+    if (node.children && Array.isArray(node.children)) {
+      node.children.forEach(walk);
+    }
+  };
+  walk(tree);
+};
+
 interface MarkdownMessageProps {
   content: string;
   isOwn?: boolean;
@@ -12,7 +33,8 @@ const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content, isOwn = fals
   return (
     <div className="markdown-content whitespace-pre-wrap">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        // ✅ Tambahkan remarkHtmlToText ke dalam array remarkPlugins
+        remarkPlugins={[remarkGfm, remarkHtmlToText]}
         rehypePlugins={[rehypeSanitize]}
         components={{
           code({ className, children, ...props }: React.HTMLProps<HTMLElement> & {inline?: boolean}) {

@@ -360,17 +360,6 @@ export function registerSocket(httpServer: HttpServer) {
           return callback?.({ ok: false, error: "Conversation not found." });
         }
 
-        if (repliedToId) {
-          const targetMessage = await prisma.message.findUnique({
-            where: { id: repliedToId },
-            select: { conversationId: true }
-          });
-          
-          if (!targetMessage || targetMessage.conversationId !== conversationId) {
-            return callback?.({ ok: false, error: "Invalid reply target." });
-          }
-        }
-        
         // --- TYPE SAFE DB TRANSACTION ---
         const newMessageRaw = await prisma.message.create({
           data: { 
@@ -383,8 +372,7 @@ export function registerSocket(httpServer: HttpServer) {
               isViewOnce: isViewOnce === true
           },
           include: { 
-              sender: { select: { id: true, encryptedProfile: true } },
-              repliedTo: { include: { sender: { select: { id: true, encryptedProfile: true } } } }
+              sender: { select: { id: true, encryptedProfile: true } }
           }
         });
         
@@ -414,6 +402,46 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
+    socket.on('message:unsend', async ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
+      if (!messageId || !socket.user) return;
+      const uid = socket.user.id;
+
+      try {
+        // 1. Cek apakah pesan itu ada dan memang milik si pengirim
+        const msg = await prisma.message.findUnique({
+          where: { id: messageId },
+          select: { senderId: true, conversationId: true }
+        });
+
+        if (!msg || msg.conversationId !== conversationId || msg.senderId !== uid) {
+          return; // Abaikan jika bukan pesan miliknya
+        }
+
+        // 2. HANCURKAN DARI SERVER (Jika pesan masih belum terbaca/terkirim oleh penerima)
+        await prisma.message.deleteMany({
+          where: { id: messageId, senderId: uid } // Gunakan deleteMany agar tidak crash jika ID tidak ada
+        });
+        
+        console.log(`[Zero-Knowledge] Pesan ${messageId} ditarik oleh pengirim dan dihapus dari server.`);
+
+        // 3. Beri tahu Klien yang Sedang Online (Tombstone Relay)
+        // Kita menggunakan socket untuk memberi sinyal real-time agar UI frontend langsung merespons
+        socket.to(conversationId).emit('message:deleted_remotely', { 
+          messageId, 
+          conversationId,
+          deletedBy: uid
+        });
+
+      } catch (error) {
+        console.error('Failed to unsend message on server:', error);
+      }
+    });
+
+    socket.on('message:view_once_opened', ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
+        if (!messageId || !conversationId || !socket.user) return;
+        socket.to(conversationId).emit('message:viewed', { messageId, conversationId });
+    });
+
     socket.on("push:subscribe", async (data: PushSubscribePayload) => {
       if (!data.endpoint || !data.keys?.p256dh || !data.keys?.auth) return;
       try {
@@ -429,39 +457,58 @@ export function registerSocket(httpServer: HttpServer) {
 
     socket.on('message:mark_as_read', async ({ messageId, conversationId }: MarkAsReadPayload) => {
       if (!messageId || !socket.user) return;
-      const uid = socket.user.id; // Aliased to avoid closure confusion
+      const uid = socket.user.id;
 
       try {
-        const msg = await prisma.message.findUnique({ select: { id: true, conversationId: true }, where: { id: messageId } });
+        // 1. Ambil data pesan SEKALIGUS dengan info grup (hanya 1x query)
+        const msg = await prisma.message.findUnique({
+          where: { id: messageId },
+          select: { 
+            id: true, 
+            conversationId: true, 
+            senderId: true,
+            conversation: { select: { isGroup: true } } // Join ringan untuk cek tipe chat
+          }
+        });
         if (!msg || msg.conversationId !== conversationId) return;
 
-        const isParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: uid } });
+        // 2. Validasi apakah user tergabung dalam percakapan
+        const isParticipant = await prisma.participant.findUnique({ 
+          where: { userId_conversationId: { userId: uid, conversationId } } 
+        });
         if (!isParticipant) return;
 
-        await prisma.messageStatus.upsert({
-          where: { messageId_userId: { messageId, userId: uid } },
-          update: { status: 'READ' },
-          create: { messageId, userId: uid, status: 'READ' },
-        });
-        
+        // 3. Update penanda baca terakhir dari participant
         await prisma.participant.update({
           where: { userId_conversationId: { userId: uid, conversationId } },
           data: { lastReadMsgId: messageId }
         });
-        
-        const messageInfo = await prisma.message.findUnique({
-          where: { id: messageId },
-          select: { senderId: true, conversationId: true },
-        });
-        
-        if (messageInfo && messageInfo.senderId !== uid) {
-          io.to(messageInfo.senderId).emit('message:status_updated', {
+
+        // 4. Beritahu pengirim bahwa pesan sudah dibaca (Centang Biru) via Socket
+        if (msg.senderId !== uid) {
+          io.to(msg.senderId).emit('message:status_updated', {
             messageId,
-            conversationId: messageInfo.conversationId,
+            conversationId: msg.conversationId,
             readBy: uid,
             status: 'READ',
           });
         }
+
+        // 5. Store-and-Forward: Hancurkan vs Simpan Status
+        if (!msg.conversation.isGroup) {
+           // Jika ini chat pribadi (1-on-1), HANCURKAN pesan dari server
+           await prisma.message.delete({
+             where: { id: messageId }
+           });
+        } else {
+           // Jika ini Grup, simpan status READ (penghapusan ditangani oleh messageSweeper setelah 14 hari)
+           await prisma.messageStatus.upsert({
+             where: { messageId_userId: { messageId, userId: uid } },
+             update: { status: 'READ' },
+             create: { messageId, userId: uid, status: 'READ' },
+           });
+        }
+
       } catch (error) {
         console.error('Failed to mark message as read:', error);
       }

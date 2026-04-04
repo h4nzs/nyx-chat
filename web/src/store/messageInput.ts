@@ -89,7 +89,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   setEditingMessage: (message) => set({ editingMessage: message }),
   sendEdit: async (conversationId, messageId, newText) => {
       const payload = { type: 'edit', targetMessageId: messageId, text: newText };
-      await get().sendMessage(conversationId, { content: JSON.stringify(payload) }, undefined, true);
+      const tempId = generateTempId();
+      // Memberikan isSilent = true agar coreSendMessage tidak membuat gelembung kosong/hantu
+      await get().sendMessage(conversationId, { content: JSON.stringify(payload) }, tempId, true);
       set({ editingMessage: null });
       // Optimistically apply local edit immediately
       useMessageStore.getState().updateMessage(conversationId, messageId, { content: newText, isEdited: true });
@@ -134,6 +136,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const { sendMessage: coreSendMessage } = useMessageStore.getState();
     const { replyingTo, expiresIn, isViewOnce } = get();
 
+    // Teruskan status isSilent ke coreSendMessage di store/message.ts
     await coreSendMessage(conversationId, {
       ...data,
       repliedToId: replyingTo?.id,

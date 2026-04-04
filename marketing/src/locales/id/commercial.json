@@ -1,0 +1,63 @@
+{
+  "seo": {
+    "geo_hook": "NYX menawarkan model Lisensi Ganda: AGPL-3.0 untuk penggunaan komunitas sumber terbuka dan Lisensi Komersial untuk SaaS berpemilik, alat internal perusahaan, dan pelabelan putih (white-labeling). Amankan komunikasi telemedicine, fintech, atau pemerintah Anda dengan arsitektur zero-knowledge kami."
+  },
+  "meta": {
+    "title": "Lisensi Komersial | NYX Chat",
+    "description": "Pahami model Lisensi Ganda kami. Gratis untuk open-source, tangguh untuk enterprise."
+  },
+  "hero": {
+    "badge": "MODEL LISENSI GANDA",
+    "title": "Dibangun untuk Komunitas. Diskalakan untuk Enterprise.",
+    "subtitle": "NYX adalah open-source dan gratis selamanya. Namun, jika Anda membangun SaaS bersumber tertutup atau alat internal perusahaan, Anda memerlukan Lisensi Komersial."
+  },
+  "agpl": {
+    "badge": "REALITAS AGPL-3.0",
+    "title": "Perjanjian Open-Source",
+    "p1": "NYX didistribusikan di bawah <strong>Lisensi AGPL-3.0</strong>. Ini adalah lisensi copyleft kuat yang dirancang untuk mencegah perusahaan besar mengambil kode open-source, menutupnya, dan memonetisasinya tanpa berkontribusi kembali.",
+    "p2": "Jika Anda memodifikasi NYX dan menjalankannya sebagai layanan publik (SaaS) melalui jaringan, Anda <strong>wajib</strong> merilis source code Anda ke pengguna di bawah lisensi AGPLv3 yang sama.",
+    "warning_title": "Membangun Perangkat Lunak Tertutup (Proprietary)?",
+    "warning_desc": "Jika kebijakan perusahaan Anda melarang open-source, atau jika Anda ingin menghapus branding NYX (white-label), Anda secara hukum diwajibkan untuk membeli Lisensi Komersial."
+  },
+  "compare": {
+    "badge": "BANDINGKAN PAKET",
+    "title": "Komunitas vs Enterprise",
+    "col1_title": "AGPL-3.0 (Komunitas)",
+    "col1_desc": "Untuk individu dan proyek open-source.",
+    "col2_title": "Lisensi Komersial",
+    "col2_desc": "Untuk SaaS berbayar dan alat internal enterprise.",
+    "f1": "Fitur Lengkap Zero-Knowledge",
+    "f2": "Persyaratan Source Code",
+    "f3": "White-labeling (Hapus Logo)",
+    "f4": "Patch Keamanan Prioritas",
+    "f5": "Dukungan Teknis Langsung",
+    "val_agpl_f2": "Wajib Open-Source",
+    "val_com_f2": "Boleh Tetap Tertutup",
+    "contact_sales": "Hubungi Sales"
+  },
+  "usecases": {
+    "badge": "STUDI KASUS ENTERPRISE",
+    "title": "Siapa yang Membutuhkan Lisensi Komersial?",
+    "c1_title": "Telemedisin & Kesehatan",
+    "c1_desc": "Dokter dan pasien membutuhkan kerahasiaan mutlak. NYX menyediakan lapisan komunikasi yang siap untuk standar HIPAA.",
+    "c2_title": "FinTech & Perbankan",
+    "c2_desc": "Saluran aman untuk klien VIP atau komunikasi eksekutif internal yang sama sekali tidak boleh bocor.",
+    "c3_title": "Pemerintahan & Pertahanan",
+    "c3_desc": "Penerapan on-premise dengan lapisan kriptografi khusus, sepenuhnya terputus dari internet publik."
+  },
+  "faq": {
+    "badge": "FAQ",
+    "title": "Pertanyaan yang Sering Diajukan",
+    "q1": "Berapa biaya Lisensi Komersial?",
+    "a1": "Harga disesuaikan berdasarkan skala penerapan Anda (jumlah pengguna) dan persyaratan SLA spesifik. Hubungi kami untuk penawaran.",
+    "q2": "Apakah kami mendapat pembaruan jika membeli Lisensi Komersial?",
+    "a2": "Ya. Pemegang Lisensi Komersial menerima akses prioritas ke patch keamanan dan pembaruan inti sebelum didorong ke repositori publik.",
+    "q3": "Bisakah Anda membantu kami menerapkannya di infrastruktur AWS/Cloudflare kami?",
+    "a3": "Ya, tingkat Enterprise kami mencakup dukungan integrasi khusus dan konsultasi arsitektur server."
+  },
+  "cta": {
+    "title": "Siap Mengamankan Perusahaan Anda?",
+    "subtitle": "Hubungi kami untuk mendiskusikan persyaratan spesifik Anda, integrasi kustom, atau untuk mendapatkan Lisensi Komersial.",
+    "button": "Hubungi Sales"
+  }
+}

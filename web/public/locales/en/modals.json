@@ -50,7 +50,8 @@
     "verify_success": "Verification successful! Your backup is confirmed.",
     "verify_fail": "Verification failed. Please try again.",
     "aria_toggle_visibility": "Toggle phrase visibility",
-    "aria_copy_phrase": "Copy recovery phrase"
+    "aria_copy_phrase": "Copy recovery phrase",
+    "unavailable": "Recovery phrase unavailable. Please ensure you have a key to proceed."
   },
   "edit_group": {
     "title": "Edit Group Info",

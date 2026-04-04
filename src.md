@@ -227,5 +227,3 @@ Alasannya:
 1.  **Penyegaran Mental:** Lu udah terlalu lama ngubek-ngubek gorong-gorong *codebase* (kripto, *worker*, *types*). Bikin *desktop app* itu ngasih lu mainan baru yang visual dan interaktif.
 2.  **Validasi Arsitektur:** Pas lu nge-*wrap* web lu ke Tauri, lu bakal otomatis ngetes seberapa bagus arsitektur PWA lu. Tauri jalan di *environment* yang beda (WebView), jadi kalau NYX lu stabil di sana, berarti fondasi yang susah payah lu bangun kemaren emang beneran kokoh.
 3.  **Zod Bisa Nunggu:** Bug kripto yang fatal udah kita sikat abis pakai *Pragmatic Strict Typing*. NYX lu udah cukup aman buat jalan. Zod dan Opaque Types bisa lu kerjain nanti pas NYX Desktop udah beres dan lu lagi iseng pengen nge-*refactor*.
-
-Gimana, sepakat kita bungkus NYX lu pake Tauri biar jadi aplikasi *native* Arch Linux yang gahar? Atau jiwa arsitek lu masih gatel pengen nerapin Zod sekarang juga? 😎🛠️
