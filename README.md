@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.5.4-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.5.5-blue?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/License-AGPLv3-red?style=for-the-badge" alt="License">
   <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="Typescript">
   <img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React">
