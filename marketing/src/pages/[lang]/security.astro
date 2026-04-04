@@ -1,4 +1,5 @@
 ---
+import '../../index.css';
 import BaseSecurity from '../security.astro';
 
 export function getStaticPaths() {
@@ -11,4 +12,4 @@ export function getStaticPaths() {
 
 const { lang } = Astro.params;
 ---
-<BaseSecurity />
+<BaseSecurity lang={lang} />

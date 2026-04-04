@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.5.5] - 2026-04-X
+## [2.5.5] - 2026-04-04
 
 ### 🚀 Key Features & Architectural Changes
 - **Pure Store-and-Forward E2EE Architecture:** Completely eliminated long-term message storage on the server. Messages are now strictly ephemeral on the backend, existing only to be routed, and are instantly destroyed once the recipient acknowledges delivery.
