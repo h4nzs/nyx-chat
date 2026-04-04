@@ -103,10 +103,10 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
                 if (isMounted) {
                     setStatus('waiting');
                     const socket = getSocket();
-                    if (socket?.connected && message.sessionId) {
+                    if (socket?.connected && targetSessionId) {
                         socket.emit('session:request_key', {
                             conversationId: message.conversationId,
-                            sessionId: message.sessionId
+                            sessionId: targetSessionId
                         });
                     }
                     retryTimeout = setTimeout(() => {

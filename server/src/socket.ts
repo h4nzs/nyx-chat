@@ -437,9 +437,31 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
-    socket.on('message:view_once_opened', ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
+    socket.on('message:view_once_opened', async ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
         if (!messageId || !conversationId || !socket.user) return;
-        socket.to(conversationId).emit('message:viewed', { messageId, conversationId });
+        const uid = socket.user.id;
+
+        try {
+            // 1. Verify membership in the conversation
+            const isParticipant = await prisma.participant.findUnique({
+                where: { userId_conversationId: { userId: uid, conversationId } }
+            });
+            if (!isParticipant) return;
+
+            // 2. Verify the message exists and belongs to this conversation
+            const msg = await prisma.message.findUnique({
+                where: { id: messageId },
+                select: { conversationId: true, senderId: true }
+            });
+            if (!msg || msg.conversationId !== conversationId) return;
+
+            // 3. Only broadcast if the viewer is NOT the sender (sender already knows)
+            if (msg.senderId === uid) return;
+
+            socket.to(conversationId).emit('message:viewed', { messageId, conversationId });
+        } catch (error) {
+            console.error('Failed to authorize view_once_opened:', error);
+        }
     });
 
     socket.on("push:subscribe", async (data: PushSubscribePayload) => {
@@ -473,10 +495,14 @@ export function registerSocket(httpServer: HttpServer) {
         if (!msg || msg.conversationId !== conversationId) return;
 
         // 2. Validasi apakah user tergabung dalam percakapan
-        const isParticipant = await prisma.participant.findUnique({ 
-          where: { userId_conversationId: { userId: uid, conversationId } } 
+        const isParticipant = await prisma.participant.findUnique({
+          where: { userId_conversationId: { userId: uid, conversationId } }
         });
         if (!isParticipant) return;
+
+        // ✅ FIX: Early return if the reader is the message sender (self-authored ACK)
+        // No need to mutate server state for self-read receipts
+        if (msg.senderId === uid) return;
 
         // 3. Update penanda baca terakhir dari participant
         await prisma.participant.update({

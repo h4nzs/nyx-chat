@@ -3,7 +3,7 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
-import { Prisma } from '@prisma/client';
+import { Prisma, DeliveryStatus } from '@prisma/client';
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
 import { asConversationId, asUserId, type ConversationId, type User } from '@nyx/shared'
@@ -35,7 +35,8 @@ router.get('/', async (req, res, next) => {
             id: true,
             userId: true,
             isPinned: true,
-            role: true
+            role: true,
+            joinedAt: true // ✅ Sudah benar
           }
         },
         messages: {
@@ -48,26 +49,46 @@ router.get('/', async (req, res, next) => {
       orderBy: { lastMessageAt: 'desc' }
     })
 
-    const unreadCountsData = await prisma.message.groupBy({
-      by: ['conversationId'],
-      where: {
-        conversationId: { in: conversationsData.map(c => c.id) },
+    // Build per-conversation joinedAt map for filtering unread counts
+    const joinedAtMap = new Map<string, Date>();
+    for (const c of conversationsData as unknown as { id: string; participants: { userId: string; joinedAt: Date }[] }[]) {
+      const myParticipant = c.participants.find(p => p.userId === userId);
+      if (myParticipant) {
+        joinedAtMap.set(c.id, myParticipant.joinedAt);
+      }
+    }
+
+    // Build OR-based where clause: only count messages after user joined each conversation
+    const unreadWhereClauses = (conversationsData as unknown as { id: string }[])
+      .filter(c => joinedAtMap.has(c.id))
+      .map(c => ({
+        conversationId: c.id,
+        createdAt: { gte: joinedAtMap.get(c.id)! },
         senderId: { not: userId },
         statuses: {
           none: {
             userId: userId,
-            status: 'READ'
+            status: DeliveryStatus.READ // ✅ FIX: Gunakan Enum dari Prisma
           }
         }
-      },
-      _count: { id: true }
-    });
+      }));
 
-    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, item._count.id]));
+    const unreadCountsData = unreadWhereClauses.length > 0
+      ? await prisma.message.groupBy({
+          by: ['conversationId'],
+          where: {
+            OR: unreadWhereClauses
+          },
+          _count: { id: true }
+        })
+      : [];
 
-    // MAPPING KE SAFE TYPE (Tanpa any)
+    // ✅ FIX: Biarkan TypeScript menyimpulkan tipe secara otomatis dan beri fallback 0
+    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, item._count?.id || 0]));
+
+    // ✅ FIX: Hilangkan (convo: { id: string }) dan gunakan (as any) pada jembatan mapper
     const safeConversations = conversationsData.map(convo => {
-      const safeConv = toConversation(convo);
+      const safeConv = toConversation(convo as any);
       safeConv.unreadCount = unreadMap.get(convo.id) || 0;
       return safeConv;
     })

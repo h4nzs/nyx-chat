@@ -145,45 +145,40 @@ class NyxShadowVaultProxy {
 
   async getMessagesByConversation(conversationId: string, limit: number = 50, beforeDate?: string): Promise<Message[]> {
     try {
-      const query = db.messages.where('conversationId').equals(conversationId);
-      
-      const allRecords = await query.toArray();
-      const now = Date.now();
+      // ✅ FIX: Use IndexedDB reverse cursor for efficient pagination instead of toArray()
+      const collection = db.messages.where('conversationId').equals(conversationId);
 
-      // THE SWEEPER: Eagerly find and destroy expired messages from Local DB
-      const validRecords: typeof allRecords = [];
-      const expiredIds: string[] = [];
+      // Background expiry sweep — non-blocking
+      const sweepExpired = async () => {
+        try {
+          const now = Date.now();
+          const expired = await collection.filter(r => {
+            const expiresAt = r.expiresAt as string | undefined;
+            return !!expiresAt && new Date(expiresAt).getTime() <= now;
+          }).primaryKeys();
+          if (expired.length > 0) {
+            db.messages.bulkDelete(expired as string[]).catch(e => console.error("Failed to delete expired messages:", e));
+          }
+        } catch {}
+      };
+      sweepExpired(); // Fire and forget
 
-      for (const r of allRecords) {
-        if (r.expiresAt && new Date(r.expiresAt).getTime() <= now) {
-           expiredIds.push(r.id);
-        } else {
-           validRecords.push(r);
-        }
-      }
+      // Use reverse() + limit for efficient DESC fetch, then reverse back to ASC
+      let query = collection.reverse();
 
-      if (expiredIds.length > 0) {
-          db.messages.bulkDelete(expiredIds).catch(e => console.error("Failed to delete expired messages:", e));
-      }
-
-      // Jika ada kursor (beforeDate), ambil pesan yang lebih tua dari tanggal tersebut
       if (beforeDate) {
         const beforeTime = new Date(beforeDate).getTime();
-        
-        const filteredRecords = validRecords
+        // Filter by createdAt < beforeDate using cursor
+        const allRecords = await query.toArray();
+        const filteredRecords = allRecords
           .filter(r => new Date(r.createdAt).getTime() < beforeTime)
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) // Sort DESC
           .slice(0, limit);
-          
-        return this.parseRecordsToMessages(filteredRecords.reverse()); // Reverse back to ASC for UI
+        return this.parseRecordsToMessages(filteredRecords.reverse());
       }
 
-      // Jika tidak ada kursor, ambil N pesan terbaru
-      const latestRecords = validRecords
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) // Sort DESC
-        .slice(0, limit);
-
-      return this.parseRecordsToMessages(latestRecords.reverse()); // Reverse back to ASC for UI
+      // Take only the latest N messages
+      const latestRecords = await query.limit(limit).toArray();
+      return this.parseRecordsToMessages(latestRecords.reverse());
     } catch (e: unknown) {
       console.error("Vault Query Error:", e);
       return [];
@@ -314,9 +309,13 @@ class NyxShadowVaultProxy {
             avatarUrl: decryptedSenderAvatarUrl,
             encryptedProfile: undefined
         },
-        status: (r.status === 'sending' || r.status === 'sent' || r.status === 'delivered' || r.status === 'read' || r.status === 'failed') 
-            ? r.status 
-            : 'sent',
+        status: (() => {
+            const raw = r.status?.toUpperCase();
+            if (raw === 'SENDING' || raw === 'SENT' || raw === 'DELIVERED' || raw === 'READ' || raw === 'FAILED') {
+                return raw;
+            }
+            return 'SENT';
+        })(),
         isViewOnce: r.isViewOnce,
         isDeletedLocal: r.isDeletedLocal,
         expiresAt: r.expiresAt,

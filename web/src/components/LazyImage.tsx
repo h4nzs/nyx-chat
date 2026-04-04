@@ -50,6 +50,11 @@ export default function LazyImage({
     if (lastAttachmentKey.current !== attachmentKey) {
       hasDecryptedSuccessfully.current = false;
       lastAttachmentKey.current = attachmentKey;
+      // ✅ FIX: Reset all per-attachment runtime state to avoid leaking from prior attachment
+      setRetryCount(0);
+      setError(null);
+      setDecryptionStatus('pending');
+      setImageUrl(null);
     }
 
     // Jika sudah sukses untuk sidik jari ini, JANGAN eksekusi ulang!

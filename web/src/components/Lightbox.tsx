@@ -25,8 +25,14 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
       useMessageStore.getState().updateMessage(message.conversationId, message.id, { isViewed: true });
       import('@lib/socket').then(({ getSocket }) => {
           const socket = getSocket();
+          const emitViewedAck = () => {
+              socket?.emit('message:view_once_opened', { messageId: message.id, conversationId: message.conversationId });
+          };
           if (socket?.connected) {
-              socket.emit('message:view_once_opened', { messageId: message.id, conversationId: message.conversationId });
+              emitViewedAck();
+          } else {
+              // Queue: emit once socket reconnects
+              socket?.once('connect', emitViewedAck);
           }
       });
       // Optionally clean up the file object locally so it can't be re-opened:

@@ -235,7 +235,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
         return {
           ...c,
-          lastMessage,
+          lastMessage: finalLastMessage,
           participants,
           decryptedMetadata
         };
@@ -589,19 +589,20 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           // Cukup tambahkan unread count JIKA pengirimnya BUKAN kita, dan kita TIDAK sedang membuka chat-nya.
           if (!isMine && !isViewingChat) {
               return {
-                  conversations: state.conversations.map(c => 
-                      c.id === conversationId 
-                          ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } 
+                  conversations: state.conversations.map(c =>
+                      c.id === conversationId
+                          ? { ...c, unreadCount: (c.unreadCount || 0) + 1 }
                           : c
                   )
               };
           }
           // Jika ini pesan kita sendiri, atau kita sedang buka chatnya, abaikan.
-          return state; 
+          return state;
       }
 
       // Jika pesan ini lebih baru, lakukan update utuh (Preview & Resort)
-      const shouldIncrementUnread = !isMine && !isViewingChat && state.activeId !== conversationId;
+      // ✅ FIX: shouldIncrementUnread hanya bergantung pada ownership dan visibility, bukan activeId
+      const shouldIncrementUnread = !isMine && !isViewingChat;
       
       const updatedConversation = {
         ...conversation,

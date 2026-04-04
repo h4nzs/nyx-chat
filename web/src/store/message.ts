@@ -584,24 +584,52 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
   // ==========================================
   // TAHAP 3: MENERAPKAN SEMUA PERUBAHAN
   // ==========================================
-  
-  // 1. Terapkan Reaksi Baru
-  for (const reaction of reactions) {
-    const target = messageMap.get(asMessageId(reaction.messageId));
-    if (target) {
-      const existingReactions = target.reactions || [];
-      if (!existingReactions.some(r => r.id === reaction.id)) {
-        target.reactions = [...existingReactions, { ...reaction, userId: asUserId(reaction.userId) }];
-      }
+
+  // 1. Terapkan Reaksi & Cabut Reaksi — ✅ FIX: Apply in order using last-action map
+  // Build a map keyed by `${messageId}|${userId}|${emoji}` to track the final action
+  const reactionActionMap = new Map<string, 'add' | 'remove'>();
+
+  // First, mark all existing reactions as "add" baseline
+  for (const msg of messageMap.values()) {
+    for (const r of (msg.reactions || [])) {
+      const key = `${msg.id}|${r.userId}|${r.emoji}`;
+      reactionActionMap.set(key, 'add');
     }
   }
 
-  // 2. Terapkan Cabut Reaksi (Reaction Remove)
+  // Then apply incoming adds
+  for (const reaction of reactions) {
+    const key = `${reaction.messageId}|${reaction.userId}|${reaction.emoji}`;
+    reactionActionMap.set(key, 'add');
+  }
+
+  // Then apply removes (overriding adds)
   for (const rr of reactionRemoves) {
-      const target = messageMap.get(asMessageId(rr.targetMessageId));
-      if (target && target.reactions) {
-          target.reactions = target.reactions.filter(r => r.userId !== rr.senderId || r.emoji !== rr.emoji);
+    const key = `${rr.targetMessageId}|${rr.senderId}|${rr.emoji}`;
+    reactionActionMap.set(key, 'remove');
+  }
+
+  // Now rebuild reactions based on final state
+  for (const msg of messageMap.values()) {
+    const finalReactions: Message['reactions'] = [];
+    for (const r of (msg.reactions || [])) {
+      const key = `${msg.id}|${r.userId}|${r.emoji}`;
+      if (reactionActionMap.get(key) === 'add') {
+        finalReactions.push(r);
       }
+    }
+    msg.reactions = finalReactions;
+  }
+
+  // Add new reactions that weren't in the original map
+  for (const reaction of reactions) {
+    const target = messageMap.get(asMessageId(reaction.messageId));
+    if (target) {
+      const key = `${reaction.messageId}|${reaction.userId}|${reaction.emoji}`;
+      if (reactionActionMap.get(key) === 'add' && !target.reactions?.some(r => r.id === reaction.id)) {
+        target.reactions = [...(target.reactions || []), { ...reaction, userId: asUserId(reaction.userId) }];
+      }
+    }
   }
 
   // 3. Terapkan Editan (Diurutkan dari yang terbaru)
@@ -618,22 +646,35 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
   for (const un of unsends) {
       const targetId = asMessageId(un.targetMessageId);
       const target = messageMap.get(targetId);
-      
+
       // Keamanan E2EE: Hanya pengirim asli yang berhak menarik pesannya
       if (target && target.senderId === un.senderId) {
           target.content = null;
           target.fileUrl = undefined;
+          target.fileKey = undefined;
+          target.fileName = undefined;
+          target.fileType = undefined;
+          target.fileSize = undefined;
+          target.duration = undefined;
+          target.isBlindAttachment = false;
           target.isDeletedLocal = true;
           target.reactions = [];
       } else if (!target) {
           // Jika pesan aslinya belum ter-load ke UI, suntikkan nisannya langsung ke DB
-          import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([{ 
-              id: targetId, 
-              conversationId: asConversationId(un.conversationId), 
-              isDeletedLocal: true, 
-              content: null, 
-              createdAt: un.createdAt, 
-              senderId: asUserId(un.senderId) 
+          import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([{
+              id: targetId,
+              conversationId: asConversationId(un.conversationId),
+              isDeletedLocal: true,
+              content: null,
+              fileUrl: undefined,
+              fileKey: undefined,
+              fileName: undefined,
+              fileType: undefined,
+              fileSize: undefined,
+              duration: undefined,
+              isBlindAttachment: false,
+              createdAt: un.createdAt,
+              senderId: asUserId(un.senderId)
           } as Message]));
       }
   }
@@ -699,7 +740,8 @@ const initialState: State = {
   selectedMessageIds: [],
 };
 
-const pendingStatuses: Record<string, { userId: string, status: string }> = {};
+// ✅ FIX: Use composite key `${conversationId}:${messageId}` to prevent race overwrites
+const pendingStatuses: Record<string, { conversationId: string; userId: string, status: string }> = {};
 
 export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) => ({
   ...initialState,
@@ -1568,9 +1610,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     }
 
     // 1. TAMPILKAN DARI LOCAL VAULT (INDEXEDDB) DULU (Instan 0ms!)
+    let localWasEmpty = true;
     try {
       const localMessagesRaw = await shadowVault.getMessagesByConversation(id, 50);
       if (localMessagesRaw.length > 0) {
+          localWasEmpty = false;
           const localProcessed = processMessagesAndReactions(localMessagesRaw, []);
           const localEnriched = enrichMessagesWithSenderProfile(id, localProcessed);
           set(state => ({
@@ -1585,10 +1629,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     // 2. SINKRONISASI BACKGROUND: Cek apakah ada surat tertunda di server
     try {
       set(state => ({ isFetchingMore: { ...state.isFetchingMore, [id]: true } }));
-      
+
       const res = await api<{ items: Message[] }>(`/api/messages/${id}?limit=50`);
       const fetchedMessages = res.items || [];
-      
+
       if (fetchedMessages.length > 0) {
         const processedMessages: Message[] = [];
 
@@ -1605,9 +1649,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
         const allMessages = processMessagesAndReactions(uniqueMessages, []);
         const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
-        
+
         // ✅ 3. AWAIT PENYIMPANAN LOKAL DULU (PENTING!)
-        await shadowVault.upsertMessages(enrichedMessages); 
+        await shadowVault.upsertMessages(enrichedMessages);
 
         // ✅ 4. BARU TEMBAK KILL SWITCH SETELAH DATA AMAN
         const socket = getSocket();
@@ -1635,6 +1679,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
     } catch (error) {
       console.error(`Failed to sync pending messages for ${id}`, error);
+      // ✅ FIX: Jika server sync gagal dan local vault kosong, tandai sebagai loaded
+      // agar UI tidak stuck loading selamanya
+      if (localWasEmpty) {
+        set(state => ({ hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true } }));
+      }
     } finally {
       set(state => ({ isFetchingMore: { ...state.isFetchingMore, [id]: false } }));
     }
@@ -2096,22 +2145,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       );
       
       const newMsgIdStr = newMessage.id ? String(newMessage.id) : '';
-      const pending = newMsgIdStr ? pendingStatuses[newMsgIdStr] : undefined;
-      
+      // ✅ FIX: Use composite key for pendingStatuses lookup
+      const pendingKey = newMsgIdStr ? `${newMessage.conversationId}:${newMsgIdStr}` : '';
+      const pending = pendingKey ? pendingStatuses[pendingKey] : undefined;
+
       const finalStatuses = pending
-          ? [{ 
-              userId: asUserId(pending.userId), 
-              status: pending.status as 'SENT' | 'DELIVERED' | 'READ', 
-              messageId: asMessageId(newMsgIdStr), 
-              id: `temp-status-${Date.now()}`, 
-              updatedAt: new Date().toISOString() 
+          ? [{
+              userId: asUserId(pending.userId),
+              status: pending.status as 'SENT' | 'DELIVERED' | 'READ',
+              messageId: asMessageId(newMsgIdStr),
+              id: `temp-status-${Date.now()}`,
+              updatedAt: new Date().toISOString()
             }]
-          : (newMessage.statuses && newMessage.statuses.length > 0) 
-              ? newMessage.statuses 
+          : (newMessage.statuses && newMessage.statuses.length > 0)
+              ? newMessage.statuses
               : (oldMsg?.statuses || []);
 
-      if (pending && newMsgIdStr) {
-          delete pendingStatuses[newMsgIdStr];
+      if (pending && pendingKey) {
+          delete pendingStatuses[pendingKey];
       }
 
       const finalMessage: Message = {
@@ -2297,7 +2348,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             
               if (!found) {
                   // Jika pesan belum ditemukan (masih berstatus temp_id), simpan ke pendingStatuses
-                  pendingStatuses[messageId] = { userId, status: validStatus };
+                  // ✅ FIX: Use composite key to prevent race overwrites across conversations
+                  const compositeKey = `${conversationId}:${messageId}`;
+                  pendingStatuses[compositeKey] = { conversationId, userId, status: validStatus };
               }
 
               if (msgToSave) {

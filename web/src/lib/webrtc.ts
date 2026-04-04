@@ -316,7 +316,32 @@ export const initWebRTCListeners = (socket: Socket | null) => {
             return; // Berhenti memproses!
         }
 
-        const iceServers = await getDynamicIceServers();
+        // ✅ FIX: Validate decrypted payload before processing
+        if (data.type === 'request') {
+            if (typeof (decryptedPayload as { isVideo?: unknown }).isVideo !== 'boolean') {
+                console.warn('[WebRTC] Invalid request payload: isVideo missing or not boolean');
+                return;
+            }
+        } else if (data.type === 'offer') {
+            const offer = (decryptedPayload as { offer?: unknown }).offer;
+            if (!offer || typeof offer !== 'object') {
+                console.warn('[WebRTC] Invalid offer payload');
+                return;
+            }
+        } else if (data.type === 'answer') {
+            const answer = (decryptedPayload as { answer?: unknown }).answer;
+            if (!answer || typeof answer !== 'object') {
+                console.warn('[WebRTC] Invalid answer payload');
+                return;
+            }
+        } else if (data.type === 'ice-candidate') {
+            const candidate = (decryptedPayload as { candidate?: unknown }).candidate;
+            if (!candidate || typeof candidate !== 'object') {
+                console.warn('[WebRTC] Invalid ice candidate payload');
+                return;
+            }
+        }
+
         let pc = peerConnections.get(data.from as string);
 
         switch (data.type) {
@@ -333,10 +358,13 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                 break;
             case 'accept':
                 useCallStore.getState().setCallState('connected');
-                useCallStore.getState().addRemoteUser({ id: data.from }); 
-                
-                if (!pc) pc = createPeerConnection(data.from as string, iceServers);
-                
+                useCallStore.getState().addRemoteUser({ id: data.from });
+
+                if (!pc) {
+                    const iceServers = await getDynamicIceServers();
+                    pc = createPeerConnection(data.from as string, iceServers);
+                }
+
                 try {
                   const offer = await pc.createOffer();
                   await pc.setLocalDescription(offer);
@@ -354,13 +382,16 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                 const store = useCallStore.getState();
                 store.removeRemoteStream(data.from);
                 store.removeRemoteUser(data.from);
-                
+
                 if (useCallStore.getState().remoteUsers.length === 0) {
                     cleanupCall();
                 }
                 break;
             case 'offer':
-                if (!pc) pc = createPeerConnection(data.from as string, iceServers);
+                if (!pc) {
+                    const iceServers = await getDynamicIceServers();
+                    pc = createPeerConnection(data.from as string, iceServers);
+                }
                 try {
                   await pc.setRemoteDescription(new RTCSessionDescription((decryptedPayload as { offer: RTCSessionDescriptionInit }).offer));
                   const answer = await pc.createAnswer();
@@ -371,7 +402,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                 }
                 break;
             case 'answer':
-                if (!pc) return; 
+                if (!pc) return;
                 try {
                   await pc.setRemoteDescription(new RTCSessionDescription((decryptedPayload as { answer: RTCSessionDescriptionInit }).answer));
                 } catch (e) {

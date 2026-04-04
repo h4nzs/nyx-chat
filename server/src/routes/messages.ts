@@ -174,7 +174,12 @@ router.delete('/:id', async (req, res, next) => {
           return res.status(403).json({ error: 'Unauthorized file deletion' });
        } else {
           console.log('[R2] Deleting blind attachment:', r2Key);
-          deleteR2File(r2Key).catch(err => console.error('[R2] Failed to delete blind file:', r2Key, ':', err))
+          try {
+             await deleteR2File(r2Key);
+          } catch (err) {
+             console.error('[R2] Failed to delete blind file:', r2Key, ':', err);
+             return res.status(500).json({ error: 'Failed to delete file from storage' });
+          }
        }
     }
 

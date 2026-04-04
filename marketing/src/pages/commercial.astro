@@ -26,8 +26,8 @@ const commercialSchema = JSON.stringify({
 });
 
 // Komponen SVG untuk Check dan Cross (bisa dipakai ulang)
-const CheckIcon = `<svg class="w-5 h-5 text-green-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`;
-const CrossIcon = `<svg class="w-5 h-5 text-gray-600 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>`;
+const CheckIcon = `<svg class="w-5 h-5 text-green-500 mx-auto" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`;
+const CrossIcon = `<svg class="w-5 h-5 text-gray-600 mx-auto" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>`;
 ---
 
 <MainLayout title={title} description={description} canonicalUrl={Astro.url.pathname} schemaMarkup={commercialSchema}>
@@ -98,8 +98,8 @@ const CrossIcon = `<svg class="w-5 h-5 text-gray-600 mx-auto" fill="none" stroke
             <tbody class="divide-y divide-gray-800 text-sm md:text-base">
               <tr>
                 <td class="p-6 font-medium text-gray-300">{t('commercial:compare.f1')}</td>
-                <td class="p-6 border-l border-gray-800" set:html={CheckIcon}></td>
-                <td class="p-6 border-l border-amber-500/30 bg-amber-500/5" set:html={CheckIcon}></td>
+                <td class="p-6 border-l border-gray-800" set:html={CheckIcon + '<span class="sr-only">Included</span>'}></td>
+                <td class="p-6 border-l border-amber-500/30 bg-amber-500/5" set:html={CheckIcon + '<span class="sr-only">Included</span>'}></td>
               </tr>
               <tr>
                 <td class="p-6 font-medium text-gray-300">{t('commercial:compare.f2')}</td>
@@ -108,18 +108,18 @@ const CrossIcon = `<svg class="w-5 h-5 text-gray-600 mx-auto" fill="none" stroke
               </tr>
               <tr>
                 <td class="p-6 font-medium text-gray-300">{t('commercial:compare.f3')}</td>
-                <td class="p-6 border-l border-gray-800" set:html={CrossIcon}></td>
-                <td class="p-6 border-l border-amber-500/30 bg-amber-500/5" set:html={CheckIcon}></td>
+                <td class="p-6 border-l border-gray-800" set:html={CrossIcon + '<span class="sr-only">Not included</span>'}></td>
+                <td class="p-6 border-l border-amber-500/30 bg-amber-500/5" set:html={CheckIcon + '<span class="sr-only">Included</span>'}></td>
               </tr>
               <tr>
                 <td class="p-6 font-medium text-gray-300">{t('commercial:compare.f4')}</td>
-                <td class="p-6 border-l border-gray-800" set:html={CrossIcon}></td>
-                <td class="p-6 border-l border-amber-500/30 bg-amber-500/5" set:html={CheckIcon}></td>
+                <td class="p-6 border-l border-gray-800" set:html={CrossIcon + '<span class="sr-only">Not included</span>'}></td>
+                <td class="p-6 border-l border-amber-500/30 bg-amber-500/5" set:html={CheckIcon + '<span class="sr-only">Included</span>'}></td>
               </tr>
               <tr>
                 <td class="p-6 font-medium text-gray-300">{t('commercial:compare.f5')}</td>
-                <td class="p-6 border-l border-gray-800" set:html={CrossIcon}></td>
-                <td class="p-6 border-l border-amber-500/30 bg-amber-500/5" set:html={CheckIcon}></td>
+                <td class="p-6 border-l border-gray-800" set:html={CrossIcon + '<span class="sr-only">Not included</span>'}></td>
+                <td class="p-6 border-l border-amber-500/30 bg-amber-500/5" set:html={CheckIcon + '<span class="sr-only">Included</span>'}></td>
               </tr>
               <tr>
                 <td class="p-6"></td>

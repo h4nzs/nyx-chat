@@ -30,13 +30,17 @@ export default function ReactionPopover({ message, children }: ReactionPopoverPr
     // 1. TOGGLE OFF (Jika mengklik emoji yang sama = Hapus Reaksi)
     if (userReaction?.emoji === emoji) {
       removeLocalReaction(message.conversationId, message.id, userReaction.id);
-      
+
       // E2EE Tombstone: Kirim sinyal hapus reaksi ke lawan bicara
       const removeReactPayload = { type: "reaction_remove", targetMessageId: message.id, emoji: emoji };
-      sendMessage(message.conversationId, {
-          content: JSON.stringify(removeReactPayload),
-          isSilent: true
-      });
+      try {
+          await sendMessage(message.conversationId, {
+              content: JSON.stringify(removeReactPayload),
+              isSilent: true
+          });
+      } catch (e) {
+          console.error("Failed to send reaction remove:", e);
+      }
       return;
     }
 
@@ -44,13 +48,17 @@ export default function ReactionPopover({ message, children }: ReactionPopoverPr
     if (userReaction) {
         // Hapus yang lama di UI Lokal
         removeLocalReaction(message.conversationId, message.id, userReaction.id);
-        
+
         // E2EE Tombstone: Kirim sinyal hapus emoji lama
         const removeReactPayload = { type: "reaction_remove", targetMessageId: message.id, emoji: userReaction.emoji };
-        sendMessage(message.conversationId, {
-            content: JSON.stringify(removeReactPayload),
-            isSilent: true
-        });
+        try {
+            await sendMessage(message.conversationId, {
+                content: JSON.stringify(removeReactPayload),
+                isSilent: true
+            });
+        } catch (e) {
+            console.error("Failed to send reaction remove:", e);
+        }
     }
 
     // 3. ADD NEW (Kirim Reaksi Baru)
