@@ -8,7 +8,7 @@ export interface TypingPayload {
 
 export interface DistributeKeysPayload {
   conversationId: string;
-  keys: { userId: string; key: string }[];
+  keys: { userId: string; key: string; senderDeviceKey?: string }[];
 }
 
 export interface MessageSendPayload {
@@ -88,6 +88,7 @@ export interface ServerToClientEvents {
         encryptedKey: string;
         type?: 'GROUP_KEY' | 'SESSION_KEY';
         senderId?: string; // Added
+        senderDeviceKey?: string;
     }) => void;
     "session:fulfill_request": (payload: {
         conversationId: string;
