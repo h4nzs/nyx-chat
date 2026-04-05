@@ -440,15 +440,13 @@ export type { VaultEntry };
 export async function exportDatabaseToJson(): Promise<string> {
   const exportData: Record<string, unknown[]> = {};
 
-  // ✅ FIX: Include ALL tables from unified Dexie schema
-  // KECUALI: 'groupSenderStates' dan 'preKeys' karena ini spesifik untuk perangkat 
-  // dan tidak boleh di-clone ke perangkat baru dalam arsitektur Multi-Device.
+  // ✅ FIX: HANYA ekspor/impor tabel riwayat dan status penerima.
+  // KECUALI: Semua tabel yang mendefinisikan identitas kriptografi perangkat 
+  // (seperti kvStore yang berisi kunci privat, sessionKeys, ratchetSessions, dll)
+  // Ini krusial agar perangkat baru tidak menjadi "kloningan" kriptografi perangkat lama.
   const tables = [
-    'sessionKeys', 'groupKeys', 'pendingHeaders',
-    'ratchetSessions', 'skippedKeys', 'messageKeys', 'identityKeys',
-    'groupReceiverStates', 'groupSkippedKeys',
-    // Unified vault tables
-    'messages', 'storyKeys', 'offlineQueue', 'kvStore'
+    'messages', 'storyKeys', 'offlineQueue',
+    'identityKeys', 'groupReceiverStates', 'groupSkippedKeys'
   ];
 
   for (const tableName of tables) {
@@ -483,15 +481,13 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
           throw new Error("Invalid vault file format.");
       }
 
-      // ✅ FIX: Include ALL tables from unified Dexie schema
-      // KECUALI: 'groupSenderStates' dan 'preKeys' karena ini spesifik untuk perangkat 
-      // dan tidak boleh di-clone ke perangkat baru dalam arsitektur Multi-Device.
+      // ✅ FIX: HANYA ekspor/impor tabel riwayat dan status penerima.
+      // KECUALI: Semua tabel yang mendefinisikan identitas kriptografi perangkat 
+      // (seperti kvStore yang berisi kunci privat, sessionKeys, ratchetSessions, dll)
+      // Ini krusial agar perangkat baru tidak menjadi "kloningan" kriptografi perangkat lama.
       const tables = [
-        'sessionKeys', 'groupKeys', 'pendingHeaders',
-        'ratchetSessions', 'skippedKeys', 'messageKeys', 'identityKeys',
-        'groupReceiverStates', 'groupSkippedKeys',
-        // Unified vault tables
-        'messages', 'storyKeys', 'offlineQueue', 'kvStore'
+        'messages', 'storyKeys', 'offlineQueue',
+        'identityKeys', 'groupReceiverStates', 'groupSkippedKeys'
       ];
 
       await db.transaction('rw', tables.map(t => db.table(t)), async () => {
