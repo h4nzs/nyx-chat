@@ -895,9 +895,11 @@ async function doDecryptMessage(
 
         // --- Resolve Sender Signing Key ---
         // ✅ FIX: Jika pengirim melampirkan senderDeviceKey, kita bisa mencari signingKey perangkat tersebut secara langsung
+        // --- Resolve Sender Signing Key ---
+        // ✅ FIX: Perbaikan Key Resolution untuk Multi-Device (Self-Sync)
         if (senderDeviceKey) {
              try {
-                 // Cari bundle milik user pengirim dari API
+                 // Cari bundle milik user pengirim dari API (bisa orang lain, bisa diri sendiri)
                  const bundlesMap = await fetchPreKeyBundles([senderId]);
                  const bundles = bundlesMap[senderId] || [];
                  
@@ -911,11 +913,20 @@ async function doDecryptMessage(
              }
         }
 
-        // Fallback jika tidak ketemu (cari di dalam participants store)
+        // Fallback jika tidak ketemu via senderDeviceKey (hanya cocok jika pengirim adalah orang lain dengan 1 device)
         if (!keyToUse) {
             const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
             const sender = conversation?.participants.find(p => p.id === senderId || ('userId' in p && p.userId === senderId)) as ExtendedParticipant | undefined;
             keyToUse = sender?.signingKey || sender?.user?.signingKey;
+            
+            // ✅ FIX: Jika pesan dari diri sendiri dan masih tidak ketemu, ekstrak signing key dari private key lokal.
+            if (!keyToUse && senderId === useAuthStore.getState().user?.id) {
+                 const sodium = await getSodiumLib();
+                 const privateSigningKey = await useAuthStore.getState().getSigningPrivateKey();
+                 // Ekstrak public signing key (32 byte terakhir dari 64 byte private key ed25519)
+                 const publicSigningKeyBytes = privateSigningKey.slice(32);
+                 keyToUse = sodium.to_base64(publicSigningKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+            }
         }
         
         if (!keyToUse) {
@@ -930,7 +941,6 @@ async function doDecryptMessage(
         const skippedMkB64 = await takeGroupSkippedKey(conversationId, senderId, header.n);
         
         if (skippedMkB64) {
-            // SECURITY FIX: Decrypt via Worker (Verifies Signature)
             const { groupDecryptSkipped } = await getWorkerProxy();
             const result = await groupDecryptSkipped(
                 skippedMkB64, 
@@ -957,21 +967,19 @@ async function doDecryptMessage(
             senderSigningKey
         );
         
-        // 2. ATOMIC STATE UPDATE: Store gaps separately
         for (const sk of result.skippedKeys) {
             await storeGroupSkippedKey(conversationId, senderId, sk.n, sk.mk);
         }
 
         await saveGroupReceiverState({
             ...receiverState,
-            id: receiverState.id, // Explicit ID preserve
+            id: receiverState.id, 
             conversationId: conversationId as ConversationId,
             senderId: senderId as UserId,
             CK: result.state.CK,
             N: result.state.N
         });
         
-        // [FIX PERSISTENCE] Save Message Key for Fast Reloads
         if (messageId && result.mk) {
             await storeMessageKeySecurely(messageId, result.mk);
         }
