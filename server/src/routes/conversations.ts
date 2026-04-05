@@ -159,13 +159,23 @@ router.post('/', async (req, res, next) => {
     if (userIds.length > MAX_GROUP_MEMBERS) return res.status(400).json({ error: `Group cannot have more than ${MAX_GROUP_MEMBERS} members.` })
 
     if (!isGroup) {
-      const otherUserId = userIds.find((id: string) => id !== creatorId)
+      const isSelfChat = userIds.length === 1 && userIds[0] === creatorId;
+      const otherUserId = isSelfChat ? creatorId : userIds.find((id: string) => id !== creatorId);
       if (!otherUserId) return res.status(400).json({ error: 'Another user ID is required for a private chat.' })
 
-      const existingConversation = await prisma.conversation.findFirst({
-        where: { isGroup: false, AND: [{ participants: { some: { userId: creatorId } } }, { participants: { some: { userId: otherUserId } } }] },
-        include: { participants: { include: { user: { select: userSelectWithKeys } } }, creator: { select: userSelectWithKeys } }
-      })
+      let existingConversation = null;
+      if (isSelfChat) {
+          const selfChats = await prisma.conversation.findMany({
+              where: { isGroup: false, participants: { some: { userId: creatorId } } },
+              include: { participants: { include: { user: { select: userSelectWithKeys } } }, creator: { select: userSelectWithKeys } }
+          });
+          existingConversation = selfChats.find(c => c.participants.length === 1);
+      } else {
+          existingConversation = await prisma.conversation.findFirst({
+              where: { isGroup: false, AND: [{ participants: { some: { userId: creatorId } } }, { participants: { some: { userId: otherUserId } } }] },
+              include: { participants: { include: { user: { select: userSelectWithKeys } } }, creator: { select: userSelectWithKeys } }
+          });
+      }
 
       if (existingConversation) return res.status(200).json(toConversation(hoistConvoKeys(existingConversation as unknown as RawConversationData)))
         

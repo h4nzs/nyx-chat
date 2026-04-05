@@ -292,12 +292,29 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       set({ isInitializingCrypto: true });
 
       try {
+        let newPublicKey = undefined;
+        let newSigningKey = undefined;
+        let newEncryptedPrivateKey = undefined;
+
+        // If this is a fresh login on a new device, generate a new cryptographic identity
+        if (!restoredNotSynced) {
+            const { registerAndGenerateKeys } = await import('@lib/crypto-worker-proxy');
+            const keys = await registerAndGenerateKeys(password);
+            
+            newPublicKey = keys.encryptionPublicKeyB64;
+            newSigningKey = keys.signingPublicKeyB64;
+            newEncryptedPrivateKey = keys.encryptedPrivateKeys;
+        }
+
         const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/login", {
           method: "POST",
           body: JSON.stringify({ 
               usernameHash, 
               password,
-              deviceName: getDeviceName() // 👈 Tambahkan baris ini
+              deviceName: getDeviceName(),
+              publicKey: newPublicKey,
+              signingKey: newSigningKey,
+              encryptedPrivateKey: newEncryptedPrivateKey
           }),
         });
 

@@ -555,7 +555,8 @@ export async function ensureGroupSession(conversationId: string, participants: P
                   userId: uId,
                   targetDeviceId: bundle.deviceId, 
                   key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-                  type: 'GROUP_KEY'
+                  type: 'GROUP_KEY',
+                  senderDeviceKey: myIdentityKeyB64
               });
           }
       }
@@ -583,27 +584,29 @@ export async function ensureGroupSession(conversationId: string, participants: P
 }
 
 export async function handleGroupKeyDistribution(
-    conversationId: string, 
+    conversationId: string,
     encryptedKey: string,
-    senderId: string // Need to know WHOSE key this is
+    senderId: string,
+    senderDeviceKey?: string
 ): Promise<void> {
   const { publicKey, privateKey } = await getMyEncryptionKeyPair();
   const sodium = await getSodiumLib();
-  
+
   // 1. Decrypt the Sender Key (Chain Key)
   const senderKeyBytes = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
   const senderKeyB64 = sodium.to_base64(senderKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
-  
+
   // 2. Save as Receiver State
+  const stateId = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
+
   await saveGroupReceiverState({
-      id: `${conversationId}_${senderId}`,
+      id: stateId,
       conversationId: conversationId as ConversationId,
       senderId: senderId as UserId,
       CK: senderKeyB64,
       N: 0
   });
 }
-
 export async function rotateGroupKey(conversationId: string, reason: 'membership_change' | 'periodic_rotation' = 'membership_change'): Promise<void> {
   // Clear OLD states
   await deleteGroupStates(conversationId);
@@ -752,12 +755,16 @@ async function doEncryptMessage(
     });
     
     const myId = useAuthStore.getState().user?.id;
-    // ✅ FIX: Menyisipkan senderId langsung ke dalam cipher agar Decryptor bisa Auto-Detect
+    const { publicKey } = await getMyEncryptionKeyPair();
+    const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+    // ✅ FIX: Menyisipkan senderId dan senderDeviceKey langsung ke dalam cipher agar Decryptor bisa Auto-Detect
     const payload = JSON.stringify({
         header: result.header,
         ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
         signature: result.signature,
-        senderId: myId 
+        senderId: myId,
+        senderDeviceKey: myPublicKeyB64
     });
     
     return { ciphertext: payload, mk: result.mk };
@@ -851,13 +858,19 @@ async function doDecryptMessage(
   const isSenderKeyProtocol = payloadObj && payloadObj.signature !== undefined && payloadObj.header !== undefined;
 
   if (isSenderKeyProtocol || isGroup) {
-    const senderId = (payloadObj && payloadObj.senderId) ? payloadObj.senderId : sessionId; 
-    
+    const senderId = (payloadObj && payloadObj.senderId) ? payloadObj.senderId : sessionId;
+    const senderDeviceKey = payloadObj && payloadObj.senderDeviceKey;
+
     if (!senderId) return { status: 'error', error: new Error('Missing senderId for group decryption') };
-    
-    const receiverState = await getGroupReceiverState(conversationId, senderId);
-    if (!receiverState) {
-        requestGroupKeyWithTimeout(conversationId); 
+
+    const stateId = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
+    let receiverState = await getGroupReceiverState(conversationId, stateId);
+
+    if (!receiverState && senderDeviceKey) {
+        receiverState = await getGroupReceiverState(conversationId, `${conversationId}_${senderId}`);
+    }
+
+    if (!receiverState) {        requestGroupKeyWithTimeout(conversationId); 
         return { status: 'pending', reason: 'waiting_for_key' };
     }
     
@@ -1213,11 +1226,11 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
       clearTimeout(pendingRequest.timerId);
       pendingGroupKeyRequests.delete(conversationId);
     }
-    
+
     try {
-        await handleGroupKeyDistribution(conversationId, encryptedKey, senderId);
-        import('@store/message').then(({ useMessageStore }) => {
-            useMessageStore.getState().reDecryptPendingMessages(conversationId);
+        const senderDeviceKey = (payload as any).senderDeviceKey;
+        await handleGroupKeyDistribution(conversationId, encryptedKey, senderId, senderDeviceKey);
+        import('@store/message').then(({ useMessageStore }) => {            useMessageStore.getState().reDecryptPendingMessages(conversationId);
         });
     } catch (e) {
         // FASE 3: Jika Sealed Box ini ditujukan untuk perangkat kita yang lain, abaikan secara diam-diam.

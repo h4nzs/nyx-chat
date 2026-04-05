@@ -441,11 +441,13 @@ export async function exportDatabaseToJson(): Promise<string> {
   const exportData: Record<string, unknown[]> = {};
 
   // ✅ FIX: Include ALL tables from unified Dexie schema
+  // KECUALI: 'groupSenderStates' dan 'preKeys' karena ini spesifik untuk perangkat 
+  // dan tidak boleh di-clone ke perangkat baru dalam arsitektur Multi-Device.
   const tables = [
-    'sessionKeys', 'groupKeys', 'preKeys', 'pendingHeaders',
+    'sessionKeys', 'groupKeys', 'pendingHeaders',
     'ratchetSessions', 'skippedKeys', 'messageKeys', 'identityKeys',
-    'groupSenderStates', 'groupReceiverStates', 'groupSkippedKeys',
-    // Unified vault tables (previously missing)
+    'groupReceiverStates', 'groupSkippedKeys',
+    // Unified vault tables
     'messages', 'storyKeys', 'offlineQueue', 'kvStore'
   ];
 
@@ -482,11 +484,13 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
       }
 
       // ✅ FIX: Include ALL tables from unified Dexie schema
+      // KECUALI: 'groupSenderStates' dan 'preKeys' karena ini spesifik untuk perangkat 
+      // dan tidak boleh di-clone ke perangkat baru dalam arsitektur Multi-Device.
       const tables = [
-        'sessionKeys', 'groupKeys', 'preKeys', 'pendingHeaders',
+        'sessionKeys', 'groupKeys', 'pendingHeaders',
         'ratchetSessions', 'skippedKeys', 'messageKeys', 'identityKeys',
-        'groupSenderStates', 'groupReceiverStates', 'groupSkippedKeys',
-        // Unified vault tables (previously missing)
+        'groupReceiverStates', 'groupSkippedKeys',
+        // Unified vault tables
         'messages', 'storyKeys', 'offlineQueue', 'kvStore'
       ];
 

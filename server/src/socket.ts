@@ -228,7 +228,11 @@ export function registerSocket(httpServer: HttpServer) {
         keys.forEach(keyPackage => {
           if (keyPackage.userId && keyPackage.key) {
             io.to(keyPackage.userId).emit('session:new_key', {
-              conversationId, encryptedKey: keyPackage.key, type: 'GROUP_KEY', senderId: userId
+              conversationId, 
+              encryptedKey: keyPackage.key, 
+              type: 'GROUP_KEY', 
+              senderId: userId,
+              senderDeviceKey: keyPackage.senderDeviceKey
             });
           }
         });

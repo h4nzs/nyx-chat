@@ -28,7 +28,7 @@ router.get('/search', async (req, res, next) => {
     if (!user?.isVerified) throw new ApiError(403, 'SANDBOX_SEARCH_RESTRICTION: Unverified users cannot search for other users.');
     
     const users = await prisma.user.findMany({
-      where: { AND: [{ id: { not: req.user!.id } }, { usernameHash: q }] },
+      where: { usernameHash: q },
       select: { id: true, encryptedProfile: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true } } },
       take: 20
     })

@@ -225,17 +225,9 @@ export async function decryptMessageObject(
                 }
             }
         }
-        
-        if (finalMessage.content && finalMessage.content.trim().startsWith('{')) {
-             finalMessage.content = "🔒 You sent this message (Encrypted)";
-        }
-        if (rawMsg.repliedTo) {
-            finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
-        } else if (rawMsg.repliedToId) {
-            const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
-            if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
-        }
-        return finalMessage;
+        // JIKA TIDAK ADA MK, JANGAN RETURN DI SINI! 
+        // Biarkan jatuh ke bawah (Fall-through) agar logika Dekripsi Receiver (Fan-Out) 
+        // bisa mencoba mendekripsi pesan kita sendiri dari perangkat lain.
     }
 
     let contentToDecrypt: string | undefined = ('ciphertext' in rawMsg ? rawMsg.ciphertext : undefined) as string | undefined;
