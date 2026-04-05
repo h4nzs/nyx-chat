@@ -756,17 +756,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
   repairSecureSession: async (conversationId, isGroup, isAuto = false) => {
     try {
-      if (isGroup) {
-        const { forceRotateGroupSenderKey, rotateGroupKey } = await import('@utils/crypto');
-        await forceRotateGroupSenderKey(conversationId);
-        await rotateGroupKey(conversationId, 'periodic_rotation');
-      } else {
-        const { deleteRatchetSession } = await import('@utils/crypto');
-        await deleteRatchetSession(conversationId);
-        // Send a silent system message to trigger the X3DH on the other side automatically,
-        // and mark it as type 'GHOST_SYNC' so it renders as a center placeholder.
-        get().sendMessage(conversationId, { content: JSON.stringify({ type: 'GHOST_SYNC' }), isSilent: true });
-      }
+      // ✅ FIX: Karena semua chat (1-on-1 maupun grup) kini menggunakan Sender Key Fan-Out,
+      // kita perbaiki sesinya dengan cara yang sama. Tidak ada lagi X3DH GHOST_SYNC.
+      const { forceRotateGroupSenderKey, rotateGroupKey } = await import('@utils/crypto');
+      await forceRotateGroupSenderKey(conversationId);
+      await rotateGroupKey(conversationId, 'periodic_rotation');
+      
       if (!isAuto) {
           toast.success("Secure session state reset. Next message will negotiate new keys.");
       }
@@ -1881,21 +1876,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               return existing;
           }
           
-          const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-          const isGroup = conversation?.isGroup || false;
-
-          if (isGroup) {
-              emitSessionKeyRequest(conversationId, decrypted.senderId, decrypted.senderId);
-          } else {
-              const now = Date.now();
-              const repairKey = `last_repair_${conversationId}` as keyof Window;
-              const lastRepair = (window[repairKey] as number) || 0;
+          // ✅ FIX: Auto-Heal Terpadu untuk semua jenis Chat (Multi-Device)
+          // Tidak perlu lagi mengecek isGroup, langsung minta GroupKeyRequest (Sender Key)
+          const now = Date.now();
+          const repairKey = `last_repair_${conversationId}` as keyof Window;
+          const lastRepair = (window[repairKey] as number) || 0;
+          
+          if (now - lastRepair > 15000) { // Limit permintaan perbaikan agar tidak spam (15 detik)
+              (window as unknown as Record<string, number>)[repairKey] = now;
+              console.warn(`[Auto-Heal] Kunci tidak sinkron untuk percakapan ${conversationId}. Meminta kunci ulang secara diam-diam...`);
               
-              if (now - lastRepair > 15000) {
-                  (window as unknown as Record<string, number>)[repairKey] = now;
-                  console.warn(`[Auto-Heal] Ratchet out of sync for ${conversationId}. Initiating silent repair...`);
-                  get().repairSecureSession(conversationId, false, true); 
-              }
+              // Minta pengirim mem-broadcast ulang kunci distribusinya
+              const { emitGroupKeyRequest } = await import('@lib/socket');
+              emitGroupKeyRequest(conversationId);
           }
       }
       

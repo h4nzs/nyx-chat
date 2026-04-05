@@ -32,21 +32,22 @@ router.post(
       if (!req.user) throw new ApiError(401, 'Authentication required.')
       
       const authUser = req.user as AuthJwtPayload;
-      const deviceId = authUser.deviceId;
-      if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
+      if (!authUser.deviceId) throw new ApiError(400, 'Device ID missing from session.')
+      
+      // Pastikan deviceId murni string
+      const deviceId = String(authUser.deviceId);
 
       const { identityKey, signedPreKey, signingKey } = req.body
 
-      const deviceUpdateData: Prisma.DeviceUpdateInput = { publicKey: identityKey }
-      if (signingKey) {
-        deviceUpdateData.signingKey = signingKey
-      }
-
-      await prisma.$transaction([
-        prisma.oneTimePreKey.deleteMany({
+      // ✅ FIX: Gunakan Interactive Transaction agar lebih kebal dari deadlock
+      await prisma.$transaction(async (tx) => {
+        // 1. Bersihkan sisa OTPK lama untuk mencegah "Identity Crisis"
+        await tx.oneTimePreKey.deleteMany({
           where: { deviceId } 
-        }),
-        prisma.preKeyBundle.upsert({
+        });
+
+        // 2. Perbarui atau Buat Bundle Baru
+        await tx.preKeyBundle.upsert({
           where: { deviceId },
           update: {
             identityKey,
@@ -59,12 +60,17 @@ router.post(
             key: signedPreKey.key,
             signature: signedPreKey.signature
           }
-        }),
-        prisma.device.update({
+        });
+
+        // 3. Perbarui Identitas Perangkat (Conditional Update yang bersih)
+        await tx.device.update({
           where: { id: deviceId },
-          data: deviceUpdateData
-        })
-      ])
+          data: {
+            publicKey: identityKey,
+            ...(signingKey && { signingKey }) // Menyisipkan signingKey hanya jika ada nilainya
+          }
+        });
+      });
 
       res.status(201).json({ message: 'Pre-key bundle updated successfully.' })
     } catch (e) {
