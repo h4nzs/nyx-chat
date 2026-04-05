@@ -863,11 +863,10 @@ async function doDecryptMessage(
 
     if (!senderId) return { status: 'error', error: new Error('Missing senderId for group decryption') };
 
-    const stateId = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
-    let receiverState = await getGroupReceiverState(conversationId, stateId);
+    let receiverState = await getGroupReceiverState(conversationId, senderId, senderDeviceKey);
 
     if (!receiverState && senderDeviceKey) {
-        receiverState = await getGroupReceiverState(conversationId, `${conversationId}_${senderId}`);
+        receiverState = await getGroupReceiverState(conversationId, senderId);
     }
 
     if (!receiverState) {        requestGroupKeyWithTimeout(conversationId); 

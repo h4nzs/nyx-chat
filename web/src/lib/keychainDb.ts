@@ -63,8 +63,8 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
   });
 }
 
-export async function getGroupReceiverState(conversationId: string, senderId: string): Promise<GroupReceiverState | null> {
-  const id = `${conversationId}_${senderId}`;
+export async function getGroupReceiverState(conversationId: string, senderId: string, senderDeviceKey?: string): Promise<GroupReceiverState | null> {
+  const id = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
   const record = await db.groupReceiverStates.get(id);
   return record ? {
       id: record.id,
