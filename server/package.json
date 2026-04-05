@@ -20,8 +20,8 @@
     "format": "prettier --write src/**/*.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1023.0",
-    "@aws-sdk/s3-request-presigner": "^3.1023.0",
+    "@aws-sdk/client-s3": "^3.1024.0",
+    "@aws-sdk/s3-request-presigner": "^3.1024.0",
     "@google/generative-ai": "^0.24.1",
     "@nyx/shared": "workspace:*",
     "@prisma/adapter-pg": "^7.6.0",
@@ -72,7 +72,7 @@
     "@types/web-push": "^3.6.4",
     "@typescript-eslint/eslint-plugin": "^8.58.0",
     "@typescript-eslint/parser": "^8.58.0",
-    "eslint": "^10.1.0",
+    "eslint": "^10.2.0",
     "eslint-config-standard": "^17.1.0",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-n": "^17.24.0",
