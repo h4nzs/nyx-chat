@@ -214,6 +214,22 @@ export const fetchPreKeyBundle = async (userId: string): Promise<PreKeyBundle[]>
   }
 };
 
+export const fetchPreKeyBundles = async (userIds: string[]): Promise<Record<string, PreKeyBundle[]>> => {
+  try {
+      if (!userIds || userIds.length === 0) return {};
+      
+      const response = await authFetch<Record<string, PreKeyBundle[]>>(`/api/keys/prekey-bundles`, {
+          method: 'POST',
+          body: JSON.stringify({ userIds })
+      });
+      
+      return response || {};
+  } catch (error) {
+      console.error(`Failed to bulk fetch pre-key bundles:`, error);
+      throw error;
+  }
+};
+
 export async function checkAndRefillOneTimePreKeys(): Promise<void> {
   try {
     const { count } = await authFetch<{ count: number }>('/api/keys/count-otpk');
@@ -498,39 +514,49 @@ export async function ensureGroupSession(conversationId: string, participants: P
       const distributionKeys: Record<string, unknown>[] = [];
       const missingKeys: string[] = [];
 
-      // 2. ✅ FAN-OUT (Looping Nested): Untuk setiap Partisipan, enkripsi ke setiap Perangkatnya
+      // 2. ✅ FAN-OUT (Optimized with Bulk Fetch): Ambil semua bundle dalam 1 query
+      const userIdsToFetch: string[] = [];
       for (const p of participants) {
-          // Gunakan tipe ketat (ExtendedParticipant)
           const extP = p as ExtendedParticipant;
           const uId = extP.userId || extP.user?.id || extP.id;
-          
-          if (!uId) continue;
-          
-          try {
-              const bundles = await fetchPreKeyBundle(uId);
-              
-              for (const bundle of bundles) {
-                  // Bypass pengenkripsian ke perangkat yang sedang kita gunakan saat ini
-                  if (uId === myId && bundle.identityKey === myIdentityKeyB64) {
-                      continue;
-                  }
+          if (uId) userIdsToFetch.push(uId);
+      }
 
-                  const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-                  const encryptedKey = await worker_crypto_box_seal(
-                      sodium.from_base64(senderKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING), 
-                      theirPublicKey
-                  );
-                  
-                  distributionKeys.push({
-                      userId: uId,
-                      targetDeviceId: bundle.deviceId, 
-                      key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-                      type: 'GROUP_KEY'
-                  });
-              }
-          } catch (e) {
-              console.warn(`Missing or failed keys for user ${uId}`, e);
+      let fetchedBundlesMap: Record<string, PreKeyBundle[]> = {};
+      try {
+          // Hanya 1 request HTTP ke server
+          fetchedBundlesMap = await fetchPreKeyBundles(userIdsToFetch);
+      } catch (e) {
+          console.error("Failed to fetch prekey bundles in bulk", e);
+      }
+
+      // Lakukan enkripsi Fan-Out untuk setiap bundle yang didapat
+      for (const uId of userIdsToFetch) {
+          const bundles = fetchedBundlesMap[uId] || [];
+          if (bundles.length === 0) {
+              console.warn(`Missing or empty keys for user ${uId}`);
               missingKeys.push(uId);
+              continue;
+          }
+          
+          for (const bundle of bundles) {
+              // Bypass pengenkripsian ke perangkat yang sedang kita gunakan saat ini
+              if (uId === myId && bundle.identityKey === myIdentityKeyB64) {
+                  continue;
+              }
+
+              const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+              const encryptedKey = await worker_crypto_box_seal(
+                  sodium.from_base64(senderKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING), 
+                  theirPublicKey
+              );
+              
+              distributionKeys.push({
+                  userId: uId,
+                  targetDeviceId: bundle.deviceId, 
+                  key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+                  type: 'GROUP_KEY'
+              });
           }
       }
 

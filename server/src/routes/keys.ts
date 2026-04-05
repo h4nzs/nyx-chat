@@ -194,6 +194,83 @@ router.get(
   }
 )
 
+// === POST: Get ALL pre-key bundles for MULTIPLE users (Bulk Fetch) ===
+router.post(
+  '/prekey-bundles',
+  requireAuth,
+  zodValidate({ body: z.object({ userIds: z.array(z.string().cuid()) }) }),
+  async (req, res, next) => {
+    try {
+      const { userIds } = req.body
+
+      if (!userIds || userIds.length === 0) {
+        return res.json({});
+      }
+
+      // Fetch devices for all requested users in one query
+      const devices = await prisma.device.findMany({
+        where: { userId: { in: userIds } },
+        include: { preKeyBundle: true }
+      })
+
+      if (devices.length === 0) {
+        return res.json({});
+      }
+
+      // Group devices by userId to form the response map
+      const responseMap: Record<string, Record<string, unknown>[]> = {};
+      for (const uid of userIds) {
+          responseMap[uid] = [];
+      }
+
+      // Process devices: we still need to atomically pop OTPKs per device.
+      // This is a mapping over devices, which is generally fast in parallel.
+      const processedBundles = await Promise.all(devices.map(async (device) => {
+          if (!device.preKeyBundle || !device.signingKey) return null;
+
+          const otpk = await prisma.$transaction(async (tx) => {
+            const key = await tx.oneTimePreKey.findFirst({
+              where: { deviceId: device.id },
+              orderBy: { createdAt: 'asc' },
+              select: { id: true, keyId: true, publicKey: true }
+            })
+            if (key) await tx.oneTimePreKey.delete({ where: { id: key.id } })
+            return key
+          })
+
+          const bundle: Record<string, unknown> = {
+            deviceId: device.id,
+            identityKey: device.preKeyBundle.identityKey,
+            signedPreKey: {
+              key: device.preKeyBundle.key,
+              signature: device.preKeyBundle.signature
+            },
+            signingKey: device.signingKey
+          }
+
+          if (otpk) {
+            bundle.oneTimePreKey = {
+              keyId: otpk.keyId,
+              key: otpk.publicKey
+            }
+          }
+          return { userId: device.userId, bundle };
+      }));
+
+      // Populate response map
+      for (const result of processedBundles) {
+          if (result) {
+              responseMap[result.userId].push(result.bundle);
+          }
+      }
+
+      res.json(responseMap)
+    } catch (e: unknown) {
+      next(e)
+    }
+  }
+)
+
 // === GET: Get an initial session key record for a recipient ===
 router.get(
   '/initial-session/:conversationId/:sessionId',
