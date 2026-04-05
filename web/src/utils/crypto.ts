@@ -64,9 +64,14 @@ export async function encryptGroupMetadata(
   const myId = useAuthStore.getState().user?.id;
   if (!myId) throw new Error("Cannot encrypt metadata: User not authenticated");
 
+  const { publicKey } = await getMyEncryptionKeyPair();
+  const sodium = await getSodiumLib();
+  const myDeviceKey = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
   const wrapper = {
     ...JSON.parse(result.ciphertext), // { header, ciphertext, signature }
-    senderId: myId
+    senderId: myId,
+    senderDeviceKey: myDeviceKey // ✅ Tambahkan ini
   };
   
   return JSON.stringify(wrapper);
@@ -78,7 +83,9 @@ export async function decryptGroupMetadata(
 ): Promise<{ title?: string; description?: string; avatarUrl?: string } | null> {
   try {
     const wrapper = JSON.parse(encryptedMetadataStr);
-    const { senderId, ...rest } = wrapper;
+    
+    // ✅ Ekstrak senderDeviceKey
+    const { senderId, senderDeviceKey, ...rest } = wrapper;
 
     if (!senderId) {
       console.warn("Decryption failed: Missing senderId in group metadata");
@@ -86,7 +93,12 @@ export async function decryptGroupMetadata(
     }
     
     // Reconstruct the payload expected by decryptMessage
-    const cipherPayload = JSON.stringify(rest);
+    // ✅ Sertakan senderDeviceKey ke dalam cipherPayload
+    const cipherPayload = JSON.stringify({
+       ...rest,
+       senderId,
+       senderDeviceKey 
+    });
     
     const result = await decryptMessage(cipherPayload, conversationId, true, senderId);
     
