@@ -222,21 +222,48 @@ export function registerSocket(httpServer: HttpServer) {
     socket.on('messages:distribute_keys', async ({ conversationId, keys }: DistributeKeysPayload) => {
       if (!await checkRateLimit(userId, 'keys', 50, 60)) return; 
       if (!keys || !Array.isArray(keys) || !conversationId) return;
+      
       try {
         const participant = await prisma.participant.findFirst({ where: { conversationId, userId } });
         if (!participant) return;
-        keys.forEach(keyPackage => {
+        
+        // ✅ SMART ROUTING: Kirim kunci HANYA ke perangkat tujuan
+        for (const keyPackage of keys) {
           if (keyPackage.userId && keyPackage.key) {
-            io.to(keyPackage.userId).emit('session:new_key', {
-              conversationId, 
-              encryptedKey: keyPackage.key, 
-              type: 'GROUP_KEY', 
-              senderId: userId,
-              senderDeviceKey: keyPackage.senderDeviceKey
-            });
+            
+            if (keyPackage.targetDeviceId) {
+               // Cari semua socket milik user tujuan
+               const targetSockets = await io.in(keyPackage.userId).fetchSockets();
+               
+               for (const s of targetSockets) {
+                  const authSocket = s as unknown as AuthenticatedSocket;
+                  // Tembakkan hanya jika deviceId socket cocok dengan targetDeviceId
+                  if (authSocket.user?.deviceId === keyPackage.targetDeviceId) {
+                      authSocket.emit('session:new_key', {
+                          conversationId,
+                          encryptedKey: keyPackage.key,
+                          type: 'GROUP_KEY',
+                          senderId: userId,
+                          senderDeviceKey: keyPackage.senderDeviceKey
+                      });
+                  }
+               }
+            } else {
+               // Fallback: Jika tidak ada targetDeviceId, broadcast ke semua (untuk kompabilitas mundur)
+               io.to(keyPackage.userId).emit('session:new_key', {
+                  conversationId,
+                  encryptedKey: keyPackage.key,
+                  type: 'GROUP_KEY',
+                  senderId: userId,
+                  senderDeviceKey: keyPackage.senderDeviceKey
+               });
+            }
+            
           }
-        });
-      } catch (error) {}
+        }
+      } catch (error) {
+        console.error(`[Key Distribution] Error:`, error);
+      }
     });
 
     socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => void) => {

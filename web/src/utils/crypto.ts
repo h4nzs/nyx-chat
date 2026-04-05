@@ -871,17 +871,19 @@ async function doDecryptMessage(
 
   if (isSenderKeyProtocol || isGroup) {
     const senderId = (payloadObj && payloadObj.senderId) ? payloadObj.senderId : sessionId;
-    const senderDeviceKey = payloadObj && payloadObj.senderDeviceKey;
+    const senderDeviceKey = payloadObj && payloadObj.senderDeviceKey; // Ini adalah identityKey (publicKey) perangkat pengirim
 
     if (!senderId) return { status: 'error', error: new Error('Missing senderId for group decryption') };
 
     let receiverState = await getGroupReceiverState(conversationId, senderId, senderDeviceKey);
 
     if (!receiverState && senderDeviceKey) {
+        // Fallback backward compatibility
         receiverState = await getGroupReceiverState(conversationId, senderId);
     }
 
-    if (!receiverState) {        requestGroupKeyWithTimeout(conversationId); 
+    if (!receiverState) {        
+        requestGroupKeyWithTimeout(conversationId); 
         return { status: 'pending', reason: 'waiting_for_key' };
     }
     
@@ -889,10 +891,32 @@ async function doDecryptMessage(
         const payload = JSON.parse(cipher);
         const { header, ciphertext, signature } = payload;
         
-        // --- Resolve Sender Signing Key First ---
-        const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-        const sender = conversation?.participants.find(p => p.id === senderId || p.userId === senderId) as ExtendedParticipant | undefined;
-        const keyToUse = sender?.signingKey || sender?.user?.signingKey;
+        let keyToUse: string | undefined = undefined;
+
+        // --- Resolve Sender Signing Key ---
+        // ✅ FIX: Jika pengirim melampirkan senderDeviceKey, kita bisa mencari signingKey perangkat tersebut secara langsung
+        if (senderDeviceKey) {
+             try {
+                 // Cari bundle milik user pengirim dari API
+                 const bundlesMap = await fetchPreKeyBundles([senderId]);
+                 const bundles = bundlesMap[senderId] || [];
+                 
+                 // Temukan perangkat yang public key-nya cocok dengan senderDeviceKey
+                 const deviceBundle = bundles.find(b => b.identityKey === senderDeviceKey);
+                 if (deviceBundle) {
+                     keyToUse = deviceBundle.signingKey;
+                 }
+             } catch (e) {
+                 console.warn("Failed to fetch sender device bundle, falling back to legacy lookup");
+             }
+        }
+
+        // Fallback jika tidak ketemu (cari di dalam participants store)
+        if (!keyToUse) {
+            const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+            const sender = conversation?.participants.find(p => p.id === senderId || ('userId' in p && p.userId === senderId)) as ExtendedParticipant | undefined;
+            keyToUse = sender?.signingKey || sender?.user?.signingKey;
+        }
         
         if (!keyToUse) {
              return { status: 'error', error: new Error('Missing sender signing key') };
@@ -923,6 +947,7 @@ async function doDecryptMessage(
             return { status: 'success', value: sodium.to_string(result.plaintext) };
         }
         
+        // 2. NORMAL RATCHET DECRYPTION
         const { groupRatchetDecrypt } = await getWorkerProxy();
         const result = await groupRatchetDecrypt(
             { CK: receiverState.CK, N: receiverState.N },
