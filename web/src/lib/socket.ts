@@ -407,10 +407,10 @@ export function emitGroupKeyDistribution(conversationId: string, keys: { userId:
   getSocket()?.emit('messages:distribute_keys', { conversationId, keys });
 }
 
-export function emitGroupKeyRequest(conversationId: string) {
-  getSocket()?.emit('group:request_key', { conversationId });
+export function emitGroupKeyRequest(conversationId: string, targetSenderId?: string, targetDeviceKey?: string) {
+  getSocket()?.emit('group:request_key', { conversationId, targetSenderId, targetDeviceKey });
 }
 
-export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; }) {
+export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; targetDeviceId?: string; senderDeviceKey?: string; }) {
   getSocket()?.emit('group:fulfilled_key', payload);
 }

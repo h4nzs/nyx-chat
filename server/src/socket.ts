@@ -417,7 +417,7 @@ export function registerSocket(httpServer: HttpServer) {
 
     // --- E2EE Key Recovery Handlers ---
     
-    socket.on('group:request_key', async ({ conversationId }: GroupKeyRequestPayload) => {
+    socket.on('group:request_key', async ({ conversationId, targetSenderId, targetDeviceKey }: GroupKeyRequestPayload) => {
       if (!conversationId) return;
       
       const isParticipant = await prisma.participant.findFirst({
@@ -426,29 +426,78 @@ export function registerSocket(httpServer: HttpServer) {
       if (!isParticipant) return;
 
       try {
-        const participants = await prisma.participant.findMany({
-          where: { conversationId, userId: { not: userId } },
-          select: { userId: true },
-        });
-        const allOnlineUsers = await redisClient.sMembers('online_users');
-        const onlineParticipants = participants.filter(p => allOnlineUsers.includes(p.userId));
+        let fulfillerSocket = null;
+        let fulfillerId = null;
+
+        // 1. Ask specific target if provided
+        if (targetSenderId) {
+             const targetSockets = await io.in(targetSenderId).fetchSockets();
+             if (targetDeviceKey) {
+                 const matchingSocket = targetSockets.find(s => (s as unknown as AuthenticatedSocket).user?.publicKey === targetDeviceKey);
+                 if (matchingSocket) {
+                     fulfillerSocket = matchingSocket;
+                     fulfillerId = targetSenderId;
+                 }
+             }
+             if (!fulfillerSocket && targetSockets.length > 0) {
+                 // Fallback to another socket of that user
+                 const other = targetSockets.find(s => s.id !== socket.id);
+                 if (other) {
+                     fulfillerSocket = other;
+                     fulfillerId = targetSenderId;
+                 }
+             }
+        }
+
+        // 2. Fallback to random online participant
+        if (!fulfillerSocket) {
+            const participants = await prisma.participant.findMany({
+              where: { conversationId, userId: { not: userId } },
+              select: { userId: true },
+            });
+            const allOnlineUsers = await redisClient.sMembers('online_users');
+            const onlineParticipants = participants.filter(p => allOnlineUsers.includes(p.userId));
+            
+            if (onlineParticipants.length > 0) {
+              fulfillerId = onlineParticipants[0].userId;
+              const sockets = await io.in(fulfillerId).fetchSockets();
+              if (sockets.length > 0) fulfillerSocket = sockets[0];
+            }
+        }
         
-        if (onlineParticipants.length > 0) {
-          const fulfillerId = onlineParticipants[0].userId;
+        if (fulfillerSocket && fulfillerId) {
           const requesterPublicKey = socket.user?.publicKey;
+          const requesterDeviceId = socket.user?.deviceId;
           
           if (requesterPublicKey) {
-            io.to(fulfillerId).emit('group:fulfill_key_request', {
-              conversationId, requesterId: userId, requesterPublicKey: requesterPublicKey,
+            fulfillerSocket.emit('group:fulfill_key_request', {
+              conversationId, 
+              requesterId: userId, 
+              requesterPublicKey,
+              requesterDeviceId
             });
           }
         }
       } catch (error) {}
     });
 
-    socket.on('group:fulfilled_key', ({ requesterId, conversationId, encryptedKey }: KeyFulfillmentPayload) => {
+    socket.on('group:fulfilled_key', async (payload: KeyFulfillmentPayload) => {
+      const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey } = payload;
       if (!requesterId || !conversationId || !encryptedKey) return;
-      io.to(requesterId).emit('session:new_key', { conversationId, encryptedKey, type: 'GROUP_KEY', senderId: userId });
+      
+      const emitPayload = { conversationId, encryptedKey, type: 'GROUP_KEY' as const, senderId: userId, senderDeviceKey };
+      
+      if (targetDeviceId) {
+         const targetSockets = await io.in(requesterId).fetchSockets();
+         for (const s of targetSockets) {
+            const authSocket = s as unknown as AuthenticatedSocket;
+            if (authSocket.user?.deviceId === targetDeviceId) {
+                authSocket.emit('session:new_key', emitPayload);
+            }
+         }
+      } else {
+         io.to(requesterId).emit('session:new_key', emitPayload);
+      }
     });
 
     socket.on("session:request_missing", async ({ conversationId, sessionId }: { conversationId: string, sessionId: string }) => {

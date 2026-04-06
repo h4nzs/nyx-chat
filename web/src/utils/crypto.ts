@@ -457,13 +457,16 @@ export async function decryptSessionKeyForUser(
   }
 
   const encryptedSessionKey = sodium.from_base64(encryptedSessionKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const sessionKey = await worker_crypto_box_seal_open(encryptedSessionKey, publicKey, privateKey);
-
-  if (!sessionKey) {
-    throw new Error("Failed to decrypt session key, likely due to incorrect key pair or corrupted data.");
+  try {
+      const sessionKey = await worker_crypto_box_seal_open(encryptedSessionKey, publicKey, privateKey);
+      if (!sessionKey) {
+        throw new Error("Failed to decrypt session key, likely due to incorrect key pair or corrupted data.");
+      }
+      return sessionKey;
+  } catch (e) {
+      console.warn("Failed to decrypt session key via worker, ignoring:", e);
+      throw e;
   }
-
-  return sessionKey;
 }
 
 // --- Session Ratcheting and Key Retrieval ---
@@ -605,7 +608,13 @@ export async function handleGroupKeyDistribution(
   const sodium = await getSodiumLib();
 
   // 1. Decrypt the Sender Key (Chain Key)
-  const senderKeyBytes = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+  let senderKeyBytes: Uint8Array;
+  try {
+      senderKeyBytes = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+  } catch (e) {
+      console.warn(`[Key Distribution] Ignored group key distribution for convo ${conversationId}, likely meant for another device.`);
+      return; // Skip silently if decryption fails
+  }
   const senderKeyB64 = sodium.to_base64(senderKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
 
   // 2. Save as Receiver State
@@ -664,22 +673,23 @@ export function stopPeriodicGroupKeyRotation(conversationId: string): void {
   }
 }
 
-async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0) {
-  if (pendingGroupKeyRequests.has(conversationId)) return;
+async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0, targetSenderId?: string, targetDeviceKey?: string) {
+  const reqKey = targetSenderId ? `${conversationId}_${targetSenderId}_${targetDeviceKey || ''}` : conversationId;
+  if (pendingGroupKeyRequests.has(reqKey)) return;
 
-  emitGroupKeyRequest(conversationId);
+  emitGroupKeyRequest(conversationId, targetSenderId, targetDeviceKey);
 
   const timerId = window.setTimeout(async () => {
-    pendingGroupKeyRequests.delete(conversationId);
+    pendingGroupKeyRequests.delete(reqKey);
     if (attempt < MAX_KEY_REQUEST_RETRIES) {
-      requestGroupKeyWithTimeout(conversationId, attempt + 1);
+      requestGroupKeyWithTimeout(conversationId, attempt + 1, targetSenderId, targetDeviceKey);
     } else {
       const { useMessageStore } = await import('@store/message');
       useMessageStore.getState().failPendingMessages(conversationId, '[Key request timed out]');
     }
   }, KEY_REQUEST_TIMEOUT_MS);
 
-  pendingGroupKeyRequests.set(conversationId, { timerId });
+  pendingGroupKeyRequests.set(reqKey, { timerId });
 }
 
 // --- Message Encryption/Decryption ---
@@ -883,7 +893,7 @@ async function doDecryptMessage(
     }
 
     if (!receiverState) {        
-        requestGroupKeyWithTimeout(conversationId); 
+        requestGroupKeyWithTimeout(conversationId, 0, senderId, senderDeviceKey); 
         return { status: 'pending', reason: 'waiting_for_key' };
     }
     
@@ -1195,6 +1205,7 @@ interface GroupFulfillRequestPayload {
   conversationId: string;
   requesterId: string;
   requesterPublicKey: string;
+  requesterDeviceId?: string;
 }
 
 interface FulfillRequestPayload {
@@ -1230,10 +1241,15 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
   const senderKeyBytes = sodium.from_base64(senderState.CK, sodium.base64_variants.URLSAFE_NO_PADDING);
   const encryptedKeyForRequester = await worker_crypto_box_seal(senderKeyBytes, requesterPublicKey);
 
+  const { publicKey: myIdentityKey } = await getMyEncryptionKeyPair();
+  const myIdentityKeyB64 = sodium.to_base64(myIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
   emitGroupKeyFulfillment({
     requesterId,
     conversationId,
     encryptedKey: sodium.to_base64(encryptedKeyForRequester, sodium.base64_variants.URLSAFE_NO_PADDING),
+    targetDeviceId: payload.requesterDeviceId,
+    senderDeviceKey: myIdentityKeyB64
   });
 }
 

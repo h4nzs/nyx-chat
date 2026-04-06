@@ -306,9 +306,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
                 const { getSodium } = await import('@lib/sodiumInitializer');
                 const sodium = await getSodium();
                 
-                // Derive public keys from the retrieved private keys
-                const encryptionPublicKeyBytes = sodium.crypto_box_seed_keypair(result.keys.encryption.slice(0, 32)).publicKey;
-                const signingPublicKeyBytes = sodium.crypto_sign_seed_keypair(result.keys.signing.slice(0, 32)).publicKey;
+                const encryptionPublicKeyBytes = sodium.crypto_scalarmult_base(result.keys.encryption);
+                const signingPublicKeyBytes = result.keys.signing.slice(32);
                 
                 newPublicKey = sodium.to_base64(encryptionPublicKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
                 newSigningKey = sodium.to_base64(signingPublicKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
