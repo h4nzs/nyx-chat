@@ -159,26 +159,32 @@ router.get(
       }
 
       const responseBundles = await Promise.all(devices.map(async (device) => {
-          if (!device.preKeyBundle || !device.signingKey) return null;
+          if (!device.signingKey || !device.publicKey) return null;
 
-          const otpk = await prisma.$transaction(async (tx) => {
-            const key = await tx.oneTimePreKey.findFirst({
-              where: { deviceId: device.id },
-              orderBy: { createdAt: 'asc' },
-              select: { id: true, keyId: true, publicKey: true }
-            })
-            if (key) await tx.oneTimePreKey.delete({ where: { id: key.id } })
-            return key
-          })
+          let otpk = null;
+          if (device.preKeyBundle) {
+              otpk = await prisma.$transaction(async (tx) => {
+                const key = await tx.oneTimePreKey.findFirst({
+                  where: { deviceId: device.id },
+                  orderBy: { createdAt: 'asc' },
+                  select: { id: true, keyId: true, publicKey: true }
+                })
+                if (key) await tx.oneTimePreKey.delete({ where: { id: key.id } })
+                return key
+              })
+          }
 
           const bundle: Record<string, unknown> = {
             deviceId: device.id,
-            identityKey: device.preKeyBundle.identityKey,
-            signedPreKey: {
-              key: device.preKeyBundle.key,
-              signature: device.preKeyBundle.signature
-            },
+            identityKey: device.publicKey,
             signingKey: device.signingKey
+          }
+
+          if (device.preKeyBundle) {
+              bundle.signedPreKey = {
+                key: device.preKeyBundle.key,
+                signature: device.preKeyBundle.signature
+              };
           }
 
           if (otpk) {
@@ -232,26 +238,32 @@ router.post(
       // Process devices: we still need to atomically pop OTPKs per device.
       // This is a mapping over devices, which is generally fast in parallel.
       const processedBundles = await Promise.all(devices.map(async (device) => {
-          if (!device.preKeyBundle || !device.signingKey) return null;
+          if (!device.signingKey || !device.publicKey) return null;
 
-          const otpk = await prisma.$transaction(async (tx) => {
-            const key = await tx.oneTimePreKey.findFirst({
-              where: { deviceId: device.id },
-              orderBy: { createdAt: 'asc' },
-              select: { id: true, keyId: true, publicKey: true }
-            })
-            if (key) await tx.oneTimePreKey.delete({ where: { id: key.id } })
-            return key
-          })
+          let otpk = null;
+          if (device.preKeyBundle) {
+              otpk = await prisma.$transaction(async (tx) => {
+                const key = await tx.oneTimePreKey.findFirst({
+                  where: { deviceId: device.id },
+                  orderBy: { createdAt: 'asc' },
+                  select: { id: true, keyId: true, publicKey: true }
+                })
+                if (key) await tx.oneTimePreKey.delete({ where: { id: key.id } })
+                return key
+              })
+          }
 
           const bundle: Record<string, unknown> = {
             deviceId: device.id,
-            identityKey: device.preKeyBundle.identityKey,
-            signedPreKey: {
-              key: device.preKeyBundle.key,
-              signature: device.preKeyBundle.signature
-            },
+            identityKey: device.publicKey,
             signingKey: device.signingKey
+          }
+
+          if (device.preKeyBundle) {
+              bundle.signedPreKey = {
+                key: device.preKeyBundle.key,
+                signature: device.preKeyBundle.signature
+              };
           }
 
           if (otpk) {

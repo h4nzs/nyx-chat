@@ -1,0 +1,3986 @@
+diff --git a/package.json b/package.json
+index 0f2a85b6..d6ca5e18 100644
+--- a/package.json
++++ b/package.json
+@@ -41,6 +41,7 @@
+       "effect": ">=3.20.0",
+       "path-to-regexp@<0.1.13": ">=0.1.13",
+       "path-to-regexp": "^8.4.0",
++      "defu@<=6.1.4": ">=6.1.5",
+       "brace-expansion": "^2.0.3"
+     },
+     "onlyBuiltDependencies": [
+diff --git a/packages/shared/src/socket.ts b/packages/shared/src/socket.ts
+index 0aa5436b..45f4a2dd 100644
+--- a/packages/shared/src/socket.ts
++++ b/packages/shared/src/socket.ts
+@@ -8,7 +8,7 @@ export interface TypingPayload {
+ 
+ export interface DistributeKeysPayload {
+   conversationId: string;
+-  keys: { userId: string; key: string }[];
++  keys: { userId: string; targetDeviceId?: string; key: string; senderDeviceKey?: string }[];
+ }
+ 
+ export interface MessageSendPayload {
+@@ -88,6 +88,7 @@ export interface ServerToClientEvents {
+         encryptedKey: string;
+         type?: 'GROUP_KEY' | 'SESSION_KEY';
+         senderId?: string; // Added
++        senderDeviceKey?: string;
+     }) => void;
+     "session:fulfill_request": (payload: {
+         conversationId: string;
+diff --git a/packages/shared/src/types.ts b/packages/shared/src/types.ts
+index 26f288b0..c53fe7e0 100644
+--- a/packages/shared/src/types.ts
++++ b/packages/shared/src/types.ts
+@@ -115,6 +115,12 @@ export interface EncryptedPayload {
+   nonce: string;
+ }
+ 
++export interface AuthJwtPayload {
++  id: string;
++  role?: string;
++  deviceId?: string; // Sekarang resmi menjadi bagian dari JWT Payload aplikasi
++}
++
+ export interface DoubleRatchetState {
+   DHs: { publicKey: string; privateKey: string } | null;
+   DHr: string | null;
+diff --git a/server/prisma/schema.prisma b/server/prisma/schema.prisma
+index f4646e08..1552d29f 100644
+--- a/server/prisma/schema.prisma
++++ b/server/prisma/schema.prisma
+@@ -14,8 +14,6 @@ model User {
+   usernameHash       String    @unique
+   passwordHash       String
+   encryptedProfile   String?   @db.Text
+-  publicKey          String?   // Encryption/Identity Key
+-  signingKey         String?   // Verification Key
+   
+   hasCompletedOnboarding Boolean @default(false)
+   isVerified         Boolean   @default(false) // WebAuthn / Trust Tier status
+@@ -25,59 +23,127 @@ model User {
+   role               String    @default("USER") 
+   bannedAt           DateTime? 
+   banReason          String?   
++  lastActiveAt       DateTime  @default(now())
++  autoDestructDays   Int?
++  currentChallenge   String?
+ 
++  // --- RELASI MULTI-DEVICE ---
++  devices              Device[]
++
++  // --- RELASI PENGGUNA ---
+   messages             Message[]
+   participants         Participant[]
+   messageStatuses      MessageStatus[]
+   stories              Story[]
+-  refreshTokens        RefreshToken[]
+-  // reactions removed
+-  pushSubscriptions    PushSubscription[]
+   hiddenConversations  UserHiddenConversation[]
+   createdConversations Conversation[]           @relation("CreatedConversations")
+   authenticators       Authenticator[]
+-  currentChallenge     String?
+-  encryptedPrivateKey  String?    @db.Text
+-
+-  // Relation to the simplified pre-key bundle
+-  preKeyBundle         PreKeyBundle?
+-  oneTimePreKeys       OneTimePreKey[]
+-  sessionKeys          SessionKey[]
+-  lastActiveAt       DateTime  @default(now())
+-  autoDestructDays   Int?
+-
+-  // Relasi Blocking
+-  blockedUsers BlockedUser[] @relation("Blocker") 
+-  blockedBy    BlockedUser[] @relation("Blocked") 
++  blockedUsers         BlockedUser[]            @relation("Blocker") 
++  blockedBy            BlockedUser[]            @relation("Blocked") 
+ 
+   @@index([createdAt])
+   @@index([autoDestructDays, lastActiveAt])
+ }
+ 
++// ==========================================
++// 📱 TABEL BARU: DEVICE (PERANGKAT)
++// ==========================================
++model Device {
++  id                  String   @id @default(cuid())
++  userId              String
++  name                String?  // e.g., "Chrome on MacOS", "iPhone 15"
++  
++  // Identitas Kriptografi (Pindahan dari tabel User)
++  publicKey           String   // Encryption/Identity Key
++  signingKey          String   // Verification Key
++  encryptedPrivateKey String?  @db.Text
++  
++  createdAt           DateTime @default(now())
++  lastActiveAt        DateTime @default(now())
++
++  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
++  
++  // Relasi Sesi & Kriptografi terikat pada Perangkat
++  preKeyBundle        PreKeyBundle?
++  oneTimePreKeys      OneTimePreKey[]
++  sessionKeys         SessionKey[]
++  refreshTokens       RefreshToken[]
++  pushSubscriptions   PushSubscription[]
++
++  @@index([userId])
++  @@index([lastActiveAt])
++}
++
+ model OneTimePreKey {
+   id        String   @id @default(cuid())
+   keyId     Int
+-  userId    String
++  deviceId  String   // Diubah dari userId
+   publicKey String   @db.Text
+   createdAt DateTime @default(now())
+ 
+-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
++  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+ 
+-  @@index([userId])
+-  @@unique([userId, keyId])
++  @@index([deviceId])
++  @@unique([deviceId, keyId])
+ }
+ 
+-// Simplified PreKeyBundle model
+ model PreKeyBundle {
+   id          Int      @id @default(autoincrement())
+-  identityKey String   // User's long-term public identity key
++  identityKey String   // Device's long-term public identity key
+   key         String   // The public part of the signed pre-key
+   signature   String   // Signature of the 'key'
+   
+-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+-  userId      String   @unique
++  deviceId    String   @unique // Diubah dari userId
++  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+ }
+ 
++model RefreshToken {
++  id           String   @id @default(cuid())
++  jti          String   @unique
++  deviceId     String   // Sesi login diikat ke Perangkat
++  device       Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
++  userAgent    String?
++  ipAddress    String?
++  revokedAt    DateTime?
++  replacedById String?
++  createdAt    DateTime @default(now())
++  lastUsedAt   DateTime @updatedAt
++  expiresAt    DateTime
++
++  @@index([deviceId])
++  @@index([expiresAt])
++  @@index([jti])
++  @@index([revokedAt])
++}
++
++model SessionKey {
++  id                    String   @id @default(cuid())
++  conversationId        String
++  sessionId             String
++  deviceId              String   // Session key E2EE diikat antar perangkat
++  device                Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
++  isInitiator           Boolean  @default(false)
++  encryptedKey          String
++  initiatorEphemeralKey String?  
++  createdAt             DateTime @default(now())
++  expiresAt             DateTime?
++
++  @@index([conversationId, deviceId, sessionId])
++  @@unique([deviceId, sessionId])
++}
++
++model PushSubscription {
++  id        String   @id @default(cuid())
++  endpoint  String   @unique
++  p256dh    String
++  auth      String
++  deviceId  String   // Push Token Notifikasi diikat per-Perangkat
++  createdAt DateTime @default(now())
++
++  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
++  
++  @@index([deviceId])
++}
+ 
+ model Conversation {
+   id            String         @id @default(cuid())
+@@ -115,16 +181,13 @@ model Participant {
+   @@index([lastReadMsgId])
+ }
+ 
+-
+ model Message {
+   id                  String          @id @default(cuid())
+   conversation        Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+   conversationId      String
+   sender              User            @relation(fields: [senderId], references: [id], onDelete: Cascade)
+   senderId            String
+-  content             String?      @db.Text
+-  // File metadata removed (Blind Attachments)
+-  // Reactions removed (Reactions as Messages)
++  content             String?         @db.Text
+   
+   sessionId           String?
+   encryptedSessionKey String?
+@@ -143,14 +206,12 @@ model Message {
+   @@index([repliedToId])
+ }
+ 
+-
+ enum DeliveryStatus {
+   SENT
+   DELIVERED
+   READ
+ }
+ 
+-
+ model MessageStatus {
+   id        String          @id @default(cuid())
+   message   Message         @relation(fields: [messageId], references: [id], onDelete: Cascade)
+@@ -167,55 +228,6 @@ model MessageStatus {
+   @@index([updatedAt])
+ }
+ 
+-// MessageReaction model removed
+-
+-model RefreshToken {
+-  id           String   @id @default(cuid())
+-  jti          String   @unique
+-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+-  userId       String
+-  userAgent    String?
+-  ipAddress    String?
+-  revokedAt    DateTime?
+-  replacedById String?
+-  createdAt    DateTime @default(now())
+-  lastUsedAt   DateTime @updatedAt
+-  expiresAt    DateTime
+-
+-  @@index([userId])
+-  @@index([expiresAt])
+-  @@index([jti])
+-  @@index([revokedAt])
+-}
+-
+-
+-model SessionKey {
+-  id                    String   @id @default(cuid())
+-  conversationId        String
+-  sessionId             String
+-  userId                String
+-  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+-  isInitiator           Boolean  @default(false)
+-  encryptedKey          String
+-  initiatorEphemeralKey String?  // For the recipient to derive the initial shared secret
+-  createdAt             DateTime @default(now())
+-  expiresAt             DateTime?
+-
+-  @@index([conversationId, userId, sessionId])
+-  @@unique([userId, sessionId])
+-}
+-
+-model PushSubscription {
+-  id        String   @id @default(cuid())
+-  endpoint  String   @unique
+-  p256dh    String
+-  auth      String
+-  userId    String
+-  createdAt DateTime @default(now())
+-
+-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+-}
+-
+ model UserHiddenConversation {
+   id             String       @id @default(cuid())
+   userId         String
+@@ -240,7 +252,6 @@ model Authenticator {
+   @@index([userId])
+ }
+ 
+-// Model untuk menyimpan informasi blocking antar pengguna
+ model BlockedUser {
+   id        String   @id @default(cuid())
+   blockerId String
+@@ -250,7 +261,7 @@ model BlockedUser {
+   blocker   User @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+   blocked   User @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+ 
+-  @@unique([blockerId, blockedId]) // Mencegah duplikasi (blokir orang yang sama 2x)
++  @@unique([blockerId, blockedId]) 
+   @@index([blockerId])
+   @@index([blockedId])
+ }
+@@ -266,4 +277,4 @@ model Story {
+ 
+   @@index([senderId])
+   @@index([expiresAt])
+-}
++}
+\ No newline at end of file
+diff --git a/server/src/routes/auth.ts b/server/src/routes/auth.ts
+index 5a035b0e..fb573600 100644
+--- a/server/src/routes/auth.ts
++++ b/server/src/routes/auth.ts
+@@ -1,7 +1,7 @@
+ // Copyright (c) 2026 [han]. All rights reserved.
+ // This file is part of NYX, licensed under the AGPL-3.0.
+ // For commercial licensing, contact [admin@nyx-app.my.id].
+-import { Router, Response, CookieOptions } from 'express'
++import { Router, Response, CookieOptions, Request } from 'express'
+ import { prisma } from '../lib/prisma.js'
+ import { hashPassword, verifyPassword } from '../utils/password.js'
+ import { ApiError } from '../utils/errors.js'
+@@ -22,63 +22,40 @@ import {
+ import { isoBase64URL } from '@simplewebauthn/server/helpers'
+ import { Buffer } from 'buffer'
+ import { redisClient } from '../lib/redis.js'
++// ✅ FIX: Import tipe JWT Payload dari shared
++import type { AuthJwtPayload } from '@nyx/shared'
+ 
+ const router: Router = Router()
+ 
+ const rpName = 'NYX'
+ const getRpID = () => {
+-  try {
+-    return env.nodeEnv === 'production' ? 'nyx-app.my.id' : 'localhost'
+-  } catch (_e) {
+-    return 'localhost'
+-  }
++  try { return env.nodeEnv === 'production' ? 'nyx-app.my.id' : 'localhost' } catch (_e) { return 'localhost' }
+ }
+ const rpID = getRpID()
+ const expectedOrigin = env.corsOrigin || 'https://nyx-app.my.id'
+ 
+ function setAuthCookies (res: Response, { access, refresh }: { access: string; refresh: string }) {
+   const isProd = env.nodeEnv === 'production'
+-
+-  const cookieOptions: CookieOptions = {
+-    httpOnly: true,
+-    secure: isProd,
+-    sameSite: isProd ? 'none' : 'lax',
+-    path: '/'
+-  }
+-
+-  res.cookie('at', access, {
+-    ...cookieOptions,
+-    maxAge: 1000 * 60 * 15 // 15 mins
+-  })
+-
+-  res.cookie('rt', refresh, {
+-    ...cookieOptions,
+-    maxAge: 1000 * 60 * 60 * 24 * 30 // 30 days
+-  })
++  const cookieOptions: CookieOptions = { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax', path: '/' }
++  res.cookie('at', access, { ...cookieOptions, maxAge: 1000 * 60 * 15 })
++  res.cookie('rt', refresh, { ...cookieOptions, maxAge: 1000 * 60 * 60 * 24 * 30 })
+ }
+ 
+-import { Request } from 'express'
+-
+-async function issueTokens (user: { id: string, role?: string }, req: Request) {
+-  // PURE ANONYMITY: Only store ID and Role in JWT. No Email/Username.
+-  const access = signAccessToken({ 
+-    id: user.id, 
+-    role: user.role 
+-  })
++async function issueTokens (user: { id: string, role?: string }, deviceId: string, req: Request) {
++  const access = signAccessToken({ id: user.id, role: user.role, deviceId })
+   const jti = newJti()
+-  const refresh = signAccessToken({ sub: user.id, jti }, { expiresIn: '30d' })
++  const refresh = signAccessToken({ sub: user.id, jti, deviceId }, { expiresIn: '30d' })
+ 
+   const rawIp = req.ip || '';
+   const ipAddress = crypto.createHash('sha256').update(rawIp).digest('hex').substring(0, 16);
+   const userAgent = req.headers['user-agent']
+ 
+   await prisma.refreshToken.create({
+-    data: { jti, userId: user.id, expiresAt: refreshExpiryDate(), ipAddress, userAgent }
++    data: { jti, deviceId, expiresAt: refreshExpiryDate(), ipAddress, userAgent }
+   })
+   return { access, refresh }
+ }
+ 
+-// Helper Turnstile
+ async function verifyTurnstileToken (token: string): Promise<boolean> {
+   if (env.nodeEnv !== 'production' && !process.env.TURNSTILE_SECRET_KEY) return true
+   if (!token) return false
+@@ -88,71 +65,63 @@ async function verifyTurnstileToken (token: string): Promise<boolean> {
+   formData.append('response', token)
+ 
+   try {
+-    const result = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+-      method: 'POST',
+-      body: formData
+-    })
+-    const outcome = await result.json()
++    const result = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: formData })
++    const outcome = await result.json() as { success: boolean }
+     return outcome.success
+   } catch (e) {
+-    console.error('Turnstile error:', e)
+     return false
+   }
+ }
+ 
+-// === ANONYMOUS AUTH ROUTES ===
+-
+ router.post('/register', authLimiter, zodValidate({
+   body: z.object({
+-    usernameHash: z.string().min(10), // Blind Index
++    usernameHash: z.string().min(10),
+     password: z.string().min(8).max(128),
+     encryptedProfile: z.string().optional(),
+     publicKey: z.string().optional(),
+     signingKey: z.string().optional(),
+     encryptedPrivateKeys: z.string().optional(),
++    deviceName: z.string().optional(),
+     turnstileToken: z.string().optional()
+   })
+ }),
+ async (req, res, next) => {
+   try {
+-    const { usernameHash, password, encryptedProfile, publicKey, signingKey, encryptedPrivateKeys, turnstileToken } = req.body
++    const { usernameHash, password, encryptedProfile, publicKey, signingKey, encryptedPrivateKeys, deviceName, turnstileToken } = req.body
+ 
+-    // 1. Verifikasi Captcha
+     const isHuman = await verifyTurnstileToken(turnstileToken || '')
+     if (!isHuman) throw new ApiError(400, 'Bot detected. Please try again.')
+ 
+-    // 2. Cek Duplikat (Hash Collision Check)
+-    const existingUser = await prisma.user.findUnique({
+-      where: { usernameHash }
+-    })
++    const existingUser = await prisma.user.findUnique({ where: { usernameHash } })
+     if (existingUser) throw new ApiError(409, 'Username already taken (Hash Collision).')
+ 
+-    // 3. Buat User (Verified: False = Sandbox)
+     const passwordHash = await hashPassword(password)
++    
+     const user = await prisma.user.create({
+       data: {
+         usernameHash,
+         passwordHash,
+         encryptedProfile,
+-        publicKey,
+-        signingKey,
+-        encryptedPrivateKey: encryptedPrivateKeys,
+-        isVerified: false // Sandbox mode by default
+-      }
++        isVerified: false,
++        devices: {
++          create: {
++            publicKey: publicKey || '',
++            signingKey: signingKey || '',
++            encryptedPrivateKey: encryptedPrivateKeys,
++            name: deviceName || 'Primary Device'
++          }
++        }
++      },
++      include: { devices: true }
+     })
+ 
+-    // 4. Issue Tokens Immediately (No OTP)
+-    const tokens = await issueTokens(user, req)
++    const deviceId = user.devices[0].id
++    const tokens = await issueTokens(user, deviceId, req)
+     setAuthCookies(res, tokens)
+ 
+     res.status(201).json({
+       message: 'Registration successful.',
+-      user: {
+-        id: user.id,
+-        usernameHash: user.usernameHash,
+-        encryptedProfile: user.encryptedProfile,
+-        isVerified: user.isVerified
+-      },
++      user: { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified },
+       accessToken: tokens.access,
+       needVerification: false
+     })
+@@ -165,54 +134,62 @@ async (req, res, next) => {
+ })
+ 
+ router.post('/login', authLimiter, zodValidate({
+-  body: z.object({ usernameHash: z.string().min(10), password: z.string().min(8) })
++  body: z.object({ 
++    usernameHash: z.string().min(10), 
++    password: z.string().min(8),
++    publicKey: z.string().optional(),
++    signingKey: z.string().optional(),
++    encryptedPrivateKey: z.string().optional(),
++    deviceName: z.string().optional()
++  })
+ }),
+ async (req, res, next) => {
+   try {
+-    const { usernameHash, password } = req.body
++    const { usernameHash, password, publicKey, signingKey, encryptedPrivateKey, deviceName } = req.body
+     
+     const user = await prisma.user.findUnique({
+       where: { usernameHash },
+-      select: {
+-        id: true,
+-        usernameHash: true,
+-        encryptedProfile: true,
+-        isVerified: true,
+-        passwordHash: true,
+-        encryptedPrivateKey: true,
+-        role: true,
+-        bannedAt: true,
+-        banReason: true
++      include: {
++        devices: { orderBy: { lastActiveAt: 'desc' } }
+       }
+     })
+ 
+     if (!user) throw new ApiError(401, 'Invalid credentials')
+-    
+-    if (user.bannedAt) {
+-      return res.status(403).json({ 
+-        error: 'ACCESS DENIED: Your account has been suspended.',
+-        reason: user.banReason 
+-      })
+-    }
++    if (user.bannedAt) return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.', reason: user.banReason })
+ 
+     const ok = await verifyPassword(password, user.passwordHash)
+     if (!ok) throw new ApiError(401, 'Invalid credentials')
+ 
+-    const safeUser = {
+-        id: user.id,
+-        usernameHash: user.usernameHash,
+-        encryptedProfile: user.encryptedProfile,
+-        isVerified: user.isVerified,
+-        role: user.role
++    let activeDeviceId = '';
++    let activeEncryptedPrivateKey = '';
++
++    if (publicKey && signingKey && encryptedPrivateKey) {
++      const newDevice = await prisma.device.create({
++        data: {
++          userId: user.id,
++          publicKey,
++          signingKey,
++          encryptedPrivateKey,
++          name: deviceName || 'New Device'
++        }
++      });
++      activeDeviceId = newDevice.id;
++      activeEncryptedPrivateKey = newDevice.encryptedPrivateKey!;
++    } else {
++      if (user.devices.length === 0) throw new ApiError(404, 'No device found. Please recover your account.');
++      activeDeviceId = user.devices[0].id;
++      activeEncryptedPrivateKey = user.devices[0].encryptedPrivateKey!;
+     }
+ 
+-    const tokens = await issueTokens(safeUser, req)
++    const safeUser = { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, role: user.role }
++
++    const tokens = await issueTokens(safeUser, activeDeviceId, req)
+     setAuthCookies(res, tokens)
+ 
+     res.json({ 
+       user: safeUser, 
+       accessToken: tokens.access,
+-      encryptedPrivateKey: user.encryptedPrivateKey 
++      encryptedPrivateKey: activeEncryptedPrivateKey 
+     })
+   } catch (e) {
+     next(e)
+@@ -223,188 +200,141 @@ router.post('/refresh', async (req, res, next) => {
+   try {
+     const token = req.cookies?.rt
+     if (!token) throw new ApiError(401, 'No refresh token')
+-    const payload = verifyJwt(token)
+-    if (typeof payload === 'string' || !payload?.jti || !payload?.sub) {
++    const payload = verifyJwt(token) as { jti?: string; sub?: string; deviceId?: string } | string | null;
++    if (typeof payload === 'string' || !payload?.jti || !payload?.sub || !payload?.deviceId) {
+       const isProd = env.nodeEnv === 'production'
+-      const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
+-      res.clearCookie('at', cookieOpts)
+-      res.clearCookie('rt', cookieOpts)
++      res.clearCookie('at', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
++      res.clearCookie('rt', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
+       throw new ApiError(401, 'Invalid refresh token')
+     }
+ 
+     const stored = await prisma.refreshToken.findUnique({ where: { jti: payload.jti } })
+     if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
+       const isProd = env.nodeEnv === 'production'
+-      const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
+-      res.clearCookie('at', cookieOpts)
+-      res.clearCookie('rt', cookieOpts)
++      res.clearCookie('at', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
++      res.clearCookie('rt', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
+       throw new ApiError(401, 'Refresh token expired/revoked')
+     }
+ 
+-    const user = await prisma.user.findUnique({
+-      where: { id: payload.sub },
+-      select: {
+-        id: true,
+-        usernameHash: true,
+-        encryptedProfile: true,
+-        isVerified: true,
+-        role: true,
+-        bannedAt: true,
+-        banReason: true
+-      }
+-    })
++    const user = await prisma.user.findUnique({ where: { id: payload.sub } })
+     if (!user) throw new ApiError(401, 'User not found')
+-
+-    if (user.bannedAt) {
+-      throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
+-    }
++    if (user.bannedAt) throw new ApiError(403, `ACCESS DENIED: ${user.banReason || 'Account suspended'}`)
+ 
+     await prisma.refreshToken.deleteMany({ where: { jti: payload.jti } });
+ 
+-    const tokens = await issueTokens(user, req)
++    const tokens = await issueTokens(user, stored.deviceId, req)
+     setAuthCookies(res, tokens)
+     res.json({ ok: true, accessToken: tokens.access })
+   } catch (e) {
+-    console.error('Refresh token error:', e)
+     next(e)
+   }
+ })
+ 
+-// === ZERO-KNOWLEDGE ACCOUNT RECOVERY ===
+ router.get('/recover/challenge', authLimiter, async (req, res, next) => {
+   try {
+     const { identifier } = req.query;
+-    if (!identifier || typeof identifier !== 'string') {
+-      throw new ApiError(400, "Identifier is required.");
+-    }
++    if (!identifier || typeof identifier !== 'string') throw new ApiError(400, "Identifier is required.");
+     const nonce = crypto.randomBytes(32).toString('hex');
+-    await redisClient.setEx(`recover_nonce:${identifier}`, 300, nonce); // 5 mins expiry
++    await redisClient.setEx(`recover_nonce:${identifier}`, 300, nonce);
+     res.json({ nonce });
+-  } catch (e) {
+-    next(e);
+-  }
++  } catch (e) { next(e); }
+ });
+ 
+ router.post('/recover', authLimiter, zodValidate({
+   body: z.object({
+-    identifier: z.string().min(10), // usernameHash
++    identifier: z.string().min(10),
+     newPassword: z.string().min(8),
+     newEncryptedKeys: z.string(),
++    publicKey: z.string().optional(),
++    signingKey: z.string().optional(),
+     signature: z.string(),
+     timestamp: z.number(),
+     nonce: z.string()
+   })
+ }), async (req, res, next) => {
+   try {
+-    const { identifier: usernameHash, newPassword, newEncryptedKeys, signature, timestamp, nonce } = req.body;
++    const { identifier: usernameHash, newPassword, newEncryptedKeys, publicKey, signingKey, signature, timestamp, nonce } = req.body;
+ 
+     const now = Date.now();
+-    if (Math.abs(now - timestamp) > 5 * 60 * 1000) {
+-       throw new ApiError(400, "Recovery request expired.");
+-    }
++    if (Math.abs(now - timestamp) > 5 * 60 * 1000) throw new ApiError(400, "Recovery request expired.");
+ 
+-    // Verify and consume server-side nonce
+     const cachedNonce = await redisClient.get(`recover_nonce:${usernameHash}`);
+-    if (!cachedNonce || cachedNonce !== nonce) {
+-       throw new ApiError(401, "Invalid or expired recovery challenge. Please try again.");
+-    }
+-    await redisClient.del(`recover_nonce:${usernameHash}`); // One-time use replay protection
++    if (!cachedNonce || cachedNonce !== nonce) throw new ApiError(401, "Invalid or expired recovery challenge.");
++    await redisClient.del(`recover_nonce:${usernameHash}`);
+ 
+-    // Match by Hash
+-    const user = await prisma.user.findUnique({
+-      where: { usernameHash }
+-    });
+-    if (!user || !user.signingKey) throw new ApiError(404, "User not found or invalid keys.");
++    const user = await prisma.user.findUnique({ where: { usernameHash }, include: { devices: true } });
++    if (!user || user.devices.length === 0) throw new ApiError(404, "User not found or invalid keys.");
++
++    const oldSigningKey = user.devices[0].signingKey;
+ 
+     const { getSodium } = await import('../lib/sodium.js');
+     const sodium = await getSodium();
+-    
+-    // Canonicalize and concatenate full recovery payload
+     const messageString = `${usernameHash}:${timestamp}:${nonce}:${newPassword}:${newEncryptedKeys}`;
+     const messageBytes = Buffer.from(messageString, 'utf-8');
+     const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
+-    const publicKeyBytes = sodium.from_base64(user.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
++    const publicKeyBytes = sodium.from_base64(oldSigningKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+ 
+     const isValid = sodium.crypto_sign_verify_detached(signatureBytes, messageBytes, publicKeyBytes);
+-    if (!isValid) {
+-       throw new ApiError(401, "Cryptographic signature verification failed.");
+-    }
++    if (!isValid) throw new ApiError(401, "Cryptographic signature verification failed.");
+ 
+     const passwordHash = await hashPassword(newPassword);
+ 
+-    const [updatedUser] = await prisma.$transaction([
+-        prisma.user.update({
+-          where: { id: user.id },
++    const [updatedUser, _, __, newDevice] = await prisma.$transaction([
++        prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
++        prisma.device.deleteMany({ where: { userId: user.id } }), // 1. Sapu bersih perangkat lama yang bocor
++        prisma.authenticator.deleteMany({ where: { userId: user.id } }), // 2. Bersihkan sesi biometrik lama
++        prisma.device.create({ // 3. Buat perangkat yang baru dipulihkan
+           data: {
+-            passwordHash,
+-            encryptedPrivateKey: newEncryptedKeys
++            userId: user.id,
++            publicKey: publicKey || '',
++            signingKey: signingKey || '',
++            encryptedPrivateKey: newEncryptedKeys,
++            name: 'Recovered Device'
+           }
+-        }),
+-        prisma.refreshToken.deleteMany({ where: { userId: user.id } }),
+-        prisma.authenticator.deleteMany({ where: { userId: user.id } })
++        })
+     ]);
+ 
+-    const tokens = await issueTokens(updatedUser, req);    setAuthCookies(res, tokens);
+-
++    const tokens = await issueTokens(updatedUser, newDevice.id, req);    
++    setAuthCookies(res, tokens);
+     res.json({ message: "Account recovered successfully.", accessToken: tokens.access });
+-  } catch (e) {
+-    next(e);
+-  }
++  } catch (e) { next(e); }
+ });
+ 
+ router.post('/logout-all', requireAuth, async (req, res, next) => {
+   try {
+     if (!req.user) throw new ApiError(401, 'Unauthorized');
++    const userDevices = await prisma.device.findMany({ where: { userId: req.user.id }, select: { id: true } });
++    const deviceIds = userDevices.map(d => d.id);
+     
+-    // Nuke all sessions from DB
+-    await prisma.refreshToken.deleteMany({
+-      where: { userId: req.user.id }
+-    });
++    await prisma.refreshToken.deleteMany({ where: { deviceId: { in: deviceIds } } });
+     
+-    // Clear cookies
+     const isProd = env.nodeEnv === 'production'
+-    const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
+-    res.clearCookie('at', cookieOpts)
+-    res.clearCookie('rt', cookieOpts)
+-    
++    res.clearCookie('at', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
++    res.clearCookie('rt', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
+     res.json({ message: "All sessions terminated." });
+-  } catch (e) {
+-    next(e);
+-  }
++  } catch (e) { next(e); }
+ });
+ 
+ router.post('/logout', async (req, res) => {
+   const { endpoint } = req.body
+   if (endpoint) {
+-    try {
+-      await prisma.pushSubscription.deleteMany({ where: { endpoint } })
+-    } catch (_e) {}
++    try { await prisma.pushSubscription.deleteMany({ where: { endpoint } }) } catch (_e) {}
+   }
+   try {
+-    // CodeQL Fix: Do not branch on user-controlled data directly.
+-    const payload = verifyJwt(String(req.cookies?.rt || ''))
++    const payload = verifyJwt(String(req.cookies?.rt || '')) as { jti?: string };
+     if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
+       await prisma.refreshToken.updateMany({ where: { jti: payload.jti }, data: { revokedAt: new Date() } })
+     }
+-  } catch (_e) {
+-    // Ignore invalid token safely
+-  }
++  } catch (_e) {}
+   const isProd = env.nodeEnv === 'production'
+-  const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
+-  res.clearCookie('at', cookieOpts)
+-  res.clearCookie('rt', cookieOpts)
++  res.clearCookie('at', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
++  res.clearCookie('rt', { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' })
+   res.json({ ok: true })
+ })
+ 
+-// === WEBAUTHN ROUTES ===
+-
+-// === PROOF OF WORK (PoW) ROUTES ===
+-
+ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
+   try {
+     const salt = crypto.randomBytes(16).toString('hex');
+-
+-    // Dynamic Difficulty based on IP usage (anti-farm)
+     const ip = req.ip || req.socket.remoteAddress;
+     const userId = req.user?.id;
+     
+@@ -413,24 +343,15 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
+     }
+     
+     const rateKey = ip ? `pow:ip_count:${ip}` : `pow:user_count:${userId}`;
+-
+-    // Get how many times this IP/User has requested PoW recently
+     let count = await redisClient.incr(rateKey);
+ 
+     if (count === 1) {
+-        // If it's the first time (INCR returns 1), set the TTL to 24 hours
+         await redisClient.expire(rateKey, 86400);
+     } else if (Number.isNaN(count) || count < 0) {
+-        // Fallback for corrupted redis types
+         count = 0;
+     }
+ 
+-    // Base difficulty is 4 (e.g., '0000'). 
+-    // Increase difficulty by 1 for every 2 requests from the same IP/User within a 24-hour window.
+-    // Cap it at a reasonable maximum (e.g., 6, which is significantly harder and takes minutes)
+     const difficulty = Math.min(4 + Math.floor(count / 2), 6);
+-
+-    // Store challenge in Redis (5 mins expiry)
+     await redisClient.setEx(`pow:challenge:${req.user!.id}`, 300, JSON.stringify({ salt, difficulty }));
+ 
+     res.json({ salt, difficulty });
+@@ -438,6 +359,7 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
+     next(e);
+   }
+ });
++
+ router.post('/pow/verify', 
+   requireAuth, 
+   zodValidate({
+@@ -454,20 +376,14 @@ router.post('/pow/verify',
+       }
+       
+       const { salt, difficulty } = JSON.parse(challengeData as string);
+-      
+-      // Verify Hash: SHA256(salt + nonce)
+       const hash = crypto.createHash('sha256').update(salt + nonce.toString()).digest('hex');
+       
+       if (hash.startsWith('0'.repeat(difficulty))) {
+-          // Valid PoW!
+           await redisClient.del(`pow:challenge:${userId}`);
+-          
+-          // Upgrade User
+           await prisma.user.update({
+               where: { id: userId },
+               data: { isVerified: true }
+           });
+-          
+           res.json({ success: true, message: 'Account verified via Proof of Work' });
+       } else {
+           throw new ApiError(400, 'Invalid Proof of Work. Hash does not meet difficulty target.');
+@@ -487,9 +403,6 @@ router.get('/webauthn/register/options', requireAuth, async (req, res, next) =>
+     })
+ 
+     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+-    
+-    // If force=true (e.g. upgrading to PRF or re-registering), don't exclude existing creds.
+-    // This allows creating a NEW credential on the same device.
+     const forceNew = req.query.force === 'true';
+     
+     type GenOpts = Parameters<typeof generateRegistrationOptions>[0];
+@@ -565,9 +478,7 @@ router.post('/webauthn/register/verify', requireAuth, async (req, res, next) =>
+         }
+       })
+ 
+-      // Upgrade Trust Tier to Verified (VIP)
+       await prisma.user.update({ where: { id: user.id }, data: { currentChallenge: null, isVerified: true } })
+-
+       res.json({ verified: true })
+     } else {
+       res.status(400).json({ verified: false, error: 'Verification failed' })
+@@ -631,25 +542,28 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
+           usernameHash: true,
+           encryptedProfile: true,
+           isVerified: true,
+-          encryptedPrivateKey: true,
+           role: true,
+           bannedAt: true,
+-          banReason: true
++          banReason: true,
++          devices: { orderBy: { lastActiveAt: 'desc' }, take: 1 }
+         }
+       })
+ 
+       if (!safeUser) throw new ApiError(404, 'User not found')
+       if (safeUser.bannedAt) return res.status(403).json({ error: 'ACCESS DENIED: Your account has been suspended.', reason: safeUser.banReason })
+ 
+-      const tokens = await issueTokens(safeUser, req)
++      const activeDeviceId = safeUser.devices[0]?.id;
++      if (!activeDeviceId) throw new ApiError(404, 'No device found for this account.');
++
++      const tokens = await issueTokens({ id: safeUser.id, role: safeUser.role }, activeDeviceId, req)
+       setAuthCookies(res, tokens)
+       res.clearCookie('webauthn_challenge')
+ 
+       res.json({ 
+         verified: true, 
+-        user: safeUser, 
++        user: { id: safeUser.id, usernameHash: safeUser.usernameHash, encryptedProfile: safeUser.encryptedProfile, isVerified: safeUser.isVerified, role: safeUser.role }, 
+         accessToken: tokens.access,
+-        encryptedPrivateKey: safeUser.encryptedPrivateKey 
++        encryptedPrivateKey: safeUser.devices[0]?.encryptedPrivateKey 
+       })
+     } else {
+       res.status(400).json({ verified: false })
+@@ -657,4 +571,4 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
+   } catch (e) { next(e) }
+ })
+ 
+-export default router
++export default router
+\ No newline at end of file
+diff --git a/server/src/routes/conversations.ts b/server/src/routes/conversations.ts
+index f30678a3..25568cc7 100644
+--- a/server/src/routes/conversations.ts
++++ b/server/src/routes/conversations.ts
+@@ -3,10 +3,10 @@
+ // For commercial licensing, contact [admin@nyx-app.my.id].
+ import { Router } from 'express'
+ import { prisma } from '../lib/prisma.js'
+-import { Prisma, DeliveryStatus } from '@prisma/client';
++import { DeliveryStatus } from '@prisma/client';
+ import { requireAuth } from '../middleware/auth.js'
+ import { getIo } from '../socket.js'
+-import { asConversationId, asUserId, type ConversationId, type User } from '@nyx/shared'
++import { asConversationId, asUserId, type User } from '@nyx/shared'
+ import { toConversation, toParticipant } from '../utils/mappers.js';
+ import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
+ import { ApiError } from '../utils/errors.js'
+@@ -15,7 +15,56 @@ import { redisClient } from '../lib/redis.js'
+ const router: Router = Router()
+ router.use(requireAuth)
+ 
+-const MAX_GROUP_MEMBERS = 100 // Batasi member maksimal biar server gak meledak
++const MAX_GROUP_MEMBERS = 100 
++
++// ✅ FIX: Selector Type-Safe untuk mengambil Kunci dari Perangkat Terakhir Aktif
++const userSelectWithKeys = { 
++  id: true, 
++  encryptedProfile: true, 
++  devices: { orderBy: { lastActiveAt: 'desc' as const }, take: 1, select: { publicKey: true, signingKey: true } } 
++};
++
++// Type Definitions untuk menampung hasil query Prisma yang memiliki relasi 'devices'
++type UserWithDevices = { id: string, encryptedProfile: string | null, devices?: { publicKey: string, signingKey: string }[] };
++type ParticipantWithUser = { id: string, userId: string, isPinned: boolean, role: string, joinedAt: Date, user: UserWithDevices };
++type MessageWithSender = { sender: UserWithDevices };
++type RawConversationData = {
++  id: string;
++  isGroup: boolean;
++  creatorId: string | null;
++  encryptedMetadata: string | null;
++  createdAt: Date;
++  updatedAt: Date;
++  lastMessageAt: Date | null;
++  creator: UserWithDevices | null;
++  participants: ParticipantWithUser[];
++  messages?: MessageWithSender[];
++};
++
++// ✅ FIX: Helper type-safe untuk menyuntikkan Kunci dari Device ke Root Object User agar kompatibel dengan toConversation Mapper
++const hoistKeys = (u: UserWithDevices | null) => {
++  if (!u) return u;
++  const result: Record<string, unknown> = { ...u };
++  if (u.devices && u.devices.length > 0) {
++    result.publicKey = u.devices[0].publicKey;
++    result.signingKey = u.devices[0].signingKey;
++  }
++  delete result.devices;
++  return result;
++};
++
++const hoistConvoKeys = (c: RawConversationData) => {
++  const result: Record<string, unknown> = { ...c };
++  if (c.creator) result.creator = hoistKeys(c.creator);
++  if (c.participants) {
++      result.participants = c.participants.map(p => ({ ...p, user: hoistKeys(p.user) }));
++  }
++  if (c.messages) {
++      result.messages = c.messages.map(m => ({ ...m, sender: hoistKeys(m.sender) }));
++  }
++  return result as unknown as Parameters<typeof toConversation>[0];
++};
++
+ 
+ // GET all conversations for the current user
+ router.get('/', async (req, res, next) => {
+@@ -31,35 +80,33 @@ router.get('/', async (req, res, next) => {
+       include: {
+         participants: {
+           select: {
+-            user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } },
++            user: { select: userSelectWithKeys }, // Menggunakan Selector Multi-Device
+             id: true,
+             userId: true,
+             isPinned: true,
+             role: true,
+-            joinedAt: true // ✅ Sudah benar
++            joinedAt: true 
+           }
+         },
+         messages: {
+           orderBy: { createdAt: 'desc' },
+           take: 1,
+-          include: { sender: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } }
++          include: { sender: { select: userSelectWithKeys } }
+         },
+-        creator: { select: { id: true, publicKey: true, signingKey: true, encryptedProfile: true } }
++        creator: { select: userSelectWithKeys }
+       },
+       orderBy: { lastMessageAt: 'desc' }
+-    })
++    });
+ 
+-    // Build per-conversation joinedAt map for filtering unread counts
+     const joinedAtMap = new Map<string, Date>();
+-    for (const c of conversationsData as unknown as { id: string; participants: { userId: string; joinedAt: Date }[] }[]) {
++    for (const c of conversationsData) {
+       const myParticipant = c.participants.find(p => p.userId === userId);
+       if (myParticipant) {
+         joinedAtMap.set(c.id, myParticipant.joinedAt);
+       }
+     }
+ 
+-    // Build OR-based where clause: only count messages after user joined each conversation
+-    const unreadWhereClauses = (conversationsData as unknown as { id: string }[])
++    const unreadWhereClauses = conversationsData
+       .filter(c => joinedAtMap.has(c.id))
+       .map(c => ({
+         conversationId: c.id,
+@@ -68,7 +115,7 @@ router.get('/', async (req, res, next) => {
+         statuses: {
+           none: {
+             userId: userId,
+-            status: DeliveryStatus.READ // ✅ FIX: Gunakan Enum dari Prisma
++            status: DeliveryStatus.READ 
+           }
+         }
+       }));
+@@ -76,19 +123,16 @@ router.get('/', async (req, res, next) => {
+     const unreadCountsData = unreadWhereClauses.length > 0
+       ? await prisma.message.groupBy({
+           by: ['conversationId'],
+-          where: {
+-            OR: unreadWhereClauses
+-          },
++          where: { OR: unreadWhereClauses },
+           _count: { id: true }
+         })
+       : [];
+ 
+-    // ✅ FIX: Biarkan TypeScript menyimpulkan tipe secara otomatis dan beri fallback 0
+     const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, item._count?.id || 0]));
+ 
+-    // ✅ FIX: Hilangkan (convo: { id: string }) dan gunakan (as any) pada jembatan mapper
++    // Hoist keys secara type-safe sebelum mapping
+     const safeConversations = conversationsData.map(convo => {
+-      const safeConv = toConversation(convo as any);
++      const safeConv = toConversation(hoistConvoKeys(convo as unknown as RawConversationData));
+       safeConv.unreadCount = unreadMap.get(convo.id) || 0;
+       return safeConv;
+     })
+@@ -115,16 +159,25 @@ router.post('/', async (req, res, next) => {
+     if (userIds.length > MAX_GROUP_MEMBERS) return res.status(400).json({ error: `Group cannot have more than ${MAX_GROUP_MEMBERS} members.` })
+ 
+     if (!isGroup) {
+-      const otherUserId = userIds.find((id: string) => id !== creatorId)
++      const isSelfChat = userIds.length === 1 && userIds[0] === creatorId;
++      const otherUserId = isSelfChat ? creatorId : userIds.find((id: string) => id !== creatorId);
+       if (!otherUserId) return res.status(400).json({ error: 'Another user ID is required for a private chat.' })
+ 
+-      const existingConversation = await prisma.conversation.findFirst({
+-        where: { isGroup: false, AND: [{ participants: { some: { userId: creatorId } } }, { participants: { some: { userId: otherUserId } } }] },
+-        include: { participants: { include: { user: true } }, creator: true }
+-      })
++      let existingConversation = null;
++      if (isSelfChat) {
++          const selfChats = await prisma.conversation.findMany({
++              where: { isGroup: false, participants: { some: { userId: creatorId } } },
++              include: { participants: { include: { user: { select: userSelectWithKeys } } }, creator: { select: userSelectWithKeys } }
++          });
++          existingConversation = selfChats.find(c => c.participants.length === 1);
++      } else {
++          existingConversation = await prisma.conversation.findFirst({
++              where: { isGroup: false, AND: [{ participants: { some: { userId: creatorId } } }, { participants: { some: { userId: otherUserId } } }] },
++              include: { participants: { include: { user: { select: userSelectWithKeys } } }, creator: { select: userSelectWithKeys } }
++          });
++      }
+ 
+-      // Bebas any
+-      if (existingConversation) return res.status(200).json(toConversation(existingConversation))
++      if (existingConversation) return res.status(200).json(toConversation(hoistConvoKeys(existingConversation as unknown as RawConversationData)))
+         
+       if (!isVerified) {
+           const today = new Date().toISOString().split('T')[0];
+@@ -146,8 +199,8 @@ router.post('/', async (req, res, next) => {
+             participants: { create: allUserIds.map((userId: string) => ({ user: { connect: { id: userId } }, role: userId === creatorId ? 'ADMIN' : 'MEMBER' })) }
+           },
+           include: {
+-            participants: { select: { id: true, userId: true, role: true, isPinned: true, user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } } },
+-            creator: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }
++            participants: { select: { id: true, userId: true, role: true, isPinned: true, user: { select: userSelectWithKeys } } },
++            creator: { select: userSelectWithKeys }
+           }
+         })
+ 
+@@ -169,8 +222,7 @@ router.post('/', async (req, res, next) => {
+       throw dbError;
+     }
+ 
+-    // MAPPING KE SAFE TYPE (Tanpa any)
+-    const safeConversation = toConversation(newConversation);
++    const safeConversation = toConversation(hoistConvoKeys(newConversation as unknown as RawConversationData));
+     
+     getIo().to(allUserIds.filter(uid => uid !== creatorId)).emit('conversation:new', safeConversation)
+     res.status(201).json({ ...safeConversation, unreadCount: 0 })
+@@ -186,14 +238,13 @@ router.get('/:id', async (req, res, next) => {
+     const conversation = await prisma.conversation.findFirst({
+       where: { id: req.params.id, participants: { some: { userId: req.user.id } } },
+       include: {
+-        participants: { select: { id: true, userId: true, user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }, isPinned: true, role: true } },
+-        creator: { select: { id: true, publicKey: true, signingKey: true, encryptedProfile: true } }
++        participants: { select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true } },
++        creator: { select: userSelectWithKeys }
+       }
+     })
+ 
+     if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
+-    // Bebas any
+-    res.json(toConversation(conversation))
++    res.json(toConversation(hoistConvoKeys(conversation as unknown as RawConversationData)))
+   } catch (error) {
+     next(error)
+   }
+@@ -232,16 +283,19 @@ router.post('/:id/participants', async (req, res, next) => {
+     const newParticipantsRaw = await prisma.$transaction(async (tx) => {
+       await Promise.all(userIds.map((userId: string) => tx.participant.upsert({ where: { userId_conversationId: { userId, conversationId } }, create: { userId, conversationId, joinedAt: new Date() }, update: {} })))
+       await rotateAndDistributeSessionKeys(conversationId, req.user!.id, tx)
+-      return await tx.participant.findMany({ where: { conversationId, userId: { in: userIds } }, include: { user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } } })
++      return await tx.participant.findMany({ where: { conversationId, userId: { in: userIds } }, include: { user: { select: userSelectWithKeys } } })
+     })
+ 
+-    const conversationRaw = await prisma.conversation.findUnique({ where: { id: conversationId }, include: { participants: { include: { user: true } }, creator: true } })
++    const conversationRaw = await prisma.conversation.findUnique({ where: { id: conversationId }, include: { participants: { include: { user: { select: userSelectWithKeys } } }, creator: { select: userSelectWithKeys } } })
+ 
+-    // MAPPING KE SAFE TYPE
+-    const safeParticipants = newParticipantsRaw.map(toParticipant);
++    const safeParticipants = newParticipantsRaw.map(p => {
++       const hoistedUser = hoistKeys((p as any).user);
++       const objToMap = { ...p, user: hoistedUser };
++       return toParticipant(objToMap as Parameters<typeof toParticipant>[0]);
++    });
++    
+     const safeConversationId = asConversationId(conversationId);
+ 
+-    // Casting ke unknown lalu ke expected interface socket untuk menghindari any
+     getIo().to(conversationId).emit('conversation:participants_added', { 
+       conversationId: safeConversationId, 
+       newParticipants: safeParticipants as unknown as { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[] 
+@@ -249,9 +303,8 @@ router.post('/:id/participants', async (req, res, next) => {
+     getIo().to(conversationId).emit('group:participants_changed', { conversationId: safeConversationId })
+     
+     if (conversationRaw) {
+-      const safeConv = toConversation(conversationRaw);
++      const safeConv = toConversation(hoistConvoKeys(conversationRaw as unknown as RawConversationData));
+       safeParticipants.forEach(p => {
+-        // FIX: Pengecekan p.userId memastikan tipe undefined tidak masuk ke fungsi .to()
+         if (p.userId) {
+           getIo().to(p.userId).emit('conversation:new', safeConv)
+         }
+@@ -296,15 +349,12 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
+     if (req.user.id === userToRemoveId) return res.status(400).json({ error: 'Cannot remove yourself.' })
+ 
+     const result = await prisma.participant.deleteMany({
+-    where: { 
+-        userId: userToRemoveId, 
+-        conversationId 
+-    }
+-});
++        where: { userId: userToRemoveId, conversationId }
++    });
+ 
+-if (result.count === 0) {
+-    return res.status(404).json({ error: 'Participant not found in this conversation' });
+-}
++    if (result.count === 0) {
++        return res.status(404).json({ error: 'Participant not found in this conversation' });
++    }
+     
+     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userToRemoveId) })
+     getIo().to(conversationId).emit('group:participants_changed', { conversationId: asConversationId(conversationId) })
+@@ -399,8 +449,8 @@ router.post('/:id/key-rotation', async (req, res, next) => {
+       data: { updatedAt: new Date() }
+     })
+ 
+-    // Bebas any
+-    res.json({ success: true, message: 'Key rotation recorded successfully', conversation: toConversation(updatedConversation) })
++    const safeConv = toConversation(hoistConvoKeys(updatedConversation as unknown as RawConversationData));
++    res.json({ success: true, message: 'Key rotation recorded successfully', conversation: safeConv })
+   } catch (error) {
+     next(error)
+   }
+diff --git a/server/src/routes/keys.ts b/server/src/routes/keys.ts
+index 1af4b13c..fad0efb1 100644
+--- a/server/src/routes/keys.ts
++++ b/server/src/routes/keys.ts
+@@ -8,17 +8,19 @@ import { requireAuth } from '../middleware/auth.js'
+ import { z } from 'zod'
+ import { zodValidate } from '../utils/validate.js'
+ import { ApiError } from '../utils/errors.js'
++// ✅ FIX: Menggunakan AuthJwtPayload dari paket shared
++import type { AuthJwtPayload } from '@nyx/shared'
+ 
+ const router: Router = Router()
+ 
+-// === POST: Upload/update a user's pre-key bundle ===
++// === POST: Upload/update a device's pre-key bundle ===
+ router.post(
+   '/prekey-bundle',
+   requireAuth,
+   zodValidate({
+     body: z.object({
+       identityKey: z.string(),
+-      signingKey: z.string().optional(), // New: Accept signingKey update
++      signingKey: z.string().optional(),
+       signedPreKey: z.object({
+         key: z.string(),
+         signature: z.string()
+@@ -28,50 +30,47 @@ router.post(
+   async (req, res, next) => {
+     try {
+       if (!req.user) throw new ApiError(401, 'Authentication required.')
+-      const userId = req.user.id
++      
++      const authUser = req.user as AuthJwtPayload;
++      if (!authUser.deviceId) throw new ApiError(400, 'Device ID missing from session.')
++      
++      // Pastikan deviceId murni string
++      const deviceId = String(authUser.deviceId);
++
+       const { identityKey, signedPreKey, signingKey } = req.body
+ 
+-      // Prepare user update data
+-      const userUpdateData: Prisma.UserUpdateInput = { publicKey: identityKey }
+-      if (signingKey) {
+-        userUpdateData.signingKey = signingKey
+-      } else {
+-        // If not provided in request, ensure the user already has one.
+-        const currentUser = await prisma.user.findUnique({
+-          where: { id: userId },
+-          select: { signingKey: true }
+-        })
+-        if (!currentUser?.signingKey) {
+-          throw new ApiError(400, 'Signing key is required for initial bundle upload.')
+-        }
+-      }
++      // ✅ FIX: Gunakan Interactive Transaction agar lebih kebal dari deadlock
++      await prisma.$transaction(async (tx) => {
++        // 1. Bersihkan sisa OTPK lama untuk mencegah "Identity Crisis"
++        await tx.oneTimePreKey.deleteMany({
++          where: { deviceId } 
++        });
+ 
+-      // Use a transaction to ensure both operations succeed or fail together
+-      await prisma.$transaction([
+-        // [FIX] Purge old OTPKs on bundle update (New Identity/Session)
+-        // This prevents "Identity Crisis" where new identity is mixed with old OTPKs.
+-        prisma.oneTimePreKey.deleteMany({
+-          where: { userId }
+-        }),
+-        prisma.preKeyBundle.upsert({
+-          where: { userId },
++        // 2. Perbarui atau Buat Bundle Baru
++        await tx.preKeyBundle.upsert({
++          where: { deviceId },
+           update: {
+             identityKey,
+             key: signedPreKey.key,
+             signature: signedPreKey.signature
+           },
+           create: {
+-            userId,
++            deviceId,
+             identityKey,
+             key: signedPreKey.key,
+             signature: signedPreKey.signature
+           }
+-        }),
+-        prisma.user.update({
+-          where: { id: userId },
+-          data: userUpdateData
+-        })
+-      ])
++        });
++
++        // 3. Perbarui Identitas Perangkat (Conditional Update yang bersih)
++        await tx.device.update({
++          where: { id: deviceId },
++          data: {
++            publicKey: identityKey,
++            ...(signingKey && { signingKey }) // Menyisipkan signingKey hanya jika ada nilainya
++          }
++        });
++      });
+ 
+       res.status(201).json({ message: 'Pre-key bundle updated successfully.' })
+     } catch (e) {
+@@ -95,19 +94,19 @@ router.post(
+   async (req, res, next) => {
+     try {
+       if (!req.user) throw new ApiError(401, 'Authentication required.')
+-      const userId = req.user.id
+-      const { keys } = req.body
++      const authUser = req.user as AuthJwtPayload;
++      const deviceId = authUser.deviceId;
++      if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
++
++      const { keys } = req.body;
+ 
+-      // Use createMany for efficiency
+-      // Note: If keyId conflict exists (unique constraint), this might fail.
+-      // We assume client manages keyIds correctly (e.g. rolling counter).
+       await prisma.oneTimePreKey.createMany({
+         data: keys.map((k: { keyId: number; publicKey: string }) => ({
+-          userId,
++          deviceId,
+           keyId: k.keyId,
+           publicKey: k.publicKey
+         })),
+-        skipDuplicates: true // Ignore duplicates if client retries
++        skipDuplicates: true
+       })
+ 
+       res.status(201).json({ message: `Uploaded ${keys.length} One-Time Pre-Keys.` })
+@@ -117,32 +116,31 @@ router.post(
+   }
+ )
+ 
+-// === GET: Count One-Time Pre-Keys ===
++// === GET: Count OTPK ===
+ router.get('/count-otpk', requireAuth, async (req, res, next) => {
+   try {
+-    if (!req.user) throw new ApiError(401, 'Authentication required.')
+-    const count = await prisma.oneTimePreKey.count({
+-      where: { userId: req.user.id }
+-    })
++    const authUser = req.user as AuthJwtPayload;
++    const deviceId = authUser.deviceId;
++    if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
++
++    const count = await prisma.oneTimePreKey.count({ where: { deviceId } })
+     res.json({ count })
+-  } catch (e) {
+-    next(e)
+-  }
++  } catch (e) { next(e) }
+ })
+ 
+-// === DELETE: Clear all One-Time Pre-Keys ===
++// === DELETE: Clear OTPK ===
+ router.delete('/otpk', requireAuth, async (req, res, next) => {
+   try {
+-    await prisma.oneTimePreKey.deleteMany({
+-      where: { userId: req.user!.id }
+-    })
++    const authUser = req.user as AuthJwtPayload;
++    const deviceId = authUser.deviceId;
++    if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
++
++    await prisma.oneTimePreKey.deleteMany({ where: { deviceId } })
+     res.status(204).send()
+-  } catch (e) {
+-    next(e)
+-  }
++  } catch (e) { next(e) }
+ })
+ 
+-// === GET: Get a pre-key bundle for another user ===
++// === GET: Get ALL pre-key bundles for another user ===
+ router.get(
+   '/prekey-bundle/:userId',
+   requireAuth,
+@@ -151,59 +149,128 @@ router.get(
+     try {
+       const { userId } = req.params
+ 
+-      // 1. Fetch User and Bundle
+-      const userWithBundle = await prisma.user.findUnique({
+-        where: { id: userId as string },
+-        select: {
+-          id: true,
+-          publicKey: true,
+-          signingKey: true,
+-          preKeyBundle: true
+-        }
++      const devices = await prisma.device.findMany({
++        where: { userId: String(userId) },
++        include: { preKeyBundle: true }
+       })
+ 
+-      if (!userWithBundle?.preKeyBundle || !userWithBundle.signingKey) {
+-        throw new ApiError(404, 'User does not have a valid pre-key bundle available.')
++      if (devices.length === 0) {
++        throw new ApiError(404, 'User does not have any active devices.')
+       }
+ 
+-      // 2. Atomic Pop: Fetch ONE OTPK and Delete it
+-      // Prisma doesn't support "DELETE RETURNING" directly in standard API easily for this logic without raw query or transaction.
+-      // We use a transaction: Find First -> Delete ID.
+-
+-      const otpk = await prisma.$transaction(async (tx) => {
+-        const key = await tx.oneTimePreKey.findFirst({
+-          where: { userId: userId as string },
+-          orderBy: { createdAt: 'asc' }, // Use oldest first
+-          select: { id: true, keyId: true, publicKey: true }
+-        })
+-
+-        if (key) {
+-          await tx.oneTimePreKey.delete({ where: { id: key.id } })
+-        }
+-        return key
++      const responseBundles = await Promise.all(devices.map(async (device) => {
++          if (!device.preKeyBundle || !device.signingKey) return null;
++
++          const otpk = await prisma.$transaction(async (tx) => {
++            const key = await tx.oneTimePreKey.findFirst({
++              where: { deviceId: device.id },
++              orderBy: { createdAt: 'asc' },
++              select: { id: true, keyId: true, publicKey: true }
++            })
++            if (key) await tx.oneTimePreKey.delete({ where: { id: key.id } })
++            return key
++          })
++
++          const bundle: Record<string, unknown> = {
++            deviceId: device.id,
++            identityKey: device.preKeyBundle.identityKey,
++            signedPreKey: {
++              key: device.preKeyBundle.key,
++              signature: device.preKeyBundle.signature
++            },
++            signingKey: device.signingKey
++          }
++
++          if (otpk) {
++            bundle.oneTimePreKey = {
++              keyId: otpk.keyId,
++              key: otpk.publicKey
++            }
++          }
++          return bundle;
++      }));
++
++      const validBundles = responseBundles.filter(b => b !== null);
++      if (validBundles.length === 0) throw new ApiError(404, 'No valid key bundles found for this user.');
++
++      res.json(validBundles)
++    } catch (e: unknown) {
++      next(e)
++    }
++  }
++)
++
++// === POST: Get ALL pre-key bundles for MULTIPLE users (Bulk Fetch) ===
++router.post(
++  '/prekey-bundles',
++  requireAuth,
++  zodValidate({ body: z.object({ userIds: z.array(z.string().cuid()) }) }),
++  async (req, res, next) => {
++    try {
++      const { userIds } = req.body
++
++      if (!userIds || userIds.length === 0) {
++        return res.json({});
++      }
++
++      // Fetch devices for all requested users in one query
++      const devices = await prisma.device.findMany({
++        where: { userId: { in: userIds } },
++        include: { preKeyBundle: true }
+       })
+ 
+-      const { preKeyBundle, signingKey } = userWithBundle
++      if (devices.length === 0) {
++        return res.json({});
++      }
+ 
+-      // Assemble the response bundle
+-      const responseBundle: Record<string, unknown> = {
+-        identityKey: preKeyBundle.identityKey,
+-        signedPreKey: {
+-          key: preKeyBundle.key,
+-          signature: preKeyBundle.signature
+-        },
+-        signingKey // Include the public signing key for verification
++      // Group devices by userId to form the response map
++      const responseMap: Record<string, Record<string, unknown>[]> = {};
++      for (const uid of userIds) {
++          responseMap[uid] = [];
+       }
+ 
+-      // 3. Attach One-Time Pre-Key if available
+-      if (otpk) {
+-        responseBundle.oneTimePreKey = {
+-          keyId: otpk.keyId,
+-          key: otpk.publicKey
+-        }
++      // Process devices: we still need to atomically pop OTPKs per device.
++      // This is a mapping over devices, which is generally fast in parallel.
++      const processedBundles = await Promise.all(devices.map(async (device) => {
++          if (!device.preKeyBundle || !device.signingKey) return null;
++
++          const otpk = await prisma.$transaction(async (tx) => {
++            const key = await tx.oneTimePreKey.findFirst({
++              where: { deviceId: device.id },
++              orderBy: { createdAt: 'asc' },
++              select: { id: true, keyId: true, publicKey: true }
++            })
++            if (key) await tx.oneTimePreKey.delete({ where: { id: key.id } })
++            return key
++          })
++
++          const bundle: Record<string, unknown> = {
++            deviceId: device.id,
++            identityKey: device.preKeyBundle.identityKey,
++            signedPreKey: {
++              key: device.preKeyBundle.key,
++              signature: device.preKeyBundle.signature
++            },
++            signingKey: device.signingKey
++          }
++
++          if (otpk) {
++            bundle.oneTimePreKey = {
++              keyId: otpk.keyId,
++              key: otpk.publicKey
++            }
++          }
++          return { userId: device.userId, bundle };
++      }));
++
++      // Populate response map
++      for (const result of processedBundles) {
++          if (result) {
++              responseMap[result.userId].push(result.bundle);
++          }
+       }
+ 
+-      res.json(responseBundle)
++      res.json(responseMap)
+     } catch (e: unknown) {
+       next(e)
+     }
+@@ -214,52 +281,41 @@ router.get(
+ router.get(
+   '/initial-session/:conversationId/:sessionId',
+   requireAuth,
+-  zodValidate({
+-    params: z.object({
+-      conversationId: z.string(),
+-      sessionId: z.string()
+-    })
+-  }),
++  zodValidate({ params: z.object({ conversationId: z.string(), sessionId: z.string() }) }),
+   async (req, res, next) => {
+     try {
+       if (!req.user) throw new ApiError(401, 'Authentication required.')
+-      const { conversationId, sessionId } = req.params
+-      const userId = req.user.id
++      
++      const authUser = req.user as AuthJwtPayload;
++      const deviceId = authUser.deviceId;
++      if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
++
++      const conversationId = String(req.params.conversationId);
++      const sessionId = String(req.params.sessionId);
+ 
+       const keyRecord = await prisma.sessionKey.findFirst({
+-        where: {
+-          conversationId: conversationId as string,
+-          sessionId: sessionId as string,
+-          userId: userId as string
+-        }
++        where: { conversationId, sessionId, deviceId }
+       })
+ 
+       if (!keyRecord || !keyRecord.initiatorEphemeralKey) {
+-        return res.status(404).json({ error: 'Initial session data not found for this user.' })
++        return res.status(404).json({ error: 'Initial session data not found for this device.' })
+       }
+ 
+-      // Find the initiator to get their public identity key
+       const initiatorRecord = await prisma.sessionKey.findFirst({
+-        where: {
+-          conversationId: conversationId as string,
+-          sessionId: sessionId as string,
+-          isInitiator: true
+-        },
+-        include: { user: { select: { id: true, publicKey: true } } }
++        where: { conversationId, sessionId, isInitiator: true },
++        include: { device: { select: { id: true, publicKey: true } } }
+       })
+ 
+-      if (!initiatorRecord?.user?.publicKey) {
+-        return res.status(404).json({ error: "Initiator's public key could not be found for this session." })
++      if (!initiatorRecord?.device?.publicKey) {
++        return res.status(404).json({ error: "Initiator's public key could not be found." })
+       }
+ 
+       res.json({
+         encryptedKey: keyRecord.encryptedKey,
+         initiatorEphemeralKey: keyRecord.initiatorEphemeralKey,
+-        initiatorIdentityKey: initiatorRecord.user.publicKey
++        initiatorIdentityKey: initiatorRecord.device.publicKey
+       })
+-    } catch (e) {
+-      next(e)
+-    }
++    } catch (e) { next(e) }
+   }
+ )
+ 
+@@ -271,7 +327,7 @@ router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
+   try {
+     const { env } = await import('../config.js');
+     if (!env.cfAccountId || !env.cfTurnKeyId || !env.cfTurnApiToken) {
+-      return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }); // Fallback
++      return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+     }
+ 
+     const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${env.cfTurnKeyId}/credentials/generate-ice-servers`;
+@@ -281,16 +337,13 @@ router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
+         'Authorization': `Bearer ${env.cfTurnApiToken}`,
+         'Content-Type': 'application/json',
+       },
+-      body: JSON.stringify({ ttl: 86400 }) // 24 hours validity
++      body: JSON.stringify({ ttl: 86400 })
+     });
+ 
+     const data = await response.json() as unknown as TurnResponse;
+ 
+     if (data.iceServers) {
+-      const payload = { 
+-          iceServers: data.iceServers
+-      };
+-      return res.json(payload);
++      return res.json({ iceServers: data.iceServers });
+     }
+ 
+     return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+@@ -300,4 +353,4 @@ router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
+   }
+ });
+ 
+-export default router
++export default router
+\ No newline at end of file
+diff --git a/server/src/routes/users.ts b/server/src/routes/users.ts
+index 0d67ab2d..77096a1c 100644
+--- a/server/src/routes/users.ts
++++ b/server/src/routes/users.ts
+@@ -8,7 +8,7 @@ import { z } from 'zod'
+ import { zodValidate } from '../utils/validate.js'
+ import { ApiError } from '../utils/errors.js'
+ import { getIo } from '../socket.js'
+-import type { UserId } from '@nyx/shared'
++import type { UserId, AuthJwtPayload } from '@nyx/shared'
+ 
+ const router = Router()
+ 
+@@ -28,12 +28,20 @@ router.get('/search', async (req, res, next) => {
+     if (!user?.isVerified) throw new ApiError(403, 'SANDBOX_SEARCH_RESTRICTION: Unverified users cannot search for other users.');
+     
+     const users = await prisma.user.findMany({
+-      where: { AND: [{ id: { not: req.user!.id } }, { usernameHash: q }] },
+-      select: { id: true, encryptedProfile: true, isVerified: true, publicKey: true },
++      where: { usernameHash: q },
++      select: { id: true, encryptedProfile: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true } } },
+       take: 20
+     })
+ 
+-    res.json(users)
++    const mappedUsers = users.map(u => ({
++      id: u.id,
++      encryptedProfile: u.encryptedProfile,
++      isVerified: u.isVerified,
++      publicKey: u.devices[0]?.publicKey
++    }))
++
++    res.json(mappedUsers)
++
+   } catch (e) { next(e) }
+ })
+ 
+@@ -61,6 +69,54 @@ router.get('/me/blocked', async (req, res, next) => {
+   } catch (error) { next(error) }
+ })
+ 
++router.get('/me/devices', requireAuth, async (req, res, next) => {
++  try {
++    const authUser = req.user as AuthJwtPayload;
++    
++    const devices = await prisma.device.findMany({
++      where: { userId: authUser.id },
++      orderBy: { lastActiveAt: 'desc' },
++      select: { id: true, name: true, lastActiveAt: true, createdAt: true }
++    });
++    
++    // Tandai perangkat mana yang sedang digunakan saat ini
++    const mapped = devices.map(d => ({ 
++        ...d, 
++        isCurrent: d.id === authUser.deviceId 
++    }));
++    
++    res.json(mapped);
++  } catch (e) { 
++      next(e); 
++  }
++});
++
++// DELETE: Cabut akses (Logout) perangkat tertentu dari jarak jauh
++router.delete('/me/devices/:deviceId', requireAuth, async (req, res, next) => {
++  try {
++    const authUser = req.user as AuthJwtPayload;
++    const targetDeviceId = String(req.params.deviceId);
++
++    if (targetDeviceId === authUser.deviceId) {
++       throw new ApiError(400, "Cannot revoke the current device from here. Use the Logout button instead.");
++    }
++
++    // 1. Hapus device (Cascade akan menghapus PreKeys, SessionKeys, dll)
++    await prisma.device.deleteMany({
++      where: { id: targetDeviceId, userId: authUser.id }
++    });
++
++    // 2. Hapus Refresh Token (Memutus sesi JWT perangkat tersebut secara paksa)
++    await prisma.refreshToken.deleteMany({
++        where: { deviceId: targetDeviceId }
++    });
++
++    res.json({ message: "Device access revoked successfully." });
++  } catch (e) { 
++      next(e); 
++  }
++});
++
+ // UPDATE User Profile (Me)
+ router.put('/me',
+   zodValidate({
+@@ -122,13 +178,18 @@ router.put('/me/keys',
+   async (req, res, next) => {
+     try {
+       if (!req.user) throw new ApiError(401, 'Authentication required.')
+-      const userId = req.user.id
++      
++      // ✅ FIX: Update kunci E2EE di tabel Device, bukan di tabel User
++      const authUser = req.user as AuthJwtPayload;
++      const deviceId = authUser.deviceId;
++      if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
++        
++      const userId = authUser.id
+       const { publicKey, signingKey } = req.body
+ 
+-      const user = await prisma.user.update({
+-        where: { id: userId },
+-        data: { publicKey, signingKey },
+-        select: { id: true }
++      await prisma.device.update({
++        where: { id: deviceId },
++        data: { publicKey, signingKey }
+       })
+ 
+       const conversations = await prisma.conversation.findMany({
+@@ -142,7 +203,7 @@ router.put('/me/keys',
+       }))
+ 
+       recipients.forEach(recipientId => {
+-        getIo().to(recipientId).emit('user:identity_changed', { userId: user.id })
++        getIo().to(recipientId).emit('user:identity_changed', { userId })
+       })
+ 
+       res.status(200).json({ message: 'Keys updated successfully.' })
+@@ -218,11 +279,21 @@ router.get('/:userId', async (req, res, next) => {
+     const { userId } = req.params
+     const user = await prisma.user.findUnique({
+       where: { id: userId },
+-      select: { id: true, encryptedProfile: true, createdAt: true, publicKey: true, isVerified: true }
++      // ✅ FIX: Ambil publicKey dari device terakhir
++      select: { id: true, encryptedProfile: true, createdAt: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true } } }
+     })
+ 
+     if (!user) return res.status(404).json({ error: 'User not found' })
+-    res.json(user)
++    
++    const mappedUser = {
++        id: user.id,
++        encryptedProfile: user.encryptedProfile,
++        createdAt: user.createdAt,
++        isVerified: user.isVerified,
++        publicKey: user.devices[0]?.publicKey
++    }
++    
++    res.json(mappedUser)
+   } catch (error) { next(error) }
+ })
+ 
+diff --git a/server/src/socket.ts b/server/src/socket.ts
+index 89ecbf5b..12d6a97d 100644
+--- a/server/src/socket.ts
++++ b/server/src/socket.ts
+@@ -7,7 +7,7 @@ import { env } from "./config.js";
+ import { prisma } from "./lib/prisma.js";
+ import { verifyJwt } from "./utils/jwt.js";
+ import { sendPushNotification } from "./utils/sendPushNotification.js";
+-import { redisClient } from "./lib/redis.js"; // Client untuk data aplikasi (Presence, dll)
++import { redisClient } from "./lib/redis.js"; 
+ import { AuthPayload } from "./types/auth.js";
+ import cookie from "cookie"; 
+ import crypto from "crypto";
+@@ -30,9 +30,9 @@ import type {
+   RawServerMessage
+ } from "@nyx/shared";
+ 
+-// Extend the Socket type from Socket.IO to include our custom user property
++// ✅ FIX: Tambahkan deviceId ke dalam interface
+ interface AuthenticatedSocket extends Socket<ClientToServerEvents, ServerToClientEvents> {
+-  user?: AuthPayload & { publicKey?: string | null };
++  user?: AuthPayload & { publicKey?: string | null, deviceId?: string };
+ }
+ 
+ export let io: Server<ClientToServerEvents, ServerToClientEvents>;
+@@ -49,21 +49,16 @@ export function registerSocket(httpServer: HttpServer) {
+     cors: {
+       origin: (origin, callback) => {
+         if (!origin) return callback(null, true);
+-        
+-        // Ratakan array
+         const baseOrigins = Array.isArray(env.corsOrigin) ? env.corsOrigin : [env.corsOrigin];
+-
+         const allowedOrigins = [
+           ...baseOrigins, 
+           "http://localhost:5173", 
+           "http://localhost:4173",
+-          // Tambahkan domain HTTP untuk support Cloudflare Tunnel
+           "http://nyx-app.my.id",
+           "https://nyx-app.my.id",
+           "http://*.nyx-app.my.id",
+           "https://*.nyx-app.my.id"
+         ];
+-        
+         if (
+           allowedOrigins.includes(origin) || 
+           origin.endsWith('.vercel.app') || 
+@@ -82,38 +77,21 @@ export function registerSocket(httpServer: HttpServer) {
+     },
+     path: '/socket.io',
+     transports: ['polling', 'websocket'],
+-    connectionStateRecovery: {
+-      maxDisconnectionDuration: 2 * 60 * 1000,
+-      skipMiddlewares: true,
+-    },
++    connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000, skipMiddlewares: true },
+     allowEIO3: true,
+     pingTimeout: 30000,
+     pingInterval: 35000 
+   });
+ 
+-  // === REDIS ADAPTER SETUP (CLUSTER MODE SUPPORT) ===
+   const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+-  
+-  // Opsi socket yang sama dengan main client agar konsisten
+-  const redisOptions = {
+-    url: redisUrl,
+-    socket: {
+-      keepAlive: true,
+-      reconnectStrategy: (retries: number) => Math.min(retries * 50, 2000),
+-    }
+-  };
++  const redisOptions = { url: redisUrl, socket: { keepAlive: true, reconnectStrategy: (retries: number) => Math.min(retries * 50, 2000) } };
+ 
+   const pubClient = createClient(redisOptions);
+   const subClient = pubClient.duplicate();
+ 
+   Promise.all([pubClient.connect(), subClient.connect()])
+-    .then(() => {
+-      io.adapter(createAdapter(pubClient, subClient));
+-    })
+-    .catch((err) => {
+-      console.error("❌ Socket.IO Redis Adapter Connection Failed:", err);
+-    });
+-  // ==================================================
++    .then(() => { io.adapter(createAdapter(pubClient, subClient)); })
++    .catch((err) => { console.error("❌ Socket.IO Redis Adapter Connection Failed:", err); });
+ 
+   // === MIDDLEWARE AUTH ===
+   io.use(async (socket: AuthenticatedSocket, next) => {
+@@ -129,32 +107,40 @@ export function registerSocket(httpServer: HttpServer) {
+       }
+ 
+       if (!token) {
+-        // ALLOW GUEST for Device Linking
+         socket.user = undefined;
+         return next(); 
+       }
+ 
+-      const payload = verifyJwt(token);
++      // ✅ FIX: Konversi tipe payload agar mencakup deviceId
++      const payload = verifyJwt(token) as { id?: string; sub?: string; role?: string; deviceId?: string } | null | string;
+       if (!payload || typeof payload === 'string') {
+         socket.user = undefined;
+         return next();
+       }
+ 
+       const userId = payload.id || payload.sub;
+-      // OPTIMIZATION: Select publicKey here
++      const deviceId = payload.deviceId;
++
++      if (!userId || !deviceId) {
++        socket.user = undefined;
++        return next();
++      }
++
++      // ✅ FIX: Ambil publicKey dari relasi devices, bukan langsung dari user
+       const user = await prisma.user.findUnique({ 
+         where: { id: userId },
+-        select: { id: true, publicKey: true }
++        select: { id: true, devices: { where: { id: deviceId }, select: { publicKey: true } } }
+       });
+ 
+-      if (!user) {
++      if (!user || user.devices.length === 0) {
+         socket.user = undefined;
+         return next();
+       }
+ 
+       socket.user = { 
+         id: user.id, 
+-        publicKey: user.publicKey 
++        publicKey: user.devices[0].publicKey,
++        deviceId: deviceId
+       };
+       next();
+     } catch (err) {
+@@ -167,22 +153,13 @@ export function registerSocket(httpServer: HttpServer) {
+   io.on("connection", async (socket: AuthenticatedSocket) => {
+     const userId = socket.user?.id;
+ 
+-    // ==========================================
+-    // 🅰️ GUEST ZONE (Belum Login / HP Baru)
+-    // ==========================================
+     if (!userId) {
+-      // Event 1: Request QR Token (Dipanggil oleh LinkDevicePage)
+       socket.on("auth:request_linking_qr", async (payload: { publicKey: string }, callback) => {
+-         
+          const linkingToken = crypto.randomBytes(32).toString('hex');
+          await socket.join(`linking:${linkingToken}`);
+-         
+-         if (typeof callback === 'function') {
+-            callback({ ok: true, qrData: linkingToken });
+-         }
++         if (typeof callback === 'function') callback({ ok: true, qrData: linkingToken });
+       });
+ 
+-      // MIGRATION GUEST RECEIVER
+       socket.on('migration:join', (roomId: string) => {
+         if (typeof roomId === 'string' && roomId.startsWith('mig_') && roomId.length > 20) {
+           socket.join(roomId);
+@@ -192,26 +169,14 @@ export function registerSocket(httpServer: HttpServer) {
+       });
+ 
+       socket.on('migration:ack', (data: { roomId: string, success: boolean }) => {
+-        if (data && data.roomId) {
+-           socket.to(data.roomId).emit('migration:ack', data);
+-        }
+-      });
+-
+-      socket.on("disconnect", () => {
++        if (data && data.roomId) socket.to(data.roomId).emit('migration:ack', data);
+       });
+ 
+-      // STOP! Guest tidak boleh lanjut ke logika user
+       return;
+     }
+ 
+-    // ==========================================
+-    // 🅱️ USER ZONE (Sudah Login / HP Lama)
+-    // ==========================================
+-    
+-    // Join room pribadi user
+     socket.join(userId);
+ 
+-    // Update Presence
+     if (!socket.recovered) {
+         const userSocketsKey = `user:${userId}:sockets`;
+         const added = await redisClient.sAdd(userSocketsKey, socket.id);
+@@ -226,7 +191,6 @@ export function registerSocket(httpServer: HttpServer) {
+         socket.emit("presence:init", onlineUserIds);
+     }
+ 
+-    // --- RATE LIMITER HELPER ---
+     const checkRateLimit = async (userIdStr: string, event: string, limit: number, windowSeconds: number): Promise<boolean> => {
+       const key = `rate_limit:socket:${event}:${userIdStr}`;
+       const current = await redisClient.incr(key);
+@@ -236,111 +200,86 @@ export function registerSocket(httpServer: HttpServer) {
+       return current <= limit;
+     };
+ 
+-    // --- CHAT FEATURES ---
+-
+     socket.on("conversation:join", async (conversationId: string) => {
+-      // 1. Rate Limit
+-      if (!await checkRateLimit(userId, 'join', 10, 60)) { 
+-        return socket.emit("error", { message: "Rate limit exceeded" });
+-      }
+-
+-      // 2. Validate Membership
++      if (!await checkRateLimit(userId, 'join', 10, 60)) return socket.emit("error", { message: "Rate limit exceeded" });
+       try {
+         const participant = await prisma.participant.findUnique({
+-          where: {
+-            userId_conversationId: {
+-              userId,
+-              conversationId
+-            }
+-          }
++          where: { userId_conversationId: { userId, conversationId } }
+         });
+-
+-        if (participant) {
+-          socket.join(conversationId);
+-        }
+-      } catch (e) {
+-        console.error("Error joining conversation:", e);
+-      }
++        if (participant) socket.join(conversationId);
++      } catch (e) {}
+     });
+ 
+     socket.on("typing:start", async ({ conversationId }: TypingPayload) => {
+       if (!await checkRateLimit(userId, 'typing', 20, 10)) return; 
+-
+-      if (conversationId && socket.user) {
+-        socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: true });
+-      }
++      if (conversationId && socket.user) socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: true });
+     });
+ 
+     socket.on("typing:stop", ({ conversationId }: TypingPayload) => {
+-       if (conversationId && socket.user) {
+-        socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: false });
+-      }
++       if (conversationId && socket.user) socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: false });
+     });
+ 
+     socket.on('messages:distribute_keys', async ({ conversationId, keys }: DistributeKeysPayload) => {
+       if (!await checkRateLimit(userId, 'keys', 50, 60)) return; 
+-      
+       if (!keys || !Array.isArray(keys) || !conversationId) return;
+       
+       try {
+-        const participant = await prisma.participant.findFirst({
+-          where: { conversationId, userId },
+-        });
++        const participant = await prisma.participant.findFirst({ where: { conversationId, userId } });
+         if (!participant) return;
+-
+-        keys.forEach(keyPackage => {
++        
++        // ✅ SMART ROUTING: Kirim kunci HANYA ke perangkat tujuan
++        for (const keyPackage of keys) {
+           if (keyPackage.userId && keyPackage.key) {
+-            io.to(keyPackage.userId).emit('session:new_key', {
+-              conversationId,
+-              encryptedKey: keyPackage.key,
+-              type: 'GROUP_KEY',
+-              senderId: userId
+-            });
++            
++            if (keyPackage.targetDeviceId) {
++               // Cari semua socket milik user tujuan
++               const targetSockets = await io.in(keyPackage.userId).fetchSockets();
++               
++               for (const s of targetSockets) {
++                  const authSocket = s as unknown as AuthenticatedSocket;
++                  // Tembakkan hanya jika deviceId socket cocok dengan targetDeviceId
++                  if (authSocket.user?.deviceId === keyPackage.targetDeviceId) {
++                      authSocket.emit('session:new_key', {
++                          conversationId,
++                          encryptedKey: keyPackage.key,
++                          type: 'GROUP_KEY',
++                          senderId: userId,
++                          senderDeviceKey: keyPackage.senderDeviceKey
++                      });
++                  }
++               }
++            } else {
++               // Fallback: Jika tidak ada targetDeviceId, broadcast ke semua (untuk kompabilitas mundur)
++               io.to(keyPackage.userId).emit('session:new_key', {
++                  conversationId,
++                  encryptedKey: keyPackage.key,
++                  type: 'GROUP_KEY',
++                  senderId: userId,
++                  senderDeviceKey: keyPackage.senderDeviceKey
++               });
++            }
++            
+           }
+-        });
++        }
+       } catch (error) {
+         console.error(`[Key Distribution] Error:`, error);
+       }
+     });
+ 
+     socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => void) => {
+-      // 1. Sandbox Rate Limit (Strict)
+       const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
+ 
+-      console.log(`[MESSAGE] User ${userId} isVerified: ${user?.isVerified}`);
+-
+       if (!user?.isVerified) {
+           try {
+               const key = `sandbox:msg:${userId}`;
+-              
+-              const luaScript = `
+-                local c = redis.call("INCR", KEYS[1]);
+-                if c == 1 then redis.call("EXPIRE", KEYS[1], ARGV[1]) end;
+-                return c;
+-              `;
+-              
+-              const count = await redisClient.eval(luaScript, {
+-                keys: [key],
+-                arguments: ['60']
+-              }) as number;
+-
+-              if (count === 1) {
+-                  console.log(`[SANDBOX] User ${userId} sent message 1/5 (window starts)`);
+-              } else {
+-                  console.log(`[SANDBOX] User ${userId} sent message ${count}/5`);
+-              }
+-
+-              if (count > 5) {
+-                  console.log(`[SANDBOX] User ${userId} blocked - limit reached (${count}/5)`);
+-                  return callback?.({ ok: false, error: "SANDBOX_LIMIT_REACHED: Max 5 messages per minute. Verify account to unlock." });
+-              }
++              const luaScript = `local c = redis.call("INCR", KEYS[1]); if c == 1 then redis.call("EXPIRE", KEYS[1], ARGV[1]) end; return c;`;
++              const count = await redisClient.eval(luaScript, { keys: [key], arguments: ['60'] }) as number;
++              if (count > 5) return callback?.({ ok: false, error: "SANDBOX_LIMIT_REACHED: Max 5 messages per minute. Verify account to unlock." });
+           } catch (redisError) {
+-              console.error(`[SANDBOX] Redis error:`, redisError);
+               return callback?.({ ok: false, error: "Service unavailable. Try again later." });
+           }
+       }
+ 
+-      // 2. Standard Rate Limit
+       if (!await checkRateLimit(userId, 'message', 15, 60)) { 
+          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
+       }
+@@ -360,32 +299,19 @@ export function registerSocket(httpServer: HttpServer) {
+           return callback?.({ ok: false, error: "Conversation not found." });
+         }
+ 
+-        // --- TYPE SAFE DB TRANSACTION ---
+         const newMessageRaw = await prisma.message.create({
+           data: { 
+-              conversationId, 
+-              senderId: userId, 
+-              content, 
+-              sessionId: sessionId || null,
+-              repliedToId: repliedToId || null,
+-              expiresAt: expiresAt ? new Date(expiresAt) : null, 
+-              isViewOnce: isViewOnce === true
++              conversationId, senderId: userId, content, sessionId: sessionId || null,
++              repliedToId: repliedToId || null, expiresAt: expiresAt ? new Date(expiresAt) : null, isViewOnce: isViewOnce === true
+           },
+-          include: { 
+-              sender: { select: { id: true, encryptedProfile: true } }
+-          }
++          include: { sender: { select: { id: true, encryptedProfile: true } } }
+         });
+         
+-        // Mapping ke Type-Safe RawServerMessage
+         const safeMessage = toRawServerMessage(newMessageRaw);
+-        
+-        if (tempId !== undefined) {
+-          safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
+-        }
++        if (tempId !== undefined) safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
+         
+         conversation.participants.forEach(participant => {
+           io.to(participant.userId).emit('message:new', safeMessage);
+-          
+           if (participant.userId !== userId) {
+              const encryptedPushPayload = pushPayloads ? pushPayloads[participant.userId] : null;
+              sendPushNotification(participant.userId, {
+@@ -397,7 +323,6 @@ export function registerSocket(httpServer: HttpServer) {
+         
+         callback?.({ ok: true, msg: safeMessage });
+       } catch (error) {
+-        console.error("Failed to process message:", error);
+         callback?.({ ok: false, error: "Failed to send." });
+       }
+     });
+@@ -407,34 +332,16 @@ export function registerSocket(httpServer: HttpServer) {
+       const uid = socket.user.id;
+ 
+       try {
+-        // 1. Cek apakah pesan itu ada dan memang milik si pengirim
+         const msg = await prisma.message.findUnique({
+           where: { id: messageId },
+           select: { senderId: true, conversationId: true }
+         });
+ 
+-        if (!msg || msg.conversationId !== conversationId || msg.senderId !== uid) {
+-          return; // Abaikan jika bukan pesan miliknya
+-        }
+-
+-        // 2. HANCURKAN DARI SERVER (Jika pesan masih belum terbaca/terkirim oleh penerima)
+-        await prisma.message.deleteMany({
+-          where: { id: messageId, senderId: uid } // Gunakan deleteMany agar tidak crash jika ID tidak ada
+-        });
+-        
+-        console.log(`[Zero-Knowledge] Pesan ${messageId} ditarik oleh pengirim dan dihapus dari server.`);
+-
+-        // 3. Beri tahu Klien yang Sedang Online (Tombstone Relay)
+-        // Kita menggunakan socket untuk memberi sinyal real-time agar UI frontend langsung merespons
+-        socket.to(conversationId).emit('message:deleted_remotely', { 
+-          messageId, 
+-          conversationId,
+-          deletedBy: uid
+-        });
++        if (!msg || msg.conversationId !== conversationId || msg.senderId !== uid) return;
+ 
+-      } catch (error) {
+-        console.error('Failed to unsend message on server:', error);
+-      }
++        await prisma.message.deleteMany({ where: { id: messageId, senderId: uid } });
++        socket.to(conversationId).emit('message:deleted_remotely', { messageId, conversationId, deletedBy: uid });
++      } catch (error) {}
+     });
+ 
+     socket.on('message:view_once_opened', async ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
+@@ -442,35 +349,29 @@ export function registerSocket(httpServer: HttpServer) {
+         const uid = socket.user.id;
+ 
+         try {
+-            // 1. Verify membership in the conversation
+-            const isParticipant = await prisma.participant.findUnique({
+-                where: { userId_conversationId: { userId: uid, conversationId } }
+-            });
++            const isParticipant = await prisma.participant.findUnique({ where: { userId_conversationId: { userId: uid, conversationId } } });
+             if (!isParticipant) return;
+ 
+-            // 2. Verify the message exists and belongs to this conversation
+-            const msg = await prisma.message.findUnique({
+-                where: { id: messageId },
+-                select: { conversationId: true, senderId: true }
+-            });
++            const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { conversationId: true, senderId: true } });
+             if (!msg || msg.conversationId !== conversationId) return;
+ 
+-            // 3. Only broadcast if the viewer is NOT the sender (sender already knows)
+             if (msg.senderId === uid) return;
+ 
+             socket.to(conversationId).emit('message:viewed', { messageId, conversationId });
+-        } catch (error) {
+-            console.error('Failed to authorize view_once_opened:', error);
+-        }
++        } catch (error) {}
+     });
+ 
+     socket.on("push:subscribe", async (data: PushSubscribePayload) => {
++      // ✅ FIX: Ambil deviceId langsung dari session properties dengan aman
++      if (!socket.user || !socket.user.deviceId) return;
++      const deviceId = socket.user.deviceId;
++
+       if (!data.endpoint || !data.keys?.p256dh || !data.keys?.auth) return;
+       try {
+         await prisma.pushSubscription.upsert({
+           where: { endpoint: data.endpoint },
+-          update: { p256dh: data.keys.p256dh, auth: data.keys.auth },
+-          create: { endpoint: data.endpoint, p256dh: data.keys.p256dh, auth: data.keys.auth, userId },
++          update: { p256dh: data.keys.p256dh, auth: data.keys.auth, deviceId },
++          create: { endpoint: data.endpoint, p256dh: data.keys.p256dh, auth: data.keys.auth, deviceId },
+         });
+       } catch (error) {
+         console.error("Failed to save push subscription:", error);
+@@ -482,62 +383,36 @@ export function registerSocket(httpServer: HttpServer) {
+       const uid = socket.user.id;
+ 
+       try {
+-        // 1. Ambil data pesan SEKALIGUS dengan info grup (hanya 1x query)
+         const msg = await prisma.message.findUnique({
+           where: { id: messageId },
+-          select: { 
+-            id: true, 
+-            conversationId: true, 
+-            senderId: true,
+-            conversation: { select: { isGroup: true } } // Join ringan untuk cek tipe chat
+-          }
++          select: { id: true, conversationId: true, senderId: true, conversation: { select: { isGroup: true } } }
+         });
+         if (!msg || msg.conversationId !== conversationId) return;
+ 
+-        // 2. Validasi apakah user tergabung dalam percakapan
+-        const isParticipant = await prisma.participant.findUnique({
+-          where: { userId_conversationId: { userId: uid, conversationId } }
+-        });
++        const isParticipant = await prisma.participant.findUnique({ where: { userId_conversationId: { userId: uid, conversationId } } });
+         if (!isParticipant) return;
+ 
+-        // ✅ FIX: Early return if the reader is the message sender (self-authored ACK)
+-        // No need to mutate server state for self-read receipts
+         if (msg.senderId === uid) return;
+ 
+-        // 3. Update penanda baca terakhir dari participant
+         await prisma.participant.update({
+           where: { userId_conversationId: { userId: uid, conversationId } },
+           data: { lastReadMsgId: messageId }
+         });
+ 
+-        // 4. Beritahu pengirim bahwa pesan sudah dibaca (Centang Biru) via Socket
+         if (msg.senderId !== uid) {
+-          io.to(msg.senderId).emit('message:status_updated', {
+-            messageId,
+-            conversationId: msg.conversationId,
+-            readBy: uid,
+-            status: 'READ',
+-          });
++          io.to(msg.senderId).emit('message:status_updated', { messageId, conversationId: msg.conversationId, readBy: uid, status: 'READ' });
+         }
+ 
+-        // 5. Store-and-Forward: Hancurkan vs Simpan Status
+         if (!msg.conversation.isGroup) {
+-           // Jika ini chat pribadi (1-on-1), HANCURKAN pesan dari server
+-           await prisma.message.delete({
+-             where: { id: messageId }
+-           });
++           await prisma.message.delete({ where: { id: messageId } });
+         } else {
+-           // Jika ini Grup, simpan status READ (penghapusan ditangani oleh messageSweeper setelah 14 hari)
+            await prisma.messageStatus.upsert({
+              where: { messageId_userId: { messageId, userId: uid } },
+              update: { status: 'READ' },
+              create: { messageId, userId: uid, status: 'READ' },
+            });
+         }
+-
+-      } catch (error) {
+-        console.error('Failed to mark message as read:', error);
+-      }
++      } catch (error) {}
+     });
+ 
+     // --- E2EE Key Recovery Handlers ---
+@@ -548,10 +423,7 @@ export function registerSocket(httpServer: HttpServer) {
+       const isParticipant = await prisma.participant.findFirst({
+         where: { conversationId, userId: socket.user!.id }
+       });
+-      if (!isParticipant) {
+-        console.warn(`[Socket] Unauthorized key request from ${socket.user!.id}`);
+-        return;
+-      }
++      if (!isParticipant) return;
+ 
+       try {
+         const participants = await prisma.participant.findMany({
+@@ -567,25 +439,16 @@ export function registerSocket(httpServer: HttpServer) {
+           
+           if (requesterPublicKey) {
+             io.to(fulfillerId).emit('group:fulfill_key_request', {
+-              conversationId,
+-              requesterId: userId,
+-              requesterPublicKey: requesterPublicKey,
++              conversationId, requesterId: userId, requesterPublicKey: requesterPublicKey,
+             });
+           }
+         }
+-      } catch (error) {
+-        console.error(`Error processing group key request`, error);
+-      }
++      } catch (error) {}
+     });
+ 
+     socket.on('group:fulfilled_key', ({ requesterId, conversationId, encryptedKey }: KeyFulfillmentPayload) => {
+       if (!requesterId || !conversationId || !encryptedKey) return;
+-      io.to(requesterId).emit('session:new_key', {
+-        conversationId,
+-        encryptedKey,
+-        type: 'GROUP_KEY',
+-        senderId: userId 
+-      });
++      io.to(requesterId).emit('session:new_key', { conversationId, encryptedKey, type: 'GROUP_KEY', senderId: userId });
+     });
+ 
+     socket.on("session:request_missing", async ({ conversationId, sessionId }: { conversationId: string, sessionId: string }) => {
+@@ -593,28 +456,12 @@ export function registerSocket(httpServer: HttpServer) {
+         const uid = socket.user?.id;
+         if (!uid) return;
+ 
+-        const isParticipant = await prisma.participant.findFirst({
+-          where: { conversationId, userId: uid }
+-        });
+-
+-        if (!isParticipant) {
+-          console.warn(`[Socket] Unauthorized session key request from ${uid} to ${conversationId}`);
+-          return;
+-        }
+-
+-        if (!await checkRateLimit(uid, 'session_request_missing', 10, 60)) {
+-          return socket.emit("error", { message: "Rate limit exceeded for missing key requests." });
+-        }
+-
+-        socket.to(conversationId).emit("session:key_requested", {
+-          requesterId: uid,
+-          conversationId,
+-          sessionId
+-        });
++        const isParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: uid } });
++        if (!isParticipant) return;
+ 
+-      } catch (error) {
+-        console.error("Error handling session request:", error);
+-      }
++        if (!await checkRateLimit(uid, 'session_request_missing', 10, 60)) return;
++        socket.to(conversationId).emit("session:key_requested", { requesterId: uid, conversationId, sessionId });
++      } catch (error) {}
+     });
+ 
+     socket.on('session:request_key', async (data: KeyRequestPayload) => {
+@@ -624,39 +471,22 @@ export function registerSocket(httpServer: HttpServer) {
+       if (targetId) {
+           try {
+             const participants = await prisma.participant.findMany({
+-              where: {
+-                conversationId,
+-                userId: { in: [userId, targetId] }
+-              },
++              where: { conversationId, userId: { in: [userId, targetId] } },
+               select: { userId: true }
+             });
+ 
+             const participantIds = participants.map(p => p.userId);
+-            if (!participantIds.includes(userId) || !participantIds.includes(targetId)) {
+-              socket.emit('error', { error: 'Unauthorized key request relay' });
+-              return;
+-            }
++            if (!participantIds.includes(userId) || !participantIds.includes(targetId)) return;
+ 
+-            io.to(targetId).emit('session:request_key', {
+-                conversationId,
+-                requesterId: userId,
+-                sessionId
+-            });
+-          } catch (error) {
+-            console.error("Error in targeted session:request_key:", error);
+-          }
++            io.to(targetId).emit('session:request_key', { conversationId, requesterId: userId, sessionId });
++          } catch (error) {}
+           return;
+       }
+ 
+       if (!sessionId) return;
+ 
+-      const isParticipant = await prisma.participant.findFirst({
+-        where: { conversationId, userId: socket.user!.id }
+-      });
+-      if (!isParticipant) {
+-        console.warn(`[Socket] Unauthorized key request from ${socket.user!.id}`);
+-        return;
+-      }
++      const isParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: socket.user!.id } });
++      if (!isParticipant) return;
+ 
+       try {
+         const participants = await prisma.participant.findMany({
+@@ -671,69 +501,39 @@ export function registerSocket(httpServer: HttpServer) {
+           const requesterPublicKey = socket.user?.publicKey;
+           
+           if (requesterPublicKey) {
+-            io.to(fulfillerId).emit('session:fulfill_request', {
+-              conversationId,
+-              sessionId,
+-              requesterId: userId,
+-              requesterPublicKey: requesterPublicKey,
+-            });
++            io.to(fulfillerId).emit('session:fulfill_request', { conversationId, sessionId, requesterId: userId, requesterPublicKey: requesterPublicKey });
+           }
+         }
+-      } catch (error) {
+-        console.error('Error processing session key request', error);
+-      }
++      } catch (error) {}
+     });
+ 
+     socket.on('session:fulfill_response', ({ requesterId, conversationId, sessionId, encryptedKey }: KeyFulfillmentPayload) => {
+       if (!requesterId || !encryptedKey) return;
+-      io.to(requesterId).emit('session:new_key', {
+-        conversationId,
+-        sessionId,
+-        encryptedKey,
+-        type: 'SESSION_KEY',
+-        senderId: userId
+-      });
++      io.to(requesterId).emit('session:new_key', { conversationId, sessionId, encryptedKey, type: 'SESSION_KEY', senderId: userId });
+     });
+ 
+-    // === WEBRTC E2EE SIGNALING (P2P CALLS) ===
+     socket.on('webrtc:secure_signal', (data: { to: string, type: string, payload: string }) => {
+       if (!data || !data.to) return;
+       socket.to(data.to).emit('webrtc:secure_signal', { from: userId, type: data.type, payload: data.payload });
+     });
+ 
+-    // === DEVICE MIGRATION TUNNEL ===
+     socket.on('migration:join', (roomId: string) => {
+-      if (typeof roomId === 'string' && roomId.startsWith('mig_') && roomId.length > 20) {
+-        socket.join(roomId);
+-      } else {
+-        socket.emit("error", { message: "Invalid migration room" });
+-      }
++      if (typeof roomId === 'string' && roomId.startsWith('mig_') && roomId.length > 20) socket.join(roomId);
+     });
+ 
+     socket.on('migration:start', async (data: { roomId: string, totalChunks: number, sealedKey: string, iv: string }) => {
+-      if (!data || !data.roomId || typeof data.roomId !== 'string' || !data.roomId.startsWith('mig_')) {
+-        socket.emit("error", { message: "Invalid migration room payload" });
+-        return;
+-      }
+-      
++      if (!data || !data.roomId || typeof data.roomId !== 'string' || !data.roomId.startsWith('mig_')) return;
+       await redisClient.setEx(`migration_owner:${data.roomId}`, 3600, userId);
+       socket.to(data.roomId).emit('migration:start', data);
+     });
+ 
+-    // PENGHAPUSAN ANY DI SINI: ganti "chunk: any" dengan tipe yang valid (misalnya ArrayBuffer untuk binary)
+     socket.on('migration:chunk', async (data: { roomId: string, chunkIndex: number, chunk: ArrayBuffer }) => {
+       if (!data || !data.roomId || typeof data.roomId !== 'string') return;
+-      
+       const ownerId = await redisClient.get(`migration_owner:${data.roomId}`);
+-      if (ownerId !== userId) {
+-        socket.emit("error", { message: "Permission denied for this migration room" });
+-        return;
+-      }
+-      
++      if (ownerId !== userId) return;
+       socket.to(data.roomId).emit('migration:chunk', data);
+     });
+ 
+-    // === PRESENCE MANAGEMENT (AWAY/ACTIVE) ===
+     socket.on("user:away", async () => {
+       if (!userId) return;
+       const userSocketsKey = `user:${userId}:sockets`;
+@@ -758,7 +558,6 @@ export function registerSocket(httpServer: HttpServer) {
+       }
+     });
+ 
+-    // Disconnect Handler
+     socket.on("disconnect", async () => {
+        const userSocketsKey = `user:${userId}:sockets`;
+        await redisClient.sRem(userSocketsKey, socket.id);
+diff --git a/server/src/utils/sendPushNotification.ts b/server/src/utils/sendPushNotification.ts
+index 088e64f8..e5d6098e 100644
+--- a/server/src/utils/sendPushNotification.ts
++++ b/server/src/utils/sendPushNotification.ts
+@@ -17,7 +17,9 @@ export async function sendPushNotification (userId: string, payload: PushNotific
+   }
+ 
+   try {
+-    const subscriptions = await prisma.pushSubscription.findMany({ where: { userId } })
++    const subscriptions = await prisma.pushSubscription.findMany({
++        where: { device: { userId } }
++    });
+     if (subscriptions.length === 0) return
+ 
+     let encryptedPushPayload = payload['data']?.encryptedPushPayload;
+diff --git a/server/src/utils/sessionKeys.ts b/server/src/utils/sessionKeys.ts
+index 71690088..771968ad 100644
+--- a/server/src/utils/sessionKeys.ts
++++ b/server/src/utils/sessionKeys.ts
+@@ -1,3 +1,6 @@
++// Copyright (c) 2026 [han]. All rights reserved.
++// This file is part of NYX, licensed under the AGPL-3.0.
++// For commercial licensing, contact [admin@nyx-app.my.id].
+ import { prisma } from '../lib/prisma.js'
+ import { PrismaClient } from '@prisma/client'
+ import { getSodium } from '../lib/sodium.js'
+@@ -7,7 +10,7 @@ export type PrismaTransactionClient = Omit<PrismaClient, "$connect" | "$disconne
+ const B64_VARIANT = 'URLSAFE_NO_PADDING'
+ 
+ /**
+- * Creates a new session key from scratch on the server and encrypts it for all participants.
++ * Creates a new session key from scratch on the server and encrypts it for all participant devices.
+  * This is used for ratcheting sessions or as a fallback.
+  */
+ export async function rotateAndDistributeSessionKeys (conversationId: string, initiatorId: string, tx?: PrismaTransactionClient) {
+@@ -16,54 +19,93 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
+   const sessionKey = sodium.crypto_secretbox_keygen()
+   const sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`
+ 
++  // ✅ FIX: Tarik partisipan sekaligus dengan SEMUA perangkat aktif mereka
+   const participants = await db.participant.findMany({
+     where: { conversationId },
+-    include: { user: { select: { id: true, publicKey: true } } }
++    include: { 
++      user: { 
++        include: { 
++          devices: {
++            select: { id: true, publicKey: true }
++          }
++        } 
++      } 
++    }
+   })
+ 
+   if (participants.length === 0) {
+     throw new Error(`No participants found for conversation ${conversationId}`)
+   }
+ 
+-  const keyRecords = participants.map((p: { user: { id: string; publicKey: string | null; } }) => {
+-    if (!p.user.publicKey) {
+-      console.warn(`User ${p.user.id} in conversation ${conversationId} has no public key.`)
+-      return null
++  // Tipe data yang valid untuk di-insert ke tabel SessionKey skema baru
++  type SessionKeyRecord = {
++    sessionId: string;
++    encryptedKey: string;
++    deviceId: string;
++    conversationId: string;
++    initiatorEphemeralKey: string;
++    isInitiator: boolean;
++  }
++
++  const keyRecords: SessionKeyRecord[] = []
++  let initiatorHasKey = false;
++  let initiatorEncryptedKey = '';
++
++  // ✅ FIX: Looping Ganda (1 User -> Banyak Device)
++  for (const p of participants) {
++    const devices = p.user.devices
++
++    if (!devices || devices.length === 0) {
++      console.warn(`User ${p.user.id} in conversation ${conversationId} has no active devices.`)
++      continue
+     }
+ 
+-    try {
+-      const recipientPublicKey = sodium.from_base64(p.user.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+-      const encryptedKey = sodium.crypto_box_seal(sessionKey, recipientPublicKey)
+-
+-      return {
+-        sessionId,
+-        encryptedKey: sodium.to_base64(encryptedKey, sodium.base64_variants[B64_VARIANT]),
+-        userId: p.user.id,
+-        conversationId,
+-        initiatorEphemeralKey: 'server-ratchet', // Add placeholder ephemeral key
+-        isInitiator: p.user.id === initiatorId
++    for (const device of devices) {
++      if (!device.publicKey) {
++        console.warn(`Device ${device.id} for user ${p.user.id} has no public key.`)
++        continue
++      }
++
++      try {
++        const recipientPublicKey = sodium.from_base64(device.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING)
++        const encryptedKey = sodium.crypto_box_seal(sessionKey, recipientPublicKey)
++        const encryptedKeyB64 = sodium.to_base64(encryptedKey, sodium.base64_variants[B64_VARIANT])
++
++        const isInitiator = p.user.id === initiatorId
++
++        keyRecords.push({
++          sessionId,
++          encryptedKey: encryptedKeyB64,
++          deviceId: device.id,
++          conversationId,
++          initiatorEphemeralKey: 'server-ratchet', // Add placeholder ephemeral key
++          isInitiator
++        })
++
++        if (isInitiator && !initiatorHasKey) {
++          initiatorHasKey = true
++          initiatorEncryptedKey = encryptedKeyB64
++        }
++      } catch (e: unknown) {
++        const errorMessage = e instanceof Error ? e.message : 'Unknown error'
++        console.error(`Failed to process public key for device ${device.id}. Error: ${errorMessage}`)
++        throw new Error(`Corrupted public key found for device ${device.id}. Cannot establish secure session.`)
+       }
+-    } catch (e: unknown) {
+-      const errorMessage = e instanceof Error ? e.message : 'Unknown error';
+-      console.error(`Failed to process public key for user ${p.user.id}. Key: "${p.user.publicKey}". Error: ${errorMessage}`)
+-      throw new Error(`Corrupted public key found for user ${p.user.id}. Cannot establish secure session.`)
+     }
+-  }).filter(Boolean) as { sessionId: string; encryptedKey: string; userId: string; conversationId: string; initiatorEphemeralKey: string; isInitiator: boolean }[]
++  }
+ 
+-  if (keyRecords.length !== participants.length) {
+-    const participantsWithKeys = new Set(keyRecords.map(r => r.userId))
+-    const missingUserIds = participants.filter((p: { user: { id: string }}) => !participantsWithKeys.has(p.user.id)).map((p: { user: { id: string }}) => p.user.id)
+-    throw new Error(`Failed to create session keys for all participants in conversation ${conversationId}. Missing keys for users: ${missingUserIds.join(', ')}`)
++  if (keyRecords.length === 0) {
++    throw new Error(`Failed to create session keys: No valid devices found in conversation ${conversationId}.`)
+   }
+ 
+-  const initiatorKeyRecord = keyRecords.find(k => k.userId === initiatorId)
+-  if (!initiatorKeyRecord) {
+-    throw new Error('Could not find the session key for the initiator.')
++  if (!initiatorHasKey) {
++    throw new Error('Could not find a valid session key for the initiator\'s device.')
+   }
+ 
++  // Simpan kunci ke database untuk didistribusikan ke masing-masing device
+   await db.sessionKey.createMany({
+     data: keyRecords
+   })
+ 
+-  return { sessionId, encryptedKey: initiatorKeyRecord.encryptedKey }
+-}
++  return { sessionId, encryptedKey: initiatorEncryptedKey }
++}
+\ No newline at end of file
+diff --git a/web/nginx.conf b/web/nginx.conf
+index d6fee00b..a974c835 100644
+--- a/web/nginx.conf
++++ b/web/nginx.conf
+@@ -31,7 +31,7 @@ server {
+         add_header Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=()" always;
+         add_header X-Content-Type-Options "nosniff" always;
+         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://*.r2.dev https://*.cloudflarestorage.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';" always;
++        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://*.r2.dev https://*.cloudflarestorage.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';" always;
+         add_header X-Edge-Relay "nyx-enigma-v2.3.0" always;
+         add_header X-Powered-By "NYX-Engine" always;
+     }
+@@ -49,14 +49,14 @@ server {
+         add_header Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=()" always;
+         add_header X-Content-Type-Options "nosniff" always;
+         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://*.r2.dev https://*.cloudflarestorage.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';" always;
++        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://*.r2.dev https://*.cloudflarestorage.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';" always;
+         add_header X-Edge-Relay "nyx-enigma-v2.3.0" always;
+         add_header X-Powered-By "NYX-Engine" always;
+     }
+ }
+ 
+ # =========================================================
+-# 🔒 RUMAH 2: SISI APLIKASI UTAMA (Subdomain App)
++# 🏛️ RUMAH 2: SISI APLIKASI UTAMA (Subdomain App)
+ # =========================================================
+ server {
+     listen 3000;
+@@ -75,7 +75,7 @@ server {
+     gzip_min_length 256;
+     gzip_types application/javascript text/css text/plain image/svg+xml text/xml application/json;
+ 
+-    # 🔄 SPA ROUTING (REACT ROUTER)
++    # 🚀 SPA ROUTING (REACT ROUTER)
+     location / {
+         try_files $uri $uri/ /index.html;
+         
+@@ -89,13 +89,16 @@ server {
+         add_header Permissions-Policy "geolocation=(), microphone=(self), camera=(self), payment=(), usb=()" always;
+         add_header X-Content-Type-Options "nosniff" always;
+         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://cloudflareinsights.com https://*.cloudflare.com https://cdn.jsdelivr.net; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.r2.dev https://cdn.jsdelivr.net https://*.cloudflarestorage.com https://*.nyx-app.my.id; media-src 'self' data: blob: https://*.r2.dev https://*.cloudflarestorage.com https://*.nyx-app.my.id; font-src 'self' https://fonts.gstatic.com; connect-src 'self' blob: https://api.nyx-app.my.id wss://api.nyx-app.my.id https://nyx-app.my.id wss://nyx-app.my.id https://*.cloudflareinsights.com https://cloudflareinsights.com https://*.r2.dev https://*.cloudflarestorage.com https://*.nyx-app.my.id wss://*.nyx-app.my.id; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';" always;
++        
++        # ✅ FIX: Penambahan 'unsafe-eval' dan https://*.nyx-app.my.id di script-src
++        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://cloudflareinsights.com https://*.cloudflare.com https://cdn.jsdelivr.net https://app.nyx-app.my.id https://*.nyx-app.my.id; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.r2.dev https://cdn.jsdelivr.net https://*.cloudflarestorage.com https://*.nyx-app.my.id; media-src 'self' data: blob: https://*.r2.dev https://*.cloudflarestorage.com https://*.nyx-app.my.id; font-src 'self' https://fonts.gstatic.com; connect-src 'self' blob: https://api.nyx-app.my.id wss://api.nyx-app.my.id https://nyx-app.my.id wss://nyx-app.my.id https://*.cloudflareinsights.com https://cloudflareinsights.com https://*.r2.dev https://*.cloudflarestorage.com https://app.nyx-app.my.id https://*.nyx-app.my.id wss://*.nyx-app.my.id; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';" always;
++        
+         add_header X-Edge-Relay "nyx-enigma-v2.3.0" always;
+         add_header X-Sec-Protocol "Double-Ratchet-Core" always;
+         add_header X-Powered-By "NYX-Engine" always;
+     }
+ 
+-    # ⚡ CACHING UNTUK ASSETS REACT
++    # 📦 CACHING UNTUK ASSETS REACT
+     location /assets/ {
+         expires 1y;
+         add_header Cache-Control "public, max-age=31536000, immutable";
+@@ -107,13 +110,16 @@ server {
+         add_header Permissions-Policy "geolocation=(), microphone=(self), camera=(self), payment=(), usb=()" always;
+         add_header X-Content-Type-Options "nosniff" always;
+         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://cloudflareinsights.com https://*.cloudflare.com https://cdn.jsdelivr.net; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.r2.dev https://cdn.jsdelivr.net https://*.cloudflarestorage.com https://*.nyx-app.my.id; media-src 'self' data: blob: https://*.r2.dev https://*.cloudflarestorage.com https://*.nyx-app.my.id; font-src 'self' https://fonts.gstatic.com; connect-src 'self' blob: https://api.nyx-app.my.id wss://api.nyx-app.my.id https://nyx-app.my.id wss://nyx-app.my.id https://*.cloudflareinsights.com https://cloudflareinsights.com https://*.r2.dev https://*.cloudflarestorage.com https://*.nyx-app.my.id wss://*.nyx-app.my.id; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';" always;
++        
++        # ✅ FIX: CSP untuk aset statis
++        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://cloudflareinsights.com https://*.cloudflare.com https://cdn.jsdelivr.net https://app.nyx-app.my.id https://*.nyx-app.my.id; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.r2.dev https://cdn.jsdelivr.net https://*.cloudflarestorage.com https://*.nyx-app.my.id; media-src 'self' data: blob: https://*.r2.dev https://*.cloudflarestorage.com https://*.nyx-app.my.id; font-src 'self' https://fonts.gstatic.com; connect-src 'self' blob: https://api.nyx-app.my.id wss://api.nyx-app.my.id https://nyx-app.my.id wss://nyx-app.my.id https://*.cloudflareinsights.com https://cloudflareinsights.com https://*.r2.dev https://*.cloudflarestorage.com https://app.nyx-app.my.id https://*.nyx-app.my.id wss://*.nyx-app.my.id; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';" always;
++        
+         add_header X-Edge-Relay "nyx-enigma-v2.3.0" always;
+         add_header X-Sec-Protocol "Double-Ratchet-Core" always;
+         add_header X-Powered-By "NYX-Engine" always;
+     }
+ 
+-    # 📱 SERVICE WORKER PWA
++    # 📡 SERVICE WORKER PWA
+     location ~ ^/(sw\.js|registerSW\.js)$ {
+         add_header Cache-Control "no-cache, no-store, must-revalidate";
+         add_header Pragma "no-cache";
+@@ -126,13 +132,16 @@ server {
+         add_header Permissions-Policy "geolocation=(), microphone=(self), camera=(self), payment=(), usb=()" always;
+         add_header X-Content-Type-Options "nosniff" always;
+         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://cloudflareinsights.com https://*.cloudflare.com https://cdn.jsdelivr.net; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.r2.dev https://cdn.jsdelivr.net https://*.cloudflarestorage.com https://*.nyx-app.my.id; media-src 'self' data: blob: https://*.r2.dev https://*.cloudflarestorage.com https://*.nyx-app.my.id; font-src 'self' https://fonts.gstatic.com; connect-src 'self' blob: https://api.nyx-app.my.id wss://api.nyx-app.my.id https://nyx-app.my.id wss://nyx-app.my.id https://*.cloudflareinsights.com https://cloudflareinsights.com https://*.r2.dev https://*.cloudflarestorage.com https://*.nyx-app.my.id wss://*.nyx-app.my.id; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';" always;
++        
++        # ✅ FIX: CSP untuk Service Worker
++        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://cloudflareinsights.com https://*.cloudflare.com https://cdn.jsdelivr.net https://app.nyx-app.my.id https://*.nyx-app.my.id; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.r2.dev https://cdn.jsdelivr.net https://*.cloudflarestorage.com https://*.nyx-app.my.id; media-src 'self' data: blob: https://*.r2.dev https://*.cloudflarestorage.com https://*.nyx-app.my.id; font-src 'self' https://fonts.gstatic.com; connect-src 'self' blob: https://api.nyx-app.my.id wss://api.nyx-app.my.id https://nyx-app.my.id wss://nyx-app.my.id https://*.cloudflareinsights.com https://cloudflareinsights.com https://*.r2.dev https://*.cloudflarestorage.com https://app.nyx-app.my.id https://*.nyx-app.my.id wss://*.nyx-app.my.id; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';" always;
++        
+         add_header X-Edge-Relay "nyx-enigma-v2.3.0" always;
+         add_header X-Sec-Protocol "Double-Ratchet-Core" always;
+         add_header X-Powered-By "NYX-Engine" always;
+     }
+ 
+-    # 🔌 REVERSE PROXY UNTUK API
++    # 🔗 REVERSE PROXY UNTUK API
+     location /api {
+         proxy_pass http://127.0.0.1:4000;
+         proxy_http_version 1.1;
+@@ -144,7 +153,7 @@ server {
+         proxy_set_header X-Forwarded-Proto $scheme;
+     }
+ 
+-    # 🔌 REVERSE PROXY UNTUK SOCKET.IO
++    # 🔗 REVERSE PROXY UNTUK SOCKET.IO
+     location /socket.io/ {
+         proxy_pass http://127.0.0.1:4000;
+         proxy_http_version 1.1;
+diff --git a/web/src/components/LinkedDevicesPanel.tsx b/web/src/components/LinkedDevicesPanel.tsx
+new file mode 100644
+index 00000000..a0f24bbf
+--- /dev/null
++++ b/web/src/components/LinkedDevicesPanel.tsx
+@@ -0,0 +1,124 @@
++import React, { useState, useEffect } from 'react';
++import { FiMonitor, FiSmartphone, FiTrash2, FiRefreshCw, FiShield } from 'react-icons/fi';
++import { authFetch, api } from '@lib/api';
++import toast from 'react-hot-toast';
++import { useMessageStore } from '@store/message';
++import { useConversationStore } from '@store/conversation';
++import { useAuthStore } from '@store/auth';
++
++interface Device {
++    id: string;
++    name: string;
++    lastActiveAt: string;
++    createdAt: string;
++    isCurrent: boolean;
++}
++
++export const LinkedDevicesPanel: React.FC = () => {
++    const [devices, setDevices] = useState<Device[]>([]);
++    const [isLoading, setIsLoading] = useState(true);
++    const broadcastHistorySync = useMessageStore(state => state.broadcastHistorySync);
++    const user = useAuthStore(state => state.user);
++    const conversations = useConversationStore(state => state.conversations);
++
++    const loadDevices = async () => {
++        try {
++            setIsLoading(true);
++            const data = await authFetch<Device[]>('/api/users/me/devices');
++            setDevices(data);
++        } catch (error) {
++            toast.error('Failed to load linked devices');
++        } finally {
++            setIsLoading(false);
++        }
++    };
++
++    useEffect(() => {
++        loadDevices();
++    }, []);
++
++    const handleRevoke = async (deviceId: string) => {
++        if (!confirm("Are you sure you want to log out this device? It will lose access to all encrypted chats.")) return;
++        
++        try {
++            await api(`/api/users/me/devices/${deviceId}`, { method: 'DELETE' });
++            toast.success('Device revoked successfully');
++            setDevices(prev => prev.filter(d => d.id !== deviceId));
++        } catch (error) {
++            toast.error('Failed to revoke device');
++        }
++    };
++
++    const handleSyncHistory = async () => {
++        // Cari ruang chat "Saved Messages" (Chat dengan diri sendiri)
++        const selfChat = conversations.find(c => !c.isGroup && c.participants.length === 1 && c.participants[0].id === user?.id);
++        
++        if (!selfChat) {
++            toast.error("Please start a chat with yourself ('Saved Messages') first to use as a sync channel.");
++            return;
++        }
++
++        await broadcastHistorySync(selfChat.id);
++    };
++
++    if (isLoading) return <div className="p-4 text-center text-zinc-400">Loading devices...</div>;
++
++    return (
++        <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
++            <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50">
++                <div>
++                    <h3 className="text-lg font-medium text-zinc-100 flex items-center gap-2">
++                        <FiShield className="w-5 h-5 text-emerald-500" />
++                        Linked Devices
++                    </h3>
++                    <p className="text-xs text-zinc-400 mt-1">Manage devices that can decrypt your messages.</p>
++                </div>
++                <button 
++                    onClick={handleSyncHistory}
++                    className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 rounded-lg text-sm font-medium transition-colors"
++                >
++                    <FiRefreshCw className="w-4 h-4" />
++                    Sync History
++                </button>
++            </div>
++
++            <div className="divide-y divide-zinc-800/50">
++                {devices.map(device => {
++                    const isMobile = device.name.toLowerCase().includes('ios') || device.name.toLowerCase().includes('android');
++                    return (
++                        <div key={device.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/20 transition-colors">
++                            <div className="flex items-center gap-4">
++                                <div className={`p-3 rounded-full ${device.isCurrent ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-800 text-zinc-400'}`}>
++                                    {isMobile ? <FiSmartphone className="w-6 h-6" /> : <FiMonitor className="w-6 h-6" />}
++                                </div>
++                                <div>
++                                    <div className="flex items-center gap-2">
++                                        <p className="font-medium text-zinc-200">{device.name || 'Unknown Device'}</p>
++                                        {device.isCurrent && (
++                                            <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] uppercase font-bold rounded-full">
++                                                This Device
++                                            </span>
++                                        )}
++                                    </div>
++                                    <p className="text-xs text-zinc-500 mt-0.5">
++                                        Last active: {new Date(device.lastActiveAt).toLocaleDateString()} at {new Date(device.lastActiveAt).toLocaleTimeString()}
++                                    </p>
++                                </div>
++                            </div>
++
++                            {!device.isCurrent && (
++                                <button 
++                                    onClick={() => handleRevoke(device.id)}
++                                    className="p-2 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 rounded-lg transition-colors"
++                                    title="Revoke Access"
++                                >
++                                    <FiTrash2 className="w-5 h-5" />
++                                </button>
++                            )}
++                        </div>
++                    );
++                })}
++            </div>
++        </div>
++    );
++};
+diff --git a/web/src/lib/keychainDb.ts b/web/src/lib/keychainDb.ts
+index 8855b03f..58498a65 100644
+--- a/web/src/lib/keychainDb.ts
++++ b/web/src/lib/keychainDb.ts
+@@ -63,8 +63,8 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
+   });
+ }
+ 
+-export async function getGroupReceiverState(conversationId: string, senderId: string): Promise<GroupReceiverState | null> {
+-  const id = `${conversationId}_${senderId}`;
++export async function getGroupReceiverState(conversationId: string, senderId: string, senderDeviceKey?: string): Promise<GroupReceiverState | null> {
++  const id = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
+   const record = await db.groupReceiverStates.get(id);
+   return record ? {
+       id: record.id,
+@@ -440,13 +440,13 @@ export type { VaultEntry };
+ export async function exportDatabaseToJson(): Promise<string> {
+   const exportData: Record<string, unknown[]> = {};
+ 
+-  // ✅ FIX: Include ALL tables from unified Dexie schema
++  // ✅ FIX: HANYA ekspor/impor tabel riwayat dan status penerima.
++  // KECUALI: Semua tabel yang mendefinisikan identitas kriptografi perangkat 
++  // (seperti kvStore yang berisi kunci privat, sessionKeys, ratchetSessions, dll)
++  // Ini krusial agar perangkat baru tidak menjadi "kloningan" kriptografi perangkat lama.
+   const tables = [
+-    'sessionKeys', 'groupKeys', 'preKeys', 'pendingHeaders',
+-    'ratchetSessions', 'skippedKeys', 'messageKeys', 'identityKeys',
+-    'groupSenderStates', 'groupReceiverStates', 'groupSkippedKeys',
+-    // Unified vault tables (previously missing)
+-    'messages', 'storyKeys', 'offlineQueue', 'kvStore'
++    'messages', 'storyKeys', 'offlineQueue',
++    'identityKeys', 'groupReceiverStates', 'groupSkippedKeys'
+   ];
+ 
+   for (const tableName of tables) {
+@@ -481,13 +481,13 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void>
+           throw new Error("Invalid vault file format.");
+       }
+ 
+-      // ✅ FIX: Include ALL tables from unified Dexie schema
++      // ✅ FIX: HANYA ekspor/impor tabel riwayat dan status penerima.
++      // KECUALI: Semua tabel yang mendefinisikan identitas kriptografi perangkat 
++      // (seperti kvStore yang berisi kunci privat, sessionKeys, ratchetSessions, dll)
++      // Ini krusial agar perangkat baru tidak menjadi "kloningan" kriptografi perangkat lama.
+       const tables = [
+-        'sessionKeys', 'groupKeys', 'preKeys', 'pendingHeaders',
+-        'ratchetSessions', 'skippedKeys', 'messageKeys', 'identityKeys',
+-        'groupSenderStates', 'groupReceiverStates', 'groupSkippedKeys',
+-        // Unified vault tables (previously missing)
+-        'messages', 'storyKeys', 'offlineQueue', 'kvStore'
++        'messages', 'storyKeys', 'offlineQueue',
++        'identityKeys', 'groupReceiverStates', 'groupSkippedKeys'
+       ];
+ 
+       await db.transaction('rw', tables.map(t => db.table(t)), async () => {
+diff --git a/web/src/lib/shadowVaultDb.ts b/web/src/lib/shadowVaultDb.ts
+index 390eb2dd..a00a1bd6 100644
+--- a/web/src/lib/shadowVaultDb.ts
++++ b/web/src/lib/shadowVaultDb.ts
+@@ -59,6 +59,28 @@ class NyxShadowVaultProxy {
+     return db.storyKeys;
+   }
+ 
++  async exportDatabase(): Promise<string> {
++    try {
++      const messages = await db.messages.toArray();
++      return JSON.stringify({ messages });
++    } catch (e) {
++      console.error("Export DB failed:", e);
++      return "{}";
++    }
++  }
++
++  async importDatabase(jsonString: string): Promise<void> {
++    try {
++      const data = JSON.parse(jsonString);
++      if (data.messages && Array.isArray(data.messages)) {
++        await db.messages.bulkPut(data.messages);
++        console.log(`[ShadowVault] Successfully imported ${data.messages.length} messages.`);
++      }
++    } catch (e) {
++      console.error("Import DB failed:", e);
++    }
++  }
++
+   async upsertMessages(messages: Message[]) {
+     // Filter messages: Allow if it has content OR it is a tombstone
+     const validMessages = messages.filter(m => (m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('[')) || m.isDeletedLocal || m.fileUrl || m.isBlindAttachment);
+diff --git a/web/src/pages/SettingsPage.tsx b/web/src/pages/SettingsPage.tsx
+index 6e587a1f..2cefe15d 100644
+--- a/web/src/pages/SettingsPage.tsx
++++ b/web/src/pages/SettingsPage.tsx
+@@ -29,6 +29,7 @@ import { useSettingsStore } from '@store/settings';
+ import { setupBiometricUnlock } from '@lib/biometricUnlock';
+ import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib/keyStorage';
+ import { useMessageStore } from '@store/message';
++import { LinkedDevicesPanel } from '@components/LinkedDevicesPanel';
+ import ImageCropperModal from '../components/ImageCropperModal';
+ 
+ /* --- MICRO-COMPONENTS --- */
+@@ -804,6 +805,13 @@ export default function SettingsPage() {
+           </ControlModule>
+         </div>
+ 
++        {/* ========================================== */}
++        {/* ✅ FASE 5: MULTI-DEVICE MANAGEMENT SLOT */}
++        {/* ========================================== */}
++        <div className="col-span-1 md:col-span-12 lg:col-span-8">
++           <LinkedDevicesPanel />
++        </div>
++
+         {/* 5. DATA PORT (Sessions & Keys) */}
+         <div className="col-span-1 md:col-span-6 lg:col-span-4">
+           <ControlModule title={t('settings:modules.data')} icon={FiKey}>
+diff --git a/web/src/store/auth.ts b/web/src/store/auth.ts
+index f4308ee2..782ff9c1 100644
+--- a/web/src/store/auth.ts
++++ b/web/src/store/auth.ts
+@@ -14,6 +14,26 @@ import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDevic
+ import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; 
+ import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; 
+ 
++// ✅ Helper pendeteksi nama perangkat
++const getDeviceName = () => {
++    const ua = navigator.userAgent;
++    let browser = "Web Browser";
++    let os = "Unknown OS";
++    
++    if (ua.includes("Firefox")) browser = "Firefox";
++    else if (ua.includes("Edg")) browser = "Edge";
++    else if (ua.includes("Chrome")) browser = "Chrome";
++    else if (ua.includes("Safari") && !ua.includes("Chrome")) browser = "Safari";
++
++    if (ua.includes("Win")) os = "Windows";
++    else if (ua.includes("Mac")) os = "MacOS";
++    else if (ua.includes("Linux")) os = "Linux";
++    else if (ua.includes("Android")) os = "Android";
++    else if (ua.includes("like Mac")) os = "iOS";
++
++    return `${browser} on ${os}`;
++};
++
+ /**
+  * Retrieves the persisted signed pre-key, signs it with the identity signing key,
+  * and uploads the bundle to the server.
+@@ -272,9 +292,30 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+       set({ isInitializingCrypto: true });
+ 
+       try {
++        let newPublicKey = undefined;
++        let newSigningKey = undefined;
++        let newEncryptedPrivateKey = undefined;
++
++        // If this is a fresh login on a new device, generate a new cryptographic identity
++        if (!restoredNotSynced) {
++            const { registerAndGenerateKeys } = await import('@lib/crypto-worker-proxy');
++            const keys = await registerAndGenerateKeys(password);
++            
++            newPublicKey = keys.encryptionPublicKeyB64;
++            newSigningKey = keys.signingPublicKeyB64;
++            newEncryptedPrivateKey = keys.encryptedPrivateKeys;
++        }
++
+         const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/login", {
+           method: "POST",
+-          body: JSON.stringify({ usernameHash, password }),
++          body: JSON.stringify({ 
++              usernameHash, 
++              password,
++              deviceName: getDeviceName(),
++              publicKey: newPublicKey,
++              signingKey: newSigningKey,
++              encryptedPrivateKey: newEncryptedPrivateKey
++          }),
+         });
+ 
+         if (res.encryptedPrivateKey) {
+@@ -349,6 +390,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+             publicKey: encryptionPublicKeyB64,
+             signingKey: signingPublicKeyB64,
+             encryptedPrivateKeys,
++            deviceName: getDeviceName(), // 👈 Mengirim nama perangkat
+             turnstileToken
+           }),
+         });
+diff --git a/web/src/store/message.ts b/web/src/store/message.ts
+index a524c5ab..15cda6b3 100644
+--- a/web/src/store/message.ts
++++ b/web/src/store/message.ts
+@@ -225,17 +225,9 @@ export async function decryptMessageObject(
+                 }
+             }
+         }
+-        
+-        if (finalMessage.content && finalMessage.content.trim().startsWith('{')) {
+-             finalMessage.content = "🔒 You sent this message (Encrypted)";
+-        }
+-        if (rawMsg.repliedTo) {
+-            finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
+-        } else if (rawMsg.repliedToId) {
+-            const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
+-            if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
+-        }
+-        return finalMessage;
++        // JIKA TIDAK ADA MK, JANGAN RETURN DI SINI! 
++        // Biarkan jatuh ke bawah (Fall-through) agar logika Dekripsi Receiver (Fan-Out) 
++        // bisa mencoba mendekripsi pesan kita sendiri dari perangkat lain.
+     }
+ 
+     let contentToDecrypt: string | undefined = ('ciphertext' in rawMsg ? rawMsg.ciphertext : undefined) as string | undefined;
+@@ -467,7 +459,7 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
+   return null;
+ }
+ 
+-function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string, storyId?: string, targetMessageId?: string, emoji?: string } | null {
++function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string, storyId?: string, targetMessageId?: string, emoji?: string, url?: string } | null {
+   if (!content) return null;
+   try {
+     let trimmed = content.trim();
+@@ -492,6 +484,9 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
+     if (payload.type === 'STORY_KEY') {
+       return payload;
+     }
++    if (payload.type === 'HISTORY_SYNC' && payload.url && payload.key) {
++      return payload;
++    }
+     // Tambahan untuk E2EE Unsend & Cabut Reaksi
+     if (payload.type === 'UNSEND' || payload.type === 'reaction_remove') {
+       return payload;
+@@ -725,6 +720,7 @@ type Actions = {
+   toggleMessageSelection: (id: string) => void;
+   clearMessageSelection: () => void;
+   repairSecureSession: (conversationId: string, isGroup: boolean, isAuto?: boolean) => Promise<void>;
++  broadcastHistorySync: (selfConversationId: string) => Promise<void>;
+ };
+ 
+ let tempIdCounter = 0;
+@@ -760,17 +756,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+ 
+   repairSecureSession: async (conversationId, isGroup, isAuto = false) => {
+     try {
+-      if (isGroup) {
+-        const { forceRotateGroupSenderKey, rotateGroupKey } = await import('@utils/crypto');
+-        await forceRotateGroupSenderKey(conversationId);
+-        await rotateGroupKey(conversationId, 'periodic_rotation');
+-      } else {
+-        const { deleteRatchetSession } = await import('@utils/crypto');
+-        await deleteRatchetSession(conversationId);
+-        // Send a silent system message to trigger the X3DH on the other side automatically,
+-        // and mark it as type 'GHOST_SYNC' so it renders as a center placeholder.
+-        get().sendMessage(conversationId, { content: JSON.stringify({ type: 'GHOST_SYNC' }), isSilent: true });
+-      }
++      // ✅ FIX: Karena semua chat (1-on-1 maupun grup) kini menggunakan Sender Key Fan-Out,
++      // kita perbaiki sesinya dengan cara yang sama. Tidak ada lagi X3DH GHOST_SYNC.
++      const { forceRotateGroupSenderKey, rotateGroupKey } = await import('@utils/crypto');
++      await forceRotateGroupSenderKey(conversationId);
++      await rotateGroupKey(conversationId, 'periodic_rotation');
++      
+       if (!isAuto) {
+           toast.success("Secure session state reset. Next message will negotiate new keys.");
+       }
+@@ -780,6 +771,61 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+     }
+   },
+ 
++  broadcastHistorySync: async (selfConversationId) => {
++    const { user } = useAuthStore.getState();
++    if (!user) return;
++    
++    const toastId = toast.loading('Preparing history sync for your linked devices...');
++    try {
++        const { shadowVault } = await import('@lib/shadowVaultDb');
++        const jsonStr = await shadowVault.exportDatabase();
++        const blob = new Blob([jsonStr], { type: 'application/json' });
++        
++        // Enkripsi JSON dengan kunci simetris rahasia
++        const { encryptFileViaWorker } = await import('@utils/crypto');
++        const { encryptedBlob, key } = await encryptFileViaWorker(blob);
++        
++        const { api } = await import('@lib/api');
++        const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
++            method: 'POST',
++            body: JSON.stringify({
++                fileName: `sync_${Date.now()}.enc`, 
++                fileType: 'application/octet-stream', 
++                folder: 'sync',
++                fileSize: encryptedBlob.size 
++            })
++        });
++
++        // Unggah ke Cloudflare R2
++        await new Promise<void>((resolve, reject) => {
++            const xhr = new XMLHttpRequest();
++            xhr.open('PUT', presignedRes.uploadUrl, true);
++            xhr.setRequestHeader('Content-Type', 'application/octet-stream'); 
++            xhr.onload = () => { if (xhr.status === 200) resolve(); else reject(new Error('Upload failed')); };
++            xhr.onerror = () => reject(new Error('Network error'));
++            xhr.send(encryptedBlob);
++        });
++
++        const payload = {
++            type: 'HISTORY_SYNC',
++            url: presignedRes.publicUrl,
++            key: key
++        };
++        
++        // Kirim E2EE payload ini ke "Self-Chat" (Pesan Tersimpan)
++        // Fan-Out Sender Key akan secara otomatis mendistribusikannya ke SEMUA perangkat Anda!
++        await get().sendMessage(selfConversationId, {
++            content: JSON.stringify(payload),
++            isSilent: true
++        });
++        
++        toast.success('History securely synced to your linked devices!', { id: toastId });
++    } catch (e) {
++        console.error(e);
++        toast.error('Failed to sync history.', { id: toastId });
++    }
++  },
++
+   removeMessages: async (conversationId, messageIds) => {
+     const { user } = useAuthStore.getState();
+     const currentMessages = get().messages[conversationId] || [];
+@@ -906,27 +952,28 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+ 
+     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+     if (!conversation) {
+-      console.error(`[SendMessage] Conversation NOT FOUND: ${conversationId}`);
+       toast.error("Conversation not found.");
+       return;
+     }
+-    const isGroup = conversation.isGroup;
+     const forceRotate = conversation.requiresKeyRotation === true;
+ 
+-    if (isGroup && useConnectionStore.getState().status === 'connected') {
++    // ✅ FASE 3: Selalu gunakan protokol Fan-Out Sender Key untuk SEMUA tipe percakapan (termasuk 1-on-1)
++    if (useConnectionStore.getState().status === 'connected') {
+       try {
+-        // Pass forceRotate if we suspect new members or requested by another peer
+         const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, forceRotate);
+         if (distributionKeys && distributionKeys.length > 0) {
+-          emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
++          // ✅ FIX: Hapus any, gunakan tipe data ketat sesuai kembalian dari ensureGroupSession
++          emitGroupKeyDistribution(
++            conversationId, 
++            distributionKeys as { userId: string; targetDeviceId: string; key: string; type: string }[]
++          );
+           if (forceRotate) {
+               useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
+           }
+-          // Wait a tiny bit to ensure the socket emits the keys before the actual message
+           await new Promise(r => setTimeout(r, 300)); 
+         }
+       } catch (e) {
+-        console.error("Failed to ensure group session", e);
++        console.error("Failed to ensure session", e);
+       }
+     }
+ 
+@@ -1014,39 +1061,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+ 
+     try {
+       let ciphertext = '';
+-      let x3dhHeader: Record<string, unknown> | null = null;
+-
+-      if (!isGroup && data.content) {
+-          const state = await retrieveRatchetStateSecurely(conversationId);
+-          if (!state) {
+-             const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
+-             if (peerId) {
+-                 const theirBundle = await authFetch<PreKeyBundle>(`/api/keys/prekey-bundle/${peerId}`);
+-                 const myKeyPair = await getMyEncryptionKeyPair();
+-                 const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
+-                 const sodium = await getSodium();
+-                 
+-                 const { worker_dr_init_alice } = await import('@lib/crypto-worker-proxy');
+-                 const newState = await worker_dr_init_alice({
+-                     sk: sessionKey,
+-                     theirSignedPreKeyPublic: sodium.from_base64(theirBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING)
+-                 });
+-                 
+-                 await storeRatchetStateSecurely(conversationId, newState);
+-
+-                 x3dhHeader = {
+-                     ik: sodium.to_base64(myKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+-                     ek: ephemeralPublicKey,
+-                     otpkId: otpkId
+-                 };
+-             } else {
+-                 console.error(`[X3DH] Peer not found in participants for ${conversationId}.`);
+-                 toast.error("Encryption failed: Cannot identify recipient.");
+-                 return;
+-             }
+-          }
+-      }
+-
+       let mkToStore: Uint8Array | undefined;
+       let contentToEncrypt = data.content;
+ 
+@@ -1070,7 +1084,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+             console.error("Failed to inject profile key", e);
+         }
+ 
+-        const result = await encryptMessage(contentToEncrypt, conversationId, isGroup, undefined, `temp_${actualTempId}`);
++        const result = await encryptMessage(contentToEncrypt, conversationId, true, undefined, `temp_${actualTempId}`);
+         ciphertext = result.ciphertext;
+         
+         // [FIX PERSISTENCE] Store MK for ALL chats (Group + 1on1)
+@@ -1080,23 +1094,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+                  storeMessageKeySecurely(`temp_${actualTempId}`, mkToStore!)
+              );
+         }
+-        
+-        if (!isGroup && result.drHeader) {
+-            ciphertext = JSON.stringify({
+-                dr: result.drHeader,
+-                ciphertext: ciphertext
+-            });
+-        }
+-      }
+-      
+-      if (x3dhHeader) {
+-          const payloadJson = JSON.stringify({
+-              x3dh: x3dhHeader,
+-              ciphertext: ciphertext 
+-          });
+-          ciphertext = payloadJson;
+       }
+-      
++
+       const pushPayloads: Record<string, string> = {};
+       try {
+         const { getSodium } = await import('@lib/sodiumInitializer');
+@@ -1623,7 +1622,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+           }));
+       }
+     } catch (e) {
+-      console.error("[Local Vault] Gagal memuat dari IndexedDB:", e);
++      console.error("[Local Vault] Failed to load messages from IndexedDB:", e);
+     }
+ 
+     // 2. SINKRONISASI BACKGROUND: Cek apakah ada surat tertunda di server
+@@ -1806,6 +1805,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+ 
+   doAddIncomingMessage: async (conversationId, message) => {
+       const currentUser = useAuthStore.getState().user;
++
+       let decrypted = message;
+ 
+       if (currentUser && message.senderId === currentUser.id && message.tempId) {
+@@ -1871,21 +1871,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+               return existing;
+           }
+           
+-          const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+-          const isGroup = conversation?.isGroup || false;
+-
+-          if (isGroup) {
+-              emitSessionKeyRequest(conversationId, decrypted.senderId, decrypted.senderId);
+-          } else {
+-              const now = Date.now();
+-              const repairKey = `last_repair_${conversationId}` as keyof Window;
+-              const lastRepair = (window[repairKey] as number) || 0;
++          // ✅ FIX: Auto-Heal Terpadu untuk semua jenis Chat (Multi-Device)
++          // Tidak perlu lagi mengecek isGroup, langsung minta GroupKeyRequest (Sender Key)
++          const now = Date.now();
++          const repairKey = `last_repair_${conversationId}` as keyof Window;
++          const lastRepair = (window[repairKey] as number) || 0;
++          
++          if (now - lastRepair > 15000) { // Limit permintaan perbaikan agar tidak spam (15 detik)
++              (window as unknown as Record<string, number>)[repairKey] = now;
++              console.warn(`[Auto-Heal] Kunci tidak sinkron untuk percakapan ${conversationId}. Meminta kunci ulang secara diam-diam...`);
+               
+-              if (now - lastRepair > 15000) {
+-                  (window as unknown as Record<string, number>)[repairKey] = now;
+-                  console.warn(`[Auto-Heal] Ratchet out of sync for ${conversationId}. Initiating silent repair...`);
+-                  get().repairSecureSession(conversationId, false, true); 
+-              }
++              // Minta pengirim mem-broadcast ulang kunci distribusinya
++              const { emitGroupKeyRequest } = await import('@lib/socket');
++              emitGroupKeyRequest(conversationId);
+           }
+       }
+       
+@@ -1939,6 +1937,38 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
+               return decrypted; 
+           }
+ 
++          if (silentPayload.type === 'HISTORY_SYNC' && silentPayload.url && silentPayload.key) {
++              cleanUpOptimisticBubble();
++              console.log(`[History Sync] Received payload from ${decrypted.senderId}. Downloading...`);
++              
++              // Proses secara asinkron agar tidak membuat UI "freeze"
++              setTimeout(async () => {
++                  try {
++                      const { decryptFile } = await import('@utils/crypto');
++                      const res = await fetch(silentPayload.url!);
++                      const blob = await res.blob();
++                      
++                      const decryptedBlob = await decryptFile(blob, silentPayload.key!, 'application/json');
++                      const jsonText = await decryptedBlob.text();
++                      
++                      const { shadowVault } = await import('@lib/shadowVaultDb');
++                      await shadowVault.importDatabase(jsonText);
++                      
++                      // Paksa UI untuk mereload pesan dari IndexedDB yang baru saja diimpor
++                      const { useConversationStore } = await import('@store/conversation');
++                      const convos = useConversationStore.getState().conversations;
++                      for (const c of convos) {
++                          get().loadMessagesForConversation(c.id);
++                      }
++                      console.log('[History Sync] Sync complete! UI Refreshed.');
++                  } catch (e) {
++                      console.error('[History Sync] Failed to process history payload:', e);
++                  }
++              }, 1000);
++              
++              return null; 
++          }
++
+           if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {
+               cleanUpOptimisticBubble(); // ✅ Bersihkan Bubble Hantu Hapus Pesan
+               const targetId = asMessageId(silentPayload.targetMessageId);
+diff --git a/web/src/utils/crypto.ts b/web/src/utils/crypto.ts
+index 85d111fd..a899d0c8 100644
+--- a/web/src/utils/crypto.ts
++++ b/web/src/utils/crypto.ts
+@@ -45,6 +45,14 @@ import type { Participant } from '@store/conversation';
+ 
+ // --- Group Metadata Helpers ---
+ 
++interface ExtendedParticipant extends Participant {
++  user?: {
++    id: string;
++    signingKey?: string;
++    publicKey?: string;
++  };
++}
++
+ export async function encryptGroupMetadata(
+   metadata: { title?: string; description?: string; avatarUrl?: string },
+   conversationId: string
+@@ -53,18 +61,17 @@ export async function encryptGroupMetadata(
+   // Encrypt as a group message
+   const result = await encryptMessage(payload, conversationId, true);
+   
+-  // We must embed the senderId so receivers know whose key to use for decryption
+   const myId = useAuthStore.getState().user?.id;
+   if (!myId) throw new Error("Cannot encrypt metadata: User not authenticated");
+ 
+-  // The result from encryptMessage for groups is already a JSON string containing header, ciphertext, signature
+-  // We need to parse it to inject senderId, or wrap it.
+-  // encryptMessage returns: { ciphertext: string (JSON), mk: Uint8Array } for groups
+-  
+-  // Let's wrap it to be safe and consistent
++  const { publicKey } = await getMyEncryptionKeyPair();
++  const sodium = await getSodiumLib();
++  const myDeviceKey = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
++
+   const wrapper = {
+     ...JSON.parse(result.ciphertext), // { header, ciphertext, signature }
+-    senderId: myId
++    senderId: myId,
++    senderDeviceKey: myDeviceKey // ✅ Tambahkan ini
+   };
+   
+   return JSON.stringify(wrapper);
+@@ -76,7 +83,9 @@ export async function decryptGroupMetadata(
+ ): Promise<{ title?: string; description?: string; avatarUrl?: string } | null> {
+   try {
+     const wrapper = JSON.parse(encryptedMetadataStr);
+-    const { senderId, ...rest } = wrapper;
++    
++    // ✅ Ekstrak senderDeviceKey
++    const { senderId, senderDeviceKey, ...rest } = wrapper;
+ 
+     if (!senderId) {
+       console.warn("Decryption failed: Missing senderId in group metadata");
+@@ -84,7 +93,12 @@ export async function decryptGroupMetadata(
+     }
+     
+     // Reconstruct the payload expected by decryptMessage
+-    const cipherPayload = JSON.stringify(rest);
++    // ✅ Sertakan senderDeviceKey ke dalam cipherPayload
++    const cipherPayload = JSON.stringify({
++       ...rest,
++       senderId,
++       senderDeviceKey 
++    });
+     
+     const result = await decryptMessage(cipherPayload, conversationId, true, senderId);
+     
+@@ -182,6 +196,52 @@ export async function deleteMessageKeySecurely(messageId: string): Promise<void>
+   await deleteMessageKey(messageId);
+ }
+ 
++// --- PreKey Download Implementation ---
++
++export interface PreKeyBundle {
++  deviceId: string;
++  identityKey: string;
++  signingKey: string;
++  signedPreKey: {
++    key: string;
++    signature: string;
++  };
++  oneTimePreKey?: {
++    keyId: number;
++    key: string;
++  };
++}
++
++export const fetchPreKeyBundle = async (userId: string): Promise<PreKeyBundle[]> => {
++  try {
++      const bundles = await authFetch<PreKeyBundle[]>(`/api/keys/prekey-bundle/${userId}`);
++      
++      if (!bundles || !Array.isArray(bundles) || bundles.length === 0) {
++           throw new Error(`No pre-key bundles found for user ${userId}`);
++      }
++      return bundles;
++  } catch (error) {
++      console.error(`Failed to fetch pre-key bundles for ${userId}:`, error);
++      throw error;
++  }
++};
++
++export const fetchPreKeyBundles = async (userIds: string[]): Promise<Record<string, PreKeyBundle[]>> => {
++  try {
++      if (!userIds || userIds.length === 0) return {};
++      
++      const response = await authFetch<Record<string, PreKeyBundle[]>>(`/api/keys/prekey-bundles`, {
++          method: 'POST',
++          body: JSON.stringify({ userIds })
++      });
++      
++      return response || {};
++  } catch (error) {
++      console.error(`Failed to bulk fetch pre-key bundles:`, error);
++      throw error;
++  }
++};
++
+ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
+   try {
+     const { count } = await authFetch<{ count: number }>('/api/keys/count-otpk');
+@@ -286,19 +346,6 @@ export type DecryptResult =
+   | { status: 'pending'; reason: string }
+   | { status: 'error'; error: Error };
+ 
+-export type PreKeyBundle = {
+-  identityKey: string;
+-  signingKey: string;
+-  signedPreKey: {
+-    key: string;
+-    signature: string;
+-  };
+-  oneTimePreKey?: {
+-    keyId: number;
+-    key: string;
+-  };
+-};
+-
+ // --- Module-level state for managing key requests ---
+ const pendingGroupKeyRequests = new Map<string, { timerId: number }>();
+ const MAX_KEY_REQUEST_RETRIES = 2; // Total 3 attempts
+@@ -438,6 +485,7 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
+ 
+ // --- Group Key Management & Recovery ---
+ 
++// ✅ FASE 3: FAN-OUT GROUP SESSION BUILDER
+ export async function ensureGroupSession(conversationId: string, participants: Participant[], forceRotate: boolean = false): Promise<Record<string, unknown>[] | null> {
+   const pending = pendingGroupSessionPromises.get(conversationId);
+   if (pending) return pending;
+@@ -457,7 +505,6 @@ export async function ensureGroupSession(conversationId: string, participants: P
+ 
+   const promise = (async () => {
+     try {
+-      // PHASE 2: Sender Key Protocol
+       if (forceRotate) {
+           const { deleteGroupSenderState } = await import('@lib/keychainDb');
+           await deleteGroupSenderState(conversationId);
+@@ -469,37 +516,61 @@ export async function ensureGroupSession(conversationId: string, participants: P
+ 
+       const sodium = await getSodiumLib();
+       const { groupInitSenderKey, worker_crypto_box_seal } = await getWorkerProxy();
++      const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
++      const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+ 
+       // 1. Generate NEW Sender Key (Chain Key)
+       const { senderKeyB64 } = await groupInitSenderKey();
+ 
+       const myId = useAuthStore.getState().user?.id;
+-      const otherParticipants = participants.filter(p => p.id !== myId);
++      const distributionKeys: Record<string, unknown>[] = [];
+       const missingKeys: string[] = [];
+ 
+-      // 2. Encrypt Sender Key for EACH participant (Fan-out)
+-      const distributionKeys = await Promise.all(
+-        otherParticipants.map(async (p) => {
+-          if (!p.publicKey) {
+-            missingKeys.push(p.id);
+-            return null;
++      // 2. ✅ FAN-OUT (Optimized with Bulk Fetch): Ambil semua bundle dalam 1 query
++      const userIdsToFetch: string[] = [];
++      for (const p of participants) {
++          const extP = p as ExtendedParticipant;
++          const uId = extP.userId || extP.user?.id || extP.id;
++          if (uId) userIdsToFetch.push(uId);
++      }
++
++      let fetchedBundlesMap: Record<string, PreKeyBundle[]> = {};
++      try {
++          // Hanya 1 request HTTP ke server
++          fetchedBundlesMap = await fetchPreKeyBundles(userIdsToFetch);
++      } catch (e) {
++          console.error("Failed to fetch prekey bundles in bulk", e);
++      }
++
++      // Lakukan enkripsi Fan-Out untuk setiap bundle yang didapat
++      for (const uId of userIdsToFetch) {
++          const bundles = fetchedBundlesMap[uId] || [];
++          if (bundles.length === 0) {
++              console.warn(`Missing or empty keys for user ${uId}`);
++              missingKeys.push(uId);
++              continue;
+           }
+-          const theirPublicKey = sodium.from_base64(p.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+-          const encryptedKey = await worker_crypto_box_seal(
+-              sodium.from_base64(senderKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING), 
+-              theirPublicKey
+-          );
+           
+-          return {
+-            userId: p.id,
+-            key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+-            type: 'GROUP_KEY'
+-          };
+-        })
+-      );
++          for (const bundle of bundles) {
++              // Bypass pengenkripsian ke perangkat yang sedang kita gunakan saat ini
++              if (uId === myId && bundle.identityKey === myIdentityKeyB64) {
++                  continue;
++              }
+ 
+-      if (missingKeys.length > 0) {
+-          throw new Error(`Cannot initialize group session. Missing public keys for participants: ${missingKeys.join(', ')}`);
++              const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
++              const encryptedKey = await worker_crypto_box_seal(
++                  sodium.from_base64(senderKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING), 
++                  theirPublicKey
++              );
++              
++              distributionKeys.push({
++                  userId: uId,
++                  targetDeviceId: bundle.deviceId, 
++                  key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
++                  type: 'GROUP_KEY',
++                  senderDeviceKey: myIdentityKeyB64
++              });
++          }
+       }
+ 
+       // 3. Save Initial Sender State ONLY after successful encryption fan-out
+@@ -509,7 +580,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
+           N: 0
+       });
+ 
+-      return distributionKeys.filter(Boolean) as Record<string, unknown>[];
++      return distributionKeys.filter(Boolean);
+     } finally {
+       groupSessionLocks.delete(conversationId);
+     }
+@@ -525,27 +596,29 @@ export async function ensureGroupSession(conversationId: string, participants: P
+ }
+ 
+ export async function handleGroupKeyDistribution(
+-    conversationId: string, 
++    conversationId: string,
+     encryptedKey: string,
+-    senderId: string // Need to know WHOSE key this is
++    senderId: string,
++    senderDeviceKey?: string
+ ): Promise<void> {
+   const { publicKey, privateKey } = await getMyEncryptionKeyPair();
+   const sodium = await getSodiumLib();
+-  
++
+   // 1. Decrypt the Sender Key (Chain Key)
+   const senderKeyBytes = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+   const senderKeyB64 = sodium.to_base64(senderKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+-  
++
+   // 2. Save as Receiver State
++  const stateId = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
++
+   await saveGroupReceiverState({
+-      id: `${conversationId}_${senderId}`,
++      id: stateId,
+       conversationId: conversationId as ConversationId,
+       senderId: senderId as UserId,
+       CK: senderKeyB64,
+       N: 0
+   });
+ }
+-
+ export async function rotateGroupKey(conversationId: string, reason: 'membership_change' | 'periodic_rotation' = 'membership_change'): Promise<void> {
+   // Clear OLD states
+   await deleteGroupStates(conversationId);
+@@ -693,17 +766,23 @@ async function doEncryptMessage(
+         N: result.state.N
+     });
+     
+-    // Construct Payload
++    const myId = useAuthStore.getState().user?.id;
++    const { publicKey } = await getMyEncryptionKeyPair();
++    const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
++
++    // ✅ FIX: Menyisipkan senderId dan senderDeviceKey langsung ke dalam cipher agar Decryptor bisa Auto-Detect
+     const payload = JSON.stringify({
+         header: result.header,
+         ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
+-        signature: result.signature
++        signature: result.signature,
++        senderId: myId,
++        senderDeviceKey: myPublicKeyB64
+     });
+     
+     return { ciphertext: payload, mk: result.mk };
+     
+   } else {
+-    // DOUBLE RATCHET
++    // DOUBLE RATCHET (Legacy Fallback)
+     const state = await retrieveRatchetStateSecurely(conversationId);
+     if (!state) throw new Error('Ratchet state not initialized for encryption.');
+ 
+@@ -785,13 +864,25 @@ async function doDecryptMessage(
+       }
+   }
+ 
+-  if (isGroup) {
+-    const senderId = sessionId; 
+-    
++  // ✅ FASE 3: Deteksi Otomatis apakah ini pesan Sender Key Fan-Out atau Double Ratchet Klasik
++  let payloadObj;
++  try { payloadObj = JSON.parse(cipher); } catch {}
++  const isSenderKeyProtocol = payloadObj && payloadObj.signature !== undefined && payloadObj.header !== undefined;
++
++  if (isSenderKeyProtocol || isGroup) {
++    const senderId = (payloadObj && payloadObj.senderId) ? payloadObj.senderId : sessionId;
++    const senderDeviceKey = payloadObj && payloadObj.senderDeviceKey; // Ini adalah identityKey (publicKey) perangkat pengirim
++
+     if (!senderId) return { status: 'error', error: new Error('Missing senderId for group decryption') };
+-    
+-    const receiverState = await getGroupReceiverState(conversationId, senderId);
+-    if (!receiverState) {
++
++    let receiverState = await getGroupReceiverState(conversationId, senderId, senderDeviceKey);
++
++    if (!receiverState && senderDeviceKey) {
++        // Fallback backward compatibility
++        receiverState = await getGroupReceiverState(conversationId, senderId);
++    }
++
++    if (!receiverState) {        
+         requestGroupKeyWithTimeout(conversationId); 
+         return { status: 'pending', reason: 'waiting_for_key' };
+     }
+@@ -800,10 +891,34 @@ async function doDecryptMessage(
+         const payload = JSON.parse(cipher);
+         const { header, ciphertext, signature } = payload;
+         
+-        // --- Resolve Sender Signing Key First ---
+-        const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+-        const sender = conversation?.participants.find(p => p.id === senderId);
+-        const keyToUse = sender?.signingKey;
++        let keyToUse: string | undefined = undefined;
++
++        // --- Resolve Sender Signing Key ---
++        // ✅ FIX: Jika pengirim melampirkan senderDeviceKey, kita bisa mencari signingKey perangkat tersebut secara langsung
++        // --- Resolve Sender Signing Key ---
++        // ✅ FIX: Perbaikan Key Resolution untuk Multi-Device (Self-Sync)
++        if (senderDeviceKey) {
++             try {
++                 // Cari bundle milik user pengirim dari API (bisa orang lain, bisa diri sendiri)
++                 const bundlesMap = await fetchPreKeyBundles([senderId]);
++                 const bundles = bundlesMap[senderId] || [];
++                 
++                 // Temukan perangkat yang public key-nya cocok dengan senderDeviceKey
++                 const deviceBundle = bundles.find(b => b.identityKey === senderDeviceKey);
++                 if (deviceBundle) {
++                     keyToUse = deviceBundle.signingKey;
++                 }
++             } catch (e) {
++                 console.warn("Failed to fetch sender device bundle, falling back to legacy lookup");
++             }
++        }
++
++        // Fallback jika tidak ketemu via senderDeviceKey (hanya cocok jika pengirim adalah orang lain dengan 1 device)
++        if (!keyToUse) {
++            const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
++            const sender = conversation?.participants.find(p => p.id === senderId || ('userId' in p && p.userId === senderId)) as ExtendedParticipant | undefined;
++            keyToUse = sender?.signingKey || sender?.user?.signingKey;
++        }
+         
+         if (!keyToUse) {
+              return { status: 'error', error: new Error('Missing sender signing key') };
+@@ -817,7 +932,6 @@ async function doDecryptMessage(
+         const skippedMkB64 = await takeGroupSkippedKey(conversationId, senderId, header.n);
+         
+         if (skippedMkB64) {
+-            // SECURITY FIX: Decrypt via Worker (Verifies Signature)
+             const { groupDecryptSkipped } = await getWorkerProxy();
+             const result = await groupDecryptSkipped(
+                 skippedMkB64, 
+@@ -834,6 +948,7 @@ async function doDecryptMessage(
+             return { status: 'success', value: sodium.to_string(result.plaintext) };
+         }
+         
++        // 2. NORMAL RATCHET DECRYPTION
+         const { groupRatchetDecrypt } = await getWorkerProxy();
+         const result = await groupRatchetDecrypt(
+             { CK: receiverState.CK, N: receiverState.N },
+@@ -843,21 +958,19 @@ async function doDecryptMessage(
+             senderSigningKey
+         );
+         
+-        // 2. ATOMIC STATE UPDATE: Store gaps separately
+         for (const sk of result.skippedKeys) {
+             await storeGroupSkippedKey(conversationId, senderId, sk.n, sk.mk);
+         }
+ 
+         await saveGroupReceiverState({
+             ...receiverState,
+-            id: receiverState.id, // Explicit ID preserve
++            id: receiverState.id, 
+             conversationId: conversationId as ConversationId,
+             senderId: senderId as UserId,
+             CK: result.state.CK,
+             N: result.state.N
+         });
+         
+-        // [FIX PERSISTENCE] Save Message Key for Fast Reloads
+         if (messageId && result.mk) {
+             await storeMessageKeySecurely(messageId, result.mk);
+         }
+@@ -1148,16 +1261,17 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
+       clearTimeout(pendingRequest.timerId);
+       pendingGroupKeyRequests.delete(conversationId);
+     }
+-    
+-    // Use the NEW handler for Sender Key
+-    await handleGroupKeyDistribution(conversationId, encryptedKey, senderId);
+ 
+-    // Trigger reprocessing of pending messages
+-    import('@store/message').then(({ useMessageStore }) => {
+-        useMessageStore.getState().reDecryptPendingMessages(conversationId);
+-    });
++    try {
++        const senderDeviceKey = (payload as any).senderDeviceKey;
++        await handleGroupKeyDistribution(conversationId, encryptedKey, senderId, senderDeviceKey);
++        import('@store/message').then(({ useMessageStore }) => {            useMessageStore.getState().reDecryptPendingMessages(conversationId);
++        });
++    } catch (e) {
++        // FASE 3: Jika Sealed Box ini ditujukan untuk perangkat kita yang lain, abaikan secara diam-diam.
++    }
+ 
+-    } else if (sessionId) {    let newSessionKey: Uint8Array | undefined;
++  } else if (sessionId) {    let newSessionKey: Uint8Array | undefined;
+ 
+     if (encryptedKey.startsWith('{') && encryptedKey.includes('"x3dh":true')) {
+         try {
+@@ -1229,10 +1343,7 @@ export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; ke
+   return { encryptedBlob, key: keyB64 };
+ }
+ 
+-// ✅ OPTIMASI: Varian Asinkron murni untuk File Besar (Digunakan oleh MessageInput.ts)
+ export async function encryptFileViaWorker(blob: Blob): Promise<{ encryptedBlob: Blob; key: string }> {
+-  // Membaca file sebagai chunk stream (jika browser mendukung) atau ArrayBuffer asinkron
+-  // agar tidak memblokir Main Thread React sebelum dikirim ke Worker
+   const fileData = await new Promise<ArrayBuffer>((resolve, reject) => {
+       const reader = new FileReader();
+       reader.onload = () => resolve(reader.result as ArrayBuffer);
+@@ -1245,7 +1356,6 @@ export async function encryptFileViaWorker(blob: Blob): Promise<{ encryptedBlob:
+   
+   const { encryptedData, iv, key } = await worker_file_encrypt(fileData);
+ 
+-  // Re-assemble di luar worker
+   const combined = new Uint8Array(iv.length + encryptedData.byteLength);
+   combined.set(iv);
+   combined.set(new Uint8Array(encryptedData), iv.length);

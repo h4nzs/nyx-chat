@@ -915,9 +915,14 @@ async function doDecryptMessage(
 
         // Fallback jika tidak ketemu via senderDeviceKey (hanya cocok jika pengirim adalah orang lain dengan 1 device)
         if (!keyToUse) {
-            const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-            const sender = conversation?.participants.find(p => p.id === senderId || ('userId' in p && p.userId === senderId)) as ExtendedParticipant | undefined;
-            keyToUse = sender?.signingKey || sender?.user?.signingKey;
+            const myId = useAuthStore.getState().user?.id;
+            if (senderId === myId) {
+                console.warn("Cannot fallback to current device signing key for a message sent from our other device.");
+            } else {
+                const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+                const sender = conversation?.participants.find(p => p.id === senderId || ('userId' in p && p.userId === senderId)) as ExtendedParticipant | undefined;
+                keyToUse = sender?.signingKey || sender?.user?.signingKey;
+            }
         }
         
         if (!keyToUse) {
