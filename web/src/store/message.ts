@@ -1805,12 +1805,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
   doAddIncomingMessage: async (conversationId, message) => {
       const currentUser = useAuthStore.getState().user;
-      if (currentUser && message.senderId === currentUser.id) {
-          if (message.content && !message.content.startsWith('{') && !message.content.includes('"ciphertext"')) {
-              // Abaikan proses dekripsi jika content sudah plain text (dari optimistik)
-              // Lanjut eksekusi bawah untuk update status saja
-          }
-      }
+
       let decrypted = message;
 
       if (currentUser && message.senderId === currentUser.id && message.tempId) {

@@ -918,15 +918,6 @@ async function doDecryptMessage(
             const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
             const sender = conversation?.participants.find(p => p.id === senderId || ('userId' in p && p.userId === senderId)) as ExtendedParticipant | undefined;
             keyToUse = sender?.signingKey || sender?.user?.signingKey;
-            
-            // ✅ FIX: Jika pesan dari diri sendiri dan masih tidak ketemu, ekstrak signing key dari private key lokal.
-            if (!keyToUse && senderId === useAuthStore.getState().user?.id) {
-                 const sodium = await getSodiumLib();
-                 const privateSigningKey = await useAuthStore.getState().getSigningPrivateKey();
-                 // Ekstrak public signing key (32 byte terakhir dari 64 byte private key ed25519)
-                 const publicSigningKeyBytes = privateSigningKey.slice(32);
-                 keyToUse = sodium.to_base64(publicSigningKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
-            }
         }
         
         if (!keyToUse) {
