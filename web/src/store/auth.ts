@@ -297,7 +297,19 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         let newEncryptedPrivateKey = undefined;
 
         // If this is a fresh login on a new device, generate a new cryptographic identity
-        if (!restoredNotSynced) {
+        const alreadyHasKeys = await hasStoredKeys();
+        if (alreadyHasKeys) {
+            const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+            const encryptedKeys = await getEncryptedKeys();
+            const result = await retrievePrivateKeys(encryptedKeys!, password);
+            if (result.success && result.keys) {
+                newPublicKey = result.keys.encryptionPublicKeyB64;
+                newSigningKey = result.keys.signingPublicKeyB64;
+                newEncryptedPrivateKey = encryptedKeys!;
+            } else {
+                throw new Error("Invalid password for local keys. Please recover your account.");
+            }
+        } else if (!restoredNotSynced) {
             const { registerAndGenerateKeys } = await import('@lib/crypto-worker-proxy');
             const keys = await registerAndGenerateKeys(password);
             
