@@ -615,7 +615,17 @@ export async function handleGroupKeyDistribution(
       console.warn(`[Key Distribution] Ignored group key distribution for convo ${conversationId}, likely meant for another device.`);
       return; // Skip silently if decryption fails
   }
-  const senderKeyB64 = sodium.to_base64(senderKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+  
+  let currentN = 0;
+  let finalCKBytes = senderKeyBytes;
+
+  if (senderKeyBytes.length === 36) {
+      // Format baru: N (4 bytes) + CK (32 bytes)
+      currentN = new DataView(senderKeyBytes.buffer, senderKeyBytes.byteOffset, senderKeyBytes.byteLength).getUint32(0, false);
+      finalCKBytes = senderKeyBytes.slice(4);
+  }
+
+  const senderKeyB64 = sodium.to_base64(finalCKBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
 
   // 2. Save as Receiver State
   const stateId = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
@@ -625,7 +635,7 @@ export async function handleGroupKeyDistribution(
       conversationId: conversationId as ConversationId,
       senderId: senderId as UserId,
       CK: senderKeyB64,
-      N: 0
+      N: currentN
   });
 }
 export async function rotateGroupKey(conversationId: string, reason: 'membership_change' | 'periodic_rotation' = 'membership_change'): Promise<void> {
@@ -1239,7 +1249,13 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
 
   const requesterPublicKey = sodium.from_base64(requesterPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
   const senderKeyBytes = sodium.from_base64(senderState.CK, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const encryptedKeyForRequester = await worker_crypto_box_seal(senderKeyBytes, requesterPublicKey);
+  
+  // Pack N (4 bytes) + CK (32 bytes)
+  const payloadToEncrypt = new Uint8Array(4 + senderKeyBytes.length);
+  new DataView(payloadToEncrypt.buffer).setUint32(0, senderState.N || 0, false); // Big Endian
+  payloadToEncrypt.set(senderKeyBytes, 4);
+
+  const encryptedKeyForRequester = await worker_crypto_box_seal(payloadToEncrypt, requesterPublicKey);
 
   const { publicKey: myIdentityKey } = await getMyEncryptionKeyPair();
   const myIdentityKeyB64 = sodium.to_base64(myIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
