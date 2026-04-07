@@ -226,11 +226,6 @@ export async function getSessionKey(
 export async function getLatestSessionKey(
   conversationId: string
 ): Promise<{ sessionId: string; key: Uint8Array } | null> {
-  // Use Dexie's compound index query if possible, or filter
-  // Since we indexed storageKey and conversationId, we can filter by conversationId
-  // BUT the sessionId ordering is implicit in the storageKey string or insertion order.
-  // The original implementation relied on IDB key range on "convId_" -> "convId_\uffff"
-  
   const lastSession = await db.sessionKeys
       .where('storageKey')
       .between(conversationId + "_", conversationId + "_\uffff", true, true)
@@ -445,8 +440,13 @@ export async function exportDatabaseToJson(): Promise<string> {
   // (seperti kvStore yang berisi kunci privat, sessionKeys, ratchetSessions, dll)
   // Ini krusial agar perangkat baru tidak menjadi "kloningan" kriptografi perangkat lama.
   const tables = [
-    'messages', 'storyKeys', 'offlineQueue',
-    'identityKeys', 'groupReceiverStates', 'groupSkippedKeys'
+    'messages', 
+    'messageKeys', // ✅ Menambahkan messageKeys agar histori bisa didekripsi
+    'storyKeys', 
+    'offlineQueue',
+    'identityKeys', 
+    'groupReceiverStates', 
+    'groupSkippedKeys'
   ];
 
   for (const tableName of tables) {
@@ -481,13 +481,15 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
           throw new Error("Invalid vault file format.");
       }
 
-      // ✅ FIX: HANYA ekspor/impor tabel riwayat dan status penerima.
-      // KECUALI: Semua tabel yang mendefinisikan identitas kriptografi perangkat 
-      // (seperti kvStore yang berisi kunci privat, sessionKeys, ratchetSessions, dll)
-      // Ini krusial agar perangkat baru tidak menjadi "kloningan" kriptografi perangkat lama.
+      // ✅ FIX: Harus sejajar dengan variabel tables di fungsi export
       const tables = [
-        'messages', 'storyKeys', 'offlineQueue',
-        'identityKeys', 'groupReceiverStates', 'groupSkippedKeys'
+        'messages', 
+        'messageKeys', // ✅ Menambahkan messageKeys
+        'storyKeys', 
+        'offlineQueue',
+        'identityKeys', 
+        'groupReceiverStates', 
+        'groupSkippedKeys'
       ];
 
       await db.transaction('rw', tables.map(t => db.table(t)), async () => {

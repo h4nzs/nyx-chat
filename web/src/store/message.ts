@@ -777,7 +777,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     
     const toastId = toast.loading('Preparing history sync for your linked devices...');
     try {
-        const { shadowVault } = await import('@lib/shadowVaultDb');
+        const { exportDatabaseToJson } = await import('@lib/keychainDb');
         const jsonStr = await shadowVault.exportDatabase();
         const blob = new Blob([jsonStr], { type: 'application/json' });
         
@@ -1943,6 +1943,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               
               // Proses secara asinkron agar tidak membuat UI "freeze"
               setTimeout(async () => {
+                  const toastId = toast.loading('Receiving history sync from your other device...');
                   try {
                       const { decryptFile } = await import('@utils/crypto');
                       const res = await fetch(silentPayload.url!);
@@ -1951,18 +1952,21 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                       const decryptedBlob = await decryptFile(blob, silentPayload.key!, 'application/json');
                       const jsonText = await decryptedBlob.text();
                       
-                      const { shadowVault } = await import('@lib/shadowVaultDb');
-                      await shadowVault.importDatabase(jsonText);
+                      // ✅ FIX: Gunakan importer Vault utama
+                      const { importDatabaseFromJson } = await import('@lib/keychainDb');
+                      await importDatabaseFromJson(jsonText);
                       
-                      // Paksa UI untuk mereload pesan dari IndexedDB yang baru saja diimpor
-                      const { useConversationStore } = await import('@store/conversation');
-                      const convos = useConversationStore.getState().conversations;
-                      for (const c of convos) {
-                          get().loadMessagesForConversation(c.id);
-                      }
-                      console.log('[History Sync] Sync complete! UI Refreshed.');
+                      toast.success('History synchronized successfully! Reloading...', { id: toastId });
+                      
+                      // ✅ FIX: Cara paling bersih untuk merefresh Zustand Store dan UI
+                      // setelah injeksi database massal adalah dengan hard reload.
+                      setTimeout(() => {
+                          window.location.reload();
+                      }, 1500);
+
                   } catch (e) {
                       console.error('[History Sync] Failed to process history payload:', e);
+                      toast.error('Failed to sync history payload.', { id: toastId });
                   }
               }, 1000);
               
