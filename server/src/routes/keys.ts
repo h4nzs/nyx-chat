@@ -13,33 +13,32 @@ import type { AuthJwtPayload } from '@nyx/shared'
 
 const router: Router = Router()
 
-// === POST: Upload/update a device's pre-key bundle ===
+const base64UrlRegex = /^[A-Za-z0-9_-]+$/;
+
 router.post(
   '/prekey-bundle',
   requireAuth,
   zodValidate({
     body: z.object({
-      identityKey: z.string(),
-      signingKey: z.string().optional(),
+      // ✅ FIX 1: Validasi ketat untuk memastikan input benar-benar format kunci kriptografi
+      identityKey: z.string().regex(base64UrlRegex, 'Invalid identity key format'),
+      signingKey: z.string().regex(base64UrlRegex, 'Invalid signing key format').optional(),
       signedPreKey: z.object({
-        key: z.string(),
-        signature: z.string()
+        key: z.string().regex(base64UrlRegex, 'Invalid pre-key format'),
+        signature: z.string().regex(base64UrlRegex, 'Invalid signature format')
       })
     })
   }),
   async (req, res, next) => {
     try {
-      if (!req.user) throw new ApiError(401, 'Authentication required.')
+      if (!req.user) throw new ApiError(401, 'Authentication required.');
       
       const authUser = req.user as AuthJwtPayload;
-      if (!authUser.deviceId) throw new ApiError(400, 'Device ID missing from session.')
+      if (!authUser.deviceId) throw new ApiError(400, 'Device ID missing from session.');
       
-      // Pastikan deviceId murni string
       const deviceId = String(authUser.deviceId);
+      const { identityKey, signedPreKey, signingKey } = req.body;
 
-      const { identityKey, signedPreKey, signingKey } = req.body
-
-      // ✅ FIX: Gunakan Interactive Transaction agar lebih kebal dari deadlock
       await prisma.$transaction(async (tx) => {
         // 1. Bersihkan sisa OTPK lama untuk mencegah "Identity Crisis"
         await tx.oneTimePreKey.deleteMany({
@@ -62,22 +61,25 @@ router.post(
           }
         });
 
-        // 3. Perbarui Identitas Perangkat (Conditional Update yang bersih)
+        // 3. Perbarui Identitas Perangkat
         await tx.device.update({
           where: { id: deviceId },
           data: {
             publicKey: identityKey,
-            ...(signingKey && { signingKey }) // Menyisipkan signingKey hanya jika ada nilainya
+            // ✅ FIX 2: Prisma sangat pintar. Jika `signingKey` bernilai `undefined`, 
+            // Prisma TIDAK AKAN mengupdatenya (tidak mengubahnya jadi null). 
+            // Ini jauh lebih bersih daripada trik spread operator sebelumnya.
+            signingKey: signingKey 
           }
         });
       });
 
-      res.status(201).json({ message: 'Pre-key bundle updated successfully.' })
+      res.status(201).json({ message: 'Pre-key bundle updated successfully.' });
     } catch (e) {
-      next(e)
+      next(e);
     }
   }
-)
+);
 
 // === POST: Upload One-Time Pre-Keys (OTPK) ===
 router.post(
@@ -210,7 +212,8 @@ router.get(
 router.post(
   '/prekey-bundles',
   requireAuth,
-  zodValidate({ body: z.object({ userIds: z.array(z.string().cuid()) }) }),
+  // ✅ FIX 1: Hapus .cuid() untuk mencegah error jika format ID user berbeda
+  zodValidate({ body: z.object({ userIds: z.array(z.string()) }) }),
   async (req, res, next) => {
     try {
       const { userIds } = req.body
@@ -225,20 +228,20 @@ router.post(
         include: { preKeyBundle: true }
       })
 
-      if (devices.length === 0) {
-        return res.json({});
-      }
-
-      // Group devices by userId to form the response map
-      const responseMap: Record<string, Record<string, unknown>[]> = {};
+      // ✅ FIX 2: Gunakan Map() untuk mencegah Prototype Pollution (CodeQL Warning)
+      const responseMap = new Map<string, Record<string, unknown>[]>();
       for (const uid of userIds) {
-          responseMap[uid] = [];
+          responseMap.set(uid, []);
       }
 
-      // Process devices: we still need to atomically pop OTPKs per device.
-      // This is a mapping over devices, which is generally fast in parallel.
-      const processedBundles = await Promise.all(devices.map(async (device) => {
-          if (!device.signingKey || !device.publicKey) return null;
+      if (devices.length === 0) {
+        return res.json(Object.fromEntries(responseMap));
+      }
+
+      // ✅ FIX 3: Gunakan perulangan For-Of sekuensial alih-alih Promise.all()
+      // Ini MENCEGAH server crash (Error 500) akibat kehabisan koneksi Prisma Transaction.
+      for (const device of devices) {
+          if (!device.signingKey || !device.publicKey) continue;
 
           let otpk = null;
           if (device.preKeyBundle) {
@@ -272,17 +275,16 @@ router.post(
               key: otpk.publicKey
             }
           }
-          return { userId: device.userId, bundle };
-      }));
-
-      // Populate response map
-      for (const result of processedBundles) {
-          if (result) {
-              responseMap[result.userId].push(result.bundle);
+          
+          // Masukkan bundle ke dalam array milik user yang sesuai di dalam Map
+          const userBundles = responseMap.get(device.userId);
+          if (userBundles) {
+              userBundles.push(bundle);
           }
       }
 
-      res.json(responseMap)
+      // Konversi Map kembali menjadi Object biasa agar bisa dikirim sebagai JSON
+      res.json(Object.fromEntries(responseMap))
     } catch (e: unknown) {
       next(e)
     }
