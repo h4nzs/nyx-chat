@@ -582,26 +582,37 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
 
   // 1. Terapkan Reaksi & Cabut Reaksi — ✅ FIX: Apply in order using last-action map
   // Build a map keyed by `${messageId}|${userId}|${emoji}` to track the final action
-  const reactionActionMap = new Map<string, 'add' | 'remove'>();
+  const reactionActionMap = new Map<string, { action: 'add' | 'remove', ts: number }>();
 
   // First, mark all existing reactions as "add" baseline
   for (const msg of messageMap.values()) {
     for (const r of (msg.reactions || [])) {
       const key = `${msg.id}|${r.userId}|${r.emoji}`;
-      reactionActionMap.set(key, 'add');
+      const rObj = r as { createdAt?: string | Date };
+      reactionActionMap.set(key, { action: 'add', ts: rObj.createdAt ? new Date(rObj.createdAt).getTime() : Date.now() });
     }
   }
 
   // Then apply incoming adds
   for (const reaction of reactions) {
     const key = `${reaction.messageId}|${reaction.userId}|${reaction.emoji}`;
-    reactionActionMap.set(key, 'add');
+    const rObj = reaction as { createdAt?: string | Date };
+    const eventTs = rObj.createdAt ? new Date(rObj.createdAt).getTime() : Date.now();
+    const existing = reactionActionMap.get(key);
+    if (!existing || eventTs >= existing.ts) {
+        reactionActionMap.set(key, { action: 'add', ts: eventTs });
+    }
   }
 
-  // Then apply removes (overriding adds)
+  // Then apply removes
   for (const rr of reactionRemoves) {
     const key = `${rr.targetMessageId}|${rr.senderId}|${rr.emoji}`;
-    reactionActionMap.set(key, 'remove');
+    const rrObj = rr as { createdAt?: string | Date };
+    const eventTs = rrObj.createdAt ? new Date(rrObj.createdAt).getTime() : Date.now();
+    const existing = reactionActionMap.get(key);
+    if (!existing || eventTs >= existing.ts) {
+        reactionActionMap.set(key, { action: 'remove', ts: eventTs });
+    }
   }
 
   // Now rebuild reactions based on final state
@@ -609,7 +620,7 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     const finalReactions: Message['reactions'] = [];
     for (const r of (msg.reactions || [])) {
       const key = `${msg.id}|${r.userId}|${r.emoji}`;
-      if (reactionActionMap.get(key) === 'add') {
+      if (reactionActionMap.get(key)?.action === 'add') {
         finalReactions.push(r);
       }
     }
@@ -621,7 +632,7 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
     const target = messageMap.get(asMessageId(reaction.messageId));
     if (target) {
       const key = `${reaction.messageId}|${reaction.userId}|${reaction.emoji}`;
-      if (reactionActionMap.get(key) === 'add' && !target.reactions?.some(r => r.id === reaction.id)) {
+      if (reactionActionMap.get(key)?.action === 'add' && !target.reactions?.some(r => r.id === reaction.id)) {
         target.reactions = [...(target.reactions || []), { ...reaction, userId: asUserId(reaction.userId) }];
       }
     }
@@ -774,13 +785,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   broadcastHistorySync: async (selfConversationId) => {
     const { user } = useAuthStore.getState();
     if (!user) return;
-    
+
     const toastId = toast.loading('Preparing history sync for your linked devices...');
     try {
         const { exportDatabaseToJson } = await import('@lib/keychainDb');
-        const jsonStr = await shadowVault.exportDatabase();
-        const blob = new Blob([jsonStr], { type: 'application/json' });
-        
+        const jsonStr = await exportDatabaseToJson();
+        const blob = new Blob([jsonStr], { type: 'application/json' });        
         // Enkripsi JSON dengan kunci simetris rahasia
         const { encryptFileViaWorker } = await import('@utils/crypto');
         const { encryptedBlob, key } = await encryptFileViaWorker(blob);
@@ -1938,9 +1948,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           }
 
           if (silentPayload.type === 'HISTORY_SYNC' && silentPayload.url && silentPayload.key) {
+              const currentUser = useAuthStore.getState().user;
+              const { useConversationStore } = await import('@store/conversation');
+              const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+              const isSelfChat = conversation?.participants.length === 1 && conversation.participants[0].id === currentUser?.id;
+
+              if (!currentUser || decrypted.senderId !== currentUser.id || !isSelfChat) {
+                  return decrypted;
+              }
+
               cleanUpOptimisticBubble();
               console.log(`[History Sync] Received payload from ${decrypted.senderId}. Downloading...`);
-              
+
               // Proses secara asinkron agar tidak membuat UI "freeze"
               setTimeout(async () => {
                   const toastId = toast.loading('Receiving history sync from your other device...');

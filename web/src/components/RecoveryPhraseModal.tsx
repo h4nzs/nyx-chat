@@ -187,8 +187,8 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
         border border-white/5
       ">
         {selectedIndices.length === 0 && <span className="text-text-secondary/40">{t('modals:recovery.select_words')}</span>}
-        {selectedIndices.map((origIdx, i) => (
-           <span key={i} className="px-2 py-1 rounded bg-accent/20 text-accent border border-accent/30">{words[origIdx]}</span>
+        {selectedIndices.map((origIdx) => (
+           <span key={origIdx} className="px-2 py-1 rounded bg-accent/20 text-accent border border-accent/30">{words[origIdx]}</span>
         ))}
       </div>
 

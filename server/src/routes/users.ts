@@ -102,9 +102,13 @@ router.delete('/me/devices/:deviceId', requireAuth, async (req, res, next) => {
     }
 
     // 1. Hapus device (Cascade akan menghapus PreKeys, SessionKeys, dll)
-    await prisma.device.deleteMany({
+    const deletedInfo = await prisma.device.deleteMany({
       where: { id: targetDeviceId, userId: authUser.id }
     });
+
+    if (deletedInfo.count === 0) {
+        throw new ApiError(404, "Device not found or already removed.");
+    }
 
     // 2. Hapus Refresh Token (Memutus sesi JWT perangkat tersebut secara paksa)
     await prisma.refreshToken.deleteMany({

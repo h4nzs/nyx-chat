@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { Message } from '@store/conversation';
 import { decryptFile } from '@utils/crypto';
@@ -19,19 +19,27 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
   const [error, setError] = useState<string | null>(null);
   const [decryptedUrl, setDecryptedUrl] = useState<string | null>(null);
   const lastKeychainUpdate = useKeychainStore(s => s.lastUpdated);
+  const isMountedRef = useRef(true);
 
-  const handleClose = () => {
+  useEffect(() => {
+      isMountedRef.current = true;
+      return () => { isMountedRef.current = false; };
+  }, []);
+
+  const handleClose = useCallback(() => {
     if (message.isViewOnce && !message.isViewed) {
       useMessageStore.getState().updateMessage(message.conversationId, message.id, { isViewed: true });
       import('@lib/socket').then(({ getSocket }) => {
           const socket = getSocket();
           const emitViewedAck = () => {
-              socket?.emit('message:view_once_opened', { messageId: message.id, conversationId: message.conversationId });
+              if (isMountedRef.current) {
+                  socket?.emit('message:view_once_opened', { messageId: message.id, conversationId: message.conversationId });
+              }
           };
           if (socket?.connected) {
               emitViewedAck();
           } else {
-              // Queue: emit once socket reconnects
+              // Queue: emit once socket reconnects if still mounted
               socket?.once('connect', emitViewedAck);
           }
       });
@@ -39,7 +47,7 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
       useMessageStore.getState().updateMessage(message.conversationId, message.id, { fileUrl: undefined, content: null });
     }
     onClose();
-  };
+  }, [message.conversationId, message.id, message.isViewOnce, message.isViewed, onClose]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

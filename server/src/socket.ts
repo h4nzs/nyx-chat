@@ -403,9 +403,7 @@ export function registerSocket(httpServer: HttpServer) {
           io.to(msg.senderId).emit('message:status_updated', { messageId, conversationId: msg.conversationId, readBy: uid, status: 'READ' });
         }
 
-        if (!msg.conversation.isGroup) {
-           await prisma.message.delete({ where: { id: messageId } });
-        } else {
+        if (msg.conversation.isGroup) {
            await prisma.messageStatus.upsert({
              where: { messageId_userId: { messageId, userId: uid } },
              update: { status: 'READ' },
@@ -438,9 +436,8 @@ export function registerSocket(httpServer: HttpServer) {
                      fulfillerSocket = matchingSocket;
                      fulfillerId = targetSenderId;
                  }
-             }
-             if (!fulfillerSocket && targetSockets.length > 0) {
-                 // Fallback to another socket of that user
+             } else if (targetSockets.length > 0) {
+                 // Fallback to another socket of that user ONLY if targetDeviceKey was not provided
                  const other = targetSockets.find(s => s.id !== socket.id);
                  if (other) {
                      fulfillerSocket = other;

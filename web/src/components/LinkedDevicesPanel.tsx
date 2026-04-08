@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { useMessageStore } from '@store/message';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
+import { useModalStore } from '@store/modal';
 
 interface Device {
     id: string;
@@ -38,15 +39,19 @@ export const LinkedDevicesPanel: React.FC = () => {
     }, []);
 
     const handleRevoke = async (deviceId: string) => {
-        if (!confirm("Are you sure you want to log out this device? It will lose access to all encrypted chats.")) return;
-        
-        try {
-            await api(`/api/users/me/devices/${deviceId}`, { method: 'DELETE' });
-            toast.success('Device revoked successfully');
-            setDevices(prev => prev.filter(d => d.id !== deviceId));
-        } catch (error) {
-            toast.error('Failed to revoke device');
-        }
+        useModalStore.getState().showConfirm(
+            "Revoke Device",
+            "Are you sure you want to log out this device? It will lose access to all encrypted chats.",
+            async () => {
+                try {
+                    await api(`/api/users/me/devices/${deviceId}`, { method: 'DELETE' });
+                    toast.success('Device revoked successfully');
+                    setDevices(prev => prev.filter(d => d.id !== deviceId));
+                } catch (error) {
+                    toast.error('Failed to revoke device');
+                }
+            }
+        );
     };
 
     const handleSyncHistory = async () => {
@@ -58,7 +63,13 @@ export const LinkedDevicesPanel: React.FC = () => {
             return;
         }
 
-        await broadcastHistorySync(selfChat.id);
+        try {
+            await broadcastHistorySync(selfChat.id);
+            toast.success("History sync payload broadcasted successfully.");
+        } catch (e) {
+            console.error("Failed to broadcast history sync:", e);
+            toast.error("Failed to broadcast history sync.");
+        }
     };
 
     if (isLoading) return <div className="p-4 text-center text-zinc-400">Loading devices...</div>;

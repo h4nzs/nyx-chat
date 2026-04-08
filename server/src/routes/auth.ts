@@ -164,21 +164,42 @@ async (req, res, next) => {
     let activeEncryptedPrivateKey = '';
 
     if (publicKey && signingKey && encryptedPrivateKey) {
-      const newDevice = await prisma.device.create({
-        data: {
-          userId: user.id,
-          publicKey,
-          signingKey,
-          encryptedPrivateKey,
-          name: deviceName || 'New Device'
-        }
+      let device = await prisma.device.findFirst({
+         where: { userId: user.id, publicKey }
       });
-      activeDeviceId = newDevice.id;
-      activeEncryptedPrivateKey = newDevice.encryptedPrivateKey!;
+      
+      if (device) {
+          device = await prisma.device.update({
+              where: { id: device.id },
+              data: { lastActiveAt: new Date(), signingKey, encryptedPrivateKey, name: deviceName || device.name }
+          });
+      } else {
+          device = await prisma.device.create({
+            data: {
+              userId: user.id,
+              publicKey,
+              signingKey,
+              encryptedPrivateKey,
+              name: deviceName || 'New Device'
+            }
+          });
+      }
+      activeDeviceId = device.id;
+      activeEncryptedPrivateKey = device.encryptedPrivateKey!;
     } else {
-      if (user.devices.length === 0) throw new ApiError(404, 'No device found. Please recover your account.');
-      activeDeviceId = user.devices[0].id;
-      activeEncryptedPrivateKey = user.devices[0].encryptedPrivateKey!;
+      const explicitDeviceId = req.body.deviceId;
+      if (explicitDeviceId) {
+          const device = user.devices.find(d => d.id === explicitDeviceId);
+          if (!device) throw new ApiError(404, 'Specified device not found.');
+          activeDeviceId = device.id;
+          activeEncryptedPrivateKey = device.encryptedPrivateKey!;
+          await prisma.device.update({ where: { id: device.id }, data: { lastActiveAt: new Date() } });
+      } else {
+          if (user.devices.length === 0) throw new ApiError(404, 'No device found. Please recover your account.');
+          activeDeviceId = user.devices[0].id;
+          activeEncryptedPrivateKey = user.devices[0].encryptedPrivateKey!;
+          await prisma.device.update({ where: { id: activeDeviceId }, data: { lastActiveAt: new Date() } });
+      }
     }
 
     const safeUser = { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, role: user.role }
@@ -265,16 +286,23 @@ router.post('/recover', authLimiter, zodValidate({
     const user = await prisma.user.findUnique({ where: { usernameHash }, include: { devices: true } });
     if (!user || user.devices.length === 0) throw new ApiError(404, "User not found or invalid keys.");
 
-    const oldSigningKey = user.devices[0].signingKey;
-
     const { getSodium } = await import('../lib/sodium.js');
     const sodium = await getSodium();
     const messageString = `${usernameHash}:${timestamp}:${nonce}:${newPassword}:${newEncryptedKeys}`;
     const messageBytes = Buffer.from(messageString, 'utf-8');
     const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
-    const publicKeyBytes = sodium.from_base64(oldSigningKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    
+    let isValid = false;
+    for (const device of user.devices) {
+        try {
+            const publicKeyBytes = sodium.from_base64(device.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+            if (sodium.crypto_sign_verify_detached(signatureBytes, messageBytes, publicKeyBytes)) {
+                isValid = true;
+                break;
+            }
+        } catch(e) {}
+    }
 
-    const isValid = sodium.crypto_sign_verify_detached(signatureBytes, messageBytes, publicKeyBytes);
     if (!isValid) throw new ApiError(401, "Cryptographic signature verification failed.");
 
     const passwordHash = await hashPassword(newPassword);

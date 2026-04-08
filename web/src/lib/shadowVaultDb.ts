@@ -1,4 +1,5 @@
 import { db, DecryptedMessageRecord } from './db';
+import { Dexie } from 'dexie';
 import type { Message } from '@store/conversation';
 import { getSodium } from '@lib/sodiumInitializer';
 import { getMyEncryptionKeyPair } from '@utils/crypto';
@@ -182,41 +183,25 @@ class NyxShadowVaultProxy {
           if (expired.length > 0) {
             db.messages.bulkDelete(expired as string[]).catch(e => console.error("Failed to delete expired messages:", e));
           }
-        } catch {}
+        } catch (e) {
+            console.error("Failed to clean expired messages:", e);
+        }
       };
       sweepExpired(); // Fire and forget
 
       // ✅ FIX: Use the compound index [conversationId+createdAt] for efficient range query
-      // We need the LATEST messages, so we fetch all for this conversation,
-      // sort DESC by createdAt, take the limit, then reverse to ASC for UI.
-      // Dexie's compound index orders by conversationId first, then createdAt.
-      const allRecords = await db.messages
-        .where('conversationId')
-        .equals(conversationId)
+      const minDate = Dexie.minKey;
+      const maxDate = beforeDate || Dexie.maxKey;
+      
+      const records = await db.messages
+        .where('[conversationId+createdAt]')
+        .between([conversationId, minDate], [conversationId, maxDate])
+        .reverse()
+        .limit(limit)
         .toArray();
 
-      // Sort DESC by createdAt (newest first)
-      allRecords.sort((a, b) => {
-        const timeA = new Date(a.createdAt).getTime();
-        const timeB = new Date(b.createdAt).getTime();
-        return timeB - timeA;
-      });
-
-      let filteredRecords: typeof allRecords;
-
-      if (beforeDate) {
-        const beforeTime = new Date(beforeDate).getTime();
-        // Filter messages older than the cursor date
-        filteredRecords = allRecords.filter(r => new Date(r.createdAt).getTime() < beforeTime);
-      } else {
-        filteredRecords = allRecords;
-      }
-
-      // Take only the requested window
-      const windowedRecords = filteredRecords.slice(0, limit);
-
       // Reverse back to ASC (oldest first) for UI display
-      return this.parseRecordsToMessages(windowedRecords.reverse());
+      return this.parseRecordsToMessages(records.reverse());
     } catch (e: unknown) {
       console.error("Vault Query Error:", e);
       return [];

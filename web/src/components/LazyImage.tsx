@@ -54,7 +54,10 @@ export default function LazyImage({
       setRetryCount(0);
       setError(null);
       setDecryptionStatus('pending');
-      setImageUrl(null);
+      setImageUrl(prevUrl => {
+         if (prevUrl && prevUrl.startsWith('blob:')) URL.revokeObjectURL(prevUrl);
+         return null;
+      });
     }
 
     // Jika sudah sukses untuk sidik jari ini, JANGAN eksekusi ulang!
@@ -62,7 +65,7 @@ export default function LazyImage({
 
     let objectUrl: string | null = null;
     let isMounted = true;
-    let retryTimeout: NodeJS.Timeout;
+    let retryTimeout: ReturnType<typeof setTimeout>;
 
     const handleImageLoad = async () => {
       // 1. Validasi URL

@@ -207,7 +207,24 @@ router.post('/', async (req, res, next) => {
         if (initialSession) {
           const { sessionId, initialKeys, ephemeralPublicKey } = initialSession
           if (!sessionId || !initialKeys || !ephemeralPublicKey) throw new Error('Incomplete initial session data provided.')
-          const keyRecords = initialKeys.map((ik: { userId: string; key: string; }) => ({ sessionId, encryptedKey: ik.key, userId: ik.userId, conversationId: conversation.id, initiatorEphemeralKey: ephemeralPublicKey, isInitiator: ik.userId === creatorId }))
+          
+          const targetUserIds = initialKeys.map((ik: { userId: string }) => ik.userId);
+          const devices = await tx.device.findMany({ where: { userId: { in: targetUserIds } }, select: { id: true, userId: true } });
+
+          const keyRecords = [];
+          for (const ik of initialKeys) {
+             const userDevices = devices.filter(d => d.userId === ik.userId);
+             for (const d of userDevices) {
+                keyRecords.push({
+                   sessionId,
+                   encryptedKey: ik.key,
+                   deviceId: d.id,
+                   conversationId: conversation.id,
+                   initiatorEphemeralKey: ephemeralPublicKey,
+                   isInitiator: ik.userId === creatorId
+                });
+             }
+          }
           await tx.sessionKey.createMany({ data: keyRecords })
         } else if (isGroup) {
           await rotateAndDistributeSessionKeys(conversation.id, creatorId, tx)

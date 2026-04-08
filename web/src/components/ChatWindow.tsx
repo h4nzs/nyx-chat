@@ -309,14 +309,11 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
   // Expose visibility tracking ref untuk MessageItem
   const trackMessageVisibility = useCallback((messageId: string, visible: boolean) => {
-    const prev = visibleMessageIdsRef.current;
-    const next = new Set(prev);
     if (visible) {
-      next.add(messageId);
+      visibleMessageIdsRef.current.add(messageId);
     } else {
-      next.delete(messageId);
+      visibleMessageIdsRef.current.delete(messageId);
     }
-    visibleMessageIdsRef.current = next;
   }, []);
 
   const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);

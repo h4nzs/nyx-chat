@@ -323,14 +323,16 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                 return;
             }
         } else if (data.type === 'offer') {
-            const offer = (decryptedPayload as { offer?: unknown }).offer;
-            if (!offer || typeof offer !== 'object') {
+            const payloadWithOffer = decryptedPayload as { offer?: { type?: string; sdp?: string } };
+            const offer = payloadWithOffer.offer;
+            if (!offer || typeof offer !== 'object' || offer.type !== 'offer' || typeof offer.sdp !== 'string') {
                 console.warn('[WebRTC] Invalid offer payload');
                 return;
             }
         } else if (data.type === 'answer') {
-            const answer = (decryptedPayload as { answer?: unknown }).answer;
-            if (!answer || typeof answer !== 'object') {
+            const payloadWithAnswer = decryptedPayload as { answer?: { type?: string; sdp?: string } };
+            const answer = payloadWithAnswer.answer;
+            if (!answer || typeof answer !== 'object' || answer.type !== 'answer' || typeof answer.sdp !== 'string') {
                 console.warn('[WebRTC] Invalid answer payload');
                 return;
             }

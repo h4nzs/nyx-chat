@@ -22,7 +22,7 @@ This is a **pnpm monorepo** with the following workspace packages:
 | `marketing` | `/marketing` | Marketing/landing site |
 
 ### Key Directories
-```
+```text
 nyx-chat/
 ├── web/                  # Frontend (React + Vite + TypeScript)
 │   ├── src/

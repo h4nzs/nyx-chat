@@ -165,15 +165,16 @@ router.get(
 
           let otpk = null;
           if (device.preKeyBundle) {
-              otpk = await prisma.$transaction(async (tx) => {
-                const key = await tx.oneTimePreKey.findFirst({
-                  where: { deviceId: device.id },
-                  orderBy: { createdAt: 'asc' },
-                  select: { id: true, keyId: true, publicKey: true }
-                })
-                if (key) await tx.oneTimePreKey.delete({ where: { id: key.id } })
-                return key
-              })
+              otpk = await prisma.$queryRaw`
+                DELETE FROM "OneTimePreKey" 
+                WHERE id = (
+                  SELECT id FROM "OneTimePreKey" 
+                  WHERE "deviceId" = ${device.id} 
+                  ORDER BY "createdAt" ASC 
+                  LIMIT 1
+                )
+                RETURNING id, "keyId", "publicKey"
+              `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: string } | null);
           }
 
           const bundle: Record<string, unknown> = {
@@ -245,15 +246,16 @@ router.post(
 
           let otpk = null;
           if (device.preKeyBundle) {
-              otpk = await prisma.$transaction(async (tx) => {
-                const key = await tx.oneTimePreKey.findFirst({
-                  where: { deviceId: device.id },
-                  orderBy: { createdAt: 'asc' },
-                  select: { id: true, keyId: true, publicKey: true }
-                })
-                if (key) await tx.oneTimePreKey.delete({ where: { id: key.id } })
-                return key
-              })
+              otpk = await prisma.$queryRaw`
+                DELETE FROM "OneTimePreKey" 
+                WHERE id = (
+                  SELECT id FROM "OneTimePreKey" 
+                  WHERE "deviceId" = ${device.id} 
+                  ORDER BY "createdAt" ASC 
+                  LIMIT 1
+                )
+                RETURNING id, "keyId", "publicKey"
+              `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: string } | null);
           }
 
           const bundle: Record<string, unknown> = {

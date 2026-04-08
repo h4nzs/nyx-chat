@@ -165,19 +165,20 @@ router.delete('/:id', async (req, res, next) => {
     // Tugas utama rute ini sekarang HANYA menghapus file fisik di Cloudflare R2.
 
     if (r2Key) {
-       const parts = r2Key.split('/');
+       const safeR2Key = r2Key.replace(/[^a-zA-Z0-9_\-\./]/g, '').substring(0, 255);
+       const parts = safeR2Key.split('/');
        const filename = parts.length > 1 ? parts[parts.length - 1] : parts[0];
 
        // Keamanan sederhana: Pastikan user hanya menghapus file miliknya
        if (!filename.startsWith(`${userId}-`)) {
-          console.warn('[Security] User', userId, 'attempted to delete unauthorized file:', r2Key);
+          console.warn('[Security] User', userId, 'attempted to delete unauthorized file:', safeR2Key);
           return res.status(403).json({ error: 'Unauthorized file deletion' });
        } else {
-          console.log('[R2] Deleting blind attachment:', r2Key);
+          console.log('[R2] Deleting blind attachment:', safeR2Key);
           try {
-             await deleteR2File(r2Key);
+             await deleteR2File(safeR2Key);
           } catch (err) {
-             console.error('[R2] Failed to delete blind file:', r2Key, ':', err);
+             console.error('[R2] Failed to delete blind file:', safeR2Key, ':', err);
              return res.status(500).json({ error: 'Failed to delete file from storage' });
           }
        }

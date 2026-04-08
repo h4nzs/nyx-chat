@@ -1222,6 +1222,7 @@ interface ReceiveKeyPayload {
   encryptedKey: string;
   type?: 'GROUP_KEY' | 'SESSION_KEY';
   senderId?: string; // New: Needed for Group Sender Keys
+  senderDeviceKey?: string;
   initiatorEphemeralKey?: string; // Need this for X3DH calc
   initiatorIdentityKey?: string; // Need this for X3DH calc
 }
@@ -1281,7 +1282,7 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
 
 export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promise<void> {
   if (!payload || typeof payload !== 'object') return;
-  const { conversationId, sessionId, encryptedKey, type, senderId, initiatorEphemeralKey, initiatorIdentityKey } = payload;
+  const { conversationId, sessionId, encryptedKey, type, senderId, senderDeviceKey, initiatorEphemeralKey, initiatorIdentityKey } = payload;
   
   if (encryptedKey === 'dummy' || (sessionId && sessionId.startsWith('dummy'))) {
       console.warn("🛡️ [Crypto] BERHASIL MEMBLOKIR KUNCI DUMMY DARI SERVER!", { conversationId, sessionId });
@@ -1293,14 +1294,16 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
         console.error("Received GROUP_KEY but missing senderId. Cannot store key.");
         return;
     }
-    const pendingRequest = pendingGroupKeyRequests.get(conversationId);
+    
+    const reqKey = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : conversationId;
+    const pendingRequest = pendingGroupKeyRequests.get(reqKey) || pendingGroupKeyRequests.get(conversationId);
     if (pendingRequest) {
       clearTimeout(pendingRequest.timerId);
+      pendingGroupKeyRequests.delete(reqKey);
       pendingGroupKeyRequests.delete(conversationId);
     }
 
     try {
-        const senderDeviceKey = (payload as any).senderDeviceKey;
         await handleGroupKeyDistribution(conversationId, encryptedKey, senderId, senderDeviceKey);
         import('@store/message').then(({ useMessageStore }) => {            useMessageStore.getState().reDecryptPendingMessages(conversationId);
         });
