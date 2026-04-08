@@ -919,27 +919,18 @@ async function doDecryptMessage(
         // ✅ FIX: Perbaikan Key Resolution untuk Multi-Device (Self-Sync)
         if (senderDeviceKey) {
              try {
-                 console.log(`[Ratchet Debug] fetching bundles for senderId: ${senderId}`);
                  // Cari bundle milik user pengirim dari API (bisa orang lain, bisa diri sendiri)
                  const bundlesMap = await fetchPreKeyBundles([senderId]);
-                 console.log(`[Ratchet Debug] bundlesMap:`, bundlesMap);
                  const bundles = bundlesMap[senderId] || [];
-                 console.log(`[Ratchet Debug] bundles for sender:`, bundles);
-                 console.log(`[Ratchet Debug] looking for senderDeviceKey:`, senderDeviceKey);
                  
                  // Temukan perangkat yang public key-nya cocok dengan senderDeviceKey
                  const deviceBundle = bundles.find(b => b.identityKey === senderDeviceKey);
                  if (deviceBundle) {
                      keyToUse = deviceBundle.signingKey;
-                     console.log(`[Ratchet Debug] Found deviceBundle, keyToUse:`, keyToUse);
-                 } else {
-                     console.warn(`[Ratchet Debug] deviceBundle not found for senderDeviceKey: ${senderDeviceKey}`);
                  }
              } catch (e) {
-                 console.warn("Failed to fetch sender device bundle, falling back to legacy lookup", e);
+                 console.warn("Failed to fetch sender device bundle, falling back to legacy lookup");
              }
-        } else {
-             console.warn(`[Ratchet Debug] senderDeviceKey is UNDEFINED in payload!`);
         }
 
         // Fallback jika tidak ketemu via senderDeviceKey (hanya cocok jika pengirim adalah orang lain dengan 1 device)
