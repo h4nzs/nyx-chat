@@ -8,77 +8,78 @@ import { requireAuth } from '../middleware/auth.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
+// ✅ FIX: Menggunakan AuthJwtPayload dari paket shared
+import type { AuthJwtPayload } from '@nyx/shared'
 
 const router: Router = Router()
 
-// === POST: Upload/update a user's pre-key bundle ===
+const base64UrlRegex = /^[A-Za-z0-9_-]+$/;
+
 router.post(
   '/prekey-bundle',
   requireAuth,
   zodValidate({
     body: z.object({
-      identityKey: z.string(),
-      signingKey: z.string().optional(), // New: Accept signingKey update
+      // ✅ FIX 1: Validasi ketat untuk memastikan input benar-benar format kunci kriptografi
+      identityKey: z.string().regex(base64UrlRegex, 'Invalid identity key format'),
+      signingKey: z.string().regex(base64UrlRegex, 'Invalid signing key format').optional(),
       signedPreKey: z.object({
-        key: z.string(),
-        signature: z.string()
+        key: z.string().regex(base64UrlRegex, 'Invalid pre-key format'),
+        signature: z.string().regex(base64UrlRegex, 'Invalid signature format')
       })
     })
   }),
   async (req, res, next) => {
     try {
-      if (!req.user) throw new ApiError(401, 'Authentication required.')
-      const userId = req.user.id
-      const { identityKey, signedPreKey, signingKey } = req.body
+      if (!req.user) throw new ApiError(401, 'Authentication required.');
+      
+      const authUser = req.user as AuthJwtPayload;
+      if (!authUser.deviceId) throw new ApiError(400, 'Device ID missing from session.');
+      
+      const deviceId = String(authUser.deviceId);
+      const { identityKey, signedPreKey, signingKey } = req.body;
 
-      // Prepare user update data
-      const userUpdateData: Prisma.UserUpdateInput = { publicKey: identityKey }
-      if (signingKey) {
-        userUpdateData.signingKey = signingKey
-      } else {
-        // If not provided in request, ensure the user already has one.
-        const currentUser = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { signingKey: true }
-        })
-        if (!currentUser?.signingKey) {
-          throw new ApiError(400, 'Signing key is required for initial bundle upload.')
-        }
-      }
+      await prisma.$transaction(async (tx) => {
+        // 1. Bersihkan sisa OTPK lama untuk mencegah "Identity Crisis"
+        await tx.oneTimePreKey.deleteMany({
+          where: { deviceId } 
+        });
 
-      // Use a transaction to ensure both operations succeed or fail together
-      await prisma.$transaction([
-        // [FIX] Purge old OTPKs on bundle update (New Identity/Session)
-        // This prevents "Identity Crisis" where new identity is mixed with old OTPKs.
-        prisma.oneTimePreKey.deleteMany({
-          where: { userId }
-        }),
-        prisma.preKeyBundle.upsert({
-          where: { userId },
+        // 2. Perbarui atau Buat Bundle Baru
+        await tx.preKeyBundle.upsert({
+          where: { deviceId },
           update: {
             identityKey,
             key: signedPreKey.key,
             signature: signedPreKey.signature
           },
           create: {
-            userId,
+            deviceId,
             identityKey,
             key: signedPreKey.key,
             signature: signedPreKey.signature
           }
-        }),
-        prisma.user.update({
-          where: { id: userId },
-          data: userUpdateData
-        })
-      ])
+        });
 
-      res.status(201).json({ message: 'Pre-key bundle updated successfully.' })
+        // 3. Perbarui Identitas Perangkat
+        await tx.device.update({
+          where: { id: deviceId },
+          data: {
+            publicKey: identityKey,
+            // ✅ FIX 2: Prisma sangat pintar. Jika `signingKey` bernilai `undefined`, 
+            // Prisma TIDAK AKAN mengupdatenya (tidak mengubahnya jadi null). 
+            // Ini jauh lebih bersih daripada trik spread operator sebelumnya.
+            signingKey: signingKey 
+          }
+        });
+      });
+
+      res.status(201).json({ message: 'Pre-key bundle updated successfully.' });
     } catch (e) {
-      next(e)
+      next(e);
     }
   }
-)
+);
 
 // === POST: Upload One-Time Pre-Keys (OTPK) ===
 router.post(
@@ -95,19 +96,19 @@ router.post(
   async (req, res, next) => {
     try {
       if (!req.user) throw new ApiError(401, 'Authentication required.')
-      const userId = req.user.id
-      const { keys } = req.body
+      const authUser = req.user as AuthJwtPayload;
+      const deviceId = authUser.deviceId;
+      if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
 
-      // Use createMany for efficiency
-      // Note: If keyId conflict exists (unique constraint), this might fail.
-      // We assume client manages keyIds correctly (e.g. rolling counter).
+      const { keys } = req.body;
+
       await prisma.oneTimePreKey.createMany({
         data: keys.map((k: { keyId: number; publicKey: string }) => ({
-          userId,
+          deviceId,
           keyId: k.keyId,
           publicKey: k.publicKey
         })),
-        skipDuplicates: true // Ignore duplicates if client retries
+        skipDuplicates: true
       })
 
       res.status(201).json({ message: `Uploaded ${keys.length} One-Time Pre-Keys.` })
@@ -117,32 +118,31 @@ router.post(
   }
 )
 
-// === GET: Count One-Time Pre-Keys ===
+// === GET: Count OTPK ===
 router.get('/count-otpk', requireAuth, async (req, res, next) => {
   try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const count = await prisma.oneTimePreKey.count({
-      where: { userId: req.user.id }
-    })
+    const authUser = req.user as AuthJwtPayload;
+    const deviceId = authUser.deviceId;
+    if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
+
+    const count = await prisma.oneTimePreKey.count({ where: { deviceId } })
     res.json({ count })
-  } catch (e) {
-    next(e)
-  }
+  } catch (e) { next(e) }
 })
 
-// === DELETE: Clear all One-Time Pre-Keys ===
+// === DELETE: Clear OTPK ===
 router.delete('/otpk', requireAuth, async (req, res, next) => {
   try {
-    await prisma.oneTimePreKey.deleteMany({
-      where: { userId: req.user!.id }
-    })
+    const authUser = req.user as AuthJwtPayload;
+    const deviceId = authUser.deviceId;
+    if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
+
+    await prisma.oneTimePreKey.deleteMany({ where: { deviceId } })
     res.status(204).send()
-  } catch (e) {
-    next(e)
-  }
+  } catch (e) { next(e) }
 })
 
-// === GET: Get a pre-key bundle for another user ===
+// === GET: Get ALL pre-key bundles for another user ===
 router.get(
   '/prekey-bundle/:userId',
   requireAuth,
@@ -151,59 +151,140 @@ router.get(
     try {
       const { userId } = req.params
 
-      // 1. Fetch User and Bundle
-      const userWithBundle = await prisma.user.findUnique({
-        where: { id: userId as string },
-        select: {
-          id: true,
-          publicKey: true,
-          signingKey: true,
-          preKeyBundle: true
-        }
+      const devices = await prisma.device.findMany({
+        where: { userId: String(userId) },
+        include: { preKeyBundle: true }
       })
 
-      if (!userWithBundle?.preKeyBundle || !userWithBundle.signingKey) {
-        throw new ApiError(404, 'User does not have a valid pre-key bundle available.')
+      if (devices.length === 0) {
+        throw new ApiError(404, 'User does not have any active devices.')
       }
 
-      // 2. Atomic Pop: Fetch ONE OTPK and Delete it
-      // Prisma doesn't support "DELETE RETURNING" directly in standard API easily for this logic without raw query or transaction.
-      // We use a transaction: Find First -> Delete ID.
+      const responseBundles = await Promise.all(devices.map(async (device) => {
+          if (!device.signingKey || !device.publicKey) return null;
 
-      const otpk = await prisma.$transaction(async (tx) => {
-        const key = await tx.oneTimePreKey.findFirst({
-          where: { userId: userId as string },
-          orderBy: { createdAt: 'asc' }, // Use oldest first
-          select: { id: true, keyId: true, publicKey: true }
-        })
+          let otpk = null;
+          if (device.preKeyBundle) {
+              otpk = await prisma.$transaction(async (tx) => {
+                const key = await tx.oneTimePreKey.findFirst({
+                  where: { deviceId: device.id },
+                  orderBy: { createdAt: 'asc' },
+                  select: { id: true, keyId: true, publicKey: true }
+                })
+                if (key) await tx.oneTimePreKey.delete({ where: { id: key.id } })
+                return key
+              })
+          }
 
-        if (key) {
-          await tx.oneTimePreKey.delete({ where: { id: key.id } })
-        }
-        return key
+          const bundle: Record<string, unknown> = {
+            deviceId: device.id,
+            identityKey: device.publicKey,
+            signingKey: device.signingKey
+          }
+
+          if (device.preKeyBundle) {
+              bundle.signedPreKey = {
+                key: device.preKeyBundle.key,
+                signature: device.preKeyBundle.signature
+              };
+          }
+
+          if (otpk) {
+            bundle.oneTimePreKey = {
+              keyId: otpk.keyId,
+              key: otpk.publicKey
+            }
+          }
+          return bundle;
+      }));
+
+      const validBundles = responseBundles.filter(b => b !== null);
+      if (validBundles.length === 0) throw new ApiError(404, 'No valid key bundles found for this user.');
+
+      res.json(validBundles)
+    } catch (e: unknown) {
+      next(e)
+    }
+  }
+)
+
+// === POST: Get ALL pre-key bundles for MULTIPLE users (Bulk Fetch) ===
+router.post(
+  '/prekey-bundles',
+  requireAuth,
+  // ✅ FIX 1: Hapus .cuid() untuk mencegah error jika format ID user berbeda
+  zodValidate({ body: z.object({ userIds: z.array(z.string()) }) }),
+  async (req, res, next) => {
+    try {
+      const { userIds } = req.body
+
+      if (!userIds || userIds.length === 0) {
+        return res.json({});
+      }
+
+      // Fetch devices for all requested users in one query
+      const devices = await prisma.device.findMany({
+        where: { userId: { in: userIds } },
+        include: { preKeyBundle: true }
       })
 
-      const { preKeyBundle, signingKey } = userWithBundle
-
-      // Assemble the response bundle
-      const responseBundle: Record<string, unknown> = {
-        identityKey: preKeyBundle.identityKey,
-        signedPreKey: {
-          key: preKeyBundle.key,
-          signature: preKeyBundle.signature
-        },
-        signingKey // Include the public signing key for verification
+      // ✅ FIX 2: Gunakan Map() untuk mencegah Prototype Pollution (CodeQL Warning)
+      const responseMap = new Map<string, Record<string, unknown>[]>();
+      for (const uid of userIds) {
+          responseMap.set(uid, []);
       }
 
-      // 3. Attach One-Time Pre-Key if available
-      if (otpk) {
-        responseBundle.oneTimePreKey = {
-          keyId: otpk.keyId,
-          key: otpk.publicKey
-        }
+      if (devices.length === 0) {
+        return res.json(Object.fromEntries(responseMap));
       }
 
-      res.json(responseBundle)
+      // ✅ FIX 3: Gunakan perulangan For-Of sekuensial alih-alih Promise.all()
+      // Ini MENCEGAH server crash (Error 500) akibat kehabisan koneksi Prisma Transaction.
+      for (const device of devices) {
+          if (!device.signingKey || !device.publicKey) continue;
+
+          let otpk = null;
+          if (device.preKeyBundle) {
+              otpk = await prisma.$transaction(async (tx) => {
+                const key = await tx.oneTimePreKey.findFirst({
+                  where: { deviceId: device.id },
+                  orderBy: { createdAt: 'asc' },
+                  select: { id: true, keyId: true, publicKey: true }
+                })
+                if (key) await tx.oneTimePreKey.delete({ where: { id: key.id } })
+                return key
+              })
+          }
+
+          const bundle: Record<string, unknown> = {
+            deviceId: device.id,
+            identityKey: device.publicKey,
+            signingKey: device.signingKey
+          }
+
+          if (device.preKeyBundle) {
+              bundle.signedPreKey = {
+                key: device.preKeyBundle.key,
+                signature: device.preKeyBundle.signature
+              };
+          }
+
+          if (otpk) {
+            bundle.oneTimePreKey = {
+              keyId: otpk.keyId,
+              key: otpk.publicKey
+            }
+          }
+          
+          // Masukkan bundle ke dalam array milik user yang sesuai di dalam Map
+          const userBundles = responseMap.get(device.userId);
+          if (userBundles) {
+              userBundles.push(bundle);
+          }
+      }
+
+      // Konversi Map kembali menjadi Object biasa agar bisa dikirim sebagai JSON
+      res.json(Object.fromEntries(responseMap))
     } catch (e: unknown) {
       next(e)
     }
@@ -214,52 +295,41 @@ router.get(
 router.get(
   '/initial-session/:conversationId/:sessionId',
   requireAuth,
-  zodValidate({
-    params: z.object({
-      conversationId: z.string(),
-      sessionId: z.string()
-    })
-  }),
+  zodValidate({ params: z.object({ conversationId: z.string(), sessionId: z.string() }) }),
   async (req, res, next) => {
     try {
       if (!req.user) throw new ApiError(401, 'Authentication required.')
-      const { conversationId, sessionId } = req.params
-      const userId = req.user.id
+      
+      const authUser = req.user as AuthJwtPayload;
+      const deviceId = authUser.deviceId;
+      if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
+
+      const conversationId = String(req.params.conversationId);
+      const sessionId = String(req.params.sessionId);
 
       const keyRecord = await prisma.sessionKey.findFirst({
-        where: {
-          conversationId: conversationId as string,
-          sessionId: sessionId as string,
-          userId: userId as string
-        }
+        where: { conversationId, sessionId, deviceId }
       })
 
       if (!keyRecord || !keyRecord.initiatorEphemeralKey) {
-        return res.status(404).json({ error: 'Initial session data not found for this user.' })
+        return res.status(404).json({ error: 'Initial session data not found for this device.' })
       }
 
-      // Find the initiator to get their public identity key
       const initiatorRecord = await prisma.sessionKey.findFirst({
-        where: {
-          conversationId: conversationId as string,
-          sessionId: sessionId as string,
-          isInitiator: true
-        },
-        include: { user: { select: { id: true, publicKey: true } } }
+        where: { conversationId, sessionId, isInitiator: true },
+        include: { device: { select: { id: true, publicKey: true } } }
       })
 
-      if (!initiatorRecord?.user?.publicKey) {
-        return res.status(404).json({ error: "Initiator's public key could not be found for this session." })
+      if (!initiatorRecord?.device?.publicKey) {
+        return res.status(404).json({ error: "Initiator's public key could not be found." })
       }
 
       res.json({
         encryptedKey: keyRecord.encryptedKey,
         initiatorEphemeralKey: keyRecord.initiatorEphemeralKey,
-        initiatorIdentityKey: initiatorRecord.user.publicKey
+        initiatorIdentityKey: initiatorRecord.device.publicKey
       })
-    } catch (e) {
-      next(e)
-    }
+    } catch (e) { next(e) }
   }
 )
 
@@ -271,7 +341,7 @@ router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
   try {
     const { env } = await import('../config.js');
     if (!env.cfAccountId || !env.cfTurnKeyId || !env.cfTurnApiToken) {
-      return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }); // Fallback
+      return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
     }
 
     const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${env.cfTurnKeyId}/credentials/generate-ice-servers`;
@@ -281,16 +351,13 @@ router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
         'Authorization': `Bearer ${env.cfTurnApiToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ ttl: 86400 }) // 24 hours validity
+      body: JSON.stringify({ ttl: 86400 })
     });
 
     const data = await response.json() as unknown as TurnResponse;
 
     if (data.iceServers) {
-      const payload = { 
-          iceServers: data.iceServers
-      };
-      return res.json(payload);
+      return res.json({ iceServers: data.iceServers });
     }
 
     return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });

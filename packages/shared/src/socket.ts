@@ -8,7 +8,7 @@ export interface TypingPayload {
 
 export interface DistributeKeysPayload {
   conversationId: string;
-  keys: { userId: string; key: string }[];
+  keys: { userId: string; targetDeviceId?: string; key: string; senderDeviceKey?: string }[];
 }
 
 export interface MessageSendPayload {
@@ -44,6 +44,8 @@ export interface KeyRequestPayload {
 
 export interface GroupKeyRequestPayload {
   conversationId: string;
+  targetSenderId?: string;
+  targetDeviceKey?: string;
 }
 
 export interface KeyFulfillmentPayload {
@@ -51,6 +53,8 @@ export interface KeyFulfillmentPayload {
   conversationId: string;
   sessionId?: string;
   encryptedKey: string;
+  targetDeviceId?: string;
+  senderDeviceKey?: string;
 }
 
 export interface ServerToClientEvents {
@@ -88,6 +92,7 @@ export interface ServerToClientEvents {
         encryptedKey: string;
         type?: 'GROUP_KEY' | 'SESSION_KEY';
         senderId?: string; // Added
+        senderDeviceKey?: string;
     }) => void;
     "session:fulfill_request": (payload: {
         conversationId: string;
@@ -104,6 +109,7 @@ export interface ServerToClientEvents {
         conversationId: string;
         requesterId: string;
         requesterPublicKey: string;
+        requesterDeviceId?: string;
     }) => void;
     force_logout: (payload?: { jti?: string }) => void; // Updated
     'auth:banned': (payload: { reason: string }) => void; // Added

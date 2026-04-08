@@ -3,10 +3,10 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
-import { Prisma } from '@prisma/client';
+import { DeliveryStatus } from '@prisma/client';
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
-import { asConversationId, asUserId, type ConversationId, type User } from '@nyx/shared'
+import { asConversationId, asUserId, type User } from '@nyx/shared'
 import { toConversation, toParticipant } from '../utils/mappers.js';
 import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
 import { ApiError } from '../utils/errors.js'
@@ -15,7 +15,56 @@ import { redisClient } from '../lib/redis.js'
 const router: Router = Router()
 router.use(requireAuth)
 
-const MAX_GROUP_MEMBERS = 100 // Batasi member maksimal biar server gak meledak
+const MAX_GROUP_MEMBERS = 100 
+
+// ✅ FIX: Selector Type-Safe untuk mengambil Kunci dari Perangkat Terakhir Aktif
+const userSelectWithKeys = { 
+  id: true, 
+  encryptedProfile: true, 
+  devices: { orderBy: { lastActiveAt: 'desc' as const }, take: 1, select: { publicKey: true, signingKey: true } } 
+};
+
+// Type Definitions untuk menampung hasil query Prisma yang memiliki relasi 'devices'
+type UserWithDevices = { id: string, encryptedProfile: string | null, devices?: { publicKey: string, signingKey: string }[] };
+type ParticipantWithUser = { id: string, userId: string, isPinned: boolean, role: string, joinedAt: Date, user: UserWithDevices };
+type MessageWithSender = { sender: UserWithDevices };
+type RawConversationData = {
+  id: string;
+  isGroup: boolean;
+  creatorId: string | null;
+  encryptedMetadata: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  lastMessageAt: Date | null;
+  creator: UserWithDevices | null;
+  participants: ParticipantWithUser[];
+  messages?: MessageWithSender[];
+};
+
+// ✅ FIX: Helper type-safe untuk menyuntikkan Kunci dari Device ke Root Object User agar kompatibel dengan toConversation Mapper
+const hoistKeys = (u: UserWithDevices | null) => {
+  if (!u) return u;
+  const result: Record<string, unknown> = { ...u };
+  if (u.devices && u.devices.length > 0) {
+    result.publicKey = u.devices[0].publicKey;
+    result.signingKey = u.devices[0].signingKey;
+  }
+  delete result.devices;
+  return result;
+};
+
+const hoistConvoKeys = (c: RawConversationData) => {
+  const result: Record<string, unknown> = { ...c };
+  if (c.creator) result.creator = hoistKeys(c.creator);
+  if (c.participants) {
+      result.participants = c.participants.map(p => ({ ...p, user: hoistKeys(p.user) }));
+  }
+  if (c.messages) {
+      result.messages = c.messages.map(m => ({ ...m, sender: hoistKeys(m.sender) }));
+  }
+  return result as unknown as Parameters<typeof toConversation>[0];
+};
+
 
 // GET all conversations for the current user
 router.get('/', async (req, res, next) => {
@@ -31,43 +80,59 @@ router.get('/', async (req, res, next) => {
       include: {
         participants: {
           select: {
-            user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } },
+            user: { select: userSelectWithKeys }, // Menggunakan Selector Multi-Device
             id: true,
             userId: true,
             isPinned: true,
-            role: true
+            role: true,
+            joinedAt: true 
           }
         },
         messages: {
           orderBy: { createdAt: 'desc' },
           take: 1,
-          include: { sender: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } }
+          include: { sender: { select: userSelectWithKeys } }
         },
-        creator: { select: { id: true, publicKey: true, signingKey: true, encryptedProfile: true } }
+        creator: { select: userSelectWithKeys }
       },
       orderBy: { lastMessageAt: 'desc' }
-    })
+    });
 
-    const unreadCountsData = await prisma.message.groupBy({
-      by: ['conversationId'],
-      where: {
-        conversationId: { in: conversationsData.map(c => c.id) },
+    const joinedAtMap = new Map<string, Date>();
+    for (const c of conversationsData) {
+      const myParticipant = c.participants.find(p => p.userId === userId);
+      if (myParticipant) {
+        joinedAtMap.set(c.id, myParticipant.joinedAt);
+      }
+    }
+
+    const unreadWhereClauses = conversationsData
+      .filter(c => joinedAtMap.has(c.id))
+      .map(c => ({
+        conversationId: c.id,
+        createdAt: { gte: joinedAtMap.get(c.id)! },
         senderId: { not: userId },
         statuses: {
           none: {
             userId: userId,
-            status: 'READ'
+            status: DeliveryStatus.READ 
           }
         }
-      },
-      _count: { id: true }
-    });
+      }));
 
-    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, item._count.id]));
+    const unreadCountsData = unreadWhereClauses.length > 0
+      ? await prisma.message.groupBy({
+          by: ['conversationId'],
+          where: { OR: unreadWhereClauses },
+          _count: { id: true }
+        })
+      : [];
 
-    // MAPPING KE SAFE TYPE (Tanpa any)
+    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, item._count?.id || 0]));
+
+    // Hoist keys secara type-safe sebelum mapping
     const safeConversations = conversationsData.map(convo => {
-      const safeConv = toConversation(convo);
+      const safeConv = toConversation(hoistConvoKeys(convo as unknown as RawConversationData));
       safeConv.unreadCount = unreadMap.get(convo.id) || 0;
       return safeConv;
     })
@@ -94,16 +159,25 @@ router.post('/', async (req, res, next) => {
     if (userIds.length > MAX_GROUP_MEMBERS) return res.status(400).json({ error: `Group cannot have more than ${MAX_GROUP_MEMBERS} members.` })
 
     if (!isGroup) {
-      const otherUserId = userIds.find((id: string) => id !== creatorId)
+      const isSelfChat = userIds.length === 1 && userIds[0] === creatorId;
+      const otherUserId = isSelfChat ? creatorId : userIds.find((id: string) => id !== creatorId);
       if (!otherUserId) return res.status(400).json({ error: 'Another user ID is required for a private chat.' })
 
-      const existingConversation = await prisma.conversation.findFirst({
-        where: { isGroup: false, AND: [{ participants: { some: { userId: creatorId } } }, { participants: { some: { userId: otherUserId } } }] },
-        include: { participants: { include: { user: true } }, creator: true }
-      })
+      let existingConversation = null;
+      if (isSelfChat) {
+          const selfChats = await prisma.conversation.findMany({
+              where: { isGroup: false, participants: { some: { userId: creatorId } } },
+              include: { participants: { include: { user: { select: userSelectWithKeys } } }, creator: { select: userSelectWithKeys } }
+          });
+          existingConversation = selfChats.find(c => c.participants.length === 1);
+      } else {
+          existingConversation = await prisma.conversation.findFirst({
+              where: { isGroup: false, AND: [{ participants: { some: { userId: creatorId } } }, { participants: { some: { userId: otherUserId } } }] },
+              include: { participants: { include: { user: { select: userSelectWithKeys } } }, creator: { select: userSelectWithKeys } }
+          });
+      }
 
-      // Bebas any
-      if (existingConversation) return res.status(200).json(toConversation(existingConversation))
+      if (existingConversation) return res.status(200).json(toConversation(hoistConvoKeys(existingConversation as unknown as RawConversationData)))
         
       if (!isVerified) {
           const today = new Date().toISOString().split('T')[0];
@@ -125,8 +199,8 @@ router.post('/', async (req, res, next) => {
             participants: { create: allUserIds.map((userId: string) => ({ user: { connect: { id: userId } }, role: userId === creatorId ? 'ADMIN' : 'MEMBER' })) }
           },
           include: {
-            participants: { select: { id: true, userId: true, role: true, isPinned: true, user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } } },
-            creator: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }
+            participants: { select: { id: true, userId: true, role: true, isPinned: true, user: { select: userSelectWithKeys } } },
+            creator: { select: userSelectWithKeys }
           }
         })
 
@@ -148,8 +222,7 @@ router.post('/', async (req, res, next) => {
       throw dbError;
     }
 
-    // MAPPING KE SAFE TYPE (Tanpa any)
-    const safeConversation = toConversation(newConversation);
+    const safeConversation = toConversation(hoistConvoKeys(newConversation as unknown as RawConversationData));
     
     getIo().to(allUserIds.filter(uid => uid !== creatorId)).emit('conversation:new', safeConversation)
     res.status(201).json({ ...safeConversation, unreadCount: 0 })
@@ -165,14 +238,13 @@ router.get('/:id', async (req, res, next) => {
     const conversation = await prisma.conversation.findFirst({
       where: { id: req.params.id, participants: { some: { userId: req.user.id } } },
       include: {
-        participants: { select: { id: true, userId: true, user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } }, isPinned: true, role: true } },
-        creator: { select: { id: true, publicKey: true, signingKey: true, encryptedProfile: true } }
+        participants: { select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true } },
+        creator: { select: userSelectWithKeys }
       }
     })
 
     if (!conversation) return res.status(404).json({ error: 'Conversation not found' })
-    // Bebas any
-    res.json(toConversation(conversation))
+    res.json(toConversation(hoistConvoKeys(conversation as unknown as RawConversationData)))
   } catch (error) {
     next(error)
   }
@@ -211,16 +283,19 @@ router.post('/:id/participants', async (req, res, next) => {
     const newParticipantsRaw = await prisma.$transaction(async (tx) => {
       await Promise.all(userIds.map((userId: string) => tx.participant.upsert({ where: { userId_conversationId: { userId, conversationId } }, create: { userId, conversationId, joinedAt: new Date() }, update: {} })))
       await rotateAndDistributeSessionKeys(conversationId, req.user!.id, tx)
-      return await tx.participant.findMany({ where: { conversationId, userId: { in: userIds } }, include: { user: { select: { id: true, encryptedProfile: true, publicKey: true, signingKey: true } } } })
+      return await tx.participant.findMany({ where: { conversationId, userId: { in: userIds } }, include: { user: { select: userSelectWithKeys } } })
     })
 
-    const conversationRaw = await prisma.conversation.findUnique({ where: { id: conversationId }, include: { participants: { include: { user: true } }, creator: true } })
+    const conversationRaw = await prisma.conversation.findUnique({ where: { id: conversationId }, include: { participants: { include: { user: { select: userSelectWithKeys } } }, creator: { select: userSelectWithKeys } } })
 
-    // MAPPING KE SAFE TYPE
-    const safeParticipants = newParticipantsRaw.map(toParticipant);
+    const safeParticipants = newParticipantsRaw.map(p => {
+       const hoistedUser = hoistKeys((p as any).user);
+       const objToMap = { ...p, user: hoistedUser };
+       return toParticipant(objToMap as Parameters<typeof toParticipant>[0]);
+    });
+    
     const safeConversationId = asConversationId(conversationId);
 
-    // Casting ke unknown lalu ke expected interface socket untuk menghindari any
     getIo().to(conversationId).emit('conversation:participants_added', { 
       conversationId: safeConversationId, 
       newParticipants: safeParticipants as unknown as { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[] 
@@ -228,9 +303,8 @@ router.post('/:id/participants', async (req, res, next) => {
     getIo().to(conversationId).emit('group:participants_changed', { conversationId: safeConversationId })
     
     if (conversationRaw) {
-      const safeConv = toConversation(conversationRaw);
+      const safeConv = toConversation(hoistConvoKeys(conversationRaw as unknown as RawConversationData));
       safeParticipants.forEach(p => {
-        // FIX: Pengecekan p.userId memastikan tipe undefined tidak masuk ke fungsi .to()
         if (p.userId) {
           getIo().to(p.userId).emit('conversation:new', safeConv)
         }
@@ -275,15 +349,12 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
     if (req.user.id === userToRemoveId) return res.status(400).json({ error: 'Cannot remove yourself.' })
 
     const result = await prisma.participant.deleteMany({
-    where: { 
-        userId: userToRemoveId, 
-        conversationId 
-    }
-});
+        where: { userId: userToRemoveId, conversationId }
+    });
 
-if (result.count === 0) {
-    return res.status(404).json({ error: 'Participant not found in this conversation' });
-}
+    if (result.count === 0) {
+        return res.status(404).json({ error: 'Participant not found in this conversation' });
+    }
     
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userToRemoveId) })
     getIo().to(conversationId).emit('group:participants_changed', { conversationId: asConversationId(conversationId) })
@@ -378,8 +449,8 @@ router.post('/:id/key-rotation', async (req, res, next) => {
       data: { updatedAt: new Date() }
     })
 
-    // Bebas any
-    res.json({ success: true, message: 'Key rotation recorded successfully', conversation: toConversation(updatedConversation) })
+    const safeConv = toConversation(hoistConvoKeys(updatedConversation as unknown as RawConversationData));
+    res.json({ success: true, message: 'Key rotation recorded successfully', conversation: safeConv })
   } catch (error) {
     next(error)
   }

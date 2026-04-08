@@ -225,17 +225,9 @@ export async function decryptMessageObject(
                 }
             }
         }
-        
-        if (finalMessage.content && finalMessage.content.trim().startsWith('{')) {
-             finalMessage.content = "🔒 You sent this message (Encrypted)";
-        }
-        if (rawMsg.repliedTo) {
-            finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
-        } else if (rawMsg.repliedToId) {
-            const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
-            if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
-        }
-        return finalMessage;
+        // JIKA TIDAK ADA MK, JANGAN RETURN DI SINI! 
+        // Biarkan jatuh ke bawah (Fall-through) agar logika Dekripsi Receiver (Fan-Out) 
+        // bisa mencoba mendekripsi pesan kita sendiri dari perangkat lain.
     }
 
     let contentToDecrypt: string | undefined = ('ciphertext' in rawMsg ? rawMsg.ciphertext : undefined) as string | undefined;
@@ -467,7 +459,7 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
   return null;
 }
 
-function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string, storyId?: string, targetMessageId?: string, emoji?: string } | null {
+function parseSilent(content: string | null | undefined): { text?: string, type?: string, key?: string, storyId?: string, targetMessageId?: string, emoji?: string, url?: string } | null {
   if (!content) return null;
   try {
     let trimmed = content.trim();
@@ -490,6 +482,9 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
       return payload;
     }
     if (payload.type === 'STORY_KEY') {
+      return payload;
+    }
+    if (payload.type === 'HISTORY_SYNC' && payload.url && payload.key) {
       return payload;
     }
     // Tambahan untuk E2EE Unsend & Cabut Reaksi
@@ -584,24 +579,52 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
   // ==========================================
   // TAHAP 3: MENERAPKAN SEMUA PERUBAHAN
   // ==========================================
-  
-  // 1. Terapkan Reaksi Baru
-  for (const reaction of reactions) {
-    const target = messageMap.get(asMessageId(reaction.messageId));
-    if (target) {
-      const existingReactions = target.reactions || [];
-      if (!existingReactions.some(r => r.id === reaction.id)) {
-        target.reactions = [...existingReactions, { ...reaction, userId: asUserId(reaction.userId) }];
-      }
+
+  // 1. Terapkan Reaksi & Cabut Reaksi — ✅ FIX: Apply in order using last-action map
+  // Build a map keyed by `${messageId}|${userId}|${emoji}` to track the final action
+  const reactionActionMap = new Map<string, 'add' | 'remove'>();
+
+  // First, mark all existing reactions as "add" baseline
+  for (const msg of messageMap.values()) {
+    for (const r of (msg.reactions || [])) {
+      const key = `${msg.id}|${r.userId}|${r.emoji}`;
+      reactionActionMap.set(key, 'add');
     }
   }
 
-  // 2. Terapkan Cabut Reaksi (Reaction Remove)
+  // Then apply incoming adds
+  for (const reaction of reactions) {
+    const key = `${reaction.messageId}|${reaction.userId}|${reaction.emoji}`;
+    reactionActionMap.set(key, 'add');
+  }
+
+  // Then apply removes (overriding adds)
   for (const rr of reactionRemoves) {
-      const target = messageMap.get(asMessageId(rr.targetMessageId));
-      if (target && target.reactions) {
-          target.reactions = target.reactions.filter(r => r.userId !== rr.senderId || r.emoji !== rr.emoji);
+    const key = `${rr.targetMessageId}|${rr.senderId}|${rr.emoji}`;
+    reactionActionMap.set(key, 'remove');
+  }
+
+  // Now rebuild reactions based on final state
+  for (const msg of messageMap.values()) {
+    const finalReactions: Message['reactions'] = [];
+    for (const r of (msg.reactions || [])) {
+      const key = `${msg.id}|${r.userId}|${r.emoji}`;
+      if (reactionActionMap.get(key) === 'add') {
+        finalReactions.push(r);
       }
+    }
+    msg.reactions = finalReactions;
+  }
+
+  // Add new reactions that weren't in the original map
+  for (const reaction of reactions) {
+    const target = messageMap.get(asMessageId(reaction.messageId));
+    if (target) {
+      const key = `${reaction.messageId}|${reaction.userId}|${reaction.emoji}`;
+      if (reactionActionMap.get(key) === 'add' && !target.reactions?.some(r => r.id === reaction.id)) {
+        target.reactions = [...(target.reactions || []), { ...reaction, userId: asUserId(reaction.userId) }];
+      }
+    }
   }
 
   // 3. Terapkan Editan (Diurutkan dari yang terbaru)
@@ -618,22 +641,35 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
   for (const un of unsends) {
       const targetId = asMessageId(un.targetMessageId);
       const target = messageMap.get(targetId);
-      
+
       // Keamanan E2EE: Hanya pengirim asli yang berhak menarik pesannya
       if (target && target.senderId === un.senderId) {
           target.content = null;
           target.fileUrl = undefined;
+          target.fileKey = undefined;
+          target.fileName = undefined;
+          target.fileType = undefined;
+          target.fileSize = undefined;
+          target.duration = undefined;
+          target.isBlindAttachment = false;
           target.isDeletedLocal = true;
           target.reactions = [];
       } else if (!target) {
           // Jika pesan aslinya belum ter-load ke UI, suntikkan nisannya langsung ke DB
-          import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([{ 
-              id: targetId, 
-              conversationId: asConversationId(un.conversationId), 
-              isDeletedLocal: true, 
-              content: null, 
-              createdAt: un.createdAt, 
-              senderId: asUserId(un.senderId) 
+          import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([{
+              id: targetId,
+              conversationId: asConversationId(un.conversationId),
+              isDeletedLocal: true,
+              content: null,
+              fileUrl: undefined,
+              fileKey: undefined,
+              fileName: undefined,
+              fileType: undefined,
+              fileSize: undefined,
+              duration: undefined,
+              isBlindAttachment: false,
+              createdAt: un.createdAt,
+              senderId: asUserId(un.senderId)
           } as Message]));
       }
   }
@@ -684,6 +720,7 @@ type Actions = {
   toggleMessageSelection: (id: string) => void;
   clearMessageSelection: () => void;
   repairSecureSession: (conversationId: string, isGroup: boolean, isAuto?: boolean) => Promise<void>;
+  broadcastHistorySync: (selfConversationId: string) => Promise<void>;
 };
 
 let tempIdCounter = 0;
@@ -699,7 +736,8 @@ const initialState: State = {
   selectedMessageIds: [],
 };
 
-const pendingStatuses: Record<string, { userId: string, status: string }> = {};
+// ✅ FIX: Use composite key `${conversationId}:${messageId}` to prevent race overwrites
+const pendingStatuses: Record<string, { conversationId: string; userId: string, status: string }> = {};
 
 export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) => ({
   ...initialState,
@@ -718,23 +756,73 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
   repairSecureSession: async (conversationId, isGroup, isAuto = false) => {
     try {
-      if (isGroup) {
-        const { forceRotateGroupSenderKey, rotateGroupKey } = await import('@utils/crypto');
-        await forceRotateGroupSenderKey(conversationId);
-        await rotateGroupKey(conversationId, 'periodic_rotation');
-      } else {
-        const { deleteRatchetSession } = await import('@utils/crypto');
-        await deleteRatchetSession(conversationId);
-        // Send a silent system message to trigger the X3DH on the other side automatically,
-        // and mark it as type 'GHOST_SYNC' so it renders as a center placeholder.
-        get().sendMessage(conversationId, { content: JSON.stringify({ type: 'GHOST_SYNC' }), isSilent: true });
-      }
+      // ✅ FIX: Karena semua chat (1-on-1 maupun grup) kini menggunakan Sender Key Fan-Out,
+      // kita perbaiki sesinya dengan cara yang sama. Tidak ada lagi X3DH GHOST_SYNC.
+      const { forceRotateGroupSenderKey, rotateGroupKey } = await import('@utils/crypto');
+      await forceRotateGroupSenderKey(conversationId);
+      await rotateGroupKey(conversationId, 'periodic_rotation');
+      
       if (!isAuto) {
           toast.success("Secure session state reset. Next message will negotiate new keys.");
       }
     } catch (error) {
       console.error("Failed to repair session:", error);
       if (!isAuto) toast.error("Failed to repair session.");
+    }
+  },
+
+  broadcastHistorySync: async (selfConversationId) => {
+    const { user } = useAuthStore.getState();
+    if (!user) return;
+    
+    const toastId = toast.loading('Preparing history sync for your linked devices...');
+    try {
+        const { exportDatabaseToJson } = await import('@lib/keychainDb');
+        const jsonStr = await shadowVault.exportDatabase();
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        
+        // Enkripsi JSON dengan kunci simetris rahasia
+        const { encryptFileViaWorker } = await import('@utils/crypto');
+        const { encryptedBlob, key } = await encryptFileViaWorker(blob);
+        
+        const { api } = await import('@lib/api');
+        const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
+            method: 'POST',
+            body: JSON.stringify({
+                fileName: `sync_${Date.now()}.enc`, 
+                fileType: 'application/octet-stream', 
+                folder: 'sync',
+                fileSize: encryptedBlob.size 
+            })
+        });
+
+        // Unggah ke Cloudflare R2
+        await new Promise<void>((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', presignedRes.uploadUrl, true);
+            xhr.setRequestHeader('Content-Type', 'application/octet-stream'); 
+            xhr.onload = () => { if (xhr.status === 200) resolve(); else reject(new Error('Upload failed')); };
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.send(encryptedBlob);
+        });
+
+        const payload = {
+            type: 'HISTORY_SYNC',
+            url: presignedRes.publicUrl,
+            key: key
+        };
+        
+        // Kirim E2EE payload ini ke "Self-Chat" (Pesan Tersimpan)
+        // Fan-Out Sender Key akan secara otomatis mendistribusikannya ke SEMUA perangkat Anda!
+        await get().sendMessage(selfConversationId, {
+            content: JSON.stringify(payload),
+            isSilent: true
+        });
+        
+        toast.success('History securely synced to your linked devices!', { id: toastId });
+    } catch (e) {
+        console.error(e);
+        toast.error('Failed to sync history.', { id: toastId });
     }
   },
 
@@ -864,27 +952,28 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
     if (!conversation) {
-      console.error(`[SendMessage] Conversation NOT FOUND: ${conversationId}`);
       toast.error("Conversation not found.");
       return;
     }
-    const isGroup = conversation.isGroup;
     const forceRotate = conversation.requiresKeyRotation === true;
 
-    if (isGroup && useConnectionStore.getState().status === 'connected') {
+    // ✅ FASE 3: Selalu gunakan protokol Fan-Out Sender Key untuk SEMUA tipe percakapan (termasuk 1-on-1)
+    if (useConnectionStore.getState().status === 'connected') {
       try {
-        // Pass forceRotate if we suspect new members or requested by another peer
         const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, forceRotate);
         if (distributionKeys && distributionKeys.length > 0) {
-          emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+          // ✅ FIX: Hapus any, gunakan tipe data ketat sesuai kembalian dari ensureGroupSession
+          emitGroupKeyDistribution(
+            conversationId, 
+            distributionKeys as { userId: string; targetDeviceId: string; key: string; type: string }[]
+          );
           if (forceRotate) {
               useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
           }
-          // Wait a tiny bit to ensure the socket emits the keys before the actual message
           await new Promise(r => setTimeout(r, 300)); 
         }
       } catch (e) {
-        console.error("Failed to ensure group session", e);
+        console.error("Failed to ensure session", e);
       }
     }
 
@@ -972,39 +1061,6 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     try {
       let ciphertext = '';
-      let x3dhHeader: Record<string, unknown> | null = null;
-
-      if (!isGroup && data.content) {
-          const state = await retrieveRatchetStateSecurely(conversationId);
-          if (!state) {
-             const peerId = conversation.participants.find(p => p.id !== user.id)?.id;
-             if (peerId) {
-                 const theirBundle = await authFetch<PreKeyBundle>(`/api/keys/prekey-bundle/${peerId}`);
-                 const myKeyPair = await getMyEncryptionKeyPair();
-                 const { sessionKey, ephemeralPublicKey, otpkId } = await establishSessionFromPreKeyBundle(myKeyPair, theirBundle);
-                 const sodium = await getSodium();
-                 
-                 const { worker_dr_init_alice } = await import('@lib/crypto-worker-proxy');
-                 const newState = await worker_dr_init_alice({
-                     sk: sessionKey,
-                     theirSignedPreKeyPublic: sodium.from_base64(theirBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING)
-                 });
-                 
-                 await storeRatchetStateSecurely(conversationId, newState);
-
-                 x3dhHeader = {
-                     ik: sodium.to_base64(myKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-                     ek: ephemeralPublicKey,
-                     otpkId: otpkId
-                 };
-             } else {
-                 console.error(`[X3DH] Peer not found in participants for ${conversationId}.`);
-                 toast.error("Encryption failed: Cannot identify recipient.");
-                 return;
-             }
-          }
-      }
-
       let mkToStore: Uint8Array | undefined;
       let contentToEncrypt = data.content;
 
@@ -1028,7 +1084,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             console.error("Failed to inject profile key", e);
         }
 
-        const result = await encryptMessage(contentToEncrypt, conversationId, isGroup, undefined, `temp_${actualTempId}`);
+        const result = await encryptMessage(contentToEncrypt, conversationId, true, undefined, `temp_${actualTempId}`);
         ciphertext = result.ciphertext;
         
         // [FIX PERSISTENCE] Store MK for ALL chats (Group + 1on1)
@@ -1038,23 +1094,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                  storeMessageKeySecurely(`temp_${actualTempId}`, mkToStore!)
              );
         }
-        
-        if (!isGroup && result.drHeader) {
-            ciphertext = JSON.stringify({
-                dr: result.drHeader,
-                ciphertext: ciphertext
-            });
-        }
       }
-      
-      if (x3dhHeader) {
-          const payloadJson = JSON.stringify({
-              x3dh: x3dhHeader,
-              ciphertext: ciphertext 
-          });
-          ciphertext = payloadJson;
-      }
-      
+
       const pushPayloads: Record<string, string> = {};
       try {
         const { getSodium } = await import('@lib/sodiumInitializer');
@@ -1568,9 +1609,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     }
 
     // 1. TAMPILKAN DARI LOCAL VAULT (INDEXEDDB) DULU (Instan 0ms!)
+    let localWasEmpty = true;
     try {
       const localMessagesRaw = await shadowVault.getMessagesByConversation(id, 50);
       if (localMessagesRaw.length > 0) {
+          localWasEmpty = false;
           const localProcessed = processMessagesAndReactions(localMessagesRaw, []);
           const localEnriched = enrichMessagesWithSenderProfile(id, localProcessed);
           set(state => ({
@@ -1579,16 +1622,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           }));
       }
     } catch (e) {
-      console.error("[Local Vault] Gagal memuat dari IndexedDB:", e);
+      console.error("[Local Vault] Failed to load messages from IndexedDB:", e);
     }
 
     // 2. SINKRONISASI BACKGROUND: Cek apakah ada surat tertunda di server
     try {
       set(state => ({ isFetchingMore: { ...state.isFetchingMore, [id]: true } }));
-      
+
       const res = await api<{ items: Message[] }>(`/api/messages/${id}?limit=50`);
       const fetchedMessages = res.items || [];
-      
+
       if (fetchedMessages.length > 0) {
         const processedMessages: Message[] = [];
 
@@ -1605,9 +1648,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
         const allMessages = processMessagesAndReactions(uniqueMessages, []);
         const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
-        
+
         // ✅ 3. AWAIT PENYIMPANAN LOKAL DULU (PENTING!)
-        await shadowVault.upsertMessages(enrichedMessages); 
+        await shadowVault.upsertMessages(enrichedMessages);
 
         // ✅ 4. BARU TEMBAK KILL SWITCH SETELAH DATA AMAN
         const socket = getSocket();
@@ -1635,6 +1678,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
     } catch (error) {
       console.error(`Failed to sync pending messages for ${id}`, error);
+      // ✅ FIX: Jika server sync gagal dan local vault kosong, tandai sebagai loaded
+      // agar UI tidak stuck loading selamanya
+      if (localWasEmpty) {
+        set(state => ({ hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true } }));
+      }
     } finally {
       set(state => ({ isFetchingMore: { ...state.isFetchingMore, [id]: false } }));
     }
@@ -1757,6 +1805,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
   doAddIncomingMessage: async (conversationId, message) => {
       const currentUser = useAuthStore.getState().user;
+
       let decrypted = message;
 
       if (currentUser && message.senderId === currentUser.id && message.tempId) {
@@ -1822,21 +1871,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               return existing;
           }
           
-          const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-          const isGroup = conversation?.isGroup || false;
-
-          if (isGroup) {
-              emitSessionKeyRequest(conversationId, decrypted.senderId, decrypted.senderId);
-          } else {
-              const now = Date.now();
-              const repairKey = `last_repair_${conversationId}` as keyof Window;
-              const lastRepair = (window[repairKey] as number) || 0;
+          // ✅ FIX: Auto-Heal Terpadu untuk semua jenis Chat (Multi-Device)
+          // Tidak perlu lagi mengecek isGroup, langsung minta GroupKeyRequest (Sender Key)
+          const now = Date.now();
+          const repairKey = `last_repair_${conversationId}` as keyof Window;
+          const lastRepair = (window[repairKey] as number) || 0;
+          
+          if (now - lastRepair > 15000) { // Limit permintaan perbaikan agar tidak spam (15 detik)
+              (window as unknown as Record<string, number>)[repairKey] = now;
+              console.warn(`[Auto-Heal] Kunci tidak sinkron untuk percakapan ${conversationId}. Meminta kunci ulang secara diam-diam...`);
               
-              if (now - lastRepair > 15000) {
-                  (window as unknown as Record<string, number>)[repairKey] = now;
-                  console.warn(`[Auto-Heal] Ratchet out of sync for ${conversationId}. Initiating silent repair...`);
-                  get().repairSecureSession(conversationId, false, true); 
-              }
+              // Minta pengirim mem-broadcast ulang kunci distribusinya
+              const { emitGroupKeyRequest } = await import('@lib/socket');
+              emitGroupKeyRequest(conversationId);
           }
       }
       
@@ -1888,6 +1935,42 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               cleanUpOptimisticBubble(); // ✅ Bersihkan
               console.log(`[Ghost Sync] Received sync from ${decrypted.senderId}. Settle ratchet state silently.`);
               return decrypted; 
+          }
+
+          if (silentPayload.type === 'HISTORY_SYNC' && silentPayload.url && silentPayload.key) {
+              cleanUpOptimisticBubble();
+              console.log(`[History Sync] Received payload from ${decrypted.senderId}. Downloading...`);
+              
+              // Proses secara asinkron agar tidak membuat UI "freeze"
+              setTimeout(async () => {
+                  const toastId = toast.loading('Receiving history sync from your other device...');
+                  try {
+                      const { decryptFile } = await import('@utils/crypto');
+                      const res = await fetch(silentPayload.url!);
+                      const blob = await res.blob();
+                      
+                      const decryptedBlob = await decryptFile(blob, silentPayload.key!, 'application/json');
+                      const jsonText = await decryptedBlob.text();
+                      
+                      // ✅ FIX: Gunakan importer Vault utama
+                      const { importDatabaseFromJson } = await import('@lib/keychainDb');
+                      await importDatabaseFromJson(jsonText);
+                      
+                      toast.success('History synchronized successfully! Reloading...', { id: toastId });
+                      
+                      // ✅ FIX: Cara paling bersih untuk merefresh Zustand Store dan UI
+                      // setelah injeksi database massal adalah dengan hard reload.
+                      setTimeout(() => {
+                          window.location.reload();
+                      }, 1500);
+
+                  } catch (e) {
+                      console.error('[History Sync] Failed to process history payload:', e);
+                      toast.error('Failed to sync history payload.', { id: toastId });
+                  }
+              }, 1000);
+              
+              return null; 
           }
 
           if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {
@@ -2096,22 +2179,24 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       );
       
       const newMsgIdStr = newMessage.id ? String(newMessage.id) : '';
-      const pending = newMsgIdStr ? pendingStatuses[newMsgIdStr] : undefined;
-      
+      // ✅ FIX: Use composite key for pendingStatuses lookup
+      const pendingKey = newMsgIdStr ? `${newMessage.conversationId}:${newMsgIdStr}` : '';
+      const pending = pendingKey ? pendingStatuses[pendingKey] : undefined;
+
       const finalStatuses = pending
-          ? [{ 
-              userId: asUserId(pending.userId), 
-              status: pending.status as 'SENT' | 'DELIVERED' | 'READ', 
-              messageId: asMessageId(newMsgIdStr), 
-              id: `temp-status-${Date.now()}`, 
-              updatedAt: new Date().toISOString() 
+          ? [{
+              userId: asUserId(pending.userId),
+              status: pending.status as 'SENT' | 'DELIVERED' | 'READ',
+              messageId: asMessageId(newMsgIdStr),
+              id: `temp-status-${Date.now()}`,
+              updatedAt: new Date().toISOString()
             }]
-          : (newMessage.statuses && newMessage.statuses.length > 0) 
-              ? newMessage.statuses 
+          : (newMessage.statuses && newMessage.statuses.length > 0)
+              ? newMessage.statuses
               : (oldMsg?.statuses || []);
 
-      if (pending && newMsgIdStr) {
-          delete pendingStatuses[newMsgIdStr];
+      if (pending && pendingKey) {
+          delete pendingStatuses[pendingKey];
       }
 
       const finalMessage: Message = {
@@ -2297,7 +2382,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             
               if (!found) {
                   // Jika pesan belum ditemukan (masih berstatus temp_id), simpan ke pendingStatuses
-                  pendingStatuses[messageId] = { userId, status: validStatus };
+                  // ✅ FIX: Use composite key to prevent race overwrites across conversations
+                  const compositeKey = `${conversationId}:${messageId}`;
+                  pendingStatuses[compositeKey] = { conversationId, userId, status: validStatus };
               }
 
               if (msgToSave) {

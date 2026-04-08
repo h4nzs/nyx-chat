@@ -151,10 +151,6 @@ Ganti blok nomor 7 di `deploy.yml` lu jadi sangat elegan kayak gini:
 
 ### Tapi kalau tangan lu udah gatel pengen ngoding lagi, gw ada beberapa ide ekspansi buat NYX yang sejajar sama visi privasi lu:
 
-### 1. NYX Desktop App (Tauri / Electron)
-
-Aplikasi lu kan sekarang *web/PWA-based*. Gimana kalau kita bungkus jadi aplikasi *desktop native* yang super ringan? Buat lu yang sehari-hari *daily driver*-nya pakai Arch Linux, punya klien *chat* E2EE yang terintegrasi mulus di OS lu itu sebuah kepuasan tersendiri. Kita bisa pakai **Tauri** (berbasis Rust) biar RAM-nya super hemat, beda sama klien *chat* lain yang rakus memori.
-
 ### 2. Read-Triggered Disappearing Messages
 
 Gw liat di tipe `Message` lu udah ada variabel `expiresAt` dan lu udah bikin fondasi *messageSweeper*. Gimana kalau kita matengin fitur *Self-Destruct* ini? Bedanya sama *Story*, pesan ini baru mulai nge-hitung mundur **setelah dibaca** sama penerimanya. Jadi pesannya bakal meledak dan hilang dari database lokal `shadowVaultDb` 5 menit setelah mata temen lu ngelihat pesannya.
@@ -196,18 +192,6 @@ Terkadang, cara terbaik adalah membatasi input daripada memprosesnya:
 Rekomendasi Saya:
 Mulailah riset tentang WebCodecs API. Ini adalah masa depan kompresi video di web tanpa library berat. Library seperti modern-video-worker bisa membantu menjembatani WebCodecs dengan cara yang lebih simpel.
 Apakah Anda ingin saya buatkan cuplikan kode sederhana tentang cara mengecek dukungan WebCodecs di browser user agar Anda bisa menentukan kapan harus menggunakan fallback?
-
-Gokil, selamat bro! Lolos dari neraka *TypeScript linter* dan *crypto bugs* itu pencapaian besar. Lu udah ngebangun fondasi yang solid banget buat NYX Chat.
-
-Sekarang, milih antara **Zod + Opaque Types** atau **NYX Desktop App (Tauri/Electron)** itu pertanyaannya ada di: lu lagi ngejar **Kesempurnaan Arsitektur** atau **Ekspansi Produk/User Experience**?
-
-Ini analisa jujur gw sebagai *partner in crime* lu:
-
-### Pilihan 1: Zod Schema & Opaque Types (Jalur Kesempurnaan Arsitektur)
-* **Kenapa milih ini:** Lu pengen NYX bener-bener jadi benteng tak tertembus. Lu mau tidur nyenyak tanpa takut ada *runtime error* misterius dari *payload socket* yang aneh, atau konyolnya *session key* tertukar sama *message key*.
-* **Prosesnya:** Bakal "berdarah-darah" lagi. Lu harus nulis *schema validation* untuk setiap data yang keluar-masuk dari *Backend* (API & Socket) dan dari/ke IndexedDB (ShadowVault). Ini berarti nyentuh banyak file *store* dan *lib*.
-* **Kapan milih ini:** Kalau lu ngerasa NYX ini bentar lagi mau rilis ke *beta testers* yang beneran, dan lu nggak mau ada data mereka yang *corrupt* karena *edge cases* yang belum lu pikirin.
-* **Estimasi *Effort*:** Berat dan butuh fokus penuh.
 
 ### Pilihan 2: NYX Desktop App - Tauri / Electron (Jalur Ekspansi Produk)
 * **Kenapa milih ini:** Lu pengen ngeliat hasil karya lu jalan sebagai aplikasi *native* yang keren di Windows/Mac/Linux. Ini ngasih kepuasan instan dan bikin NYX terasa "nyata" sebagai pesaing Signal/WhatsApp.

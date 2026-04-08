@@ -39,6 +39,6 @@ We deeply appreciate the following researchers who have successfully breached ou
 
 | Operative (Name / Handle) | Date | Vulnerability Class | Portfolio / Social Link |
 | :--- | :--- | :--- | :--- |
-| *[Available for the finder!]* | - | - | - |
+| **faiqalfaruq** | 2026-04-03 | DOM-Based XSS (Pre-load App Execution) | [GitHub](https://github.com/faiqalfaruq) |
 
 > *"Security is a continuous operation, not a state of rest."*

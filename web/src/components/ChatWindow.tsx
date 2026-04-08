@@ -270,27 +270,32 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   }, [id, loadMessagesForConversation, clearMessageSelection]);
 
 
-  // 2. MARK AS READ: Hanya bertugas membaca pesan, berjalan di background
-  // Aman menggunakan `messages.length` karena di sini TIDAK ADA pemanggilan API fetch
+  // 2. MARK AS READ: Hanya ACK pesan yang benar-benar terlihat di viewport
+  // Menggunakan IntersectionObserver dari MessageItem.tsx yang sudah ada
+  // untuk menghindari ACK pesan off-screen
+  const visibleMessageIdsRef = useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (!id || !messages || !meId) return;
 
     const markUnreadAsRead = async () => {
          // Beri sedikit jeda agar pesan selesai di-render ke DOM (Virtuoso)
          await new Promise(r => setTimeout(r, 300));
-         
+
          const socket = getSocket();
          if (!socket?.connected) return;
 
-         // Cari pesan dari orang lain yang statusnya belum "READ" oleh kita
-         const unreadMessages = messages.filter(m => 
-             m.senderId !== meId && 
+         // Hanya ACK pesan yang terlihat di viewport DAN belum READ
+         const visibleMessageIds = visibleMessageIdsRef.current;
+         const unreadVisible = messages.filter(m =>
+             m.senderId !== meId &&
+             visibleMessageIds.has(m.id) &&
              (!m.statuses || !m.statuses.some(s => s.userId === meId && s.status === 'READ'))
          );
 
          // Batasi maksimal 20 pesan sekaligus untuk mencegah spam socket
-         const msgsToAck = unreadMessages.slice(-20);
-         
+         const msgsToAck = unreadVisible.slice(-20);
+
          msgsToAck.forEach(msg => {
              socket.emit('message:mark_as_read', {
                  messageId: msg.id,
@@ -301,6 +306,18 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
 
     markUnreadAsRead();
   }, [id, meId, messages.length]);
+
+  // Expose visibility tracking ref untuk MessageItem
+  const trackMessageVisibility = useCallback((messageId: string, visible: boolean) => {
+    const prev = visibleMessageIdsRef.current;
+    const next = new Set(prev);
+    if (visible) {
+      next.add(messageId);
+    } else {
+      next.delete(messageId);
+    }
+    visibleMessageIdsRef.current = next;
+  }, []);
 
   const handleImageClick = useCallback((message: Message) => setLightboxMessage(message), []);
 
@@ -391,18 +408,19 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   
       return (
         <div className="px-1 md:px-4 py-0.5" key={message.id}>
-          <MessageItem 
-            message={message} 
+          <MessageItem
+            message={message}
             isGroup={isGroup}
             participants={participants}
             isHighlighted={message.id === highlightedMessageId}
             onImageClick={handleImageClick}
             isFirstInSequence={isFirstInSequence} // 👈 Props ini wajib ada
             isLastInSequence={isLastInSequence}   // 👈 Props ini wajib ada
+            onVisibilityChange={trackMessageVisibility}
           />
         </div>
       );
-    }, [messages, isGroup, participants, highlightedMessageId, handleImageClick]); // 👈 'messages' dikembalikan
+    }, [messages, isGroup, participants, highlightedMessageId, handleImageClick, trackMessageVisibility]); // 👈 'messages' dikembalikan
 
   return (
     <AnimatePresence mode="wait">

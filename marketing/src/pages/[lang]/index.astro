@@ -1,4 +1,5 @@
 ---
+import '../../index.css';
 import BaseIndex from '../index.astro';
 
 export function getStaticPaths() {
@@ -9,7 +10,6 @@ export function getStaticPaths() {
   ];
 }
 
-// TANGKAP DAN LEMPAR PARAMETERNYA!
 const { lang } = Astro.params;
 ---
 <BaseIndex lang={lang} />

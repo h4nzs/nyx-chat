@@ -54,9 +54,10 @@ const processMessageBuffer = async () => {
                 if (safeMessage.content && safeMessage.content.startsWith('{')) {
                      try {
                          const meta = JSON.parse(safeMessage.content);
-                         if (meta.type === 'reaction' || meta.type === 'edit' || meta.type === 'silent' || meta.type === 'GHOST_SYNC' || meta.type === 'UNSEND') {
+                         if (meta.type === 'reaction' || meta.type === 'edit' || meta.type === 'silent' || meta.type === 'GHOST_SYNC') {
                              continue;
                          }
+                         // UNSEND tombstone TIDAK di-skip: perangkat sender juga perlu memprosesnya
                      } catch (_e) {}
                 }
             }
@@ -406,10 +407,10 @@ export function emitGroupKeyDistribution(conversationId: string, keys: { userId:
   getSocket()?.emit('messages:distribute_keys', { conversationId, keys });
 }
 
-export function emitGroupKeyRequest(conversationId: string) {
-  getSocket()?.emit('group:request_key', { conversationId });
+export function emitGroupKeyRequest(conversationId: string, targetSenderId?: string, targetDeviceKey?: string) {
+  getSocket()?.emit('group:request_key', { conversationId, targetSenderId, targetDeviceKey });
 }
 
-export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; }) {
+export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; targetDeviceId?: string; senderDeviceKey?: string; }) {
   getSocket()?.emit('group:fulfilled_key', payload);
 }

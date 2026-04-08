@@ -7,7 +7,7 @@ import { env } from "./config.js";
 import { prisma } from "./lib/prisma.js";
 import { verifyJwt } from "./utils/jwt.js";
 import { sendPushNotification } from "./utils/sendPushNotification.js";
-import { redisClient } from "./lib/redis.js"; // Client untuk data aplikasi (Presence, dll)
+import { redisClient } from "./lib/redis.js"; 
 import { AuthPayload } from "./types/auth.js";
 import cookie from "cookie"; 
 import crypto from "crypto";
@@ -30,9 +30,9 @@ import type {
   RawServerMessage
 } from "@nyx/shared";
 
-// Extend the Socket type from Socket.IO to include our custom user property
+// ✅ FIX: Tambahkan deviceId ke dalam interface
 interface AuthenticatedSocket extends Socket<ClientToServerEvents, ServerToClientEvents> {
-  user?: AuthPayload & { publicKey?: string | null };
+  user?: AuthPayload & { publicKey?: string | null, deviceId?: string };
 }
 
 export let io: Server<ClientToServerEvents, ServerToClientEvents>;
@@ -49,21 +49,16 @@ export function registerSocket(httpServer: HttpServer) {
     cors: {
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
-        
-        // Ratakan array
         const baseOrigins = Array.isArray(env.corsOrigin) ? env.corsOrigin : [env.corsOrigin];
-
         const allowedOrigins = [
           ...baseOrigins, 
           "http://localhost:5173", 
           "http://localhost:4173",
-          // Tambahkan domain HTTP untuk support Cloudflare Tunnel
           "http://nyx-app.my.id",
           "https://nyx-app.my.id",
           "http://*.nyx-app.my.id",
           "https://*.nyx-app.my.id"
         ];
-        
         if (
           allowedOrigins.includes(origin) || 
           origin.endsWith('.vercel.app') || 
@@ -82,38 +77,21 @@ export function registerSocket(httpServer: HttpServer) {
     },
     path: '/socket.io',
     transports: ['polling', 'websocket'],
-    connectionStateRecovery: {
-      maxDisconnectionDuration: 2 * 60 * 1000,
-      skipMiddlewares: true,
-    },
+    connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000, skipMiddlewares: true },
     allowEIO3: true,
     pingTimeout: 30000,
     pingInterval: 35000 
   });
 
-  // === REDIS ADAPTER SETUP (CLUSTER MODE SUPPORT) ===
   const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-  
-  // Opsi socket yang sama dengan main client agar konsisten
-  const redisOptions = {
-    url: redisUrl,
-    socket: {
-      keepAlive: true,
-      reconnectStrategy: (retries: number) => Math.min(retries * 50, 2000),
-    }
-  };
+  const redisOptions = { url: redisUrl, socket: { keepAlive: true, reconnectStrategy: (retries: number) => Math.min(retries * 50, 2000) } };
 
   const pubClient = createClient(redisOptions);
   const subClient = pubClient.duplicate();
 
   Promise.all([pubClient.connect(), subClient.connect()])
-    .then(() => {
-      io.adapter(createAdapter(pubClient, subClient));
-    })
-    .catch((err) => {
-      console.error("❌ Socket.IO Redis Adapter Connection Failed:", err);
-    });
-  // ==================================================
+    .then(() => { io.adapter(createAdapter(pubClient, subClient)); })
+    .catch((err) => { console.error("❌ Socket.IO Redis Adapter Connection Failed:", err); });
 
   // === MIDDLEWARE AUTH ===
   io.use(async (socket: AuthenticatedSocket, next) => {
@@ -129,32 +107,40 @@ export function registerSocket(httpServer: HttpServer) {
       }
 
       if (!token) {
-        // ALLOW GUEST for Device Linking
         socket.user = undefined;
         return next(); 
       }
 
-      const payload = verifyJwt(token);
+      // ✅ FIX: Konversi tipe payload agar mencakup deviceId
+      const payload = verifyJwt(token) as { id?: string; sub?: string; role?: string; deviceId?: string } | null | string;
       if (!payload || typeof payload === 'string') {
         socket.user = undefined;
         return next();
       }
 
       const userId = payload.id || payload.sub;
-      // OPTIMIZATION: Select publicKey here
+      const deviceId = payload.deviceId;
+
+      if (!userId || !deviceId) {
+        socket.user = undefined;
+        return next();
+      }
+
+      // ✅ FIX: Ambil publicKey dari relasi devices, bukan langsung dari user
       const user = await prisma.user.findUnique({ 
         where: { id: userId },
-        select: { id: true, publicKey: true }
+        select: { id: true, devices: { where: { id: deviceId }, select: { publicKey: true } } }
       });
 
-      if (!user) {
+      if (!user || user.devices.length === 0) {
         socket.user = undefined;
         return next();
       }
 
       socket.user = { 
         id: user.id, 
-        publicKey: user.publicKey 
+        publicKey: user.devices[0].publicKey,
+        deviceId: deviceId
       };
       next();
     } catch (err) {
@@ -167,22 +153,13 @@ export function registerSocket(httpServer: HttpServer) {
   io.on("connection", async (socket: AuthenticatedSocket) => {
     const userId = socket.user?.id;
 
-    // ==========================================
-    // 🅰️ GUEST ZONE (Belum Login / HP Baru)
-    // ==========================================
     if (!userId) {
-      // Event 1: Request QR Token (Dipanggil oleh LinkDevicePage)
       socket.on("auth:request_linking_qr", async (payload: { publicKey: string }, callback) => {
-         
          const linkingToken = crypto.randomBytes(32).toString('hex');
          await socket.join(`linking:${linkingToken}`);
-         
-         if (typeof callback === 'function') {
-            callback({ ok: true, qrData: linkingToken });
-         }
+         if (typeof callback === 'function') callback({ ok: true, qrData: linkingToken });
       });
 
-      // MIGRATION GUEST RECEIVER
       socket.on('migration:join', (roomId: string) => {
         if (typeof roomId === 'string' && roomId.startsWith('mig_') && roomId.length > 20) {
           socket.join(roomId);
@@ -192,26 +169,14 @@ export function registerSocket(httpServer: HttpServer) {
       });
 
       socket.on('migration:ack', (data: { roomId: string, success: boolean }) => {
-        if (data && data.roomId) {
-           socket.to(data.roomId).emit('migration:ack', data);
-        }
+        if (data && data.roomId) socket.to(data.roomId).emit('migration:ack', data);
       });
 
-      socket.on("disconnect", () => {
-      });
-
-      // STOP! Guest tidak boleh lanjut ke logika user
       return;
     }
 
-    // ==========================================
-    // 🅱️ USER ZONE (Sudah Login / HP Lama)
-    // ==========================================
-    
-    // Join room pribadi user
     socket.join(userId);
 
-    // Update Presence
     if (!socket.recovered) {
         const userSocketsKey = `user:${userId}:sockets`;
         const added = await redisClient.sAdd(userSocketsKey, socket.id);
@@ -226,7 +191,6 @@ export function registerSocket(httpServer: HttpServer) {
         socket.emit("presence:init", onlineUserIds);
     }
 
-    // --- RATE LIMITER HELPER ---
     const checkRateLimit = async (userIdStr: string, event: string, limit: number, windowSeconds: number): Promise<boolean> => {
       const key = `rate_limit:socket:${event}:${userIdStr}`;
       const current = await redisClient.incr(key);
@@ -236,111 +200,86 @@ export function registerSocket(httpServer: HttpServer) {
       return current <= limit;
     };
 
-    // --- CHAT FEATURES ---
-
     socket.on("conversation:join", async (conversationId: string) => {
-      // 1. Rate Limit
-      if (!await checkRateLimit(userId, 'join', 10, 60)) { 
-        return socket.emit("error", { message: "Rate limit exceeded" });
-      }
-
-      // 2. Validate Membership
+      if (!await checkRateLimit(userId, 'join', 10, 60)) return socket.emit("error", { message: "Rate limit exceeded" });
       try {
         const participant = await prisma.participant.findUnique({
-          where: {
-            userId_conversationId: {
-              userId,
-              conversationId
-            }
-          }
+          where: { userId_conversationId: { userId, conversationId } }
         });
-
-        if (participant) {
-          socket.join(conversationId);
-        }
-      } catch (e) {
-        console.error("Error joining conversation:", e);
-      }
+        if (participant) socket.join(conversationId);
+      } catch (e) {}
     });
 
     socket.on("typing:start", async ({ conversationId }: TypingPayload) => {
       if (!await checkRateLimit(userId, 'typing', 20, 10)) return; 
-
-      if (conversationId && socket.user) {
-        socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: true });
-      }
+      if (conversationId && socket.user) socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: true });
     });
 
     socket.on("typing:stop", ({ conversationId }: TypingPayload) => {
-       if (conversationId && socket.user) {
-        socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: false });
-      }
+       if (conversationId && socket.user) socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: false });
     });
 
     socket.on('messages:distribute_keys', async ({ conversationId, keys }: DistributeKeysPayload) => {
       if (!await checkRateLimit(userId, 'keys', 50, 60)) return; 
-      
       if (!keys || !Array.isArray(keys) || !conversationId) return;
       
       try {
-        const participant = await prisma.participant.findFirst({
-          where: { conversationId, userId },
-        });
+        const participant = await prisma.participant.findFirst({ where: { conversationId, userId } });
         if (!participant) return;
-
-        keys.forEach(keyPackage => {
+        
+        // ✅ SMART ROUTING: Kirim kunci HANYA ke perangkat tujuan
+        for (const keyPackage of keys) {
           if (keyPackage.userId && keyPackage.key) {
-            io.to(keyPackage.userId).emit('session:new_key', {
-              conversationId,
-              encryptedKey: keyPackage.key,
-              type: 'GROUP_KEY',
-              senderId: userId
-            });
+            
+            if (keyPackage.targetDeviceId) {
+               // Cari semua socket milik user tujuan
+               const targetSockets = await io.in(keyPackage.userId).fetchSockets();
+               
+               for (const s of targetSockets) {
+                  const authSocket = s as unknown as AuthenticatedSocket;
+                  // Tembakkan hanya jika deviceId socket cocok dengan targetDeviceId
+                  if (authSocket.user?.deviceId === keyPackage.targetDeviceId) {
+                      authSocket.emit('session:new_key', {
+                          conversationId,
+                          encryptedKey: keyPackage.key,
+                          type: 'GROUP_KEY',
+                          senderId: userId,
+                          senderDeviceKey: keyPackage.senderDeviceKey
+                      });
+                  }
+               }
+            } else {
+               // Fallback: Jika tidak ada targetDeviceId, broadcast ke semua (untuk kompabilitas mundur)
+               io.to(keyPackage.userId).emit('session:new_key', {
+                  conversationId,
+                  encryptedKey: keyPackage.key,
+                  type: 'GROUP_KEY',
+                  senderId: userId,
+                  senderDeviceKey: keyPackage.senderDeviceKey
+               });
+            }
+            
           }
-        });
+        }
       } catch (error) {
         console.error(`[Key Distribution] Error:`, error);
       }
     });
 
     socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => void) => {
-      // 1. Sandbox Rate Limit (Strict)
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
-
-      console.log(`[MESSAGE] User ${userId} isVerified: ${user?.isVerified}`);
 
       if (!user?.isVerified) {
           try {
               const key = `sandbox:msg:${userId}`;
-              
-              const luaScript = `
-                local c = redis.call("INCR", KEYS[1]);
-                if c == 1 then redis.call("EXPIRE", KEYS[1], ARGV[1]) end;
-                return c;
-              `;
-              
-              const count = await redisClient.eval(luaScript, {
-                keys: [key],
-                arguments: ['60']
-              }) as number;
-
-              if (count === 1) {
-                  console.log(`[SANDBOX] User ${userId} sent message 1/5 (window starts)`);
-              } else {
-                  console.log(`[SANDBOX] User ${userId} sent message ${count}/5`);
-              }
-
-              if (count > 5) {
-                  console.log(`[SANDBOX] User ${userId} blocked - limit reached (${count}/5)`);
-                  return callback?.({ ok: false, error: "SANDBOX_LIMIT_REACHED: Max 5 messages per minute. Verify account to unlock." });
-              }
+              const luaScript = `local c = redis.call("INCR", KEYS[1]); if c == 1 then redis.call("EXPIRE", KEYS[1], ARGV[1]) end; return c;`;
+              const count = await redisClient.eval(luaScript, { keys: [key], arguments: ['60'] }) as number;
+              if (count > 5) return callback?.({ ok: false, error: "SANDBOX_LIMIT_REACHED: Max 5 messages per minute. Verify account to unlock." });
           } catch (redisError) {
-              console.error(`[SANDBOX] Redis error:`, redisError);
               return callback?.({ ok: false, error: "Service unavailable. Try again later." });
           }
       }
 
-      // 2. Standard Rate Limit
       if (!await checkRateLimit(userId, 'message', 15, 60)) { 
          return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
       }
@@ -360,32 +299,19 @@ export function registerSocket(httpServer: HttpServer) {
           return callback?.({ ok: false, error: "Conversation not found." });
         }
 
-        // --- TYPE SAFE DB TRANSACTION ---
         const newMessageRaw = await prisma.message.create({
           data: { 
-              conversationId, 
-              senderId: userId, 
-              content, 
-              sessionId: sessionId || null,
-              repliedToId: repliedToId || null,
-              expiresAt: expiresAt ? new Date(expiresAt) : null, 
-              isViewOnce: isViewOnce === true
+              conversationId, senderId: userId, content, sessionId: sessionId || null,
+              repliedToId: repliedToId || null, expiresAt: expiresAt ? new Date(expiresAt) : null, isViewOnce: isViewOnce === true
           },
-          include: { 
-              sender: { select: { id: true, encryptedProfile: true } }
-          }
+          include: { sender: { select: { id: true, encryptedProfile: true } } }
         });
         
-        // Mapping ke Type-Safe RawServerMessage
         const safeMessage = toRawServerMessage(newMessageRaw);
-        
-        if (tempId !== undefined) {
-          safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
-        }
+        if (tempId !== undefined) safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
         
         conversation.participants.forEach(participant => {
           io.to(participant.userId).emit('message:new', safeMessage);
-          
           if (participant.userId !== userId) {
              const encryptedPushPayload = pushPayloads ? pushPayloads[participant.userId] : null;
              sendPushNotification(participant.userId, {
@@ -397,7 +323,6 @@ export function registerSocket(httpServer: HttpServer) {
         
         callback?.({ ok: true, msg: safeMessage });
       } catch (error) {
-        console.error("Failed to process message:", error);
         callback?.({ ok: false, error: "Failed to send." });
       }
     });
@@ -407,48 +332,46 @@ export function registerSocket(httpServer: HttpServer) {
       const uid = socket.user.id;
 
       try {
-        // 1. Cek apakah pesan itu ada dan memang milik si pengirim
         const msg = await prisma.message.findUnique({
           where: { id: messageId },
           select: { senderId: true, conversationId: true }
         });
 
-        if (!msg || msg.conversationId !== conversationId || msg.senderId !== uid) {
-          return; // Abaikan jika bukan pesan miliknya
-        }
+        if (!msg || msg.conversationId !== conversationId || msg.senderId !== uid) return;
 
-        // 2. HANCURKAN DARI SERVER (Jika pesan masih belum terbaca/terkirim oleh penerima)
-        await prisma.message.deleteMany({
-          where: { id: messageId, senderId: uid } // Gunakan deleteMany agar tidak crash jika ID tidak ada
-        });
-        
-        console.log(`[Zero-Knowledge] Pesan ${messageId} ditarik oleh pengirim dan dihapus dari server.`);
-
-        // 3. Beri tahu Klien yang Sedang Online (Tombstone Relay)
-        // Kita menggunakan socket untuk memberi sinyal real-time agar UI frontend langsung merespons
-        socket.to(conversationId).emit('message:deleted_remotely', { 
-          messageId, 
-          conversationId,
-          deletedBy: uid
-        });
-
-      } catch (error) {
-        console.error('Failed to unsend message on server:', error);
-      }
+        await prisma.message.deleteMany({ where: { id: messageId, senderId: uid } });
+        socket.to(conversationId).emit('message:deleted_remotely', { messageId, conversationId, deletedBy: uid });
+      } catch (error) {}
     });
 
-    socket.on('message:view_once_opened', ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
+    socket.on('message:view_once_opened', async ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
         if (!messageId || !conversationId || !socket.user) return;
-        socket.to(conversationId).emit('message:viewed', { messageId, conversationId });
+        const uid = socket.user.id;
+
+        try {
+            const isParticipant = await prisma.participant.findUnique({ where: { userId_conversationId: { userId: uid, conversationId } } });
+            if (!isParticipant) return;
+
+            const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { conversationId: true, senderId: true } });
+            if (!msg || msg.conversationId !== conversationId) return;
+
+            if (msg.senderId === uid) return;
+
+            socket.to(conversationId).emit('message:viewed', { messageId, conversationId });
+        } catch (error) {}
     });
 
     socket.on("push:subscribe", async (data: PushSubscribePayload) => {
+      // ✅ FIX: Ambil deviceId langsung dari session properties dengan aman
+      if (!socket.user || !socket.user.deviceId) return;
+      const deviceId = socket.user.deviceId;
+
       if (!data.endpoint || !data.keys?.p256dh || !data.keys?.auth) return;
       try {
         await prisma.pushSubscription.upsert({
           where: { endpoint: data.endpoint },
-          update: { p256dh: data.keys.p256dh, auth: data.keys.auth },
-          create: { endpoint: data.endpoint, p256dh: data.keys.p256dh, auth: data.keys.auth, userId },
+          update: { p256dh: data.keys.p256dh, auth: data.keys.auth, deviceId },
+          create: { endpoint: data.endpoint, p256dh: data.keys.p256dh, auth: data.keys.auth, deviceId },
         });
       } catch (error) {
         console.error("Failed to save push subscription:", error);
@@ -460,106 +383,121 @@ export function registerSocket(httpServer: HttpServer) {
       const uid = socket.user.id;
 
       try {
-        // 1. Ambil data pesan SEKALIGUS dengan info grup (hanya 1x query)
         const msg = await prisma.message.findUnique({
           where: { id: messageId },
-          select: { 
-            id: true, 
-            conversationId: true, 
-            senderId: true,
-            conversation: { select: { isGroup: true } } // Join ringan untuk cek tipe chat
-          }
+          select: { id: true, conversationId: true, senderId: true, conversation: { select: { isGroup: true } } }
         });
         if (!msg || msg.conversationId !== conversationId) return;
 
-        // 2. Validasi apakah user tergabung dalam percakapan
-        const isParticipant = await prisma.participant.findUnique({ 
-          where: { userId_conversationId: { userId: uid, conversationId } } 
-        });
+        const isParticipant = await prisma.participant.findUnique({ where: { userId_conversationId: { userId: uid, conversationId } } });
         if (!isParticipant) return;
 
-        // 3. Update penanda baca terakhir dari participant
+        if (msg.senderId === uid) return;
+
         await prisma.participant.update({
           where: { userId_conversationId: { userId: uid, conversationId } },
           data: { lastReadMsgId: messageId }
         });
 
-        // 4. Beritahu pengirim bahwa pesan sudah dibaca (Centang Biru) via Socket
         if (msg.senderId !== uid) {
-          io.to(msg.senderId).emit('message:status_updated', {
-            messageId,
-            conversationId: msg.conversationId,
-            readBy: uid,
-            status: 'READ',
-          });
+          io.to(msg.senderId).emit('message:status_updated', { messageId, conversationId: msg.conversationId, readBy: uid, status: 'READ' });
         }
 
-        // 5. Store-and-Forward: Hancurkan vs Simpan Status
         if (!msg.conversation.isGroup) {
-           // Jika ini chat pribadi (1-on-1), HANCURKAN pesan dari server
-           await prisma.message.delete({
-             where: { id: messageId }
-           });
+           await prisma.message.delete({ where: { id: messageId } });
         } else {
-           // Jika ini Grup, simpan status READ (penghapusan ditangani oleh messageSweeper setelah 14 hari)
            await prisma.messageStatus.upsert({
              where: { messageId_userId: { messageId, userId: uid } },
              update: { status: 'READ' },
              create: { messageId, userId: uid, status: 'READ' },
            });
         }
-
-      } catch (error) {
-        console.error('Failed to mark message as read:', error);
-      }
+      } catch (error) {}
     });
 
     // --- E2EE Key Recovery Handlers ---
     
-    socket.on('group:request_key', async ({ conversationId }: GroupKeyRequestPayload) => {
+    socket.on('group:request_key', async ({ conversationId, targetSenderId, targetDeviceKey }: GroupKeyRequestPayload) => {
       if (!conversationId) return;
       
       const isParticipant = await prisma.participant.findFirst({
         where: { conversationId, userId: socket.user!.id }
       });
-      if (!isParticipant) {
-        console.warn(`[Socket] Unauthorized key request from ${socket.user!.id}`);
-        return;
-      }
+      if (!isParticipant) return;
 
       try {
-        const participants = await prisma.participant.findMany({
-          where: { conversationId, userId: { not: userId } },
-          select: { userId: true },
-        });
-        const allOnlineUsers = await redisClient.sMembers('online_users');
-        const onlineParticipants = participants.filter(p => allOnlineUsers.includes(p.userId));
+        let fulfillerSocket = null;
+        let fulfillerId = null;
+
+        // 1. Ask specific target if provided
+        if (targetSenderId) {
+             const targetSockets = await io.in(targetSenderId).fetchSockets();
+             if (targetDeviceKey) {
+                 const matchingSocket = targetSockets.find(s => (s as unknown as AuthenticatedSocket).user?.publicKey === targetDeviceKey);
+                 if (matchingSocket) {
+                     fulfillerSocket = matchingSocket;
+                     fulfillerId = targetSenderId;
+                 }
+             }
+             if (!fulfillerSocket && targetSockets.length > 0) {
+                 // Fallback to another socket of that user
+                 const other = targetSockets.find(s => s.id !== socket.id);
+                 if (other) {
+                     fulfillerSocket = other;
+                     fulfillerId = targetSenderId;
+                 }
+             }
+        }
+
+        // 2. Fallback to random online participant
+        if (!fulfillerSocket) {
+            const participants = await prisma.participant.findMany({
+              where: { conversationId, userId: { not: userId } },
+              select: { userId: true },
+            });
+            const allOnlineUsers = await redisClient.sMembers('online_users');
+            const onlineParticipants = participants.filter(p => allOnlineUsers.includes(p.userId));
+            
+            if (onlineParticipants.length > 0) {
+              fulfillerId = onlineParticipants[0].userId;
+              const sockets = await io.in(fulfillerId).fetchSockets();
+              if (sockets.length > 0) fulfillerSocket = sockets[0];
+            }
+        }
         
-        if (onlineParticipants.length > 0) {
-          const fulfillerId = onlineParticipants[0].userId;
+        if (fulfillerSocket && fulfillerId) {
           const requesterPublicKey = socket.user?.publicKey;
+          const requesterDeviceId = socket.user?.deviceId;
           
           if (requesterPublicKey) {
-            io.to(fulfillerId).emit('group:fulfill_key_request', {
-              conversationId,
-              requesterId: userId,
-              requesterPublicKey: requesterPublicKey,
+            fulfillerSocket.emit('group:fulfill_key_request', {
+              conversationId, 
+              requesterId: userId, 
+              requesterPublicKey,
+              requesterDeviceId
             });
           }
         }
-      } catch (error) {
-        console.error(`Error processing group key request`, error);
-      }
+      } catch (error) {}
     });
 
-    socket.on('group:fulfilled_key', ({ requesterId, conversationId, encryptedKey }: KeyFulfillmentPayload) => {
+    socket.on('group:fulfilled_key', async (payload: KeyFulfillmentPayload) => {
+      const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey } = payload;
       if (!requesterId || !conversationId || !encryptedKey) return;
-      io.to(requesterId).emit('session:new_key', {
-        conversationId,
-        encryptedKey,
-        type: 'GROUP_KEY',
-        senderId: userId 
-      });
+      
+      const emitPayload = { conversationId, encryptedKey, type: 'GROUP_KEY' as const, senderId: userId, senderDeviceKey };
+      
+      if (targetDeviceId) {
+         const targetSockets = await io.in(requesterId).fetchSockets();
+         for (const s of targetSockets) {
+            const authSocket = s as unknown as AuthenticatedSocket;
+            if (authSocket.user?.deviceId === targetDeviceId) {
+                authSocket.emit('session:new_key', emitPayload);
+            }
+         }
+      } else {
+         io.to(requesterId).emit('session:new_key', emitPayload);
+      }
     });
 
     socket.on("session:request_missing", async ({ conversationId, sessionId }: { conversationId: string, sessionId: string }) => {
@@ -567,28 +505,12 @@ export function registerSocket(httpServer: HttpServer) {
         const uid = socket.user?.id;
         if (!uid) return;
 
-        const isParticipant = await prisma.participant.findFirst({
-          where: { conversationId, userId: uid }
-        });
+        const isParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: uid } });
+        if (!isParticipant) return;
 
-        if (!isParticipant) {
-          console.warn(`[Socket] Unauthorized session key request from ${uid} to ${conversationId}`);
-          return;
-        }
-
-        if (!await checkRateLimit(uid, 'session_request_missing', 10, 60)) {
-          return socket.emit("error", { message: "Rate limit exceeded for missing key requests." });
-        }
-
-        socket.to(conversationId).emit("session:key_requested", {
-          requesterId: uid,
-          conversationId,
-          sessionId
-        });
-
-      } catch (error) {
-        console.error("Error handling session request:", error);
-      }
+        if (!await checkRateLimit(uid, 'session_request_missing', 10, 60)) return;
+        socket.to(conversationId).emit("session:key_requested", { requesterId: uid, conversationId, sessionId });
+      } catch (error) {}
     });
 
     socket.on('session:request_key', async (data: KeyRequestPayload) => {
@@ -598,39 +520,22 @@ export function registerSocket(httpServer: HttpServer) {
       if (targetId) {
           try {
             const participants = await prisma.participant.findMany({
-              where: {
-                conversationId,
-                userId: { in: [userId, targetId] }
-              },
+              where: { conversationId, userId: { in: [userId, targetId] } },
               select: { userId: true }
             });
 
             const participantIds = participants.map(p => p.userId);
-            if (!participantIds.includes(userId) || !participantIds.includes(targetId)) {
-              socket.emit('error', { error: 'Unauthorized key request relay' });
-              return;
-            }
+            if (!participantIds.includes(userId) || !participantIds.includes(targetId)) return;
 
-            io.to(targetId).emit('session:request_key', {
-                conversationId,
-                requesterId: userId,
-                sessionId
-            });
-          } catch (error) {
-            console.error("Error in targeted session:request_key:", error);
-          }
+            io.to(targetId).emit('session:request_key', { conversationId, requesterId: userId, sessionId });
+          } catch (error) {}
           return;
       }
 
       if (!sessionId) return;
 
-      const isParticipant = await prisma.participant.findFirst({
-        where: { conversationId, userId: socket.user!.id }
-      });
-      if (!isParticipant) {
-        console.warn(`[Socket] Unauthorized key request from ${socket.user!.id}`);
-        return;
-      }
+      const isParticipant = await prisma.participant.findFirst({ where: { conversationId, userId: socket.user!.id } });
+      if (!isParticipant) return;
 
       try {
         const participants = await prisma.participant.findMany({
@@ -645,69 +550,39 @@ export function registerSocket(httpServer: HttpServer) {
           const requesterPublicKey = socket.user?.publicKey;
           
           if (requesterPublicKey) {
-            io.to(fulfillerId).emit('session:fulfill_request', {
-              conversationId,
-              sessionId,
-              requesterId: userId,
-              requesterPublicKey: requesterPublicKey,
-            });
+            io.to(fulfillerId).emit('session:fulfill_request', { conversationId, sessionId, requesterId: userId, requesterPublicKey: requesterPublicKey });
           }
         }
-      } catch (error) {
-        console.error('Error processing session key request', error);
-      }
+      } catch (error) {}
     });
 
     socket.on('session:fulfill_response', ({ requesterId, conversationId, sessionId, encryptedKey }: KeyFulfillmentPayload) => {
       if (!requesterId || !encryptedKey) return;
-      io.to(requesterId).emit('session:new_key', {
-        conversationId,
-        sessionId,
-        encryptedKey,
-        type: 'SESSION_KEY',
-        senderId: userId
-      });
+      io.to(requesterId).emit('session:new_key', { conversationId, sessionId, encryptedKey, type: 'SESSION_KEY', senderId: userId });
     });
 
-    // === WEBRTC E2EE SIGNALING (P2P CALLS) ===
     socket.on('webrtc:secure_signal', (data: { to: string, type: string, payload: string }) => {
       if (!data || !data.to) return;
       socket.to(data.to).emit('webrtc:secure_signal', { from: userId, type: data.type, payload: data.payload });
     });
 
-    // === DEVICE MIGRATION TUNNEL ===
     socket.on('migration:join', (roomId: string) => {
-      if (typeof roomId === 'string' && roomId.startsWith('mig_') && roomId.length > 20) {
-        socket.join(roomId);
-      } else {
-        socket.emit("error", { message: "Invalid migration room" });
-      }
+      if (typeof roomId === 'string' && roomId.startsWith('mig_') && roomId.length > 20) socket.join(roomId);
     });
 
     socket.on('migration:start', async (data: { roomId: string, totalChunks: number, sealedKey: string, iv: string }) => {
-      if (!data || !data.roomId || typeof data.roomId !== 'string' || !data.roomId.startsWith('mig_')) {
-        socket.emit("error", { message: "Invalid migration room payload" });
-        return;
-      }
-      
+      if (!data || !data.roomId || typeof data.roomId !== 'string' || !data.roomId.startsWith('mig_')) return;
       await redisClient.setEx(`migration_owner:${data.roomId}`, 3600, userId);
       socket.to(data.roomId).emit('migration:start', data);
     });
 
-    // PENGHAPUSAN ANY DI SINI: ganti "chunk: any" dengan tipe yang valid (misalnya ArrayBuffer untuk binary)
     socket.on('migration:chunk', async (data: { roomId: string, chunkIndex: number, chunk: ArrayBuffer }) => {
       if (!data || !data.roomId || typeof data.roomId !== 'string') return;
-      
       const ownerId = await redisClient.get(`migration_owner:${data.roomId}`);
-      if (ownerId !== userId) {
-        socket.emit("error", { message: "Permission denied for this migration room" });
-        return;
-      }
-      
+      if (ownerId !== userId) return;
       socket.to(data.roomId).emit('migration:chunk', data);
     });
 
-    // === PRESENCE MANAGEMENT (AWAY/ACTIVE) ===
     socket.on("user:away", async () => {
       if (!userId) return;
       const userSocketsKey = `user:${userId}:sockets`;
@@ -732,7 +607,6 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
-    // Disconnect Handler
     socket.on("disconnect", async () => {
        const userSocketsKey = `user:${userId}:sockets`;
        await redisClient.sRem(userSocketsKey, socket.id);

@@ -59,6 +59,28 @@ class NyxShadowVaultProxy {
     return db.storyKeys;
   }
 
+  async exportDatabase(): Promise<string> {
+    try {
+      const messages = await db.messages.toArray();
+      return JSON.stringify({ messages });
+    } catch (e) {
+      console.error("Export DB failed:", e);
+      return "{}";
+    }
+  }
+
+  async importDatabase(jsonString: string): Promise<void> {
+    try {
+      const data = JSON.parse(jsonString);
+      if (data.messages && Array.isArray(data.messages)) {
+        await db.messages.bulkPut(data.messages);
+        console.log(`[ShadowVault] Successfully imported ${data.messages.length} messages.`);
+      }
+    } catch (e) {
+      console.error("Import DB failed:", e);
+    }
+  }
+
   async upsertMessages(messages: Message[]) {
     // Filter messages: Allow if it has content OR it is a tombstone
     const validMessages = messages.filter(m => (m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('[')) || m.isDeletedLocal || m.fileUrl || m.isBlindAttachment);
@@ -145,45 +167,56 @@ class NyxShadowVaultProxy {
 
   async getMessagesByConversation(conversationId: string, limit: number = 50, beforeDate?: string): Promise<Message[]> {
     try {
-      const query = db.messages.where('conversationId').equals(conversationId);
-      
-      const allRecords = await query.toArray();
-      const now = Date.now();
+      // Background expiry sweep — non-blocking
+      const sweepExpired = async () => {
+        try {
+          const now = Date.now();
+          const expired = await db.messages
+            .where('conversationId')
+            .equals(conversationId)
+            .filter(r => {
+              const expiresAt = r.expiresAt as string | undefined;
+              return !!expiresAt && new Date(expiresAt).getTime() <= now;
+            })
+            .primaryKeys();
+          if (expired.length > 0) {
+            db.messages.bulkDelete(expired as string[]).catch(e => console.error("Failed to delete expired messages:", e));
+          }
+        } catch {}
+      };
+      sweepExpired(); // Fire and forget
 
-      // THE SWEEPER: Eagerly find and destroy expired messages from Local DB
-      const validRecords: typeof allRecords = [];
-      const expiredIds: string[] = [];
+      // ✅ FIX: Use the compound index [conversationId+createdAt] for efficient range query
+      // We need the LATEST messages, so we fetch all for this conversation,
+      // sort DESC by createdAt, take the limit, then reverse to ASC for UI.
+      // Dexie's compound index orders by conversationId first, then createdAt.
+      const allRecords = await db.messages
+        .where('conversationId')
+        .equals(conversationId)
+        .toArray();
 
-      for (const r of allRecords) {
-        if (r.expiresAt && new Date(r.expiresAt).getTime() <= now) {
-           expiredIds.push(r.id);
-        } else {
-           validRecords.push(r);
-        }
-      }
+      // Sort DESC by createdAt (newest first)
+      allRecords.sort((a, b) => {
+        const timeA = new Date(a.createdAt).getTime();
+        const timeB = new Date(b.createdAt).getTime();
+        return timeB - timeA;
+      });
 
-      if (expiredIds.length > 0) {
-          db.messages.bulkDelete(expiredIds).catch(e => console.error("Failed to delete expired messages:", e));
-      }
+      let filteredRecords: typeof allRecords;
 
-      // Jika ada kursor (beforeDate), ambil pesan yang lebih tua dari tanggal tersebut
       if (beforeDate) {
         const beforeTime = new Date(beforeDate).getTime();
-        
-        const filteredRecords = validRecords
-          .filter(r => new Date(r.createdAt).getTime() < beforeTime)
-          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) // Sort DESC
-          .slice(0, limit);
-          
-        return this.parseRecordsToMessages(filteredRecords.reverse()); // Reverse back to ASC for UI
+        // Filter messages older than the cursor date
+        filteredRecords = allRecords.filter(r => new Date(r.createdAt).getTime() < beforeTime);
+      } else {
+        filteredRecords = allRecords;
       }
 
-      // Jika tidak ada kursor, ambil N pesan terbaru
-      const latestRecords = validRecords
-        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) // Sort DESC
-        .slice(0, limit);
+      // Take only the requested window
+      const windowedRecords = filteredRecords.slice(0, limit);
 
-      return this.parseRecordsToMessages(latestRecords.reverse()); // Reverse back to ASC for UI
+      // Reverse back to ASC (oldest first) for UI display
+      return this.parseRecordsToMessages(windowedRecords.reverse());
     } catch (e: unknown) {
       console.error("Vault Query Error:", e);
       return [];
@@ -314,9 +347,13 @@ class NyxShadowVaultProxy {
             avatarUrl: decryptedSenderAvatarUrl,
             encryptedProfile: undefined
         },
-        status: (r.status === 'sending' || r.status === 'sent' || r.status === 'delivered' || r.status === 'read' || r.status === 'failed') 
-            ? r.status 
-            : 'sent',
+        status: (() => {
+            const raw = r.status?.toUpperCase();
+            if (raw === 'SENDING' || raw === 'SENT' || raw === 'DELIVERED' || raw === 'READ' || raw === 'FAILED') {
+                return raw;
+            }
+            return 'SENT';
+        })(),
         isViewOnce: r.isViewOnce,
         isDeletedLocal: r.isDeletedLocal,
         expiresAt: r.expiresAt,

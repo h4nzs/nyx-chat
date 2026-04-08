@@ -78,9 +78,10 @@ interface MessageItemProps {
   onImageClick: (message: Message) => void;
   isFirstInSequence: boolean;
   isLastInSequence: boolean;
+  onVisibilityChange?: (messageId: string, visible: boolean) => void;
 }
 
-const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageClick, isFirstInSequence, isLastInSequence }: MessageItemProps) => {
+const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageClick, isFirstInSequence, isLastInSequence, onVisibilityChange }: MessageItemProps) => {
   const { t } = useTranslation(['chat', 'common']);
   const meId = useAuthStore((s) => s.user?.id);
   const setReplyingTo = useMessageInputStore(state => state.setReplyingTo);
@@ -108,6 +109,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
     if (!ref.current || mine) return;
     const observer = new IntersectionObserver(([entry]) => {
       if (entry.isIntersecting) {
+        onVisibilityChange?.(message.id, true);
         const alreadyRead = message.statuses?.some((s: MessageStatus) => s.userId === meId && s.status === 'READ');
         if (!alreadyRead) {
           getSocket().emit('message:mark_as_read', { messageId: message.id, conversationId: message.conversationId });
@@ -116,8 +118,11 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
       }
     }, { threshold: 0.8 });
     observer.observe(ref.current);
-    return () => observer.disconnect();
-  }, [message.id, message.conversationId, mine, meId, message.statuses]);
+    return () => {
+      onVisibilityChange?.(message.id, false);
+      observer.disconnect();
+    };
+  }, [message.id, message.conversationId, mine, meId, message.statuses, onVisibilityChange]);
 
   if (message.type === 'SYSTEM' || message.content?.startsWith('You sent') || message.content?.startsWith('Secure session') || message.content?.startsWith('System')) {
     const getSystemIcon = (text: string) => {
@@ -160,25 +165,25 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
 
   const handleDelete = () => {
     showConfirm(
-      t('chat:actions.delete_message_title'), 
-      t('chat:actions.delete_message_desc'), 
+      t('chat:actions.delete_message_title'),
+      t('chat:actions.delete_message_desc'),
       () => {
       // 1. Hapus dari UI dan Local Vault secara instan
       removeMessage(message.conversationId, message.id);
 
       // Hanya kirim instruksi hapus ke server dan lawan bicara JIKA ini pesan milik kita
       if (mine) {
+          // 2. E2EE TOMBSTONE: Selalu enqueue agar terkirim saat online kembali
+          const unsendPayload = { type: "UNSEND", targetMessageId: message.id };
+          useMessageStore.getState().sendMessage(message.conversationId, {
+              content: JSON.stringify(unsendPayload),
+              isSilent: true
+          });
+
+          // 3. Beritahu Server untuk memusnahkannya (jika pesan masih nyangkut/belum dibaca) — hanya jika connected
           const socket = getSocket();
           if (socket?.connected) {
-              // 2. Beritahu Server untuk memusnahkannya (jika pesan masih nyangkut/belum dibaca)
               socket.emit("message:unsend", { messageId: message.id, conversationId: message.conversationId });
-
-              // 3. E2EE TOMBSTONE: Kirim sinyal terenkripsi ke lawan bicara agar mereka menghapusnya dari IndexedDB mereka
-              const unsendPayload = { type: "UNSEND", targetMessageId: message.id };
-              useMessageStore.getState().sendMessage(message.conversationId, {
-                  content: JSON.stringify(unsendPayload),
-                  isSilent: true
-              });
           }
       }
 

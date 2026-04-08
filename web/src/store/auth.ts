@@ -14,6 +14,26 @@ import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDevic
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; 
 import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; 
 
+// ✅ Helper pendeteksi nama perangkat
+const getDeviceName = () => {
+    const ua = navigator.userAgent;
+    let browser = "Web Browser";
+    let os = "Unknown OS";
+    
+    if (ua.includes("Firefox")) browser = "Firefox";
+    else if (ua.includes("Edg")) browser = "Edge";
+    else if (ua.includes("Chrome")) browser = "Chrome";
+    else if (ua.includes("Safari") && !ua.includes("Chrome")) browser = "Safari";
+
+    if (ua.includes("Win")) os = "Windows";
+    else if (ua.includes("Mac")) os = "MacOS";
+    else if (ua.includes("Linux")) os = "Linux";
+    else if (ua.includes("Android")) os = "Android";
+    else if (ua.includes("like Mac")) os = "iOS";
+
+    return `${browser} on ${os}`;
+};
+
 /**
  * Retrieves the persisted signed pre-key, signs it with the identity signing key,
  * and uploads the bundle to the server.
@@ -272,9 +292,48 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       set({ isInitializingCrypto: true });
 
       try {
+        let newPublicKey = undefined;
+        let newSigningKey = undefined;
+        let newEncryptedPrivateKey = undefined;
+
+        // If this is a fresh login on a new device, generate a new cryptographic identity
+        const alreadyHasKeys = await hasStoredKeys();
+        if (alreadyHasKeys) {
+            const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+            const encryptedKeys = await getEncryptedKeys();
+            const result = await retrievePrivateKeys(encryptedKeys!, password);
+            if (result.success && result.keys) {
+                const { getSodium } = await import('@lib/sodiumInitializer');
+                const sodium = await getSodium();
+                
+                const encryptionPublicKeyBytes = sodium.crypto_scalarmult_base(result.keys.encryption);
+                const signingPublicKeyBytes = result.keys.signing.slice(32);
+                
+                newPublicKey = sodium.to_base64(encryptionPublicKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newSigningKey = sodium.to_base64(signingPublicKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newEncryptedPrivateKey = encryptedKeys!;
+            } else {
+                throw new Error("Invalid password for local keys. Please recover your account.");
+            }
+        } else if (!restoredNotSynced) {
+            const { registerAndGenerateKeys } = await import('@lib/crypto-worker-proxy');
+            const keys = await registerAndGenerateKeys(password);
+            
+            newPublicKey = keys.encryptionPublicKeyB64;
+            newSigningKey = keys.signingPublicKeyB64;
+            newEncryptedPrivateKey = keys.encryptedPrivateKeys;
+        }
+
         const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/login", {
           method: "POST",
-          body: JSON.stringify({ usernameHash, password }),
+          body: JSON.stringify({ 
+              usernameHash, 
+              password,
+              deviceName: getDeviceName(),
+              publicKey: newPublicKey,
+              signingKey: newSigningKey,
+              encryptedPrivateKey: newEncryptedPrivateKey
+          }),
         });
 
         if (res.encryptedPrivateKey) {
@@ -349,6 +408,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             publicKey: encryptionPublicKeyB64,
             signingKey: signingPublicKeyB64,
             encryptedPrivateKeys,
+            deviceName: getDeviceName(), // 👈 Mengirim nama perangkat
             turnstileToken
           }),
         });

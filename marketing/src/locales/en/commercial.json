@@ -39,7 +39,7 @@
     "badge": "ENTERPRISE USE CASES",
     "title": "Who Needs a Commercial License?",
     "c1_title": "Telemedicine & Healthcare",
-    "c1_desc": "Doctors and patients require absolute confidentiality. NYX provides a HIPAA-ready communication layer.",
+    "c1_desc": "Doctors and patients require absolute confidentiality. NYX provides a zero-knowledge communication layer with enterprise-grade security.",
     "c2_title": "FinTech & Banking",
     "c2_desc": "Secure channels for high-net-worth clients or internal executive communications that must not leak.",
     "c3_title": "Government & Defense",

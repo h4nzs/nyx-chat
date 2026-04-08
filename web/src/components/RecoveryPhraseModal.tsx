@@ -24,14 +24,19 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
   const { t } = useTranslation(['modals', 'common']);
   const [step, setStep] = useState(1);
   const [showPhrase, setShowPhrase] = useState(false);
-  const [userInput, setUserInput] = useState<string[]>([]);
+  // ✅ FIX: Track selected indices instead of word text to handle duplicate words
+  const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
 
   const words = useMemo(() => {
       if (!phrase) return [];
       return phrase.trim().split(/\s+/).filter(w => w.length > 0);
   }, [phrase]);
-  
-  const verificationWords = useMemo(() => shuffle([...words]), [words]);
+
+  // ✅ FIX: Shuffle with original indices so duplicates can be distinguished
+  const verificationWords = useMemo(() => {
+      const indexed = words.map((word, index) => ({ word, originalIndex: index }));
+      return shuffle(indexed);
+  }, [words]);
 
   const handleCopyToClipboard = async () => {
     try {
@@ -42,22 +47,23 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
     }
   };
 
-  const handleWordClick = (word: string) => {
-    if (userInput.includes(word) || userInput.length >= words.length) return;
-    setUserInput(prev => [...prev, word]);
+  const handleWordClick = (item: { word: string; originalIndex: number }) => {
+    if (selectedIndices.includes(item.originalIndex) || selectedIndices.length >= words.length) return;
+    setSelectedIndices(prev => [...prev, item.originalIndex]);
   };
 
   const handleUndo = () => {
-    setUserInput(prev => prev.slice(0, -1));
+    setSelectedIndices(prev => prev.slice(0, -1));
   };
 
   const handleVerify = () => {
-    if (userInput.join(' ') === phrase) {
+    const selectedWords = selectedIndices.map(i => words[i]);
+    if (selectedWords.join(' ') === phrase) {
       toast.success(t('modals:recovery.verify_success'));
       onClose();
     } else {
       toast.error(t('modals:recovery.verify_fail'));
-      setUserInput([]);
+      setSelectedIndices([]);
     }
   };
 
@@ -157,8 +163,13 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
       </div>
       
       <button
-        onClick={() => setStep(3)}
-        className="w-full py-3 rounded-xl bg-accent text-white font-bold uppercase tracking-wider shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"
+        onClick={() => {
+          // ✅ FIX: Prevent advancing with empty phrase
+          if (words.length === 0) return;
+          setStep(3);
+        }}
+        disabled={words.length === 0}
+        className="w-full py-3 rounded-xl bg-accent text-white font-bold uppercase tracking-wider shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all disabled:opacity-50 disabled:shadow-none"
       >
         {t('modals:recovery.button_recorded')}
       </button>
@@ -169,47 +180,47 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
     <>
       <h2 className="text-xl font-black uppercase tracking-wide text-text-primary text-center mb-2">{t('modals:recovery.verify_title')}</h2>
       <p className="text-xs text-text-secondary text-center mb-6 font-mono">{t('modals:recovery.verify_desc')}</p>
-      
+
       <div className="
-        bg-bg-main p-4 rounded-xl shadow-neumorphic-concave 
+        bg-bg-main p-4 rounded-xl shadow-neumorphic-concave
         min-h-[100px] mb-6 font-mono text-sm text-center flex flex-wrap gap-2 justify-center items-center
         border border-white/5
       ">
-        {userInput.length === 0 && <span className="text-text-secondary/40">{t('modals:recovery.select_words')}</span>}
-        {userInput.map((word, i) => (
-           <span key={i} className="px-2 py-1 rounded bg-accent/20 text-accent border border-accent/30">{word}</span>
+        {selectedIndices.length === 0 && <span className="text-text-secondary/40">{t('modals:recovery.select_words')}</span>}
+        {selectedIndices.map((origIdx, i) => (
+           <span key={i} className="px-2 py-1 rounded bg-accent/20 text-accent border border-accent/30">{words[origIdx]}</span>
         ))}
       </div>
-      
+
       <div className="flex flex-wrap gap-2 justify-center mb-8">
-        {verificationWords.map((word, index) => (
+        {verificationWords.map((item, index) => (
           <button
-            key={index}
-            onClick={() => handleWordClick(word)}
-            disabled={userInput.includes(word) || userInput.length >= words.length}
+            key={item.originalIndex}
+            onClick={() => handleWordClick(item)}
+            disabled={selectedIndices.includes(item.originalIndex) || selectedIndices.length >= words.length}
             className="
-              px-3 py-2 rounded-lg 
+              px-3 py-2 rounded-lg
               bg-bg-surface text-text-primary text-xs font-bold
-              shadow-neumorphic-convex active:shadow-neumorphic-pressed 
+              shadow-neumorphic-convex active:shadow-neumorphic-pressed
               hover:-translate-y-0.5 transition-all
             "
           >
-            {word}
+            {item.word}
           </button>
         ))}
       </div>
-      
+
       <div className="flex gap-4">
         <button
           onClick={handleUndo}
-          disabled={userInput.length === 0}
+          disabled={selectedIndices.length === 0}
           className="flex-1 py-3 rounded-xl bg-bg-surface text-text-secondary font-bold uppercase text-xs shadow-neumorphic-convex active:shadow-neumorphic-pressed disabled:opacity-50 transition-all"
         >
           {t('modals:recovery.undo')}
         </button>
         <button
           onClick={handleVerify}
-          disabled={userInput.length !== words.length}
+          disabled={selectedIndices.length !== words.length}
           className="flex-1 py-3 rounded-xl bg-accent text-white font-bold uppercase text-xs shadow-neumorphic-convex active:shadow-neumorphic-pressed disabled:opacity-50 disabled:shadow-none transition-all"
         >
           {t('modals:recovery.confirm')}
