@@ -436,9 +436,6 @@ export async function exportDatabaseToJson(): Promise<string> {
   const exportData: Record<string, unknown[]> = {};
 
   // ✅ FIX: HANYA ekspor/impor tabel riwayat dan status penerima.
-  // KECUALI: Semua tabel yang mendefinisikan identitas kriptografi perangkat 
-  // (seperti kvStore yang berisi kunci privat, sessionKeys, ratchetSessions, dll)
-  // Ini krusial agar perangkat baru tidak menjadi "kloningan" kriptografi perangkat lama.
   const tables = [
     'messages', 
     'messageKeys', // ✅ Menambahkan messageKeys agar histori bisa didekripsi
@@ -456,6 +453,41 @@ export async function exportDatabaseToJson(): Promise<string> {
      }
   }
 
+  // --- DEVICE-SPECIFIC DECRYPTION FOR HISTORY SYNC ---
+  // Kita harus mendekripsi messages dan messageKeys sebelum diekspor karena kunci enkripsi
+  // bersifat lokal per perangkat (masterSeed / privateKey).
+  try {
+      const { useAuthStore } = await import('@store/auth');
+      const masterSeed = await useAuthStore.getState().getMasterSeed();
+      if (masterSeed) {
+          const { worker_decrypt_session_key } = await import('@lib/crypto-worker-proxy');
+
+          if (exportData['messageKeys']) {
+              for (const mk of exportData['messageKeys']) {
+                  try {
+                      const m = mk as { key: Uint8Array, plaintext?: string };
+                      const decrypted = await worker_decrypt_session_key(m.key, masterSeed);
+                      // Temporary store as array so JSON.stringify can handle it
+                      m.plaintext = Buffer.from(decrypted).toString('base64');
+                  } catch (e) {}
+              }
+          }
+      }
+
+      const { decryptVaultText } = await import('@lib/shadowVaultDb');
+      if (exportData['messages']) {
+          for (const msg of exportData['messages']) {
+              const m = msg as any;
+              if (m.content) m.content = await decryptVaultText(m.content) || m.content;
+              if (m.preview) m.preview = await decryptVaultText(m.preview) || m.preview;
+              if (m.fileUrl) m.fileUrl = await decryptVaultText(m.fileUrl) || m.fileUrl;
+              if (m.fileMeta) m.fileMeta = await decryptVaultText(m.fileMeta) || m.fileMeta;
+          }
+      }
+  } catch (e) {
+      console.warn("Failed to decrypt local payload for export", e);
+  }
+
   return JSON.stringify(exportData, (key, value) => {
     if (value instanceof Uint8Array) {
       return { __type: 'Uint8Array', data: Array.from(value) };
@@ -463,7 +495,6 @@ export async function exportDatabaseToJson(): Promise<string> {
     return value;
   });
 }
-
 /**
  * Mengimpor dan menimpa isi brankas kunci dari string JSON.
  */
@@ -491,6 +522,43 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
         'groupReceiverStates', 
         'groupSkippedKeys'
       ];
+
+      // --- DEVICE-SPECIFIC ENCRYPTION FOR HISTORY SYNC ---
+      try {
+          const { useAuthStore } = await import('@store/auth');
+          const masterSeed = await useAuthStore.getState().getMasterSeed();
+          if (masterSeed) {
+              const { worker_encrypt_session_key } = await import('@lib/crypto-worker-proxy');
+              
+              if (importData['messageKeys']) {
+                  for (const mk of importData['messageKeys']) {
+                      try {
+                          const m = mk as { key: Uint8Array, plaintext?: string };
+                          if (m.plaintext) {
+                              const mkBytes = Buffer.from(m.plaintext, 'base64');
+                              m.key = await worker_encrypt_session_key(mkBytes, masterSeed);
+                              delete m.plaintext;
+                          }
+                      } catch (e) {}
+                  }
+              }
+          }
+
+          const { encryptVaultText } = await import('@lib/shadowVaultDb');
+          if (importData['messages']) {
+              for (const msg of importData['messages']) {
+                  const m = msg as any;
+                  // Only re-encrypt if it's plaintext (not starting with typical base64 ciphertext headers/flags if any)
+                  // For shadowVaultDb, messages are exported as plaintext now!
+                  if (m.content) m.content = await encryptVaultText(m.content);
+                  if (m.preview) m.preview = await encryptVaultText(m.preview);
+                  if (m.fileUrl) m.fileUrl = await encryptVaultText(m.fileUrl);
+                  if (m.fileMeta) m.fileMeta = await encryptVaultText(m.fileMeta);
+              }
+          }
+      } catch (e) {
+          console.warn("Failed to encrypt imported payload", e);
+      }
 
       await db.transaction('rw', tables.map(t => db.table(t)), async () => {
           for (const tableName of tables) {
