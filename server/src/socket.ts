@@ -313,10 +313,9 @@ export function registerSocket(httpServer: HttpServer) {
         conversation.participants.forEach(participant => {
           io.to(participant.userId).emit('message:new', safeMessage);
           if (participant.userId !== userId) {
-             const encryptedPushPayload = pushPayloads ? pushPayloads[participant.userId] : null;
              sendPushNotification(participant.userId, {
-                 type: encryptedPushPayload ? 'ENCRYPTED_MESSAGE' : 'GENERIC_MESSAGE',
-                 data: { conversationId, messageId: safeMessage.id, encryptedPushPayload: encryptedPushPayload || undefined }
+                 type: pushPayloads ? 'ENCRYPTED_MESSAGE' : 'GENERIC_MESSAGE',
+                 data: { conversationId, messageId: safeMessage.id, pushPayloadMap: pushPayloads || undefined }
              }).catch(console.error);
           }
         });

@@ -1165,17 +1165,28 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             const pushDataBytes = new TextEncoder().encode(pushData);
 
             // Encrypt for each recipient using Web Worker
-            for (const p of conversation.participants as {id: string, publicKey?: string}[]) {
-               const targetUserId = ('userId' in p ? (p as { userId?: string }).userId! : p.id);
-               const targetPublicKey = ('user' in p ? (p as { user?: { publicKey?: string } }).user?.publicKey : p.publicKey);
+            for (const p of conversation.participants as any) {
+               const targetUserId = p.userId || p.id;
+               const userObj = p.user || p;
 
-               if (targetUserId !== user.id && targetPublicKey) {
-                   try {
-                       const recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-                       const sealed = await worker_crypto_box_seal(pushDataBytes, recipientPubBytes);
-                       pushPayloads[targetUserId] = sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
-                   } catch (e) {
-                       console.error(`Failed to seal push for ${targetUserId}`, e);
+               if (targetUserId !== user.id) {
+                   const targetDevices = userObj.devices || [];
+                   // Fallback for legacy schema or if devices array is empty
+                   if (targetDevices.length === 0 && userObj.publicKey) {
+                       targetDevices.push({ id: 'legacy', publicKey: userObj.publicKey });
+                   }
+
+                   for (const device of targetDevices) {
+                       const targetPublicKey = device.publicKey;
+                       if (targetPublicKey) {
+                           try {
+                               const recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                               const sealed = await worker_crypto_box_seal(pushDataBytes, recipientPubBytes);
+                               pushPayloads[device.id] = sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
+                           } catch (e) {
+                               console.error(`Failed to seal push for device ${device.id}`, e);
+                           }
+                       }
                    }
                }
             }

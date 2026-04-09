@@ -21,11 +21,11 @@ const MAX_GROUP_MEMBERS = 100
 const userSelectWithKeys = { 
   id: true, 
   encryptedProfile: true, 
-  devices: { orderBy: { lastActiveAt: 'desc' as const }, take: 1, select: { publicKey: true, signingKey: true } } 
+  devices: { select: { id: true, publicKey: true, signingKey: true } } 
 };
 
 // Type Definitions untuk menampung hasil query Prisma yang memiliki relasi 'devices'
-type UserWithDevices = { id: string, encryptedProfile: string | null, devices?: { publicKey: string, signingKey: string }[] };
+type UserWithDevices = { id: string, encryptedProfile: string | null, devices?: { id: string, publicKey: string, signingKey: string }[] };
 type ParticipantWithUser = { id: string, userId: string, isPinned: boolean, role: string, joinedAt: Date, user: UserWithDevices };
 type MessageWithSender = { sender: UserWithDevices };
 type RawConversationData = {
@@ -49,7 +49,7 @@ const hoistKeys = (u: UserWithDevices | null) => {
     result.publicKey = u.devices[0].publicKey;
     result.signingKey = u.devices[0].signingKey;
   }
-  delete result.devices;
+  // DO NOT delete result.devices so it is sent to the client!
   return result;
 };
 

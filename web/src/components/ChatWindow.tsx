@@ -497,6 +497,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                     components={{ Header: () => isFetchingMore ? <ChatSpinner /> : <div className="h-4" /> }}
                     itemContent={itemContent}
                     followOutput="auto"
+                    atBottomStateChange={(bottom) => setIsAtBottom(bottom)}
                     increaseViewportBy={200} // 🔥 Optimasi scroll cepat
                     computeItemKey={(index, item) => item.tempId ? `virtuoso-t-${item.tempId}` : `virtuoso-r-${item.id}`} // 🔥 Ini menghilangkan kedip/glitch dari framework list
                   />
