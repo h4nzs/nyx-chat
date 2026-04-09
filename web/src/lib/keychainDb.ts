@@ -547,7 +547,7 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
           const { encryptVaultText } = await import('@lib/shadowVaultDb');
           if (importData['messages']) {
               for (const msg of importData['messages']) {
-                  const m = msg as any;
+                  const m = msg as { content?: string, preview?: string, fileUrl?: string, fileMeta?: string };
                   // Only re-encrypt if it's plaintext (not starting with typical base64 ciphertext headers/flags if any)
                   // For shadowVaultDb, messages are exported as plaintext now!
                   if (m.content) m.content = await encryptVaultText(m.content);

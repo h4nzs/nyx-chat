@@ -306,7 +306,7 @@ router.post('/:id/participants', async (req, res, next) => {
     const conversationRaw = await prisma.conversation.findUnique({ where: { id: conversationId }, include: { participants: { include: { user: { select: userSelectWithKeys } } }, creator: { select: userSelectWithKeys } } })
 
     const safeParticipants = newParticipantsRaw.map(p => {
-       const hoistedUser = hoistKeys((p as any).user);
+       const hoistedUser = hoistKeys((p as { user: UserWithDevices | null }).user);
        const objToMap = { ...p, user: hoistedUser };
        return toParticipant(objToMap as Parameters<typeof toParticipant>[0]);
     });

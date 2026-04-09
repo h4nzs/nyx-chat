@@ -1,5 +1,5 @@
 // Shim untuk react-window
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable */
 declare module 'react-window' {
   import { Component, CSSProperties, Ref } from 'react';
 
@@ -11,7 +11,7 @@ declare module 'react-window' {
   };
 
   export interface FixedSizeListProps {
-    children: React.ComponentType<any>;
+    children: React.ComponentType<unknown>;
     className?: string;
     direction?: 'horizontal' | 'vertical';
     height: number | string;
