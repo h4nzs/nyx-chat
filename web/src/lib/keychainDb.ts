@@ -571,4 +571,3 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
       });
   });
 }
-}
