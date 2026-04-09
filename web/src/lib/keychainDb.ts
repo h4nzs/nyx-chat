@@ -477,7 +477,7 @@ export async function exportDatabaseToJson(): Promise<string> {
       const { decryptVaultText } = await import('@lib/shadowVaultDb');
       if (exportData['messages']) {
           for (const msg of exportData['messages']) {
-              const m = msg as any;
+              const m = msg as { content?: string, preview?: string, fileUrl?: string, fileMeta?: string };
               if (m.content) m.content = await decryptVaultText(m.content) || m.content;
               if (m.preview) m.preview = await decryptVaultText(m.preview) || m.preview;
               if (m.fileUrl) m.fileUrl = await decryptVaultText(m.fileUrl) || m.fileUrl;
@@ -556,8 +556,8 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
                   if (m.fileMeta) m.fileMeta = await encryptVaultText(m.fileMeta);
               }
           }
-      } catch (e) {
-          console.warn("Failed to encrypt imported payload", e);
+      } catch {
+          console.warn("Failed to encrypt imported payload");
       }
 
       await db.transaction('rw', tables.map(t => db.table(t)), async () => {
@@ -570,4 +570,5 @@ export async function importDatabaseFromJson(jsonString: string): Promise<void> 
           }
       });
   });
+}
 }
