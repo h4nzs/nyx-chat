@@ -4,6 +4,7 @@
 import { prisma } from '../lib/prisma.js'
 import { PrismaClient } from '@prisma/client'
 import { getSodium } from '../lib/sodium.js'
+import { sanitizeForLog } from './logger.js'
 
 export type PrismaTransactionClient = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">
 
@@ -56,13 +57,13 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
     const devices = p.user.devices
 
     if (!devices || devices.length === 0) {
-      console.warn(`User ${p.user.id} in conversation ${conversationId} has no active devices.`)
+      console.warn(`User ${sanitizeForLog(p.user.id)} in conversation ${sanitizeForLog(conversationId)} has no active devices.`)
       continue
     }
 
     for (const device of devices) {
       if (!device.publicKey) {
-        console.warn(`Device ${device.id} for user ${p.user.id} has no public key.`)
+        console.warn(`Device ${sanitizeForLog(device.id)} for user ${sanitizeForLog(p.user.id)} has no public key.`)
         continue
       }
 
@@ -88,14 +89,14 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
         }
       } catch (e: unknown) {
         const errorMessage = e instanceof Error ? e.message : 'Unknown error'
-        console.error(`Failed to process public key for device ${device.id}. Error: ${errorMessage}`)
-        throw new Error(`Corrupted public key found for device ${device.id}. Cannot establish secure session.`)
+        console.error(`Failed to process public key for device ${sanitizeForLog(device.id)}. Error: ${sanitizeForLog(errorMessage)}`)
+        throw new Error(`Corrupted public key found for device ${sanitizeForLog(device.id)}. Cannot establish secure session.`)
       }
     }
   }
 
   if (keyRecords.length === 0) {
-    throw new Error(`Failed to create session keys: No valid devices found in conversation ${conversationId}.`)
+    throw new Error(`Failed to create session keys: No valid devices found in conversation ${sanitizeForLog(conversationId)}.`)
   }
 
   if (!initiatorHasKey) {

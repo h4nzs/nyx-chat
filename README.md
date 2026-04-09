@@ -1,9 +1,9 @@
-# NYX: The Zero-Knowledge Messenger
+# NYX
 
 <p align="center">
   <img src="./web/public/nyx.png" width="250" alt="NYX Logo">
 </p>
-<h1 align="center">NYX - Zero-Knowledge Messenger</h1>
+<h1 align="center">Zero-Knowledge Messenger</h1>
 
 <p align="center">
   <a href="https://nyx-app.my.id"><strong>🌐 Access the Official Web Client: nyx-app.my.id</strong></a>
@@ -142,7 +142,6 @@ Please check the `CONTRIBUTING.md` and use the provided PR templates.
 **Han**
 *Creator & Lead Architect of NYX*
 - 🐙 GitHub: [@h4nzs](https://github.com/h4nzs)
-- 💼 LinkedIn: [han](https://linkedin.com/in/muhammad-dehan-amada)
 - 🌐 Website: [portfolio](https://h4nzs.github.io/portofolio)
 
 ## ✨ Contributors

@@ -12,6 +12,7 @@ import { sendPushNotification } from '../utils/sendPushNotification.js'
 import { deleteR2File } from '../utils/r2.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
+import { sanitizeForLog } from '../utils/logger.js'
 
 const router: Router = Router()
 router.use(requireAuth)
@@ -171,14 +172,15 @@ router.delete('/:id', async (req, res, next) => {
 
        // Keamanan sederhana: Pastikan user hanya menghapus file miliknya
        if (!filename.startsWith(`${userId}-`)) {
-          console.warn('[Security] User', userId, 'attempted to delete unauthorized file:', safeR2Key);
+          console.warn('[Security] User', sanitizeForLog(userId), 'attempted to delete unauthorized file:', sanitizeForLog(safeR2Key));
           return res.status(403).json({ error: 'Unauthorized file deletion' });
        } else {
-          console.log('[R2] Deleting blind attachment:', safeR2Key);
+          console.log('[R2] Deleting blind attachment:', sanitizeForLog(safeR2Key));
           try {
              await deleteR2File(safeR2Key);
           } catch (err) {
-             console.error('[R2] Failed to delete blind file:', safeR2Key, ':', err);
+             const errorMessage = err instanceof Error ? err.message : String(err);
+             console.error('[R2] Failed to delete blind file:', sanitizeForLog(safeR2Key), ':', sanitizeForLog(errorMessage));
              return res.status(500).json({ error: 'Failed to delete file from storage' });
           }
        }

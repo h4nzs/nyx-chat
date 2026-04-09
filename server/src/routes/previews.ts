@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { getSecureLinkPreview, validateRedirectChain } from '../utils/secureLinkPreview.js'
 import { requireAuth } from '../middleware/auth.js'
+import { sanitizeForLog } from '../utils/logger.js'
 
 const router: Router = Router()
 
@@ -18,7 +19,7 @@ router.post('/', requireAuth, async (req, res, _next) => {
       res.status(404).json({ error: 'Could not generate a preview for this link.' })
     }
   } catch (error) {
-    console.warn('[Link Preview] Failed to fetch metadata for:', url, ':', (error as Error).message);
+    console.warn('[Link Preview] Failed to fetch metadata for:', sanitizeForLog(url), ':', sanitizeForLog((error as Error).message));
     res.status(400).json({ error: 'Failed to extract link preview. Target site is protected or unreachable.' });
   }
 })

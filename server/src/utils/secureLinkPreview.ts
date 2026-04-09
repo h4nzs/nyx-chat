@@ -1,6 +1,7 @@
 import { getLinkPreview } from 'link-preview-js'
 import dns from 'dns/promises'
 import ipaddr from 'ipaddr.js'
+import { sanitizeForLog } from './logger.js'
 
 // PERBAIKAN: Gunakan inferensi tipe dari return value fungsi
 type LinkPreview = Awaited<ReturnType<typeof getLinkPreview>>;
@@ -124,7 +125,8 @@ export async function getSecureLinkPreview (url: string): Promise<LinkPreview> {
     })
     return preview as LinkPreview
   } catch (error) {
-    console.error('Secure link preview failed for URL:', url, ':', error)
+    const errString = error instanceof Error ? error.message : String(error);
+    console.error('Secure link preview failed for URL:', sanitizeForLog(url), ':', sanitizeForLog(errString));
     throw error // Re-throw the error to be handled by the caller
   }
 }
