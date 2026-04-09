@@ -58,8 +58,8 @@ export async function encryptGroupMetadata(
   conversationId: string
 ): Promise<string> {
   const payload = JSON.stringify(metadata);
-  // Encrypt as a group message
-  const result = await encryptMessage(payload, conversationId, true);
+  // Encrypt as a group message, saving the Message Key locally using a pseudo-messageId
+  const result = await encryptMessage(payload, conversationId, true, undefined, `meta_${conversationId}`);
   
   const myId = useAuthStore.getState().user?.id;
   if (!myId) throw new Error("Cannot encrypt metadata: User not authenticated");
@@ -100,7 +100,8 @@ export async function decryptGroupMetadata(
        senderDeviceKey 
     });
     
-    const result = await decryptMessage(cipherPayload, conversationId, true, senderId);
+    // Pass the pseudo-messageId so the creator can decrypt it from their local MK cache
+    const result = await decryptMessage(cipherPayload, conversationId, true, senderId, `meta_${conversationId}`);
     
     if (result.status === 'success') {
       return JSON.parse(result.value);
