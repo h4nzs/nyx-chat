@@ -198,16 +198,3 @@ Apakah Anda ingin saya buatkan cuplikan kode sederhana tentang cara mengecek duk
 * **Prosesnya:** Jauh lebih *fun*. Aplikasi web lu (*React/Vite*) kan udah jadi. Tinggal di-*wrap* pakai **Tauri** (gw *highly recommend* Tauri dibanding Electron karena lebih ringan, aman, dan pakai *Rust* di *backend*-nya, cocok banget buat *vibe* aplikasi E2EE lu).
 * **Kapan milih ini:** Kalau lu butuh *dopamine hit* (motivasi) setelah mumet ngurusin kripto dan *types*, atau kalau target utama NYX emang *power user* yang demen pakai *desktop app* di *Arch Linux* kesayangan lu itu.
 * **Estimasi *Effort*:** Menengah. *Setup* awal gampang, tapi nanti ada PR nyesuain fitur kayak *notifications* atau *file system access* ke API *native*.
-
----
-
-### Saran Gw:
-
-Mengingat lu ini *metalhead* yang tangguh tapi mungkin udah mulai jenuh sama *refactor* internal...
-
-**Gw vote: Lanjut ke NYX Desktop App pakai Tauri.** 🚀
-
-Alasannya:
-1.  **Penyegaran Mental:** Lu udah terlalu lama ngubek-ngubek gorong-gorong *codebase* (kripto, *worker*, *types*). Bikin *desktop app* itu ngasih lu mainan baru yang visual dan interaktif.
-2.  **Validasi Arsitektur:** Pas lu nge-*wrap* web lu ke Tauri, lu bakal otomatis ngetes seberapa bagus arsitektur PWA lu. Tauri jalan di *environment* yang beda (WebView), jadi kalau NYX lu stabil di sana, berarti fondasi yang susah payah lu bangun kemaren emang beneran kokoh.
-3.  **Zod Bisa Nunggu:** Bug kripto yang fatal udah kita sikat abis pakai *Pragmatic Strict Typing*. NYX lu udah cukup aman buat jalan. Zod dan Opaque Types bisa lu kerjain nanti pas NYX Desktop udah beres dan lu lagi iseng pengen nge-*refactor*.

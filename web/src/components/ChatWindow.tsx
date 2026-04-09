@@ -17,7 +17,7 @@ import { useModalStore } from "@store/modal";
 import { useShallow } from 'zustand/react/shallow';
 import clsx from "clsx";
 import { useVerificationStore } from '@store/verification';
-import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers, FiPhone, FiVideo, FiX, FiTrash2 } from 'react-icons/fi';
+import { FiShield, FiMoreHorizontal, FiArrowLeft, FiInfo, FiUsers, FiPhone, FiVideo, FiX, FiTrash2, FiChevronDown } from 'react-icons/fi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -258,7 +258,16 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const [lightboxMessage, setLightboxMessage] = useState<Message | null>(null);
   const [isGroupInfoOpen, setIsGroupInfoOpen] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const navigate = useNavigate();
+
+  const scrollToBottom = useCallback(() => {
+    virtuosoRef.current?.scrollToIndex({
+      index: messages.length - 1,
+      align: 'end',
+      behavior: 'smooth'
+    });
+  }, [messages.length]);
 
   useEffect(() => {
     if (id) {
@@ -384,6 +393,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
     actions.sendMessage(data);
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     getSocket().emit("typing:stop", { conversationId: id });
+    setTimeout(scrollToBottom, 100);
   };
 
   const handleVoiceSend = (blob: Blob, duration: number) => {
@@ -515,6 +525,22 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
                         <span className="text-[10px] font-bold uppercase tracking-wider text-text-secondary">{t('header.typing')}</span>
                       </div>
                     </motion.div>
+                  )}
+                </AnimatePresence>
+                
+                {/* Scroll to Bottom Button */}
+                <AnimatePresence>
+                  {!isAtBottom && (
+                    <motion.button
+                      initial={{ opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.8 }}
+                      onClick={scrollToBottom}
+                      className="absolute bottom-4 right-6 z-20 p-3 rounded-full bg-bg-surface/80 backdrop-blur-md border border-white/10 shadow-neumorphic-convex text-text-primary hover:text-accent transition-colors"
+                      aria-label="Scroll to bottom"
+                    >
+                      <FiChevronDown size={20} />
+                    </motion.button>
                   )}
                 </AnimatePresence>
               </div>

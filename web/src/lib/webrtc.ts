@@ -293,10 +293,21 @@ export const initWebRTCListeners = (socket: Socket | null) => {
 
     const data = parsed.data;
     const state = useCallStore.getState();
-    const callKey = state.ephemeralCallKey;
+    let callKey = state.ephemeralCallKey;
 
     if (!callKey) {
-        return;
+        // ✅ FIX: Wait for up to 5 seconds for the callKey to be set by the E2EE CALL_INIT message
+        // This solves the race condition where the fast WebRTC signal arrives before the heavy E2EE message is decrypted
+        for (let i = 0; i < 50; i++) {
+            await new Promise(r => setTimeout(r, 100));
+            callKey = useCallStore.getState().ephemeralCallKey;
+            if (callKey) break;
+        }
+        
+        if (!callKey) {
+            console.warn(`[WebRTC] SECURITY BLOCK: Dropping signal ${data.type} because callKey is missing after timeout.`);
+            return;
+        }
     }
 
     try {
@@ -422,6 +433,10 @@ export const initWebRTCListeners = (socket: Socket | null) => {
         }
     } catch (e) {
         console.error(`Failed to decrypt and process secure signal ${data.type}`, e);
+        if (e instanceof DOMException || (e as Error).name === 'OperationError') {
+            console.warn(`[WebRTC] Invalid call key detected. Purging current call state to allow recovery.`);
+            useCallStore.getState().endCall();
+        }
     }
   });
 };
