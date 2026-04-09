@@ -21,7 +21,7 @@
   },
   "pnpm": {
     "overrides": {
-      "basic-ftp": ">=5.2.0",
+      "basic-ftp": ">=5.2.1",
       "minimatch": ">=10.2.3",
       "serialize-javascript": ">=7.0.3",
       "fast-xml-parser": "^5.5.7",

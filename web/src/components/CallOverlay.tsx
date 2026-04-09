@@ -91,6 +91,50 @@ export default function CallOverlay() {
   const isMobile = /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   useEffect(() => {
+    let wakeLock: WakeLockSentinel | null = null;
+
+    const requestWakeLock = async () => {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+        } catch (err) {
+          console.error('Failed to request Wake Lock', err);
+        }
+      }
+    };
+
+    const releaseWakeLock = async () => {
+      if (wakeLock !== null) {
+        try {
+          await wakeLock.release();
+          wakeLock = null;
+        } catch (err) {
+          console.error('Failed to release Wake Lock', err);
+        }
+      }
+    };
+
+    if (callState !== 'idle') {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+
+    const handleVisibilityChange = () => {
+      if (wakeLock !== null && document.visibilityState === 'visible' && callState !== 'idle') {
+        requestWakeLock();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      releaseWakeLock();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [callState]);
+
+  useEffect(() => {
     // Initialize audio only once
     if (!ringtoneRef.current) {
       ringtoneRef.current = new Audio('/sounds/ringing.mp3');
