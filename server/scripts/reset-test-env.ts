@@ -1,15 +1,33 @@
+import * as dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Muat variabel lingkungan
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+// ✅ FIX: Inisialisasi Prisma dengan pg adapter secara eksplisit
+// Persis seperti yang dilakukan di server/src/lib/prisma.ts
 import { PrismaClient } from '@prisma/client';
+import { Pool } from 'pg';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { createClient } from 'redis';
 
-const prisma = new PrismaClient();
+// Atur koneksi pool PostgreSQL
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error("DATABASE_URL is not set in the environment variables.");
+}
+const pool = new Pool({ connectionString });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
+
 const redis = createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
 
 async function reset() {
   console.log('🔄 Resetting database and redis for E2E tests...');
   try {
-    // Delete in reverse dependency order or let Prisma handle the cascading deletes where appropriate.
-    // Since we're using deleteMany, deleting User will cascade to many relations if set up with onDelete: Cascade.
-    // But it's safer to delete specific root tables first.
     await prisma.$transaction([
       prisma.messageStatus.deleteMany(),
       prisma.message.deleteMany(),
@@ -38,6 +56,8 @@ async function reset() {
     process.exit(1);
   } finally {
     await prisma.$disconnect();
+    // Pastikan pool ditutup agar script bisa berhenti dengan sempurna
+    await pool.end();
   }
 }
 

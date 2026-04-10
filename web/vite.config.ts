@@ -92,7 +92,7 @@ export default defineConfig(({ mode }) => {
   optimizeDeps: {
     // Paksa Vite untuk tidak meng-optimasi libsodium-wrappers
     // Ini memperbaiki error "Could not resolve ./libsodium.mjs"
-    exclude: ['libsodium-wrappers']
+    include: ['libsodium-wrappers']
   },
   define: {
     // Only inject Buffer polyfill if NOT in test mode to avoid Vitest serialization crash

@@ -1,6 +1,9 @@
-import sodium from 'libsodium-wrappers';
+// ✅ FIX: Kembali ke import statis. Vite akan mengamankannya lewat 'optimizeDeps' di vite.config.ts
+import * as sodiumExports from 'libsodium-wrappers';
 
-// Flag to track if sodium has been initialized
+// Handle perbedaan export antara CJS/UMD dan ESM
+const sodium = sodiumExports.default || sodiumExports;
+
 let isSodiumInitialized = false;
 let sodiumInitPromise: Promise<void> | null = null;
 
@@ -19,6 +22,7 @@ export async function initializeSodium(): Promise<void> {
     return;
   }
 
+  // Gunakan promise bawaan dari library
   sodiumInitPromise = sodium.ready
     .then(() => {
       isSodiumInitialized = true;

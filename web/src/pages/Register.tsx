@@ -51,6 +51,10 @@ export default function Register() {
   }, [user, navigate]);
 
   async function handleRegister(data: { name?: string, d?: string, b?: string }) {
+    if (!turnstileToken) {
+      toast.error(t('auth:errors.wait_turnstile', 'Please wait for the security check to complete.'));
+      return;
+    }
     const { name, d: username, b: password } = data;
     setError("");
 
@@ -243,15 +247,16 @@ export default function Register() {
           {/* Modified AuthForm for Username Only */}
           <AuthForm
             onSubmit={handleRegister}
-            button={t('auth:buttons.register')}
+            button={!turnstileToken ? t('auth:status.verifying_security', 'Checking Security...') : t('auth:buttons.register')}
             hideEmail={true} 
             isRegister={true}
+            disabled={!turnstileToken}
           />
 
           {/* Turnstile Widget */}
           <div className="mt-4 flex justify-center">
             <Turnstile
-              siteKey="0x4AAAAAACN0kvKqxA8cYt6U" 
+              siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY || '1x00000000000000000000AA'}
               onSuccess={setTurnstileToken}
               onError={() => toast.error(t('auth:errors.security_check_failed', 'Security check failed.'))}
               onExpire={() => setTurnstileToken('')}

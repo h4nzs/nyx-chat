@@ -1,5 +1,9 @@
 import { execSync } from 'child_process';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function globalSetup() {
   console.log('🛠️ Running Global Setup for Playwright: Resetting Environment...');
@@ -7,7 +11,7 @@ async function globalSetup() {
   const serverDir = path.resolve(__dirname, '../../server');
   try {
     // Execute the reset script in the server directory
-    execSync('npx ts-node scripts/reset-test-env.ts', {
+    execSync('pnpm exec tsx scripts/reset-test-env.ts', {
       cwd: serverDir,
       stdio: 'inherit',
     });

@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
-  globalSetup: require.resolve('./e2e/global.setup'),
+  globalSetup: './e2e/global.setup.ts',
   use: {
     baseURL: 'http://localhost:5173',
     trace: 'on-first-retry',
@@ -15,7 +15,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm dev', // Sesuaikan dengan script package.json Anda
+    command: 'pnpm --filter server dev & pnpm --filter web dev', // Sesuaikan dengan script package.json Anda
     url: 'http://localhost:5173',
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,

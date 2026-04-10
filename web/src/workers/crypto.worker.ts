@@ -2,7 +2,7 @@
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
 // web/src/workers/crypto.worker.ts
-import sodium from 'libsodium-wrappers';
+import type _sodium from 'libsodium-wrappers';
 import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { argon2id } from 'hash-wasm';
@@ -15,7 +15,12 @@ import type {
   DoubleRatchetHeader 
 } from '../types/crypto-common';
 
+// ✅ FIX 2: Kita impor fungsi inisialisasi aman yang SUDAH kita buat sebelumnya di lib.
+import { getSodium } from '../lib/sodiumInitializer';
+
+let sodium: typeof _sodium;
 let isReady = false;
+
 const B64_VARIANT = 'URLSAFE_NO_PADDING';
 
 // Konfigurasi Argon2
@@ -26,6 +31,15 @@ const ARGON_CONFIG = {
   hashLength: 32,
   outputType: 'binary' as const,
 };
+
+// ✅ FIX 3: Fungsi ini sekarang jauh lebih bersih dan memanggil helper utama.
+async function ensureSodiumReady() {
+  if (isReady && sodium) return;
+  
+  // Mengambil instance dari helper yang sudah aman terhadap ESM
+  sodium = await getSodium();
+  isReady = true;
+}
 
 // --- INTERNAL HELPER FUNCTIONS FOR CORE CRYPTO LOGIC ---
 
@@ -377,12 +391,10 @@ export type WorkerMessage =
 self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
   const { type, payload, id } = event.data;
 
-  if (!isReady) {
-    await sodium.ready;
-    isReady = true;
-  }
+
   
   try {
+    await ensureSodiumReady();
     let result: unknown;
     // The main message handler now orchestrates calls to the internal functions.
     // The recursive postMessage calls are gone.

@@ -25,6 +25,17 @@ import { redisClient } from '../lib/redis.js'
 // ✅ FIX: Import tipe JWT Payload dari shared
 import type { AuthJwtPayload } from '@nyx/shared'
 
+function getGenericDeviceName(userAgent?: string | string[]): string {
+  if (!userAgent) return 'Unknown Device';
+  const ua = String(userAgent);
+  if (ua.includes('Windows')) return 'Windows Device';
+  if (ua.includes('Mac OS')) return 'Mac Device';
+  if (ua.includes('Linux')) return 'Linux Device';
+  if (ua.includes('Android')) return 'Android Device';
+  if (ua.includes('iPhone') || ua.includes('iPad')) return 'iOS Device';
+  return 'Web Browser Session';
+}
+
 const router: Router = Router()
 
 const rpName = 'NYX'

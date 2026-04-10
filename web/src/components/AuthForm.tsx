@@ -4,7 +4,16 @@ import { Spinner } from './Spinner';
 import { handleApiError } from '@lib/api';
 import { useTranslation } from 'react-i18next';
 
-export default function AuthForm({ onSubmit, button, hideEmail = false, isRegister = false }: { onSubmit: (v: { a: string; b?: string; c?: string; d?: string; name?: string }) => Promise<void>; button: string; hideEmail?: boolean; isRegister?: boolean }) {
+// ✅ FIX 1: Tambahkan `disabled?: boolean` ke definisi props
+interface AuthFormProps {
+  onSubmit: (v: { a: string; b?: string; c?: string; d?: string; name?: string }) => Promise<void>;
+  button: string;
+  hideEmail?: boolean;
+  isRegister?: boolean;
+  disabled?: boolean;
+}
+
+export default function AuthForm({ onSubmit, button, hideEmail = false, isRegister = false, disabled = false }: AuthFormProps) {
   const { t } = useTranslation(['auth', 'common']);
   const [emailOrUsername, setA] = useState('')
   const [password, setB] = useState('')
@@ -27,26 +36,28 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
     return emailRegex.test(email)
   }
 
-  // Determine if email is valid for green glow effect
   const emailIsValid = isValidEmail(email)
-  // For login, we now only accept Username, so email validation is irrelevant
-  const emailOrUsernameIsValid = false; // Disable validation glow for login
 
   // Determine button text from props or translation
   const getButtonText = () => {
       if (button === 'Login') return t('auth:buttons.login');
       if (button === 'Register') return t('auth:buttons.register');
-      return button;
+      return button; // Akan merender 'Checking Security...' jika dikirim dari luar
   };
   
   const buttonText = getButtonText();
   const loadingText = t('common:actions.loading');
+
+  // ✅ FIX 2: Gabungkan status loading internal dengan disabled eksternal (Turnstile)
+  const isButtonDisabled = isLoading || disabled;
 
   return (
     <form
       className="space-y-4"
       onSubmit={async (e) => {
         e.preventDefault()
+        if (isButtonDisabled) return; // Mencegah submit paksa jika masih disabled
+        
         setErr('')
         setIsLoading(true)
         try {
@@ -162,14 +173,18 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
         <div className="absolute right-3 top-1/2 transform -translate-y-1/2 w-2 h-2 rounded-full bg-transparent transition-colors duration-300"></div>
       </div>
 
+      {/* ✅ FIX 3: Tambahkan type="submit" dan terapkan state isButtonDisabled */}
       <button
-        className={`w-full py-3 rounded-lg font-semibold text-white transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-bg-surface focus:ring-accent disabled:opacity-70 ${
+        type="submit"
+        className={`w-full py-3 rounded-lg font-semibold text-white transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-bg-surface focus:ring-accent ${
+          isButtonDisabled ? 'opacity-50 cursor-not-allowed' : ''
+        } ${
           button === 'Login' 
             ? 'bg-gradient-to-r from-orange-500 to-orange-600 shadow-[5px_5px_15px_rgba(255,107,53,0.4),-5px_-5px_15px_rgba(255,165,110,0.2)] hover:shadow-[3px_3px_10px_rgba(255,107,53,0.6),-3px_-3px_10px_rgba(255,165,110,0.3)] active:shadow-[inset_3px_3px_8px_rgba(139,69,19,0.6)]' 
             : 'bg-gradient-to-r from-teal-500 to-teal-600 shadow-[5px_5px_15px_rgba(0,150,150,0.4),-5px_-5px_15px_rgba(100,200,200,0.2)] hover:shadow-[3px_3px_10px_rgba(0,150,150,0.6),-3px_-3px_10px_rgba(100,200,200,0.3)] active:shadow-[inset_3px_3px_8px_rgba(0,100,100,0.6)]'
         }`}
         aria-label={buttonText}
-        disabled={isLoading}
+        disabled={isButtonDisabled}
       >
         {isLoading ? (
           <div className="flex items-center justify-center">
