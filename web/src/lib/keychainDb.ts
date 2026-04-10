@@ -498,18 +498,33 @@ export async function exportDatabaseToJson(): Promise<string> {
 /**
  * Mengimpor dan menimpa isi brankas kunci dari string JSON.
  */
-export async function importDatabaseFromJson(jsonString: string): Promise<void> {
+export async function importDatabaseFromJson(jsonString: string, password?: string): Promise<void> {
   return enqueueWrite(async () => {
       let importData: Record<string, unknown[]>;
       try {
-          importData = JSON.parse(jsonString, (key, value) => {
+          const parsedInit = JSON.parse(jsonString);
+          let finalJsonStr = jsonString;
+
+          if (parsedInit.encrypted && parsedInit.salt && parsedInit.data) {
+              if (!password) throw new Error("Password required to decrypt vault.");
+              
+              const { getSodium } = await import('@lib/sodiumInitializer');
+              const sodium = await getSodium();
+              const { deriveKeyFromPassword, decryptWithKey } = await import('@lib/crypto-worker-proxy');
+              
+              const salt = sodium.from_base64(parsedInit.salt, sodium.base64_variants.URLSAFE_NO_PADDING);
+              const key = await deriveKeyFromPassword(password, salt);
+              finalJsonStr = await decryptWithKey(key, parsedInit.data) as string;
+          }
+
+          importData = JSON.parse(finalJsonStr, (key, value) => {
             if (value && typeof value === 'object' && value.__type === 'Uint8Array') {
               return new Uint8Array(value.data);
             }
             return value;
           }) as Record<string, unknown[]>;
       } catch (_e) {
-          throw new Error("Invalid vault file format.");
+          throw new Error("Invalid vault file format or incorrect password.");
       }
 
       // ✅ FIX: Harus sejajar dengan variabel tables di fungsi export

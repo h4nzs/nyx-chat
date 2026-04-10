@@ -557,8 +557,12 @@ export function registerSocket(httpServer: HttpServer) {
       io.to(requesterId).emit('session:new_key', { conversationId, sessionId, encryptedKey, type: 'SESSION_KEY', senderId: userId });
     });
 
-    socket.on('webrtc:secure_signal', (data: { to: string, type: string, payload: string }) => {
+    socket.on('webrtc:secure_signal', async (data: { to: string, type: string, payload: string }) => {
       if (!data || !data.to) return;
+      if (!await checkRateLimit(userId, 'webrtc_signal', 20, 60)) {
+        socket.emit("error", { message: "Rate limit exceeded for WebRTC signaling" });
+        return;
+      }
       socket.to(data.to).emit('webrtc:secure_signal', { from: userId, type: data.type, payload: data.payload });
     });
 
@@ -614,6 +618,12 @@ export function registerSocket(httpServer: HttpServer) {
                io.emit("presence:user_left", userId);
            }
        }, 5000);
+    });
+
+  }); 
+
+  return io;
+});
     });
 
   }); 

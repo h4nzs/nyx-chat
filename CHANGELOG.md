@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🚀 [v2.6.0] - Multi-Device Evolution
+
+This release brings one of the most significant architectural updates to Nyx Chat. We have completely rewritten the core cryptographic engine to support multiple simultaneous devices, ensuring you stay connected everywhere without compromising End-to-End Encryption (E2EE) privacy.
+
+### ✨ New Features
+* **Linked Devices (Multi-Device Support):** Your account can now be linked to multiple devices simultaneously. Each device maintains its own secure cryptographic identity, powered by our new *Fan-Out Sender Key* architecture.
+* **History Sync & Vault Management:** Seamlessly synchronize your chat history across linked devices via E2EE, complete with a revamped export/import system for the Local Vault.
+
+### 🐛 Bug Fixes
+* **Cryptography & Synchronization:** Fixed decryption failures on group metadata and perfected Message Key distribution across multi-device environments.
+* **Database / IndexedDB:** Resolved an issue where exporting/importing the vault and reloading messages resulted in empty chat bubbles.
+* **WebRTC & Calls:** Fixed bugs during call initialization and ensured the wakelock feature (preventing the screen from sleeping) works correctly during active audio/video calls.
+* **Notifications:** Push notifications are now strictly managed per-device to prevent conflicts or missing alerts across different active sessions.
+* **Marketing Site:** Fixed multi-language routing (`lang` page) on the Astro marketing site.
+
+### 🛡️ Security & Under the Hood
+* **Security Patches:** Resolved severity findings from static analysis (CodeQL), including preventing multiple log injection vulnerabilities.
+* **Type Safety:** Conducted a massive cleanup and refinement of TypeScript definitions to make the codebase more resilient against runtime errors.
+* **Dependency Updates:** Addressed Dependabot security alerts by bumping Vite to a secure branch, along with ESLint and various other core backend and frontend dependencies.
+* **Internal:** Cleaned up dozens of internal multi-device testing commits to keep the git history clean.
+
 ## [2.5.5] - 2026-04-04
 
 ### 🚀 Key Features & Architectural Changes

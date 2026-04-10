@@ -171,7 +171,7 @@ async (req, res, next) => {
       if (device) {
           device = await prisma.device.update({
               where: { id: device.id },
-              data: { lastActiveAt: new Date(), signingKey, encryptedPrivateKey, name: deviceName || device.name }
+              data: { lastActiveAt: new Date(), signingKey, encryptedPrivateKey, name: getGenericDeviceName(req.headers['user-agent']) }
           });
       } else {
           device = await prisma.device.create({
@@ -180,7 +180,7 @@ async (req, res, next) => {
               publicKey,
               signingKey,
               encryptedPrivateKey,
-              name: deviceName || 'New Device'
+              name: getGenericDeviceName(req.headers['user-agent'])
             }
           });
       }
@@ -590,6 +590,16 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
       res.json({ 
         verified: true, 
         user: { id: safeUser.id, usernameHash: safeUser.usernameHash, encryptedProfile: safeUser.encryptedProfile, isVerified: safeUser.isVerified, role: safeUser.role }, 
+        accessToken: tokens.access,
+        encryptedPrivateKey: safeUser.devices[0]?.encryptedPrivateKey 
+      })
+    } else {
+      res.status(400).json({ verified: false })
+    }
+  } catch (e) { next(e) }
+})
+
+export default routerVerified: safeUser.isVerified, role: safeUser.role }, 
         accessToken: tokens.access,
         encryptedPrivateKey: safeUser.devices[0]?.encryptedPrivateKey 
       })

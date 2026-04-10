@@ -407,14 +407,29 @@ export default function SettingsPage() {
 
     const reader = new FileReader();
     reader.onload = async (event) => {
+      const json = event.target?.result as string;
       try {
-        const json = event.target?.result as string;
-        await importDatabaseFromJson(json);
-        toast.success(t('settings:messages.import_success'));
-        setTimeout(() => window.location.reload(), 1000);
+         const parsed = JSON.parse(json);
+         if (parsed.encrypted) {
+             useModalStore.getState().showPasswordPrompt(async (password) => {
+                 if (!password) return;
+                 try {
+                     await importDatabaseFromJson(json, password);
+                     toast.success(t('settings:messages.import_success'));
+                     setTimeout(() => window.location.reload(), 1000);
+                 } catch (error) {
+                     console.error("Import failed:", sanitizeErrorLog(error));
+                     toast.error(t('settings:messages.import_failed'));
+                 }
+             });
+         } else {
+             await importDatabaseFromJson(json);
+             toast.success(t('settings:messages.import_success'));
+             setTimeout(() => window.location.reload(), 1000);
+         }
       } catch (error) {
-        console.error("Import failed:", sanitizeErrorLog(error));
-        toast.error(t('settings:messages.import_failed'));
+         console.error("Import parsing failed:", sanitizeErrorLog(error));
+         toast.error(t('settings:messages.import_failed'));
       }
     };
     reader.readAsText(file);
