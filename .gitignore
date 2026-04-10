@@ -26,3 +26,4 @@ vspostgre.session.sql
 
 .gemini/
 gha-creds-*.json
+test-results/

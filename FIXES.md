@@ -1,8 +1,8 @@
 # Phase 1: Security & Cryptography (Zero-Knowledge Validation)
 
 ## Langkah 1: Audit Skema Database (`schema.prisma`)
-1. **[MEDIUM] `RefreshToken` (IP Address & User-Agent)**: Menyimpan IP Address dalam bentuk *plaintext* melanggar prinsip anonimitas absolut. *(Koreksi: Pada Langkah 3, ditemukan bahwa IP Address sebenarnya sudah di-hash SHA-256 sebelum disimpan).*
-2. **[LOW] `Device` (Name)**: Disimpan sebagai *plaintext*. Terkadang pengguna menamai perangkat dengan nama asli.
+1. **[MEDIUM] `RefreshToken` (IP Address & User-Agent)**: ~~Menyimpan IP Address dalam bentuk *plaintext* melanggar prinsip anonimitas absolut.~~ *(Koreksi: Pada Langkah 3, ditemukan bahwa IP Address sebenarnya sudah di-hash SHA-256 sebelum disimpan).*
+2. **[LOW] `Device` (Name)**: ~~Disimpan sebagai *plaintext*. Terkadang pengguna menamai perangkat dengan nama asli.~~
 3. **[INFO] `Message` (Content)**: Kolom bernama `content` berisiko membuat *developer* secara tidak sengaja melakukan *logging* pada kolom ini. Saran: ubah menjadi `encryptedContent`.
 
 ## Langkah 2: Integritas Kriptografi (Klien)
