@@ -623,10 +623,4 @@ export function registerSocket(httpServer: HttpServer) {
   }); 
 
   return io;
-});
-    });
-
-  }); 
-
-  return io;
 }

@@ -599,14 +599,4 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
   } catch (e) { next(e) }
 })
 
-export default routerVerified: safeUser.isVerified, role: safeUser.role }, 
-        accessToken: tokens.access,
-        encryptedPrivateKey: safeUser.devices[0]?.encryptedPrivateKey 
-      })
-    } else {
-      res.status(400).json({ verified: false })
-    }
-  } catch (e) { next(e) }
-})
-
 export default router
