@@ -160,5 +160,19 @@
     "ago_m": "{{count}}m ago",
     "ago_s": "{{count}}s ago",
     "now": "NOW"
-  }
+  },
+  "device_revoked_successfully": "Device revoked successfully",
+  "history_sync_payload_broadcasted_success": "History sync payload broadcasted successfully.",
+  "notifications_enabled": "Notifications enabled!",
+  "notifications_disabled": "Notifications disabled",
+  "profile_updated": "Profile updated!",
+  "processing_avatar": "Processing avatar...",
+  "blocking_user": "Blocking user...",
+  "unblocking_user": "Unblocking user...",
+  "secure_session_state_reset_next_message_": "Secure session state reset. Next message will negotiate new keys.",
+  "preparing_history_sync_for_your_linked_d": "Preparing history sync for your linked devices...",
+  "receiving_history_sync_from_your_other_d": "Receiving history sync from your other device...",
+  "posting_story": "Posting story...",
+  "added_to_group": "You've been added to \"{{groupName}}\"",
+  "user_unbanned": "User @{{username}} unbanned!"
 }

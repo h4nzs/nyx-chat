@@ -30,6 +30,7 @@ import { getSodium } from "@lib/sodiumInitializer";
 import { shadowVault, saveStoryKey } from "../lib/shadowVaultDb";
 
 import { useProfileStore } from './profile';
+import i18n from '../i18n';
 
 const incomingMessageLocks = new Map<string, Promise<void>>();
 
@@ -774,11 +775,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       await rotateGroupKey(conversationId, 'periodic_rotation');
       
       if (!isAuto) {
-          toast.success("Secure session state reset. Next message will negotiate new keys.");
+          toast.success(i18n.t('common:secure_session_state_reset_next_message_', 'Secure session state reset. Next message will negotiate new keys.'));
       }
     } catch (error) {
       console.error("Failed to repair session:", error);
-      if (!isAuto) toast.error("Failed to repair session.");
+      if (!isAuto) toast.error(i18n.t('errors:failed_to_repair_session', 'Failed to repair session.'));
     }
   },
 
@@ -786,7 +787,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const { user } = useAuthStore.getState();
     if (!user) return;
 
-    const toastId = toast.loading('Preparing history sync for your linked devices...');
+    const toastId = toast.loading(i18n.t('common:preparing_history_sync_for_your_linked_d', 'Preparing history sync for your linked devices...'));
     try {
         const { exportDatabaseToJson } = await import('@lib/keychainDb');
         const jsonStr = await exportDatabaseToJson();
@@ -956,13 +957,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     }
 
     if (!hasRestoredKeys) {
-      toast.error("You must restore your keys from your recovery phrase before you can send messages.");
+      toast.error(i18n.t('errors:you_must_restore_your_keys_from_your_rec', 'You must restore your keys from your recovery phrase before you can send messages.'));
       return;
     }
 
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
     if (!conversation) {
-      toast.error("Conversation not found.");
+      toast.error(i18n.t('errors:conversation_not_found', 'Conversation not found.'));
       return;
     }
     const forceRotate = conversation.requiresKeyRotation === true;
@@ -1329,12 +1330,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               if (!isReactionPayload && !shouldBeSilent) {
                   get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
                   if (res.error?.includes('SANDBOX_LIMIT_REACHED')) {
-                      toast.error("Sandbox limit reached! Verify your account to unlock unlimited messaging.");
+                      toast.error(i18n.t('errors:sandbox_limit_reached_verify_your_accoun', 'Sandbox limit reached! Verify your account to unlock unlimited messaging.'));
                   } else if (res.error) {
                       toast.error(res.error);
                   }
               } else if (isReactionPayload) {
-                  toast.error("Failed to send reaction");
+                  toast.error(i18n.t('errors:failed_to_send_reaction', 'Failed to send reaction'));
               }
           }
         });
@@ -1514,13 +1515,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     if (!user) return;
 
     if (!hasRestoredKeys) {
-      toast.error("You must restore your keys from your recovery phrase before you can send files.");
+      toast.error(i18n.t('errors:you_must_restore_your_keys_from_your_rec', 'You must restore your keys from your recovery phrase before you can send files.'));
       return;
     }
     
     const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
     if (!conversation) {
-      toast.error("Conversation not found.");
+      toast.error(i18n.t('errors:conversation_not_found', 'Conversation not found.'));
       return;
     }
 
@@ -1610,7 +1611,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     } catch (error) {
       removeActivity(uploadId);
       console.error("File upload failed:", error);
-      toast.error(`Failed to upload ${file.name}.`);
+      toast.error(i18n.t('errors:failed_to_upload_file', `Failed to upload ${file.name}.`, { filename: file.name }));
       set(state => ({
         messages: {
           ...state.messages,
@@ -1974,7 +1975,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
               // Proses secara asinkron agar tidak membuat UI "freeze"
               setTimeout(async () => {
-                  const toastId = toast.loading('Receiving history sync from your other device...');
+                  const toastId = toast.loading(i18n.t('common:receiving_history_sync_from_your_other_d', 'Receiving history sync from your other device...'));
                   try {
                       const { decryptFile } = await import('@utils/crypto');
                       const res = await fetch(silentPayload.url!);

@@ -151,5 +151,17 @@
     "terminated": "Sesión terminada.",
     "eject_failed": "Error al expulsar.",
     "keys_rotated": "Claves rotadas. Reiniciando sesión..."
+  },
+  "linked_devices": {
+    "title": "Dispositivos Vinculados",
+    "desc": "Administre los dispositivos que pueden descifrar sus mensajes.",
+    "sync_history": "Sincronizar Historial",
+    "loading": "Cargando dispositivos...",
+    "unknown_device": "Dispositivo Desconocido",
+    "this_device": "Este Dispositivo",
+    "last_active": "Última vez activo:",
+    "revoke_access": "Revocar Acceso",
+    "revoke_title": "Revocar Dispositivo",
+    "revoke_desc": "¿Estás seguro de que deseas cerrar sesión en este dispositivo? Perderá el acceso a todos los chats cifrados."
   }
 }

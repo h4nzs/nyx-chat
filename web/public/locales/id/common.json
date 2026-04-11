@@ -162,6 +162,19 @@
     "ago_s": "{{count}}dtk lalu",
     "now": "SEKARANG",
     "yesterday": "Kemarin"
-
-  }
+  },
+  "device_revoked_successfully": "Perangkat berhasil dicabut",
+  "history_sync_payload_broadcasted_success": "Payload sinkronisasi riwayat berhasil disiarkan.",
+  "notifications_enabled": "Notifikasi diaktifkan!",
+  "notifications_disabled": "Notifikasi dinonaktifkan",
+  "profile_updated": "Profil diperbarui!",
+  "processing_avatar": "Memproses avatar...",
+  "blocking_user": "Memblokir pengguna...",
+  "unblocking_user": "Membuka blokir pengguna...",
+  "secure_session_state_reset_next_message_": "Status sesi aman direset. Pesan berikutnya akan menegosiasikan kunci baru.",
+  "preparing_history_sync_for_your_linked_d": "Menyiapkan sinkronisasi riwayat untuk perangkat tertaut Anda...",
+  "receiving_history_sync_from_your_other_d": "Menerima sinkronisasi riwayat dari perangkat Anda yang lain...",
+  "posting_story": "Memposting cerita...",
+  "added_to_group": "Anda telah ditambahkan ke \"{{groupName}}\"",
+  "user_unbanned": "Pengguna @{{username}} telah di-unban!"
 }

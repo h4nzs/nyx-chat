@@ -1,0 +1,22 @@
+{
+  "title": "NYX MISSION CONTROL",
+  "refresh": "Atualizar Dados",
+  "vps_ram": "USO DE RAM DO VPS",
+  "uptime": "Tempo de atividade:",
+  "active_db": "BANCO DE DADOS ATIVO",
+  "users": "Usuários",
+  "messages": "Mensagens",
+  "storage": "ARMAZENAMENTO R2",
+  "files": "Arquivos",
+  "enforcement": "APLICAÇÃO",
+  "suspend_desc": "Suspenda o acesso do usuário imediatamente. Esta ação desconectará o usuário à força e impedirá logins futuros.",
+  "open_ban_terminal": "ABRIR TERMINAL DE BANIMENTO",
+  "suspended_accounts": "CONTAS SUSPENSAS",
+  "no_active_suspensions": "Nenhuma suspensão ativa",
+  "reason": "Motivo:",
+  "banned": "Banido:",
+  "unban": "Desbanir",
+  "unban_title": "Desbanir Usuário",
+  "unban_desc": "Tem certeza que deseja remover o banimento de @{{username}}?",
+  "initializing": "INICIALIZANDO LINK DO SISTEMA..."
+}

@@ -15,6 +15,7 @@ import { asUserId } from '@nyx/shared';
 import { IncomingMessageSchema, RawServerMessageSchema } from '@nyx/shared';
 import type { ServerToClientEvents, ClientToServerEvents } from "@nyx/shared";
 import { triggerReceiveFeedback } from "@utils/feedback";
+import i18n from '../i18n';
 
 const WS_URL = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL;
 let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
@@ -171,7 +172,7 @@ export function getSocket() {
 
     socket.on("disconnect", (reason) => {
       setStatus('disconnected');
-      if (reason !== "io client disconnect") toast.error("Disconnected. Reconnecting...");
+      if (reason !== "io client disconnect") toast.error(i18n.t('errors:disconnected_reconnecting', 'Disconnected. Reconnecting...'));
     });
 
     socket.on("connect_error", (err) => {
@@ -281,7 +282,7 @@ export function getSocket() {
         fireGhostSync(newConversation.id, 3000);
       }
 
-      toast.success(`You've been added to "${newConversation.title || 'a new chat'}"`);
+      toast.success(i18n.t('common:added_to_group', `You've been added to "${newConversation.title || 'a new chat'}"`, { groupName: newConversation.title || 'a new chat' }));
     });
 
     socket.on("conversation:updated", (updates) => conversationStore.updateConversation(updates.id, updates));
@@ -336,7 +337,7 @@ export function getSocket() {
         .catch(console.error);
     });
     socket.on('force_logout', () => {
-      toast.error("This session has been logged out remotely.");
+      toast.error(i18n.t('errors:this_session_has_been_logged_out_remotel', 'This session has been logged out remotely.'));
       useAuthStore.getState().logout();
       disconnectSocket();
     });

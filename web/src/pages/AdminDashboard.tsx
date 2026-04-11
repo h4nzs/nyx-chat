@@ -7,6 +7,9 @@ import { useShallow } from 'zustand/react/shallow';
 import { FiRefreshCw, FiUnlock, FiAlertTriangle } from 'react-icons/fi';
 import { useAuthStore } from '@store/auth';
 import { useNavigate } from 'react-router-dom';
+import i18n from '../i18n';
+
+import { useTranslation } from 'react-i18next';
 
 interface BannedUser {
   id: string;
@@ -17,6 +20,7 @@ interface BannedUser {
 }
 
 export default function AdminDashboard() {
+  const { t } = useTranslation('admin');
   const { user } = useAuthStore(useShallow(s => ({ user: s.user })));
   const navigate = useNavigate();
   const [metrics, setMetrics] = useState<{
@@ -33,7 +37,7 @@ export default function AdminDashboard() {
   const loadMetrics = () => {
     authFetch('/api/admin/system-status')
       .then((res: unknown) => setMetrics(res as { vps: { ramUsage: string; uptime: string; }; db: { totalUsers: string; totalMessages: string; }; storage: { totalSizeMB: string; totalFiles: string; }; }))
-      .catch((err: unknown) => toast.error("Failed to load metrics"));
+      .catch((err: unknown) => toast.error(i18n.t('errors:failed_to_load_metrics', 'Failed to load metrics')));
   };
 
   const loadBannedUsers = () => {
@@ -49,7 +53,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (user?.role !== 'ADMIN') {
-      toast.error("Access Denied");
+      toast.error(i18n.t('errors:access_denied', 'Access Denied'));
       navigate('/');
     } else {
       loadAllData();
@@ -66,7 +70,7 @@ export default function AdminDashboard() {
             method: 'POST',
             body: JSON.stringify({ userId: user.id })
           });
-          toast.success(`User @${user.username} unbanned!`);
+          toast.success(i18n.t('common:user_unbanned', `User @${user.username} unbanned!`, { username: user.username }));
           loadAllData();
         } catch (e: unknown) {
           toast.error((e instanceof Error ? e.message : 'Unknown error') || "Failed to unban user.");
@@ -149,14 +153,14 @@ export default function AdminDashboard() {
         <div className="lg:col-span-2">
           <div className="bg-bg-surface rounded-xl border border-white/10 shadow-lg overflow-hidden flex flex-col h-[500px]">
             <div className="p-4 border-b border-white/10 bg-white/5 flex justify-between items-center">
-              <h3 className="font-bold text-sm tracking-wider">SUSPENDED ACCOUNTS ({bannedUsers.length})</h3>
+              <h3 className="font-bold text-sm tracking-wider">{t('suspended_accounts', 'SUSPENDED ACCOUNTS')} ({bannedUsers.length})</h3>
             </div>
             
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {bannedUsers.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-text-secondary opacity-50">
                   <FiUnlock size={32} className="mb-2" />
-                  <p>No active suspensions</p>
+                  <p>{t('no_active_suspensions', 'No active suspensions')}</p>
                 </div>
               ) : (
                 bannedUsers.map(user => (
@@ -168,10 +172,10 @@ export default function AdminDashboard() {
                       </div>
                       <div className="text-xs text-text-secondary font-mono mb-1">ID: {user.id}</div>
                       <div className="text-xs text-text-secondary">
-                        <span className="opacity-60">Reason:</span> <span className="italic text-white/80">&quot;{user.banReason}&quot;</span>
+                        <span className="opacity-60">{t('reason', 'Reason:')}</span> <span className="italic text-white/80">&quot;{user.banReason}&quot;</span>
                       </div>
                       <div className="text-[10px] text-text-secondary mt-1 opacity-50">
-                        Banned: {new Date(user.bannedAt).toLocaleString()}
+                        {t('banned', 'Banned:')} {new Date(user.bannedAt).toLocaleString()}
                       </div>
                     </div>
                     
@@ -184,7 +188,7 @@ export default function AdminDashboard() {
                         self-start md:self-center
                       "
                     >
-                      <FiUnlock /> Unban
+                      <FiUnlock /> {t('unban', 'Unban')}
                     </button>
                   </div>
                 ))

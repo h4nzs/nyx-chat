@@ -6,6 +6,8 @@ import { useMessageStore } from '@store/message';
 import { useConversationStore } from '@store/conversation';
 import { useAuthStore } from '@store/auth';
 import { useModalStore } from '@store/modal';
+import i18n from '../i18n';
+import { useTranslation } from 'react-i18next';
 
 interface Device {
     id: string;
@@ -16,6 +18,7 @@ interface Device {
 }
 
 export const LinkedDevicesPanel: React.FC = () => {
+    const { t } = useTranslation('settings');
     const [devices, setDevices] = useState<Device[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const broadcastHistorySync = useMessageStore(state => state.broadcastHistorySync);
@@ -28,7 +31,7 @@ export const LinkedDevicesPanel: React.FC = () => {
             const data = await authFetch<Device[]>('/api/users/me/devices');
             setDevices(data);
         } catch (error) {
-            toast.error('Failed to load linked devices');
+            toast.error(i18n.t('errors:failed_to_load_linked_devices', 'Failed to load linked devices'));
         } finally {
             setIsLoading(false);
         }
@@ -40,15 +43,15 @@ export const LinkedDevicesPanel: React.FC = () => {
 
     const handleRevoke = async (deviceId: string) => {
         useModalStore.getState().showConfirm(
-            "Revoke Device",
-            "Are you sure you want to log out this device? It will lose access to all encrypted chats.",
+            t('linked_devices.revoke_title', "Revoke Device"),
+            t('linked_devices.revoke_desc', "Are you sure you want to log out this device? It will lose access to all encrypted chats."),
             async () => {
                 try {
                     await api(`/api/users/me/devices/${deviceId}`, { method: 'DELETE' });
-                    toast.success('Device revoked successfully');
+                    toast.success(i18n.t('common:device_revoked_successfully', 'Device revoked successfully'));
                     setDevices(prev => prev.filter(d => d.id !== deviceId));
                 } catch (error) {
-                    toast.error('Failed to revoke device');
+                    toast.error(i18n.t('errors:failed_to_revoke_device', 'Failed to revoke device'));
                 }
             }
         );
@@ -59,16 +62,16 @@ export const LinkedDevicesPanel: React.FC = () => {
         const selfChat = conversations.find(c => !c.isGroup && c.participants.length === 1 && c.participants[0].id === user?.id);
         
         if (!selfChat) {
-            toast.error("Please start a chat with yourself ('Saved Messages') first to use as a sync channel.");
+            toast.error(i18n.t('errors:please_start_a_chat_with_yourself_saved_', 'Please start a chat with yourself (\'Saved Messages\') first to use as a sync channel.'));
             return;
         }
 
         try {
             await broadcastHistorySync(selfChat.id);
-            toast.success("History sync payload broadcasted successfully.");
+            toast.success(i18n.t('common:history_sync_payload_broadcasted_success', 'History sync payload broadcasted successfully.'));
         } catch (e) {
             console.error("Failed to broadcast history sync:", e);
-            toast.error("Failed to broadcast history sync.");
+            toast.error(i18n.t('errors:failed_to_broadcast_history_sync', 'Failed to broadcast history sync.'));
         }
     };
 

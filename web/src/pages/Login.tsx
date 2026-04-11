@@ -18,6 +18,7 @@ import { FiLock, FiKey, FiShield } from "react-icons/fi";
 import SEO from '../components/SEO';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 
+import i18n from '../i18n';
 export default function Login() {
   const { t } = useTranslation(['auth', 'common']);
   const [error, setError] = useState("");
@@ -172,7 +173,7 @@ export default function Login() {
                             toast.error(t('auth:messages.decrypt_failed'));
                         }
                     } catch (e) {
-                        toast.error("Something went wrong when decrypting.");
+                        toast.error(i18n.t('errors:something_went_wrong_when_decrypting', 'Something went wrong when decrypting.'));
                     }
                 });
                 return;
@@ -242,7 +243,7 @@ export default function Login() {
                     toast.error(t('auth:messages.decrypt_failed'));
                 }
             } catch (e) {
-                toast.error("Terjadi kesalahan saat dekripsi.");
+                toast.error(i18n.t('errors:terjadi_kesalahan_saat_dekripsi', 'Terjadi kesalahan saat dekripsi.'));
             }
          });
       }

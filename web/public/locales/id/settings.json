@@ -151,5 +151,17 @@
     "terminated": "Sesi dihentikan.",
     "eject_failed": "Pengeluaran gagal.",
     "keys_rotated": "Kunci Diputar. Memulai Ulang Sesi..."
+  },
+  "linked_devices": {
+    "title": "Perangkat Tertaut",
+    "desc": "Kelola perangkat yang dapat mendekripsi pesan Anda.",
+    "sync_history": "Sinkronkan Riwayat",
+    "loading": "Memuat perangkat...",
+    "unknown_device": "Perangkat Tidak Dikenal",
+    "this_device": "Perangkat Ini",
+    "last_active": "Terakhir aktif:",
+    "revoke_access": "Cabut Akses",
+    "revoke_title": "Cabut Perangkat",
+    "revoke_desc": "Apakah Anda yakin ingin mengeluarkan perangkat ini? Ia akan kehilangan akses ke semua obrolan terenkripsi."
   }
 }

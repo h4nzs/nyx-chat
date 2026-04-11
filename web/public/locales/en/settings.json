@@ -151,5 +151,17 @@
     "terminated": "Session terminated.",
     "eject_failed": "Ejection failed.",
     "keys_rotated": "Keys Rotated. Rebooting Session..."
+  },
+  "linked_devices": {
+    "title": "Linked Devices",
+    "desc": "Manage devices that can decrypt your messages.",
+    "sync_history": "Sync History",
+    "loading": "Loading devices...",
+    "unknown_device": "Unknown Device",
+    "this_device": "This Device",
+    "last_active": "Last active:",
+    "revoke_access": "Revoke Access",
+    "revoke_title": "Revoke Device",
+    "revoke_desc": "Are you sure you want to log out this device? It will lose access to all encrypted chats."
   }
 }

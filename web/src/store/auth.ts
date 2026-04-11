@@ -76,6 +76,7 @@ export async function setupAndUploadPreKeyBundle() {
 }
 
 import type { UserId, User } from '@nyx/shared';
+import i18n from '../i18n';
 export type { User };
 
 type State = {
@@ -362,7 +363,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             }
           } catch (e) {
             console.error("Failed to decrypt keys on login:", e);
-            toast.error("Could not decrypt your stored keys. Please restore your account if the password has changed.");
+            toast.error(i18n.t('errors:could_not_decrypt_your_stored_keys_pleas', 'Could not decrypt your stored keys. Please restore your account if the password has changed.'));
           }
         }
 
@@ -504,13 +505,13 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         localStorage.setItem("user", JSON.stringify(newUser));
         return { user: newUser };
       });
-      toast.success('Profile updated!');
+      toast.success(i18n.t('common:profile_updated', 'Profile updated!'));
     },
 
     updateAvatar: async (avatar: File) => {
       // Avatar upload is tricky because it needs to update the encrypted profile.
       // For now, just upload the file and return. The UI needs to handle updating the profile JSON.
-      const toastId = toast.loading('Processing avatar...');
+      const toastId = toast.loading(i18n.t('common:processing_avatar', 'Processing avatar...'));
       const { compressImage } = await import('@lib/fileUtils');
       const { uploadToR2 } = await import('@lib/r2');
       let fileToProcess = avatar;
@@ -559,7 +560,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     blockUser: async (userId) => {
-      const toastId = toast.loading('Blocking user...');
+      const toastId = toast.loading(i18n.t('common:blocking_user', 'Blocking user...'));
       try {
         await authFetch(`/api/users/${userId}/block`, { method: 'POST' });
         toast.success('User blocked', { id: toastId });
@@ -573,7 +574,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     unblockUser: async (userId) => {
-      const toastId = toast.loading('Unblocking user...');
+      const toastId = toast.loading(i18n.t('common:unblocking_user', 'Unblocking user...'));
       try {
         await authFetch(`/api/users/${userId}/block`, { method: 'DELETE' });
         toast.success('User unblocked', { id: toastId });

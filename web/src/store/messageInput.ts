@@ -14,6 +14,7 @@ import { useConversationStore } from "./conversation";
 import type { Message } from "./conversation";
 import { compressImage } from "@lib/fileUtils";
 import useDynamicIslandStore, { UploadActivity } from "./dynamicIsland";
+import i18n from '../i18n';
 
 export type StagedFile = {
   id: string;
@@ -53,7 +54,7 @@ type State = {
 const ensureGroupSessionIfNeeded = async (conversationId: string): Promise<boolean> => {
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (!conversation) {
-    toast.error("Internal error: Active conversation not found.");
+    toast.error(i18n.t('errors:internal_error_active_conversation_not_f', 'Internal error: Active conversation not found.'));
     return false;
   }
   
@@ -158,7 +159,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     
     if (!me) {
       removeActivity(activityId);
-      toast.error("User not authenticated.");
+      toast.error(i18n.t('errors:user_not_authenticated', 'User not authenticated.'));
       return;
     }
 
@@ -376,7 +377,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
     } catch (error: unknown) {
       const errorMsg = handleApiError(error);
-      toast.error(`Voice message failed: ${errorMsg}`);
+      toast.error(i18n.t('errors:voice_message_failed', `Voice message failed: ${errorMsg}`, { error: errorMsg }));
       removeActivity(activityId);
       updateMessage(conversationId, `temp-${tempId}`, { error: true, optimistic: false });
     }
@@ -388,7 +389,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     useMessageStore.getState().removeMessage(conversationId, message.id);
 
     if (fileUrl) {
-      toast.error("Cannot retry file messages automatically. Please try uploading again.");
+      toast.error(i18n.t('errors:cannot_retry_file_messages_automatically', 'Cannot retry file messages automatically. Please try uploading again.'));
       return;
     }
 

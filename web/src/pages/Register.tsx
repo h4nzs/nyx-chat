@@ -265,7 +265,7 @@ export default function Register() {
               />
             ) : (
               <div className="text-red-500 text-sm p-4 border border-red-500 rounded bg-red-500/10">
-                System configuration error: Turnstile site key is missing.
+                {t('errors:turnstile_missing', 'System configuration error: Turnstile site key is missing.')}
               </div>
             )}
           </div>

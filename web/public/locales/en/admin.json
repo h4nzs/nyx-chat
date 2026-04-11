@@ -1,0 +1,22 @@
+{
+  "title": "NYX MISSION CONTROL",
+  "refresh": "Refresh Data",
+  "vps_ram": "VPS RAM USAGE",
+  "uptime": "Uptime:",
+  "active_db": "ACTIVE DATABASE",
+  "users": "Users",
+  "messages": "Messages",
+  "storage": "R2 STORAGE",
+  "files": "Files",
+  "enforcement": "ENFORCEMENT",
+  "suspend_desc": "Suspend user access immediately. This action will forcibly disconnect the user and prevent future logins.",
+  "open_ban_terminal": "OPEN BAN TERMINAL",
+  "suspended_accounts": "SUSPENDED ACCOUNTS",
+  "no_active_suspensions": "No active suspensions",
+  "reason": "Reason:",
+  "banned": "Banned:",
+  "unban": "Unban",
+  "unban_title": "Unban User",
+  "unban_desc": "Are you sure you want to lift the ban for @{{username}}?",
+  "initializing": "INITIALIZING SYSTEM LINK..."
+}

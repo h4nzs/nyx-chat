@@ -162,5 +162,19 @@
     "ago_s": "há {{count}} seg",
     "now": "AGORA",
     "yesterday": "Ontem"
-  }
+  },
+  "device_revoked_successfully": "Dispositivo revogado com sucesso",
+  "history_sync_payload_broadcasted_success": "Sincronização do histórico transmitida com sucesso.",
+  "notifications_enabled": "Notificações ativadas!",
+  "notifications_disabled": "Notificações desativadas",
+  "profile_updated": "Perfil atualizado!",
+  "processing_avatar": "Processando avatar...",
+  "blocking_user": "Bloqueando usuário...",
+  "unblocking_user": "Desbloqueando usuário...",
+  "secure_session_state_reset_next_message_": "Estado de sessão segura redefinido. A próxima mensagem negociará novas chaves.",
+  "preparing_history_sync_for_your_linked_d": "Preparando sincronização de histórico para seus dispositivos vinculados...",
+  "receiving_history_sync_from_your_other_d": "Recebendo sincronização de histórico do seu outro dispositivo...",
+  "posting_story": "Publicando história...",
+  "added_to_group": "Você foi adicionado a \"{{groupName}}\"",
+  "user_unbanned": "Usuário @{{username}} desbanido!"
 }

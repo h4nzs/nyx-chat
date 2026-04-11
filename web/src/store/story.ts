@@ -12,6 +12,7 @@ import type { StoryId, UserId, ConversationId } from '@nyx/shared';
 import { asStoryId, asUserId, asConversationId } from '@nyx/shared';
 
 import type { Story } from '@nyx/shared';
+import i18n from '../i18n';
 
 type StoryState = {
   stories: Record<string, Story[]>;
@@ -78,7 +79,7 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
   },
 
   postStory: async (file, text, privacy, selectedUserIds) => {
-    const toastId = toast.loading('Posting story...');
+    const toastId = toast.loading(i18n.t('common:posting_story', 'Posting story...'));
     try {
       const storyKey = await generateStoryKey();
       

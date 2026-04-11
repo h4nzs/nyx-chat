@@ -12,6 +12,7 @@ import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage
 import toast from 'react-hot-toast';
 
 import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, ensureGroupSession } from "@utils/crypto";
+import i18n from '../i18n';
 export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
 
 // --- Helper Functions ---
@@ -302,7 +303,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       console.error("Failed to delete group:", error);
       // Check if error is an ApiError with status property
       if (typeof error === 'object' && error !== null && 'status' in error && (error as Record<string, unknown>).status === 403) {
-        toast.error("Only the group creator can delete the group.");
+        toast.error(i18n.t('errors:only_the_group_creator_can_delete_the_gr', 'Only the group creator can delete the group.'));
       } else {
         const errorMessage = (error instanceof Error ? error.message : 'Unknown error') || "Failed to delete group.";
         toast.error(errorMessage);

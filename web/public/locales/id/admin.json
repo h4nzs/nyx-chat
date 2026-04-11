@@ -1,0 +1,22 @@
+{
+  "title": "NYX MISSION CONTROL",
+  "refresh": "Segarkan Data",
+  "vps_ram": "PENGGUNAAN RAM VPS",
+  "uptime": "Waktu Aktif:",
+  "active_db": "DATABASE AKTIF",
+  "users": "Pengguna",
+  "messages": "Pesan",
+  "storage": "PENYIMPANAN R2",
+  "files": "File",
+  "enforcement": "PENEGAKAN",
+  "suspend_desc": "Tangguhkan akses pengguna segera. Tindakan ini akan memutus koneksi pengguna secara paksa dan mencegah login di masa mendatang.",
+  "open_ban_terminal": "BUKA TERMINAL BLOKIR",
+  "suspended_accounts": "AKUN YANG DITANGGUHKAN",
+  "no_active_suspensions": "Tidak ada penangguhan aktif",
+  "reason": "Alasan:",
+  "banned": "Diblokir:",
+  "unban": "Buka Blokir",
+  "unban_title": "Buka Blokir Pengguna",
+  "unban_desc": "Apakah Anda yakin ingin mencabut blokir untuk @{{username}}?",
+  "initializing": "MENGINISIALISASI TAUTAN SISTEM..."
+}

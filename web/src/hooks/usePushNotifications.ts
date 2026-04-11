@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { getSocket } from '@lib/socket';
 import { urlBase64ToUint8Array } from '@utils/url';
 import toast from 'react-hot-toast';
+import i18n from '../i18n';
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
 
@@ -78,7 +79,7 @@ export function usePushNotifications() {
   // 2. Fungsi Subscribe (Dipanggil saat tombol diklik)
   const subscribeToPush = useCallback(async () => {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-      toast.error('Push notifications not supported');
+      toast.error(i18n.t('errors:push_notifications_not_supported', 'Push notifications not supported'));
       return;
     }
 
@@ -94,7 +95,7 @@ export function usePushNotifications() {
       setPermission(perm);
 
       if (perm !== 'granted') {
-        toast.error('Notification permission denied');
+        toast.error(i18n.t('errors:notification_permission_denied', 'Notification permission denied'));
         setLoading(false);
         return;
       }
@@ -110,11 +111,11 @@ export function usePushNotifications() {
         sendSubscriptionToSocket(subscription);
         setIsSubscribed(true);
         localStorage.setItem('nyx_push_enabled', 'true');
-        toast.success('Notifications enabled!');
+        toast.success(i18n.t('common:notifications_enabled', 'Notifications enabled!'));
       }
     } catch (error: unknown) {
       console.error('Failed to subscribe:', error);
-      toast.error('Failed to enable notifications: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      toast.error(i18n.t('errors:failed_to_enable_notifications', `Failed to enable notifications: ${error instanceof Error ? error.message : 'Unknown error'}`, { error: error instanceof Error ? error.message : 'Unknown error' }));
       if (mountedRef.current) {
         setIsSubscribed(false);
         localStorage.removeItem('nyx_push_enabled');
@@ -147,11 +148,11 @@ export function usePushNotifications() {
           socket.emit('push:unsubscribe');
         }
 
-        toast.success('Notifications disabled');
+        toast.success(i18n.t('common:notifications_disabled', 'Notifications disabled'));
       }
     } catch (error) {
       console.error('Error unsubscribing', error);
-      toast.error('Failed to disable notifications');
+      toast.error(i18n.t('errors:failed_to_disable_notifications', 'Failed to disable notifications'));
     } finally {
       if (mountedRef.current) {
         setLoading(false);
