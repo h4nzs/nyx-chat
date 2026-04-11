@@ -27,7 +27,9 @@ router.get('/', requireAuth, async (req, res, next) => {
 
     const sessions = await prisma.refreshToken.findMany({
       where: {
-        userId: req.user.id,
+        device: {
+          userId: req.user.id
+        },
         revokedAt: null // Only show active sessions
       },
       orderBy: {

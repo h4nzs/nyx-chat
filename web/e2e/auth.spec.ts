@@ -1,68 +1,60 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
 
 test.describe('Authentication & Onboarding', () => {
   test.setTimeout(60000); 
 
-  test('Register with Proof of Work', async ({ page }) => {
+  // Helper: Registrasi Akun dan Bypass Semua Modal Awal
+  async function registerAndBypass(page: Page, displayName: string, username: string) {
     await page.goto('/register');
+    
+    await page.getByRole('textbox', { name: /Display Name/i }).fill(displayName);
+    await page.getByRole('textbox', { name: /Username/i }).fill(username);
+    await page.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
+    await page.getByRole('button', { name: /Initialize Identity/i }).click();
 
-    await page.getByRole('textbox', { name: 'Display Name' }).fill('Test User');
-    await page.getByRole('textbox', { name: 'Username (ID)' }).fill('testuser_pow');
-    await page.getByRole('textbox', { name: 'Password' }).fill('StrongPass123!');
-
-    await page.getByRole('button', { name: 'Initialize Identity' }).click();
-
+    // 1. Bypass Biometric
     const skipBiometricBtn = page.locator('button:has-text("Skip"), button:has-text("Continue")').first();
     await expect(skipBiometricBtn).toBeVisible({ timeout: 30000 });
     await skipBiometricBtn.click();
 
-    // Langkah 1 Modal Recovery
-    await page.getByRole('button', { name: 'Acknowledge & Proceed' }).click();
-    
-    // Langkah 2 Tutup Modal Recovery
+    // 2. Bypass Recovery Modal
+    await page.getByRole('button', { name: /Acknowledge/i }).click();
     const closeRecoveryBtn = page.locator('button[aria-label="Close"], button:has-text("×")').first();
     await expect(closeRecoveryBtn).toBeVisible({ timeout: 5000 });
     await closeRecoveryBtn.click();
 
-    // ✅ FIX 1: Tangani Modal "System Init" dengan klik "Skip for now"
-    const skipSystemInitBtn = page.getByRole('button', { name: 'Skip for now' });
-    // Gunakan pengecekan kondisional karena modal ini mungkin tidak muncul saat Login
-    if (await skipSystemInitBtn.isVisible({ timeout: 5000 })) {
+    // 3. Bypass System Init Modal
+    const skipSystemInitBtn = page.getByRole('button', { name: /Skip for now/i });
+    try {
+      await skipSystemInitBtn.waitFor({ state: 'visible', timeout: 10000 });
       await skipSystemInitBtn.click();
+      await skipSystemInitBtn.waitFor({ state: 'hidden', timeout: 5000 });
+    } catch (e) {
+      console.log('System Init modal skipped or not found');
     }
 
-    // ✅ FIX 2: Ubah asersi akhir menggunakan elemen yang benar-benar ada di UI
-    await expect(page.getByRole('heading', { name: 'System Ready' })).toBeVisible({ timeout: 15000 });
+    // 4. Bypass Quick Tour Modal (If it appears)
+    const closeTourBtn = page.getByRole('button', { name: /Close modal/i });
+    try {
+      await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
+      await closeTourBtn.click();
+    } catch (e) {
+      console.log('Quick Tour modal skipped or not found');
+    }
+
+    // Verifikasi mendarat di Dashboard
+    await expect(page.getByRole('heading', { name: /System Ready/i })).toBeVisible({ timeout: 15000 });
+  }
+
+  test('Register with Proof of Work', async ({ page }) => {
+    await registerAndBypass(page, 'Test User', 'testuser_pow');
   });
 
   test('Login with correct password', async ({ page }) => {
     const username = `loginuser_${Date.now()}`;
     
     // 1. Register User
-    await page.goto('/register');
-    await page.getByRole('textbox', { name: 'Display Name' }).fill('Test Login User');
-    await page.getByRole('textbox', { name: 'Username (ID)' }).fill(username);
-    await page.getByRole('textbox', { name: 'Password' }).fill('StrongPass123!');
-    await page.getByRole('button', { name: 'Initialize Identity' }).click();
-
-    const skipBiometricBtn = page.locator('button:has-text("Skip"), button:has-text("Continue")').first();
-    await expect(skipBiometricBtn).toBeVisible({ timeout: 30000 });
-    await skipBiometricBtn.click();
-
-    await page.getByRole('button', { name: 'Acknowledge & Proceed' }).click();
-    
-    const closeRecoveryBtn = page.locator('button[aria-label="Close"], button:has-text("×")').first();
-    await expect(closeRecoveryBtn).toBeVisible({ timeout: 5000 });
-    await closeRecoveryBtn.click();
-
-    // ✅ FIX 1: Tangani Modal "System Init" 
-    const skipSystemInitBtn = page.getByRole('button', { name: 'Skip for now' });
-    if (await skipSystemInitBtn.isVisible({ timeout: 5000 })) {
-      await skipSystemInitBtn.click();
-    }
-    
-    // ✅ FIX 2: Asersi masuk halaman awal
-    await expect(page.getByRole('heading', { name: 'System Ready' })).toBeVisible({ timeout: 15000 });
+    await registerAndBypass(page, 'Test Login User', username);
     
     // 2. Clear Session
     await page.evaluate(async () => {
@@ -74,22 +66,39 @@ test.describe('Authentication & Onboarding', () => {
       }
     });
 
-    // 3. Login
-    await page.goto('/login');
-    await page.getByRole('textbox', { name: 'Username' }).fill(username);
-    await page.getByRole('textbox', { name: 'Password' }).fill('StrongPass123!');
-    await page.getByRole('button', { name: 'Login' }).click();
+    // 3. FORCE PAGE RELOAD
+    // Wipes out Zustand/React state in memory so SPA knows the user is truly logged out
+    await page.reload();
 
-    // ✅ FIX 2: Asersi Login berhasil
-    await expect(page.getByRole('heading', { name: 'System Ready' })).toBeVisible({ timeout: 15000 });
+    // 4. Login
+    await page.goto('/login');
+    await page.getByRole('textbox', { name: /Username/i }).fill(username);
+    await page.getByRole('textbox', { name: /Password/i }).fill('StrongPass123!');
+    await page.getByRole('button', { name: /Login/i }).click();
+
+    // 5. Bypass Modals after Login (System Init / Quick Tour)
+    const skipSystemInitBtn = page.getByRole('button', { name: /Skip for now/i });
+    try {
+      await skipSystemInitBtn.waitFor({ state: 'visible', timeout: 5000 });
+      await skipSystemInitBtn.click();
+    } catch (e) {}
+
+    const closeTourBtn = page.getByRole('button', { name: /Close modal/i });
+    try {
+      await closeTourBtn.waitFor({ state: 'visible', timeout: 5000 });
+      await closeTourBtn.click();
+    } catch (e) {}
+
+    // ✅ Asersi Login berhasil
+    await expect(page.getByRole('heading', { name: /System Ready/i })).toBeVisible({ timeout: 15000 });
   });
 
   test('Fail login with incorrect password', async ({ page }) => {
     await page.goto('/login');
     
-    await page.getByRole('textbox', { name: 'Username' }).fill('nonexistent_user');
-    await page.getByRole('textbox', { name: 'Password' }).fill('WrongPassword123!');
-    await page.getByRole('button', { name: 'Login' }).click();
+    await page.getByRole('textbox', { name: /Username/i }).fill('nonexistent_user');
+    await page.getByRole('textbox', { name: /Password/i }).fill('WrongPassword123!');
+    await page.getByRole('button', { name: /Login/i }).click();
 
     await expect(page.getByText('Invalid credentials')).toBeVisible({ timeout: 15000 });
   });
