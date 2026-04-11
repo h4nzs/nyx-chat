@@ -25,7 +25,7 @@
     "@scure/bip39": "^2.0.1",
     "@simplewebauthn/browser": "^13.3.0",
     "@types/lodash-es": "^4.17.12",
-    "axios": "^1.14.0",
+    "axios": "^1.15.0",
     "browser-image-compression": "^2.0.2",
     "clsx": "^2.1.1",
     "dexie": "^4.3.0",
