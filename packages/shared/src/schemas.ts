@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { asUserId, asConversationId, asMessageId, asStoryId } from './brands.js';
 
+// --- Validasi Kriptografi Khusus ---
+// Memastikan string hanya berisi karakter Base64 atau URL-Safe Base64 yang valid
+export const Base64StringSchema = z.string().regex(/^[A-Za-z0-9+/_-]*={0,2}$/, "Invalid Base64 format");
+
 // --- Base ID Schemas (Transforming to Branded Types) ---
 export const UserIdSchema = z.string().min(1).transform((val) => asUserId(val));
 export const ConversationIdSchema = z.string().min(1).transform((val) => asConversationId(val));
@@ -14,7 +18,7 @@ export const MinimalUserSchema = z.object({
   username: z.string().optional(),
   name: z.string().optional(),
   avatarUrl: z.string().nullable().optional(),
-  encryptedProfile: z.string().nullable().optional(),
+  encryptedProfile: Base64StringSchema.nullable().optional(),
   role: z.string().optional(),
   isVerified: z.boolean().optional(),
 }).passthrough();
@@ -22,7 +26,7 @@ export const MinimalUserSchema = z.object({
 export const MinimalConversationSchema = z.object({
   id: ConversationIdSchema,
   isGroup: z.boolean().default(false),
-  encryptedMetadata: z.string().nullable().optional(),
+  encryptedMetadata: Base64StringSchema.nullable().optional(),
   creatorId: UserIdSchema.nullable().optional(),
   updatedAt: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as string | number | Date); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
   unreadCount: z.number().default(0),
@@ -34,7 +38,7 @@ export const IncomingMessageSchema = z.object({
   id: MessageIdSchema,
   conversationId: ConversationIdSchema,
   senderId: UserIdSchema,
-  content: z.string().nullable().optional(),
+  content: Base64StringSchema.nullable().optional(),
   timestamp: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as string | number | Date); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
   createdAt: z.preprocess((val) => {
     if (val === null || val === undefined) return undefined;
@@ -75,16 +79,16 @@ const RawServerMessageBaseSchema = z.object({
   senderId: z.string(),
   sender: z.object({
     id: z.string(),
-    encryptedProfile: z.string().nullable().optional(),
+    encryptedProfile: Base64StringSchema.nullable().optional(),
     name: z.string().optional(),
     username: z.string().optional(),
     avatarUrl: z.string().nullable().optional(),
   }).optional(),
-  ciphertext: z.string().nullable().optional(),
-  content: z.string().nullable().optional(),
-  fileKey: z.string().nullable().optional(),
+  ciphertext: Base64StringSchema.nullable().optional(),
+  content: Base64StringSchema.nullable().optional(),
+  fileKey: Base64StringSchema.nullable().optional(),
   sessionId: z.string().nullable().optional(),
-  encryptedSessionKey: z.string().nullable().optional(),
+  encryptedSessionKey: Base64StringSchema.nullable().optional(),
   createdAt: z.string(),
   repliedToId: z.string().optional(),
   linkPreview: z.unknown().optional(),
@@ -108,7 +112,7 @@ export const ShadowVaultMessageSchema = z.object({
   id: MessageIdSchema,
   conversationId: ConversationIdSchema,
   senderId: UserIdSchema,
-  content: z.string().nullable().optional(),
+  content: Base64StringSchema.nullable().optional(),
   createdAt: z.preprocess((val) => {
       if (val === null || val === undefined) return undefined;
 

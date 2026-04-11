@@ -42,6 +42,7 @@
       "path-to-regexp@<0.1.13": ">=0.1.13",
       "path-to-regexp": "^8.4.0",
       "defu@<=6.1.4": ">=6.1.5",
+      "axios": ">=1.15.0",
       "brace-expansion": "^2.0.3"
     },
     "onlyBuiltDependencies": [

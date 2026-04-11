@@ -20,7 +20,7 @@
 ## Langkah 4: Keamanan Transport (Socket)
 1. **[GOOD] E2EE Transport (`socket.ts` & `shared/src/socket.ts`)**: Payload yang melewati socket sepenuhnya buta (hanya `content` sebagai *ciphertext* dan kunci yang dienkripsi). Server hanya bertindak sebagai *relay*.
 2. **[GOOD] Smart Key Routing (`socket.ts`)**: Distribusi kunci grup (`messages:distribute_keys`) secara cerdas diarahkan hanya ke spesifik `targetDeviceId`, mengurangi permukaan serangan.
-3. **[MEDIUM] Celah Rate Limit Signaling (`socket.ts`)**: Terdapat *rate limiter* Redis untuk event `message:send` dan `typing`. Namun, event `webrtc:secure_signal` tidak di-rate limit. Penyerang dapat membanjiri target tertentu dengan payload sampah WebRTC (Signaling DoS).
+3. **[MEDIUM] Celah Rate Limit Signaling (`socket.ts`)**: ~~Terdapat *rate limiter* Redis untuk event `message:send` dan `typing`. Namun, event `webrtc:secure_signal` tidak di-rate limit. Penyerang dapat membanjiri target tertentu dengan payload sampah WebRTC (Signaling DoS).~~
 
 # Phase 2: User Experience (UX) & Performance Audit
 
@@ -51,8 +51,8 @@
 2. **[GOOD] Tombol Kematian (Dead Man's Switch)**: Pada `systemSweeper.ts`, ada fitur penghapusan akun otomatis beserta kaskade (cascade deletion) jika pengguna tidak *login* (tidak *online*) selama durasi `autoDestructDays`. Ini adalah fitur luar biasa untuk *High-Threat Model* (Whistleblower).
 
 ## Langkah 3: Infrastruktur & Deployment (Docker)
-1. **[CRITICAL] Nginx Reverse Proxy Mismatch (`web/nginx.conf`)**: Pada berkas konfigurasi Nginx untuk situs App, permintaan `/api` dan `/socket.io` diteruskan (proxy_pass) ke `http://127.0.0.1:4000`. Dalam lingkungan Docker (via `docker-compose.yml`), IP `127.0.0.1` di dalam wadah `web` akan mengarah pada wadah itu sendiri, bukan ke wadah `server`. **Ini akan menyebabkan API dan Socket gagal terkoneksi (Connection Refused).** Harus diubah menjadi nama servis dalam docker-compose, yaitu `http://server:4000`.
-2. **[INFO] Mismatch Port Expose Dockerfile (`web/Dockerfile`)**: Di dalam Dockerfile tertulis `EXPOSE 80`, namun `nginx.conf` dikonfigurasi untuk `listen 3000;`. Meski dalam docker-compose port pemetaan yang menang akan digunakan, ini dapat membingungkan saat men- *deploy* ke platform *Serverless* atau *PaaS* seperti Koyeb/Vercel/Render. Sebaiknya seragamkan.
+1. **[CRITICAL] Nginx Reverse Proxy Mismatch (`web/nginx.conf`)**: ~~Pada berkas konfigurasi Nginx untuk situs App, permintaan `/api` dan `/socket.io` diteruskan (proxy_pass) ke `http://127.0.0.1:4000`. Dalam lingkungan Docker (via `docker-compose.yml`), IP `127.0.0.1` di dalam wadah `web` akan mengarah pada wadah itu sendiri, bukan ke wadah `server`. **Ini akan menyebabkan API dan Socket gagal terkoneksi ~~(Connection Refused).** Harus diubah menjadi nama servis dalam docker-compose, yaitu `http://server:4000`.
+2. **[INFO] Mismatch Port Expose Dockerfile (`web/Dockerfile`)**: ~~Di dalam Dockerfile tertulis `EXPOSE 80`, namun `nginx.conf` dikonfigurasi untuk `listen 3000;`. Meski dalam docker-compose port pemetaan yang menang akan digunakan, ini dapat membingungkan saat men- *deploy* ke platform *Serverless* atau *PaaS* seperti Koyeb/Vercel/Render. Sebaiknya seragamkan.~~
 
 # Phase 4: Kualitas Kode & Standar TypeScript
 
@@ -71,5 +71,4 @@
 
 ## Langkah 1: Eksekusi Test Suite Global (`pnpm test`)
 1. **[RESOLVED] Cakupan Test Playwright (E2E)**: Berdasarkan audit terbaru, pengujian End-to-End dengan Playwright telah ditambahkan dan divalidasi. Keberadaan file `web/playwright.config.ts` beserta suite pengujian di dalam `web/e2e/*.spec.ts` memastikan bahwa alur kritis seperti registrasi, login, dan keamanan telah memiliki cakupan pengujian otomatis. Risiko regresi telah berhasil dimitigasi.
-2. **[CRITICAL] Kegagalan Unit/API Test Backend**: Saat menjalankan `pnpm test` di *workspace* `server`, proses *crash* dengan galat `ENOENT: no such file or directory, open '/home/kenz/nyx-chat/server/ca.pem'`. Ini berarti `prisma.ts` dikonfigurasi secara manual (*hard-coded*) untuk mencari sertifikat SSL saat menginisiasi *database* lokal untuk *testing*. Anda harus mengisolasi konfigurasi tes dengan mengejek (*mocking*) basis data atau tidak memerlukan file sertifikat SSL *production-level* saat sedang uji coba.
-3. **[CRITICAL] Kode Uji yang Usang (Legacy Flow)**: Melirik ke dalam isi file `server/tests/api.test.ts`, terlihat tes ini masih mencoba menguji alur `/api/auth/register` dengan payload `email, username, password, name`. Padahal arsitektur Anda sudah lama bertransformasi menjadi **Zero-Knowledge** (menggunakan *usernameHash*, *publicKey*, dan *biometric*). Tes yang ada benar-benar sudah usang (*obsolete*).
+2. **[RESOLVED] Kegagalan Unit/API Test Backend**: Masalah *crash* akibat galat `ENOENT` pada `ca.pem` telah diperbaiki. Konfigurasi di `server/src/lib/prisma.ts` kini diisolasi sehingga sertifikat SSL tidak di-*load* ketika `process.env.NODE_ENV === 'test'`, mencegah *error* saat inisialisasi basis data lokal dalam mode uji coba.

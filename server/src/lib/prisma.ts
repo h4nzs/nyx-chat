@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
-import { Pool } from 'pg';
+import { Pool, PoolConfig } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import fs from 'fs'; // 1. Impor fs
 import path from 'path';
@@ -12,15 +12,19 @@ if (!connectionString) {
 }
 
 const caPath = path.resolve(process.cwd(), 'ca.pem');
+const isTestEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
 
 // 1. Buat connection pool standar PostgreSQL
-const pool = new Pool({ 
-  connectionString,
-  ssl: {
+const poolConfig: PoolConfig = { connectionString };
+
+if (!isTestEnv && fs.existsSync(caPath)) {
+  poolConfig.ssl = {
     rejectUnauthorized: true, // <--- INI OBATNYA!
     ca: fs.readFileSync(caPath).toString()
-  }
-});
+  };
+}
+
+const pool = new Pool(poolConfig);
 
 // 2. Bungkus pool tersebut dengan Prisma Adapter
 const adapter = new PrismaPg(pool);

@@ -9,6 +9,7 @@ build
 coverage
 server/dist
 web/dist
+**/dev-dist
 # Keep environment variables out of version control
 .env
 **/.env
