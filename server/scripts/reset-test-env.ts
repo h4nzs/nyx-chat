@@ -26,6 +26,15 @@ const prisma = new PrismaClient({ adapter });
 const redis = createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
 
 async function reset() {
+  // 🚨 CRITICAL GUARDRAIL: Mencegah eksekusi tidak sengaja di Production atau DB eksternal
+  if (
+    process.env.NODE_ENV === 'production' || 
+    (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('localhost') && !process.env.DATABASE_URL.includes('127.0.0.1') && !process.env.DATABASE_URL.includes('postgres'))
+  ) {
+    console.error('❌ DANGER: Attempted to wipe database in non-local/production environment!');
+    process.exit(1);
+  }
+
   console.log('🔄 Resetting database and redis for E2E tests...');
   try {
     await prisma.$transaction([
