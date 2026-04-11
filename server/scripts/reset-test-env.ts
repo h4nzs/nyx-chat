@@ -56,7 +56,12 @@ async function reset() {
     ]);
     
     await redis.connect();
-    await redis.flushAll();
+    if (!REDIS_URL.includes('localhost') && !REDIS_URL.includes('127.0.0.1')) {
+      console.error('❌ DANGER: Redis URL is not local! Aborting wipe.');
+      process.exit(1);
+    }
+    await redis.select(TEST_DB_INDEX);
+    await redis.flushDb();
     await redis.quit();
 
     console.log('✅ Test environment reset successful.');

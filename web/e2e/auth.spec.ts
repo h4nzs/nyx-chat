@@ -47,6 +47,15 @@ test.describe('Authentication & Onboarding', () => {
   }
 
   test('Register with Proof of Work', async ({ page }) => {
+    await page.route('**/api/auth/pow/challenge', async route => {
+      await route.fulfill({ status: 200, json: { challenge: 'mock_challenge', difficulty: 1 } });
+    });
+    await page.route('**/api/auth/pow/verify', async route => {
+      await route.fulfill({
+        status: 201,
+        json: { message: 'Registered successfully', user: { id: 'mock_id', username: 'testuser_pow' }, tokens: { access: 'token', refresh: 'token' } }
+      });
+    });
     await registerAndBypass(page, 'Test User', 'testuser_pow');
   });
 

@@ -37,4 +37,4 @@ class WorkerMock {
   }
   terminate() {}
 }
-global.Worker = WorkerMock as any;
+global.Worker = WorkerMock as unknown as typeof global.Worker;

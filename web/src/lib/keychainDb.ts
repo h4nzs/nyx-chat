@@ -502,10 +502,14 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
   return enqueueWrite(async () => {
       let importData: Record<string, unknown[]>;
       try {
-          const parsedInit = JSON.parse(jsonString);
+          const parsedInit: unknown = JSON.parse(jsonString);
           let finalJsonStr = jsonString;
 
-          if (parsedInit.encrypted && parsedInit.salt && parsedInit.data) {
+          const isVaultEnvelope = (obj: unknown): obj is { encrypted: boolean; salt: string; data: string } => {
+              return typeof obj === 'object' && obj !== null && 'encrypted' in obj && 'salt' in obj && 'data' in obj;
+          };
+
+          if (isVaultEnvelope(parsedInit)) {
               if (!password) throw new Error("Password required to decrypt vault.");
               
               const { getSodium } = await import('@lib/sodiumInitializer');

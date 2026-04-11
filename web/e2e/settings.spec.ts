@@ -61,16 +61,15 @@ test.describe('Settings & Emergency Eject', () => {
 
     // 3. Handle confirmation modal if it appears (Emergency Eject triggers showConfirm)
     const confirmBtn = page.getByRole('button', { name: /confirm|proceed|yes|eject/i }).filter({ hasText: /confirm|eject/i }).first();
-    if (await confirmBtn.isVisible({ timeout: 5000 })) {
-      await confirmBtn.click();
-    }
+    await expect(confirmBtn).toBeVisible({ timeout: 5000 });
+    await confirmBtn.click();
 
     // 4. Verify redirected to login/onboarding
-    await expect(page).toHaveURL(/.*(\/login|\/|\/register)/, { timeout: 15000 });
+    await expect(page).toHaveURL(/(\/login|\/register|\/)$/, { timeout: 15000 });
 
     // 5. Verify IndexedDB is functionally cleared by attempting to go back to a protected route
     await page.goto('/chat');
     // Should be redirected back to login because session is gone
-    await expect(page).toHaveURL(/.*(\/login|\/|\/register)/, { timeout: 10000 });
+    await expect(page).toHaveURL(/(\/login|\/register|\/)$/, { timeout: 10000 });
   });
 });

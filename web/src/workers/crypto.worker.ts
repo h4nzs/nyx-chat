@@ -18,7 +18,7 @@ import type {
 // ✅ FIX 2: Kita impor fungsi inisialisasi aman yang SUDAH kita buat sebelumnya di lib.
 import { getSodium } from '../lib/sodiumInitializer';
 
-let sodium: typeof _sodium;
+let sodium: Awaited<ReturnType<typeof getSodium>>;
 let isReady = false;
 
 const B64_VARIANT = 'URLSAFE_NO_PADDING';

@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## 🚀 [v2.6.0] - Multi-Device Evolution
+## 🚀 [v2.6.0] - 2026-04-11
 
 This release brings one of the most significant architectural updates to Nyx Chat. We have completely rewritten the core cryptographic engine to support multiple simultaneous devices, ensuring you stay connected everywhere without compromising End-to-End Encryption (E2EE) privacy.
 

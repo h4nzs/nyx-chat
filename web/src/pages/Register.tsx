@@ -247,21 +247,27 @@ export default function Register() {
           {/* Modified AuthForm for Username Only */}
           <AuthForm
             onSubmit={handleRegister}
-            button={!turnstileToken ? t('auth:status.verifying_security', 'Checking Security...') : t('auth:buttons.register')}
+            button={!import.meta.env.VITE_TURNSTILE_SITE_KEY ? 'Configuration Error' : (!turnstileToken ? t('auth:status.verifying_security', 'Checking Security...') : t('auth:buttons.register'))}
             hideEmail={true} 
             isRegister={true}
-            disabled={!turnstileToken}
+            disabled={!import.meta.env.VITE_TURNSTILE_SITE_KEY || !turnstileToken}
           />
 
           {/* Turnstile Widget */}
           <div className="mt-4 flex justify-center">
-            <Turnstile
-              siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY || '1x00000000000000000000AA'}
-              onSuccess={setTurnstileToken}
-              onError={() => toast.error(t('auth:errors.security_check_failed', 'Security check failed.'))}
-              onExpire={() => setTurnstileToken('')}
-              options={{ theme: 'auto' }}
-            />
+            {import.meta.env.VITE_TURNSTILE_SITE_KEY ? (
+              <Turnstile
+                siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                onSuccess={setTurnstileToken}
+                onError={() => toast.error(t('auth:errors.security_check_failed', 'Security check failed.'))}
+                onExpire={() => setTurnstileToken('')}
+                options={{ theme: 'auto' }}
+              />
+            ) : (
+              <div className="text-red-500 text-sm p-4 border border-red-500 rounded bg-red-500/10">
+                System configuration error: Turnstile site key is missing.
+              </div>
+            )}
           </div>
 
           <div className="text-center mt-6">
