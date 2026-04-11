@@ -42,6 +42,7 @@ jobs:
           VITE_APP_SECRET: ${{ secrets.VITE_APP_SECRET }}
           VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
           INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
         run: pnpm --filter nyx-web run build
 
       - name: 🚀 Build Marketing (Sisi Publik)
