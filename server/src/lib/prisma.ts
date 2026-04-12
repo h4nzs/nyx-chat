@@ -12,12 +12,12 @@ if (!connectionString) {
 }
 
 const caPath = path.resolve(process.cwd(), 'ca.pem');
-const isTestEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+const isLocalEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
 
 // 1. Buat connection pool standar PostgreSQL
 const poolConfig: PoolConfig = { connectionString };
 
-if (!isTestEnv) {
+if (!isLocalEnv) {
   if (process.env.NODE_ENV === 'production' && !fs.existsSync(caPath)) {
     throw new Error("Production environment requires ca.pem for database connection.");
   }

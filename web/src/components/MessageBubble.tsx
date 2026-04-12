@@ -147,7 +147,7 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
                 {message.isViewed ? (
                   <div className="flex items-center gap-2 text-text-secondary/50 italic select-none">
                     <FiEyeOff size={18} />
-                    <span className="text-sm font-medium">Opened</span>
+                    <span className="text-sm font-medium">{t('messages.opened', 'Opened')}</span>
                   </div>
                 ) : (
                   <button 
@@ -251,3 +251,4 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
     </div>
   );
 }
+

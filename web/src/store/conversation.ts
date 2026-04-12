@@ -291,7 +291,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       get().removeConversation(id);
     } catch (error: unknown) {
       console.error("Failed to delete conversation:", error);
-      const errorMessage = (error instanceof Error ? error.message : 'Unknown error') || "Failed to delete conversation.";
+      const errorMessage = (error instanceof Error ? error.message : undefined) || i18n.t('errors:failed_to_delete_conversation', "Failed to delete conversation.");
       toast.error(errorMessage);
     }
   },
@@ -305,7 +305,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       if (typeof error === 'object' && error !== null && 'status' in error && (error as Record<string, unknown>).status === 403) {
         toast.error(i18n.t('errors:only_the_group_creator_can_delete_the_gr', 'Only the group creator can delete the group.'));
       } else {
-        const errorMessage = (error instanceof Error ? error.message : 'Unknown error') || "Failed to delete group.";
+        const errorMessage = (error instanceof Error ? error.message : undefined) || i18n.t('errors:failed_to_delete_group', "Failed to delete group.");
         toast.error(errorMessage);
       }
     }
@@ -661,7 +661,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     } catch (error: unknown) {
       console.error("Failed to toggle pinned conversation", error);
       // Show error toast
-      const errorMessage = (error instanceof Error ? error.message : 'Unknown error') || i18n.t('errors:failed_to_toggle_pinned_conversation', "Failed to toggle pinned conversation.");
+      const errorMessage = (error instanceof Error ? error.message : undefined) || i18n.t('errors:failed_to_toggle_pinned_conversation', "Failed to toggle pinned conversation.");
       toast.error(errorMessage);
       // If the API call fails, revert the optimistic update
       set(state => {

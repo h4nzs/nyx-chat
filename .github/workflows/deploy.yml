@@ -35,8 +35,10 @@ jobs:
         run: pnpm --filter @nyx/shared run build
 
       - name: 🔐 Assert Turnstile Site Key
+        env:
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
         run: |
-          if [ -z "${{ secrets.VITE_TURNSTILE_SITE_KEY }}" ]; then
+          if [ -z "$VITE_TURNSTILE_SITE_KEY" ]; then
             echo "::error::VITE_TURNSTILE_SITE_KEY secret is missing or empty!"
             exit 1
           fi
