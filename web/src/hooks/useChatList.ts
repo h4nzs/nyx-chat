@@ -8,8 +8,10 @@ import { authFetch } from '@lib/api';
 import { debounce } from 'lodash-es';
 import { hashUsername } from '@lib/crypto-worker-proxy';
 import i18n from '../i18n';
+import { useTranslation } from 'react-i18next';
 
 export function useChatList() {
+  const { t } = useTranslation(['common']);
   const navigate = useNavigate();
   const { conversationId: activeId } = useParams<{ conversationId: string }>();
 
@@ -89,7 +91,7 @@ export function useChatList() {
     };
   
     const handleSelectUser = async (user: User) => {
-      const conversationId = await startConversation(user.id, { name: user.name || 'Unknown', username: user.username || 'unknown' });
+      const conversationId = await startConversation(user.id, { name: user.name || t('common:defaults.unknown', 'Unknown'), username: user.username || 'unknown' });
       navigate(`/chat/${conversationId}`);
       setSearchQuery('');
       setSearchResults([]);

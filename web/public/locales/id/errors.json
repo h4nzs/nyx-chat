@@ -5,7 +5,6 @@
   "failed_to_broadcast_history_sync": "Gagal menyiarkan sinkronisasi riwayat.",
   "push_notifications_not_supported": "Notifikasi push tidak didukung",
   "notification_permission_denied": "Izin notifikasi ditolak",
-  "failed_to_enable_notifications_error_ins": "Gagal mengaktifkan notifikasi: {{error}}",
   "failed_to_disable_notifications": "Gagal menonaktifkan notifikasi",
   "disconnected_reconnecting": "Terputus. Menghubungkan kembali...",
   "this_session_has_been_logged_out_remotel": "Sesi ini telah dikeluarkan dari jarak jauh.",

@@ -35,16 +35,8 @@ export function useUserProfile(userInput?: { id: string | UserId; encryptedProfi
   if (localProfile) return localProfile;   
   
   // ✅ FIX: Jika objek 'user' sudah membawa nama (misalnya dari SQLite / cache / mapper backend), JANGAN DITOLAK!
-  if (user.name) {
-      const placeholderNames = [
-          "Unknown", "Encrypted User", "Anonymous",
-          i18n.t('common:defaults.unknown', "Unknown"),
-          i18n.t('common:defaults.anonymous', "Anonymous"),
-          i18n.t('common:defaults.encrypted_user', "Encrypted User")
-      ];
-      if (!placeholderNames.includes(user.name)) {
-          return { name: user.name, avatarUrl: user.avatarUrl || null, description: user.description || null };
-      }
+  if (user.name && !('isPlaceholder' in user && (user as { isPlaceholder?: boolean }).isPlaceholder)) {
+      return { name: user.name, avatarUrl: user.avatarUrl || null, description: user.description || null };
   }
 
   if (!user.encryptedProfile) return { name: i18n.t('common:defaults.anonymous', "Anonymous"), avatarUrl: null, description: null };

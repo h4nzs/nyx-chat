@@ -3,7 +3,7 @@ import { asUserId, asConversationId, asMessageId, asStoryId } from './brands.js'
 
 // --- Validasi Kriptografi Khusus ---
 // Memastikan string hanya berisi karakter Base64 atau URL-Safe Base64 yang valid
-export const Base64StringSchema = z.string().regex(/^(?=.{4,}$)(?:[A-Za-z0-9+/_-]{4})*(?:[A-Za-z0-9+/_-]{2}==|[A-Za-z0-9+/_-]{3}=)?$/, "Invalid Base64 format");
+export const Base64StringSchema = z.string().regex(/^(?=.{2,}$)(?:[A-Za-z0-9+/_-]{4})*(?:[A-Za-z0-9+/_-]{2}(?:==)?|[A-Za-z0-9+/_-]{3}=?)?$/, "Invalid Base64 format");
 
 // --- Base ID Schemas (Transforming to Branded Types) ---
 export const UserIdSchema = z.string().min(1).transform((val) => asUserId(val));

@@ -12,24 +12,23 @@ if (!connectionString) {
 }
 
 const caPath = path.resolve(process.cwd(), 'ca.pem');
-const isLocalEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+const env = process.env.NODE_ENV || 'development';
+const isLocalEnv = env === 'development' || env === 'test';
 
 // 1. Buat connection pool standar PostgreSQL
 const poolConfig: PoolConfig = { connectionString };
 
 if (!isLocalEnv) {
-  if (process.env.NODE_ENV === 'production' && !fs.existsSync(caPath)) {
-    throw new Error("Production environment requires ca.pem for database connection.");
-  }
-  
-  if (fs.existsSync(caPath)) {
+  if (!fs.existsSync(caPath)) {
+    if (env === 'production') {
+      throw new Error("Production environment requires ca.pem for database connection.");
+    } else {
+      poolConfig.ssl = { rejectUnauthorized: false };
+    }
+  } else {
     poolConfig.ssl = {
       rejectUnauthorized: true,
       ca: fs.readFileSync(caPath, 'utf8')
-    };
-  } else {
-    poolConfig.ssl = {
-      rejectUnauthorized: true
     };
   }
 }

@@ -5,7 +5,6 @@
   "failed_to_broadcast_history_sync": "Error al transmitir la sincronización del historial.",
   "push_notifications_not_supported": "Notificaciones push no compatibles",
   "notification_permission_denied": "Permiso de notificación denegado",
-  "failed_to_enable_notifications_error_ins": "Error al habilitar notificaciones: {{error}}",
   "failed_to_disable_notifications": "Error al deshabilitar las notificaciones",
   "disconnected_reconnecting": "Desconectado. Reconectando...",
   "this_session_has_been_logged_out_remotel": "Esta sesión ha sido cerrada remotamente.",

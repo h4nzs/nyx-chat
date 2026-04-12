@@ -6,7 +6,6 @@
   "push_notifications_not_supported": "Push notifications not supported",
   "notification_permission_denied": "Notification permission denied",
   "failed_to_enable_notifications": "Failed to enable notifications: {{error}}",
-  "failed_to_enable_notifications_error_ins": "Failed to enable notifications: {{error}}",
   "disconnected_reconnecting": "Disconnected. Reconnecting...",
   "this_session_has_been_logged_out_remotel": "This session has been logged out remotely.",
   "failed_to_load_metrics": "Failed to load metrics",

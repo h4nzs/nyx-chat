@@ -15,6 +15,11 @@ import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, 
 import i18n from '../i18n';
 export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
 
+function getToastErrorMessage(error: unknown, i18nKey: string, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message;
+  return i18n.t(i18nKey, fallback);
+}
+
 // --- Helper Functions ---
 
 const sortConversations = (list: Conversation[], currentUserId: string | undefined) =>
@@ -305,8 +310,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       if (typeof error === 'object' && error !== null && 'status' in error && (error as Record<string, unknown>).status === 403) {
         toast.error(i18n.t('errors:only_the_group_creator_can_delete_the_gr', 'Only the group creator can delete the group.'));
       } else {
-        const errorMessage = (error instanceof Error ? error.message : undefined) || i18n.t('errors:failed_to_delete_group', "Failed to delete group.");
-        toast.error(errorMessage);
+        toast.error(getToastErrorMessage(error, 'errors:failed_to_delete_group', "Failed to delete group."));
       }
     }
   },
