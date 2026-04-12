@@ -563,7 +563,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const toastId = toast.loading(i18n.t('common:blocking_user', 'Blocking user...'));
       try {
         await authFetch(`/api/users/${userId}/block`, { method: 'POST' });
-        toast.success('User blocked', { id: toastId });
+        toast.success(i18n.t('common:user_blocked', 'User blocked'), { id: toastId });
         set(state => ({ blockedUserIds: [...state.blockedUserIds, userId] }));
       } catch (error: unknown) {
         const errorDetails = typeof error === 'object' && error !== null && 'details' in error ? (error as Record<string, unknown>).details : undefined;

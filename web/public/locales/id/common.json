@@ -67,7 +67,10 @@
     "me": "Saya",
     "unknown": "Tidak diketahui",
     "someone": "Seseorang",
-    "you": "ANDA"
+    "you": "ANDA",
+    "anonymous": "Anonim",
+    "unknown_group": "Grup Tidak Dikenal",
+    "unknown_user": "Pengguna Tidak Dikenal"
   },
   "status": {
     "connection_lost": "KONEKSI_HILANG // SISTEM_OFFLINE",
@@ -176,5 +179,10 @@
   "receiving_history_sync_from_your_other_d": "Menerima sinkronisasi riwayat dari perangkat Anda yang lain...",
   "posting_story": "Memposting cerita...",
   "added_to_group": "Anda telah ditambahkan ke \"{{groupName}}\"",
-  "user_unbanned": "Pengguna @{{username}} telah di-unban!"
+  "user_unbanned": "Pengguna @{{username}} telah di-unban!",
+  "security_key_changed": "Kunci keamanan untuk {{name}} telah berubah. Anda mungkin ingin memverifikasi identitas mereka.",
+  "uploading_to_cloud": "Mengunggah ke Cloud...",
+  "avatar_uploaded": "Avatar diunggah! (Pembaruan profil diperlukan)",
+  "user_blocked": "Pengguna diblokir",
+  "user_unblocked": "Blokir pengguna dibuka"
 }

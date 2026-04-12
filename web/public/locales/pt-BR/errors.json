@@ -28,5 +28,14 @@
   "file_upload_failed": "Falha no upload do arquivo: {{error}}",
   "voice_message_failed": "Mensagem de voz falhou: {{error}}",
   "failed_to_upload_file": "Falha ao fazer upload de {{filename}}",
-  "failed_to_enable_notifications": "Falha ao ativar notificações: {{error}}"
+  "failed_to_enable_notifications": "Falha ao ativar notificações: {{error}}",
+  "failed_to_rotate_group_keys": "CRÍTICO: Falha ao rotacionar chaves para o grupo. O chat está inseguro.",
+  "media_error": "Erro de mídia: {{error}}",
+  "call_failed": "Falha ao iniciar chamada E2EE.",
+  "update_failed": "Falha na atualização: {{error}}",
+  "block_failed": "Falha ao bloquear: {{error}}",
+  "unblock_failed": "Falha ao desbloquear: {{error}}",
+  "failed_to_delete_conversation": "Falha ao excluir conversa.",
+  "failed_to_delete_group": "Falha ao excluir grupo.",
+  "failed_to_toggle_pinned_conversation": "Falha ao fixar/desafixar conversa."
 }

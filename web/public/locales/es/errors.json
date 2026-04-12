@@ -28,5 +28,14 @@
   "file_upload_failed": "Error en la subida de archivo: {{error}}",
   "voice_message_failed": "Error en el mensaje de voz: {{error}}",
   "failed_to_upload_file": "Error al subir {{filename}}",
-  "failed_to_enable_notifications": "Error al habilitar notificaciones: {{error}}"
+  "failed_to_enable_notifications": "Error al habilitar notificaciones: {{error}}",
+  "failed_to_rotate_group_keys": "CRÍTICO: Error al rotar las claves del grupo. El chat es inseguro.",
+  "media_error": "Error de medios: {{error}}",
+  "call_failed": "Error al iniciar la llamada E2EE.",
+  "update_failed": "Error en la actualización: {{error}}",
+  "block_failed": "Error al bloquear: {{error}}",
+  "unblock_failed": "Error al desbloquear: {{error}}",
+  "failed_to_delete_conversation": "Error al eliminar la conversación.",
+  "failed_to_delete_group": "Error al eliminar el grupo.",
+  "failed_to_toggle_pinned_conversation": "Error al fijar/desfijar la conversación."
 }

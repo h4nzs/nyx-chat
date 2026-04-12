@@ -351,7 +351,7 @@ export function getSocket() {
       // Opsional: Berikan feedback visual kecil jika user sedang melihat chat
       const isViewingChat = window.location.pathname.includes(`/chat/${conversationId}`);
       if (isViewingChat) {
-          toast.success("Sebuah pesan telah ditarik oleh pengirim.", {
+          toast.success(i18n.t('chat:messages.message_retracted', 'A message has been retracted by the sender.'), {
               icon: '🗑️',
               duration: 3000,
               position: 'bottom-center'

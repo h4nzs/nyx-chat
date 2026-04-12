@@ -28,5 +28,14 @@
   "voice_message_failed": "Pesan suara gagal: {{error}}",
   "turnstile_missing": "Turnstile tidak ditemukan. Harap selesaikan tantangan keamanan untuk melanjutkan.",
   "failed_to_upload_file": "Gagal mengunggah {{filename}}",
-  "failed_to_enable_notifications": "Gagal mengaktifkan notifikasi: {{error}}"
+  "failed_to_enable_notifications": "Gagal mengaktifkan notifikasi: {{error}}",
+  "failed_to_rotate_group_keys": "KRITIS: Gagal memutar kunci untuk grup. Obrolan menjadi tidak aman.",
+  "media_error": "Kesalahan Media: {{error}}",
+  "call_failed": "Gagal memulai panggilan E2EE.",
+  "update_failed": "Pembaruan gagal: {{error}}",
+  "block_failed": "Gagal memblokir: {{error}}",
+  "unblock_failed": "Gagal membuka blokir: {{error}}",
+  "failed_to_delete_conversation": "Gagal menghapus obrolan.",
+  "failed_to_delete_group": "Gagal menghapus grup.",
+  "failed_to_toggle_pinned_conversation": "Gagal menyematkan/melepas sematan obrolan."
 }

@@ -100,7 +100,8 @@
     "repair_session": "Reparar sesión",
     "message_deleted": "Este mensaje ha sido borrado",
     "security_info": "Cifrado E2E vía Protocolo Signal",
-    "message_id_toast": "ID del mensaje: {{id}}"
+    "message_id_toast": "ID del mensaje: {{id}}",
+    "message_retracted": "El remitente ha retirado un mensaje."
   },
   "media": {
     "decrypting": "Descifrando...",

@@ -267,7 +267,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     } catch (error: unknown) {
       console.error("Upload error:", error);
       const errorMsg = handleApiError(error);
-      toast.error(`File upload failed: ${errorMsg}`);
+      toast.error(i18n.t('errors:file_upload_failed', 'File upload failed: {{error}}', { error: errorMsg }));
       removeActivity(activityId);
       updateMessage(conversationId, `temp-${tempId}`, { error: true, optimistic: false });
     }

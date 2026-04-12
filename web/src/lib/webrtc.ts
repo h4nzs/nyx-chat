@@ -6,6 +6,7 @@ import { useCallStore } from '../store/callStore';
 import { api } from './api';
 import { asUserId } from '@nyx/shared';
 import { WebRTCSignalingSchema } from '@nyx/shared';
+import i18n from '../i18n';
 
 let cachedIceServers: RTCIceServer[] | null = null;
 let turnCacheExp = 0;
@@ -220,7 +221,7 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
 
   } catch (err) {
     console.error('Failed to start call', err);
-    import('react-hot-toast').then(m => m.default.error('Failed to start E2EE call.'));
+    import('react-hot-toast').then(m => m.default.error(i18n.t('errors:call_failed', 'Failed to start E2EE call.')));
     cleanupCall();
   }
 };

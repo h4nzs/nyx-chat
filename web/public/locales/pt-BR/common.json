@@ -67,7 +67,10 @@
     "me": "Eu",
     "unknown": "Desconhecido",
     "someone": "Alguém",
-    "you": "VOCÊ"
+    "you": "VOCÊ",
+    "anonymous": "Anônimo",
+    "unknown_group": "Grupo Desconhecido",
+    "unknown_user": "Usuário Desconhecido"
   },
   "status": {
     "connection_lost": "CONEXÃO_PERDIDA // SISTEMA_OFFLINE",
@@ -176,5 +179,10 @@
   "receiving_history_sync_from_your_other_d": "Recebendo sincronização de histórico do seu outro dispositivo...",
   "posting_story": "Publicando história...",
   "added_to_group": "Você foi adicionado a \"{{groupName}}\"",
-  "user_unbanned": "Usuário @{{username}} desbanido!"
+  "user_unbanned": "Usuário @{{username}} desbanido!",
+  "security_key_changed": "A chave de segurança de {{name}} mudou. Você pode querer verificar a identidade deles.",
+  "uploading_to_cloud": "Enviando para a nuvem...",
+  "avatar_uploaded": "Avatar enviado! (Requer atualização do perfil)",
+  "user_blocked": "Usuário bloqueado",
+  "user_unblocked": "Usuário desbloqueado"
 }

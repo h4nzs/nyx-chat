@@ -28,5 +28,14 @@
   "file_upload_failed": "File upload failed: {{error}}",
   "voice_message_failed": "Voice message failed: {{error}}",
   "failed_to_upload_file": "Failed to upload {{filename}}",
-  "Failed_to_enable_notifications": " Failed to enable notifications: {{error}}"
+  "Failed_to_enable_notifications": " Failed to enable notifications: {{error}}",
+  "failed_to_rotate_group_keys": "CRITICAL: Failed to rotate keys for group. The chat is insecure.",
+  "media_error": "Media Error: {{error}}",
+  "call_failed": "Failed to start E2EE call.",
+  "update_failed": "Update failed: {{error}}",
+  "block_failed": "Block failed: {{error}}",
+  "unblock_failed": "Unblock failed: {{error}}",
+  "failed_to_delete_conversation": "Failed to delete conversation.",
+  "failed_to_delete_group": "Failed to delete group.",
+  "failed_to_toggle_pinned_conversation": "Failed to toggle pinned conversation."
 }

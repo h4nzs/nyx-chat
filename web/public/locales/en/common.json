@@ -67,7 +67,10 @@
     "me": "Me",
     "someone": "Someone",
     "you": "YOU",
-    "unknown": "Unknown"
+    "unknown": "Unknown",
+    "anonymous": "Anonymous",
+    "unknown_group": "Unknown Group",
+    "unknown_user": "Unknown User"
   },
   "status": {
     "connection_lost": "CONNECTION_LOST // SYSTEM_OFFLINE",
@@ -176,5 +179,10 @@
   "receiving_history_sync_from_your_other_d": "Receiving history sync from your other device...",
   "posting_story": "Posting story...",
   "added_to_group": "You've been added to \"{{groupName}}\"",
-  "user_unbanned": "User @{{username}} unbanned!"
+  "user_unbanned": "User @{{username}} unbanned!",
+  "security_key_changed": "The security key for {{name}} has changed. You may want to verify their identity.",
+  "uploading_to_cloud": "Uploading to Cloud...",
+  "avatar_uploaded": "Avatar uploaded! (Profile update required)",
+  "user_blocked": "User blocked",
+  "user_unblocked": "User unblocked"
 }

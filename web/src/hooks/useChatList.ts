@@ -7,6 +7,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { authFetch } from '@lib/api';
 import { debounce } from 'lodash-es';
 import { hashUsername } from '@lib/crypto-worker-proxy';
+import i18n from '../i18n';
 
 export function useChatList() {
   const navigate = useNavigate();
@@ -101,8 +102,8 @@ export function useChatList() {
   
     const filteredConversations = conversations.filter(c => {
       const title = c.isGroup 
-          ? (c.decryptedMetadata?.title || 'Unknown Group') 
-          : (c.participants.find(p => p.id !== meId)?.name || 'Unknown User');
+          ? (c.decryptedMetadata?.title || i18n.t('common:defaults.unknown_group', 'Unknown Group')) 
+          : (c.participants.find(p => p.id !== meId)?.name || i18n.t('common:defaults.unknown_user', 'Unknown User'));
       return title.toLowerCase().includes(searchQuery.toLowerCase());
     });  
     const showSearchResults = searchQuery.trim().length > 0;

@@ -661,7 +661,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     } catch (error: unknown) {
       console.error("Failed to toggle pinned conversation", error);
       // Show error toast
-      const errorMessage = (error instanceof Error ? error.message : 'Unknown error') || "Failed to toggle pinned conversation.";
+      const errorMessage = (error instanceof Error ? error.message : 'Unknown error') || i18n.t('errors:failed_to_toggle_pinned_conversation', "Failed to toggle pinned conversation.");
       toast.error(errorMessage);
       // If the API call fails, revert the optimistic update
       set(state => {
