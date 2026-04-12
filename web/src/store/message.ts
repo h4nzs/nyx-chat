@@ -830,10 +830,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             isSilent: true
         });
         
-        toast.success('History securely synced to your linked devices!', { id: toastId });
+        toast.success(i18n.t('common:history_sync_success', 'History securely synced to your linked devices!'), { id: toastId });
     } catch (e) {
         console.error(e);
-        toast.error('Failed to sync history.', { id: toastId });
+        toast.error(i18n.t('common:history_sync_failure', 'Failed to sync history.'), { id: toastId });
     }
   },
 

@@ -192,10 +192,12 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
         }
       }));
 
-      toast.success('Story posted!', { id: toastId });
+      toast.success(i18n.t('common:posting_success', 'Story posted!'), { id: toastId });
     } catch (e: unknown) {
       console.error(e);
-      toast.error(`Failed to post story: ${(e instanceof Error ? e.message : 'Unknown error') || 'Unknown error'}`, { id: toastId });
+      toast.error(i18n.t('common:posting_error', `Failed to post story: ${(e instanceof Error ? e.message : 'Unknown error') || 'Unknown error'}`), { id: toastId });
     }
   }
 }));
+;
+;

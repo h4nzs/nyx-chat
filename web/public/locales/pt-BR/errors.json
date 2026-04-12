@@ -22,7 +22,7 @@
   "failed_to_send_reaction": "Falha ao enviar reação",
   "internal_error_active_conversation_not_f": "Erro interno: Conversa ativa não encontrada.",
   "user_not_authenticated": "Usuário não autenticado.",
-  "turnstile_missing": "Turnstile não encontrado. Por favor, complete o desafio de segurança para continuar.",
+  "turnstile_missing": "Chave de site do Turnstile ausente. Por favor, configure a chave do Turnstile no servidor.",
   "cannot_retry_file_messages_automatically": "Não é possível tentar mensagens de arquivo novamente de forma automática. Tente enviar novamente.",
   "failed_to_establish_group_session": "Falha ao estabelecer sessão em grupo: {{error}}",
   "file_upload_failed": "Falha no upload do arquivo: {{error}}",

@@ -34,6 +34,13 @@ jobs:
       - name: 🏗️ Build Shared Package
         run: pnpm --filter @nyx/shared run build
 
+      - name: 🔐 Assert Turnstile Site Key
+        run: |
+          if [ -z "${{ secrets.VITE_TURNSTILE_SITE_KEY }}" ]; then
+            echo "::error::VITE_TURNSTILE_SITE_KEY secret is missing or empty!"
+            exit 1
+          fi
+
       # --- PHASE 3: BUILD WEB ---
       - name: 🎨 Build Web (Frontend)
         env:

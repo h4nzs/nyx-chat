@@ -122,7 +122,15 @@
     "missing_url": "Missing file URL.",
     "fetch_voice_failed": "Failed to fetch voice file: {{error}}",
     "decrypt_voice_failed": "Failed to decrypt voice message.",
-    "invalid_audio_url": "Invalid audio file URL."
+    "invalid_audio_url": "Invalid audio file URL.",
+    "default_error": "Failed to decrypt file",
+    "pages": "pages",
+    "image_placeholder": "Image",
+    "video_placeholder": "Video",
+    "audio_placeholder": "Audio",
+    "file_placeholder": "File",
+    "document_placeholder": "Document.pdf",
+    "image_alt": "Attached image"
   },
   "empty_state": {
     "title": "System Ready",

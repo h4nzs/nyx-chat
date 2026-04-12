@@ -66,7 +66,8 @@
     "avatar": "Avatar",
     "me": "Me",
     "someone": "Someone",
-    "you": "YOU"
+    "you": "YOU",
+    "unknown": "Unknown"
   },
   "status": {
     "connection_lost": "CONNECTION_LOST // SYSTEM_OFFLINE",
@@ -159,7 +160,8 @@
     "ago_h": "{{count}}h ago",
     "ago_m": "{{count}}m ago",
     "ago_s": "{{count}}s ago",
-    "now": "NOW"
+    "now": "NOW",
+    "yesterday": "Yesterday"
   },
   "device_revoked_successfully": "Device revoked successfully",
   "history_sync_payload_broadcasted_success": "History sync payload broadcasted successfully.",

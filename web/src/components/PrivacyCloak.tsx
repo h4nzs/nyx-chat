@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { FiShield } from 'react-icons/fi';
+import { useTranslation } from 'react-i18next';
 
 export default function PrivacyCloak() {
+  const { t } = useTranslation('common');
   const [isCloaked, setIsCloaked] = useState(false);
 
   useEffect(() => {
@@ -70,7 +72,7 @@ export default function PrivacyCloak() {
               <h1 className="text-3xl font-black tracking-widest uppercase text-text-primary drop-shadow-md">NYX</h1>
               <p className="text-sm font-mono text-text-secondary uppercase tracking-widest flex items-center gap-2">
                 <span className="w-2 h-2 rounded-full bg-accent animate-ping"></span>
-                Secure Context Locked
+                {t('status.secure_context_locked', 'Secure Context Locked')}
               </p>
             </div>
           </motion.div>

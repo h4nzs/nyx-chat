@@ -243,7 +243,7 @@ export default function Login() {
                     toast.error(t('auth:messages.decrypt_failed'));
                 }
             } catch (e) {
-                toast.error(i18n.t('errors:terjadi_kesalahan_saat_dekripsi', 'Terjadi kesalahan saat dekripsi.'));
+                toast.error(i18n.t('errors:terjadi_kesalahan_saat_dekripsi', 'An error occurred during decryption.'));
             }
          });
       }

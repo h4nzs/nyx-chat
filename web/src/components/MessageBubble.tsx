@@ -13,6 +13,7 @@ import clsx from 'clsx';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useSettingsStore } from '@store/settings';
 import { useMessageStore } from "@store/message";
+import { useTranslation } from 'react-i18next';
 
 const ReplyQuote = ({ message }: { message: Message }) => {
   const profile = useUserProfile(message.sender as { id: string; encryptedProfile?: string | null });
@@ -45,6 +46,7 @@ interface Props {
 
 // ✅ OPTIMASI: Hapus 'participants' dari props jika tidak digunakan
 export default function MessageBubble({ message, isOwn, onImageClick, isLastInSequence = true }: Props) {
+  const { t } = useTranslation('chat');
   // Ambil ID saja secara statis untuk menghindari re-render berlebih
   const myId = useAuthStore.getState().user?.id; 
   
@@ -155,8 +157,8 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
                     {message.fileType?.startsWith('video/') ? <FiVideo size={20} /> : 
                      message.fileType?.startsWith('audio/') ? <FiMic size={20} /> : 
                      message.fileUrl ? <FiCamera size={20} /> : <FiEye size={20} />}
-                    <span className="text-sm font-bold tracking-wider uppercase">View Once</span>
-                  </button>
+                    <span className="text-sm font-bold tracking-wider uppercase">{t('messages.view_once', 'View Once')}</span>
+                    </button>
                 )}
               </div>
             ) : (
@@ -243,7 +245,7 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
           </span>
         )}
         <span className="text-[10px] font-medium tracking-wide opacity-90">{formatTime(message.createdAt)}</span>
-        {message.isEdited && <span className="opacity-70 italic text-[10px]">(edited)</span>}
+        {message.isEdited && <span className="opacity-70 italic text-[10px]">{t('messages.edited', '(edited)')}</span>}
         {isOwn && !isDeleted && getStatusIcon()}
       </div>
     </div>

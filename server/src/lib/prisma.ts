@@ -17,11 +17,21 @@ const isTestEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV
 // 1. Buat connection pool standar PostgreSQL
 const poolConfig: PoolConfig = { connectionString };
 
-if (!isTestEnv && fs.existsSync(caPath)) {
-  poolConfig.ssl = {
-    rejectUnauthorized: true, // <--- INI OBATNYA!
-    ca: fs.readFileSync(caPath).toString()
-  };
+if (!isTestEnv) {
+  if (process.env.NODE_ENV === 'production' && !fs.existsSync(caPath)) {
+    throw new Error("Production environment requires ca.pem for database connection.");
+  }
+  
+  if (fs.existsSync(caPath)) {
+    poolConfig.ssl = {
+      rejectUnauthorized: true,
+      ca: fs.readFileSync(caPath, 'utf8')
+    };
+  } else {
+    poolConfig.ssl = {
+      rejectUnauthorized: true
+    };
+  }
 }
 
 const pool = new Pool(poolConfig);

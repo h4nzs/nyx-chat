@@ -7,6 +7,7 @@ import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
 import { FiAlertTriangle, FiImage, FiRefreshCw } from 'react-icons/fi';
 import { getSocket } from '@lib/socket'; 
+import { useTranslation } from 'react-i18next';
 
 interface LazyImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src'> {
   message: Message;
@@ -20,6 +21,7 @@ export default function LazyImage({
   className,
   ...props 
 }: LazyImageProps) {
+  const { t } = useTranslation('chat');
   const [decryptionStatus, setDecryptionStatus] = useState<DecryptionStatus>('pending');
   const [error, setError] = useState<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
@@ -227,7 +229,7 @@ export default function LazyImage({
             }}
         >
           <FiAlertTriangle className="mb-1 text-xl" />
-          <span className="text-[10px] font-medium">Failed. Click to retry.</span>
+          <span className="text-[10px] font-medium">{t('messages.failed_retry', 'Failed. Click to retry.')}</span>
         </div>
       );
     }

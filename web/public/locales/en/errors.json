@@ -5,8 +5,8 @@
   "failed_to_broadcast_history_sync": "Failed to broadcast history sync.",
   "push_notifications_not_supported": "Push notifications not supported",
   "notification_permission_denied": "Notification permission denied",
-  "failed_to_enable_notifications_error_ins": "Failed to enable notifications: ' + (error instanceof Error ? error.message : 'Unknown error",
-  "failed_to_disable_notifications": "Failed to disable notifications",
+  "failed_to_enable_notifications": "Failed to enable notifications: {{error}}",
+  "failed_to_enable_notifications_error_ins": "Failed to enable notifications: {{error}}",
   "disconnected_reconnecting": "Disconnected. Reconnecting...",
   "this_session_has_been_logged_out_remotel": "This session has been logged out remotely.",
   "failed_to_load_metrics": "Failed to load metrics",
@@ -27,5 +27,6 @@
   "failed_to_establish_group_session": "Failed to establish group session: {{error}}",
   "file_upload_failed": "File upload failed: {{error}}",
   "voice_message_failed": "Voice message failed: {{error}}",
-  "failed_to_upload_file": "Failed to upload {{filename}}"
+  "failed_to_upload_file": "Failed to upload {{filename}}",
+  "Failed_to_enable_notifications": " Failed to enable notifications: {{error}}"
 }
