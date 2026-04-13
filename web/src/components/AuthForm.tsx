@@ -77,10 +77,10 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
           <div className="relative">
             <input
               aria-label={t('auth:fields.display_name')}
-              className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
+              className={`w-full px-4 py-3 bg-bg-main text-text-primary rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
                 isFocused.name 
-                  ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
-                  : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
+                  ? 'shadow-neu-pressed dark:shadow-neu-pressed-dark' 
+                  : 'shadow-neu-flat dark:shadow-neu-flat-dark'
               }`}
               placeholder={t('auth:fields.display_name')}
               value={name}
@@ -96,12 +96,12 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
             <div className="relative">
               <input
                 aria-label={t('auth:fields.email')}
-                className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
+                className={`w-full px-4 py-3 bg-bg-main text-text-primary rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
                   isFocused.email 
-                    ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
-                    : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
+                    ? 'shadow-neu-pressed dark:shadow-neu-pressed-dark' 
+                    : 'shadow-neu-flat dark:shadow-neu-flat-dark'
                 } ${
-                  emailIsValid ? 'border border-green-500' : ''
+                  emailIsValid ? 'border border-green-500' : 'border border-transparent'
                 }`}
                 placeholder={t('auth:fields.email')}
                 value={email}
@@ -119,10 +119,10 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
           <div className="relative">
             <input
               aria-label={t('auth:fields.username_id')}
-              className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
+              className={`w-full px-4 py-3 bg-bg-main text-text-primary rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
                 isFocused.username 
-                  ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
-                  : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
+                  ? 'shadow-neu-pressed dark:shadow-neu-pressed-dark' 
+                  : 'shadow-neu-flat dark:shadow-neu-flat-dark'
               }`}
               placeholder={t('auth:fields.username_id')}
               value={username}
@@ -138,10 +138,10 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
         <div className="relative">
           <input
             aria-label={t('auth:fields.username')}
-            className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
+            className={`w-full px-4 py-3 bg-bg-main text-text-primary rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
               isFocused.emailOrUsername 
-                ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
-                : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
+                ? 'shadow-neu-pressed dark:shadow-neu-pressed-dark' 
+                : 'shadow-neu-flat dark:shadow-neu-flat-dark'
             }`}
             placeholder={t('auth:fields.username')}
             value={emailOrUsername}
@@ -157,10 +157,10 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
         <input
           aria-label={t('auth:fields.password')}
           minLength={8}
-          className={`w-full px-4 py-3 bg-bg-main rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
+          className={`w-full px-4 py-3 bg-bg-main text-text-primary rounded-lg focus:outline-none focus:ring-2 focus:ring-accent transition-all duration-300 ${
             isFocused.password 
-              ? 'shadow-[inset_3px_3px_6px_rgba(0,0,0,0.3),inset_-3px_-3px_6px_rgba(255,255,255,0.1)]' 
-              : 'shadow-[6px_6px_12px_rgba(0,0,0,0.2),-6px_-6px_12px_rgba(255,255,255,0.1)]'
+              ? 'shadow-neu-pressed dark:shadow-neu-pressed-dark' 
+              : 'shadow-neu-flat dark:shadow-neu-flat-dark'
           }`}
           placeholder={t('auth:fields.password')}
           type="password"
@@ -176,12 +176,8 @@ export default function AuthForm({ onSubmit, button, hideEmail = false, isRegist
       {/* ✅ FIX 3: Tambahkan type="submit" dan terapkan state isButtonDisabled */}
       <button
         type="submit"
-        className={`w-full py-3 rounded-lg font-semibold text-white transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-bg-surface focus:ring-accent ${
+        className={`w-full py-3 rounded-lg font-bold uppercase tracking-wider text-white transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-bg-surface focus:ring-accent bg-accent shadow-neu-flat dark:shadow-neu-flat-dark hover:-translate-y-0.5 hover:brightness-110 active:translate-y-0 active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark ${
           isButtonDisabled ? 'opacity-50 cursor-not-allowed' : ''
-        } ${
-          button === 'Login' 
-            ? 'bg-gradient-to-r from-orange-500 to-orange-600 shadow-[5px_5px_15px_rgba(255,107,53,0.4),-5px_-5px_15px_rgba(255,165,110,0.2)] hover:shadow-[3px_3px_10px_rgba(255,107,53,0.6),-3px_-3px_10px_rgba(255,165,110,0.3)] active:shadow-[inset_3px_3px_8px_rgba(139,69,19,0.6)]' 
-            : 'bg-gradient-to-r from-teal-500 to-teal-600 shadow-[5px_5px_15px_rgba(0,150,150,0.4),-5px_-5px_15px_rgba(100,200,200,0.2)] hover:shadow-[3px_3px_10px_rgba(0,150,150,0.6),-3px_-3px_10px_rgba(100,200,200,0.3)] active:shadow-[inset_3px_3px_8px_rgba(0,100,100,0.6)]'
         }`}
         aria-label={buttonText}
         disabled={isButtonDisabled}

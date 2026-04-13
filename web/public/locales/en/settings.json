@@ -29,7 +29,8 @@
   },
   "visual": {
     "dark_mode": "Dark Mode",
-    "accent_emitter": "Accent Emitter"
+    "accent_emitter": "Accent Emitter",
+    "language": "Language"
   },
   "privacy": {
     "read_receipts": "Read Receipts",
@@ -76,7 +77,8 @@
     "eject": "Emergency Eject",
     "terminate_sessions": "Terminate All Sessions",
     "delete_account": "Delete Account",
-    "delete_desc": "PERMANENTLY erase all data from servers. This action is irreversible."
+    "delete_desc": "PERMANENTLY erase all data from servers. This action is irreversible.",
+    "logout_desc": "This will log you out and clear your device data."
   },
   "modals": {
     "upgrade_title": "Upgrade to VIP",

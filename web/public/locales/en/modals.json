@@ -213,12 +213,12 @@
     "crop_failed": "Failed to crop image.",
     "draw": "Draw",
     "process_failed": "Failed to process image.",
-      "blob_failed": "Failed to generate image blob.",
-      "crop": "Crop",
-      "remove": "Remove",
+    "blob_failed": "Failed to generate image blob.",
+    "crop": "Crop",
+    "remove": "Remove",
     "undo": "Urungkan",
-      "redo": "Ulangi",
-      "pick_color": "Pilih warna",
+    "redo": "Ulangi",
+    "pick_color": "Pilih warna",
     "zoom": "ZOOM",
     "rotate": "Rotate"
   },
@@ -279,5 +279,9 @@
     "report_signal": "REPORT SIGNAL",
     "prompt_report": "Enter reason for reporting this user:",
     "no_data": "No data available."
+  },
+  "logout": {
+    "title": "Confirm Logout",
+    "desc": "Are you sure you want to end your session?"
   }
 }

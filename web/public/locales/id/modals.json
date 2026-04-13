@@ -213,12 +213,12 @@
     "crop_failed": "Gagal memotong gambar.",
     "draw": "Gambar",
     "process_failed": "Gagal memproses gambar.",
-      "blob_failed": "Gagal menghasilkan data gambar.",
-      "crop": "Potong",
-      "remove": "Hapus",
+    "blob_failed": "Gagal menghasilkan data gambar.",
+    "crop": "Potong",
+    "remove": "Hapus",
     "undo": "Urungkan",
-      "redo": "Ulangi",
-      "pick_color": "Pilih warna",
+    "redo": "Ulangi",
+    "pick_color": "Pilih warna",
     "zoom": "ZOOM",
     "rotate": "Putar"
   },
@@ -279,5 +279,9 @@
     "report_signal": "LAPORKAN",
     "prompt_report": "Masukkan alasan melaporkan pengguna ini:",
     "no_data": "Tidak ada data tersedia."
+  },
+  "logout": {
+    "title": "Konfirmasi Keluar",
+    "desc": "Apakah Anda yakin ingin mengakhiri sesi Anda?"
   }
 }

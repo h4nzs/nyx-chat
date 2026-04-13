@@ -35,7 +35,8 @@
     "you": "You",
     "unknown": "Unknown",
     "transmission_blocked": "TRANSMISSION BLOCKED",
-    "unblock_signal": "Unblock Signal"
+    "unblock_signal": "Unblock Signal",
+    "timer_off": "Off"
   },
   "actions": {
     "reply": "Reply",

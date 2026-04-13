@@ -251,25 +251,22 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-stone-900 relative">
+    <div className="min-h-screen flex flex-col md:flex-row bg-bg-main relative">
       <LanguageSwitcher />
       <SEO title="Login" description="Sign in to your NYX secure enclave to access your E2EE chats." canonicalUrl="/login" />
       {/* Left Panel - Concrete Security Panel */}
-      <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
-           style={{
-             boxShadow: 'inset -10px -10px 30px rgba(0, 0, 0, 0.5)'
-           }}>
+      <div className="w-full md:w-2/5 bg-bg-surface p-8 flex flex-col justify-center shadow-2xl z-10">
         <div className="max-w-md w-full mx-auto">
           <div className="flex items-center justify-center mb-8">
-            <div className="w-12 h-12 rounded-lg bg-orange-500 flex items-center justify-center mr-3">
-              <div className="w-8 h-8 rounded bg-orange-300"></div>
+            <div className="w-12 h-12 rounded-lg bg-accent flex items-center justify-center mr-3 shadow-neu-flat dark:shadow-neu-flat-dark">
+              <div className="w-8 h-8 rounded bg-bg-main opacity-50"></div>
             </div>
-            <h1 className="text-3xl font-black text-white tracking-tighter">{t('auth:titles.secure_vault')}</h1>
+            <h1 className="text-3xl font-black text-text-primary tracking-tighter">{t('auth:titles.secure_vault')}</h1>
           </div>
 
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-orange-400 mb-2">{t('auth:titles.access_terminal')}</h2>
-            <p className="text-stone-400">{t('auth:subtitles.login_desc')}</p>
+            <h2 className="text-2xl font-bold text-accent mb-2">{t('auth:titles.access_terminal')}</h2>
+            <p className="text-text-secondary">{t('auth:subtitles.login_desc')}</p>
           </div>
 
           {error && <p className="text-red-500 text-center mb-4 text-sm">{error}</p>}
@@ -283,81 +280,77 @@ export default function Login() {
             <button
               type="button"
               onClick={handleBiometricLogin}
-              className="w-full flex items-center justify-center gap-3 mt-6 py-3 px-4 rounded-lg bg-stone-700 text-stone-200 font-medium transition-all duration-300"
-              style={{
-                boxShadow: '3px 3px 6px rgba(0, 0, 0, 0.4), -3px -3px 6px rgba(255, 255, 255, 0.05)'
-              }}
+              className="w-full flex items-center justify-center gap-3 mt-6 py-3 px-4 rounded-xl bg-bg-main text-text-primary font-bold transition-all duration-300 shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark hover:text-accent"
             >
-              <div className="w-5 h-5 rounded-full bg-orange-500 flex items-center justify-center">
-                <IoFingerPrint size={16} className="text-orange-900" />
+              <div className="w-5 h-5 rounded-full bg-accent/20 flex items-center justify-center text-accent">
+                <IoFingerPrint size={16} />
               </div>
               <span>{t('auth:buttons.biometric_unlock')}</span>
             </button>
           )}
 
-          <div className="text-center mt-8 pt-6 border-t border-stone-700">
-            <p className="text-stone-500 text-sm mb-4">
-              {t('auth:links.no_account')} <Link to="/register" className="font-semibold text-orange-500 hover:underline">{t('auth:links.sign_up')}</Link>
+          <div className="text-center mt-8 pt-6 border-t border-white/10 dark:border-white/5">
+            <p className="text-text-secondary text-sm mb-4">
+              {t('auth:links.no_account')} <Link to="/register" className="font-bold text-accent hover:underline">{t('auth:links.sign_up')}</Link>
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-4">
-              <Link to="/restore" className="text-sm text-orange-500 hover:underline">{t('auth:links.restore')}</Link>
-              <Link to="/migrate-receive" className="text-sm text-orange-500 hover:underline">{t('auth:links.transfer')}</Link>
+              <Link to="/restore" className="text-sm text-accent hover:underline">{t('auth:links.restore')}</Link>
+              <Link to="/migrate-receive" className="text-sm text-accent hover:underline">{t('auth:links.transfer')}</Link>
             </div>
-            <div className="mt-4 pt-4 border-t border-stone-800">
-              <Link to="/privacy" className="text-xs text-stone-600 hover:text-stone-400 transition-colors">{t('common:nav.privacy')} & {t('common:nav.terms')}</Link>
+            <div className="mt-4 pt-4 border-t border-white/10 dark:border-white/5">
+              <a href="https://nyx-app.my.id/privacy" target="_blank" rel="noopener noreferrer" className="text-xs text-text-secondary hover:text-accent transition-colors">{t('common:nav.privacy')} & {t('common:nav.terms')}</a>
             </div>
           </div>
         </div>
       </div>
 
       {/* Right Panel - Dynamic Visualization */}
-      <div className="w-full md:w-3/5 bg-gradient-to-br from-stone-900 to-black relative overflow-hidden flex items-center justify-center p-8">
+      <div className="hidden md:flex w-full md:w-3/5 bg-bg-main relative overflow-hidden items-center justify-center p-8">
         {/* Abstract 3D visualization */}
         <div className="absolute inset-0 z-0">
-          <div className="absolute top-1/4 left-1/4 w-32 h-32 rounded-full bg-orange-500/10 blur-3xl animate-pulse"></div>
-          <div className="absolute bottom-1/3 right-1/3 w-48 h-48 rounded-full bg-blue-500/10 blur-3xl animate-pulse delay-1000"></div>
-          <div className="absolute top-1/3 right-1/4 w-24 h-24 rounded-full bg-teal-500/10 blur-3xl animate-pulse delay-500"></div>
+          <div className="absolute top-1/4 left-1/4 w-32 h-32 rounded-full bg-accent/10 blur-3xl animate-pulse"></div>
+          <div className="absolute bottom-1/3 right-1/3 w-48 h-48 rounded-full bg-accent/5 blur-3xl animate-pulse delay-1000"></div>
         </div>
 
         {/* Grid pattern */}
-        <div className="absolute inset-0 z-0 opacity-20"
+        <div className="absolute inset-0 z-0 opacity-10"
              style={{
-               backgroundImage: `linear-gradient(stone 1px, transparent 1px), linear-gradient(to right, stone 1px, transparent 1px)`,
+               backgroundImage: `linear-gradient(var(--color-text-secondary) 1px, transparent 1px), linear-gradient(to right, var(--color-text-secondary) 1px, transparent 1px)`,
                backgroundSize: '40px 40px'
              }}></div>
 
         {/* Central security graphic */}
         <div className="relative z-10 text-center max-w-lg">
           <div className="inline-block mb-8 relative">
-            <div className="w-48 h-48 rounded-full border-4 border-orange-500/30 flex items-center justify-center">
-              <div className="w-32 h-32 rounded-full border-4 border-orange-500/20 flex items-center justify-center">
-                <div className="w-20 h-20 rounded-full border-4 border-orange-500/10 flex items-center justify-center">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-r from-orange-500 to-orange-700 flex items-center justify-center">
-                    <div className="w-6 h-6 rounded-full bg-orange-300 animate-pulse"></div>
+            <div className="w-48 h-48 rounded-full border-4 border-accent/30 flex items-center justify-center">
+              <div className="w-32 h-32 rounded-full border-4 border-accent/20 flex items-center justify-center">
+                <div className="w-20 h-20 rounded-full border-4 border-accent/10 flex items-center justify-center shadow-neu-pressed dark:shadow-neu-pressed-dark">
+                  <div className="w-12 h-12 rounded-full bg-accent flex items-center justify-center shadow-[0_0_20px_rgba(var(--accent),0.5)]">
+                    <div className="w-6 h-6 rounded-full bg-bg-main animate-pulse opacity-50"></div>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Scanning animation */}
-            <div className="absolute inset-0 rounded-full border-4 border-orange-500 animate-ping opacity-20"></div>
+            <div className="absolute inset-0 rounded-full border-4 border-accent animate-ping opacity-20"></div>
           </div>
 
-          <h2 className="text-3xl font-black text-white mb-4 tracking-tighter">{t('auth:marketing.industrial_security')}</h2>
-          <p className="text-stone-400 mb-6">{t('auth:marketing.industrial_desc')}</p>
+          <h2 className="text-3xl font-black text-text-primary mb-4 tracking-tighter">{t('auth:marketing.industrial_security')}</h2>
+          <p className="text-text-secondary mb-6">{t('auth:marketing.industrial_desc')}</p>
 
           <div className="grid grid-cols-3 gap-4 mt-12">
-            <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
-              <div className="text-orange-500 mb-2"><FiLock size={24} /></div>
-              <h3 className="font-bold text-white text-sm">{t('auth:marketing.e2e_encrypted')}</h3>
+            <div className="p-4 bg-bg-surface rounded-xl shadow-neu-flat dark:shadow-neu-flat-dark">
+              <div className="text-accent mb-2 flex justify-center"><FiLock size={24} /></div>
+              <h3 className="font-bold text-text-primary text-xs uppercase tracking-wider">{t('auth:marketing.e2e_encrypted')}</h3>
             </div>
-            <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
-              <div className="text-orange-500 mb-2"><FiKey size={24} /></div>
-              <h3 className="font-bold text-white text-sm">{t('auth:marketing.key_ownership')}</h3>
+            <div className="p-4 bg-bg-surface rounded-xl shadow-neu-flat dark:shadow-neu-flat-dark">
+              <div className="text-accent mb-2 flex justify-center"><FiKey size={24} /></div>
+              <h3 className="font-bold text-text-primary text-xs uppercase tracking-wider">{t('auth:marketing.key_ownership')}</h3>
             </div>
-            <div className="p-4 bg-stone-800/50 backdrop-blur-sm rounded-lg border border-stone-700">
-              <div className="text-orange-500 mb-2"><FiShield size={24} /></div>
-              <h3 className="font-bold text-white text-sm">{t('auth:marketing.privacy_first')}</h3>
+            <div className="p-4 bg-bg-surface rounded-xl shadow-neu-flat dark:shadow-neu-flat-dark">
+              <div className="text-accent mb-2 flex justify-center"><FiShield size={24} /></div>
+              <h3 className="font-bold text-text-primary text-xs uppercase tracking-wider">{t('auth:marketing.privacy_first')}</h3>
             </div>
           </div>
         </div>

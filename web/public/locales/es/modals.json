@@ -279,5 +279,9 @@
     "report_signal": "REPORTAR",
     "prompt_report": "Ingresa el motivo para reportar a este usuario:",
     "no_data": "No hay datos disponibles."
+  },
+  "logout": {
+    "title": "Confirmar cierre de sesión",
+    "desc": "¿Estás seguro de que quieres finalizar tu sesión?"
   }
 }

@@ -35,7 +35,8 @@
     "you": "Tú",
     "unknown": "Desconocido",
     "transmission_blocked": "CONTACTO BLOQUEADO",
-    "unblock_signal": "Desbloquear"
+    "unblock_signal": "Desbloquear",
+    "timer_off": "Apagado"
   },
   "actions": {
     "reply": "Responder",

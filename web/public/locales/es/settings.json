@@ -29,7 +29,8 @@
   },
   "visual": {
     "dark_mode": "Modo oscuro",
-    "accent_emitter": "Color de acento"
+    "accent_emitter": "Color de acento",
+    "language": "Idioma"
   },
   "privacy": {
     "read_receipts": "Confirmación de lectura",
@@ -76,7 +77,8 @@
     "eject": "Salida de emergencia",
     "terminate_sessions": "Cerrar todas las sesiones",
     "delete_account": "Borrar cuenta",
-    "delete_desc": "Borra de forma PERMANENTE todos tus datos del servidor. Esta acción no se puede deshacer."
+    "delete_desc": "Borra de forma PERMANENTE todos tus datos del servidor. Esta acción no se puede deshacer.",
+    "logout_desc": "Esto cerrará su sesión y borrará los datos de su dispositivo."
   },
   "modals": {
     "upgrade_title": "Mejorar a VIP",

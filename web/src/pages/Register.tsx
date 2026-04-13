@@ -168,15 +168,15 @@ export default function Register() {
   // STEP 2: BIOMETRIC VERIFICATION
   if (step === 'biometric') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-stone-900 p-4 relative">
+      <div className="min-h-screen flex items-center justify-center bg-bg-main p-4 relative">
         <LanguageSwitcher />
-        <div className="max-w-md w-full bg-stone-800 rounded-2xl p-8 shadow-2xl border border-stone-700 text-center">
-          <div className="w-16 h-16 bg-teal-500/10 rounded-full flex items-center justify-center mx-auto mb-6 text-teal-500">
+        <div className="max-w-md w-full bg-bg-surface rounded-2xl p-8 shadow-neu-flat dark:shadow-neu-flat-dark text-center">
+          <div className="w-16 h-16 bg-accent/10 rounded-full flex items-center justify-center mx-auto mb-6 text-accent shadow-neu-pressed dark:shadow-neu-pressed-dark">
             <IoFingerPrint size={32} />
           </div>
           
-          <h2 className="text-2xl font-black text-white mb-2 tracking-tight">{t('auth:titles.trust_verification')}</h2>
-          <p className="text-stone-400 text-sm mb-8">
+          <h2 className="text-2xl font-black text-text-primary mb-2 tracking-tight">{t('auth:titles.trust_verification')}</h2>
+          <p className="text-text-secondary text-sm mb-8">
             {t('auth:subtitles.verify_desc')}
           </p>
 
@@ -185,7 +185,7 @@ export default function Register() {
               <button
                 onClick={handleBiometricRegister}
                 disabled={isVerifyingBio}
-                className="w-full py-4 rounded-xl bg-teal-500 hover:bg-teal-400 text-stone-900 font-bold uppercase tracking-wider shadow-lg shadow-teal-500/20 transition-all flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-xl bg-accent text-white font-bold uppercase tracking-wider shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark transition-all flex items-center justify-center gap-2 hover:brightness-110"
               >
                 {isVerifyingBio ? <span className="animate-pulse">{t('common:actions.loading')}</span> : (
                   <>
@@ -196,19 +196,19 @@ export default function Register() {
               
               <button
                 onClick={handleSkipBiometric}
-                className="w-full py-4 rounded-xl bg-transparent border border-stone-600 text-stone-400 hover:text-white hover:border-stone-500 font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2"
+                className="w-full py-4 rounded-xl bg-bg-main text-text-secondary hover:text-accent font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark"
               >
                 <FiSkipForward /> {t('auth:buttons.skip_now')}
               </button>
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-500 text-xs">
+              <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl text-yellow-600 dark:text-yellow-500 text-xs">
                 {t('auth:messages.device_not_supported')}
               </div>
               <button
                 onClick={handleSkipBiometric}
-                className="w-full py-4 rounded-xl bg-stone-700 hover:bg-stone-600 text-white font-bold uppercase tracking-wider transition-all"
+                className="w-full py-4 rounded-xl bg-bg-main text-text-primary hover:text-accent font-bold uppercase tracking-wider transition-all shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark"
               >
                 {t('auth:buttons.continue_app')}
               </button>
@@ -221,25 +221,22 @@ export default function Register() {
 
   // STEP 1: REGISTER FORM
   return (
-    <div className="min-h-screen flex flex-col md:flex-row bg-stone-900 relative">
+    <div className="min-h-screen flex flex-col md:flex-row bg-bg-main relative">
       <LanguageSwitcher />
       <SEO title="Register" description="Create a new anonymous, end-to-end encrypted account on NYX. No tracking, no ads." canonicalUrl="/register" />
       {/* Left Panel - Concrete Security Panel */}
-      <div className="w-full md:w-2/5 bg-gradient-to-br from-stone-800 to-stone-900 p-8 flex flex-col justify-center"
-           style={{
-             boxShadow: 'inset -10px -10px 30px rgba(0, 0, 0, 0.5)'
-           }}>
+      <div className="w-full md:w-2/5 bg-bg-surface p-8 flex flex-col justify-center shadow-2xl z-10">
         <div className="max-w-md w-full mx-auto">
           <div className="flex items-center justify-center mb-8">
-            <div className="w-12 h-12 rounded-lg bg-teal-500 flex items-center justify-center mr-3">
-              <div className="w-8 h-8 rounded bg-teal-300"></div>
+            <div className="w-12 h-12 rounded-lg bg-accent flex items-center justify-center mr-3 shadow-neu-flat dark:shadow-neu-flat-dark">
+              <div className="w-8 h-8 rounded bg-bg-main opacity-50"></div>
             </div>
-            <h1 className="text-3xl font-black text-white tracking-tighter">{t('auth:titles.secure_vault')}</h1>
+            <h1 className="text-3xl font-black text-text-primary tracking-tighter">{t('auth:titles.secure_vault')}</h1>
           </div>
 
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-teal-400 mb-2">{t('auth:titles.anonymous_reg')}</h2>
-            <p className="text-stone-400">{t('auth:subtitles.register_desc')}</p>
+            <h2 className="text-2xl font-bold text-accent mb-2">{t('auth:titles.anonymous_reg')}</h2>
+            <p className="text-text-secondary">{t('auth:subtitles.register_desc')}</p>
           </div>
 
           {error && <div className="text-red-500 text-center mb-4 text-sm">{error}</div>}

@@ -29,7 +29,10 @@
     "menu": "Menu",
     "back": "Back",
     "create_group": "Create Group",
-    "view_profile": "View Profile"
+    "view_profile": "View Profile",
+    "toggle_cloak": "Toggle Privacy Cloak",
+    "settings": "Settings",
+    "logout": "Logout"
   },
   "action": {
     "abort": "ABORT",
@@ -75,7 +78,8 @@
   "status": {
     "connection_lost": "CONNECTION_LOST // SYSTEM_OFFLINE",
     "establishing_uplink": "ESTABLISHING_UPLINK...",
-    "power_surge": "Power Surge Required"
+    "power_surge": "Power Surge Required",
+    "secure_context_locked": "Secure Context Locked"
   },
   "cmd_palette": {
     "title": "System Command Line",

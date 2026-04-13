@@ -29,7 +29,10 @@
     "create_group": "Buat Grup",
     "menu": "Menu",
     "back": "Kembali",
-    "view_profile": "Lihat Profil"
+    "view_profile": "Lihat Profil",
+    "toggle_cloak": "Alihkan Jubah Privasi",
+    "settings": "Pengaturan",
+    "logout": "Keluar"
   },
   "action": {
     "abort": "BATALKAN",
@@ -75,7 +78,8 @@
   "status": {
     "connection_lost": "KONEKSI_HILANG // SISTEM_OFFLINE",
     "establishing_uplink": "MEMBANGUN_UPLINK...",
-    "power_surge": "Lonjakan Daya Diperlukan"
+    "power_surge": "Lonjakan Daya Diperlukan",
+    "secure_context_locked": "Konteks Aman Terkunci"
   },
   "cmd_palette": {
     "title": "Baris Perintah Sistem",

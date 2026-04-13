@@ -35,7 +35,8 @@
     "you": "Anda",
     "unknown": "Tidak Diketahui",
     "transmission_blocked": "KONTAK DIBLOKIR",
-    "unblock_signal": "Buka Blokir"
+    "unblock_signal": "Buka Blokir",
+    "timer_off": "Mati"
   },
   "actions": {
     "reply": "Balas",

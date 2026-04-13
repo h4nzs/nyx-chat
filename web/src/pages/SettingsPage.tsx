@@ -958,9 +958,9 @@ export default function SettingsPage() {
                 )}
                 </div>             
              <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <ActionButton label={t('settings:support.help_center')} icon={FiHelpCircle} onClick={() => navigate('/help')} />
+                <ActionButton label={t('settings:support.help_center')} icon={FiHelpCircle} onClick={() => window.open('https://nyx-app.my.id/help', '_blank')} />
                 <ActionButton label={t('settings:support.report_bug')} icon={FiFlag} onClick={() => setShowReportModal(true)} />
-                <ActionButton label={t('settings:support.legal')} icon={FiShield} onClick={() => navigate('/privacy')} />
+                <ActionButton label={t('settings:support.legal')} icon={FiShield} onClick={() => window.open('https://nyx-app.my.id/privacy', '_blank')} />
              </div>
           </ControlModule>
         </div>

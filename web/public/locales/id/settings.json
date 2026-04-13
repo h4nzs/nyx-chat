@@ -29,7 +29,8 @@
   },
   "visual": {
     "dark_mode": "Mode Gelap",
-    "accent_emitter": "Warna Aksen"
+    "accent_emitter": "Warna Aksen",
+    "language": "Bahasa"
   },
   "privacy": {
     "read_receipts": "Laporan Dibaca",
@@ -76,7 +77,8 @@
     "eject": "Keluar Darurat",
     "terminate_sessions": "Hentikan Semua Sesi",
     "delete_account": "Hapus Akun",
-    "delete_desc": "Hapus PERMANEN semua data dari server. Tindakan ini tidak dapat dibatalkan."
+    "delete_desc": "Hapus PERMANEN semua data dari server. Tindakan ini tidak dapat dibatalkan.",
+    "logout_desc": "Ini akan mengeluarkan Anda dan menghapus data perangkat Anda."
   },
   "modals": {
     "upgrade_title": "Tingkatkan ke VIP",

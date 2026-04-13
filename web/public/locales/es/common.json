@@ -29,7 +29,10 @@
     "create_group": "Crear grupo",
     "menu": "Menú",
     "back": "Atrás",
-    "view_profile": "Ver perfil"
+    "view_profile": "Ver perfil",
+    "toggle_cloak": "Alternar Capa de Privacidad",
+    "settings": "Ajustes",
+    "logout": "Cerrar sesión"
   },
   "action": {
     "abort": "ABORTAR",
@@ -75,7 +78,8 @@
   "status": {
     "connection_lost": "CONEXIÓN_PERDIDA // SISTEMA_OFFLINE",
     "establishing_uplink": "ESTABLECIENDO_ENLACE...",
-    "power_surge": "Se necesita un pico de energía"
+    "power_surge": "Se necesita un pico de energía",
+    "secure_context_locked": "Contexto seguro bloqueado"
   },
   "cmd_palette": {
     "title": "Línea de comandos",

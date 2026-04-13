@@ -279,5 +279,9 @@
     "report_signal": "DENUNCIAR",
     "prompt_report": "Insira o motivo para denunciar este usuário:",
     "no_data": "Nenhum dado disponível."
+  },
+  "logout": {
+    "title": "Confirmar Saída",
+    "desc": "Tem certeza de que deseja encerrar sua sessão?"
   }
 }
