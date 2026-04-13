@@ -75,47 +75,53 @@ export const LinkedDevicesPanel: React.FC = () => {
         }
     };
 
-    if (isLoading) return <div className="p-4 text-center text-zinc-400">Loading devices...</div>;
+    if (isLoading) return <div className="p-4 text-center text-text-secondary">Loading devices...</div>;
 
     return (
-        <div className="bg-zinc-900 rounded-xl border border-zinc-800 overflow-hidden">
-            <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50">
-                <div>
-                    <h3 className="text-lg font-medium text-zinc-100 flex items-center gap-2">
-                        <FiShield className="w-5 h-5 text-emerald-500" />
-                        Linked Devices
-                    </h3>
-                    <p className="text-xs text-zinc-400 mt-1">Manage devices that can decrypt your messages.</p>
-                </div>
-                <button 
-                    onClick={handleSyncHistory}
-                    className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 rounded-lg text-sm font-medium transition-colors"
-                >
-                    <FiRefreshCw className="w-4 h-4" />
-                    Sync History
-                </button>
+        <div className="relative bg-bg-main rounded-xl p-6 overflow-hidden shadow-neu-flat dark:shadow-neu-flat-dark border-t border-white/40 dark:border-white/5">
+            {/* VISUAL ANCHORS (The "Rivets") */}
+            <div className="absolute top-3 left-3 w-1.5 h-1.5 rounded-full bg-text-secondary/20 shadow-neu-pressed dark:shadow-neu-pressed-dark" />
+            <div className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full bg-text-secondary/20 shadow-neu-pressed dark:shadow-neu-pressed-dark" />
+            <div className="absolute bottom-3 left-3 w-1.5 h-1.5 rounded-full bg-text-secondary/20 shadow-neu-pressed dark:shadow-neu-pressed-dark" />
+            <div className="absolute bottom-3 right-3 w-1.5 h-1.5 rounded-full bg-text-secondary/20 shadow-neu-pressed dark:shadow-neu-pressed-dark" />
+
+            {/* Header with "Groove" line */}
+            <div className="flex items-center gap-4 mb-6 pl-2">
+              <div className="p-2 rounded-lg bg-bg-main shadow-neu-icon dark:shadow-neu-icon-dark text-accent">
+                <FiShield size={16} />
+              </div>
+              <h3 className="text-xs font-black tracking-[0.2em] uppercase text-text-secondary hidden sm:block">Linked Devices</h3>
+              <div className="h-[2px] flex-1 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark rounded-full"></div>
+              
+              <button 
+                  onClick={handleSyncHistory}
+                  className="flex items-center gap-2 px-4 py-2 bg-bg-main text-accent shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark rounded-xl text-xs font-bold uppercase tracking-wider transition-all hover:brightness-110"
+              >
+                  <FiRefreshCw size={14} />
+                  Sync History
+              </button>
             </div>
 
-            <div className="divide-y divide-zinc-800/50">
+            <div className="relative z-10 pl-2 pr-2 space-y-4">
                 {devices.map(device => {
                     const isMobile = device.name.toLowerCase().includes('ios') || device.name.toLowerCase().includes('android');
                     return (
-                        <div key={device.id} className="p-4 flex items-center justify-between hover:bg-zinc-800/20 transition-colors">
+                        <div key={device.id} className="p-4 flex items-center justify-between rounded-xl bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark">
                             <div className="flex items-center gap-4">
-                                <div className={`p-3 rounded-full ${device.isCurrent ? 'bg-emerald-500/10 text-emerald-500' : 'bg-zinc-800 text-zinc-400'}`}>
-                                    {isMobile ? <FiSmartphone className="w-6 h-6" /> : <FiMonitor className="w-6 h-6" />}
+                                <div className={`p-3 rounded-full shadow-neu-flat dark:shadow-neu-flat-dark ${device.isCurrent ? 'text-emerald-500' : 'text-text-secondary'}`}>
+                                    {isMobile ? <FiSmartphone className="w-5 h-5" /> : <FiMonitor className="w-5 h-5" />}
                                 </div>
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <p className="font-medium text-zinc-200">{device.name || 'Unknown Device'}</p>
+                                <div className="min-w-0 pr-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <p className="font-bold text-sm text-text-primary truncate max-w-[150px] sm:max-w-xs">{device.name || 'Unknown Device'}</p>
                                         {device.isCurrent && (
-                                            <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[10px] uppercase font-bold rounded-full">
+                                            <span className="px-2 py-0.5 shadow-neu-flat dark:shadow-neu-flat-dark text-emerald-500 text-[10px] uppercase font-bold rounded-md whitespace-nowrap">
                                                 This Device
                                             </span>
                                         )}
                                     </div>
-                                    <p className="text-xs text-zinc-500 mt-0.5">
-                                        Last active: {new Date(device.lastActiveAt).toLocaleDateString()} at {new Date(device.lastActiveAt).toLocaleTimeString()}
+                                    <p className="text-[10px] text-text-secondary mt-1 uppercase tracking-wider font-mono truncate">
+                                        Active: {new Date(device.lastActiveAt).toLocaleDateString()} {new Date(device.lastActiveAt).toLocaleTimeString()}
                                     </p>
                                 </div>
                             </div>
@@ -123,10 +129,10 @@ export const LinkedDevicesPanel: React.FC = () => {
                             {!device.isCurrent && (
                                 <button 
                                     onClick={() => handleRevoke(device.id)}
-                                    className="p-2 text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 rounded-lg transition-colors"
+                                    className="p-3 text-red-500 shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark rounded-xl transition-all hover:scale-105 shrink-0"
                                     title="Revoke Access"
                                 >
-                                    <FiTrash2 className="w-5 h-5" />
+                                    <FiTrash2 className="w-4 h-4" />
                                 </button>
                             )}
                         </div>
