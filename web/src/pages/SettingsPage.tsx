@@ -820,13 +820,6 @@ export default function SettingsPage() {
           </ControlModule>
         </div>
 
-        {/* ========================================== */}
-        {/* ✅ FASE 5: MULTI-DEVICE MANAGEMENT SLOT */}
-        {/* ========================================== */}
-        <div className="col-span-1 md:col-span-12 lg:col-span-8">
-           <LinkedDevicesPanel />
-        </div>
-
         {/* 5. DATA PORT (Sessions & Keys) */}
         <div className="col-span-1 md:col-span-6 lg:col-span-4">
           <ControlModule title={t('settings:modules.data')} icon={FiKey}>
@@ -895,7 +888,14 @@ export default function SettingsPage() {
           </ControlModule>
         </div>
 
-        {/* 6. SMART ASSISTANCE */}
+        {/* ========================================== */}
+        {/* ✅ FASE 6: MULTI-DEVICE MANAGEMENT SLOT */}
+        {/* ========================================== */}
+        <div className="col-span-1 md:col-span-12 lg:col-span-8">
+           <LinkedDevicesPanel />
+        </div>
+
+        {/* 7. SMART ASSISTANCE */}
         <div className="col-span-1 md:col-span-6 lg:col-span-4">
           <ControlModule title={t('settings:modules.smart')} icon={FiActivity}>
             <div className="space-y-4">
@@ -908,23 +908,23 @@ export default function SettingsPage() {
                   checked={enableSmartReply}
                   onChange={() => setEnableSmartReply(!enableSmartReply)}
                 />
-                </div>
+              </div>
 
-                {enableSmartReply && (
+              {enableSmartReply && (
                 <div className="p-3 bg-accent/5 border border-accent/10 rounded-lg">
                   <p className="text-[10px] text-text-secondary leading-relaxed">
                     <strong className="text-accent">{t('settings:smart.privacy_note')}</strong> <Trans i18nKey="settings:smart.privacy_desc">Incoming messages are decrypted on-device and sent securely to Google Gemini for analysis. Messages are <strong className="text-text-primary">not stored</strong> by our servers.</Trans>
                   </p>
                 </div>
-                )}
-                </div>
-                </ControlModule>
-                </div>
+              )}
+            </div>
+          </ControlModule>
+        </div>
 
-                {/* 7. SUPPORT MODULE */}
-                <div className="col-span-1 md:col-span-12 lg:col-span-12">
-                <ControlModule title={t('settings:modules.support')} className="flex flex-col md:flex-row gap-6">
-                <div className="flex-1 space-y-4">
+        {/* 8. SUPPORT MODULE */}
+        <div className="col-span-1 md:col-span-12 lg:col-span-12">
+          <ControlModule title={t('settings:modules.support')} className="flex flex-col md:flex-row gap-6">
+            <div className="flex-1 space-y-4">
                 <RockerSwitch
                   label={t('settings:support.push_notif')}
                   checked={isSubscribed}

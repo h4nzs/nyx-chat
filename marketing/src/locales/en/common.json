@@ -60,14 +60,6 @@
     "network": "Network error, please try again",
     "required": "This field is required"
   },
-  "defaults": {
-    "encrypted_user": "Encrypted User",
-    "user": "User",
-    "avatar": "Avatar",
-    "me": "Me",
-    "someone": "Someone",
-    "you": "YOU"
-  },
   "status": {
     "connection_lost": "CONNECTION_LOST // SYSTEM_OFFLINE",
     "establishing_uplink": "ESTABLISHING_UPLINK...",
@@ -159,6 +151,16 @@
     "ago_h": "{{count}}h ago",
     "ago_m": "{{count}}m ago",
     "ago_s": "{{count}}s ago",
-    "now": "NOW"
+    "now": "NOW",
+    "yesterday": "Yesterday"
+  },
+  "defaults": {
+    "unknown": "Unknown",
+    "encrypted_user": "Encrypted User",
+    "user": "User",
+    "avatar": "Avatar",
+    "me": "Me",
+    "someone": "Someone",
+    "you": "YOU"
   }
 }

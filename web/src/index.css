@@ -34,15 +34,15 @@
   --color-neumorph-dark: #1a1b1e;
 
   /* Box Shadows */
-  --shadow-neu-flat: 6px 6px 12px #b8b9be, -6px -6px 12px #ffffff;
-  --shadow-neu-pressed: inset 6px 6px 10px #b8b9be, inset -6px -6px 10px #ffffff;
-  --shadow-neu-icon: 3px 3px 6px #b8b9be, -3px -3px 6px #ffffff;
+  --shadow-neu-flat: 6px 6px 12px rgba(163, 177, 198, 0.35), -6px -6px 12px rgba(255, 255, 255, 0.8);
+  --shadow-neu-pressed: inset 6px 6px 10px rgba(163, 177, 198, 0.35), inset -6px -6px 10px rgba(255, 255, 255, 0.8);
+  --shadow-neu-icon: 3px 3px 6px rgba(163, 177, 198, 0.35), -3px -3px 6px rgba(255, 255, 255, 0.8);
   
   --shadow-neu-flat-dark: 5px 5px 10px #0b0c0e, -5px -5px 10px #292a2e;
   --shadow-neu-pressed-dark: inset 5px 5px 10px #0b0c0e, inset -5px -5px 10px #292a2e;
   --shadow-neu-icon-dark: 3px 3px 6px #0b0c0e, -3px -3px 6px #292a2e;
 
-  --shadow-neu-float: 20px 20px 60px #d1d9e6, -20px -20px 60px #ffffff;
+  --shadow-neu-float: 20px 20px 60px rgba(163, 177, 198, 0.35), -20px -20px 60px rgba(255, 255, 255, 0.8);
   --shadow-neu-float-dark: 20px 20px 60px #000000, -20px -20px 60px #292a2e;
 
   --shadow-neumorphic-convex: 5px 5px 10px hsl(var(--shadow-dark)), -5px -5px 10px hsl(var(--shadow-light));
@@ -55,9 +55,9 @@
   --shadow-soft: 0 1px 3px 0 hsl(var(--shadow-color) / 0.1), 0 1px 2px 0 hsl(var(--shadow-color) / 0.06);
   --shadow-card: 0 4px 12px hsl(var(--shadow-color) / 0.15);
   
-  --shadow-neu-flat-light: 9px 9px 16px rgb(163,177,198,0.6), -9px -9px 16px rgba(255,255,255, 0.5);
-  --shadow-neu-pressed-light: inset 6px 6px 10px 0 rgba(163,177,198, 0.7), inset -6px -6px 10px 0 rgba(255,255,255, 0.8);
-  --shadow-neu-convex-light: 5px 5px 10px rgb(163,177,198,0.6), -5px -5px 10px rgba(255,255,255, 0.5);
+  --shadow-neu-flat-light: 9px 9px 16px rgba(163, 177, 198, 0.35), -9px -9px 16px rgba(255, 255, 255, 0.7);
+  --shadow-neu-pressed-light: inset 6px 6px 10px 0 rgba(163, 177, 198, 0.35), inset -6px -6px 10px 0 rgba(255, 255, 255, 0.8);
+  --shadow-neu-convex-light: 5px 5px 10px rgba(163, 177, 198, 0.35), -5px -5px 10px rgba(255, 255, 255, 0.7);
   
   --shadow-neu-convex-dark: 3px 3px 6px #0b0c0e, -3px -3px 6px #292a2e;
 

@@ -1,5 +1,5 @@
 # --- Stage 1: Build & Prune ---
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 # Install dependencies sistem
 RUN corepack enable && apk add --no-cache openssl
@@ -26,7 +26,7 @@ RUN pnpm build
 RUN pnpm prune --prod
 
 # --- Stage 2: Production Runner ---
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 
 WORKDIR /app
 
@@ -45,8 +45,8 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 
 # Set Port Koyeb (8000)
-ENV PORT=8000
-EXPOSE 8000
+ENV PORT=4000
+EXPOSE 4000
 
 # Command Start
 CMD ["node", "dist/index.js"]
