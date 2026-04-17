@@ -329,15 +329,8 @@ export default function SettingsPage() {
         phraseToLock,
         // Fungsi callback untuk generate silent auth options
         async () => {
-           // Meminta opsi login dari server khusus untuk user ini
-           const res = await fetch('/api/auth/webauthn/generate-authentication-options', {
-               method: 'POST',
-               headers: { 'Content-Type': 'application/json' },
-               // Optional: Kirim username/id jika API lu butuh konteks siapa yang lagi setup
-               // body: JSON.stringify({ userId: user.id }) 
-           });
-           if (!res.ok) throw new Error('Failed to fetch silent auth options');
-           return res.json();
+           const res = await api('/api/auth/webauthn/login/options');
+           return res;
         }
       );
       

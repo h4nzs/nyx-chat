@@ -174,9 +174,9 @@ router.delete('/:id', async (req, res, next) => {
     // Dalam E2EE, server mungkin sudah menghapus pesannya dari DB (Kadaluarsa otomatis).
     // Jika pesan masih ada, kita hapus secara eksplisit.
     try {
-      await prisma.message.delete({ where: { id: messageId, senderId: userId } });
-    } catch (_e) {
-      // Abaikan error jika pesan sudah tidak ada atau bukan milik user
+      await prisma.message.deleteMany({ where: { id: messageId, senderId: userId } });
+    } catch (e) {
+      console.error('[Messages] Failed to delete message:', e);
     }
 
     // Tugas utama rute ini sekarang HANYA menghapus file fisik di Cloudflare R2.

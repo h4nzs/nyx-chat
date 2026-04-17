@@ -351,6 +351,28 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             newPqPublicKey = keys.pqEncryptionPublicKeyB64;
             newSigningKey = keys.signingPublicKeyB64;
             newEncryptedPrivateKey = keys.encryptedPrivateKeys;
+        } else if (restoredNotSynced) {
+            // Restored from phrase, but not synced to server yet
+            const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+            const localEncryptedKeys = await getEncryptedKeys();
+            if (!localEncryptedKeys) throw new Error("Local keys missing unexpectedly after restore.");
+
+            const result = await retrievePrivateKeys(localEncryptedKeys, password);
+            if (result.success && result.keys) {
+                const { getSodiumLib } = await import('@utils/crypto');
+                const sodium = await getSodiumLib();
+                
+                const encryptionKeyPair = sodium.crypto_box_seed_keypair(result.keys.encryption);
+                const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(result.keys.pqEncryption);
+                const signingPublicKeyBytes = result.keys.signing.slice(32);
+                
+                newPublicKey = sodium.to_base64(encryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newPqPublicKey = sodium.to_base64(pqEncryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newSigningKey = sodium.to_base64(signingPublicKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newEncryptedPrivateKey = localEncryptedKeys;
+            } else {
+                throw new Error("Failed to read restored keys. Please restore your account again.");
+            }
         }
 
         // Call API

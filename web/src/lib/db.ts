@@ -150,6 +150,15 @@ export class NyxDatabase extends Dexie {
       pendingHeaders: 'conversationId',
       groupSkippedKeys: 'key'
     });
+
+    this.version(2).upgrade(trans => {
+      return trans.table('preKeys').toCollection().modify((preKey: any) => {
+        if (preKey.keyPair) {
+          preKey.encryptedPrivateKey = preKey.keyPair;
+          delete preKey.keyPair;
+        }
+      });
+    });
   }
 }
 

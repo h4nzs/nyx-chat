@@ -187,10 +187,10 @@ export function getSocket() {
       const parsed = RawServerMessageSchema.safeParse(rawPayload);
 
       if (!parsed.success) {
-          console.error("[Zod Shield] Dropping invalid incoming message:", JSON.stringify(parsed.error.format(), null, 2), "Raw Payload:", rawPayload);
-          return; 
+          const payloadSummary = typeof rawPayload === 'object' && rawPayload !== null ? Object.keys(rawPayload) : typeof rawPayload;
+          console.error("[Zod Shield] Dropping invalid incoming message:", JSON.stringify(parsed.error.format(), null, 2), "Raw Payload Keys:", payloadSummary);
+          return;
       }
-
       const safeMessage = parsed.data;
 
       // ✅ FIX 2: Kirim ACK "Delivered" ke server segera setelah diterima dengan aman!

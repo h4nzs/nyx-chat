@@ -219,10 +219,10 @@ router.post('/', async (req, res, next) => {
              for (const d of userDevices) {
                 keyRecords.push({
                    sessionId,
-                   encryptedKey: Buffer.from(ik.key, 'base64'),
+                   encryptedKey: Buffer.from(ik.key, 'base64url'),
                    deviceId: d.id,
                    conversationId: conversation.id,
-                   initiatorCiphertexts: ephemeralPublicKey ? Buffer.from(ephemeralPublicKey, 'base64') : null,
+                   initiatorCiphertexts: Buffer.from(ephemeralPublicKey, 'base64url'),
                    isInitiator: ik.userId === creatorId
                 });
              }

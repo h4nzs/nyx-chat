@@ -79,8 +79,8 @@ model OneTimePreKey {
   id          String   @id @default(cuid())
   keyId       Int
   deviceId    String   // Diubah dari userId
-  publicKey   String   @db.Text // Classical
-  pqPublicKey String?  @db.Text // NEW: Post-Quantum
+  publicKey   Bytes    // Classical
+  pqPublicKey Bytes?   // NEW: Post-Quantum
   createdAt   DateTime @default(now())
 
   device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
@@ -91,17 +91,16 @@ model OneTimePreKey {
 
 model PreKeyBundle {
   id            Int      @id @default(autoincrement())
-  identityKey   String   // Device's long-term public identity key
-  pqIdentityKey String?  // NEW: PQ long-term public identity key
-  key           String   // The public part of the signed pre-key
-  pqKey         String?  // NEW: PQ signed pre-key
-  signature     String   // Signature of the 'key'
-  pqSignature   String?  // NEW: Signature of the 'pqKey'
-  
+  identityKey   Bytes    // Device's long-term public identity key
+  pqIdentityKey Bytes?   // NEW: PQ long-term public identity key
+  key           Bytes    // The public part of the signed pre-key
+  pqKey         Bytes?   // NEW: PQ signed pre-key
+  signature     Bytes    // Signature of the 'key'
+  pqSignature   Bytes?   // NEW: Signature of the 'pqKey'
+
   deviceId      String   @unique // Diubah dari userId
   device        Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 }
-
 model RefreshToken {
   id           String   @id @default(cuid())
   jti          String   @unique

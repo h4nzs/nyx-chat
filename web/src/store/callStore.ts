@@ -101,6 +101,10 @@ export const useCallStore = create<CallStoreState>((set, get) => ({
       state.localStream.getTracks().forEach(track => track.stop());
     }
 
+    Object.values(state.remoteStreams).forEach(stream => {
+      stream.getTracks().forEach(track => track.stop());
+    });
+
     set({
       callState: 'idle',
       remoteUsers: [],

@@ -119,9 +119,9 @@ async (req, res, next) => {
         devices: {
           create: {
             // FIX 1: Safe Buffer conversion for optional inputs
-            publicKey: publicKey ? Buffer.from(publicKey, 'base64') : Buffer.alloc(0),
-            pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64') : null,
-            signingKey: signingKey ? Buffer.from(signingKey, 'base64') : Buffer.alloc(0),
+            publicKey: Buffer.from(publicKey, 'base64url'),
+            pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
+            signingKey: Buffer.from(signingKey, 'base64url'),
             encryptedPrivateKey: encryptedPrivateKeys ? Buffer.from(encryptedPrivateKeys, 'utf8') : null,
             name: deviceName || 'Primary Device'
           }
@@ -336,6 +336,10 @@ router.post('/recover', authLimiter, zodValidate({
 
     if (!isValid) throw new ApiError(401, "Cryptographic signature verification failed.");
 
+    if (!publicKey || !signingKey || !newEncryptedKeys) {
+      throw new ApiError(400, 'Missing required cryptographic keys or encrypted private keys.');
+    }
+
     const passwordHash = await hashPassword(newPassword);
 
     const [updatedUser, _, __, newDevice] = await prisma.$transaction([
@@ -346,9 +350,9 @@ router.post('/recover', authLimiter, zodValidate({
           data: {
             userId: user.id,
             // FIX 4: Safe buffer conversion for Recovery creation
-            publicKey: publicKey ? Buffer.from(publicKey, 'base64') : Buffer.alloc(0),
-            pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64') : null,
-            signingKey: signingKey ? Buffer.from(signingKey, 'base64') : Buffer.alloc(0),
+            publicKey: Buffer.from(publicKey, 'base64url'),
+            pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
+            signingKey: Buffer.from(signingKey, 'base64url'),
             encryptedPrivateKey: newEncryptedKeys ? Buffer.from(newEncryptedKeys, 'utf8') : null,
             name: 'Recovered Device'
           }

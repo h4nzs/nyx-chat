@@ -176,10 +176,15 @@ class NyxShadowVaultProxy {
         .limit(limit)
         .toArray();
 
+      const now = Date.now();
+      const validRecords = records.filter(r => {
+        if (!r.expiresAt) return true;
+        return new Date(r.expiresAt).getTime() > now;
+      });
+
       // Eksekusi pembersihan kadaluarsa tanpa memblokir thread
       queueMicrotask(async () => {
         try {
-          const now = Date.now();
           const expired = await db.messages
             .where('conversationId')
             .equals(conversationId)
@@ -197,7 +202,7 @@ class NyxShadowVaultProxy {
         }
       });
 
-      return this.parseRecordsToMessages(records.reverse());
+      return this.parseRecordsToMessages(validRecords.reverse());
     } catch (e: unknown) {
       console.error("Vault Query Error:", e);
       return [];

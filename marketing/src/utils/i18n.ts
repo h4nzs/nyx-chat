@@ -44,8 +44,12 @@ export function useTranslations(lang: string) {
     let value = translations[lang]?.[ns];
     
     for (const k of keys) {
-      if (value === undefined) break;
-      value = value[k];
+      if (value !== undefined && typeof value === 'object' && value !== null) {
+        value = (value as Record<string, unknown>)[k];
+      } else {
+        value = undefined;
+        break;
+      }
     }
     
     let text = typeof value === 'string' ? value : key;

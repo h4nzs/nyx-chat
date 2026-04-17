@@ -41,7 +41,7 @@ export default function RestorePage() {
         signatureB64
       } = await recoverAccountWithSignature(trimmedPhrase, password, identifier, timestamp, nonce);
 
-      if (!encryptedPrivateKeys || !signatureB64) {
+      if (!encryptedPrivateKeys || !signatureB64 || !encryptionPublicKeyB64 || !pqEncryptionPublicKeyB64 || !signingPublicKeyB64) {
         throw new Error(t('auth:restore.error_payload'));
       }
 

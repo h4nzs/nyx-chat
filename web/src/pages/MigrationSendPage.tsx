@@ -93,10 +93,8 @@ export default function MigrationSendPage() {
 
       // 1. Encrypt Huge Vault using AES-GCM (Worker)
       const { combinedData, key: aesKey } = await worker_file_encrypt(vaultDataRef.current!);
-      const encryptedBlob = new Blob([combinedData], { type: 'application/octet-stream' });;
-      
-      // 2. Seal the AES Key using Receiver's Public Key
-      const sealedKeyBytes = sodium.crypto_box_seal(aesKey, receiverPubKeyBytes);
+
+      // 2. Seal the AES Key using Receiver's Public Key      const sealedKeyBytes = sodium.crypto_box_seal(aesKey, receiverPubKeyBytes);
       const sealedKey = sodium.to_base64(sealedKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       setStatus('sending');

@@ -92,27 +92,25 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
 }
 
 export async function getGroupReceiverState(conversationId: string, senderId: string, senderDeviceKey?: string): Promise<GroupReceiverState | null> {
-  return enqueueWrite(async () => {
-      const id = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
-      const record = await db.groupReceiverStates.get(id);
-      
-      let ckString = '';
-      if (record) {
-          if (typeof record.state.CK === 'string') {
-              ckString = record.state.CK;
-          } else if ((record.state.CK as unknown) instanceof Uint8Array) {
-              ckString = bytesToBase64(record.state.CK);
-          }
+  const id = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
+  const record = await db.groupReceiverStates.get(id);
+  
+  let ckString = '';
+  if (record) {
+      if (typeof record.state.CK === 'string') {
+          ckString = record.state.CK;
+      } else if ((record.state.CK as unknown) instanceof Uint8Array) {
+          ckString = bytesToBase64(record.state.CK);
       }
+  }
 
-      return record ? {
-          id: record.id,
-          conversationId: asConversationId(conversationId),
-          senderId: asUserId(senderId),
-          CK: ckString,
-          N: record.state.N
-      } : null;
-  });
+  return record ? {
+      id: record.id,
+      conversationId: asConversationId(conversationId),
+      senderId: asUserId(senderId),
+      CK: ckString,
+      N: record.state.N
+  } : null;
 }
 
 export async function saveGroupReceiverState(state: GroupReceiverState): Promise<void> {

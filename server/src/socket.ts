@@ -473,6 +473,8 @@ export function registerSocket(httpServer: HttpServer) {
               requesterPqPublicKey,
               requesterDeviceId
             });
+          } else {
+             socket.emit("group:key_request_failed", { conversationId, reason: "Missing classical or PQ public key" });
           }
         }      } catch (error) {}
     });
@@ -548,6 +550,8 @@ export function registerSocket(httpServer: HttpServer) {
 
           if (requesterPublicKey && requesterPqPublicKey) {
             io.to(fulfillerId).emit('session:fulfill_request', { conversationId, sessionId, requesterId: userId, requesterPublicKey: requesterPublicKey, requesterPqPublicKey: requesterPqPublicKey });
+          } else {
+            socket.emit("session:request_key_failed", { sessionId, targetId: fulfillerId, reason: "Missing PQ or classical public key" });
           }
         }      } catch (error) {}
     });

@@ -273,8 +273,16 @@ export async function decryptMessageObject(
                const myIdentityKeyPair = await getMyEncryptionKeyPair();
                const { getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
                const mySignedPreKeyPair = await getSignedPreKeyPair();
-               const myPqIdentityKeyPair = await getPqEncryptionKeyPair();
-               const myPqSignedPreKeyPair = await getPqSignedPreKeyPair();
+               
+               let myPqIdentityKeyPair;
+               let myPqSignedPreKeyPair;
+               try {
+                   myPqIdentityKeyPair = await getPqEncryptionKeyPair();
+                   myPqSignedPreKeyPair = await getPqSignedPreKeyPair();
+               } catch (e) {
+                   console.warn("PQ keys unavailable. Triggering classical fallback / upgrade flow.");
+                   throw new Error("PQ keys missing. Account upgrade required.");
+               }
 
                const sessionKey = await deriveSessionKeyAsRecipient(
                    myIdentityKeyPair,

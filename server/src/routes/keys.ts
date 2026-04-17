@@ -74,9 +74,9 @@ router.post(
         await tx.device.update({
           where: { id: deviceId },
           data: {
-            publicKey: Buffer.from(identityKey, 'base64'),
-            pqPublicKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64') : null,
-            signingKey: signingKey ? Buffer.from(signingKey, 'base64') : Buffer.alloc(0)
+            ...(identityKey !== undefined && { publicKey: Buffer.from(identityKey, 'base64url') }),
+            ...(pqIdentityKey !== undefined && { pqPublicKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null }),
+            ...(signingKey !== undefined && { signingKey: Buffer.from(signingKey, 'base64url') })
           }
         });
       });
@@ -384,4 +384,4 @@ router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
   }
 });
 
-export default router
+export default routerdefault router

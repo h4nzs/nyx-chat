@@ -199,11 +199,10 @@ router.put('/me/keys',
       // FIX 2: Konversi String Base64 dari Client menjadi Buffer untuk Prisma Bytes
       await prisma.device.update({
         where: { id: deviceId },
-        data: { 
-            publicKey: Buffer.from(publicKey, 'base64'), 
-            signingKey: Buffer.from(signingKey, 'base64') 
-        }
-      })
+        data: {
+            publicKey: Buffer.from(publicKey, 'base64url'),
+            signingKey: Buffer.from(signingKey, 'base64url')
+        }      })
 
       const conversations = await prisma.conversation.findMany({
         where: { participants: { some: { userId } } },

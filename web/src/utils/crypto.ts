@@ -1223,6 +1223,7 @@ interface GroupFulfillRequestPayload {
   conversationId: string;
   requesterId: string;
   requesterPublicKey: string;
+  requesterPqPublicKey?: string;
   requesterDeviceId?: string;
 }
 
@@ -1246,7 +1247,7 @@ interface ReceiveKeyPayload {
 }
 
 export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload): Promise<void> {
-  const { conversationId, requesterId, requesterPublicKey: requesterPublicKeyB64 } = payload;
+  const { conversationId, requesterId, requesterPublicKey: requesterPublicKeyB64, requesterPqPublicKey: requesterPqPublicKeyB64 } = payload;
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (!conversation || !conversation.participants.some(p => p.id === requesterId)) return;
 
@@ -1255,9 +1256,14 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
   if (!senderState) return;
 
   const sodium = await getSodiumLib();
-  const { worker_crypto_box_seal } = await getWorkerProxy();
+  const { worker_pq_box_seal } = await getWorkerProxy();
 
   const requesterPublicKey = sodium.from_base64(requesterPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+  if (!requesterPqPublicKeyB64) {
+      console.warn("Group key fulfillment: Missing PQ key for requester. Cannot safely fulfill.");
+      return;
+  }
+  const requesterPqPublicKey = sodium.from_base64(requesterPqPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
   const senderKeyBytes = sodium.from_base64(senderState.CK, sodium.base64_variants.URLSAFE_NO_PADDING);
   
   // Pack N (4 bytes) + CK (32 bytes)
@@ -1265,7 +1271,7 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
   new DataView(payloadToEncrypt.buffer).setUint32(0, senderState.N || 0, false); // Big Endian
   payloadToEncrypt.set(senderKeyBytes, 4);
 
-  const encryptedKeyForRequester = await worker_crypto_box_seal(payloadToEncrypt, requesterPublicKey);
+  const encryptedKeyForRequester = await worker_pq_box_seal(payloadToEncrypt, requesterPqPublicKey, requesterPublicKey);
 
   const { publicKey: myIdentityKey } = await getMyEncryptionKeyPair();
   const myIdentityKeyB64 = sodium.to_base64(myIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING);

@@ -104,12 +104,12 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
   }
 
   // Simpan kunci ke database untuk didistribusikan ke masing-masing device
-  await prisma.sessionKey.createMany({
+  await db.sessionKey.createMany({
       data: keyRecords.map(k => ({
         ...k,
         // Konversi eksplisit Buffer ke Uint8Array murni agar kompatibel dengan Prisma Bytes
-        encryptedKey: new Uint8Array(Buffer.from(k.encryptedKey, 'base64')),
-        initiatorCiphertexts: k.initiatorCiphertexts ? new Uint8Array(k.initiatorCiphertexts) : null
+        encryptedKey: new Uint8Array(Buffer.from(k.encryptedKey, 'base64url')),
+        initiatorCiphertexts: null
       }))
     });
 
