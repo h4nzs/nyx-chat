@@ -88,6 +88,7 @@ export async function getRecoveryPhrase(encryptedDataStr: string, password: stri
 
 export async function registerAndGenerateKeys(password: string): Promise<{
   encryptionPublicKeyB64: string;
+  pqEncryptionPublicKeyB64: string;
   signingPublicKeyB64: string;
   encryptedPrivateKeys: string;
   phrase: string;
@@ -97,19 +98,22 @@ export async function registerAndGenerateKeys(password: string): Promise<{
 
 export async function generateNewKeys(password: string): Promise<{
     encryptionPublicKeyB64: string;
+    pqEncryptionPublicKeyB64: string;
     signingPublicKeyB64: string;
     encryptedPrivateKeys: string;
 }> {
-  const { encryptionPublicKeyB64, signingPublicKeyB64, encryptedPrivateKeys } = await sendToWorker<{
+  const { encryptionPublicKeyB64, pqEncryptionPublicKeyB64, signingPublicKeyB64, encryptedPrivateKeys } = await sendToWorker<{
     encryptionPublicKeyB64: string;
+    pqEncryptionPublicKeyB64: string;
     signingPublicKeyB64: string;
     encryptedPrivateKeys: string;
   }>('registerAndGenerateKeys', { password });
-  return { encryptionPublicKeyB64, signingPublicKeyB64, encryptedPrivateKeys };
+  return { encryptionPublicKeyB64, pqEncryptionPublicKeyB64, signingPublicKeyB64, encryptedPrivateKeys };
 }
 
 export async function restoreFromPhrase(phrase: string, password: string): Promise<{
   encryptionPublicKeyB64: string,
+  pqEncryptionPublicKeyB64: string,
   signingPublicKeyB64: string,
   encryptedPrivateKeys: string,
 }> {
@@ -124,6 +128,7 @@ export async function recoverAccountWithSignature(
   nonce: string
 ): Promise<{
   encryptionPublicKeyB64: string,
+  pqEncryptionPublicKeyB64: string,
   signingPublicKeyB64: string,
   encryptedPrivateKeys: string,
   signatureB64: string

@@ -974,25 +974,22 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const forceRotate = conversation.requiresKeyRotation === true;
 
     // ✅ FASE 3: Selalu gunakan protokol Fan-Out Sender Key untuk SEMUA tipe percakapan (termasuk 1-on-1)
-    if (useConnectionStore.getState().status === 'connected') {
-      try {
-        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, forceRotate);
-        if (distributionKeys && distributionKeys.length > 0) {
-          // ✅ FIX: Hapus any, gunakan tipe data ketat sesuai kembalian dari ensureGroupSession
-          emitGroupKeyDistribution(
-            conversationId, 
-            distributionKeys as { userId: string; targetDeviceId: string; key: string; type: string }[]
-          );
-          if (forceRotate) {
-              useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
-          }
-          await new Promise(r => setTimeout(r, 300)); 
+    try {
+      const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, forceRotate);
+      if (distributionKeys && distributionKeys.length > 0) {
+        emitGroupKeyDistribution(
+          conversationId, 
+          distributionKeys as { userId: string; targetDeviceId: string; key: string; type: string }[]
+        );
+        if (forceRotate) {
+            useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
         }
-      } catch (e) {
-        console.error("Failed to ensure session", e);
-        toast.error(i18n.t('errors:failed_to_establish_secure_session', 'Failed to establish secure session. Please try again.'));
-        return; // ✅ FIX: Stop execution if session establishment fails
+        await new Promise(r => setTimeout(r, 300)); 
       }
+    } catch (e) {
+      console.error("Failed to ensure session", e);
+      toast.error(i18n.t('errors:failed_to_establish_secure_session', 'Failed to establish secure session. Please try again.'));
+      return; // ✅ FIX: Stop execution if session establishment fails
     }
 
     const actualTempId = tempId !== undefined ? tempId : generateTempId();
@@ -1189,7 +1186,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                        const targetPublicKey = device.publicKey;
                        if (targetPublicKey) {
                            try {
-                               const recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                               let recipientPubBytes;
+                               try {
+                                   recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                               } catch (e1) {
+                                   try {
+                                       recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.ORIGINAL);
+                                   } catch (e2) {
+                                       recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE);
+                                   }
+                               }
                                const sealed = await worker_crypto_box_seal(pushDataBytes, recipientPubBytes);
                                pushPayloads[device.id] = sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
                            } catch (e) {

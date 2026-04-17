@@ -252,6 +252,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             privateKeysCache = result.keys;
             set({ hasRestoredKeys: true });
             await setDeviceAutoUnlockReady(true);
+            
+            import('./auth').then(({ setupAndUploadPreKeyBundle }) => {
+              setupAndUploadPreKeyBundle().catch(e => console.warn("[Auto-Heal] Failed to upload keys:", e));
+            });
+            
             return true;
           }
         } catch (e) { console.error("Error during auto-unlock:", e); } finally { set({ isInitializingCrypto: false }); }
@@ -263,6 +268,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       privateKeysCache = keys;
       set({ hasRestoredKeys: true });
       await setDeviceAutoUnlockReady(true);
+      
+      import('./auth').then(({ setupAndUploadPreKeyBundle }) => {
+        setupAndUploadPreKeyBundle().catch(e => console.warn("[Auto-Heal] Failed to upload keys:", e));
+      });
     },
 
     bootstrap: async (force = false) => {
@@ -304,6 +313,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
       try {
         let newPublicKey: string | undefined = undefined;
+        let newPqPublicKey: string | undefined = undefined;
         let newSigningKey: string | undefined = undefined;
         let newEncryptedPrivateKey: string | undefined = undefined;
 
@@ -321,10 +331,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
                 const sodium = await getSodiumLib();
                 
                 // Regenerate public keys from decrypted private keys for server sync
-                const encryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(result.keys.encryption);
+                const encryptionKeyPair = sodium.crypto_box_seed_keypair(result.keys.encryption);
+                const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(result.keys.pqEncryption);
                 const signingPublicKeyBytes = result.keys.signing.slice(32);
                 
                 newPublicKey = sodium.to_base64(encryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newPqPublicKey = sodium.to_base64(pqEncryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
                 newSigningKey = sodium.to_base64(signingPublicKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
                 newEncryptedPrivateKey = localEncryptedKeys;
             } else {
@@ -336,6 +348,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             const keys = await generateNewKeys(password);
             
             newPublicKey = keys.encryptionPublicKeyB64;
+            newPqPublicKey = keys.pqEncryptionPublicKeyB64;
             newSigningKey = keys.signingPublicKeyB64;
             newEncryptedPrivateKey = keys.encryptedPrivateKeys;
         }
@@ -348,6 +361,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
               password,
               deviceName: getDeviceName(),
               publicKey: newPublicKey,
+              pqPublicKey: newPqPublicKey,
               signingKey: newSigningKey,
               encryptedPrivateKey: newEncryptedPrivateKey
           }),
@@ -414,6 +428,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         const { registerAndGenerateKeys, retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
         const {
           encryptionPublicKeyB64,
+          pqEncryptionPublicKeyB64,
           signingPublicKeyB64,
           encryptedPrivateKeys,
           phrase
@@ -426,6 +441,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             password,
             encryptedProfile,
             publicKey: encryptionPublicKeyB64,
+            pqPublicKey: pqEncryptionPublicKeyB64,
             signingKey: signingPublicKeyB64,
             encryptedPrivateKeys,
             deviceName: getDeviceName(),
@@ -552,7 +568,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const keys = await retrieveAndCacheKeys();
       const { getSodiumLib } = await import('@utils/crypto');
       const sodium = await getSodiumLib();
-      return sodium.crypto_kem_xwing_seed_keypair(keys.encryption);
+      return sodium.crypto_box_seed_keypair(keys.encryption);
     },
     async getPqEncryptionKeyPair() {
       const keys = await retrieveAndCacheKeys();
@@ -565,7 +581,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       const keys = await retrieveAndCacheKeys();
       const { getSodiumLib } = await import('@utils/crypto');
       const sodium = await getSodiumLib();
-      return sodium.crypto_kem_xwing_seed_keypair(keys.signedPreKey);
+      return sodium.crypto_box_seed_keypair(keys.signedPreKey);
     },
     async getPqSignedPreKeyPair() {
       const keys = await retrieveAndCacheKeys();
@@ -636,3 +652,4 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
   };
 }, Object.is);
+;

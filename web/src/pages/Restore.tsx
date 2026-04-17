@@ -34,6 +34,9 @@ export default function RestorePage() {
 
       // 2. Generate keys & Sign Payload locally
       const {
+        encryptionPublicKeyB64,
+        pqEncryptionPublicKeyB64,
+        signingPublicKeyB64,
         encryptedPrivateKeys,
         signatureB64
       } = await recoverAccountWithSignature(trimmedPhrase, password, identifier, timestamp, nonce);
@@ -49,6 +52,9 @@ export default function RestorePage() {
           identifier,
           newPassword: password,
           newEncryptedKeys: encryptedPrivateKeys,
+          publicKey: encryptionPublicKeyB64,
+          pqPublicKey: pqEncryptionPublicKeyB64,
+          signingKey: signingPublicKeyB64,
           signature: signatureB64,
           timestamp,
           nonce

@@ -15,6 +15,7 @@
   "identity": {
     "anonymous_id": "ID ANÓNIMO",
     "verified": "Verificado",
+    "unverified": "No verificado",
     "sandboxed": "Sandbox (Mejorar)",
     "display_name": "Nombre visible",
     "bio": "Biografía",
@@ -98,6 +99,7 @@
   "profile_page": {
     "title": "Perfil de operador",
     "active": "ACTIVO",
+    "inactive": "INACTIVO",
     "edit_record": "EDITAR_REGISTRO",
     "security_clearance": "Nivel de seguridad",
     "encryption_protocol": "Protocolo de cifrado",

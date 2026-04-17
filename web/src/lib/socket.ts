@@ -1,6 +1,7 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
+import { z } from 'zod';
 import io from "socket.io-client";
 import type { Socket } from "socket.io-client";
 import toast from "react-hot-toast";
@@ -186,7 +187,7 @@ export function getSocket() {
       const parsed = RawServerMessageSchema.safeParse(rawPayload);
 
       if (!parsed.success) {
-          console.error("[Zod Shield] Dropping invalid incoming message:", parsed.error.format());
+          console.error("[Zod Shield] Dropping invalid incoming message:", JSON.stringify(parsed.error.format(), null, 2), "Raw Payload:", rawPayload);
           return; 
       }
 

@@ -506,9 +506,9 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'pq_box_seal_open': {
         const { combinedPayload, pqPrivateKey, classicalPrivateKey } = payload;
-        const payloadBytes = new Uint8Array(combinedPayload);
-        const pqPrivateKeyBytes = new Uint8Array(pqPrivateKey);
-        const classicalPrivateKeyBytes = new Uint8Array(classicalPrivateKey);
+        const payloadBytes = typeof combinedPayload === 'string' ? sodium.from_base64(combinedPayload, sodium.base64_variants.URLSAFE_NO_PADDING) : new Uint8Array(combinedPayload);
+        const pqPrivateKeyBytes = typeof pqPrivateKey === 'string' ? sodium.from_base64(pqPrivateKey, sodium.base64_variants.URLSAFE_NO_PADDING) : new Uint8Array(pqPrivateKey);
+        const classicalPrivateKeyBytes = typeof classicalPrivateKey === 'string' ? sodium.from_base64(classicalPrivateKey, sodium.base64_variants.URLSAFE_NO_PADDING) : new Uint8Array(classicalPrivateKey);
 
         const ephemeralPubKeyLength = 32;
         const pqCiphertextLength = sodium.crypto_kem_xwing_CIPHERTEXTBYTES;

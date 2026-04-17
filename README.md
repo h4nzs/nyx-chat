@@ -61,7 +61,7 @@ To prevent bot swarms without collecting phone numbers, we employ a **Proof-of-H
 
 ## ⚡ The 2026 Tech Stack
 
-We recently underwent a nuclear dependency upgrade to ensure NYX is future-proofed for the next decade.
+We recently underwent a dependency upgrade to ensure NYX is future-proofed for the next decade.
 
 ### Frontend (Client)
 
@@ -110,7 +110,7 @@ JWT_SECRET="super-long-random-string-min-32-chars"
 
 ```bash
 cd server && npx prisma db push
-pnpm dev # (Assuming you set up a root script, or run individually in /web and /server)
+pnpm dev # (Assuming you set up a root script, or run individually in /web and /server but dont forget to build the shared package first in ./packages/shared to avoid any error when setting up for the first time)
 ```
 
 ---
@@ -129,7 +129,7 @@ Because we don't sync history to the cloud, YOU own your data:
 NYX is an open-source fortress, and we welcome operatives to inspect the walls.
 
   * **Strict Rule:** Do NOT update or touch `libsodium-wrappers` unless upgrading specifically for newer PQC primitives. Cryptographic backward compatibility is our highest priority.
-  * **Linting:** We strictly enforce ESLint v10 (Flat Config). Ensure `pnpm run build` passes with zero warnings before opening a PR.
+  * **Linting:** We strictly enforce ESLint v10 (Flat Config). Ensure `pnpm run build` passes with zero warnings before opening a PR (except unused-var can be ignored).
 
 Please check the `CONTRIBUTING.md` and use the provided PR templates.
 

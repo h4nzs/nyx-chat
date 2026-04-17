@@ -91,6 +91,7 @@ router.post('/register', authLimiter, zodValidate({
     password: z.string().min(8).max(128),
     encryptedProfile: z.string().optional(),
     publicKey: z.string().optional(),
+    pqPublicKey: z.string().optional(),
     signingKey: z.string().optional(),
     encryptedPrivateKeys: z.string().optional(),
     deviceName: z.string().optional(),
@@ -99,7 +100,7 @@ router.post('/register', authLimiter, zodValidate({
 }),
 async (req, res, next) => {
   try {
-    const { usernameHash, password, encryptedProfile, publicKey, signingKey, encryptedPrivateKeys, deviceName, turnstileToken } = req.body
+    const { usernameHash, password, encryptedProfile, publicKey, pqPublicKey, signingKey, encryptedPrivateKeys, deviceName, turnstileToken } = req.body
 
     const isHuman = await verifyTurnstileToken(turnstileToken || '')
     if (!isHuman) throw new ApiError(400, 'Bot detected. Please try again or reload page.')
@@ -119,6 +120,7 @@ async (req, res, next) => {
           create: {
             // FIX 1: Safe Buffer conversion for optional inputs
             publicKey: publicKey ? Buffer.from(publicKey, 'base64') : Buffer.alloc(0),
+            pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64') : null,
             signingKey: signingKey ? Buffer.from(signingKey, 'base64') : Buffer.alloc(0),
             encryptedPrivateKey: encryptedPrivateKeys ? Buffer.from(encryptedPrivateKeys, 'utf8') : null,
             name: deviceName || 'Primary Device'
@@ -153,6 +155,7 @@ router.post('/login', authLimiter, zodValidate({
     usernameHash: z.string().min(10), 
     password: z.string().min(8),
     publicKey: z.string().optional(),
+    pqPublicKey: z.string().optional(),
     signingKey: z.string().optional(),
     encryptedPrivateKey: z.string().optional(),
     deviceName: z.string().optional()
@@ -160,7 +163,7 @@ router.post('/login', authLimiter, zodValidate({
 }),
 async (req, res, next) => {
   try {
-    const { usernameHash, password, publicKey, signingKey, encryptedPrivateKey, deviceName } = req.body
+    const { usernameHash, password, publicKey, pqPublicKey, signingKey, encryptedPrivateKey, deviceName } = req.body
     
     const user = await prisma.user.findUnique({
       where: { usernameHash },
@@ -192,9 +195,10 @@ async (req, res, next) => {
               data: { 
                 lastActiveAt: new Date(), 
                 // FIX 2: Buffer conversion for updates
+                pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64') : device.pqPublicKey,
                 signingKey: Buffer.from(signingKey, 'base64'), 
                 encryptedPrivateKey: Buffer.from(encryptedPrivateKey, 'utf8'), 
-                name: getGenericDeviceName(req.headers['user-agent']) 
+                name: deviceName || getGenericDeviceName(req.headers['user-agent']) 
               }
           });
       } else {
@@ -203,9 +207,10 @@ async (req, res, next) => {
               userId: user.id,
               // FIX 3: Buffer conversion for creates
               publicKey: Buffer.from(publicKey, 'base64'),
+              pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64') : null,
               signingKey: Buffer.from(signingKey, 'base64'),
               encryptedPrivateKey: Buffer.from(encryptedPrivateKey, 'utf8'),
-              name: getGenericDeviceName(req.headers['user-agent'])
+              name: deviceName || getGenericDeviceName(req.headers['user-agent'])
             }
           });
       }
@@ -292,6 +297,7 @@ router.post('/recover', authLimiter, zodValidate({
     newPassword: z.string().min(8),
     newEncryptedKeys: z.string(),
     publicKey: z.string().optional(),
+    pqPublicKey: z.string().optional(),
     signingKey: z.string().optional(),
     signature: z.string(),
     timestamp: z.number(),
@@ -299,7 +305,7 @@ router.post('/recover', authLimiter, zodValidate({
   })
 }), async (req, res, next) => {
   try {
-    const { identifier: usernameHash, newPassword, newEncryptedKeys, publicKey, signingKey, signature, timestamp, nonce } = req.body;
+    const { identifier: usernameHash, newPassword, newEncryptedKeys, publicKey, pqPublicKey, signingKey, signature, timestamp, nonce } = req.body;
 
     const now = Date.now();
     if (Math.abs(now - timestamp) > 5 * 60 * 1000) throw new ApiError(400, "Recovery request expired.");
@@ -341,6 +347,7 @@ router.post('/recover', authLimiter, zodValidate({
             userId: user.id,
             // FIX 4: Safe buffer conversion for Recovery creation
             publicKey: publicKey ? Buffer.from(publicKey, 'base64') : Buffer.alloc(0),
+            pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64') : null,
             signingKey: signingKey ? Buffer.from(signingKey, 'base64') : Buffer.alloc(0),
             encryptedPrivateKey: newEncryptedKeys ? Buffer.from(newEncryptedKeys, 'utf8') : null,
             name: 'Recovered Device'
@@ -436,7 +443,7 @@ router.post('/pow/verify',
         Buffer.from(nonce.toString())
       ]);
 
-      const hashBuffer = sodium.crypto_generichash(64, input);
+      const hashBuffer = sodium.crypto_generichash(64, input, null);
       const hash = Buffer.from(hashBuffer).toString('hex');
 
       if (hash.startsWith('0'.repeat(difficulty))) {          await redisClient.del(`pow:challenge:${userId}`);

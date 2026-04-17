@@ -127,22 +127,21 @@ export function registerSocket(httpServer: HttpServer) {
       }
 
       // ✅ FIX: Ambil publicKey dari relasi devices, bukan langsung dari user
-      const user = await prisma.user.findUnique({ 
+      const user = await prisma.user.findUnique({
         where: { id: userId },
-        select: { id: true, devices: { where: { id: deviceId }, select: { publicKey: true } } }
+        select: { id: true, devices: { where: { id: deviceId }, select: { publicKey: true, pqPublicKey: true } } }
       });
-
       if (!user || user.devices.length === 0) {
         socket.user = undefined;
         return next();
       }
 
-      socket.user = { 
-        id: user.id, 
-        publicKey: Buffer.from(user.devices[0].publicKey).toString('base64'),
+      socket.user = {
+        id: user.id,
+        publicKey: Buffer.from(user.devices[0].publicKey).toString('base64url'),
+        pqPublicKey: user.devices[0].pqPublicKey ? Buffer.from(user.devices[0].pqPublicKey).toString('base64url') : null,
         deviceId: deviceId
-      };
-      next();
+      };      next();
     } catch (err) {
       console.error("[Socket] Auth Middleware Error:", err);
       socket.user = undefined;

@@ -481,11 +481,13 @@ export async function ensureGroupSession(conversationId: string, participants: P
   if (pending) return pending;
 
   if (groupSessionLocks.has(conversationId)) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const interval = setInterval(() => {
         if (!groupSessionLocks.has(conversationId)) {
           clearInterval(interval);
-          ensureGroupSession(conversationId, participants, forceRotate).then(resolve);
+          ensureGroupSession(conversationId, participants, forceRotate)
+            .then(resolve)
+            .catch(reject);
         }
       }, 10);
     });

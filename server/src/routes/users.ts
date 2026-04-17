@@ -30,18 +30,19 @@ router.get('/search', async (req, res, next) => {
     
     const users = await prisma.user.findMany({
       where: { usernameHash: q },
-      select: { id: true, encryptedProfile: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true } } },
+      select: { id: true, encryptedProfile: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true, pqPublicKey: true, signingKey: true } } },
       take: 20
     })
 
     const mappedUsers = users.map(u => {
-      const pk = u.devices[0]?.publicKey;
+      const device = u.devices[0];
       return {
         id: u.id,
         encryptedProfile: u.encryptedProfile,
         isVerified: u.isVerified,
-        // FIX 1: Pastikan konversi Buffer ke Base64 sebelum merender JSON
-        publicKey: pk ? (Buffer.isBuffer(pk) || pk instanceof Uint8Array ? Buffer.from(pk).toString('base64') : String(pk)) : undefined
+        publicKey: device?.publicKey ? Buffer.from(device.publicKey).toString('base64url') : undefined,
+        pqPublicKey: device?.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : undefined,
+        signingKey: device?.signingKey ? Buffer.from(device.signingKey).toString('base64url') : undefined
       };
     })
 
@@ -291,20 +292,21 @@ router.get('/:userId', async (req, res, next) => {
     const { userId } = req.params
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, encryptedProfile: true, createdAt: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true } } }
+      select: { id: true, encryptedProfile: true, createdAt: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true, pqPublicKey: true, signingKey: true } } }
     })
 
     if (!user) return res.status(404).json({ error: 'User not found' })
     
-    const pk = user.devices[0]?.publicKey;
+    const device = user.devices[0];
     
     const mappedUser = {
         id: user.id,
         encryptedProfile: user.encryptedProfile,
         createdAt: user.createdAt,
         isVerified: user.isVerified,
-        // FIX 3: Konversi dari Buffer ke Base64
-        publicKey: pk ? (Buffer.isBuffer(pk) || pk instanceof Uint8Array ? Buffer.from(pk).toString('base64') : String(pk)) : undefined
+        publicKey: device?.publicKey ? Buffer.from(device.publicKey).toString('base64url') : undefined,
+        pqPublicKey: device?.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : undefined,
+        signingKey: device?.signingKey ? Buffer.from(device.signingKey).toString('base64url') : undefined
     }
     
     res.json(mappedUser)
