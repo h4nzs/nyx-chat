@@ -83,8 +83,24 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
       }
       
       const sodium = await getSodium();
-      const myPublicKey = sodium.from_base64(myPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-      const theirPublicKey = sodium.from_base64(user.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const { useAuthStore } = await import('@store/auth');
+      const { getSigningPrivateKey } = useAuthStore.getState();
+      const mySigningKey = await getSigningPrivateKey();
+      const mySigningPubKey = mySigningKey.slice(32);
+      
+      const myXWingPubKey = sodium.from_base64(myPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const myPublicKey = new Uint8Array(myXWingPubKey.length + mySigningPubKey.length);
+      myPublicKey.set(myXWingPubKey, 0);
+      myPublicKey.set(mySigningPubKey, myXWingPubKey.length);
+
+      const theirXWingPubKey = sodium.from_base64(user.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const theirSigningPubKey = user.signingKey 
+          ? sodium.from_base64(user.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING) 
+          : new Uint8Array(0);
+          
+      const theirPublicKey = new Uint8Array(theirXWingPubKey.length + theirSigningPubKey.length);
+      theirPublicKey.set(theirXWingPubKey, 0);
+      theirPublicKey.set(theirSigningPubKey, theirXWingPubKey.length);
 
       const sn = await generateSafetyNumber(myPublicKey, theirPublicKey);
       setSafetyNumber(sn);

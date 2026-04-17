@@ -44,7 +44,7 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
     encryptedKey: string;
     deviceId: string;
     conversationId: string;
-    initiatorEphemeralKey: string;
+    initiatorCiphertexts: Buffer | null;
     isInitiator: boolean;
   }
 
@@ -68,7 +68,7 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
       }
 
       try {
-        const recipientPublicKey = sodium.from_base64(device.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+        const recipientPublicKey = new Uint8Array(device.publicKey);
         const encryptedKey = sodium.crypto_box_seal(sessionKey, recipientPublicKey)
         const encryptedKeyB64 = sodium.to_base64(encryptedKey, sodium.base64_variants[B64_VARIANT])
 
@@ -79,7 +79,7 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
           encryptedKey: encryptedKeyB64,
           deviceId: device.id,
           conversationId,
-          initiatorEphemeralKey: 'server-ratchet', // Add placeholder ephemeral key
+          initiatorCiphertexts: null, // Add placeholder ephemeral key
           isInitiator
         })
 
@@ -104,9 +104,14 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
   }
 
   // Simpan kunci ke database untuk didistribusikan ke masing-masing device
-  await db.sessionKey.createMany({
-    data: keyRecords
-  })
+  await prisma.sessionKey.createMany({
+      data: keyRecords.map(k => ({
+        ...k,
+        // Konversi eksplisit Buffer ke Uint8Array murni agar kompatibel dengan Prisma Bytes
+        encryptedKey: new Uint8Array(Buffer.from(k.encryptedKey, 'base64')),
+        initiatorCiphertexts: k.initiatorCiphertexts ? new Uint8Array(k.initiatorCiphertexts) : null
+      }))
+    });
 
-  return { sessionId, encryptedKey: initiatorEncryptedKey }
+    return { sessionId, encryptedKey: initiatorEncryptedKey };
 }

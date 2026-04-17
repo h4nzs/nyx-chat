@@ -17,6 +17,13 @@ import { sanitizeForLog } from '../utils/logger.js'
 const router: Router = Router()
 router.use(requireAuth)
 
+// Helper untuk menyuntikkan properti 'repliedToId' yang hilang dari DB (karena E2EE refactor)
+// agar kompatibel dengan toRawServerMessage mapper.
+const ensureLegacyMessageFields = <T extends Record<string, unknown>>(msg: T) => ({
+  ...msg,
+  repliedToId: null // Relasi DB sudah diputus, jadi selalu null dari server
+});
+
 // ==========================================
 // 1. GET PENDING MESSAGES (Offline Catch-up)
 // ==========================================
@@ -46,7 +53,8 @@ router.get('/:conversationId', async (req, res, next) => {
       }
     })
 
-    const safeMessages = messages.map(toRawServerMessage);
+    // FIX 1: Suntikkan null untuk repliedToId agar TS tidak error
+    const safeMessages = messages.map(msg => toRawServerMessage(ensureLegacyMessageFields(msg)));
     
     // Reverse biar di frontend urutannya bener (Oldest -> Newest)
     res.json({ items: safeMessages.reverse() })
@@ -124,7 +132,8 @@ router.post('/', zodValidate({
       })
     ])
 
-    const safeMessage = toRawServerMessage(newMessageRaw);
+    // FIX 2: Suntikkan null untuk repliedToId
+    const safeMessage = toRawServerMessage(ensureLegacyMessageFields(newMessageRaw));
 
     // Inject tempId (Optimistic UI)
     if (tempId !== undefined) {
@@ -159,12 +168,18 @@ router.delete('/:id', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const userId = req.user.id
+    const messageId = req.params.id
     const r2Key = req.query.r2Key as string | undefined
 
-    // Dalam E2EE, server mungkin sudah menghapus pesannya dari DB.
-    // Jadi kita abaikan pengecekan prisma.message.findUnique().
-    // Tugas utama rute ini sekarang HANYA menghapus file fisik di Cloudflare R2.
+    // Dalam E2EE, server mungkin sudah menghapus pesannya dari DB (Kadaluarsa otomatis).
+    // Jika pesan masih ada, kita hapus secara eksplisit.
+    try {
+      await prisma.message.delete({ where: { id: messageId, senderId: userId } });
+    } catch (_e) {
+      // Abaikan error jika pesan sudah tidak ada atau bukan milik user
+    }
 
+    // Tugas utama rute ini sekarang HANYA menghapus file fisik di Cloudflare R2.
     if (r2Key) {
        const safeR2Key = r2Key.replace(/[^a-zA-Z0-9_\-\./]/g, '').substring(0, 255);
        const parts = safeR2Key.split('/');

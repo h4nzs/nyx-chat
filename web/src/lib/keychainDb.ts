@@ -21,8 +21,6 @@ export interface GroupReceiverState {
 }
 
 // --- GLOBAL WRITE QUEUE ---
-// This ensures that even if multiple async processes try to update the database,
-// they do so in a strict, predictable sequence.
 const dbWriteQueue: Promise<unknown> = Promise.resolve();
 let queueTail = dbWriteQueue;
 
@@ -43,19 +41,49 @@ export async function closeDatabaseConnection() {
   }
 }
 
+// Helper: Konversi Base64 <-> Uint8Array untuk di Browser
+function bytesToBase64(bytes: Uint8Array): string {
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+}
+
 // ... existing helpers ...
 
 export async function getGroupSenderState(conversationId: string): Promise<GroupSenderState | null> {
   const record = await db.groupSenderStates.get(conversationId);
+  // Di GroupRatchetState yang baru, CK sudah berupa string. 
+  // Jika di runtime dia berupa Uint8Array (dari legacy code), kita konversi.
+  let ckString = '';
+  if (record) {
+      if (typeof record.state.CK === 'string') {
+          ckString = record.state.CK;
+      } else if ((record.state.CK as unknown) instanceof Uint8Array) {
+          ckString = bytesToBase64(record.state.CK);
+      }
+  }
+  
   return record ? {
       conversationId: asConversationId(record.conversationId),
-      CK: record.state.CK,
+      CK: ckString,
       N: record.state.N
   } : null;
 }
 
 export async function saveGroupSenderState(state: GroupSenderState): Promise<void> {
   return enqueueWrite(async () => {
+      // Sama seperti di atas, kita simpan sesuai schema yang baru (string)
       await db.groupSenderStates.put({
           conversationId: state.conversationId,
           state: { CK: state.CK, N: state.N }
@@ -64,15 +92,27 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
 }
 
 export async function getGroupReceiverState(conversationId: string, senderId: string, senderDeviceKey?: string): Promise<GroupReceiverState | null> {
-  const id = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
-  const record = await db.groupReceiverStates.get(id);
-  return record ? {
-      id: record.id,
-      conversationId: asConversationId(conversationId),
-      senderId: asUserId(senderId),
-      CK: record.state.CK,
-      N: record.state.N
-  } : null;
+  return enqueueWrite(async () => {
+      const id = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
+      const record = await db.groupReceiverStates.get(id);
+      
+      let ckString = '';
+      if (record) {
+          if (typeof record.state.CK === 'string') {
+              ckString = record.state.CK;
+          } else if ((record.state.CK as unknown) instanceof Uint8Array) {
+              ckString = bytesToBase64(record.state.CK);
+          }
+      }
+
+      return record ? {
+          id: record.id,
+          conversationId: asConversationId(conversationId),
+          senderId: asUserId(senderId),
+          CK: ckString,
+          N: record.state.N
+      } : null;
+  });
 }
 
 export async function saveGroupReceiverState(state: GroupReceiverState): Promise<void> {
@@ -111,16 +151,16 @@ export async function takeGroupSkippedKey(conversationId: string, senderId: stri
 
 export async function deleteGroupStates(conversationId: string): Promise<void> {
   await enqueueWrite(async () => {
-      // 1. Hapus Sender State (Ini aman menggunakan exact match karena key-nya adalah conversationId)
+      // 1. Hapus Sender State
       await db.groupSenderStates.delete(conversationId);
       
-      // 2. Hapus SEMUA Receiver States yang berawalan dari conversationId_
+      // 2. Hapus SEMUA Receiver States
       await db.groupReceiverStates
           .where('id')
           .between(conversationId + "_", conversationId + "_\uffff", true, true)
           .delete();
           
-      // 3. Hapus SEMUA Skipped Keys yang berawalan dari conversationId_
+      // 3. Hapus SEMUA Skipped Keys
       await db.groupSkippedKeys
           .where('key')
           .between(conversationId + "_", conversationId + "_\uffff", true, true)
@@ -134,69 +174,45 @@ export async function deleteGroupSenderState(conversationId: string): Promise<vo
   });
 }
 
-/**
- * Stores a pending X3DH header for a conversation.
- */
 export async function storePendingHeader(conversationId: string, header: Record<string, unknown>): Promise<void> {
   return enqueueWrite(async () => {
       await db.pendingHeaders.put({ conversationId: conversationId as ConversationId, header });
   });
 }
 
-/**
- * Retrieves a pending X3DH header.
- */
 export async function getPendingHeader(conversationId: string): Promise<Record<string, unknown> | null> {
   const record = await db.pendingHeaders.get(conversationId);
   return record ? record.header : null;
 }
 
-/**
- * Deletes a pending X3DH header.
- */
 export async function deletePendingHeader(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       await db.pendingHeaders.delete(conversationId);
   });
 }
 
-/**
- * Stores a One-Time Pre-Key (private part) securely.
- */
 export async function storeOneTimePreKey(keyId: number, encryptedPrivateKey: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
-      await db.preKeys.put({ keyId, keyPair: encryptedPrivateKey });
+      await db.preKeys.put({ keyId, encryptedPrivateKey });
   });
 }
 
-/**
- * Retrieves a One-Time Pre-Key (private part) by ID.
- */
 export async function getOneTimePreKey(keyId: number): Promise<Uint8Array | null> {
   const record = await db.preKeys.get(keyId);
-  return record ? record.keyPair : null;
+  return record ? record.encryptedPrivateKey : null;
 }
 
-/**
- * Deletes a One-Time Pre-Key after use (for Forward Secrecy).
- */
 export async function deleteOneTimePreKey(keyId: number): Promise<void> {
   return enqueueWrite(async () => {
       await db.preKeys.delete(keyId);
   });
 }
 
-/**
- * Gets the highest keyId currently in the store.
- */
 export async function getLastOtpkId(): Promise<number> {
   const lastKey = await db.preKeys.orderBy('keyId').last();
   return lastKey ? lastKey.keyId : 0;
 }
 
-/**
- * Adds a session key to the keychain atomically.
- */
 export async function addSessionKey(
   conversationId: string,
   sessionId: string,
@@ -208,9 +224,6 @@ export async function addSessionKey(
   });
 }
 
-/**
- * Retrieves a specific session key from the keychain.
- */
 export async function getSessionKey(
   conversationId: string,
   sessionId: string
@@ -220,9 +233,6 @@ export async function getSessionKey(
   return record ? record.key : null;
 }
 
-/**
- * Retrieves the most recently added session key for a conversation.
- */
 export async function getLatestSessionKey(
   conversationId: string
 ): Promise<{ sessionId: string; key: Uint8Array } | null> {
@@ -234,98 +244,65 @@ export async function getLatestSessionKey(
   if (lastSession) {
       return { sessionId: lastSession.sessionId, key: lastSession.key };
   }
-  
   return null;
 }
 
-/**
- * Stores a group key for a specific conversation.
- */
 export async function storeGroupKey(conversationId: string, key: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
       await db.groupKeys.put({ conversationId: conversationId as ConversationId, key });
   });
 }
 
-/**
- * Retrieves the group key for a specific conversation.
- */
 export async function getGroupKey(conversationId: string): Promise<Uint8Array | null> {
   const record = await db.groupKeys.get(conversationId);
   return record ? record.key : null;
 }
 
-/**
- * Stores a group key received from another user.
- */
 export async function receiveGroupKey(conversationId: string, key: Uint8Array): Promise<void> {
   return storeGroupKey(conversationId, key);
 }
 
-/**
- * Deletes the group key for a specific conversation.
- */
 export async function deleteGroupKey(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       await db.groupKeys.delete(conversationId);
   });
 }
 
-/**
- * Stores the encrypted RatchetState for a conversation.
- */
 export async function storeRatchetSession(conversationId: string, encryptedState: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
-      await db.ratchetSessions.put({ conversationId: conversationId as ConversationId, state: encryptedState });
+      // Dummy cast to bypass mismatch between serialized (Uint8Array) and runtime type (DoubleRatchetState)
+      await db.ratchetSessions.put({ conversationId: conversationId as ConversationId, state: encryptedState as unknown as import('@nyx/shared').DoubleRatchetState });
   });
 }
 
-/**
- * Retrieves the encrypted RatchetState for a conversation.
- */
 export async function getRatchetSession(conversationId: string): Promise<Uint8Array | null> {
   const record = await db.ratchetSessions.get(conversationId);
-  return record ? record.state : null;
+  return record ? (record.state as unknown as Uint8Array) : null;
 }
 
-/**
- * Stores an encrypted skipped message key.
- */
 export async function storeSkippedKey(headerKey: string, encryptedKey: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
       await db.skippedKeys.put({ headerKey, key: encryptedKey });
   });
 }
 
-/**
- * Retrieves an encrypted skipped message key.
- */
 export async function getSkippedKey(headerKey: string): Promise<Uint8Array | null> {
   const record = await db.skippedKeys.get(headerKey);
   return record ? record.key : null;
 }
 
-/**
- * Deletes a skipped message key.
- */
 export async function deleteSkippedKey(headerKey: string): Promise<void> {
   return enqueueWrite(async () => {
       await db.skippedKeys.delete(headerKey);
   });
 }
 
-/**
- * Deletes the encrypted RatchetState for a conversation.
- */
 export async function deleteRatchetSession(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       await db.ratchetSessions.delete(conversationId);
   });
 }
 
-/**
- * Deletes all session keys for a conversation.
- */
 export async function deleteSessionKeys(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
       await db.sessionKeys
@@ -335,18 +312,13 @@ export async function deleteSessionKeys(conversationId: string): Promise<void> {
   });
 }
 
-/**
- * Deletes all group receiver states for a conversation.
- */
 export async function deleteGroupReceiverStates(conversationId: string): Promise<void> {
   return enqueueWrite(async () => {
-     // Delete states
      await db.groupReceiverStates
          .where('id')
          .between(conversationId + "_", conversationId + "_\uffff", true, true)
          .delete();
 
-     // Delete skipped keys (assuming key starts with conversationId_)
      await db.groupSkippedKeys
          .where('key')
          .between(conversationId + "_", conversationId + "_\uffff", true, true)
@@ -354,35 +326,23 @@ export async function deleteGroupReceiverStates(conversationId: string): Promise
   });
 }
 
-/**
- * Stores an encrypted Message Key locally for history decryption.
- */
 export async function storeMessageKey(messageId: string, encryptedMk: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
       await db.messageKeys.put({ messageId: messageId as MessageId, key: encryptedMk });
   });
 }
 
-/**
- * Retrieves an encrypted Message Key.
- */
 export async function getMessageKey(messageId: string): Promise<Uint8Array | null> {
   const record = await db.messageKeys.get(messageId);
   return record ? record.key : null;
 }
 
-/**
- * Deletes an encrypted Message Key locally.
- */
 export async function deleteMessageKey(messageId: string): Promise<void> {
   return enqueueWrite(async () => {
       await db.messageKeys.delete(messageId);
   });
 }
 
-/**
- * Clears all data related to a conversation from the keychain.
- */
 export async function deleteConversationKeychain(conversationId: string): Promise<void> {
   await Promise.all([
     deleteSessionKeys(conversationId),
@@ -405,12 +365,8 @@ export async function getProfileKey(userId: string): Promise<string | undefined>
   return record?.key;
 }
 
-/**
- * Clears all keys from the database. Used on logout.
- */
 export async function clearAllKeys(): Promise<void> {
   return enqueueWrite(async () => {
-      // Clear all keychain-related tables
       await Promise.all([
           db.sessionKeys.clear(),
           db.groupKeys.clear(),
@@ -435,10 +391,9 @@ export type { VaultEntry };
 export async function exportDatabaseToJson(): Promise<string> {
   const exportData: Record<string, unknown[]> = {};
 
-  // ✅ FIX: HANYA ekspor/impor tabel riwayat dan status penerima.
   const tables = [
     'messages', 
-    'messageKeys', // ✅ Menambahkan messageKeys agar histori bisa didekripsi
+    'messageKeys', 
     'storyKeys', 
     'offlineQueue',
     'identityKeys', 
@@ -454,8 +409,6 @@ export async function exportDatabaseToJson(): Promise<string> {
   }
 
   // --- DEVICE-SPECIFIC DECRYPTION FOR HISTORY SYNC ---
-  // Kita harus mendekripsi messages dan messageKeys sebelum diekspor karena kunci enkripsi
-  // bersifat lokal per perangkat (masterSeed / privateKey).
   try {
       const { useAuthStore } = await import('@store/auth');
       const masterSeed = await useAuthStore.getState().getMasterSeed();
@@ -467,8 +420,8 @@ export async function exportDatabaseToJson(): Promise<string> {
                   try {
                       const m = mk as { key: Uint8Array, plaintext?: string };
                       const decrypted = await worker_decrypt_session_key(m.key, masterSeed);
-                      // Temporary store as array so JSON.stringify can handle it
-                      m.plaintext = Buffer.from(decrypted).toString('base64');
+                      // FIX: Safe native base64 in browser
+                      m.plaintext = bytesToBase64(decrypted);
                   } catch (e) {}
               }
           }
@@ -477,11 +430,11 @@ export async function exportDatabaseToJson(): Promise<string> {
       const { decryptVaultText } = await import('@lib/shadowVaultDb');
       if (exportData['messages']) {
           for (const msg of exportData['messages']) {
-              const m = msg as { content?: string, preview?: string, fileUrl?: string, fileMeta?: string };
+              const m = msg as { content?: string, fileMeta?: string, senderName?: string };
+              // FIX: Clean up legacy fields (preview, fileUrl)
               if (m.content) m.content = await decryptVaultText(m.content) || m.content;
-              if (m.preview) m.preview = await decryptVaultText(m.preview) || m.preview;
-              if (m.fileUrl) m.fileUrl = await decryptVaultText(m.fileUrl) || m.fileUrl;
               if (m.fileMeta) m.fileMeta = await decryptVaultText(m.fileMeta) || m.fileMeta;
+              if (m.senderName) m.senderName = await decryptVaultText(m.senderName) || m.senderName;
           }
       }
   } catch (e) {
@@ -495,6 +448,7 @@ export async function exportDatabaseToJson(): Promise<string> {
     return value;
   });
 }
+
 /**
  * Mengimpor dan menimpa isi brankas kunci dari string JSON.
  */
@@ -512,8 +466,8 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
           if (isVaultEnvelope(parsedInit)) {
               if (!password) throw new Error("Password required to decrypt vault.");
               
-              const { getSodium } = await import('@lib/sodiumInitializer');
-              const sodium = await getSodium();
+              const { getSodiumLib } = await import('@utils/crypto');
+              const sodium = await getSodiumLib();
               const { deriveKeyFromPassword, decryptWithKey } = await import('@lib/crypto-worker-proxy');
               
               const salt = sodium.from_base64(parsedInit.salt, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -531,10 +485,9 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
           throw new Error("Invalid vault file format or incorrect password.");
       }
 
-      // ✅ FIX: Harus sejajar dengan variabel tables di fungsi export
       const tables = [
         'messages', 
-        'messageKeys', // ✅ Menambahkan messageKeys
+        'messageKeys', 
         'storyKeys', 
         'offlineQueue',
         'identityKeys', 
@@ -554,7 +507,8 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
                       try {
                           const m = mk as { key: Uint8Array, plaintext?: string };
                           if (m.plaintext) {
-                              const mkBytes = Buffer.from(m.plaintext, 'base64');
+                              // FIX: Safe native base64 decode in browser
+                              const mkBytes = base64ToBytes(m.plaintext);
                               m.key = await worker_encrypt_session_key(mkBytes, masterSeed);
                               delete m.plaintext;
                           }
@@ -566,13 +520,10 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
           const { encryptVaultText } = await import('@lib/shadowVaultDb');
           if (importData['messages']) {
               for (const msg of importData['messages']) {
-                  const m = msg as { content?: string, preview?: string, fileUrl?: string, fileMeta?: string };
-                  // Only re-encrypt if it's plaintext (not starting with typical base64 ciphertext headers/flags if any)
-                  // For shadowVaultDb, messages are exported as plaintext now!
+                  const m = msg as { content?: string, fileMeta?: string, senderName?: string };
                   if (m.content) m.content = await encryptVaultText(m.content);
-                  if (m.preview) m.preview = await encryptVaultText(m.preview);
-                  if (m.fileUrl) m.fileUrl = await encryptVaultText(m.fileUrl);
                   if (m.fileMeta) m.fileMeta = await encryptVaultText(m.fileMeta);
+                  if (m.senderName) m.senderName = await encryptVaultText(m.senderName);
               }
           }
       } catch {

@@ -96,10 +96,11 @@ export async function decryptMessageObject(
 
   // ✅ FIX: Parse tempId agar selalu menjadi number | undefined
   let parsedTempId: number | undefined = undefined;
-  if (typeof rawMsg.tempId === 'number') {
+  if (typeof rawMsg.tempId === 'number' && Number.isSafeInteger(rawMsg.tempId)) {
       parsedTempId = rawMsg.tempId;
   } else if (typeof rawMsg.tempId === 'string' && /^\d+$/.test(rawMsg.tempId)) {
-      parsedTempId = parseInt(rawMsg.tempId, 10);
+      const num = Number(rawMsg.tempId);
+      if (Number.isSafeInteger(num)) parsedTempId = num;
   }
 
   // ✅ FIX: Konversi string mentah menjadi Branded Types
@@ -270,12 +271,16 @@ export async function decryptMessageObject(
                const ciphertext = payload.ciphertext;
 
                const myIdentityKeyPair = await getMyEncryptionKeyPair();
-               const { getSignedPreKeyPair } = useAuthStore.getState();
+               const { getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
                const mySignedPreKeyPair = await getSignedPreKeyPair();
+               const myPqIdentityKeyPair = await getPqEncryptionKeyPair();
+               const myPqSignedPreKeyPair = await getPqSignedPreKeyPair();
 
                const sessionKey = await deriveSessionKeyAsRecipient(
                    myIdentityKeyPair,
                    mySignedPreKeyPair,
+                   myPqIdentityKeyPair,
+                   myPqSignedPreKeyPair,
                    ik,
                    ek,
                    otpkId
@@ -985,6 +990,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         }
       } catch (e) {
         console.error("Failed to ensure session", e);
+        toast.error(i18n.t('errors:failed_to_establish_secure_session', 'Failed to establish secure session. Please try again.'));
+        return; // ✅ FIX: Stop execution if session establishment fails
       }
     }
 
@@ -1423,8 +1430,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 if (reactionData) {
                     const tempReactionId = `temp_react_${tempId}`;
                     get().replaceOptimisticReaction(conversationId, reactionData.targetMessageId, tempReactionId, {
-                        ...reactionData,
                         id: res.msg.id, 
+                        emoji: reactionData.emoji,
                         userId: useAuthStore.getState().user!.id,
                         isMessage: true
                     });
@@ -1829,30 +1836,21 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   doAddIncomingMessage: async (conversationId, message) => {
       const currentUser = useAuthStore.getState().user;
 
-      let decrypted = message;
+      // 1. ALWAYS decrypt to ensure cryptographic integrity
+      let decrypted = await decryptMessageObject(message);
 
       if (currentUser && message.senderId === currentUser.id && message.tempId) {
           const optimistic = get().messages[conversationId]?.find(m => m.tempId && String(m.tempId) === String(message.tempId));
           if (optimistic) {
+              // 2. Do NOT copy optimistic.content. Only merge UI statuses.
               decrypted = {
-                  ...message,
-                  content: optimistic.content,
-                  fileUrl: optimistic.fileUrl,
-                  fileName: optimistic.fileName,
-                  fileSize: optimistic.fileSize,
-                  fileType: optimistic.fileType,
-                  isBlindAttachment: optimistic.isBlindAttachment,
-                  repliedTo: optimistic.repliedTo,
-                  isSilent: optimistic.isSilent,
+                  ...decrypted,
                   id: message.id,
+                  tempId: message.tempId,
                   createdAt: message.createdAt,
                   statuses: (message.statuses && message.statuses.length > 0) ? message.statuses : (optimistic.statuses || [])
               };
-          } else {
-              decrypted = await decryptMessageObject(message);
           }
-      } else {
-          decrypted = await decryptMessageObject(message);
       }
 
       if (decrypted.content === 'waiting_for_key' || decrypted.error) {

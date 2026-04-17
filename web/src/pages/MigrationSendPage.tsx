@@ -92,27 +92,27 @@ export default function MigrationSendPage() {
       const receiverPubKeyBytes = sodium.from_base64(pubKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       // 1. Encrypt Huge Vault using AES-GCM (Worker)
-      const { encryptedData, iv, key: aesKey } = await worker_file_encrypt(vaultDataRef.current!);
+      const { combinedData, key: aesKey } = await worker_file_encrypt(vaultDataRef.current!);
+      const encryptedBlob = new Blob([combinedData], { type: 'application/octet-stream' });;
       
       // 2. Seal the AES Key using Receiver's Public Key
       const sealedKeyBytes = sodium.crypto_box_seal(aesKey, receiverPubKeyBytes);
       const sealedKey = sodium.to_base64(sealedKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
-      const ivB64 = sodium.to_base64(iv, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       setStatus('sending');
       toast.loading(t('common:migration.tunneling', 'Membangun terowongan aman...'), { id: 'send' });
 
       // 3. Chunking & Socket Emission
       const socket = getSocket();
-      const totalChunks = Math.ceil(encryptedData.byteLength / CHUNK_SIZE);
-      
-      socket.emit('migration:join', roomId);
-      socket.emit('migration:start', { roomId, totalChunks, sealedKey, iv: ivB64 });
+      const totalChunks = Math.ceil(combinedData.byteLength / CHUNK_SIZE);
+
+// Hapus iv dari socket.emit
+      socket.emit('migration:start', { roomId, totalChunks, sealedKey });
 
       for (let i = 0; i < totalChunks; i++) {
         const start = i * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, encryptedData.byteLength);
-        const chunk = encryptedData.slice(start, end);
+        const end = Math.min(start + CHUNK_SIZE, combinedData.byteLength);
+        const chunk = combinedData.slice(start, end);
         
         socket.emit('migration:chunk', { roomId, chunkIndex: i, chunk });
         setProgress(Math.round(((i + 1) / totalChunks) * 100));

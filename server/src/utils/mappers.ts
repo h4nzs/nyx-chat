@@ -8,16 +8,14 @@ import {
   type MinimalProfile
 } from '@nyx/shared';
 
-// --- 1. DEFINISI INPUT (Murni tanpa any) ---
+// --- 1. DEFINISI INPUT (Aman & Sesuai E2EE Schema) ---
 
 export interface PrismaUserProfileInput {
   id: string;
-  username?: string | null;
-  name?: string | null;
-  avatarUrl?: string | null;
+  usernameHash?: string | null; // Sesuai schema baru
   encryptedProfile?: string | null;
-  publicKey?: string | null; // ✅ Tambahkan ini untuk E2EE
-  signingKey?: string | null; // ✅ Tambahkan ini untuk E2EE
+  publicKey?: string | null; 
+  signingKey?: string | null; 
 }
 
 export interface PrismaParticipantInput {
@@ -25,6 +23,7 @@ export interface PrismaParticipantInput {
   userId: string;
   role: string;
   isPinned?: boolean;
+  joinedAt?: Date | string; // Bisa Date atau ISO String
   user?: PrismaUserProfileInput | null; 
 }
 
@@ -34,13 +33,12 @@ export interface PrismaMessageInput {
   type?: string;
   conversationId: string;
   senderId: string;
-  ciphertext?: string | null;
-  content?: string | null;
+  content?: string | null; // Pengganti ciphertext dalam E2EE payload
   fileKey?: string | null;
   sessionId?: string | null;
   encryptedSessionKey?: string | null;
-  createdAt: Date;
-  expiresAt?: Date | null;
+  createdAt: Date | string; // Bisa Date atau ISO String
+  expiresAt?: Date | string | null; // Bisa Date atau ISO String
   isViewOnce?: boolean | null;
   repliedToId?: string | null;
   sender?: PrismaUserProfileInput | null; 
@@ -53,8 +51,8 @@ export interface PrismaConversationInput {
   type?: string | null;
   encryptedMetadata?: string | null;
   creatorId?: string | null;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: Date | string; // Bisa Date atau ISO String
+  updatedAt: Date | string; // Bisa Date atau ISO String
   participants?: PrismaParticipantInput[]; 
 }
 
@@ -62,23 +60,25 @@ export interface PrismaConversationInput {
 
 export const toMinimalProfile = (user: PrismaUserProfileInput): MinimalProfile => ({
   id: asUserId(user.id),
-  username: user.username ?? '',
-  name: user.name ?? '',
-  avatarUrl: user.avatarUrl,
+  // Karena arsitektur ZKP, kita kembalikan usernameHash sebagai identifier darurat
+  username: user.usernameHash ?? '', 
+  name: '', // Selalu kosong dari server, didekripsi di klien
+  avatarUrl: null, // Selalu null dari server, didekripsi di klien
   encryptedProfile: user.encryptedProfile,
 });
 
 export const toParticipant = (p: PrismaParticipantInput): Participant => ({
-  // ✅ FIX UTAMA: Frontend butuh `id` yang merepresentasikan User ID, bukan Participant ID!
+  // Frontend butuh `id` yang merepresentasikan User ID, bukan Participant ID!
   id: asUserId(p.userId || p.user?.id || p.id), 
   userId: asUserId(p.userId || p.user?.id || p.id),
   role: (p.role === 'ADMIN' || p.role === 'MEMBER' || p.role === 'admin' || p.role === 'member') ? p.role as Participant['role'] : 'MEMBER',
   isPinned: p.isPinned ?? false,
-  name: p.user?.name ?? undefined,
-  username: p.user?.username ?? undefined,
-  avatarUrl: p.user?.avatarUrl ?? undefined,
+  // Hapus name/username/avatarUrl yang tidak aman, klien akan mendekripsi encryptedProfile
+  name: undefined,
+  username: undefined,
+  avatarUrl: undefined,
   encryptedProfile: p.user?.encryptedProfile ?? undefined,
-  // ✅ FIX: Kembalikan public keys agar sistem E2EE tidak rusak
+  // Kembalikan public keys agar sistem E2EE berfungsi
   publicKey: p.user?.publicKey ?? undefined,
   signingKey: p.user?.signingKey ?? undefined,
 });
@@ -88,8 +88,9 @@ export const toConversation = (conv: PrismaConversationInput): Conversation => (
   isGroup: conv.isGroup ?? (conv.type === 'GROUP'), 
   encryptedMetadata: conv.encryptedMetadata ?? undefined,
   creatorId: conv.creatorId ? asUserId(conv.creatorId) : undefined,
-  createdAt: conv.createdAt.toISOString(),
-  updatedAt: conv.updatedAt.toISOString(),
+  // FIX: Aman memanggil toISOString meski input aslinya sudah berupa string
+  createdAt: new Date(conv.createdAt).toISOString(),
+  updatedAt: new Date(conv.updatedAt).toISOString(),
   participants: conv.participants ? conv.participants.map(toParticipant) : [],
   unreadCount: 0,
   lastMessage: null,
@@ -102,13 +103,15 @@ export const toRawServerMessage = (msg: PrismaMessageInput): RawServerMessage =>
   conversationId: asConversationId(msg.conversationId),
   senderId: asUserId(msg.senderId),
   sender: msg.sender ? toMinimalProfile(msg.sender) : undefined,
-  ciphertext: msg.ciphertext,
+  // Hapus map ciphertext yang salah, fokus ke content
+  ciphertext: msg.content ?? undefined, 
   content: msg.content,
   fileKey: msg.fileKey,
   sessionId: msg.sessionId,
   encryptedSessionKey: msg.encryptedSessionKey,
-  createdAt: msg.createdAt.toISOString(),
-  expiresAt: msg.expiresAt ? msg.expiresAt.toISOString() : undefined,
+  // FIX: Aman memanggil toISOString meski input aslinya sudah berupa string
+  createdAt: new Date(msg.createdAt).toISOString(),
+  expiresAt: msg.expiresAt ? new Date(msg.expiresAt).toISOString() : undefined,
   isViewOnce: msg.isViewOnce ?? false,
   repliedToId: msg.repliedToId ? asMessageId(msg.repliedToId) : undefined,
   repliedTo: msg.repliedTo ? toRawServerMessage(msg.repliedTo) : undefined,

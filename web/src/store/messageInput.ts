@@ -62,7 +62,7 @@ const ensureGroupSessionIfNeeded = async (conversationId: string): Promise<boole
     try {
       const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
       if (distributionKeys && distributionKeys.length > 0) {
-        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; targetDeviceId: string; key: string; type: string }[]);
       }
     } catch (e: unknown) {
       console.error("Failed to ensure group session.", e);
@@ -91,10 +91,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   sendEdit: async (conversationId, messageId, newText) => {
       const payload = { type: 'edit', targetMessageId: messageId, text: newText };
       const tempId = generateTempId();
-      // Memberikan isSilent = true agar coreSendMessage tidak membuat gelembung kosong/hantu
       await get().sendMessage(conversationId, { content: JSON.stringify(payload) }, tempId, true);
       set({ editingMessage: null });
-      // Optimistically apply local edit immediately
       useMessageStore.getState().updateMessage(conversationId, messageId, { content: newText, isEdited: true });
   },
   setExpiresIn: (seconds) => set({ expiresIn: seconds }),
@@ -137,7 +135,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const { sendMessage: coreSendMessage } = useMessageStore.getState();
     const { replyingTo, expiresIn, isViewOnce } = get();
 
-    // Teruskan status isSilent ke coreSendMessage di store/message.ts
     await coreSendMessage(conversationId, {
       ...data,
       repliedToId: replyingTo?.id,
@@ -154,7 +151,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Processing ${file.name}...`, progress: 0 };
     const activityId = addActivity(activity);
     const { replyingTo, expiresIn, isViewOnce, isHD } = get();
-    const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
+    
+    // FIX 1: Extract functions correctly
+    const { addOptimisticMessage, updateMessage, sendMessage: coreSendMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     
     if (!me) {
@@ -171,9 +170,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const tempId = generateTempId();
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
-    // Optimistic UI 
+    // FIX 2: Use underscore for tempId consistency (temp_12345)
     const optimisticMessage: Message = {
-      id: asMessageId(`temp-${tempId}`),
+      id: asMessageId(`temp_${tempId}`),
       tempId,
       conversationId: asConversationId(conversationId),
       senderId: asUserId(me.id),
@@ -190,7 +189,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     };
     addOptimisticMessage(conversationId, optimisticMessage);
     
-    // Clear Input state early for UX
     set({ replyingTo: null, isViewOnce: false, isHD: false });
 
     try {
@@ -202,14 +200,14 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
       updateActivity(activityId, { progress: 25, fileName: `Encrypting ${file.name}...` });
       
-      // ✅ OPTIMASI: Delegasikan Enkripsi File ke Web Worker!
-      // Tidak akan lagi membekukan UI / Animasi meskipun file berukuran 100MB.
       const { encryptFileViaWorker } = await import('@utils/crypto');
-      const { encryptedBlob, key: rawFileKey } = await encryptFileViaWorker(fileToProcess);
+      // Fix 3: Ensure we are extracting string 'key' if that's what API expects
+      const encryptRes = await encryptFileViaWorker(fileToProcess);
+      const encryptedBlob = encryptRes.encryptedBlob;
+      const rawFileKey = encryptRes.key;
       
       updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
       
-      // Calculate retention
       const fileRetention = expiresIn ? expiresIn : (isViewOnce ? 1209600 : 0);
 
       const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
@@ -223,7 +221,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           })
       });
 
-      // Upload to R2 via XHR for progress
       await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', presignedRes.uploadUrl, true);
@@ -231,7 +228,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           
           xhr.upload.onprogress = (e) => {
               if (e.lengthComputable) {
-                  const percentComplete = (e.loaded / e.total) * 60; // 30 -> 90
+                  const percentComplete = (e.loaded / e.total) * 60;
                   updateActivity(activityId, { progress: 30 + percentComplete });
               }
           };
@@ -243,7 +240,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
       updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
 
-      // Send Metadata via Message (Blind Attachment)
       const metadata = {
           type: 'file',
           url: presignedRes.publicUrl,
@@ -253,7 +249,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           mimeType: file.type,
       };
 
-      const { sendMessage: coreSendMessage } = useMessageStore.getState();
       await coreSendMessage(conversationId, {
           content: JSON.stringify(metadata),
           repliedTo: replyingTo || undefined,
@@ -269,7 +264,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       const errorMsg = handleApiError(error);
       toast.error(i18n.t('errors:file_upload_failed', 'File upload failed: {{error}}', { error: errorMsg }));
       removeActivity(activityId);
-      updateMessage(conversationId, `temp-${tempId}`, { error: true, optimistic: false });
+      // FIX 4: Use consistent temp_ prefix
+      updateMessage(conversationId, `temp_${tempId}`, { error: true, optimistic: false });
     }
   },
 
@@ -278,7 +274,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: 'Processing Voice...', progress: 0 };
     const activityId = addActivity(activity);
     const { replyingTo, expiresIn, isViewOnce } = get();
-    const { addOptimisticMessage, updateMessage } = useMessageStore.getState();
+    
+    // FIX 5: Extract functions correctly
+    const { addOptimisticMessage, updateMessage, sendMessage: coreSendMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
     
     if (!me) {
@@ -291,11 +289,12 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       return;
     }
 
-    const tempId = Date.now();
+    const tempId = generateTempId();
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
+    // FIX 6: Use underscore for tempId consistency (temp_12345)
     const optimisticMessage: Message = {
-      id: asMessageId(`temp-${tempId}`),
+      id: asMessageId(`temp_${tempId}`),
       tempId,
       conversationId: asConversationId(conversationId),
       senderId: asUserId(me.id),
@@ -318,9 +317,10 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     try {
       updateActivity(activityId, { progress: 20, fileName: 'Encrypting voice...' });
       
-      // ✅ OPTIMASI: Delegasikan Enkripsi Suara ke Web Worker
       const { encryptFileViaWorker } = await import('@utils/crypto');
-      const { encryptedBlob, key: rawFileKey } = await encryptFileViaWorker(blob);
+      const encryptRes = await encryptFileViaWorker(blob);
+      const encryptedBlob = encryptRes.encryptedBlob;
+      const rawFileKey = encryptRes.key;
 
       updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
       
@@ -364,7 +364,6 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           duration
       };
 
-      const { sendMessage: coreSendMessage } = useMessageStore.getState();
       await coreSendMessage(conversationId, {
           content: JSON.stringify(metadata),
           repliedTo: replyingTo || undefined,
@@ -379,7 +378,8 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       const errorMsg = handleApiError(error);
       toast.error(i18n.t('errors:voice_message_failed', `Voice message failed: ${errorMsg}`, { error: errorMsg }));
       removeActivity(activityId);
-      updateMessage(conversationId, `temp-${tempId}`, { error: true, optimistic: false });
+      // FIX 7: Use consistent temp_ prefix
+      updateMessage(conversationId, `temp_${tempId}`, { error: true, optimistic: false });
     }
   },
 

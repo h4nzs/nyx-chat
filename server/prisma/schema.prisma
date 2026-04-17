@@ -54,9 +54,10 @@ model Device {
   name                String?  // e.g., "Chrome on MacOS", "iPhone 15"
   
   // Identitas Kriptografi (Pindahan dari tabel User)
-  publicKey           String   // Encryption/Identity Key
-  signingKey          String   // Verification Key
-  encryptedPrivateKey String?  @db.Text
+  publicKey           Bytes    // Encryption/Identity Key
+  pqPublicKey         Bytes?   // NEW: PQ Identity Key (ML-KEM)
+  signingKey          Bytes    // Verification Key
+  encryptedPrivateKey Bytes?
   
   createdAt           DateTime @default(now())
   lastActiveAt        DateTime @default(now())
@@ -75,26 +76,30 @@ model Device {
 }
 
 model OneTimePreKey {
-  id        String   @id @default(cuid())
-  keyId     Int
-  deviceId  String   // Diubah dari userId
-  publicKey String   @db.Text
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  keyId       Int
+  deviceId    String   // Diubah dari userId
+  publicKey   String   @db.Text // Classical
+  pqPublicKey String?  @db.Text // NEW: Post-Quantum
+  createdAt   DateTime @default(now())
 
-  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([deviceId])
   @@unique([deviceId, keyId])
 }
 
 model PreKeyBundle {
-  id          Int      @id @default(autoincrement())
-  identityKey String   // Device's long-term public identity key
-  key         String   // The public part of the signed pre-key
-  signature   String   // Signature of the 'key'
+  id            Int      @id @default(autoincrement())
+  identityKey   String   // Device's long-term public identity key
+  pqIdentityKey String?  // NEW: PQ long-term public identity key
+  key           String   // The public part of the signed pre-key
+  pqKey         String?  // NEW: PQ signed pre-key
+  signature     String   // Signature of the 'key'
+  pqSignature   String?  // NEW: Signature of the 'pqKey'
   
-  deviceId    String   @unique // Diubah dari userId
-  device      Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  deviceId      String   @unique // Diubah dari userId
+  device        Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 }
 
 model RefreshToken {
@@ -123,8 +128,8 @@ model SessionKey {
   deviceId              String   // Session key E2EE diikat antar perangkat
   device                Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
   isInitiator           Boolean  @default(false)
-  encryptedKey          String
-  initiatorEphemeralKey String?  
+  encryptedKey          Bytes
+  initiatorCiphertexts  Bytes?  
   createdAt             DateTime @default(now())
   expiresAt             DateTime?
 

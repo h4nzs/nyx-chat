@@ -1,4 +1,6 @@
+// web/src/lib/keyStorage.ts
 import { db } from './db';
+// FIX 1: Perbaikan case-sensitivity nama file agar aman di build Linux/Vercel
 import { clearAllKeys as clearSessionKeys } from './keychainDb';
 import { sha256 } from 'hash-wasm';
 
@@ -23,17 +25,18 @@ const del = async (key: string) => {
   await db.kvStore.delete(key);
 };
 
+// FIX 2: Pindahkan Panic Hash ke IndexedDB (kvStore) agar tersentralisasi
 export const setPanicPassword = async (password: string) => {
   if (!password) {
-    localStorage.removeItem(STORAGE_KEYS.PANIC_HASH);
+    await del(STORAGE_KEYS.PANIC_HASH);
     return;
   }
   const hash = await sha256(password);
-  localStorage.setItem(STORAGE_KEYS.PANIC_HASH, hash);
+  await set(STORAGE_KEYS.PANIC_HASH, hash);
 };
 
 export const checkPanicPassword = async (password: string): Promise<boolean> => {
-  const storedHash = localStorage.getItem(STORAGE_KEYS.PANIC_HASH);
+  const storedHash = await get<string>(STORAGE_KEYS.PANIC_HASH);
   if (!storedHash) return false;
   const hash = await sha256(password);
   return hash === storedHash;
@@ -115,6 +118,7 @@ export const clearKeys = async () => {
     await del(STORAGE_KEYS.ENCRYPTED_KEYS);
     await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
     await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_READY);
+    await del(STORAGE_KEYS.PANIC_HASH);
   } catch (error) {
     console.error('Failed to clear keys:', error);
   }

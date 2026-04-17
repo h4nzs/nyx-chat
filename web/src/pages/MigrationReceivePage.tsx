@@ -26,7 +26,7 @@ export default function MigrationReceivePage() {
   
   const keysRef = useRef<{ publicKey: Uint8Array, privateKey: Uint8Array } | null>(null);
   const chunksRef = useRef<ArrayBuffer[]>([]);
-  const metaRef = useRef<{ roomId: string, totalChunks: number, sealedKey: string, iv: string } | null>(null);
+  const metaRef = useRef<{ roomId: string, totalChunks: number, sealedKey: string } | null>(null);
   const migrationStartedRef = useRef(false);
 
   useEffect(() => {
@@ -83,7 +83,7 @@ export default function MigrationReceivePage() {
 
   const processMigration = async (sodium: typeof import('libsodium-wrappers')) => {
     try {
-      const { sealedKey, iv } = metaRef.current!;
+      const { sealedKey } = metaRef.current!;
       const sealedKeyBytes = sodium.from_base64(sealedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       
       // 1. Decrypt the AES Key using our Private Key
@@ -99,10 +99,8 @@ export default function MigrationReceivePage() {
       }
 
       // 3. Prepare payload for worker (IV + Ciphertext)
-      const ivBytes = sodium.from_base64(iv, sodium.base64_variants.URLSAFE_NO_PADDING);
-      const workerPayload = new Uint8Array(ivBytes.length + combinedCiphertext.length);
-      workerPayload.set(ivBytes);
-      workerPayload.set(combinedCiphertext, ivBytes.length);
+      const workerPayload = new Uint8Array(combinedCiphertext.length);
+      workerPayload.set(combinedCiphertext);
 
       // 4. Decrypt via Worker
       const decryptedBuffer = await worker_file_decrypt(workerPayload.buffer, aesKey);

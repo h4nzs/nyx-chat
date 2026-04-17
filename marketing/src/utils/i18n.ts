@@ -7,7 +7,7 @@ export const LANGUAGES = [
 ];
 
 const localeFiles = import.meta.glob('../locales/**/*.json', { eager: true });
-const translations: Record<string, any> = {};
+const translations: Record<string, unknown> = {};
 
 for (const path in localeFiles) {
   // Memecah path (contoh: '../locales/id/landing.json' menjadi array)

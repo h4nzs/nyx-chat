@@ -8,7 +8,8 @@ import { requireAuth } from '../middleware/auth.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
-// ✅ FIX: Menggunakan AuthJwtPayload dari paket shared
+import { Buffer } from 'buffer'
+// ✅ Menggunakan AuthJwtPayload dari paket shared
 import type { AuthJwtPayload } from '@nyx/shared'
 
 const router: Router = Router()
@@ -20,12 +21,14 @@ router.post(
   requireAuth,
   zodValidate({
     body: z.object({
-      // ✅ FIX 1: Validasi ketat untuk memastikan input benar-benar format kunci kriptografi
       identityKey: z.string().regex(base64UrlRegex, 'Invalid identity key format'),
+      pqIdentityKey: z.string().regex(base64UrlRegex, 'Invalid pq identity key format').optional(),
       signingKey: z.string().regex(base64UrlRegex, 'Invalid signing key format').optional(),
       signedPreKey: z.object({
         key: z.string().regex(base64UrlRegex, 'Invalid pre-key format'),
-        signature: z.string().regex(base64UrlRegex, 'Invalid signature format')
+        pqKey: z.string().regex(base64UrlRegex, 'Invalid pq pre-key format').optional(),
+        signature: z.string().regex(base64UrlRegex, 'Invalid signature format'),
+        pqSignature: z.string().regex(base64UrlRegex, 'Invalid pq signature format').optional()
       })
     })
   }),
@@ -37,7 +40,7 @@ router.post(
       if (!authUser.deviceId) throw new ApiError(400, 'Device ID missing from session.');
       
       const deviceId = String(authUser.deviceId);
-      const { identityKey, signedPreKey, signingKey } = req.body;
+      const { identityKey, pqIdentityKey, signedPreKey, signingKey } = req.body;
 
       await prisma.$transaction(async (tx) => {
         // 1. Bersihkan sisa OTPK lama untuk mencegah "Identity Crisis"
@@ -50,26 +53,30 @@ router.post(
           where: { deviceId },
           update: {
             identityKey,
+            pqIdentityKey,
             key: signedPreKey.key,
-            signature: signedPreKey.signature
+            pqKey: signedPreKey.pqKey,
+            signature: signedPreKey.signature,
+            pqSignature: signedPreKey.pqSignature
           },
           create: {
             deviceId,
             identityKey,
+            pqIdentityKey,
             key: signedPreKey.key,
-            signature: signedPreKey.signature
+            pqKey: signedPreKey.pqKey,
+            signature: signedPreKey.signature,
+            pqSignature: signedPreKey.pqSignature
           }
         });
 
-        // 3. Perbarui Identitas Perangkat
+        // 3. Perbarui Identitas Perangkat (Konversi aman dari base64 ke Buffer)
         await tx.device.update({
           where: { id: deviceId },
           data: {
-            publicKey: identityKey,
-            // ✅ FIX 2: Prisma sangat pintar. Jika `signingKey` bernilai `undefined`, 
-            // Prisma TIDAK AKAN mengupdatenya (tidak mengubahnya jadi null). 
-            // Ini jauh lebih bersih daripada trik spread operator sebelumnya.
-            signingKey: signingKey 
+            publicKey: Buffer.from(identityKey, 'base64'),
+            pqPublicKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64') : null,
+            signingKey: signingKey ? Buffer.from(signingKey, 'base64') : Buffer.alloc(0)
           }
         });
       });
@@ -89,7 +96,8 @@ router.post(
     body: z.object({
       keys: z.array(z.object({
         keyId: z.number(),
-        publicKey: z.string()
+        publicKey: z.string(),
+        pqPublicKey: z.string().optional()
       })).min(1).max(100)
     })
   }),
@@ -103,10 +111,11 @@ router.post(
       const { keys } = req.body;
 
       await prisma.oneTimePreKey.createMany({
-        data: keys.map((k: { keyId: number; publicKey: string }) => ({
+        data: keys.map((k: { keyId: number; publicKey: string; pqPublicKey?: string }) => ({
           deviceId,
           keyId: k.keyId,
-          publicKey: k.publicKey
+          publicKey: k.publicKey, // Disimpan sebagai string karena di Prisma OTPK.publicKey masih String
+          pqPublicKey: k.pqPublicKey
         })),
         skipDuplicates: true
       })
@@ -173,27 +182,33 @@ router.get(
                   ORDER BY "createdAt" ASC 
                   LIMIT 1
                 )
-                RETURNING id, "keyId", "publicKey"
-              `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: string } | null);
+                RETURNING id, "keyId", "publicKey", "pqPublicKey"
+              `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
           }
 
+          // FIX 1: Konversi Buffer ke base64url (URLSAFE_NO_PADDING) sebelum dikirim ke Client
           const bundle: Record<string, unknown> = {
             deviceId: device.id,
-            identityKey: device.publicKey,
-            signingKey: device.signingKey
+            identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
+            pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
+            signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey)
           }
 
           if (device.preKeyBundle) {
               bundle.signedPreKey = {
                 key: device.preKeyBundle.key,
-                signature: device.preKeyBundle.signature
+                pqKey: device.preKeyBundle.pqKey,
+                signature: device.preKeyBundle.signature,
+                pqSignature: device.preKeyBundle.pqSignature
               };
           }
 
           if (otpk) {
             bundle.oneTimePreKey = {
               keyId: otpk.keyId,
-              key: otpk.publicKey
+              // FIX 2: Konversi jika publicKey OTPK itu Buffer
+              key: Buffer.isBuffer(otpk.publicKey) || otpk.publicKey instanceof Uint8Array ? Buffer.from(otpk.publicKey).toString('base64url') : String(otpk.publicKey),
+              pqKey: otpk.pqPublicKey
             }
           }
           return bundle;
@@ -213,7 +228,6 @@ router.get(
 router.post(
   '/prekey-bundles',
   requireAuth,
-  // ✅ FIX 1: Hapus .cuid() untuk mencegah error jika format ID user berbeda
   zodValidate({ body: z.object({ userIds: z.array(z.string()) }) }),
   async (req, res, next) => {
     try {
@@ -223,13 +237,11 @@ router.post(
         return res.json({});
       }
 
-      // Fetch devices for all requested users in one query
       const devices = await prisma.device.findMany({
         where: { userId: { in: userIds } },
         include: { preKeyBundle: true }
       })
 
-      // ✅ FIX 2: Gunakan Map() untuk mencegah Prototype Pollution (CodeQL Warning)
       const responseMap = new Map<string, Record<string, unknown>[]>();
       for (const uid of userIds) {
           responseMap.set(uid, []);
@@ -239,8 +251,6 @@ router.post(
         return res.json(Object.fromEntries(responseMap));
       }
 
-      // ✅ FIX 3: Gunakan perulangan For-Of sekuensial alih-alih Promise.all()
-      // Ini MENCEGAH server crash (Error 500) akibat kehabisan koneksi Prisma Transaction.
       for (const device of devices) {
           if (!device.signingKey || !device.publicKey) continue;
 
@@ -254,38 +264,42 @@ router.post(
                   ORDER BY "createdAt" ASC 
                   LIMIT 1
                 )
-                RETURNING id, "keyId", "publicKey"
-              `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: string } | null);
+                RETURNING id, "keyId", "publicKey", "pqPublicKey"
+              `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
           }
 
+          // FIX 3: Konversi Buffer ke base64url (URLSAFE_NO_PADDING) sebelum dikirim ke Client
           const bundle: Record<string, unknown> = {
             deviceId: device.id,
-            identityKey: device.publicKey,
-            signingKey: device.signingKey
+            identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
+            pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
+            signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey)
           }
 
           if (device.preKeyBundle) {
               bundle.signedPreKey = {
                 key: device.preKeyBundle.key,
-                signature: device.preKeyBundle.signature
+                pqKey: device.preKeyBundle.pqKey,
+                signature: device.preKeyBundle.signature,
+                pqSignature: device.preKeyBundle.pqSignature
               };
           }
 
           if (otpk) {
             bundle.oneTimePreKey = {
               keyId: otpk.keyId,
-              key: otpk.publicKey
+               // FIX 4: Konversi jika publicKey OTPK itu Buffer
+              key: Buffer.isBuffer(otpk.publicKey) || otpk.publicKey instanceof Uint8Array ? Buffer.from(otpk.publicKey).toString('base64url') : String(otpk.publicKey),
+              pqKey: otpk.pqPublicKey
             }
           }
           
-          // Masukkan bundle ke dalam array milik user yang sesuai di dalam Map
           const userBundles = responseMap.get(device.userId);
           if (userBundles) {
               userBundles.push(bundle);
           }
       }
 
-      // Konversi Map kembali menjadi Object biasa agar bisa dikirim sebagai JSON
       res.json(Object.fromEntries(responseMap))
     } catch (e: unknown) {
       next(e)
@@ -313,13 +327,13 @@ router.get(
         where: { conversationId, sessionId, deviceId }
       })
 
-      if (!keyRecord || !keyRecord.initiatorEphemeralKey) {
+      if (!keyRecord || !keyRecord.initiatorCiphertexts) {
         return res.status(404).json({ error: 'Initial session data not found for this device.' })
       }
 
       const initiatorRecord = await prisma.sessionKey.findFirst({
         where: { conversationId, sessionId, isInitiator: true },
-        include: { device: { select: { id: true, publicKey: true } } }
+        include: { device: { select: { id: true, publicKey: true, signingKey: true } } }
       })
 
       if (!initiatorRecord?.device?.publicKey) {
@@ -327,9 +341,10 @@ router.get(
       }
 
       res.json({
-        encryptedKey: keyRecord.encryptedKey,
-        initiatorEphemeralKey: keyRecord.initiatorEphemeralKey,
-        initiatorIdentityKey: initiatorRecord.device.publicKey
+        // FIX 5: Konversi encryptedKey ke Base64
+        encryptedKey: Buffer.isBuffer(keyRecord.encryptedKey) || keyRecord.encryptedKey instanceof Uint8Array ? Buffer.from(keyRecord.encryptedKey).toString('base64') : String(keyRecord.encryptedKey),
+        initiatorCiphertextsStr: Buffer.from(keyRecord.initiatorCiphertexts!).toString('base64'),
+        initiatorSigningKey: Buffer.from(initiatorRecord.device.signingKey).toString('base64')
       })
     } catch (e) { next(e) }
   }

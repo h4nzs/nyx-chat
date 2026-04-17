@@ -9,6 +9,7 @@ import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
 import { getIo } from '../socket.js'
 import type { UserId, AuthJwtPayload } from '@nyx/shared'
+import { Buffer } from 'buffer'
 
 const router = Router()
 
@@ -33,12 +34,16 @@ router.get('/search', async (req, res, next) => {
       take: 20
     })
 
-    const mappedUsers = users.map(u => ({
-      id: u.id,
-      encryptedProfile: u.encryptedProfile,
-      isVerified: u.isVerified,
-      publicKey: u.devices[0]?.publicKey
-    }))
+    const mappedUsers = users.map(u => {
+      const pk = u.devices[0]?.publicKey;
+      return {
+        id: u.id,
+        encryptedProfile: u.encryptedProfile,
+        isVerified: u.isVerified,
+        // FIX 1: Pastikan konversi Buffer ke Base64 sebelum merender JSON
+        publicKey: pk ? (Buffer.isBuffer(pk) || pk instanceof Uint8Array ? Buffer.from(pk).toString('base64') : String(pk)) : undefined
+      };
+    })
 
     res.json(mappedUsers)
 
@@ -183,7 +188,6 @@ router.put('/me/keys',
     try {
       if (!req.user) throw new ApiError(401, 'Authentication required.')
       
-      // ✅ FIX: Update kunci E2EE di tabel Device, bukan di tabel User
       const authUser = req.user as AuthJwtPayload;
       const deviceId = authUser.deviceId;
       if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
@@ -191,9 +195,13 @@ router.put('/me/keys',
       const userId = authUser.id
       const { publicKey, signingKey } = req.body
 
+      // FIX 2: Konversi String Base64 dari Client menjadi Buffer untuk Prisma Bytes
       await prisma.device.update({
         where: { id: deviceId },
-        data: { publicKey, signingKey }
+        data: { 
+            publicKey: Buffer.from(publicKey, 'base64'), 
+            signingKey: Buffer.from(signingKey, 'base64') 
+        }
       })
 
       const conversations = await prisma.conversation.findMany({
@@ -283,18 +291,20 @@ router.get('/:userId', async (req, res, next) => {
     const { userId } = req.params
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      // ✅ FIX: Ambil publicKey dari device terakhir
       select: { id: true, encryptedProfile: true, createdAt: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true } } }
     })
 
     if (!user) return res.status(404).json({ error: 'User not found' })
+    
+    const pk = user.devices[0]?.publicKey;
     
     const mappedUser = {
         id: user.id,
         encryptedProfile: user.encryptedProfile,
         createdAt: user.createdAt,
         isVerified: user.isVerified,
-        publicKey: user.devices[0]?.publicKey
+        // FIX 3: Konversi dari Buffer ke Base64
+        publicKey: pk ? (Buffer.isBuffer(pk) || pk instanceof Uint8Array ? Buffer.from(pk).toString('base64') : String(pk)) : undefined
     }
     
     res.json(mappedUser)

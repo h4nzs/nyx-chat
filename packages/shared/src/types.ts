@@ -122,8 +122,9 @@ export interface AuthJwtPayload {
 }
 
 export interface DoubleRatchetState {
-  DHs: { publicKey: string; privateKey: string } | null;
-  DHr: string | null;
+  KEMs: { publicKey: string; privateKey: string } | null;
+  KEMr: string | null;
+  savedCt: string | null;
   RK: string | null;
   CKs: string | null;
   CKr: string | null;

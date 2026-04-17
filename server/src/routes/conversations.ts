@@ -11,21 +11,22 @@ import { toConversation, toParticipant } from '../utils/mappers.js';
 import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
 import { ApiError } from '../utils/errors.js'
 import { redisClient } from '../lib/redis.js'
+import { Buffer } from 'buffer';
 
 const router: Router = Router()
 router.use(requireAuth)
 
 const MAX_GROUP_MEMBERS = 100 
 
-// ✅ FIX: Selector Type-Safe untuk mengambil Kunci dari Perangkat Terakhir Aktif
+// ✅ Selector Type-Safe untuk mengambil Kunci dari Perangkat Terakhir Aktif
 const userSelectWithKeys = { 
   id: true, 
   encryptedProfile: true, 
-  devices: { select: { id: true, publicKey: true, signingKey: true } } 
+  devices: { select: { id: true, publicKey: true, signingKey: true }, orderBy: { lastActiveAt: 'desc' as const }, take: 1 } 
 };
 
-// Type Definitions untuk menampung hasil query Prisma yang memiliki relasi 'devices'
-type UserWithDevices = { id: string, encryptedProfile: string | null, devices?: { id: string, publicKey: string, signingKey: string }[] };
+// Type Definitions
+type UserWithDevices = { id: string, encryptedProfile: string | null, devices?: { id: string, publicKey: string | Uint8Array, signingKey: string | Uint8Array }[] };
 type ParticipantWithUser = { id: string, userId: string, isPinned: boolean, role: string, joinedAt: Date, user: UserWithDevices };
 type MessageWithSender = { sender: UserWithDevices };
 type RawConversationData = {
@@ -41,15 +42,17 @@ type RawConversationData = {
   messages?: MessageWithSender[];
 };
 
-// ✅ FIX: Helper type-safe untuk menyuntikkan Kunci dari Device ke Root Object User agar kompatibel dengan toConversation Mapper
+// ✅ Helper type-safe untuk menyuntikkan Kunci dari Device ke Root Object User agar kompatibel dengan toConversation Mapper
 const hoistKeys = (u: UserWithDevices | null) => {
   if (!u) return u;
   const result: Record<string, unknown> = { ...u };
   if (u.devices && u.devices.length > 0) {
-    result.publicKey = u.devices[0].publicKey;
-    result.signingKey = u.devices[0].signingKey;
+    // Pastikan selalu dirender ke base64 jika asalnya adalah Uint8Array/Buffer dari Prisma
+    const pk = u.devices[0].publicKey;
+    const sk = u.devices[0].signingKey;
+    result.publicKey = Buffer.isBuffer(pk) || pk instanceof Uint8Array ? Buffer.from(pk).toString('base64') : pk;
+    result.signingKey = Buffer.isBuffer(sk) || sk instanceof Uint8Array ? Buffer.from(sk).toString('base64') : sk;
   }
-  // DO NOT delete result.devices so it is sent to the client!
   return result;
 };
 
@@ -80,7 +83,7 @@ router.get('/', async (req, res, next) => {
       include: {
         participants: {
           select: {
-            user: { select: userSelectWithKeys }, // Menggunakan Selector Multi-Device
+            user: { select: userSelectWithKeys },
             id: true,
             userId: true,
             isPinned: true,
@@ -130,7 +133,6 @@ router.get('/', async (req, res, next) => {
 
     const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, item._count?.id || 0]));
 
-    // Hoist keys secara type-safe sebelum mapping
     const safeConversations = conversationsData.map(convo => {
       const safeConv = toConversation(hoistConvoKeys(convo as unknown as RawConversationData));
       safeConv.unreadCount = unreadMap.get(convo.id) || 0;
@@ -217,10 +219,10 @@ router.post('/', async (req, res, next) => {
              for (const d of userDevices) {
                 keyRecords.push({
                    sessionId,
-                   encryptedKey: ik.key,
+                   encryptedKey: Buffer.from(ik.key, 'base64'),
                    deviceId: d.id,
                    conversationId: conversation.id,
-                   initiatorEphemeralKey: ephemeralPublicKey,
+                   initiatorCiphertexts: ephemeralPublicKey ? Buffer.from(ephemeralPublicKey, 'base64') : null,
                    isInitiator: ik.userId === creatorId
                 });
              }
@@ -306,7 +308,7 @@ router.post('/:id/participants', async (req, res, next) => {
     const conversationRaw = await prisma.conversation.findUnique({ where: { id: conversationId }, include: { participants: { include: { user: { select: userSelectWithKeys } } }, creator: { select: userSelectWithKeys } } })
 
     const safeParticipants = newParticipantsRaw.map(p => {
-       const hoistedUser = hoistKeys((p as { user: UserWithDevices | null }).user);
+       const hoistedUser = hoistKeys(p.user as unknown as UserWithDevices);
        const objToMap = { ...p, user: hoistedUser };
        return toParticipant(objToMap as Parameters<typeof toParticipant>[0]);
     });
@@ -315,7 +317,7 @@ router.post('/:id/participants', async (req, res, next) => {
 
     getIo().to(conversationId).emit('conversation:participants_added', { 
       conversationId: safeConversationId, 
-      newParticipants: safeParticipants as unknown as { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[] 
+      newParticipants: safeParticipants as unknown as { id: string; role: 'ADMIN' | 'MEMBER'; user: User; isPinned: boolean }[]
     })
     getIo().to(conversationId).emit('group:participants_changed', { conversationId: safeConversationId })
     

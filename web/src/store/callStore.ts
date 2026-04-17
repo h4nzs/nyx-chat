@@ -28,7 +28,7 @@ interface CallStoreState {
   setCallKey: (key: string) => void;
 }
 
-export const useCallStore = create<CallStoreState>((set) => ({
+export const useCallStore = create<CallStoreState>((set, get) => ({
   callState: 'idle',
   remoteUsers: [],
   remoteStreams: {},
@@ -65,7 +65,8 @@ export const useCallStore = create<CallStoreState>((set) => ({
 
   setIncomingCall: (from, isVideo, profile, key) => set({
     callState: 'ringing',
-    remoteUsers: profile ? [profile] : [{ id: from, name: 'Unknown User' }],
+    // FIX 1: Provide a fully compliant MinimalProfile fallback
+    remoteUsers: profile ? [profile] : [{ id: from, username: 'Unknown', name: 'Unknown User' }],
     isVideoCall: isVideo,
     isReceivingCall: true,
     isMinimized: false,
@@ -78,7 +79,8 @@ export const useCallStore = create<CallStoreState>((set) => ({
     
     const initialUsers = toArray.map(id => {
       const existing = profileArray.find(p => p.id === id);
-      return existing || { id, name: 'Unknown User' };
+      // FIX 2: Provide a fully compliant MinimalProfile fallback
+      return existing || { id, username: 'Unknown', name: 'Unknown User' };
     });
 
     set({
@@ -91,14 +93,23 @@ export const useCallStore = create<CallStoreState>((set) => ({
     });
   },
 
-  endCall: () => set({
-    callState: 'idle',
-    remoteUsers: [],
-    remoteStreams: {},
-    isVideoCall: false,
-    isReceivingCall: false,
-    localStream: null,
-    isMinimized: false,
-    ephemeralCallKey: null,
-  }),
+  endCall: () => {
+    const state = get();
+    
+    // FIX 3: Mencegah Memory Leak dengan mematikan hardware tracks
+    if (state.localStream) {
+      state.localStream.getTracks().forEach(track => track.stop());
+    }
+
+    set({
+      callState: 'idle',
+      remoteUsers: [],
+      remoteStreams: {},
+      isVideoCall: false,
+      isReceivingCall: false,
+      localStream: null,
+      isMinimized: false,
+      ephemeralCallKey: null,
+    });
+  },
 }));

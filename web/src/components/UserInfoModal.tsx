@@ -96,8 +96,21 @@ export default function UserInfoModal() {
       }
 
       const sodium = await getSodium();
-      const myPublicKey = keyPair.publicKey;
-      const theirPublicKey = sodium.from_base64(user.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const { getSigningPrivateKey } = useAuthStore.getState();
+      const mySigningKey = await getSigningPrivateKey();
+      const mySigningPubKey = mySigningKey.slice(32);
+      const myPublicKey = new Uint8Array(keyPair.publicKey.length + mySigningPubKey.length);
+      myPublicKey.set(keyPair.publicKey, 0);
+      myPublicKey.set(mySigningPubKey, keyPair.publicKey.length);
+
+      const theirXWingPubKey = sodium.from_base64(user.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const theirSigningPubKey = user.signingKey 
+          ? sodium.from_base64(user.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING) 
+          : new Uint8Array(0); // Fallback for incomplete profiles
+          
+      const theirPublicKey = new Uint8Array(theirXWingPubKey.length + theirSigningPubKey.length);
+      theirPublicKey.set(theirXWingPubKey, 0);
+      theirPublicKey.set(theirSigningPubKey, theirXWingPubKey.length);
 
       const sn = await generateSafetyNumber(myPublicKey, theirPublicKey);
       setSafetyNumber(sn);

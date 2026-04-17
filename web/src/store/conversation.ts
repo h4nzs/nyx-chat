@@ -56,8 +56,6 @@ const withPreview = (msg: Message): Message => {
             return { ...msg, preview: `✎ ${payload.text}`, content: payload.text, isEdited: true };
          }
          if (payload.type === 'CALL_INIT' || payload.type === 'GHOST_SYNC') {
-            // These should ideally not be last messages, but if they are (e.g. fresh convo)
-            // we return a placeholder or just null out the preview
             return { ...msg, preview: '', isSilent: true };
          }
        } catch {}
@@ -135,8 +133,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     try {
       if (!query.trim()) return [];
 
-      // Check if query is already a usernameHash (base64url format, exactly 43 chars)
-      // Argon2id with hashLength: 32 produces 32 bytes = 43 base64url chars (URLSAFE_NO_PADDING)
       const trimmedQuery = query.trim();
       const isAlreadyHash = /^[A-Za-z0-9_-]{43}$/.test(trimmedQuery);
 
@@ -180,17 +176,14 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     if (!shouldProceed) return;
 
     try {
-      // ✅ FIX: Gunakan tipe data Conversation[] yang sempurna dari @nyx/shared
       const rawConversations = await api<Conversation[]>("/api/conversations");
       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 
-      // IMPORT SHADOW VAULT UNTUK MENCARI LAST MESSAGE LOKAL
       const { shadowVault } = await import('@lib/shadowVaultDb');
 
       const conversations = await Promise.all(rawConversations.map(async c => {
         const participants = c.participants;
 
-        // 1. Coba cari lastMessage dari Local Vault (IndexedDB) dulu
         let localLastMessage: Message | null = null;
         try {
             const localMsgs = await shadowVault.getMessagesByConversation(c.id, 1);
@@ -199,7 +192,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             }
         } catch (_e) {}
 
-        // 2. Bandingkan dengan lastMessage dari Server (jika ada pesan pending yang lebih baru)
         let lastMessage = c.lastMessage || null;
         
         if (lastMessage) {
@@ -211,13 +203,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             }
         }
 
-        // 3. Tentukan pemenang (Pesan mana yang paling baru)
         const serverMsgTime = lastMessage ? new Date(lastMessage.createdAt).getTime() : 0;
         const localMsgTime = localLastMessage ? new Date(localLastMessage.createdAt).getTime() : 0;
 
         let finalLastMessage = localMsgTime > serverMsgTime ? localLastMessage : lastMessage;
 
-        // 4. Proses Preview & Profile
         if (finalLastMessage) {
             const pInfo = participants.find(p => p.id === finalLastMessage!.senderId);
             if (pInfo) {
@@ -300,13 +290,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       toast.error(errorMessage);
     }
   },
+  
   deleteGroup: async (id) => {
     try {
       await authFetch(`/api/conversations/${id}`, { method: 'DELETE' });
       get().removeConversation(id);
     } catch (error: unknown) {
       console.error("Failed to delete group:", error);
-      // Check if error is an ApiError with status property
       if (typeof error === 'object' && error !== null && 'status' in error && (error as Record<string, unknown>).status === 403) {
         toast.error(i18n.t('errors:only_the_group_creator_can_delete_the_gr', 'Only the group creator can delete the group.'));
       } else {
@@ -314,6 +304,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       }
     }
   },
+  
   toggleSidebar: () => set(s => ({ isSidebarOpen: !s.isSidebarOpen })),
 
   startConversation: async (peerId: string, optimisticProfile?: { name: string; username: string }): Promise<ConversationId> => {
@@ -323,32 +314,24 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     }
 
     try {
-      // STATELESS INITIALIZATION (Pure Lazy Init)
-      // No crypto here. Just create room container.
-      
       const conv = await authFetch<Conversation>("/api/conversations", {
         method: "POST",
         body: JSON.stringify({
           userIds: [peerId],
           isGroup: false,
-          // [FIX] Don't send dummy session. Let sendMessage create real X3DH session later.
           initialSession: null, 
         }),
       });
       
-      // Inject Optimistic Profile (Blind Indexing Search Result)
       if (optimisticProfile) {
           const knownUsers = get().conversations.flatMap(c => c.participants);
           
           conv.participants = conv.participants.map(p => {
               if (p.id === peerId) {
-                  // Guard: Check if we already know this user's real name from another conversation
                   const existing = knownUsers.find(u => u.id === peerId);
                   if (existing?.name && existing.name !== 'Unknown') {
-                      return p; // Keep the real profile data we already have
+                      return p; 
                   }
-                  
-                  // Merge optimistic data. Server might return null/unknown initially if not friends.
                   return { ...p, ...optimisticProfile }; 
               }
               return p;
@@ -372,7 +355,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     let conv: Conversation | null = null;
 
     try {
-        // Step 1: Create Group with NO metadata
         conv = await authFetch<Conversation>("/api/conversations", {
             method: "POST",
             body: JSON.stringify({
@@ -382,24 +364,18 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             })
         });
 
-        // Step 1.5: Initialize Group Sender Key (Zero-Knowledge)
-        // We must generate and distribute our Sender Key so we can encrypt the metadata (which uses the Sender Key protocol)
-        // The participants list from the server includes public keys.
         const distributionKeys = await ensureGroupSession(conv.id, conv.participants as unknown as Participant[], true);
         if (distributionKeys) {
             emitGroupKeyDistribution(conv.id, distributionKeys as { userId: string; key: string }[]);
         }
         
-        // Step 2: Encrypt the metadata
         const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl }, conv.id);
         
-        // Step 3: Update the group with encrypted metadata
         await authFetch(`/api/conversations/${conv.id}/details`, {
             method: 'PUT',
             body: JSON.stringify({ encryptedMetadata })
         });
         
-        // Step 4: Optimistically update local state with decrypted data
         const updatedConv: Conversation = {
             ...conv,
             decryptedMetadata: { title: name, avatarUrl },
@@ -412,7 +388,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         
         return conv.id;
     } catch (e) {
-        // ROLLBACK
         if (conv) {
              console.error("Create group failed during setup. Rolling back...", e);
              try {
@@ -428,7 +403,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   addOrUpdateConversation: async (conversation) => {
     let decryptedMetadata = conversation.decryptedMetadata;
     
-    // If we have encrypted metadata but no decrypted version, try to decrypt
     if (!decryptedMetadata && conversation.isGroup && conversation.encryptedMetadata) {
         try {
             const dec = await decryptGroupMetadata(conversation.encryptedMetadata as string, conversation.id);
@@ -443,7 +417,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           ...existing,
           encryptedMetadata: conversation.encryptedMetadata,
           decryptedMetadata: decryptedMetadata || existing.decryptedMetadata,
-          isGroup: conversation.isGroup, // Ensure isGroup is updated
+          isGroup: conversation.isGroup,
           participants: conversation.participants,
           lastMessage: conversation.lastMessage || existing.lastMessage,
           updatedAt: conversation.updatedAt,
@@ -461,7 +435,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   removeConversation: (conversationId) => {
-    // Also clear messages from the message store
     useMessageStore.getState().clearMessagesForConversation(conversationId);
 
     set(state => {
@@ -478,7 +451,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   updateConversation: async (id, data) => {
-    // Decrypt metadata if it changed
     let decryptedMetadata = undefined;
     if (data.encryptedMetadata) {
          try {
@@ -492,7 +464,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
     set((state) => {
         const oldConv = state.conversations.find((c) => c.id === id);
         
-        // Check for membership changes in groups to trigger Key Rotation
         if (oldConv && oldConv.isGroup && data.participants) {
           const oldIds = oldConv.participants.map(p => p.id).sort().join(',');
           const newIds = data.participants.map(p => p.id).sort().join(',');
@@ -514,7 +485,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   updateParticipantDetails: (user) => {
-    // Destructure role to exclude it, preventing conflict with Participant role type
     const { role, ...userDetails } = user;
     set(state => ({
       conversations: state.conversations.map(c => ({
@@ -532,16 +502,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         if (c.id === conversationId) {
           const merged = [...c.participants, ...newParticipants];
           
-          // ✅ FIX: Hapus duplikat tanpa 'any', menggunakan strict Map
-          const uniqueMap = new Map<string, typeof merged[0]>();
-          
+          // FIX: Type-safe unique map based on strict Participant ID
+          const uniqueMap = new Map<string, Participant>();
           merged.forEach(p => {
-             // Type Guard yang aman: cek apakah 'userId' ada di dalam objek 'p'
-             const pid = ('userId' in p && p.userId) ? String(p.userId) : String(p.id);
-             
-             if (!uniqueMap.has(pid)) {
-                 uniqueMap.set(pid, p);
-             }
+             if (p && p.id) uniqueMap.set(p.id, p);
           });
 
           return { ...c, participants: Array.from(uniqueMap.values()) };
@@ -581,32 +545,24 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const meId = useAuthStore.getState().user?.id;
       const isMine = message.senderId === meId;
 
-      // ✅ OPTIMASI: Jangan update atau re-sort jika pesan yang masuk ternyata lebih TUA 
-      // dari lastMessage yang sudah ada di UI.
       const newMsgTime = new Date(message.createdAt).getTime();
       const currentLastMsgTime = conversation.lastMessage ? new Date(conversation.lastMessage.createdAt).getTime() : 0;
       
-      // ✅ FIX: Cek langsung dari URL browser apakah pengguna sedang membuka chat ini
       const isViewingChat = typeof window !== 'undefined' && window.location.pathname.includes(`/chat/${conversationId}`) && document.visibilityState === 'visible';
 
       if (newMsgTime < currentLastMsgTime) {
-          // Jika pesan ini lebih tua dari preview yang ada di layar, JANGAN timpa lastMessage.
-          // Cukup tambahkan unread count JIKA pengirimnya BUKAN kita, dan kita TIDAK sedang membuka chat-nya.
+          // FIX: Pastikan kita tetap mengembalikan hasil array yang di-sort!
           if (!isMine && !isViewingChat) {
-              return {
-                  conversations: state.conversations.map(c =>
-                      c.id === conversationId
-                          ? { ...c, unreadCount: (c.unreadCount || 0) + 1 }
-                          : c
-                  )
-              };
+              const updatedConvos = state.conversations.map(c =>
+                  c.id === conversationId
+                      ? { ...c, unreadCount: (c.unreadCount || 0) + 1 }
+                      : c
+              );
+              return { conversations: sortConversations(updatedConvos, meId) };
           }
-          // Jika ini pesan kita sendiri, atau kita sedang buka chatnya, abaikan.
           return state;
       }
 
-      // Jika pesan ini lebih baru, lakukan update utuh (Preview & Resort)
-      // ✅ FIX: shouldIncrementUnread hanya bergantung pada ownership dan visibility, bukan activeId
       const shouldIncrementUnread = !isMine && !isViewingChat;
       
       const updatedConversation = {
@@ -623,13 +579,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   togglePinConversation: async (conversationId) => {
+    const meId = useAuthStore.getState().user?.id;
     try {
-      // Optimistically update the UI
       set(state => {
         const updatedConversations = state.conversations.map(conversation => {
           if (conversation.id === conversationId) {
             const updatedParticipants = conversation.participants.map(participant => {
-              if (participant.id === useAuthStore.getState().user?.id) {
+              if (participant.id === meId) {
                 return { ...participant, isPinned: !participant.isPinned };
               }
               return participant;
@@ -638,20 +594,18 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           }
           return conversation;
         });
-        return { conversations: sortConversations(updatedConversations, useAuthStore.getState().user?.id) };
+        return { conversations: sortConversations(updatedConversations, meId) };
       });
 
-      // Call the API to update the server
       const response = await authFetch<{ isPinned: boolean }>(`/api/conversations/${conversationId}/pin`, {
         method: 'POST',
       });
 
-      // Update the UI based on the server response
       set(state => {
         const updatedConversations = state.conversations.map(conversation => {
           if (conversation.id === conversationId) {
             const updatedParticipants = conversation.participants.map(participant => {
-              if (participant.id === useAuthStore.getState().user?.id) {
+              if (participant.id === meId) {
                 return { ...participant, isPinned: response.isPinned };
               }
               return participant;
@@ -660,20 +614,19 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           }
           return conversation;
         });
-        return { conversations: sortConversations(updatedConversations, useAuthStore.getState().user?.id) };
+        return { conversations: sortConversations(updatedConversations, meId) };
       });
     } catch (error: unknown) {
       console.error("Failed to toggle pinned conversation", error);
-      // Show error toast
       const errorMessage = (error instanceof Error ? error.message : undefined) || i18n.t('errors:failed_to_toggle_pinned_conversation', "Failed to toggle pinned conversation.");
       toast.error(errorMessage);
-      // If the API call fails, revert the optimistic update
+      
       set(state => {
         const updatedConversations = state.conversations.map(conversation => {
           if (conversation.id === conversationId) {
             const updatedParticipants = conversation.participants.map(participant => {
-              if (participant.id === useAuthStore.getState().user?.id) {
-                return { ...participant, isPinned: !participant.isPinned }; // Revert to original state
+              if (participant.id === meId) {
+                return { ...participant, isPinned: !participant.isPinned }; 
               }
               return participant;
             });
@@ -681,7 +634,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           }
           return conversation;
         });
-        return { conversations: sortConversations(updatedConversations, useAuthStore.getState().user?.id) };
+        return { conversations: sortConversations(updatedConversations, meId) };
       });
     }
   },

@@ -99,6 +99,7 @@ export interface ServerToClientEvents {
         sessionId: string;
         requesterId: string;
         requesterPublicKey: string;
+        requesterPqPublicKey: string;
     }) => void;
     "session:key_requested": (payload: { // Added
         conversationId: string;
@@ -109,6 +110,7 @@ export interface ServerToClientEvents {
         conversationId: string;
         requesterId: string;
         requesterPublicKey: string;
+        requesterPqPublicKey: string;
         requesterDeviceId?: string;
     }) => void;
     force_logout: (payload?: { jti?: string }) => void; // Updated
@@ -121,7 +123,7 @@ export interface ServerToClientEvents {
     "webrtc:secure_signal": (payload: { from: string; type: string; payload: string }) => void;
 
     // --- DEVICE MIGRATION TUNNEL (SERVER -> CLIENT) ---
-    "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
+    "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string }) => void;
     "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
     'message:deleted_remotely': (payload: { messageId: string; conversationId: string; deletedBy: string }) => void;
@@ -152,7 +154,7 @@ export interface ClientToServerEvents {
     
     // --- DEVICE MIGRATION TUNNEL (CLIENT -> SERVER) ---
     "migration:join": (roomId: string) => void;
-    "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string; iv: string }) => void;
+    "migration:start": (payload: { roomId: string; totalChunks: number; sealedKey: string }) => void;
     "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
     'message:unsend': (payload: { messageId: string; conversationId: string }) => void;

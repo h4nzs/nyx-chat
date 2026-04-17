@@ -1,50 +1,70 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
+import { getSodiumLib } from '@utils/crypto';
+import { worker_generate_random_key } from './crypto-worker-proxy';
+
+/**
+ * Generate a new random symmetric key for a Story (using libsodium)
+ * Output: Base64 URL Safe string
+ */
 export async function generateStoryKey(): Promise<string> {
-  const key = await window.crypto.subtle.generateKey(
-    { name: 'AES-GCM', length: 256 },
-    true,
-    ['encrypt', 'decrypt']
-  );
-  const exported = await window.crypto.subtle.exportKey('raw', key);
-  return btoa(String.fromCharCode(...new Uint8Array(exported)));
+  const sodium = await getSodiumLib();
+  // Generate 32 bytes key for XChaCha20-Poly1305
+  const keyBytes = await worker_generate_random_key();
+  return sodium.to_base64(keyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
 }
 
+/**
+ * Encrypt a Story payload using the provided key (XChaCha20-Poly1305)
+ * Output: Base64 URL Safe string (nonce + ciphertext)
+ */
 export async function encryptStoryPayload(payload: unknown, base64Key: string): Promise<string> {
-  const rawKey = Uint8Array.from(atob(base64Key), c => c.charCodeAt(0));
-  const cryptoKey = await window.crypto.subtle.importKey(
-    'raw', rawKey, { name: 'AES-GCM' }, false, ['encrypt']
-  );
+  const sodium = await getSodiumLib();
+  const keyBytes = sodium.from_base64(base64Key, sodium.base64_variants.URLSAFE_NO_PADDING);
   
-  const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const encodedPayload = new TextEncoder().encode(JSON.stringify(payload));
+  const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
   
-  const encrypted = await window.crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    cryptoKey,
-    encodedPayload
+  const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+    encodedPayload,
+    null,
+    null,
+    nonce,
+    keyBytes
   );
   
-  const encryptedArray = new Uint8Array(encrypted);
-  const combined = new Uint8Array(iv.length + encryptedArray.length);
-  combined.set(iv);
-  combined.set(encryptedArray, iv.length);
+  const combined = new Uint8Array(nonce.length + ciphertext.length);
+  combined.set(nonce);
+  combined.set(ciphertext, nonce.length);
   
-  return btoa(String.fromCharCode(...combined));
+  return sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
 }
 
+/**
+ * Decrypt a Story payload using the provided key (XChaCha20-Poly1305)
+ * Output: Parsed JSON Object
+ */
 export async function decryptStoryPayload(encryptedDataB64: string, base64Key: string): Promise<unknown> {
-  const rawKey = Uint8Array.from(atob(base64Key), c => c.charCodeAt(0));
-  const cryptoKey = await window.crypto.subtle.importKey(
-    'raw', rawKey, { name: 'AES-GCM' }, false, ['decrypt']
-  );
+  const sodium = await getSodiumLib();
+  const keyBytes = sodium.from_base64(base64Key, sodium.base64_variants.URLSAFE_NO_PADDING);
   
-  const combined = Uint8Array.from(atob(encryptedDataB64), c => c.charCodeAt(0));
-  const iv = combined.slice(0, 12);
-  const data = combined.slice(12);
+  const combined = sodium.from_base64(encryptedDataB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const nonceBytes = sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
   
-  const decrypted = await window.crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
-    cryptoKey,
-    data
+  if (combined.length < nonceBytes) {
+      throw new Error("Story payload is too short to contain a valid nonce.");
+  }
+  
+  const nonce = combined.slice(0, nonceBytes);
+  const ciphertext = combined.slice(nonceBytes);
+  
+  const decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+    null,
+    ciphertext,
+    null,
+    nonce,
+    keyBytes
   );
   
   const decoded = new TextDecoder().decode(decrypted);

@@ -6,16 +6,13 @@ import type _sodium from 'libsodium-wrappers';
 import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { argon2id } from 'hash-wasm';
-import type { DoubleRatchetState } from '@nyx/shared';
 import type { 
   CryptoBuffer, 
   SodiumKeyPair, 
   GroupRatchetState, 
-  GroupRatchetHeader, 
-  DoubleRatchetHeader 
+  GroupRatchetHeader
 } from '../types/crypto-common';
 
-// ✅ FIX 2: Kita impor fungsi inisialisasi aman yang SUDAH kita buat sebelumnya di lib.
 import { getSodium } from '../lib/sodiumInitializer';
 
 let sodium: Awaited<ReturnType<typeof getSodium>>;
@@ -24,55 +21,29 @@ let isReady = false;
 const B64_VARIANT = 'URLSAFE_NO_PADDING';
 
 // Konfigurasi Argon2
-const ARGON_CONFIG = {
+const ARGON_VAULT_CONFIG = {
   parallelism: 1,
-  iterations: 3,
-  memorySize: 32768, // 32 MB
+  iterations: 4,
+  memorySize: 131072, // 128 MB
   hashLength: 32,
   outputType: 'binary' as const,
 };
 
-// ✅ FIX 3: Fungsi ini sekarang jauh lebih bersih dan memanggil helper utama.
+const ARGON_INDEX_CONFIG = {
+  parallelism: 1,
+  iterations: 3,
+  memorySize: 65536, // 64 MB
+  hashLength: 32,
+  outputType: 'binary' as const,
+};
+
 async function ensureSodiumReady() {
   if (isReady && sodium) return;
-  
-  // Mengambil instance dari helper yang sudah aman terhadap ESM
   sodium = await getSodium();
   isReady = true;
 }
 
 // --- INTERNAL HELPER FUNCTIONS FOR CORE CRYPTO LOGIC ---
-
-async function _hkdf(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, length: number): Promise<Uint8Array> {
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    ikm as BufferSource,
-    { name: "HKDF" },
-    false,
-    ["deriveBits"]
-  );
-
-  const derivedBits = await crypto.subtle.deriveBits(
-    {
-      name: "HKDF",
-      hash: "SHA-256",
-      salt: salt as BufferSource,
-      info: info as BufferSource
-    },
-    keyMaterial,
-    length * 8
-  );
-
-  return new Uint8Array(derivedBits);
-}
-
-export async function kdfRoot(rootKey: Uint8Array, dhOutput: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
-  const info = new TextEncoder().encode("NYX_Double_Ratchet_Root");
-  const derived = await _hkdf(dhOutput, rootKey, info, 64);
-  const newRootKey = derived.slice(0, 32);
-  const chainKey = derived.slice(32, 64);
-  return [newRootKey, chainKey];
-}
 
 export async function kdfChain(chainKey: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
   const key = await crypto.subtle.importKey(
@@ -94,7 +65,17 @@ export async function kdfChain(chainKey: Uint8Array): Promise<[Uint8Array, Uint8
 
 async function _deriveKey(password: string, salt: Uint8Array): Promise<Uint8Array> {
   return argon2id({
-    ...ARGON_CONFIG,
+    ...ARGON_VAULT_CONFIG,
+    password,
+    salt,
+  });
+}
+
+async function _stretchSeed(seed: Uint8Array): Promise<Uint8Array> {
+  const password = sodium.to_hex(seed);
+  const salt = new TextEncoder().encode("NYX_STRETCH_V1");
+  return argon2id({
+    ...ARGON_VAULT_CONFIG,
     password,
     salt,
   });
@@ -102,26 +83,20 @@ async function _deriveKey(password: string, salt: Uint8Array): Promise<Uint8Arra
 
 async function _encryptData(keyBytes: Uint8Array, data: unknown): Promise<string> {
   try {
-    const key = await crypto.subtle.importKey(
-      'raw',
-      new Uint8Array(keyBytes),
-      { name: 'AES-GCM' },
-      false,
-      ['encrypt']
-    );
-
-    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const iv = sodium.randombytes_buf(24);
     const encodedData = new TextEncoder().encode(JSON.stringify(data));
 
-    const encryptedContent = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
-      key,
-      encodedData
+    const encryptedContent = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+      encodedData,
+      null,
+      null,
+      iv,
+      keyBytes
     );
 
     return JSON.stringify({
       iv: Array.from(iv),
-      data: Array.from(new Uint8Array(encryptedContent))
+      data: Array.from(encryptedContent)
     });
   } finally {
     if (keyBytes && keyBytes.length > 0) {
@@ -136,23 +111,17 @@ async function _encryptData(keyBytes: Uint8Array, data: unknown): Promise<string
 
 async function _decryptData(keyBytes: Uint8Array, encryptedString: string): Promise<unknown> {
   try {
-    const key = await crypto.subtle.importKey(
-      'raw',
-      new Uint8Array(keyBytes),
-      { name: 'AES-GCM' },
-      false,
-      ['decrypt']
-    );
-
     const parsed = JSON.parse(encryptedString) as { iv: number[], data: number[] };
     const { iv: ivArr, data: dataArr } = parsed;
     const iv = new Uint8Array(ivArr);
     const ciphertext = new Uint8Array(dataArr);
 
-    const decryptedContent = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv },
-      key,
-      ciphertext
+    const decryptedContent = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+      null,
+      ciphertext,
+      null,
+      iv,
+      keyBytes
     );
 
     const decryptedString = new TextDecoder().decode(decryptedContent);
@@ -172,7 +141,6 @@ async function _decryptData(keyBytes: Uint8Array, encryptedString: string): Prom
   }
 }
 
-
 // --- REFACTORED HELPER FUNCTIONS ---
 
 function exportPublicKey(publicKey: Uint8Array): string {
@@ -181,14 +149,18 @@ function exportPublicKey(publicKey: Uint8Array): string {
 
 async function storePrivateKeys(keys: {
   encryption: Uint8Array,
+  pqEncryption?: Uint8Array,
   signing: Uint8Array,
   signedPreKey: Uint8Array,
+  pqSignedPreKey?: Uint8Array,
   masterSeed?: Uint8Array
 }, password: string): Promise<string> {
   const privateKeysObj = {
     encryption: sodium.to_base64(keys.encryption, sodium.base64_variants[B64_VARIANT]),
+    pqEncryption: keys.pqEncryption ? sodium.to_base64(keys.pqEncryption, sodium.base64_variants[B64_VARIANT]) : undefined,
     signing: sodium.to_base64(keys.signing, sodium.base64_variants[B64_VARIANT]),
     signedPreKey: sodium.to_base64(keys.signedPreKey, sodium.base64_variants[B64_VARIANT]),
+    pqSignedPreKey: keys.pqSignedPreKey ? sodium.to_base64(keys.pqSignedPreKey, sodium.base64_variants[B64_VARIANT]) : undefined,
     masterSeed: keys.masterSeed ? sodium.to_base64(keys.masterSeed, sodium.base64_variants[B64_VARIANT]) : undefined,
   };
 
@@ -196,11 +168,8 @@ async function storePrivateKeys(keys: {
   let kek: Uint8Array | null = null;
 
   try {
-    // Directly call the internal helper functions
     kek = await _deriveKey(password, salt);
     const encryptedData = await _encryptData(kek, privateKeysObj);
-
-    // Combine salt and encrypted data
     return sodium.to_base64(salt, sodium.base64_variants[B64_VARIANT]) + '.' + encryptedData;
   } finally {
     if (kek) {
@@ -212,8 +181,10 @@ async function storePrivateKeys(keys: {
 
 type RetrievedKeys = {
   encryption: Uint8Array,
+  pqEncryption?: Uint8Array,
   signing: Uint8Array,
   signedPreKey: Uint8Array,
+  pqSignedPreKey?: Uint8Array,
   masterSeed?: Uint8Array
 };
 
@@ -232,29 +203,28 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
       const salt = sodium.from_base64(parts[0], sodium.base64_variants[B64_VARIANT]);
       const encryptedString = parts[1];
       
-      // Directly call the internal helper functions
       kek = await _deriveKey(password, salt);
       const privateKeysRaw = await _decryptData(kek, encryptedString);
 
-      // Handle potential double-stringified data from previous registrations
       const privateKeysObj = typeof privateKeysRaw === 'string' 
         ? JSON.parse(privateKeysRaw) 
         : privateKeysRaw;
 
-      const keys = privateKeysObj as { encryption: string; signing: string; signedPreKey: string; masterSeed?: string };
+      const keys = privateKeysObj as { encryption: string; pqEncryption?: string; signing: string; signedPreKey: string; pqSignedPreKey?: string; masterSeed?: string };
       if (!keys.signedPreKey) return { success: false, reason: 'legacy_bundle' };
 
       return {
         success: true,
         keys: {
           encryption: sodium.from_base64(keys.encryption, sodium.base64_variants[B64_VARIANT]),
+          pqEncryption: keys.pqEncryption ? sodium.from_base64(keys.pqEncryption, sodium.base64_variants[B64_VARIANT]) : undefined,
           signing: sodium.from_base64(keys.signing, sodium.base64_variants[B64_VARIANT]),
           signedPreKey: sodium.from_base64(keys.signedPreKey, sodium.base64_variants[B64_VARIANT]),
+          pqSignedPreKey: keys.pqSignedPreKey ? sodium.from_base64(keys.pqSignedPreKey, sodium.base64_variants[B64_VARIANT]) : undefined,
           masterSeed: keys.masterSeed ? sodium.from_base64(keys.masterSeed, sodium.base64_variants[B64_VARIANT]) : undefined,
         }
       };
     } catch (error: unknown) {
-      // Argon2id or subtle.decrypt can throw. If it's a decrypt error, it's likely a wrong password.
       console.error("Failed to retrieve private keys:", error);
       return { success: false, reason: 'incorrect_password' };
     } finally {
@@ -285,7 +255,7 @@ function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicKey: Uint8Arra
     return digitGroups.join(' ');
 }
 
-// --- DOUBLE RATCHET STATE HELPERS ---
+// --- STATE HELPERS ---
 
 function b64ToBytes(str: string | null | undefined): Uint8Array | null {
   return str ? sodium.from_base64(str, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
@@ -295,60 +265,7 @@ function bytesToB64(bytes: Uint8Array | null | undefined): string | null {
   return bytes ? sodium.to_base64(bytes, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
 }
 
-interface RuntimeDoubleRatchetState {
-  RK: Uint8Array | null;
-  CKs: Uint8Array | null;
-  CKr: Uint8Array | null;
-  DHs: { publicKey: Uint8Array; privateKey: Uint8Array } | null;
-  DHr: Uint8Array | null;
-  Ns: number;
-  Nr: number;
-  PN: number;
-}
-
-function deserializeState(state: DoubleRatchetState): RuntimeDoubleRatchetState {
-  return {
-    RK: b64ToBytes(state.RK),
-    CKs: b64ToBytes(state.CKs),
-    CKr: b64ToBytes(state.CKr),
-    DHs: state.DHs ? {
-      publicKey: b64ToBytes(state.DHs.publicKey) as Uint8Array,
-      privateKey: b64ToBytes(state.DHs.privateKey) as Uint8Array
-    } : null,
-    DHr: b64ToBytes(state.DHr),
-    Ns: state.Ns,
-    Nr: state.Nr,
-    PN: state.PN
-  };
-}
-
-function serializeState(state: RuntimeDoubleRatchetState): DoubleRatchetState {
-  return {
-    RK: bytesToB64(state.RK),
-    CKs: bytesToB64(state.CKs),
-    CKr: bytesToB64(state.CKr),
-    DHs: state.DHs ? {
-      publicKey: bytesToB64(state.DHs.publicKey) as string,
-      privateKey: bytesToB64(state.DHs.privateKey) as string
-    } : null,
-    DHr: bytesToB64(state.DHr),
-    Ns: state.Ns,
-    Nr: state.Nr,
-    PN: state.PN
-  };
-}
-
-function wipeState(state: RuntimeDoubleRatchetState) {
-  if (state.RK) sodium.memzero(state.RK);
-  if (state.CKs) sodium.memzero(state.CKs);
-  if (state.CKr) sodium.memzero(state.CKr);
-  if (state.DHs && state.DHs.privateKey) sodium.memzero(state.DHs.privateKey);
-}
-
 // --- MAIN MESSAGE HANDLER ---
-const ALGO = 'AES-GCM';
-const KEY_LENGTH = 256;
-const IV_LENGTH = 12;
 
 export type WorkerMessage =
   | { type: 'DERIVE_KEY'; payload: { password: string; salt: CryptoBuffer }; id: string }
@@ -360,8 +277,10 @@ export type WorkerMessage =
   | { type: 'crypto_secretbox_xchacha20poly1305_easy'; payload: { message: string | CryptoBuffer; nonce: CryptoBuffer; key: CryptoBuffer }; id: string }
   | { type: 'crypto_secretbox_xchacha20poly1305_open_easy'; payload: { ciphertext: CryptoBuffer; nonce: CryptoBuffer; key: CryptoBuffer }; id: string }
   | { type: 'crypto_box_seal_open'; payload: { ciphertext: CryptoBuffer; publicKey: CryptoBuffer; privateKey: CryptoBuffer }; id: string }
-  | { type: 'x3dh_initiator'; payload: { myIdentityKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirSignedPreKey: CryptoBuffer; theirSigningKey: CryptoBuffer; signature: CryptoBuffer; theirOneTimePreKey?: CryptoBuffer }; id: string }
-  | { type: 'x3dh_recipient'; payload: { myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirEphemeralKey: CryptoBuffer; myOneTimePreKey?: CryptoBuffer }; id: string }
+  | { type: 'pq_box_seal'; payload: { message: CryptoBuffer | string; pqPublicKey: CryptoBuffer; classicalPublicKey: CryptoBuffer }; id: string }
+  | { type: 'pq_box_seal_open'; payload: { combinedPayload: CryptoBuffer; pqPrivateKey: CryptoBuffer; classicalPrivateKey: CryptoBuffer }; id: string }
+  | { type: 'x3dh_initiator'; payload: { mySigningKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirPqIdentityKey: CryptoBuffer; theirSignedPreKey: CryptoBuffer; theirPqSignedPreKey: CryptoBuffer; theirSigningKey: CryptoBuffer; signature: CryptoBuffer; theirOneTimePreKey?: CryptoBuffer; theirPqOneTimePreKey?: CryptoBuffer }; id: string }
+  | { type: 'x3dh_recipient'; payload: { myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; myPqIdentityKey: SodiumKeyPair; myPqSignedPreKey: SodiumKeyPair; theirSigningKey: CryptoBuffer; initiatorCiphertexts: string; myOneTimePreKey?: { privateKey: CryptoBuffer } }; id: string }
   | { type: 'crypto_box_seal'; payload: { message: CryptoBuffer; publicKey: CryptoBuffer }; id: string }
   | { type: 'file_encrypt'; payload: { fileBuffer: ArrayBuffer | Uint8Array }; id: string }
   | { type: 'file_decrypt'; payload: { combinedData: ArrayBuffer | Uint8Array; keyBytes: CryptoBuffer }; id: string }
@@ -378,11 +297,7 @@ export type WorkerMessage =
   | { type: 'encrypt_session_key'; payload: { sessionKey: CryptoBuffer; masterSeed: CryptoBuffer }; id: string }
   | { type: 'decrypt_session_key'; payload: { encryptedKey: CryptoBuffer; masterSeed: CryptoBuffer }; id: string }
   | { type: 'generate_otpk_batch'; payload: { count: number; startId: number; masterSeed: CryptoBuffer }; id: string }
-  | { type: 'x3dh_recipient_regenerate'; payload: { keyId: number; masterSeed: CryptoBuffer; myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirEphemeralKey: CryptoBuffer }; id: string }
-  | { type: 'dr_init_alice'; payload: { sk: CryptoBuffer; theirSignedPreKeyPublic: CryptoBuffer }; id: string }
-  | { type: 'dr_init_bob'; payload: { sk: CryptoBuffer; mySignedPreKey: SodiumKeyPair }; id: string }
-  | { type: 'dr_ratchet_encrypt'; payload: { serializedState: DoubleRatchetState; plaintext: string | CryptoBuffer }; id: string }
-  | { type: 'dr_ratchet_decrypt'; payload: { serializedState: DoubleRatchetState; header: DoubleRatchetHeader; ciphertext: CryptoBuffer }; id: string }
+  | { type: 'x3dh_recipient_regenerate'; payload: { keyId: number; masterSeed: CryptoBuffer; myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; myPqIdentityKey: SodiumKeyPair; myPqSignedPreKey: SodiumKeyPair; theirSigningKey: CryptoBuffer; initiatorCiphertexts: string }; id: string }
   | { type: 'group_init_sender_key'; payload: void; id: string }
   | { type: 'group_ratchet_encrypt'; payload: { serializedState: GroupRatchetState; plaintext: string | CryptoBuffer; signingPrivateKey: CryptoBuffer }; id: string }
   | { type: 'group_ratchet_decrypt'; payload: { serializedState: GroupRatchetState; header: GroupRatchetHeader; ciphertext: CryptoBuffer; signature: string; senderSigningPublicKey: CryptoBuffer }; id: string }
@@ -390,14 +305,11 @@ export type WorkerMessage =
 
 self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
   const { type, payload, id } = event.data;
-
-
   
   try {
     await ensureSodiumReady();
     let result: unknown;
-    // The main message handler now orchestrates calls to the internal functions.
-    // The recursive postMessage calls are gone.
+    
     switch (type) {
       case 'DERIVE_KEY': {
         const { password, salt } = payload;
@@ -417,39 +329,51 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       case 'registerAndGenerateKeys': {
         const { password } = payload;
         const masterSeed = sodium.randombytes_buf(32);
-        const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
-        const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));
-        const signedPreKeySeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
+        const stretchedSeed = await _stretchSeed(masterSeed);
+        const encryptionSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("encryption")));
+        const pqEncryptionSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("pq-encryption")));
+        const signingSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("signing")));
+        const signedPreKeySeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
+        const pqSignedPreKeySeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("pq-signed-pre-key")));
         
         const encryptionKeyPair = sodium.crypto_box_seed_keypair(encryptionSeed);
+        const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(pqEncryptionSeed);
         const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
         const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
+        const pqSignedPreKeyPair = sodium.crypto_kem_xwing_seed_keypair(pqSignedPreKeySeed);
         
         try {
           const encryptedPrivateKeys = await storePrivateKeys({
             encryption: encryptionKeyPair.privateKey,
+            pqEncryption: pqEncryptionKeyPair.privateKey,
             signing: signingKeyPair.privateKey,
             signedPreKey: signedPreKeyPair.privateKey,
+            pqSignedPreKey: pqSignedPreKeyPair.privateKey,
             masterSeed: masterSeed
           }, password);
 
-          // @scure/bip39 accepts Uint8Array directly
           const phrase = entropyToMnemonic(masterSeed, wordlist);
           
           result = {
               encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
+              pqEncryptionPublicKeyB64: exportPublicKey(pqEncryptionKeyPair.publicKey),
               signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
               encryptedPrivateKeys,
               phrase
           };
         } finally {
           sodium.memzero(masterSeed);
+          sodium.memzero(stretchedSeed);
           sodium.memzero(encryptionSeed);
+          sodium.memzero(pqEncryptionSeed);
           sodium.memzero(signingSeed);
           sodium.memzero(signedPreKeySeed);
+          sodium.memzero(pqSignedPreKeySeed);
           sodium.memzero(encryptionKeyPair.privateKey);
+          sodium.memzero(pqEncryptionKeyPair.privateKey);
           sodium.memzero(signingKeyPair.privateKey);
           sodium.memzero(signedPreKeyPair.privateKey);
+          sodium.memzero(pqSignedPreKeyPair.privateKey);
         }
         break;
       }
@@ -477,11 +401,10 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             nonceBytes = new Uint8Array(nonce);
             keyBytes = new Uint8Array(key);
             
-            // Use AEAD IETF version: message, ad, secret_nonce, public_nonce, key
             result = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(messageBytes, null, null, nonceBytes, keyBytes);
         } finally {
             if (messageBytes && typeof message !== 'string') sodium.memzero(messageBytes);
-            if (nonceBytes) sodium.memzero(nonceBytes); // Optional
+            if (nonceBytes) sodium.memzero(nonceBytes);
             if (keyBytes) sodium.memzero(keyBytes);
         }
         break;
@@ -497,7 +420,6 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             nonceBytes = new Uint8Array(nonce);
             keyBytes = new Uint8Array(key);
 
-            // Use AEAD IETF version: secret_nonce, ciphertext, ad, public_nonce, key
             result = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ciphertextBytes, null, nonceBytes, keyBytes);
         } finally {
             if (ciphertextBytes) sodium.memzero(ciphertextBytes);
@@ -519,8 +441,121 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         }
         break;
       }
+      case 'pq_box_seal': {
+        const { message, pqPublicKey, classicalPublicKey } = payload;
+        const messageBytes = typeof message === 'string' ? new TextEncoder().encode(message) : new Uint8Array(message);
+        const pqPublicKeyBytes = new Uint8Array(pqPublicKey);
+        const classicalPublicKeyBytes = new Uint8Array(classicalPublicKey);
+
+        // Validate key lengths
+        if (classicalPublicKeyBytes.length !== 32) {
+          throw new Error(`invalid publicKey length: expected 32 bytes for classical key, got ${classicalPublicKeyBytes.length}`);
+        }
+        if (pqPublicKeyBytes.length !== sodium.crypto_kem_xwing_PUBLICKEYBYTES) {
+          throw new Error(`invalid PQ publicKey length: expected ${sodium.crypto_kem_xwing_PUBLICKEYBYTES} bytes, got ${pqPublicKeyBytes.length}`);
+        }
+
+        const ephemeralKeyPair = sodium.crypto_box_keypair();
+        let sharedSecret: Uint8Array | null = null;
+        let nonce: Uint8Array | null = null;
+        let encryptedMessage: Uint8Array | null = null;
+
+        try {
+          const classicalSharedSecret = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, classicalPublicKeyBytes);
+          
+          const pqResult = sodium.crypto_kem_xwing_enc(pqPublicKeyBytes);
+          const pqSharedSecret = pqResult.sharedSecret;
+          const pqCiphertext = pqResult.ciphertext;
+
+          sharedSecret = new Uint8Array(classicalSharedSecret.length + pqSharedSecret.length);
+          sharedSecret.set(classicalSharedSecret, 0);
+          sharedSecret.set(pqSharedSecret, classicalSharedSecret.length);
+
+          const derivedKey = sodium.crypto_generichash(32, sharedSecret, null);
+
+          nonce = sodium.randombytes_buf(24);
+          encryptedMessage = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(messageBytes, null, null, nonce, derivedKey);
+
+          if (!nonce || !encryptedMessage) {
+              throw new Error("Encryption failed");
+          }
+
+          const combined = new Uint8Array(ephemeralKeyPair.publicKey.length + pqCiphertext.length + nonce.length + encryptedMessage.length);
+          let offset = 0;
+          combined.set(ephemeralKeyPair.publicKey, offset);
+          offset += ephemeralKeyPair.publicKey.length;
+          combined.set(pqCiphertext, offset);
+          offset += pqCiphertext.length;
+          combined.set(nonce, offset);
+          offset += nonce.length;
+          combined.set(encryptedMessage, offset);
+
+          result = combined;
+
+          sodium.memzero(classicalSharedSecret);
+          sodium.memzero(pqSharedSecret);
+          sodium.memzero(derivedKey);
+        } finally {
+          sodium.memzero(ephemeralKeyPair.privateKey);
+          if (sharedSecret) sodium.memzero(sharedSecret);
+          if (nonce) sodium.memzero(nonce);
+          if (encryptedMessage) sodium.memzero(encryptedMessage);
+          if (messageBytes && typeof message === 'string') sodium.memzero(messageBytes);
+        }
+        break;
+      }
+      case 'pq_box_seal_open': {
+        const { combinedPayload, pqPrivateKey, classicalPrivateKey } = payload;
+        const payloadBytes = new Uint8Array(combinedPayload);
+        const pqPrivateKeyBytes = new Uint8Array(pqPrivateKey);
+        const classicalPrivateKeyBytes = new Uint8Array(classicalPrivateKey);
+
+        const ephemeralPubKeyLength = 32;
+        const pqCiphertextLength = sodium.crypto_kem_xwing_CIPHERTEXTBYTES;
+        const nonceLength = 24;
+
+        if (payloadBytes.length < ephemeralPubKeyLength + pqCiphertextLength + nonceLength) {
+          throw new Error("Payload too short for pq_box_seal_open");
+        }
+
+        let offset = 0;
+        const ephemeralPubKey = payloadBytes.slice(offset, offset + ephemeralPubKeyLength);
+        offset += ephemeralPubKeyLength;
+        
+        const pqCiphertext = payloadBytes.slice(offset, offset + pqCiphertextLength);
+        offset += pqCiphertextLength;
+        
+        const nonce = payloadBytes.slice(offset, offset + nonceLength);
+        offset += nonceLength;
+        
+        const encryptedMessage = payloadBytes.slice(offset);
+
+        let sharedSecret: Uint8Array | null = null;
+
+        try {
+          const classicalSharedSecret = sodium.crypto_scalarmult(classicalPrivateKeyBytes, ephemeralPubKey);
+          const pqSharedSecret = sodium.crypto_kem_xwing_dec(pqCiphertext, pqPrivateKeyBytes);
+
+          sharedSecret = new Uint8Array(classicalSharedSecret.length + pqSharedSecret.length);
+          sharedSecret.set(classicalSharedSecret, 0);
+          sharedSecret.set(pqSharedSecret, classicalSharedSecret.length);
+
+          const derivedKey = sodium.crypto_generichash(32, sharedSecret, null);
+
+          result = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, encryptedMessage, null, nonce, derivedKey);
+
+          sodium.memzero(classicalSharedSecret);
+          sodium.memzero(pqSharedSecret);
+          sodium.memzero(derivedKey);
+        } finally {
+          sodium.memzero(pqPrivateKeyBytes);
+          sodium.memzero(classicalPrivateKeyBytes);
+          if (sharedSecret) sodium.memzero(sharedSecret);
+        }
+        break;
+      }
       case 'x3dh_initiator': {
-        const { myIdentityKey, theirIdentityKey, theirSignedPreKey, theirSigningKey, signature, theirOneTimePreKey } = payload;
+        const { mySigningKey, theirIdentityKey, theirPqIdentityKey, theirSignedPreKey, theirPqSignedPreKey, theirSigningKey, signature, theirOneTimePreKey, theirPqOneTimePreKey } = payload;
 
         const signatureBytes = new Uint8Array(signature);
         const theirSignedPreKeyBytes = new Uint8Array(theirSignedPreKey);
@@ -530,44 +565,70 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           throw new Error("Invalid signature on signed pre-key.");
         }
 
-        const myIdentityKeyPrivateBytes = new Uint8Array(myIdentityKey.privateKey);
+        const mySigningKeyPrivateBytes = new Uint8Array(mySigningKey.privateKey);
+        const myIdentityKeyPrivateBytes = sodium.crypto_sign_ed25519_sk_to_curve25519(mySigningKeyPrivateBytes);
         const theirIdentityKeyBytes = new Uint8Array(theirIdentityKey);
         
         const ephemeralKeyPair = sodium.crypto_box_keypair();
         let sharedSecret: Uint8Array | null = null;
-        let dh4: Uint8Array | null = null;
 
         try {
           const dh1 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirSignedPreKeyBytes);
           const dh2 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirIdentityKeyBytes);
           const dh3 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirSignedPreKeyBytes);
 
-          const secrets = [dh1, dh2, dh3];
+          const pqIdResult = sodium.crypto_kem_xwing_enc(new Uint8Array(theirPqIdentityKey));
+          const ss_id = pqIdResult.sharedSecret;
+          const ct_id = pqIdResult.ciphertext;
 
-          // DH4: Ephemeral (Alice) * One-Time Pre-Key (Bob)
-          if (theirOneTimePreKey) {
+          const pqSpkResult = sodium.crypto_kem_xwing_enc(new Uint8Array(theirPqSignedPreKey));
+          const ss_spk = pqSpkResult.sharedSecret;
+          const ct_spk = pqSpkResult.ciphertext;
+
+          const secrets = [dh1, dh2, dh3, ss_id, ss_spk];
+
+          let ct_otpk: Uint8Array | undefined = undefined;
+
+          if (theirOneTimePreKey && theirPqOneTimePreKey) {
              const theirOneTimePreKeyBytes = new Uint8Array(theirOneTimePreKey);
-             dh4 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirOneTimePreKeyBytes);
+             const dh4 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirOneTimePreKeyBytes);
              secrets.push(dh4);
+
+             const pqOtpkResult = sodium.crypto_kem_xwing_enc(new Uint8Array(theirPqOneTimePreKey));
+             const ss_otpk = pqOtpkResult.sharedSecret;
+             ct_otpk = pqOtpkResult.ciphertext;
+             secrets.push(ss_otpk);
           }
 
-          // Concatenate all shared secrets
           const totalLength = secrets.reduce((sum, s) => sum + s.length, 0);
           sharedSecret = new Uint8Array(totalLength);
           let offset = 0;
           for (const s of secrets) {
               sharedSecret.set(s, offset);
               offset += s.length;
-              sodium.memzero(s); // Wipe intermediate
+              sodium.memzero(s);
           }
           
           const sessionKey = sodium.crypto_generichash(32, sharedSecret, null);
 
+          const ciphertextsObj = {
+             ek: sodium.to_base64(ephemeralKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+             ct_id: sodium.to_base64(ct_id, sodium.base64_variants.URLSAFE_NO_PADDING),
+             ct_spk: sodium.to_base64(ct_spk, sodium.base64_variants.URLSAFE_NO_PADDING),
+             ct_otpk: ct_otpk ? sodium.to_base64(ct_otpk, sodium.base64_variants.URLSAFE_NO_PADDING) : undefined
+          };
+
+          const initiatorCiphertexts = sodium.to_base64(
+             new TextEncoder().encode(JSON.stringify(ciphertextsObj)),
+             sodium.base64_variants.URLSAFE_NO_PADDING
+          );
+
           result = {
               sessionKey,
-              ephemeralPublicKey: sodium.to_base64(ephemeralKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+              initiatorCiphertexts,
           };
         } finally {
+          sodium.memzero(mySigningKeyPrivateBytes);
           sodium.memzero(myIdentityKeyPrivateBytes);
           sodium.memzero(ephemeralKeyPair.privateKey);
           if (sharedSecret) sodium.memzero(sharedSecret);
@@ -575,28 +636,50 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         break;
       }
       case 'x3dh_recipient': {
-        const { myIdentityKey, mySignedPreKey, theirIdentityKey, theirEphemeralKey, myOneTimePreKey } = payload;
+        const { myIdentityKey, mySignedPreKey, myPqIdentityKey, myPqSignedPreKey, theirSigningKey, initiatorCiphertexts, myOneTimePreKey } = payload;
         
         const myIdentityKeyPrivateBytes = new Uint8Array(myIdentityKey.privateKey);
         const mySignedPreKeyPrivateBytes = new Uint8Array(mySignedPreKey.privateKey);
-        const theirIdentityKeyBytes = new Uint8Array(theirIdentityKey);
-        const theirEphemeralKeyBytes = new Uint8Array(theirEphemeralKey);
+        const myPqIdentityKeyPrivateBytes = new Uint8Array(myPqIdentityKey.privateKey);
+        const myPqSignedPreKeyPrivateBytes = new Uint8Array(myPqSignedPreKey.privateKey);
+
+        const theirSigningKeyBytes = new Uint8Array(theirSigningKey);
+        const theirIdentityKeyBytes = sodium.crypto_sign_ed25519_pk_to_curve25519(theirSigningKeyBytes);
+
+        const ciphertextsStr = new TextDecoder().decode(sodium.from_base64(initiatorCiphertexts as string, sodium.base64_variants.URLSAFE_NO_PADDING));
+        const ciphertexts = JSON.parse(ciphertextsStr);
+
+        const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const ct_spk = sodium.from_base64(ciphertexts.ct_spk, sodium.base64_variants.URLSAFE_NO_PADDING);
 
         let sharedSecret: Uint8Array | null = null;
-        let dh4: Uint8Array | null = null;
 
         try {
           const dh1 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirIdentityKeyBytes);
           const dh2 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirEphemeralKeyBytes);
           const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirEphemeralKeyBytes);
-        
-          const secrets = [dh1, dh2, dh3];
+          
+          const ss_id = sodium.crypto_kem_xwing_dec(ct_id, myPqIdentityKeyPrivateBytes);
+          const ss_spk = sodium.crypto_kem_xwing_dec(ct_spk, myPqSignedPreKeyPrivateBytes);
 
-          // DH4: One-Time Pre-Key (Bob) * Ephemeral (Alice)
-          if (myOneTimePreKey) {
-             const myOneTimePreKeyBytes = new Uint8Array(myOneTimePreKey);
-             dh4 = sodium.crypto_scalarmult(myOneTimePreKeyBytes, theirEphemeralKeyBytes);
+          const secrets = [dh1, dh2, dh3, ss_id, ss_spk];
+
+          if (myOneTimePreKey && ciphertexts.ct_otpk) {
+             const privateKeysJson = new TextDecoder().decode(new Uint8Array(myOneTimePreKey.privateKey));
+             const parsedKeys = JSON.parse(privateKeysJson);
+             const classicalKey = new Uint8Array(parsedKeys.classical);
+             const pqKey = new Uint8Array(parsedKeys.pq);
+
+             const dh4 = sodium.crypto_scalarmult(classicalKey, theirEphemeralKeyBytes);
              secrets.push(dh4);
+
+             const ct_otpk = sodium.from_base64(ciphertexts.ct_otpk, sodium.base64_variants.URLSAFE_NO_PADDING);
+             const ss_otpk = sodium.crypto_kem_xwing_dec(ct_otpk, pqKey);
+             secrets.push(ss_otpk);
+
+             sodium.memzero(classicalKey);
+             sodium.memzero(pqKey);
           }
 
           const totalLength = secrets.reduce((sum, s) => sum + s.length, 0);
@@ -608,11 +691,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
               sodium.memzero(s);
           }
 
-          result = sodium.crypto_generichash(32, sharedSecret, null); // Returns the sessionKey
+          result = sodium.crypto_generichash(32, sharedSecret, null);
         } finally {
           sodium.memzero(myIdentityKeyPrivateBytes);
           sodium.memzero(mySignedPreKeyPrivateBytes);
-          if (myOneTimePreKey) sodium.memzero(new Uint8Array(myOneTimePreKey)); // Wipe passed key if array
+          sodium.memzero(myPqIdentityKeyPrivateBytes);
+          sodium.memzero(myPqSignedPreKeyPrivateBytes);
           if (sharedSecret) sodium.memzero(sharedSecret);
         }
         break;
@@ -627,42 +711,86 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'file_encrypt': {
         const { fileBuffer } = payload;
-        // Ensure fileBuffer is Uint8Array
         const fileBytes = new Uint8Array(fileBuffer);
         
-        const key = await crypto.subtle.generateKey({ name: ALGO, length: KEY_LENGTH }, true, ['encrypt', 'decrypt']);
-        const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
-        const encryptedData = await crypto.subtle.encrypt({ name: ALGO, iv }, key, fileBytes);
-        const exportedKey = await crypto.subtle.exportKey('raw', key);
-        result = { encryptedData, iv, key: new Uint8Array(exportedKey) };
+        const key = sodium.crypto_secretstream_xchacha20poly1305_keygen();
+        const res = sodium.crypto_secretstream_xchacha20poly1305_init_push(key);
+        const state = res.state;
+        const header = res.header;
+        
+        const chunkSize = 1024 * 1024 * 2; 
+        const chunks: Uint8Array[] = [];
+        chunks.push(header); 
+
+        for (let i = 0; i < fileBytes.length; i += chunkSize) {
+          const chunk = fileBytes.slice(i, i + chunkSize);
+          const isFinal = (i + chunkSize) >= fileBytes.length;
+          const tag = isFinal 
+            ? sodium.crypto_secretstream_xchacha20poly1305_TAG_FINAL 
+            : sodium.crypto_secretstream_xchacha20poly1305_TAG_MESSAGE;
+          
+          const encryptedChunk = sodium.crypto_secretstream_xchacha20poly1305_push(state, chunk, null, tag);
+          chunks.push(encryptedChunk);
+        }
+        
+        const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
+        const combinedData = new Uint8Array(totalLength);
+        let offset = 0;
+        for (const c of chunks) {
+          combinedData.set(c, offset);
+          offset += c.length;
+        }
+
+        result = { combinedData, key };
         break;
       }
       case 'file_decrypt': {
         const { combinedData, keyBytes } = payload;
-        
-        // Convert plain array keyBytes to Uint8Array for importKey
-        const keyBytesUint8 = new Uint8Array(keyBytes);
-        const key = await crypto.subtle.importKey('raw', keyBytesUint8, { name: ALGO }, false, ['decrypt']);
-        
-        // Ensure combinedData is a Uint8Array for slicing
         const dataBytes = new Uint8Array(combinedData);
-        const iv = dataBytes.slice(0, IV_LENGTH);
-        const encryptedData = dataBytes.slice(IV_LENGTH);
+        const headerSize = sodium.crypto_secretstream_xchacha20poly1305_HEADERBYTES;
+        const header = dataBytes.slice(0, headerSize);
+        const key = new Uint8Array(keyBytes);
         
-        result = await crypto.subtle.decrypt({ name: ALGO, iv }, key, encryptedData);
+        const state = sodium.crypto_secretstream_xchacha20poly1305_init_pull(header, key);
+        
+        const chunkSize = 1024 * 1024 * 2 + sodium.crypto_secretstream_xchacha20poly1305_ABYTES;
+        const decryptedChunks: Uint8Array[] = [];
+        let offset = headerSize;
+        
+        while (offset < dataBytes.length) {
+          const chunk = dataBytes.slice(offset, Math.min(offset + chunkSize, dataBytes.length));
+          const pullRes = sodium.crypto_secretstream_xchacha20poly1305_pull(state, chunk);
+          if (!pullRes) {
+             throw new Error("File decryption failed or corrupted data");
+          }
+          decryptedChunks.push(pullRes.message);
+          
+          const isFinal = (offset + chunkSize) >= dataBytes.length;
+          if (isFinal && pullRes.tag !== sodium.crypto_secretstream_xchacha20poly1305_TAG_FINAL) {
+             throw new Error("File truncation detected: Missing TAG_FINAL");
+          }
+          offset += chunkSize;
+        }
+
+        const totalLength = decryptedChunks.reduce((acc, c) => acc + c.length, 0);
+        const decryptedData = new Uint8Array(totalLength);
+        let currentOffset = 0;
+        for (const c of decryptedChunks) {
+          decryptedData.set(c, currentOffset);
+          currentOffset += c.length;
+        }
+
+        result = decryptedData;
         break;
       }
       case 'getRecoveryPhrase': {
         const { encryptedDataStr, password } = payload;
         const resultData = await retrievePrivateKeys(encryptedDataStr, password);
         if (resultData.success && resultData.keys.masterSeed) {
-          // @scure/bip39 accepts Uint8Array directly. No Hex/Buffer conversion needed.
           const mnemonic = entropyToMnemonic(resultData.keys.masterSeed, wordlist);
-          
           if (!mnemonic || mnemonic.trim().length === 0) {
               throw new Error(`Mnemonic generation failed. Output length: ${mnemonic?.length}`);
           }
-          
           result = mnemonic;
         } else {
           throw new Error("Failed to retrieve master seed. Incorrect password or invalid bundle.");
@@ -671,62 +799,80 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'restoreFromPhrase': {
         const { phrase, password } = payload;
-        // @scure/bip39 returns Uint8Array directly
         const masterSeed = mnemonicToEntropy(phrase, wordlist);
+        const stretchedSeed = await _stretchSeed(masterSeed);
 
-        const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
-        const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));
-        const signedPreKeySeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
+        const encryptionSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("encryption")));
+        const pqEncryptionSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("pq-encryption")));
+        const signingSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("signing")));
+        const signedPreKeySeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
+        const pqSignedPreKeySeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("pq-signed-pre-key")));
         
         const encryptionKeyPair = sodium.crypto_box_seed_keypair(encryptionSeed);
+        const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(pqEncryptionSeed);
         const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
         const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
+        const pqSignedPreKeyPair = sodium.crypto_kem_xwing_seed_keypair(pqSignedPreKeySeed);
         
         try {
           const encryptedPrivateKeys = await storePrivateKeys({
             encryption: encryptionKeyPair.privateKey,
+            pqEncryption: pqEncryptionKeyPair.privateKey,
             signing: signingKeyPair.privateKey,
             signedPreKey: signedPreKeyPair.privateKey,
+            pqSignedPreKey: pqSignedPreKeyPair.privateKey,
             masterSeed: masterSeed
           }, password);
 
           result = {
             encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
+            pqEncryptionPublicKeyB64: exportPublicKey(pqEncryptionKeyPair.publicKey),
             signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
             encryptedPrivateKeys,
           };
         } finally {
           sodium.memzero(masterSeed);
+          sodium.memzero(stretchedSeed);
           sodium.memzero(encryptionSeed);
+          sodium.memzero(pqEncryptionSeed);
           sodium.memzero(signingSeed);
           sodium.memzero(signedPreKeySeed);
+          sodium.memzero(pqSignedPreKeySeed);
           sodium.memzero(encryptionKeyPair.privateKey);
+          sodium.memzero(pqEncryptionKeyPair.privateKey);
           sodium.memzero(signingKeyPair.privateKey);
           sodium.memzero(signedPreKeyPair.privateKey);
+          sodium.memzero(pqSignedPreKeyPair.privateKey);
         }
         break;
       }
       case 'recoverAccountWithSignature': {
         const { phrase, newPassword, identifier, timestamp, nonce } = payload;
         const masterSeed = mnemonicToEntropy(phrase, wordlist);
+        const stretchedSeed = await _stretchSeed(masterSeed);
 
-        const encryptionSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("encryption")));
-        const signingSeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signing")));
-        const signedPreKeySeed = sodium.crypto_generichash(32, masterSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
+        const encryptionSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("encryption")));
+        const pqEncryptionSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("pq-encryption")));
+        const signingSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("signing")));
+        const signedPreKeySeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
+        const pqSignedPreKeySeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("pq-signed-pre-key")));
         
         const encryptionKeyPair = sodium.crypto_box_seed_keypair(encryptionSeed);
+        const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(pqEncryptionSeed);
         const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
         const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
+        const pqSignedPreKeyPair = sodium.crypto_kem_xwing_seed_keypair(pqSignedPreKeySeed);
         
         try {
           const encryptedPrivateKeys = await storePrivateKeys({
             encryption: encryptionKeyPair.privateKey,
+            pqEncryption: pqEncryptionKeyPair.privateKey,
             signing: signingKeyPair.privateKey,
             signedPreKey: signedPreKeyPair.privateKey,
+            pqSignedPreKey: pqSignedPreKeyPair.privateKey,
             masterSeed: masterSeed
           }, newPassword);
 
-          // BUAT DIGITAL SIGNATURE (Full Payload with Nonce)
           const messageString = `${identifier}:${timestamp}:${nonce}:${newPassword}:${encryptedPrivateKeys}`;
           const messageBytes = new TextEncoder().encode(messageString);
           const signature = sodium.crypto_sign_detached(messageBytes, signingKeyPair.privateKey);
@@ -734,32 +880,34 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
           result = {
             encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
+            pqEncryptionPublicKeyB64: exportPublicKey(pqEncryptionKeyPair.publicKey),
             signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
             encryptedPrivateKeys,
             signatureB64: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING)
           };
         } finally {
           sodium.memzero(masterSeed);
+          sodium.memzero(stretchedSeed);
           sodium.memzero(encryptionSeed);
+          sodium.memzero(pqEncryptionSeed);
           sodium.memzero(signingSeed);
           sodium.memzero(signedPreKeySeed);
+          sodium.memzero(pqSignedPreKeySeed);
           sodium.memzero(encryptionKeyPair.privateKey);
+          sodium.memzero(pqEncryptionKeyPair.privateKey);
           sodium.memzero(signingKeyPair.privateKey);
           sodium.memzero(signedPreKeyPair.privateKey);
+          sodium.memzero(pqSignedPreKeyPair.privateKey);
         }
         break;
       }
       case 'hashUsername': {
         const { username } = payload;
-        // STATIC SALT for Blind Indexing (Must be 16 bytes)
-        // "NYX_BLIND_IDX_V1" is exactly 16 chars
         const SALT = new TextEncoder().encode("NYX_BLIND_IDX_V1"); 
-        
-        // Use hash-wasm's argon2id which is reliable
         const hashBytes = await argon2id({
           password: username.toLowerCase(),
           salt: SALT,
-          ...ARGON_CONFIG,
+          ...ARGON_INDEX_CONFIG,
         });
         
         result = sodium.to_base64(hashBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -776,18 +924,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         try {
             key = sodium.from_base64(profileKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
             message = new TextEncoder().encode(profileJsonString);
-            // Generate random nonce (24 bytes for XChaCha20)
             nonce = sodium.randombytes_buf(24);
             
             ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-                message,
-                null,
-                null,
-                nonce,
-                key
+                message, null, null, nonce, key
             );
             
-            // Combine nonce + ciphertext
             combined = new Uint8Array(nonce!.length + ciphertext!.length);
             combined.set(nonce!);
             combined.set(ciphertext!, nonce!.length);
@@ -795,8 +937,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             result = sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
         } finally {
             if (key) sodium.memzero(key);
-            if (message) sodium.memzero(message); // Optional for profile json but good practice
-            if (nonce) sodium.memzero(nonce); // Nonce isn't secret but cleanup is fine
+            if (message) sodium.memzero(message);
+            if (nonce) sodium.memzero(nonce);
             if (ciphertext) sodium.memzero(ciphertext);
             if (combined) sodium.memzero(combined);
         }
@@ -817,11 +959,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             const ciphertext = combined!.slice(nonceBytes);
             
             decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-                null,
-                ciphertext,
-                null,
-                nonce,
-                key!
+                null, ciphertext, null, nonce, key!
             );
             
             result = new TextDecoder().decode(decrypted!);
@@ -833,7 +971,6 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         break;
       }
       case 'generateProfileKey': {
-        // Generate a random 32-byte key for profile encryption
         let key: Uint8Array | null = null;
         try {
             key = sodium.randombytes_buf(32);
@@ -852,32 +989,28 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         
         const saltBytes = new TextEncoder().encode(salt);
         
-        // Helper to convert buffer to hex
-        const toHex = (buffer: ArrayBuffer) => {
-            return Array.from(new Uint8Array(buffer))
+        const toHex = (buffer: Uint8Array) => {
+            return Array.from(buffer)
                 .map(b => b.toString(16).padStart(2, '0'))
                 .join('');
         };
 
-        // Loop until we find a hash starting with targetPrefix
         while (!found) {
             const nonceStr = nonce.toString();
             const nonceBytes = new TextEncoder().encode(nonceStr);
             
-            // Concatenate salt + nonce
             const input = new Uint8Array(saltBytes.length + nonceBytes.length);
             input.set(saltBytes);
             input.set(nonceBytes, saltBytes.length);
             
-            // Native Web Crypto SHA-256 (Faster & Reliable)
-            const hashBuffer = await crypto.subtle.digest('SHA-256', input);
+            const hashBuffer = sodium.crypto_generichash(64, input);
             hash = toHex(hashBuffer);
             
             if (hash.startsWith(targetPrefix)) {
                 found = true;
             } else {
                 nonce++;
-                // Optional: Yield to event loop every N iterations to check for aborts (not strictly needed for worker)
+                if (nonce % 500 === 0) await new Promise(r => setTimeout(r, 0));
             }
         }
         
@@ -890,37 +1023,47 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       case 'reEncryptBundleFromMasterKey': {
         const { masterKey, newPassword } = payload;
-        const encryptionSeed = sodium.crypto_generichash(32, masterKey, new Uint8Array(new TextEncoder().encode("encryption")));
-        const signingSeed = sodium.crypto_generichash(32, masterKey, new Uint8Array(new TextEncoder().encode("signing")));
-        const signedPreKeySeed = sodium.crypto_generichash(32, masterKey, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
+        const stretchedSeed = await _stretchSeed(masterKey instanceof Uint8Array ? masterKey : new Uint8Array(masterKey));
+        const encryptionSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("encryption")));
+        const pqEncryptionSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("pq-encryption")));
+        const signingSeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("signing")));
+        const signedPreKeySeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("signed-pre-key")));
+        const pqSignedPreKeySeed = sodium.crypto_generichash(32, stretchedSeed, new Uint8Array(new TextEncoder().encode("pq-signed-pre-key")));
 
         const encryptionKeyPair = sodium.crypto_box_seed_keypair(encryptionSeed);
+        const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(pqEncryptionSeed);
         const signingKeyPair = sodium.crypto_sign_seed_keypair(signingSeed);
         const signedPreKeyPair = sodium.crypto_box_seed_keypair(signedPreKeySeed);
+        const pqSignedPreKeyPair = sodium.crypto_kem_xwing_seed_keypair(pqSignedPreKeySeed);
 
         try {
           const encryptedPrivateKeys = await storePrivateKeys({
             encryption: encryptionKeyPair.privateKey,
+            pqEncryption: pqEncryptionKeyPair.privateKey,
             signing: signingKeyPair.privateKey,
             signedPreKey: signedPreKeyPair.privateKey,
+            pqSignedPreKey: pqSignedPreKeyPair.privateKey,
             masterSeed: masterKey instanceof Uint8Array ? masterKey : new Uint8Array(masterKey),
           }, newPassword);
 
           result = {
             encryptedPrivateKeys,
             encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
+            pqEncryptionPublicKeyB64: exportPublicKey(pqEncryptionKeyPair.publicKey),
             signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
           };
         } finally {
-          // Note: payload.masterKey is likely a reference to the array passed in. 
-          // Wiping it is good practice, but since it came from postMessage it might be a copy.
-          try { sodium.memzero(masterKey); } catch {} 
-          sodium.memzero(encryptionSeed);
+          try { sodium.memzero(masterKey); } catch {}
+          sodium.memzero(stretchedSeed);
+          sodium.memzero(encryptionSeed);          sodium.memzero(pqEncryptionSeed);
           sodium.memzero(signingSeed);
           sodium.memzero(signedPreKeySeed);
+          sodium.memzero(pqSignedPreKeySeed);
           sodium.memzero(encryptionKeyPair.privateKey);
+          sodium.memzero(pqEncryptionKeyPair.privateKey);
           sodium.memzero(signingKeyPair.privateKey);
           sodium.memzero(signedPreKeyPair.privateKey);
+          sodium.memzero(pqSignedPreKeyPair.privateKey);
         }
         break;
       }
@@ -929,7 +1072,6 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const sessionKeyBytes = new Uint8Array(sessionKey);
         const masterSeedBytes = new Uint8Array(masterSeed);
 
-        // Derive a specific key for storage encryption to protect the master seed
         const storageKey = sodium.crypto_generichash(32, masterSeedBytes, new Uint8Array(new TextEncoder().encode("session-storage")));
         
         let nonce: Uint8Array | null = null;
@@ -939,11 +1081,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           nonce = sodium.randombytes_buf(24);
           
           ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-            sessionKeyBytes,
-            null,
-            null,
-            nonce,
-            storageKey
+            sessionKeyBytes, null, null, nonce, storageKey
           );
 
           if (!nonce || !ciphertext) throw new Error("Encryption failed");
@@ -974,11 +1112,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         try {
           result = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-            null,
-            ciphertext,
-            null,
-            nonce,
-            storageKey
+            null, ciphertext, null, nonce, storageKey
           );
         } finally {
           sodium.memzero(storageKey);
@@ -995,26 +1129,33 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         for (let i = 0; i < count; i++) {
           const keyId = startId + i;
           
-          // DETERMINISTIC GENERATION
-          // seed = Hash(MasterSeed || "OTPK" || KeyID)
-          const seedInput = new Uint8Array(masterSeedBytes.length + 4 + 4); // 4 bytes for "OTPK", 4 bytes for ID
+          const seedInput = new Uint8Array(masterSeedBytes.length + 4 + 4);
           seedInput.set(masterSeedBytes);
           seedInput.set(new TextEncoder().encode("OTPK"), masterSeedBytes.length);
-          // Simple Little Endian encoding for ID
           const idBytes = new Uint8Array(new Uint32Array([keyId]).buffer); 
           seedInput.set(idBytes, masterSeedBytes.length + 4);
 
           const keySeed = sodium.crypto_generichash(32, seedInput, null);
           const keyPair = sodium.crypto_box_seed_keypair(keySeed);
           
-          // Encrypt private key for storage
+          // Generate PQ keypair
+          const pqSeedInput = new Uint8Array(masterSeedBytes.length + 7 + 4);
+          pqSeedInput.set(masterSeedBytes);
+          pqSeedInput.set(new TextEncoder().encode("pq-otpk"), masterSeedBytes.length);
+          pqSeedInput.set(idBytes, masterSeedBytes.length + 7);
+          const pqKeySeed = sodium.crypto_generichash(32, pqSeedInput, null);
+          const pqKeyPair = sodium.crypto_kem_xwing_seed_keypair(pqKeySeed);
+          
+          // Serialize private keys
+          const privateKeysJson = JSON.stringify({
+            classical: Array.from(keyPair.privateKey),
+            pq: Array.from(pqKeyPair.privateKey)
+          });
+          const privateKeysBytes = new TextEncoder().encode(privateKeysJson);
+
           const nonce = sodium.randombytes_buf(24);
           const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-            keyPair.privateKey,
-            null,
-            null,
-            nonce,
-            storageKey
+            privateKeysBytes, null, null, nonce, storageKey
           );
           
           const combined = new Uint8Array(nonce.length + ciphertext.length);
@@ -1024,11 +1165,15 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           batch.push({
             keyId,
             publicKey: sodium.to_base64(keyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+            pqPublicKey: sodium.to_base64(pqKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
             encryptedPrivateKey: combined
           });
           
           sodium.memzero(keySeed);
           sodium.memzero(keyPair.privateKey);
+          sodium.memzero(pqKeySeed);
+          sodium.memzero(pqKeyPair.privateKey);
+          sodium.memzero(privateKeysBytes);
         }
         
         sodium.memzero(masterSeedBytes);
@@ -1042,13 +1187,14 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             masterSeed,
             myIdentityKey, 
             mySignedPreKey, 
-            theirIdentityKey, 
-            theirEphemeralKey 
+            myPqIdentityKey,
+            myPqSignedPreKey,
+            theirSigningKey, 
+            initiatorCiphertexts 
         } = payload;
 
         const masterSeedBytes = new Uint8Array(masterSeed);
         
-        // 1. RE-DERIVE OTPK PRIVATE KEY
         const seedInput = new Uint8Array(masterSeedBytes.length + 4 + 4);
         seedInput.set(masterSeedBytes);
         seedInput.set(new TextEncoder().encode("OTPK"), masterSeedBytes.length);
@@ -1057,23 +1203,49 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         const keySeed = sodium.crypto_generichash(32, seedInput, null);
         const otpkKeyPair = sodium.crypto_box_seed_keypair(keySeed);
+
+        const pqSeedInput = new Uint8Array(masterSeedBytes.length + 7 + 4);
+        pqSeedInput.set(masterSeedBytes);
+        pqSeedInput.set(new TextEncoder().encode("pq-otpk"), masterSeedBytes.length);
+        pqSeedInput.set(idBytes, masterSeedBytes.length + 7);
+        const pqKeySeed = sodium.crypto_generichash(32, pqSeedInput, null);
+        const pqOtpkKeyPair = sodium.crypto_kem_xwing_seed_keypair(pqKeySeed);
         
-        // 2. PREPARE KEYS FOR X3DH
         const myIdentityKeyPrivateBytes = new Uint8Array(myIdentityKey.privateKey);
         const mySignedPreKeyPrivateBytes = new Uint8Array(mySignedPreKey.privateKey);
-        const theirIdentityKeyBytes = new Uint8Array(theirIdentityKey);
-        const theirEphemeralKeyBytes = new Uint8Array(theirEphemeralKey);
+        const myPqIdentityKeyPrivateBytes = new Uint8Array(myPqIdentityKey.privateKey);
+        const myPqSignedPreKeyPrivateBytes = new Uint8Array(myPqSignedPreKey.privateKey);
+
+        const theirSigningKeyBytes = new Uint8Array(theirSigningKey);
+        const theirIdentityKeyBytes = sodium.crypto_sign_ed25519_pk_to_curve25519(theirSigningKeyBytes);
+
+        const ciphertextsStr = new TextDecoder().decode(sodium.from_base64(initiatorCiphertexts as string, sodium.base64_variants.URLSAFE_NO_PADDING));
+        const ciphertexts = JSON.parse(ciphertextsStr);
+
+        const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const ct_spk = sodium.from_base64(ciphertexts.ct_spk, sodium.base64_variants.URLSAFE_NO_PADDING);
 
         let sharedSecret: Uint8Array | null = null;
 
         try {
-          // 3. PERFORM X3DH CALCULATION
           const dh1 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirIdentityKeyBytes);
           const dh2 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirEphemeralKeyBytes);
           const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirEphemeralKeyBytes);
-          const dh4 = sodium.crypto_scalarmult(otpkKeyPair.privateKey, theirEphemeralKeyBytes); // DH4 using regenerated key
-        
-          const secrets = [dh1, dh2, dh3, dh4];
+          
+          const ss_id = sodium.crypto_kem_xwing_dec(ct_id, myPqIdentityKeyPrivateBytes);
+          const ss_spk = sodium.crypto_kem_xwing_dec(ct_spk, myPqSignedPreKeyPrivateBytes);
+
+          const secrets = [dh1, dh2, dh3, ss_id, ss_spk];
+
+          if (ciphertexts.ct_otpk) {
+             const dh4 = sodium.crypto_scalarmult(otpkKeyPair.privateKey, theirEphemeralKeyBytes); 
+             secrets.push(dh4);
+
+             const ct_otpk = sodium.from_base64(ciphertexts.ct_otpk, sodium.base64_variants.URLSAFE_NO_PADDING);
+             const ss_otpk = sodium.crypto_kem_xwing_dec(ct_otpk, pqOtpkKeyPair.privateKey);
+             secrets.push(ss_otpk);
+          }
 
           const totalLength = secrets.reduce((sum, s) => sum + s.length, 0);
           sharedSecret = new Uint8Array(totalLength);
@@ -1084,203 +1256,26 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
               sodium.memzero(s);
           }
 
-          result = sodium.crypto_generichash(32, sharedSecret, null); // Returns the sessionKey
+          result = sodium.crypto_generichash(32, sharedSecret, null);
         } finally {
-          // 4. SECURE CLEANUP
           sodium.memzero(masterSeedBytes);
           sodium.memzero(seedInput);
           sodium.memzero(keySeed);
           sodium.memzero(otpkKeyPair.privateKey);
+          sodium.memzero(pqSeedInput);
+          sodium.memzero(pqKeySeed);
+          sodium.memzero(pqOtpkKeyPair.privateKey);
           
           sodium.memzero(myIdentityKeyPrivateBytes);
           sodium.memzero(mySignedPreKeyPrivateBytes);
+          sodium.memzero(myPqIdentityKeyPrivateBytes);
+          sodium.memzero(myPqSignedPreKeyPrivateBytes);
           if (sharedSecret) sodium.memzero(sharedSecret);
         }
         break;
       }
-      case 'dr_init_alice': {
-        const { sk, theirSignedPreKeyPublic } = payload;
-        const skBytes = new Uint8Array(sk);
-        const theirSpkBytes = new Uint8Array(theirSignedPreKeyPublic);
-        
-        const DHs = sodium.crypto_box_keypair();
-        const dh_out = sodium.crypto_scalarmult(DHs.privateKey, theirSpkBytes);
-        
-        const [RK, CKs] = await kdfRoot(skBytes, dh_out);
-        
-        const state = {
-           RK, CKs, CKr: null,
-           DHs, DHr: theirSpkBytes,
-           Ns: 0, Nr: 0, PN: 0
-        };
-        
-        result = serializeState(state);
-        
-        wipeState(state);
-        sodium.memzero(skBytes);
-        sodium.memzero(dh_out);
-        break;
-      }
-      case 'dr_init_bob': {
-        const { sk, mySignedPreKey } = payload;
-        const skBytes = new Uint8Array(sk);
-        
-        const state = {
-           RK: new Uint8Array(skBytes),
-           CKs: null, CKr: null,
-           DHs: {
-             publicKey: new Uint8Array(mySignedPreKey.publicKey!),
-             privateKey: new Uint8Array(mySignedPreKey.privateKey)
-           },           DHr: null, // Initialized to null to trigger DH ratchet on first receive
-           Ns: 0, Nr: 0, PN: 0
-        };
-        
-        result = serializeState(state);
-        
-        wipeState(state);
-        sodium.memzero(skBytes);
-        break;
-      }
-      case 'dr_ratchet_encrypt': {
-        const { serializedState, plaintext } = payload;
-        const state = deserializeState(serializedState);
-        const plaintextBytes = typeof plaintext === 'string' ? new TextEncoder().encode(plaintext) : new Uint8Array(plaintext);
-        
-        if (!state.CKs) throw new Error("Sender chain key not initialized");
-        if (!state.DHs) throw new Error("Sender DH keypair not initialized");
-
-        const [newCKs, mk] = await kdfChain(state.CKs);
-        if (state.CKs) sodium.memzero(state.CKs);
-        state.CKs = newCKs;
-        
-        const header = {
-           dh: bytesToB64(state.DHs.publicKey),
-           n: state.Ns,
-           pn: state.PN
-        };
-        state.Ns += 1;
-        
-        const nonce = sodium.randombytes_buf(24);
-        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-            plaintextBytes,
-            null,
-            null,
-            nonce,
-            mk
-        );
-        
-        const combined = new Uint8Array(nonce.length + ciphertext.length);
-        combined.set(nonce);
-        combined.set(ciphertext, nonce.length);
-        
-        result = {
-           state: serializeState(state),
-           header,
-           ciphertext: combined,
-           mk: Array.from(mk)
-        };
-        
-        wipeState(state);
-        sodium.memzero(mk);
-        sodium.memzero(plaintextBytes);
-        break;
-      }
-      case 'dr_ratchet_decrypt': {
-        const { serializedState, header, ciphertext } = payload;
-        const state = deserializeState(serializedState);
-        const ciphertextBytes = new Uint8Array(ciphertext);
-        const headerDhBytes = b64ToBytes(header.dh);
-        
-        if (!headerDhBytes) throw new Error("Invalid header DH key");
-
-        const skippedKeys: { dh?: string; epk?: string; n: number; mk: string }[] = [];
-        
-        try {
-            if (!state.DHr || sodium.compare(headerDhBytes, state.DHr) !== 0) {
-                if (state.CKr) {
-                   while (state.Nr < header.pn) {
-                      const [newCKr, mk] = await kdfChain(state.CKr);
-                      sodium.memzero(state.CKr);
-                      state.CKr = newCKr;
-                      // When storing skipped keys from a previous chain, state.DHr holds the previous public key.
-                      // At this point, we only know its DH value, we don't have its EPK context because we are moving PAST it.
-                      // The main logic in crypto.ts will use .epk || .dh, so if epk is undefined it just falls back to dh.
-                      skippedKeys.push({ dh: bytesToB64(state.DHr) || undefined, n: state.Nr, mk: bytesToB64(mk) || '' });                      sodium.memzero(mk);
-                      state.Nr += 1;
-                   }
-                }
-                
-                state.PN = state.Ns;
-                state.Ns = 0;
-                state.Nr = 0;
-                if (state.DHr) sodium.memzero(state.DHr);
-                state.DHr = new Uint8Array(headerDhBytes);
-                
-                if (!state.DHs || !state.RK) throw new Error("Invalid state: missing DHs or RK");
-                
-                let dh_out = sodium.crypto_scalarmult(state.DHs.privateKey, state.DHr);
-                const [RK1, CKr] = await kdfRoot(state.RK, dh_out);
-                sodium.memzero(dh_out);
-                sodium.memzero(state.RK);
-                if (state.CKr) sodium.memzero(state.CKr);
-                state.RK = RK1;
-                state.CKr = CKr;
-                
-                if (state.DHs && state.DHs.privateKey) sodium.memzero(state.DHs.privateKey);
-                state.DHs = sodium.crypto_box_keypair();
-                
-                if (!state.DHs) throw new Error("DH generation failed");
-
-                dh_out = sodium.crypto_scalarmult(state.DHs.privateKey, state.DHr);
-                const [RK2, CKs] = await kdfRoot(state.RK, dh_out);
-                sodium.memzero(dh_out);
-                sodium.memzero(state.RK);
-                if (state.CKs) sodium.memzero(state.CKs);
-                state.RK = RK2;
-                state.CKs = CKs;
-            }
-            
-            if (!state.CKr) throw new Error("Receiver chain key not initialized");
-
-            while (state.Nr < header.n) {
-                const [newCKr, mk] = await kdfChain(state.CKr);
-                sodium.memzero(state.CKr);
-                state.CKr = newCKr;
-                skippedKeys.push({ dh: bytesToB64(state.DHr) || undefined, n: state.Nr, mk: bytesToB64(mk) || '' });                sodium.memzero(mk);
-                state.Nr += 1;
-            }
-            
-            const [newCKr, mk] = await kdfChain(state.CKr);
-            sodium.memzero(state.CKr);
-            state.CKr = newCKr;
-            state.Nr += 1;
-            
-            const nonce = ciphertextBytes.slice(0, 24);
-            const ctext = ciphertextBytes.slice(24);
-            const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-                null,
-                ctext,
-                null,
-                nonce,
-                mk
-            );
-            
-            result = {
-               state: serializeState(state),
-               plaintext,
-               skippedKeys,
-               mk: Array.from(mk)
-            };
-            
-            sodium.memzero(mk);
-        } finally {
-            wipeState(state);
-            sodium.memzero(headerDhBytes);
-        }
-        break;
-      }
+      
       case 'group_init_sender_key': {
-        // Generates a new sender key (acts as the initial Chain Key)
         const senderKey = sodium.randombytes_buf(32);
         result = {
           senderKeyB64: sodium.to_base64(senderKey, sodium.base64_variants.URLSAFE_NO_PADDING)
@@ -1294,46 +1289,45 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         if (!CKBytes) throw new Error("Invalid Group Chain Key");
         const plaintextBytes = typeof plaintext === 'string' ? new TextEncoder().encode(plaintext) : new Uint8Array(plaintext);
 
-        // Ratchet the Chain Key to get Message Key
-        const [newCK, mk] = await kdfChain(CKBytes);
-        const currentN = serializedState.N || 0;
-
-        // Encrypt with Message Key
-        const nonce = sodium.randombytes_buf(24);
-        const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
-            plaintextBytes,
-            null,
-            null,
-            nonce,
-            mk
-        );
-        
-        const combined = new Uint8Array(nonce.length + ciphertext.length);
-        combined.set(nonce);
-        combined.set(ciphertext, nonce.length);
-
-        const header = { n: currentN };
-
-        // Sign the message (Header N + Ciphertext) to prevent identity spoofing in group
+        let newCK: Uint8Array | null = null;
+        let mk: Uint8Array | null = null;
         const signingKeyBytes = new Uint8Array(signingPrivateKey);
-        const dataToSign = new Uint8Array(4 + combined.length);
-        new DataView(dataToSign.buffer).setUint32(0, currentN, false); // N as 4-byte BE
-        dataToSign.set(combined, 4);
         
-        const signature = sodium.crypto_sign_detached(dataToSign, signingKeyBytes);
+        try {
+            [newCK, mk] = await kdfChain(CKBytes);
+            const currentN = serializedState.N || 0;
 
-        result = {
-           state: { CK: bytesToB64(newCK), N: currentN + 1 },
-           header,
-           ciphertext: combined,
-           signature: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING),
-           mk: Array.from(mk) // Return MK so sender can store it for history
-        };
+            const nonce = sodium.randombytes_buf(24);
+            const ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+                plaintextBytes, null, null, nonce, mk
+            );
+            
+            const combined = new Uint8Array(nonce.length + ciphertext.length);
+            combined.set(nonce);
+            combined.set(ciphertext, nonce.length);
 
-        sodium.memzero(CKBytes);
-        sodium.memzero(newCK);
-        sodium.memzero(mk);
-        sodium.memzero(signingKeyBytes);
+            const header = { n: currentN };
+
+            const dataToSign = new Uint8Array(4 + combined.length);
+            new DataView(dataToSign.buffer).setUint32(0, currentN, false);
+            dataToSign.set(combined, 4);
+            
+            const signature = sodium.crypto_sign_detached(dataToSign, signingKeyBytes);
+
+            result = {
+               state: { CK: bytesToB64(newCK) || '', N: currentN + 1 },
+               header,
+               ciphertext: combined,
+               signature: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING),
+               mk: Array.from(mk)
+            };
+        } finally {
+            if (CKBytes) sodium.memzero(CKBytes);
+            if (newCK) sodium.memzero(newCK);
+            if (mk) sodium.memzero(mk);
+            if (signingKeyBytes) sodium.memzero(signingKeyBytes);
+            if (plaintextBytes) sodium.memzero(plaintextBytes); 
+        }
         break;
       }
       case 'group_ratchet_decrypt': {
@@ -1346,7 +1340,6 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         if (!signatureBytes) throw new Error("Missing signature");
 
-        // 1. Verify Signature FIRST (Anti-Spoofing)
         const dataToVerify = new Uint8Array(4 + ciphertextBytes.length);
         new DataView(dataToVerify.buffer).setUint32(0, header.n, false);
         dataToVerify.set(ciphertextBytes, 4);
@@ -1358,7 +1351,6 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         let mk: Uint8Array | null = null;
         const skippedKeys: { dh?: string; epk?: string; n: number; mk: string }[] = [];
 
-        // 2. Fast-forward ratchet if receiving out-of-order/newer messages
         while (currentN < header.n) {
            const [nextCK, skippedMK] = await kdfChain(CKBytes);
            skippedKeys.push({ n: currentN, mk: bytesToB64(skippedMK) || '' });
@@ -1367,7 +1359,6 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
            currentN++;
         }
 
-        // 3. Derive Message Key for this exact message
         if (currentN === header.n) {
            const [nextCK, messageKey] = await kdfChain(CKBytes);
            mk = messageKey;
@@ -1378,22 +1369,17 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
            throw new Error("Message N is older than current state. Possibly replayed or already decrypted.");
         }
 
-        // 4. Decrypt
         const nonce = ciphertextBytes.slice(0, 24);
         const ctext = ciphertextBytes.slice(24);
         const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-            null,
-            ctext,
-            null,
-            nonce,
-            mk
+            null, ctext, null, nonce, mk
         );
 
         result = {
-           state: { CK: bytesToB64(CKBytes), N: currentN },
+           state: { CK: bytesToB64(CKBytes) || '', N: currentN },
            plaintext,
            skippedKeys,
-           mk: Array.from(mk) // Return MK for persistence
+           mk: Array.from(mk)
         };
 
         sodium.memzero(CKBytes);
@@ -1411,8 +1397,6 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         if (!signatureBytes) throw new Error("Missing signature");
 
         try {
-          // 1. Verify Signature (Anti-Spoofing)
-          // Must match the signature format in group_ratchet_encrypt: 4-byte BE N + Ciphertext
           const dataToVerify = new Uint8Array(4 + ciphertextBytes.length);
           new DataView(dataToVerify.buffer).setUint32(0, headerN, false);
           dataToVerify.set(ciphertextBytes, 4);
@@ -1420,20 +1404,13 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           const isValid = sodium.crypto_sign_verify_detached(signatureBytes, dataToVerify, signingPublicKeyBytes);
           if (!isValid) throw new Error("Invalid group message signature (skipped key). Potential spoofing detected!");
 
-          // 2. Decrypt
           const nonce = ciphertextBytes.slice(0, 24);
           const ctext = ciphertextBytes.slice(24);
           const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
-              null,
-              ctext,
-              null,
-              nonce,
-              mkBytes
+              null, ctext, null, nonce, mkBytes
           );
 
-          result = {
-             plaintext
-          };
+          result = { plaintext };
         } finally {
           sodium.memzero(mkBytes);
         }
@@ -1444,7 +1421,6 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         return;
     }
     
-    // Post the result back to the main thread
     self.postMessage({ success: true, id, result });
 
   } catch (error: unknown) {
