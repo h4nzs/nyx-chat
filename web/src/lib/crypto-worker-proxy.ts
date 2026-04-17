@@ -363,8 +363,8 @@ export function worker_dr_ratchet_decrypt(payload: {
     serializedState: DoubleRatchetState,
     header: DoubleRatchetHeader,
     ciphertext: Uint8Array
-}): Promise<{ state: DoubleRatchetState, plaintext: Uint8Array, skippedKeys: { kemPk: string, epk?: string, n: number, mk: string }[], mk: Uint8Array }> {
-    return sendToWorker<{ state: DoubleRatchetState, plaintext: ArrayBuffer, skippedKeys: { kemPk: string, epk?: string, n: number, mk: string }[], mk: ArrayBuffer }>('dr_ratchet_decrypt', {
+}): Promise<{ state: DoubleRatchetState, plaintext: Uint8Array, skippedKeys: { kemPk: string, n: number, mk: string }[], mk: Uint8Array }> {
+    return sendToWorker<{ state: DoubleRatchetState, plaintext: ArrayBuffer, skippedKeys: { kemPk: string, n: number, mk: string }[], mk: ArrayBuffer }>('dr_ratchet_decrypt', {
         serializedState: payload.serializedState,
         header: payload.header,
         ciphertext: toArray(payload.ciphertext)

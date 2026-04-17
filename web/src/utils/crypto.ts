@@ -1052,9 +1052,10 @@ async function doDecryptMessage(
 
       const drHeader = payload.dr;
       const actualCipher = payload.ciphertext;
-      // Prefer epk if present, otherwise fallback to dh
-      const dhKey = drHeader.epk || drHeader.kemPk;
-      const headerKey = `${conversationId}_${dhKey}_${drHeader.n}`;
+      
+      // ✅ FIX: Get the post-quantum key directly from the new KEM header structure
+      const kemPk = drHeader.kemPk;
+      const headerKey = `${conversationId}_${kemPk}_${drHeader.n}`;
 
       const skippedMkStr = await retrieveSkippedMessageKeySecurely(headerKey);
       if (skippedMkStr) {
@@ -1084,8 +1085,7 @@ async function doDecryptMessage(
 
       // [FIX] ATOMIC ORDER: Store intermediate keys (gaps) FIRST
       for (const sk of result.skippedKeys) {
-          const skDhKey = sk.epk || sk.kemPk;
-          const hKey = `${conversationId}_${skDhKey}_${sk.n}`;
+          const hKey = `${conversationId}_${sk.kemPk}_${sk.n}`;
           await storeSkippedMessageKeySecurely(hKey, sk.mk);
       }
 

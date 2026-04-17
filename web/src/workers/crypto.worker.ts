@@ -6,11 +6,13 @@ import type _sodium from 'libsodium-wrappers';
 import { entropyToMnemonic, mnemonicToEntropy } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { argon2id } from 'hash-wasm';
+import type { DoubleRatchetState } from '@nyx/shared';
 import type { 
   CryptoBuffer, 
   SodiumKeyPair, 
   GroupRatchetState, 
-  GroupRatchetHeader
+  GroupRatchetHeader,
+  DoubleRatchetHeader
 } from '../types/crypto-common';
 
 import { getSodium } from '../lib/sodiumInitializer';
@@ -265,6 +267,54 @@ function bytesToB64(bytes: Uint8Array | null | undefined): string | null {
   return bytes ? sodium.to_base64(bytes, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
 }
 
+// --- PQ-DR STATE HELPERS ---
+
+interface RuntimeDoubleRatchetState {
+  KEMs: { publicKey: Uint8Array; privateKey: Uint8Array } | null;
+  KEMr: Uint8Array | null;
+  savedCt: Uint8Array | null;
+  RK: Uint8Array | null;
+  CKs: Uint8Array | null;
+  CKr: Uint8Array | null;
+  Ns: number;
+  Nr: number;
+  PN: number;
+}
+
+function deserializeState(serialized: DoubleRatchetState): RuntimeDoubleRatchetState {
+  return {
+    KEMs: serialized.KEMs ? {
+      publicKey: sodium.from_base64(serialized.KEMs.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+      privateKey: sodium.from_base64(serialized.KEMs.privateKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+    } : null,
+    KEMr: b64ToBytes(serialized.KEMr),
+    savedCt: b64ToBytes(serialized.savedCt),
+    RK: b64ToBytes(serialized.RK),
+    CKs: b64ToBytes(serialized.CKs),
+    CKr: b64ToBytes(serialized.CKr),
+    Ns: serialized.Ns,
+    Nr: serialized.Nr,
+    PN: serialized.PN
+  };
+}
+
+function serializeState(runtime: RuntimeDoubleRatchetState): DoubleRatchetState {
+  return {
+    KEMs: runtime.KEMs ? {
+      publicKey: sodium.to_base64(runtime.KEMs.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+      privateKey: sodium.to_base64(runtime.KEMs.privateKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+    } : null,
+    KEMr: bytesToB64(runtime.KEMr),
+    savedCt: bytesToB64(runtime.savedCt),
+    RK: bytesToB64(runtime.RK),
+    CKs: bytesToB64(runtime.CKs),
+    CKr: bytesToB64(runtime.CKr),
+    Ns: runtime.Ns,
+    Nr: runtime.Nr,
+    PN: runtime.PN
+  };
+}
+
 // --- MAIN MESSAGE HANDLER ---
 
 export type WorkerMessage =
@@ -298,6 +348,10 @@ export type WorkerMessage =
   | { type: 'decrypt_session_key'; payload: { encryptedKey: CryptoBuffer; masterSeed: CryptoBuffer }; id: string }
   | { type: 'generate_otpk_batch'; payload: { count: number; startId: number; masterSeed: CryptoBuffer }; id: string }
   | { type: 'x3dh_recipient_regenerate'; payload: { keyId: number; masterSeed: CryptoBuffer; myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; myPqIdentityKey: SodiumKeyPair; myPqSignedPreKey: SodiumKeyPair; theirSigningKey: CryptoBuffer; initiatorCiphertexts: string }; id: string }
+  | { type: 'dr_init_alice'; payload: { sk: CryptoBuffer; theirSignedPreKeyPublic: CryptoBuffer }; id: string }
+  | { type: 'dr_init_bob'; payload: { sk: CryptoBuffer; mySignedPreKey: SodiumKeyPair }; id: string }
+  | { type: 'dr_ratchet_encrypt'; payload: { serializedState: DoubleRatchetState; plaintext: string | CryptoBuffer }; id: string }
+  | { type: 'dr_ratchet_decrypt'; payload: { serializedState: DoubleRatchetState; header: DoubleRatchetHeader; ciphertext: CryptoBuffer }; id: string }
   | { type: 'group_init_sender_key'; payload: void; id: string }
   | { type: 'group_ratchet_encrypt'; payload: { serializedState: GroupRatchetState; plaintext: string | CryptoBuffer; signingPrivateKey: CryptoBuffer }; id: string }
   | { type: 'group_ratchet_decrypt'; payload: { serializedState: GroupRatchetState; header: GroupRatchetHeader; ciphertext: CryptoBuffer; signature: string; senderSigningPublicKey: CryptoBuffer }; id: string }
@@ -1275,6 +1329,254 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         break;
       }
       
+      case 'dr_init_alice': {
+        const { sk, theirSignedPreKeyPublic } = payload as { sk: CryptoBuffer, theirSignedPreKeyPublic: CryptoBuffer };
+        const skBytes = new Uint8Array(sk);
+        const theirSpkBytes = new Uint8Array(theirSignedPreKeyPublic);
+        
+        let RK: Uint8Array | null = null;
+        let CKs: Uint8Array | null = null;
+        let sharedSecret: Uint8Array | null = null;
+        let pqKeypair: { publicKey: Uint8Array, privateKey: Uint8Array } | null = null;
+
+        try {
+          pqKeypair = sodium.crypto_kem_xwing_keypair();
+          if (!pqKeypair) throw new Error("KEM Keypair generation failed");
+          const pqResult = sodium.crypto_kem_xwing_enc(theirSpkBytes);
+          
+          sharedSecret = new Uint8Array(skBytes.length + pqResult.sharedSecret.length);
+          sharedSecret.set(skBytes, 0);
+          sharedSecret.set(pqResult.sharedSecret, skBytes.length);
+
+          const KDF = sodium.crypto_generichash(64, sharedSecret, null);
+          RK = KDF.slice(0, 32);
+          CKs = KDF.slice(32, 64);
+
+          const state: RuntimeDoubleRatchetState = {
+            KEMs: {
+              publicKey: pqKeypair.publicKey,
+              privateKey: pqKeypair.privateKey
+            },
+            KEMr: theirSpkBytes,
+            savedCt: pqResult.ciphertext,
+            RK,
+            CKs,
+            CKr: null,
+            Ns: 0,
+            Nr: 0,
+            PN: 0
+          };
+
+          result = serializeState(state);
+          sodium.memzero(KDF);
+          sodium.memzero(pqResult.sharedSecret);
+        } finally {
+          sodium.memzero(skBytes);
+          if (pqKeypair) sodium.memzero(pqKeypair.privateKey);
+          if (sharedSecret) sodium.memzero(sharedSecret);
+          if (RK) sodium.memzero(RK);
+          if (CKs) sodium.memzero(CKs);
+        }
+        break;
+      }
+
+      case 'dr_init_bob': {
+        const { sk, mySignedPreKey } = payload as { sk: CryptoBuffer, mySignedPreKey: SodiumKeyPair };
+        if (!mySignedPreKey.publicKey) throw new Error("Missing public key");
+        const skBytes = new Uint8Array(sk);
+        const mySpkPrivateBytes = new Uint8Array(mySignedPreKey.privateKey);
+        const mySpkPublicBytes = new Uint8Array(mySignedPreKey.publicKey);
+
+        try {
+          const state: RuntimeDoubleRatchetState = {
+            KEMs: {
+              publicKey: mySpkPublicBytes,
+              privateKey: mySpkPrivateBytes
+            },
+            KEMr: null,
+            savedCt: null,
+            RK: skBytes,
+            CKs: null,
+            CKr: null,
+            Ns: 0,
+            Nr: 0,
+            PN: 0
+          };
+          result = serializeState(state);
+        } finally {
+          sodium.memzero(skBytes);
+          sodium.memzero(mySpkPrivateBytes);
+        }
+        break;
+      }
+
+      case 'dr_ratchet_encrypt': {
+        const { serializedState, plaintext } = payload as { serializedState: DoubleRatchetState, plaintext: CryptoBuffer | string };
+        const state = deserializeState(serializedState);
+        const plaintextBytes = typeof plaintext === 'string' ? new TextEncoder().encode(plaintext) : new Uint8Array(plaintext);
+
+        let mk: Uint8Array | null = null;
+        let nonce: Uint8Array | null = null;
+        let ciphertext: Uint8Array | null = null;
+
+        try {
+          if (!state.CKs) throw new Error("Cannot encrypt: CKs is null");
+
+          const [newCKs, messageKey] = await kdfChain(state.CKs);
+          sodium.memzero(state.CKs);
+          state.CKs = newCKs;
+          mk = messageKey;
+
+          nonce = sodium.randombytes_buf(24);
+          ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(plaintextBytes, null, null, nonce, mk);
+          
+          if (!nonce || !ciphertext) throw new Error("Encryption failed");
+
+          const combined = new Uint8Array(nonce.length + ciphertext.length);
+          combined.set(nonce);
+          combined.set(ciphertext, nonce.length);
+
+          const header = {
+            kemPk: bytesToB64(state.KEMs?.publicKey)!,
+            ct: bytesToB64(state.savedCt) || '',
+            n: state.Ns,
+            pn: state.PN
+          };
+
+          state.Ns += 1;
+
+          result = {
+            state: serializeState(state),
+            header,
+            ciphertext: Array.from(combined),
+            mk: Array.from(mk)
+          };
+        } finally {
+          if (state.KEMs) sodium.memzero(state.KEMs.privateKey);
+          if (state.RK) sodium.memzero(state.RK);
+          if (state.CKs) sodium.memzero(state.CKs);
+          if (state.CKr) sodium.memzero(state.CKr);
+          if (mk) sodium.memzero(mk);
+          if (nonce) sodium.memzero(nonce);
+          if (ciphertext) sodium.memzero(ciphertext);
+          sodium.memzero(plaintextBytes);
+        }
+        break;
+      }
+
+      case 'dr_ratchet_decrypt': {
+        const { serializedState, header, ciphertext } = payload as { serializedState: DoubleRatchetState, header: DoubleRatchetHeader, ciphertext: CryptoBuffer };
+        const state = deserializeState(serializedState);
+        const ciphertextBytes = new Uint8Array(ciphertext);
+        const headerKemPk = b64ToBytes(header.kemPk);
+        const headerCt = header.ct ? b64ToBytes(header.ct) : null;
+        
+        if (!headerKemPk) throw new Error("Missing kemPk in header");
+        if (!state.RK) throw new Error("RK is missing");
+
+        const skippedKeys: { kemPk: string, n: number, mk: string }[] = [];
+        let mk: Uint8Array | null = null;
+        let sharedSecret1: Uint8Array | null = null;
+        let sharedSecret2: Uint8Array | null = null;
+        let newKEMs: { publicKey: Uint8Array, privateKey: Uint8Array } | null = null;
+        let plaintext: Uint8Array | null = null;
+
+        try {
+          if (!state.KEMr || sodium.compare(headerKemPk, state.KEMr) !== 0) {
+            if (headerCt && state.KEMs) {
+              const pqSharedSecret = sodium.crypto_kem_xwing_dec(headerCt, state.KEMs.privateKey);
+              sharedSecret1 = new Uint8Array(32 + pqSharedSecret.length);
+              sharedSecret1.set(state.RK, 0);
+              sharedSecret1.set(pqSharedSecret, 32);
+
+              const KDF1 = sodium.crypto_generichash(64, sharedSecret1, null);
+              sodium.memzero(state.RK);
+              state.RK = KDF1.slice(0, 32);
+              if (state.CKr) sodium.memzero(state.CKr);
+              state.CKr = KDF1.slice(32, 64);
+              sodium.memzero(pqSharedSecret);
+              sodium.memzero(KDF1);
+            }
+
+            state.PN = state.Ns;
+            state.Ns = 0;
+            state.Nr = 0;
+            state.KEMr = headerKemPk;
+
+            newKEMs = sodium.crypto_kem_xwing_keypair();
+            if (!newKEMs) throw new Error("KEM Keypair generation failed");
+            const pqResult = sodium.crypto_kem_xwing_enc(state.KEMr);
+            state.savedCt = pqResult.ciphertext;
+
+            sharedSecret2 = new Uint8Array(32 + pqResult.sharedSecret.length);
+            sharedSecret2.set(state.RK!, 0);
+            sharedSecret2.set(pqResult.sharedSecret, 32);
+
+            const KDF2 = sodium.crypto_generichash(64, sharedSecret2, null);
+            sodium.memzero(state.RK);
+            state.RK = KDF2.slice(0, 32);
+            if (state.CKs) sodium.memzero(state.CKs);
+            state.CKs = KDF2.slice(32, 64);
+            sodium.memzero(pqResult.sharedSecret);
+            sodium.memzero(KDF2);
+
+            if (state.KEMs) sodium.memzero(state.KEMs.privateKey);
+            state.KEMs = {
+              publicKey: newKEMs.publicKey,
+              privateKey: newKEMs.privateKey
+            };
+          }
+
+          while (state.Nr < header.n) {
+            if (!state.CKr) throw new Error("CKr is missing");
+            const [nextCKr, skippedMK] = await kdfChain(state.CKr);
+            skippedKeys.push({ kemPk: header.kemPk, n: state.Nr, mk: bytesToB64(skippedMK) || '' });
+            sodium.memzero(state.CKr);
+            state.CKr = nextCKr;
+            state.Nr++;
+          }
+
+          if (state.Nr === header.n) {
+            if (!state.CKr) throw new Error("CKr is missing");
+            const [nextCKr, messageKey] = await kdfChain(state.CKr);
+            mk = messageKey;
+            sodium.memzero(state.CKr);
+            state.CKr = nextCKr;
+            state.Nr++;
+          } else {
+            throw new Error("Message N is older than current state");
+          }
+
+          const nonce = ciphertextBytes.slice(0, 24);
+          const ctext = ciphertextBytes.slice(24);
+          plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
+          if (!plaintext) throw new Error("Decryption failed");
+
+          result = {
+            state: serializeState(state),
+            plaintext: Array.from(plaintext),
+            skippedKeys,
+            mk: Array.from(mk)
+          };
+        } finally {
+          if (sharedSecret1) sodium.memzero(sharedSecret1);
+          if (sharedSecret2) sodium.memzero(sharedSecret2);
+          if (mk) sodium.memzero(mk);
+          if (headerKemPk) sodium.memzero(headerKemPk);
+          if (headerCt) sodium.memzero(headerCt);
+          if (newKEMs && (!state.KEMs || state.KEMs.privateKey !== newKEMs.privateKey)) {
+             sodium.memzero(newKEMs.privateKey);
+          }
+          if (plaintext) sodium.memzero(plaintext);
+          
+          if (state.KEMs) sodium.memzero(state.KEMs.privateKey);
+          if (state.RK) sodium.memzero(state.RK);
+          if (state.CKs) sodium.memzero(state.CKs);
+          if (state.CKr) sodium.memzero(state.CKr);
+        }
+        break;
+      }
+
       case 'group_init_sender_key': {
         const senderKey = sodium.randombytes_buf(32);
         result = {
