@@ -405,7 +405,7 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
   getSocket()?.emit('session:fulfill_response', payload);
 }
 
-export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string }[]) {
+export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string; type: string }[]) {
   getSocket()?.emit('messages:distribute_keys', { conversationId, keys });
 }
 

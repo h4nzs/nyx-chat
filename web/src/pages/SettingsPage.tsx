@@ -329,7 +329,7 @@ export default function SettingsPage() {
         phraseToLock,
         // Fungsi callback untuk generate silent auth options
         async () => {
-           const res = await api('/api/auth/webauthn/login/options');
+           const res = await api<import('@simplewebauthn/browser').PublicKeyCredentialRequestOptionsJSON>('/api/auth/webauthn/login/options');
            return res;
         }
       );

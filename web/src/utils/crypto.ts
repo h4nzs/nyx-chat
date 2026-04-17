@@ -666,7 +666,7 @@ export async function rotateGroupKey(conversationId: string, reason: 'membership
     if (conversation) {
       const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
       if (distributionKeys) {
-        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string; type: string }[]);
       }
     }
   }

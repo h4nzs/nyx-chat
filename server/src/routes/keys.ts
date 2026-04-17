@@ -52,21 +52,21 @@ router.post(
         await tx.preKeyBundle.upsert({
           where: { deviceId },
           update: {
-            identityKey,
-            pqIdentityKey,
-            key: signedPreKey.key,
-            pqKey: signedPreKey.pqKey,
-            signature: signedPreKey.signature,
-            pqSignature: signedPreKey.pqSignature
+            identityKey: Buffer.from(identityKey, 'base64url'),
+            pqIdentityKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null,
+            key: Buffer.from(signedPreKey.key, 'base64url'),
+            pqKey: signedPreKey.pqKey ? Buffer.from(signedPreKey.pqKey, 'base64url') : null,
+            signature: Buffer.from(signedPreKey.signature, 'base64url'),
+            pqSignature: signedPreKey.pqSignature ? Buffer.from(signedPreKey.pqSignature, 'base64url') : null
           },
           create: {
             deviceId,
-            identityKey,
-            pqIdentityKey,
-            key: signedPreKey.key,
-            pqKey: signedPreKey.pqKey,
-            signature: signedPreKey.signature,
-            pqSignature: signedPreKey.pqSignature
+            identityKey: Buffer.from(identityKey, 'base64url'),
+            pqIdentityKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null,
+            key: Buffer.from(signedPreKey.key, 'base64url'),
+            pqKey: signedPreKey.pqKey ? Buffer.from(signedPreKey.pqKey, 'base64url') : null,
+            signature: Buffer.from(signedPreKey.signature, 'base64url'),
+            pqSignature: signedPreKey.pqSignature ? Buffer.from(signedPreKey.pqSignature, 'base64url') : null
           }
         });
 
@@ -96,8 +96,8 @@ router.post(
     body: z.object({
       keys: z.array(z.object({
         keyId: z.number(),
-        publicKey: z.string(),
-        pqPublicKey: z.string().optional()
+        publicKey: z.string().regex(base64UrlRegex, 'Must be base64url'),
+        pqPublicKey: z.string().regex(base64UrlRegex, 'Must be base64url').optional()
       })).min(1).max(100)
     })
   }),
@@ -114,8 +114,8 @@ router.post(
         data: keys.map((k: { keyId: number; publicKey: string; pqPublicKey?: string }) => ({
           deviceId,
           keyId: k.keyId,
-          publicKey: k.publicKey, // Disimpan sebagai string karena di Prisma OTPK.publicKey masih String
-          pqPublicKey: k.pqPublicKey
+          publicKey: Buffer.from(k.publicKey, 'base64url'),
+          pqPublicKey: k.pqPublicKey ? Buffer.from(k.pqPublicKey, 'base64url') : null
         })),
         skipDuplicates: true
       })
@@ -384,4 +384,4 @@ router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
   }
 });
 
-export default routerdefault router
+export default router

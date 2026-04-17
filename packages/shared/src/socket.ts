@@ -113,6 +113,8 @@ export interface ServerToClientEvents {
         requesterPqPublicKey: string;
         requesterDeviceId?: string;
     }) => void;
+    "group:key_request_failed": (payload: { conversationId: string; reason: string }) => void;
+    "session:request_key_failed": (payload: { sessionId: string; targetId: string; reason: string }) => void;
     force_logout: (payload?: { jti?: string }) => void; // Updated
     'auth:banned': (payload: { reason: string }) => void; // Added
     'user:identity_changed': (data: { userId: string; name?: string }) => void; // Made name optional
