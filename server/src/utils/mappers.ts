@@ -16,6 +16,7 @@ export interface PrismaUserProfileInput {
   encryptedProfile?: string | null;
   publicKey?: string | null; 
   signingKey?: string | null; 
+  devices?: { id: string; publicKey: string; signingKey: string }[] | null;
 }
 
 export interface PrismaParticipantInput {
@@ -69,7 +70,7 @@ export const toMinimalProfile = (user: PrismaUserProfileInput): MinimalProfile =
 
 export const toParticipant = (p: PrismaParticipantInput): Participant => ({
   // Frontend butuh `id` yang merepresentasikan User ID, bukan Participant ID!
-  id: asUserId(p.userId || p.user?.id || p.id), 
+  id: asUserId(p.userId || p.user?.id || p.id),
   userId: asUserId(p.userId || p.user?.id || p.id),
   role: (p.role === 'ADMIN' || p.role === 'MEMBER' || p.role === 'admin' || p.role === 'member') ? p.role as Participant['role'] : 'MEMBER',
   isPinned: p.isPinned ?? false,
@@ -81,8 +82,8 @@ export const toParticipant = (p: PrismaParticipantInput): Participant => ({
   // Kembalikan public keys agar sistem E2EE berfungsi
   publicKey: p.user?.publicKey ?? undefined,
   signingKey: p.user?.signingKey ?? undefined,
+  devices: p.user?.devices ?? undefined,
 });
-
 export const toConversation = (conv: PrismaConversationInput): Conversation => ({
   id: asConversationId(conv.id),
   isGroup: conv.isGroup ?? (conv.type === 'GROUP'), 

@@ -21,7 +21,7 @@ router.use(requireAuth)
 // agar kompatibel dengan toRawServerMessage mapper.
 const ensureLegacyMessageFields = <T extends Record<string, unknown>>(msg: T) => ({
   ...msg,
-  repliedToId: null // Relasi DB sudah diputus, jadi selalu null dari server
+  repliedToId: msg.repliedToId || null
 });
 
 // ==========================================

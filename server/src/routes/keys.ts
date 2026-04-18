@@ -340,11 +340,15 @@ router.get(
         return res.status(404).json({ error: "Initiator's public key could not be found." })
       }
 
+      if (!initiatorRecord.device.signingKey) {
+        return res.status(404).json({ error: "Initiator's signing key could not be found." })
+      }
+
       res.json({
         // FIX 5: Konversi encryptedKey ke Base64
-        encryptedKey: Buffer.isBuffer(keyRecord.encryptedKey) || keyRecord.encryptedKey instanceof Uint8Array ? Buffer.from(keyRecord.encryptedKey).toString('base64') : String(keyRecord.encryptedKey),
-        initiatorCiphertextsStr: Buffer.from(keyRecord.initiatorCiphertexts!).toString('base64'),
-        initiatorSigningKey: Buffer.from(initiatorRecord.device.signingKey).toString('base64')
+        encryptedKey: Buffer.isBuffer(keyRecord.encryptedKey) || keyRecord.encryptedKey instanceof Uint8Array ? Buffer.from(keyRecord.encryptedKey).toString('base64url') : String(keyRecord.encryptedKey),
+        initiatorCiphertextsStr: Buffer.from(keyRecord.initiatorCiphertexts!).toString('base64url'),
+        initiatorSigningKey: Buffer.from(initiatorRecord.device.signingKey).toString('base64url')
       })
     } catch (e) { next(e) }
   }

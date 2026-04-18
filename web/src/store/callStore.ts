@@ -16,7 +16,7 @@ interface CallStoreState {
 
   setCallState: (state: CallState) => void;
   setIncomingCall: (from: UserId, isVideo: boolean, profile?: MinimalProfile, key?: string) => void;
-  setOutgoingCall: (to: UserId | UserId[], isVideo: boolean, profile: MinimalProfile | MinimalProfile[], key: string) => void;
+  setOutgoingCall: (to: UserId | UserId[], isVideo: boolean, profile?: MinimalProfile | MinimalProfile[], key?: string) => void;
   setLocalStream: (stream: MediaStream | null) => void;
   addRemoteStream: (userId: UserId, stream: MediaStream) => void;
   removeRemoteStream: (userId: UserId) => void;

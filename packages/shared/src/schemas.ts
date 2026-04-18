@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { asUserId, asConversationId, asMessageId, asStoryId } from './brands.js';
 
 // --- Validasi Kriptografi Khusus ---
-// Memastikan string hanya berisi karakter Base64 atau URL-Safe Base64 yang valid
-export const Base64StringSchema = z.string();
+// Memastikan string hanya berisi karakter Base64 atau URL-Safe Base64 yang valid (dan max len wajar)
+export const Base64StringSchema = z.string().regex(/^[A-Za-z0-9+/_-]+={0,2}$/, 'Invalid base64/base64url format').max(1000000, 'Payload too large');
 
 // --- Base ID Schemas (Transforming to Branded Types) ---
 export const UserIdSchema = z.string().min(1).transform((val) => asUserId(val));
@@ -32,6 +32,35 @@ export const MinimalConversationSchema = z.object({
   unreadCount: z.number().default(0),
   keyRotationPending: z.boolean().optional(),
   requiresKeyRotation: z.boolean().optional(),
+}).passthrough();
+
+export const ParticipantSchema = z.object({
+  id: UserIdSchema,
+  userId: UserIdSchema.optional(),
+  encryptedProfile: Base64StringSchema.nullable().optional(),
+  publicKey: z.string().optional(),
+  signingKey: z.string().optional(),
+  devices: z.array(z.object({
+    id: z.string(),
+    publicKey: z.string(),
+    signingKey: z.string()
+  })).optional(),
+  role: z.enum(["ADMIN", "MEMBER", "admin", "member"]),
+  isPinned: z.boolean().optional(),
+  name: z.string().optional(),
+  username: z.string().optional(),
+  avatarUrl: z.string().nullable().optional()
+}).passthrough();
+
+export const ConversationSchema = MinimalConversationSchema.extend({
+  participants: z.array(ParticipantSchema),
+  lastMessage: z.any().nullable(),
+  lastUpdated: z.number().optional(),
+  decryptedMetadata: z.object({
+    title: z.string().optional(),
+    description: z.string().optional(),
+    avatarUrl: z.string().optional()
+  }).optional()
 }).passthrough();
 
 export const IncomingMessageSchema = z.object({

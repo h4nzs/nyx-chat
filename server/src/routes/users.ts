@@ -182,27 +182,30 @@ router.put('/me/keys',
   zodValidate({
     body: z.object({
       publicKey: z.string().min(43).max(256).regex(base64UrlRegex, { message: 'Invalid public key format.' }),
+      pqPublicKey: z.string().min(43).max(2048).regex(base64UrlRegex, { message: 'Invalid PQ public key format.' }),
       signingKey: z.string().min(43).max(256).regex(base64UrlRegex, { message: 'Invalid signing key format.' })
     })
   }),
   async (req, res, next) => {
     try {
       if (!req.user) throw new ApiError(401, 'Authentication required.')
-      
+
       const authUser = req.user as AuthJwtPayload;
+      const userId = authUser.id;
       const deviceId = authUser.deviceId;
       if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
-        
-      const userId = authUser.id
-      const { publicKey, signingKey } = req.body
+
+      const { publicKey, pqPublicKey, signingKey } = req.body
 
       // FIX 2: Konversi String Base64 dari Client menjadi Buffer untuk Prisma Bytes
       await prisma.device.update({
         where: { id: deviceId },
         data: {
             publicKey: Buffer.from(publicKey, 'base64url'),
+            pqPublicKey: Buffer.from(pqPublicKey, 'base64url'),
             signingKey: Buffer.from(signingKey, 'base64url')
-        }      })
+        }
+      })
 
       const conversations = await prisma.conversation.findMany({
         where: { participants: { some: { userId } } },

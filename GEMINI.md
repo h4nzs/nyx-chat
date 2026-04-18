@@ -77,6 +77,6 @@ pnpm dev # Starts Astro development server
 
 1. **Cryptography Stability:** **DO NOT** update, modify, or bump the `libsodium-wrappers` dependency unless specifically instructed to do so for newer PQC primitives. Cryptographic backward compatibility is the highest priority.
 2. **Strict Linting:** The project enforces strict linting with ESLint v10 (Flat Config). Code must pass `pnpm lint` with zero warnings before being merged or considered complete.
-3. **Shared Types:** Any interfaces, data models, or validation schemas (Zod) that cross the client/server boundary must be defined inside `packages/shared/` to ensure end-to-end type safety.
+3. **Shared Types:** Any interfaces, data models, or validation schemas (Zod) that cross the client/server boundary must be defined inside `packages/shared/` to ensure end-to-end type safety and if this packages need to be modified always build first before any other workspaces.
 4. **Database Changes:** The backend uses Prisma ORM. Modify `server/prisma/schema.prisma` for database changes, and apply them using `npx prisma db push` during local development.
 5. **No PII:** When designing new features or database models, ensure absolutely no personally identifiable information (PII) is collected, transmitted, or stored in plaintext.

@@ -58,7 +58,7 @@ export interface IdentityKey {
 // Menggunakan tipe State yang sesuai dari shared
 export interface RatchetSession {
   conversationId: ConversationId;
-  state: DoubleRatchetState; // serialized state
+  state: Uint8Array; // serialized encrypted state
 }
 
 // Menggunakan tipe State yang sesuai dari crypto-common

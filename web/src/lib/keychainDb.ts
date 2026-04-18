@@ -268,14 +268,13 @@ export async function deleteGroupKey(conversationId: string): Promise<void> {
 
 export async function storeRatchetSession(conversationId: string, encryptedState: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
-      // Dummy cast to bypass mismatch between serialized (Uint8Array) and runtime type (DoubleRatchetState)
-      await db.ratchetSessions.put({ conversationId: conversationId as ConversationId, state: encryptedState as unknown as import('@nyx/shared').DoubleRatchetState });
+      await db.ratchetSessions.put({ conversationId: conversationId as ConversationId, state: encryptedState });
   });
 }
 
 export async function getRatchetSession(conversationId: string): Promise<Uint8Array | null> {
   const record = await db.ratchetSessions.get(conversationId);
-  return record ? (record.state as unknown as Uint8Array) : null;
+  return record ? record.state : null;
 }
 
 export async function storeSkippedKey(headerKey: string, encryptedKey: Uint8Array): Promise<void> {

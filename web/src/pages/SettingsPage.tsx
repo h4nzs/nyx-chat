@@ -302,7 +302,9 @@ export default function SettingsPage() {
       if (autoUnlockKey && encryptedKeysStr) {
           try {
               phraseToLock = await getRecoveryPhrase(encryptedKeysStr, autoUnlockKey);
-          } catch (e) {}
+          } catch (e) {
+              console.error('getRecoveryPhrase failed', { e, encryptedKeysStr, autoUnlockKey });
+          }
       }
 
       if (!phraseToLock) {

@@ -366,7 +366,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
         const distributionKeys = await ensureGroupSession(conv.id, conv.participants as unknown as Participant[], true);
         if (distributionKeys) {
-            emitGroupKeyDistribution(conv.id, distributionKeys as { userId: string; key: string; type: string }[]);
+            emitGroupKeyDistribution(conv.id, distributionKeys as { userId: string; key: string }[]);
         }
         
         const encryptedMetadata = await encryptGroupMetadata({ title: name, avatarUrl }, conv.id);

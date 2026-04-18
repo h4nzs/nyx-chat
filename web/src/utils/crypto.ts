@@ -256,24 +256,30 @@ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
     if (count >= OTPK_THRESHOLD) return;
 
     const masterSeed = await getMasterSeedOrThrow();
-    const startId = (await getLastOtpkId()) + 1;
+    let currentStartId = (await getLastOtpkId()) + 1;
+    let currentCount = count;
 
     // Dynamic import for worker proxy
     const { worker_generate_otpk_batch } = await import('@lib/crypto-worker-proxy');
 
-    const batch = await worker_generate_otpk_batch(OTPK_BATCH_SIZE, startId, masterSeed);
+    while (currentCount < OTPK_THRESHOLD) {
+        const batch = await worker_generate_otpk_batch(OTPK_BATCH_SIZE, currentStartId, masterSeed);
 
-    // Store private keys locally
-    for (const key of batch) {
-      await storeOneTimePreKey(key.keyId, key.encryptedPrivateKey);
+        // Store private keys locally
+        for (const key of batch) {
+          await storeOneTimePreKey(key.keyId, key.encryptedPrivateKey);
+        }
+
+        // Upload public keys
+        const publicKeys = batch.map(k => ({ keyId: k.keyId, publicKey: k.publicKey, pqPublicKey: k.pqPublicKey }));
+        await authFetch('/api/keys/upload-otpk', {
+          method: 'POST',
+          body: JSON.stringify({ keys: publicKeys })
+        });
+        
+        currentCount += batch.length;
+        currentStartId += batch.length;
     }
-
-    // Upload public keys
-    const publicKeys = batch.map(k => ({ keyId: k.keyId, publicKey: k.publicKey, pqPublicKey: k.pqPublicKey }));
-    await authFetch('/api/keys/upload-otpk', {
-      method: 'POST',
-      body: JSON.stringify({ keys: publicKeys })
-    });
   } catch (error) {
     console.error("[Crypto] Failed to refill One-Time Pre-Keys:", error);
   }
@@ -583,6 +589,11 @@ export async function ensureGroupSession(conversationId: string, participants: P
           }
       }
 
+      if (distributionKeys.length === 0) {
+          console.warn(`No distribution keys generated for group ${conversationId}. Skipping sender state creation.`);
+          return [];
+      }
+
       // 3. Save Initial Sender State ONLY after successful encryption fan-out
       await saveGroupSenderState({
           conversationId: conversationId as ConversationId,
@@ -666,7 +677,7 @@ export async function rotateGroupKey(conversationId: string, reason: 'membership
     if (conversation) {
       const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
       if (distributionKeys) {
-        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string; type: string }[]);
+        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
       }
     }
   }

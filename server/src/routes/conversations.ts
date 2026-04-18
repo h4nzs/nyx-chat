@@ -6,23 +6,25 @@ import { prisma } from '../lib/prisma.js'
 import { DeliveryStatus } from '@prisma/client';
 import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
-import { asConversationId, asUserId, type User } from '@nyx/shared'
+import { asConversationId, asUserId, type User, ConversationSchema, ParticipantSchema } from '@nyx/shared'
 import { toConversation, toParticipant } from '../utils/mappers.js';
 import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
 import { ApiError } from '../utils/errors.js'
+import { zodValidate } from '../utils/validate.js'
 import { redisClient } from '../lib/redis.js'
 import { Buffer } from 'buffer';
+import { z } from 'zod';
 
 const router: Router = Router()
 router.use(requireAuth)
 
 const MAX_GROUP_MEMBERS = 100 
 
-// ✅ Selector Type-Safe untuk mengambil Kunci dari Perangkat Terakhir Aktif
-const userSelectWithKeys = { 
-  id: true, 
-  encryptedProfile: true, 
-  devices: { select: { id: true, publicKey: true, signingKey: true }, orderBy: { lastActiveAt: 'desc' as const }, take: 1 } 
+// ✅ Selector Type-Safe untuk mengambil Kunci dari Perangkat Aktif
+const userSelectWithKeys = {
+  id: true,
+  encryptedProfile: true,
+  devices: { select: { id: true, publicKey: true, signingKey: true }, orderBy: { lastActiveAt: 'desc' as const } }
 };
 
 // Type Definitions
@@ -47,15 +49,20 @@ const hoistKeys = (u: UserWithDevices | null) => {
   if (!u) return u;
   const result: Record<string, unknown> = { ...u };
   if (u.devices && u.devices.length > 0) {
-    // Pastikan selalu dirender ke base64 jika asalnya adalah Uint8Array/Buffer dari Prisma
+    result.devices = u.devices.map(d => ({
+      id: d.id,
+      publicKey: Buffer.isBuffer(d.publicKey) || d.publicKey instanceof Uint8Array ? Buffer.from(d.publicKey).toString('base64url') : d.publicKey,
+      signingKey: Buffer.isBuffer(d.signingKey) || d.signingKey instanceof Uint8Array ? Buffer.from(d.signingKey).toString('base64url') : d.signingKey
+    }));
+
+    // Keep top-level keys for backward compatibility (uses the first active device)
     const pk = u.devices[0].publicKey;
     const sk = u.devices[0].signingKey;
-    result.publicKey = Buffer.isBuffer(pk) || pk instanceof Uint8Array ? Buffer.from(pk).toString('base64') : pk;
-    result.signingKey = Buffer.isBuffer(sk) || sk instanceof Uint8Array ? Buffer.from(sk).toString('base64') : sk;
+    result.publicKey = Buffer.isBuffer(pk) || pk instanceof Uint8Array ? Buffer.from(pk).toString('base64url') : pk;
+    result.signingKey = Buffer.isBuffer(sk) || sk instanceof Uint8Array ? Buffer.from(sk).toString('base64url') : sk;
   }
   return result;
 };
-
 const hoistConvoKeys = (c: RawConversationData) => {
   const result: Record<string, unknown> = { ...c };
   if (c.creator) result.creator = hoistKeys(c.creator);
@@ -136,7 +143,7 @@ router.get('/', async (req, res, next) => {
     const safeConversations = conversationsData.map(convo => {
       const safeConv = toConversation(hoistConvoKeys(convo as unknown as RawConversationData));
       safeConv.unreadCount = unreadMap.get(convo.id) || 0;
-      return safeConv;
+      return ConversationSchema.parse(safeConv);
     })
 
     res.json(safeConversations)
@@ -145,8 +152,27 @@ router.get('/', async (req, res, next) => {
   }
 })
 
+const initialSessionSchema = z.object({
+  sessionId: z.string(),
+  initialKeys: z.array(z.object({
+    userId: z.string(),
+    key: z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url')
+  })),
+  ephemeralPublicKey: z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url')
+}).optional()
+
 // CREATE a new conversation
-router.post('/', async (req, res, next) => {
+router.post(
+  '/', 
+  zodValidate({
+    body: z.object({
+      encryptedMetadata: z.string().nullable().optional(),
+      userIds: z.array(z.string()),
+      isGroup: z.boolean(),
+      initialSession: initialSessionSchema
+    })
+  }),
+  async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { encryptedMetadata, userIds, isGroup, initialSession } = req.body
@@ -207,9 +233,9 @@ router.post('/', async (req, res, next) => {
         })
 
         if (initialSession) {
-          const { sessionId, initialKeys, ephemeralPublicKey } = initialSession
-          if (!sessionId || !initialKeys || !ephemeralPublicKey) throw new Error('Incomplete initial session data provided.')
-          
+          const { sessionId, initialKeys, ephemeralPublicKey: initiatorCiphertextsPerUser } = initialSession
+          if (!sessionId || !initialKeys || !initiatorCiphertextsPerUser) throw new Error('Incomplete initial session data provided.')
+
           const targetUserIds = initialKeys.map((ik: { userId: string }) => ik.userId);
           const devices = await tx.device.findMany({ where: { userId: { in: targetUserIds } }, select: { id: true, userId: true } });
 
@@ -222,13 +248,15 @@ router.post('/', async (req, res, next) => {
                    encryptedKey: Buffer.from(ik.key, 'base64url'),
                    deviceId: d.id,
                    conversationId: conversation.id,
-                   initiatorCiphertexts: Buffer.from(ephemeralPublicKey, 'base64url'),
+                   // DOCUMENTATION: initiatorCiphertextsPerUser (previously ephemeralPublicKey) contains the full X3DH 
+                   // initiator ciphertexts object ({ek, ct_id, ct_spk, ct_otpk}) and is shared per user (not per device)
+                   // due to the client's current X3DH protocol implementation.
+                   initiatorCiphertexts: Buffer.from(initiatorCiphertextsPerUser, 'base64url'),
                    isInitiator: ik.userId === creatorId
                 });
              }
           }
-          await tx.sessionKey.createMany({ data: keyRecords })
-        } else if (isGroup) {
+          await tx.sessionKey.createMany({ data: keyRecords })        } else if (isGroup) {
           await rotateAndDistributeSessionKeys(conversation.id, creatorId, tx)
         }
         return conversation
@@ -330,7 +358,7 @@ router.post('/:id/participants', async (req, res, next) => {
       })
     }
     
-    res.status(201).json(safeParticipants)
+    res.status(201).json(z.array(ParticipantSchema).parse(safeParticipants))
   } catch (error) {
     next(error)
   }

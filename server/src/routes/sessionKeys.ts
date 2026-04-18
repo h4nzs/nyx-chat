@@ -38,7 +38,7 @@ router.get('/:conversationId', async (req, res, next) => {
     // Konversi Prisma Bytes (Buffer) kembali menjadi string Base64 untuk JSON response
     const formattedKeys = sessionKeys.map(sk => ({
       sessionId: sk.sessionId,
-      encryptedKey: Buffer.from(sk.encryptedKey).toString('base64')
+      encryptedKey: Buffer.from(sk.encryptedKey).toString('base64url')
     }))
 
     res.json({ keys: formattedKeys })

@@ -70,13 +70,13 @@ export type Message = z.infer<typeof IncomingMessageSchema> & {
   isSilent?: boolean;
   isDeletedLocal?: boolean;
 };
-
 export type Participant = {
   id: UserId;
   userId?: UserId;
   encryptedProfile?: string | null;
   publicKey?: string;
   signingKey?: string;
+  devices?: { id: string; publicKey: string; signingKey: string }[];
   role: "ADMIN" | "MEMBER" | "admin" | "member";
   isPinned?: boolean;
   name?: string;

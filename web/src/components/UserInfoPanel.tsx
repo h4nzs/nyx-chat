@@ -219,10 +219,10 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
       </div>
       
       {showSafetyModal && user && (
-        <SafetyNumberModal 
-          safetyNumber={safetyNumber} 
-          userName={profile.name} 
-          onClose={() => setShowSafetyModal(false)} 
+        <SafetyNumberModal
+          safetyNumber={safetyNumber}
+          userName={profile.name}
+          onClose={() => setShowSafetyModal(false)}
           onVerify={() => {
             if (activeId && user.publicKey) {
               setVerified(activeId, user.publicKey);
@@ -230,6 +230,8 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
             setShowSafetyModal(false);
           }}
           isVerified={isAlreadyVerified}
+          hasPeerPQ={!!user.pqPublicKey}
+          hasPeerSigning={!!user.signingKey}
         />
       )}
     </>

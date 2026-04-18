@@ -90,9 +90,9 @@ router.post('/register', authLimiter, zodValidate({
     usernameHash: z.string().min(10),
     password: z.string().min(8).max(128),
     encryptedProfile: z.string().optional(),
-    publicKey: z.string().optional(),
+    publicKey: z.string(),
     pqPublicKey: z.string().optional(),
-    signingKey: z.string().optional(),
+    signingKey: z.string(),
     encryptedPrivateKeys: z.string().optional(),
     deviceName: z.string().optional(),
     turnstileToken: z.string().optional()
@@ -154,9 +154,9 @@ router.post('/login', authLimiter, zodValidate({
   body: z.object({ 
     usernameHash: z.string().min(10), 
     password: z.string().min(8),
-    publicKey: z.string().optional(),
+    publicKey: z.string(),
     pqPublicKey: z.string().optional(),
-    signingKey: z.string().optional(),
+    signingKey: z.string(),
     encryptedPrivateKey: z.string().optional(),
     deviceName: z.string().optional()
   })
@@ -296,9 +296,9 @@ router.post('/recover', authLimiter, zodValidate({
     identifier: z.string().min(10),
     newPassword: z.string().min(8),
     newEncryptedKeys: z.string(),
-    publicKey: z.string().optional(),
+    publicKey: z.string(),
     pqPublicKey: z.string().optional(),
-    signingKey: z.string().optional(),
+    signingKey: z.string(),
     signature: z.string(),
     timestamp: z.number(),
     nonce: z.string()

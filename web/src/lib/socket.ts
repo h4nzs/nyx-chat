@@ -337,7 +337,15 @@ export function getSocket() {
         })
         .catch(console.error);
     });
-    socket.on('force_logout', () => {
+    socket.on('force_logout', (payload) => {
+      const currentToken = useAuthStore.getState().accessToken;
+      if (payload?.jti && currentToken) {
+         try {
+            const decoded = JSON.parse(atob(currentToken.split('.')[1]));
+            if (decoded.jti !== payload.jti) return;
+         } catch(e) {}
+      }
+
       toast.error(i18n.t('errors:this_session_has_been_logged_out_remotel', 'This session has been logged out remotely.'));
       useAuthStore.getState().logout();
       disconnectSocket();
@@ -405,7 +413,7 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
   getSocket()?.emit('session:fulfill_response', payload);
 }
 
-export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string; type: string }[]) {
+export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string }[]) {
   getSocket()?.emit('messages:distribute_keys', { conversationId, keys });
 }
 

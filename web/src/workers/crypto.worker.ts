@@ -1527,6 +1527,11 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             };
           }
 
+          const MAX_SKIP = 1000;
+          if (header.n - state.Nr > MAX_SKIP) {
+            throw new Error(`Too many skipped messages: ${header.n - state.Nr}`);
+          }
+
           while (state.Nr < header.n) {
             if (!state.CKr) throw new Error("CKr is missing");
             const [nextCKr, skippedMK] = await kdfChain(state.CKr);

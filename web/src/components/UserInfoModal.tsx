@@ -324,10 +324,10 @@ export default function UserInfoModal() {
       </ModalBase>
       
       {showSafetyModal && user && (
-        <SafetyNumberModal 
-          safetyNumber={safetyNumber} 
-          userName={profile.name} 
-          onClose={() => setShowSafetyModal(false)} 
+        <SafetyNumberModal
+          safetyNumber={safetyNumber}
+          userName={profile.name}
+          onClose={() => setShowSafetyModal(false)}
           onVerify={() => {
             if (activeId && user.publicKey) {
               setVerified(activeId, user.publicKey);
@@ -335,6 +335,8 @@ export default function UserInfoModal() {
             setShowSafetyModal(false);
           }}
           isVerified={isAlreadyVerified}
+          hasPeerPQ={!!user.pqPublicKey}
+          hasPeerSigning={!!user.signingKey}
         />
       )}
     </>
