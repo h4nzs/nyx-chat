@@ -319,7 +319,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         body: JSON.stringify({
           userIds: [peerId],
           isGroup: false,
-          initialSession: null, 
+          initialSession: undefined, 
         }),
       });
       

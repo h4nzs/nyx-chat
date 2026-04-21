@@ -220,6 +220,14 @@ export async function decryptMessageObject(
                     }
                     if (rawMsg.repliedTo) {
                         finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
+                    } else if (rawMsg.repliedToId) {
+                        try {
+                            const { shadowVault } = await import('@lib/shadowVaultDb');
+                            const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
+                            if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
+                        } catch (e) {
+                            console.error('[Vault] Failed to fetch replied message locally', e);
+                        }
                     }
                     return finalMessage;
                 } catch (e) {
@@ -1687,7 +1695,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         // 2. PROSES & GABUNGKAN DATA DI LUAR LOOP
         const existingMessages = get().messages[id] || [];
         const combined = [...existingMessages, ...processedMessages];
-        const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
+        const uniqueMessagesMap = new Map<string, Message>();
+        for (const m of combined) {
+            const existing = uniqueMessagesMap.get(m.id);
+            if (existing) {
+                uniqueMessagesMap.set(m.id, { ...existing, ...m, repliedTo: m.repliedTo || existing.repliedTo });
+            } else {
+                uniqueMessagesMap.set(m.id, m);
+            }
+        }
+        const uniqueMessages = Array.from(uniqueMessagesMap.values());
 
         const allMessages = processMessagesAndReactions(uniqueMessages, []);
         const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);

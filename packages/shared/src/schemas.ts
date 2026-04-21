@@ -4,6 +4,7 @@ import { asUserId, asConversationId, asMessageId, asStoryId } from './brands.js'
 // --- Validasi Kriptografi Khusus ---
 // Memastikan string hanya berisi karakter Base64 atau URL-Safe Base64 yang valid (dan max len wajar)
 export const Base64StringSchema = z.string().regex(/^[A-Za-z0-9+/_-]+={0,2}$/, 'Invalid base64/base64url format').max(1000000, 'Payload too large');
+export const PayloadStringSchema = z.string().max(1000000, 'Payload too large');
 
 // --- Base ID Schemas (Transforming to Branded Types) ---
 export const UserIdSchema = z.string().min(1).transform((val) => asUserId(val));
@@ -67,7 +68,7 @@ export const IncomingMessageSchema = z.object({
   id: MessageIdSchema,
   conversationId: ConversationIdSchema,
   senderId: UserIdSchema,
-  content: Base64StringSchema.nullable().optional(),
+  content: PayloadStringSchema.optional().nullable(),
   timestamp: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as string | number | Date); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
   createdAt: z.preprocess((val) => {
     if (val === null || val === undefined) return undefined;
@@ -113,11 +114,11 @@ const RawServerMessageBaseSchema = z.object({
     username: z.string().optional(),
     avatarUrl: z.string().nullable().optional(),
   }).optional(),
-  ciphertext: Base64StringSchema.nullable().optional(),
-  content: Base64StringSchema.nullable().optional(),
+  ciphertext: PayloadStringSchema,
+  content: PayloadStringSchema.optional().nullable(),
   fileKey: Base64StringSchema.nullable().optional(),
   sessionId: z.string().nullable().optional(),
-  encryptedSessionKey: Base64StringSchema.nullable().optional(),
+  encryptedSessionKey: PayloadStringSchema.optional().nullable(),
   createdAt: z.string(),
   repliedToId: z.string().optional(),
   linkPreview: z.unknown().optional(),
@@ -141,7 +142,7 @@ export const ShadowVaultMessageSchema = z.object({
   id: MessageIdSchema,
   conversationId: ConversationIdSchema,
   senderId: UserIdSchema,
-  content: Base64StringSchema.nullable().optional(),
+  content: PayloadStringSchema.optional().nullable(),
   createdAt: z.preprocess((val) => {
       if (val === null || val === undefined) return undefined;
 
