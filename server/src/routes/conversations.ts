@@ -24,11 +24,11 @@ const MAX_GROUP_MEMBERS = 100
 const userSelectWithKeys = {
   id: true,
   encryptedProfile: true,
-  devices: { select: { id: true, publicKey: true, signingKey: true }, orderBy: { lastActiveAt: 'desc' as const } }
+  devices: { select: { id: true, publicKey: true, pqPublicKey: true, signingKey: true }, orderBy: { lastActiveAt: 'desc' as const } }
 };
 
 // Type Definitions
-type UserWithDevices = { id: string, encryptedProfile: string | null, devices?: { id: string, publicKey: string | Uint8Array, signingKey: string | Uint8Array }[] };
+type UserWithDevices = { id: string, encryptedProfile: string | null, devices?: { id: string, publicKey: string | Uint8Array, pqPublicKey?: string | Uint8Array | null, signingKey: string | Uint8Array }[] };
 type ParticipantWithUser = { id: string, userId: string, isPinned: boolean, role: string, joinedAt: Date, user: UserWithDevices };
 type MessageWithSender = { sender: UserWithDevices };
 type RawConversationData = {
@@ -52,13 +52,16 @@ const hoistKeys = (u: UserWithDevices | null) => {
     result.devices = u.devices.map(d => ({
       id: d.id,
       publicKey: Buffer.isBuffer(d.publicKey) || d.publicKey instanceof Uint8Array ? Buffer.from(d.publicKey).toString('base64url') : d.publicKey,
+      pqPublicKey: d.pqPublicKey ? (Buffer.isBuffer(d.pqPublicKey) || d.pqPublicKey instanceof Uint8Array ? Buffer.from(d.pqPublicKey).toString('base64url') : d.pqPublicKey) : null,
       signingKey: Buffer.isBuffer(d.signingKey) || d.signingKey instanceof Uint8Array ? Buffer.from(d.signingKey).toString('base64url') : d.signingKey
     }));
 
     // Keep top-level keys for backward compatibility (uses the first active device)
     const pk = u.devices[0].publicKey;
+    const pqk = u.devices[0].pqPublicKey;
     const sk = u.devices[0].signingKey;
     result.publicKey = Buffer.isBuffer(pk) || pk instanceof Uint8Array ? Buffer.from(pk).toString('base64url') : pk;
+    result.pqPublicKey = pqk ? (Buffer.isBuffer(pqk) || pqk instanceof Uint8Array ? Buffer.from(pqk).toString('base64url') : pqk) : null;
     result.signingKey = Buffer.isBuffer(sk) || sk instanceof Uint8Array ? Buffer.from(sk).toString('base64url') : sk;
   }
   return result;
@@ -158,7 +161,7 @@ const initialSessionSchema = z.object({
     userId: z.string(),
     key: z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url')
   })),
-  ephemeralPublicKey: z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url')
+  initiatorCiphertextsPerUser: z.record(z.string(), z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url'))
 }).optional()
 
 // CREATE a new conversation
@@ -233,7 +236,7 @@ router.post(
         })
 
         if (initialSession) {
-          const { sessionId, initialKeys, ephemeralPublicKey: initiatorCiphertextsPerUser } = initialSession
+          const { sessionId, initialKeys, initiatorCiphertextsPerUser } = initialSession
           if (!sessionId || !initialKeys || !initiatorCiphertextsPerUser) throw new Error('Incomplete initial session data provided.')
 
           const targetUserIds = initialKeys.map((ik: { userId: string }) => ik.userId);
@@ -242,16 +245,19 @@ router.post(
           const keyRecords = [];
           for (const ik of initialKeys) {
              const userDevices = devices.filter(d => d.userId === ik.userId);
+             const userCiphertext = initiatorCiphertextsPerUser[ik.userId];
+             
+             if (!userCiphertext) continue; // Skip if no ciphertext provided for this user
+
              for (const d of userDevices) {
                 keyRecords.push({
                    sessionId,
                    encryptedKey: Buffer.from(ik.key, 'base64url'),
                    deviceId: d.id,
                    conversationId: conversation.id,
-                   // DOCUMENTATION: initiatorCiphertextsPerUser (previously ephemeralPublicKey) contains the full X3DH 
-                   // initiator ciphertexts object ({ek, ct_id, ct_spk, ct_otpk}) and is shared per user (not per device)
-                   // due to the client's current X3DH protocol implementation.
-                   initiatorCiphertexts: Buffer.from(initiatorCiphertextsPerUser, 'base64url'),
+                   // DOCUMENTATION: initiatorCiphertextsPerUser contains the full X3DH 
+                   // initiator ciphertexts object ({ek, ct_id, ct_spk, ct_otpk}) and is shared per user
+                   initiatorCiphertexts: Buffer.from(userCiphertext, 'base64url'),
                    isInitiator: ik.userId === creatorId
                 });
              }

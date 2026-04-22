@@ -329,7 +329,7 @@ export type WorkerMessage =
   | { type: 'crypto_box_seal_open'; payload: { ciphertext: CryptoBuffer; publicKey: CryptoBuffer; privateKey: CryptoBuffer }; id: string }
   | { type: 'pq_box_seal'; payload: { message: CryptoBuffer | string; pqPublicKey: CryptoBuffer; classicalPublicKey: CryptoBuffer }; id: string }
   | { type: 'pq_box_seal_open'; payload: { combinedPayload: CryptoBuffer; pqPrivateKey: CryptoBuffer; classicalPrivateKey: CryptoBuffer }; id: string }
-  | { type: 'x3dh_initiator'; payload: { mySigningKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirPqIdentityKey: CryptoBuffer; theirSignedPreKey: CryptoBuffer; theirPqSignedPreKey: CryptoBuffer; theirSigningKey: CryptoBuffer; signature: CryptoBuffer; theirOneTimePreKey?: CryptoBuffer; theirPqOneTimePreKey?: CryptoBuffer }; id: string }
+  | { type: 'x3dh_initiator'; payload: { mySigningKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirPqIdentityKey: CryptoBuffer; theirSignedPreKey: CryptoBuffer; theirPqSignedPreKey: CryptoBuffer; theirSigningKey: CryptoBuffer; signature: CryptoBuffer; pqSignature?: CryptoBuffer; theirOneTimePreKey?: CryptoBuffer; theirPqOneTimePreKey?: CryptoBuffer }; id: string }
   | { type: 'x3dh_recipient'; payload: { myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; myPqIdentityKey: SodiumKeyPair; myPqSignedPreKey: SodiumKeyPair; theirSigningKey: CryptoBuffer; initiatorCiphertexts: string; myOneTimePreKey?: { privateKey: CryptoBuffer } }; id: string }
   | { type: 'crypto_box_seal'; payload: { message: CryptoBuffer; publicKey: CryptoBuffer }; id: string }
   | { type: 'file_encrypt'; payload: { fileBuffer: ArrayBuffer | Uint8Array }; id: string }
@@ -609,7 +609,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         break;
       }
       case 'x3dh_initiator': {
-        const { mySigningKey, theirIdentityKey, theirPqIdentityKey, theirSignedPreKey, theirPqSignedPreKey, theirSigningKey, signature, theirOneTimePreKey, theirPqOneTimePreKey } = payload;
+        const { mySigningKey, theirIdentityKey, theirPqIdentityKey, theirSignedPreKey, theirPqSignedPreKey, theirSigningKey, signature, pqSignature, theirOneTimePreKey, theirPqOneTimePreKey } = payload;
 
         const signatureBytes = new Uint8Array(signature);
         const theirSignedPreKeyBytes = new Uint8Array(theirSignedPreKey);
@@ -617,6 +617,14 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         if (!sodium.crypto_sign_verify_detached(signatureBytes, theirSignedPreKeyBytes, theirSigningKeyBytes)) {
           throw new Error("Invalid signature on signed pre-key.");
+        }
+
+        if (theirPqSignedPreKey && pqSignature) {
+            const pqSignatureBytes = new Uint8Array(pqSignature);
+            const theirPqSignedPreKeyBytes = new Uint8Array(theirPqSignedPreKey);
+            if (!sodium.crypto_sign_verify_detached(pqSignatureBytes, theirPqSignedPreKeyBytes, theirSigningKeyBytes)) {
+                throw new Error("Invalid signature on PQ signed pre-key.");
+            }
         }
 
         const mySigningKeyPrivateBytes = new Uint8Array(mySigningKey.privateKey);
@@ -719,7 +727,10 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
           const secrets = [dh1, dh2, dh3, ss_id, ss_spk];
 
-          if (myOneTimePreKey && ciphertexts.ct_otpk) {
+          if (ciphertexts.ct_otpk) {
+             if (!myOneTimePreKey) {
+                 throw new Error("Sender used One-Time Pre-Key but local device is missing the key.");
+             }
              const privateKeysJson = new TextDecoder().decode(new Uint8Array(myOneTimePreKey.privateKey));
              const parsedKeys = JSON.parse(privateKeysJson);
              const classicalKey = new Uint8Array(parsedKeys.classical);
@@ -776,15 +787,22 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const chunks: Uint8Array[] = [];
         chunks.push(header); 
 
-        for (let i = 0; i < fileBytes.length; i += chunkSize) {
-          const chunk = fileBytes.slice(i, i + chunkSize);
-          const isFinal = (i + chunkSize) >= fileBytes.length;
-          const tag = isFinal 
-            ? sodium.crypto_secretstream_xchacha20poly1305_TAG_FINAL 
-            : sodium.crypto_secretstream_xchacha20poly1305_TAG_MESSAGE;
-          
-          const encryptedChunk = sodium.crypto_secretstream_xchacha20poly1305_push(state, chunk, null, tag);
+        if (fileBytes.length === 0) {
+          const encryptedChunk = sodium.crypto_secretstream_xchacha20poly1305_push(
+            state, new Uint8Array(0), null, sodium.crypto_secretstream_xchacha20poly1305_TAG_FINAL
+          );
           chunks.push(encryptedChunk);
+        } else {
+          for (let i = 0; i < fileBytes.length; i += chunkSize) {
+            const chunk = fileBytes.slice(i, i + chunkSize);
+            const isFinal = (i + chunkSize) >= fileBytes.length;
+            const tag = isFinal 
+              ? sodium.crypto_secretstream_xchacha20poly1305_TAG_FINAL 
+              : sodium.crypto_secretstream_xchacha20poly1305_TAG_MESSAGE;
+            
+            const encryptedChunk = sodium.crypto_secretstream_xchacha20poly1305_push(state, chunk, null, tag);
+            chunks.push(encryptedChunk);
+          }
         }
         
         const totalLength = chunks.reduce((acc, c) => acc + c.length, 0);
@@ -802,6 +820,11 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const { combinedData, keyBytes } = payload;
         const dataBytes = new Uint8Array(combinedData);
         const headerSize = sodium.crypto_secretstream_xchacha20poly1305_HEADERBYTES;
+        
+        if (dataBytes.length <= headerSize) {
+            throw new Error("File decryption failed: Invalid or missing ciphertext");
+        }
+
         const header = dataBytes.slice(0, headerSize);
         const key = new Uint8Array(keyBytes);
         
@@ -811,6 +834,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const decryptedChunks: Uint8Array[] = [];
         let offset = headerSize;
         
+        let lastTag: number | null = null;
+
         while (offset < dataBytes.length) {
           const chunk = dataBytes.slice(offset, Math.min(offset + chunkSize, dataBytes.length));
           const pullRes = sodium.crypto_secretstream_xchacha20poly1305_pull(state, chunk);
@@ -818,12 +843,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
              throw new Error("File decryption failed or corrupted data");
           }
           decryptedChunks.push(pullRes.message);
-          
-          const isFinal = (offset + chunkSize) >= dataBytes.length;
-          if (isFinal && pullRes.tag !== sodium.crypto_secretstream_xchacha20poly1305_TAG_FINAL) {
+          lastTag = pullRes.tag;
+          offset += chunk.length;
+        }
+
+        if (lastTag !== sodium.crypto_secretstream_xchacha20poly1305_TAG_FINAL) {
              throw new Error("File truncation detected: Missing TAG_FINAL");
-          }
-          offset += chunkSize;
         }
 
         const totalLength = decryptedChunks.reduce((acc, c) => acc + c.length, 0);
@@ -1657,6 +1682,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         let currentN = serializedState.N || 0;
         let mk: Uint8Array | null = null;
         const skippedKeys: { dh?: string; epk?: string; n: number; mk: string }[] = [];
+
+        const MAX_SKIP = 2000;
+        if (header.n - currentN > MAX_SKIP) {
+            sodium.memzero(CKBytes);
+            throw new Error(`Too many skipped messages (${header.n - currentN}). Potential DoS attack.`);
+        }
 
         while (currentN < header.n) {
            const [nextCK, skippedMK] = await kdfChain(CKBytes);

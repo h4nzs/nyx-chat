@@ -303,7 +303,7 @@ export default function SettingsPage() {
           try {
               phraseToLock = await getRecoveryPhrase(encryptedKeysStr, autoUnlockKey);
           } catch (e) {
-              console.error('getRecoveryPhrase failed', { e, encryptedKeysStr, autoUnlockKey });
+              console.error('getRecoveryPhrase failed', e instanceof Error ? { message: e.message, name: e.name } : { error: 'Unknown error' });
           }
       }
 

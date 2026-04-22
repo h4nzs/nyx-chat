@@ -81,6 +81,7 @@ export async function setupAndUploadPreKeyBundle() {
 
   } catch (e) {
     console.error("Failed to set up and upload pre-key bundle:", e);
+    throw e;
   }
 }
 

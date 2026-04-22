@@ -73,6 +73,7 @@ export type Message = z.infer<typeof IncomingMessageSchema> & {
 export type Participant = {
   id: UserId;
   userId?: UserId;
+  user?: { id: string; publicKey?: string; pqPublicKey?: string; signingKey?: string; [key: string]: unknown };
   encryptedProfile?: string | null;
   publicKey?: string;
   signingKey?: string;

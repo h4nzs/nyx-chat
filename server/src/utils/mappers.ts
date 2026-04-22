@@ -105,7 +105,7 @@ export const toRawServerMessage = (msg: PrismaMessageInput): RawServerMessage =>
   senderId: asUserId(msg.senderId),
   sender: msg.sender ? toMinimalProfile(msg.sender) : undefined,
   // Hapus map ciphertext yang salah, fokus ke content
-  ciphertext: msg.content ?? undefined, 
+  ciphertext: msg.content ?? '', 
   content: msg.content,
   fileKey: msg.fileKey,
   sessionId: msg.sessionId,

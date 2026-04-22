@@ -118,7 +118,6 @@ export const clearKeys = async () => {
     await del(STORAGE_KEYS.ENCRYPTED_KEYS);
     await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
     await del(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_READY);
-    await del(STORAGE_KEYS.PANIC_HASH);
   } catch (error) {
     console.error('Failed to clear keys:', error);
   }

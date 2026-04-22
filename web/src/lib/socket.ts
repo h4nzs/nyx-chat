@@ -201,7 +201,7 @@ export function getSocket() {
       });
 
       // ✅ FIX 3: Lempar ke keranjang Batching
-      incomingMessageBuffer.push(safeMessage as Message);
+      incomingMessageBuffer.push(safeMessage as unknown as Message);
       
       // Reset timer. Kita tunggu "badai" reda selama 100ms. 
       // Jika dalam 100ms tidak ada pesan baru lagi yang masuk, proses semua yang ada di keranjang.
@@ -341,9 +341,17 @@ export function getSocket() {
       const currentToken = useAuthStore.getState().accessToken;
       if (payload?.jti && currentToken) {
          try {
-            const decoded = JSON.parse(atob(currentToken.split('.')[1]));
+            const base64Url = currentToken.split('.')[1];
+            let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            while (base64.length % 4) {
+              base64 += '=';
+            }
+            const decoded = JSON.parse(atob(base64));
             if (decoded.jti !== payload.jti) return;
-         } catch(e) {}
+         } catch(e) {
+            console.error("Failed to decode token for force_logout", e);
+            return;
+         }
       }
 
       toast.error(i18n.t('errors:this_session_has_been_logged_out_remotel', 'This session has been logged out remotely.'));

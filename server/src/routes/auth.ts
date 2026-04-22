@@ -85,14 +85,29 @@ async function verifyTurnstileToken (token: string): Promise<boolean> {
   }
 }
 
+const isValidBase64Url = (str: string, expectedBytes?: number) => {
+  if (!/^[A-Za-z0-9_-]+={0,2}$/.test(str)) return false;
+  if (expectedBytes) {
+    try {
+      const buf = Buffer.from(str, 'base64url');
+      if (buf.byteLength !== expectedBytes) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+};
+
+const validateKey = (expectedBytes?: number) => z.string().refine(val => isValidBase64Url(val, expectedBytes), { message: `Invalid key format or length (expected ${expectedBytes || 'valid base64url'})` });
+
 router.post('/register', authLimiter, zodValidate({
   body: z.object({
     usernameHash: z.string().min(10),
     password: z.string().min(8).max(128),
     encryptedProfile: z.string().optional(),
-    publicKey: z.string(),
-    pqPublicKey: z.string().optional(),
-    signingKey: z.string(),
+    publicKey: validateKey(32),
+    pqPublicKey: validateKey(1184).optional(),
+    signingKey: validateKey(32),
     encryptedPrivateKeys: z.string().optional(),
     deviceName: z.string().optional(),
     turnstileToken: z.string().optional()
@@ -151,17 +166,16 @@ async (req, res, next) => {
 })
 
 router.post('/login', authLimiter, zodValidate({
-  body: z.object({ 
-    usernameHash: z.string().min(10), 
+  body: z.object({
+    usernameHash: z.string().min(10),
     password: z.string().min(8),
-    publicKey: z.string(),
-    pqPublicKey: z.string().optional(),
-    signingKey: z.string(),
+    publicKey: validateKey(32),
+    pqPublicKey: validateKey(1184).optional(),
+    signingKey: validateKey(32),
     encryptedPrivateKey: z.string().optional(),
     deviceName: z.string().optional()
   })
-}),
-async (req, res, next) => {
+}),async (req, res, next) => {
   try {
     const { usernameHash, password, publicKey, pqPublicKey, signingKey, encryptedPrivateKey, deviceName } = req.body
     
@@ -296,9 +310,9 @@ router.post('/recover', authLimiter, zodValidate({
     identifier: z.string().min(10),
     newPassword: z.string().min(8),
     newEncryptedKeys: z.string(),
-    publicKey: z.string(),
-    pqPublicKey: z.string().optional(),
-    signingKey: z.string(),
+    publicKey: validateKey(32),
+    pqPublicKey: validateKey(1184).optional(),
+    signingKey: validateKey(32),
     signature: z.string(),
     timestamp: z.number(),
     nonce: z.string()

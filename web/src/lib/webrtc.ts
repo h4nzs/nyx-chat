@@ -436,7 +436,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
         console.error(`Failed to decrypt and process secure signal ${data.type}`, e);
         if (e instanceof DOMException || (e as Error).name === 'OperationError') {
             console.warn(`[WebRTC] Invalid call key detected. Purging current call state to allow recovery.`);
-            useCallStore.getState().endCall();
+            cleanupCall();
         }
     }
   });

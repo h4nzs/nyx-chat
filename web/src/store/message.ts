@@ -1349,7 +1349,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 fileSize: existingMsg?.fileSize,
                 duration: existingMsg?.duration,
                 status: 'SENT' as const
-            } as Partial<Message>;
+            } as unknown as Partial<Message>;
             
             // Ubah bubble optimistik menjadi bubble permanen
             get().replaceOptimisticMessage(conversationId, actualTempId, updatedMsg);
@@ -1522,7 +1522,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 fileSize: existingMsg?.fileSize,
                 duration: existingMsg?.duration,
                 status: 'SENT' as const
-            } as Partial<Message>;
+            } as unknown as Partial<Message>;
             
             get().replaceOptimisticMessage(conversationId, tempId, updatedMsg);
 
@@ -1699,7 +1699,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         for (const m of combined) {
             const existing = uniqueMessagesMap.get(m.id);
             if (existing) {
-                uniqueMessagesMap.set(m.id, { ...existing, ...m, repliedTo: m.repliedTo || existing.repliedTo });
+                const existingIsValid = existing.content && !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error'].includes(existing.content);
+                const mIsFailure = !m.content || ['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error'].includes(m.content);
+
+                if (existingIsValid && mIsFailure) {
+                    uniqueMessagesMap.set(m.id, { ...existing, repliedTo: existing.repliedTo || m.repliedTo });
+                } else if (!existingIsValid && !mIsFailure) {
+                    uniqueMessagesMap.set(m.id, { ...m, repliedTo: m.repliedTo || existing.repliedTo });
+                } else {
+                    uniqueMessagesMap.set(m.id, { ...existing, ...m, repliedTo: m.repliedTo || existing.repliedTo });
+                }
             } else {
                 uniqueMessagesMap.set(m.id, m);
             }

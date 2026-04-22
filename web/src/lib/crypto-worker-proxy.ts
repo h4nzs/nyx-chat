@@ -234,6 +234,7 @@ export function worker_x3dh_initiator(payload: {
     theirPqSignedPreKey: CryptoBuffer,
     theirSigningKey: CryptoBuffer,
     signature: CryptoBuffer,
+    pqSignature?: CryptoBuffer,
     theirOneTimePreKey?: CryptoBuffer,
     theirPqOneTimePreKey?: CryptoBuffer
 }): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: string }> {
@@ -245,6 +246,7 @@ export function worker_x3dh_initiator(payload: {
       theirPqSignedPreKey: toArray(payload.theirPqSignedPreKey),
       theirSigningKey: toArray(payload.theirSigningKey),
       signature: toArray(payload.signature),
+      pqSignature: payload.pqSignature ? toArray(payload.pqSignature) : undefined,
       theirOneTimePreKey: payload.theirOneTimePreKey ? toArray(payload.theirOneTimePreKey) : undefined,
       theirPqOneTimePreKey: payload.theirPqOneTimePreKey ? toArray(payload.theirPqOneTimePreKey) : undefined
     });

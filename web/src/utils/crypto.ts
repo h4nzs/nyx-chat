@@ -975,7 +975,7 @@ async function doDecryptMessage(
 
         // 1. CHECK SKIPPED KEYS FIRST (ATOMIC)
         const { takeGroupSkippedKey, storeGroupSkippedKey } = await import('@lib/keychainDb');
-        const skippedMkB64 = await takeGroupSkippedKey(conversationId, senderId, header.n);
+        const skippedMkB64 = await takeGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n);
         
         if (skippedMkB64) {
             const { groupDecryptSkipped } = await getWorkerProxy();
@@ -1005,7 +1005,7 @@ async function doDecryptMessage(
         );
         
         for (const sk of result.skippedKeys) {
-            await storeGroupSkippedKey(conversationId, senderId, sk.n, sk.mk);
+            await storeGroupSkippedKey(conversationId, senderId, senderDeviceKey, sk.n, sk.mk);
         }
 
         await saveGroupReceiverState({
@@ -1132,6 +1132,7 @@ export async function establishSessionFromPreKeyBundle(
   const theirPqSignedPreKey = preKeyBundle.signedPreKey.pqKey ? sodium.from_base64(preKeyBundle.signedPreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING) : new Uint8Array(0);
   const theirSigningKey = sodium.from_base64(preKeyBundle.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const signature = sodium.from_base64(preKeyBundle.signedPreKey.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const pqSignature = preKeyBundle.signedPreKey.pqSignature ? sodium.from_base64(preKeyBundle.signedPreKey.pqSignature, sodium.base64_variants.URLSAFE_NO_PADDING) : undefined;
 
   let theirOneTimePreKey: Uint8Array | undefined;
   let theirPqOneTimePreKey: Uint8Array | undefined;
@@ -1150,6 +1151,7 @@ export async function establishSessionFromPreKeyBundle(
     theirPqSignedPreKey,
     theirSigningKey,
     signature,
+    pqSignature,
     theirOneTimePreKey,
     theirPqOneTimePreKey
   });

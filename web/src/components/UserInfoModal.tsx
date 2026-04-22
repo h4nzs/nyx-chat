@@ -330,7 +330,7 @@ export default function UserInfoModal() {
           onClose={() => setShowSafetyModal(false)}
           onVerify={() => {
             if (activeId && user.publicKey) {
-              setVerified(activeId, user.publicKey);
+              setVerified(activeId, safetyNumber);
             }
             setShowSafetyModal(false);
           }}
