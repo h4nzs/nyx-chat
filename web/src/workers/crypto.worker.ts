@@ -329,7 +329,7 @@ export type WorkerMessage =
   | { type: 'crypto_box_seal_open'; payload: { ciphertext: CryptoBuffer; publicKey: CryptoBuffer; privateKey: CryptoBuffer }; id: string }
   | { type: 'pq_box_seal'; payload: { message: CryptoBuffer | string; pqPublicKey: CryptoBuffer; classicalPublicKey: CryptoBuffer }; id: string }
   | { type: 'pq_box_seal_open'; payload: { combinedPayload: CryptoBuffer; pqPrivateKey: CryptoBuffer; classicalPrivateKey: CryptoBuffer }; id: string }
-  | { type: 'x3dh_initiator'; payload: { mySigningKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirPqIdentityKey: CryptoBuffer; theirSignedPreKey: CryptoBuffer; theirPqSignedPreKey: CryptoBuffer; theirSigningKey: CryptoBuffer; signature: CryptoBuffer; pqSignature?: CryptoBuffer; theirOneTimePreKey?: CryptoBuffer; theirPqOneTimePreKey?: CryptoBuffer }; id: string }
+  | { type: 'x3dh_initiator'; payload: { mySigningKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirPqIdentityKey?: CryptoBuffer; theirSignedPreKey: CryptoBuffer; theirPqSignedPreKey?: CryptoBuffer; theirSigningKey: CryptoBuffer; signature: CryptoBuffer; pqSignature?: CryptoBuffer; theirOneTimePreKey?: CryptoBuffer; theirPqOneTimePreKey?: CryptoBuffer }; id: string }
   | { type: 'x3dh_recipient'; payload: { myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; myPqIdentityKey: SodiumKeyPair; myPqSignedPreKey: SodiumKeyPair; theirSigningKey: CryptoBuffer; initiatorCiphertexts: string; myOneTimePreKey?: { privateKey: CryptoBuffer } }; id: string }
   | { type: 'crypto_box_seal'; payload: { message: CryptoBuffer; publicKey: CryptoBuffer }; id: string }
   | { type: 'file_encrypt'; payload: { fileBuffer: ArrayBuffer | Uint8Array }; id: string }
@@ -619,7 +619,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           throw new Error("Invalid signature on signed pre-key.");
         }
 
-        if (theirPqSignedPreKey && pqSignature) {
+        if (theirPqSignedPreKey) {
+            if (!pqSignature) throw new Error("Missing PQ signature for PQ signed pre-key.");
             const pqSignatureBytes = new Uint8Array(pqSignature);
             const theirPqSignedPreKeyBytes = new Uint8Array(theirPqSignedPreKey);
             if (!sodium.crypto_sign_verify_detached(pqSignatureBytes, theirPqSignedPreKeyBytes, theirSigningKeyBytes)) {
@@ -639,15 +640,20 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           const dh2 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirIdentityKeyBytes);
           const dh3 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirSignedPreKeyBytes);
 
-          const pqIdResult = sodium.crypto_kem_xwing_enc(new Uint8Array(theirPqIdentityKey));
-          const ss_id = pqIdResult.sharedSecret;
-          const ct_id = pqIdResult.ciphertext;
+          const secrets = [dh1, dh2, dh3];
 
-          const pqSpkResult = sodium.crypto_kem_xwing_enc(new Uint8Array(theirPqSignedPreKey));
-          const ss_spk = pqSpkResult.sharedSecret;
-          const ct_spk = pqSpkResult.ciphertext;
+          let ct_id: Uint8Array | undefined = undefined;
+          let ct_spk: Uint8Array | undefined = undefined;
 
-          const secrets = [dh1, dh2, dh3, ss_id, ss_spk];
+          if (theirPqIdentityKey && theirPqSignedPreKey) {
+            const pqIdResult = sodium.crypto_kem_xwing_enc(new Uint8Array(theirPqIdentityKey));
+            secrets.push(pqIdResult.sharedSecret);
+            ct_id = pqIdResult.ciphertext;
+
+            const pqSpkResult = sodium.crypto_kem_xwing_enc(new Uint8Array(theirPqSignedPreKey));
+            secrets.push(pqSpkResult.sharedSecret);
+            ct_spk = pqSpkResult.ciphertext;
+          }
 
           let ct_otpk: Uint8Array | undefined = undefined;
 
@@ -673,12 +679,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           
           const sessionKey = sodium.crypto_generichash(32, sharedSecret, null);
 
-          const ciphertextsObj = {
-             ek: sodium.to_base64(ephemeralKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
-             ct_id: sodium.to_base64(ct_id, sodium.base64_variants.URLSAFE_NO_PADDING),
-             ct_spk: sodium.to_base64(ct_spk, sodium.base64_variants.URLSAFE_NO_PADDING),
-             ct_otpk: ct_otpk ? sodium.to_base64(ct_otpk, sodium.base64_variants.URLSAFE_NO_PADDING) : undefined
+          const ciphertextsObj: Record<string, string | undefined> = {
+             ek: sodium.to_base64(ephemeralKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING)
           };
+          if (ct_id) ciphertextsObj.ct_id = sodium.to_base64(ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
+          if (ct_spk) ciphertextsObj.ct_spk = sodium.to_base64(ct_spk, sodium.base64_variants.URLSAFE_NO_PADDING);
+          if (ct_otpk) ciphertextsObj.ct_otpk = sodium.to_base64(ct_otpk, sodium.base64_variants.URLSAFE_NO_PADDING);
 
           const initiatorCiphertexts = sodium.to_base64(
              new TextEncoder().encode(JSON.stringify(ciphertextsObj)),
@@ -952,15 +958,20 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             masterSeed: masterSeed
           }, newPassword);
 
-          const messageString = `${identifier}:${timestamp}:${nonce}:${newPassword}:${encryptedPrivateKeys}`;
+          const pubEnc = exportPublicKey(encryptionKeyPair.publicKey);
+          const pubPqEnc = exportPublicKey(pqEncryptionKeyPair.publicKey);
+          const pubSign = exportPublicKey(signingKeyPair.publicKey);
+          const pqKeyStr = pubPqEnc || "";
+          
+          const messageString = `${identifier}:${timestamp}:${nonce}:${newPassword}:${encryptedPrivateKeys}:${pubEnc}:${pqKeyStr}:${pubSign}`;
           const messageBytes = new TextEncoder().encode(messageString);
           const signature = sodium.crypto_sign_detached(messageBytes, signingKeyPair.privateKey);
           sodium.memzero(messageBytes);
 
           result = {
-            encryptionPublicKeyB64: exportPublicKey(encryptionKeyPair.publicKey),
-            pqEncryptionPublicKeyB64: exportPublicKey(pqEncryptionKeyPair.publicKey),
-            signingPublicKeyB64: exportPublicKey(signingKeyPair.publicKey),
+            encryptionPublicKeyB64: pubEnc,
+            pqEncryptionPublicKeyB64: pubPqEnc,
+            signingPublicKeyB64: pubSign,
             encryptedPrivateKeys,
             signatureB64: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING)
           };
@@ -1508,6 +1519,22 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         try {
           if (!state.KEMr || sodium.compare(headerKemPk, state.KEMr) !== 0) {
+            
+            // PRE-RATCHET SKIP LOOP
+            const MAX_SKIP = 1000;
+            if (header.pn - state.Nr > MAX_SKIP) {
+              throw new Error(`Too many skipped messages: ${header.pn - state.Nr}`);
+            }
+            if (state.CKr && state.KEMr) {
+              while (state.Nr < header.pn) {
+                const [nextCKr, skippedMK] = await kdfChain(state.CKr);
+                skippedKeys.push({ kemPk: bytesToB64(state.KEMr) || '', n: state.Nr, mk: bytesToB64(skippedMK) || '' });
+                sodium.memzero(state.CKr);
+                state.CKr = nextCKr;
+                state.Nr++;
+              }
+            }
+
             if (headerCt && state.KEMs) {
               const pqSharedSecret = sodium.crypto_kem_xwing_dec(headerCt, state.KEMs.privateKey);
               sharedSecret1 = new Uint8Array(32 + pqSharedSecret.length);

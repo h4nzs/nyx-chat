@@ -282,15 +282,8 @@ export async function decryptMessageObject(
                const { getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
                const mySignedPreKeyPair = await getSignedPreKeyPair();
                
-               let myPqIdentityKeyPair;
-               let myPqSignedPreKeyPair;
-               try {
-                   myPqIdentityKeyPair = await getPqEncryptionKeyPair();
-                   myPqSignedPreKeyPair = await getPqSignedPreKeyPair();
-               } catch (e) {
-                   console.warn("PQ keys unavailable. Triggering classical fallback / upgrade flow.");
-                   throw new Error("PQ keys missing. Account upgrade required.");
-               }
+               const myPqIdentityKeyPair = await getPqEncryptionKeyPair();
+               const myPqSignedPreKeyPair = await getPqSignedPreKeyPair();
 
                const sessionKey = await deriveSessionKeyAsRecipient(
                    myIdentityKeyPair,
@@ -330,6 +323,9 @@ export async function decryptMessageObject(
            }
        } catch (e) {
            console.error("[X3DH] Failed to parse/derive from header:", e);
+           if (e instanceof Error && (e.message.includes("Account upgrade required") || e.message.includes("PQ keys missing"))) {
+               throw e;
+           }
        }
     }
 
@@ -2273,7 +2269,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         ...(newMessage as Message), 
         // === FIX CENTANG BIRU HILANG ===
         statuses: finalStatuses,
-        content: oldMsg?.content !== undefined ? oldMsg.content : newMessage.content,
+        content: newMessage.content !== undefined ? newMessage.content : oldMsg?.content,
         fileUrl: newMessage.fileUrl !== undefined ? newMessage.fileUrl : oldMsg?.fileUrl,
         fileKey: newMessage.fileKey !== undefined ? newMessage.fileKey : oldMsg?.fileKey,
         fileName: newMessage.fileName !== undefined ? newMessage.fileName : oldMsg?.fileName,

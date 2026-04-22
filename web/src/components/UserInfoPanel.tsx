@@ -7,7 +7,7 @@ import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
-import { useVerificationStore } from '@store/verification';
+import { useVerificationStore, computeFingerprint } from '@store/verification';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { useUserProfile } from '@hooks/useUserProfile';
@@ -223,9 +223,10 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
           safetyNumber={safetyNumber}
           userName={profile.name}
           onClose={() => setShowSafetyModal(false)}
-          onVerify={() => {
-            if (activeId && user.publicKey) {
-              setVerified(activeId, user.publicKey);
+          onVerify={async () => {
+            if (activeId && user) {
+              const fingerprint = await computeFingerprint(user);
+              setVerified(activeId, fingerprint);
             }
             setShowSafetyModal(false);
           }}

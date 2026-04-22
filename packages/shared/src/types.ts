@@ -73,11 +73,12 @@ export type Message = z.infer<typeof IncomingMessageSchema> & {
 export type Participant = {
   id: UserId;
   userId?: UserId;
-  user?: { id: string; publicKey?: string; pqPublicKey?: string; signingKey?: string; [key: string]: unknown };
+  user?: { id: UserId; publicKey?: string; pqPublicKey?: string; signingKey?: string; [key: string]: unknown };
   encryptedProfile?: string | null;
   publicKey?: string;
+  pqPublicKey?: string;
   signingKey?: string;
-  devices?: { id: string; publicKey: string; signingKey: string }[];
+  devices?: { id: string; publicKey: string; signingKey?: string; pqPublicKey?: string | null }[];
   role: "ADMIN" | "MEMBER" | "admin" | "member";
   isPinned?: boolean;
   name?: string;

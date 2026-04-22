@@ -45,14 +45,6 @@ import type { Participant } from '@store/conversation';
 
 // --- Group Metadata Helpers ---
 
-interface ExtendedParticipant extends Participant {
-  user?: {
-    id: string;
-    signingKey?: string;
-    publicKey?: string;
-  };
-}
-
 export async function encryptGroupMetadata(
   metadata: { title?: string; description?: string; avatarUrl?: string },
   conversationId: string
@@ -527,7 +519,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
       // 2. ✅ FAN-OUT (Optimized with Bulk Fetch): Ambil semua bundle dalam 1 query
       const userIdsToFetch: string[] = [];
       for (const p of participants) {
-          const extP = p as ExtendedParticipant;
+          const extP = p as Participant;
           const uId = extP.userId || extP.user?.id || extP.id;
           if (uId) userIdsToFetch.push(uId);
       }
@@ -961,7 +953,7 @@ async function doDecryptMessage(
                 console.warn("Cannot fallback to current device signing key for a message sent from our other device.");
             } else {
                 const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-                const sender = conversation?.participants.find(p => p.id === senderId || ('userId' in p && p.userId === senderId)) as ExtendedParticipant | undefined;
+                const sender = conversation?.participants.find(p => p.id === senderId || ('userId' in p && p.userId === senderId)) as Participant | undefined;
                 keyToUse = sender?.signingKey || sender?.user?.signingKey;
             }
         }
@@ -1126,19 +1118,34 @@ export async function establishSessionFromPreKeyBundle(
   const sodium = await getSodiumLib();
   const { worker_x3dh_initiator } = await getWorkerProxy();
 
+  const isHybrid = !!preKeyBundle.pqIdentityKey;
+
   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const theirPqIdentityKey = preKeyBundle.pqIdentityKey ? sodium.from_base64(preKeyBundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING) : new Uint8Array(0);
   const theirSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const theirPqSignedPreKey = preKeyBundle.signedPreKey.pqKey ? sodium.from_base64(preKeyBundle.signedPreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING) : new Uint8Array(0);
   const theirSigningKey = sodium.from_base64(preKeyBundle.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const signature = sodium.from_base64(preKeyBundle.signedPreKey.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const pqSignature = preKeyBundle.signedPreKey.pqSignature ? sodium.from_base64(preKeyBundle.signedPreKey.pqSignature, sodium.base64_variants.URLSAFE_NO_PADDING) : undefined;
+
+  let theirPqIdentityKey: Uint8Array | undefined;
+  let theirPqSignedPreKey: Uint8Array | undefined;
+  let pqSignature: Uint8Array | undefined;
+
+  if (isHybrid) {
+      if (!preKeyBundle.signedPreKey.pqKey || !preKeyBundle.signedPreKey.pqSignature) {
+          throw new Error("Missing required PQ fields in hybrid pre-key bundle.");
+      }
+      theirPqIdentityKey = sodium.from_base64(preKeyBundle.pqIdentityKey!, sodium.base64_variants.URLSAFE_NO_PADDING);
+      theirPqSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      pqSignature = sodium.from_base64(preKeyBundle.signedPreKey.pqSignature, sodium.base64_variants.URLSAFE_NO_PADDING);
+  }
 
   let theirOneTimePreKey: Uint8Array | undefined;
   let theirPqOneTimePreKey: Uint8Array | undefined;
   if (preKeyBundle.oneTimePreKey) {
     theirOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
-    if (preKeyBundle.oneTimePreKey.pqKey) {
+    if (isHybrid) {
+      if (!preKeyBundle.oneTimePreKey.pqKey) {
+        throw new Error("Missing required PQ OTPK in hybrid pre-key bundle.");
+      }
       theirPqOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
     }
   }
@@ -1307,6 +1314,7 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
   const { worker_pq_box_seal } = await getWorkerProxy();
 
   const requesterPublicKey = sodium.from_base64(requesterPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+  if (!requesterPqPublicKeyB64) return;
   const requesterPqPublicKey = sodium.from_base64(requesterPqPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
   
   const encryptedKeyForRequester = await worker_pq_box_seal(key, requesterPqPublicKey, requesterPublicKey);

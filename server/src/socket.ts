@@ -575,8 +575,12 @@ export function registerSocket(httpServer: HttpServer) {
     });
 
     socket.on('migration:start', async (data: { roomId: string, totalChunks: number, sealedKey: string }) => {
-      if (!data || !data.roomId || typeof data.roomId !== 'string' || !data.roomId.startsWith('mig_')) return;
-      await redisClient.setEx(`migration_owner:${data.roomId}`, 3600, userId);
+      if (!data || !data.roomId || typeof data.roomId !== 'string' || !data.roomId.startsWith('mig_') || data.roomId.length <= 20) return;
+      if (!await checkRateLimit(userId, 'migration_start', 10, 60)) {
+        socket.emit("error", { message: "Rate limit exceeded for migration" });
+        return;
+      }
+      await redisClient.set(`migration_owner:${data.roomId}`, userId, { EX: 3600 });
       socket.to(data.roomId).emit('migration:start', data);
     });
 

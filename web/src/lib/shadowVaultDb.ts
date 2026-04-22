@@ -169,18 +169,18 @@ class NyxShadowVaultProxy {
       const minDate = Dexie.minKey;
       const maxDate = beforeDate || Dexie.maxKey;
       
-      const records = await db.messages
+      const now = Date.now();
+
+      const validRecords = await db.messages
         .where('[conversationId+createdAt]')
         .between([conversationId, minDate], [conversationId, maxDate])
         .reverse()
+        .filter(r => {
+          if (!r.expiresAt) return true;
+          return new Date(r.expiresAt).getTime() > now;
+        })
         .limit(limit)
         .toArray();
-
-      const now = Date.now();
-      const validRecords = records.filter(r => {
-        if (!r.expiresAt) return true;
-        return new Date(r.expiresAt).getTime() > now;
-      });
 
       // Eksekusi pembersihan kadaluarsa tanpa memblokir thread
       queueMicrotask(async () => {

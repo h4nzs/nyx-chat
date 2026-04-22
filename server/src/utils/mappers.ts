@@ -14,11 +14,11 @@ export interface PrismaUserProfileInput {
   id: string;
   usernameHash?: string | null; // Sesuai schema baru
   encryptedProfile?: string | null;
-  publicKey?: string | null; 
-  signingKey?: string | null; 
-  devices?: { id: string; publicKey: string; signingKey: string }[] | null;
+  publicKey?: string | null;
+  pqPublicKey?: string | null;
+  signingKey?: string | null;
+  devices?: { id: string; publicKey: string; pqPublicKey?: string | null; signingKey: string }[] | null;
 }
-
 export interface PrismaParticipantInput {
   id: string;
   userId: string;
@@ -79,11 +79,12 @@ export const toParticipant = (p: PrismaParticipantInput): Participant => ({
   username: undefined,
   avatarUrl: undefined,
   encryptedProfile: p.user?.encryptedProfile ?? undefined,
-  // Kembalikan public keys agar sistem E2EE berfungsi
   publicKey: p.user?.publicKey ?? undefined,
+  pqPublicKey: p.user?.pqPublicKey ?? undefined,
   signingKey: p.user?.signingKey ?? undefined,
   devices: p.user?.devices ?? undefined,
 });
+
 export const toConversation = (conv: PrismaConversationInput): Conversation => ({
   id: asConversationId(conv.id),
   isGroup: conv.isGroup ?? (conv.type === 'GROUP'), 

@@ -229,9 +229,9 @@ export function worker_pq_box_seal_open(combinedPayload: CryptoBuffer, pqPrivate
 export function worker_x3dh_initiator(payload: {
     mySigningKey: SodiumKeyPair,
     theirIdentityKey: CryptoBuffer,
-    theirPqIdentityKey: CryptoBuffer,
+    theirPqIdentityKey?: CryptoBuffer,
     theirSignedPreKey: CryptoBuffer,
-    theirPqSignedPreKey: CryptoBuffer,
+    theirPqSignedPreKey?: CryptoBuffer,
     theirSigningKey: CryptoBuffer,
     signature: CryptoBuffer,
     pqSignature?: CryptoBuffer,
@@ -241,9 +241,9 @@ export function worker_x3dh_initiator(payload: {
     return sendToWorker('x3dh_initiator', {
       mySigningKey: { privateKey: toArray(payload.mySigningKey.privateKey) },
       theirIdentityKey: toArray(payload.theirIdentityKey),
-      theirPqIdentityKey: toArray(payload.theirPqIdentityKey),
+      theirPqIdentityKey: payload.theirPqIdentityKey ? toArray(payload.theirPqIdentityKey) : undefined,
       theirSignedPreKey: toArray(payload.theirSignedPreKey),
-      theirPqSignedPreKey: toArray(payload.theirPqSignedPreKey),
+      theirPqSignedPreKey: payload.theirPqSignedPreKey ? toArray(payload.theirPqSignedPreKey) : undefined,
       theirSigningKey: toArray(payload.theirSigningKey),
       signature: toArray(payload.signature),
       pqSignature: payload.pqSignature ? toArray(payload.pqSignature) : undefined,

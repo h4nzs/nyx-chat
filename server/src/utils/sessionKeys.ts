@@ -14,7 +14,7 @@ const B64_VARIANT = 'URLSAFE_NO_PADDING'
  * Creates a new session key from scratch on the server and encrypts it for all participant devices.
  * This is used for ratcheting sessions or as a fallback.
  */
-export async function rotateAndDistributeSessionKeys (conversationId: string, initiatorId: string, tx?: PrismaTransactionClient) {
+export async function rotateAndDistributeSessionKeys (conversationId: string, initiatorDeviceId: string, tx?: PrismaTransactionClient) {
   const db = tx || prisma
   const sodium = await getSodium()
   const sessionKey = sodium.crypto_secretbox_keygen()
@@ -27,7 +27,7 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
       user: { 
         include: { 
           devices: {
-            select: { id: true, publicKey: true }
+            select: { id: true, publicKey: true, userId: true }
           }
         } 
       } 
@@ -72,7 +72,7 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
         const encryptedKey = sodium.crypto_box_seal(sessionKey, recipientPublicKey)
         const encryptedKeyB64 = sodium.to_base64(encryptedKey, sodium.base64_variants[B64_VARIANT])
 
-        const isInitiator = p.user.id === initiatorId
+        const isInitiatorDevice = device.id === initiatorDeviceId
 
         keyRecords.push({
           sessionId,
@@ -80,10 +80,10 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
           deviceId: device.id,
           conversationId,
           initiatorCiphertexts: null, // Add placeholder ephemeral key
-          isInitiator
+          isInitiator: isInitiatorDevice
         })
 
-        if (isInitiator && !initiatorHasKey) {
+        if (isInitiatorDevice && !initiatorHasKey) {
           initiatorHasKey = true
           initiatorEncryptedKey = encryptedKeyB64
         }

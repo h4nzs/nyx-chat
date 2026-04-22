@@ -28,6 +28,14 @@ router.get('/:conversationId', async (req, res, next) => {
       throw new ApiError(403, 'Device not found or unauthorized.')
     }
 
+    const isParticipant = await prisma.participant.findFirst({
+      where: { conversationId, userId: req.user.id }
+    })
+
+    if (!isParticipant) {
+      throw new ApiError(403, 'You are not a participant in this conversation.')
+    }
+
     // Cari SessionKey berdasarkan deviceId, bukan userId
     const sessionKeys = await prisma.sessionKey.findMany({
       where: { conversationId, deviceId },
@@ -66,14 +74,13 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
     }
 
     // Fungsi ini akan membuat SessionKey baru dan mendistribusikannya
-    // ke semua device partisipan yang valid, lalu mengembalikan kunci 
+    // ke semua device partisipan yang valid, lalu mengembalikan kunci
     // dalam bentuk string Base64 untuk inisiator.
-    const { sessionId, encryptedKey } = await rotateAndDistributeSessionKeys(conversationId, userId)
+    const { sessionId, encryptedKey } = await rotateAndDistributeSessionKeys(conversationId, req.user.deviceId)
 
     if (!sessionId || !encryptedKey) {
       throw new ApiError(500, 'Failed to create and retrieve session key for initiator.')
     }
-
     res.status(201).json({
       sessionId,
       encryptedKey 

@@ -106,7 +106,7 @@ router.post('/register', authLimiter, zodValidate({
     password: z.string().min(8).max(128),
     encryptedProfile: z.string().optional(),
     publicKey: validateKey(32),
-    pqPublicKey: validateKey(1184).optional(),
+    pqPublicKey: validateKey(1216).optional(),
     signingKey: validateKey(32),
     encryptedPrivateKeys: z.string().optional(),
     deviceName: z.string().optional(),
@@ -170,10 +170,11 @@ router.post('/login', authLimiter, zodValidate({
     usernameHash: z.string().min(10),
     password: z.string().min(8),
     publicKey: validateKey(32),
-    pqPublicKey: validateKey(1184).optional(),
+    pqPublicKey: validateKey(1216).optional(),
     signingKey: validateKey(32),
     encryptedPrivateKey: z.string().optional(),
-    deviceName: z.string().optional()
+    deviceName: z.string().optional(),
+    deviceId: z.string().optional()
   })
 }),async (req, res, next) => {
   try {
@@ -311,7 +312,7 @@ router.post('/recover', authLimiter, zodValidate({
     newPassword: z.string().min(8),
     newEncryptedKeys: z.string(),
     publicKey: validateKey(32),
-    pqPublicKey: validateKey(1184).optional(),
+    pqPublicKey: validateKey(1216).optional(),
     signingKey: validateKey(32),
     signature: z.string(),
     timestamp: z.number(),
@@ -333,7 +334,8 @@ router.post('/recover', authLimiter, zodValidate({
 
     const { getSodium } = await import('../lib/sodium.js');
     const sodium = await getSodium();
-    const messageString = `${usernameHash}:${timestamp}:${nonce}:${newPassword}:${newEncryptedKeys}`;
+    const pqKeyStr = pqPublicKey || "";
+    const messageString = `${usernameHash}:${timestamp}:${nonce}:${newPassword}:${newEncryptedKeys}:${publicKey}:${pqKeyStr}:${signingKey}`;
     const messageBytes = Buffer.from(messageString, 'utf-8');
     const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
     

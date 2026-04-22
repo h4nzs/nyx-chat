@@ -244,26 +244,26 @@ router.post(
 
           const keyRecords = [];
           for (const ik of initialKeys) {
-             const userDevices = devices.filter(d => d.userId === ik.userId);
              const userCiphertext = initiatorCiphertextsPerUser[ik.userId];
-             
-             if (!userCiphertext) continue; // Skip if no ciphertext provided for this user
+             if (!userCiphertext) {
+                 throw new Error(`Missing initiator ciphertext for user ${ik.userId} in conversation ${conversation.id} by creator ${creatorId}`);
+             }
 
+             const userDevices = devices.filter(d => d.userId === ik.userId);
              for (const d of userDevices) {
                 keyRecords.push({
                    sessionId,
                    encryptedKey: Buffer.from(ik.key, 'base64url'),
                    deviceId: d.id,
                    conversationId: conversation.id,
-                   // DOCUMENTATION: initiatorCiphertextsPerUser contains the full X3DH 
+                   // DOCUMENTATION: initiatorCiphertextsPerUser contains the full X3DH
                    // initiator ciphertexts object ({ek, ct_id, ct_spk, ct_otpk}) and is shared per user
                    initiatorCiphertexts: Buffer.from(userCiphertext, 'base64url'),
                    isInitiator: ik.userId === creatorId
                 });
              }
-          }
-          await tx.sessionKey.createMany({ data: keyRecords })        } else if (isGroup) {
-          await rotateAndDistributeSessionKeys(conversation.id, creatorId, tx)
+          }          await tx.sessionKey.createMany({ data: keyRecords })        } else if (isGroup) {
+          await rotateAndDistributeSessionKeys(conversation.id, req.user.deviceId, tx)
         }
         return conversation
       })
@@ -335,7 +335,7 @@ router.post('/:id/participants', async (req, res, next) => {
 
     const newParticipantsRaw = await prisma.$transaction(async (tx) => {
       await Promise.all(userIds.map((userId: string) => tx.participant.upsert({ where: { userId_conversationId: { userId, conversationId } }, create: { userId, conversationId, joinedAt: new Date() }, update: {} })))
-      await rotateAndDistributeSessionKeys(conversationId, req.user!.id, tx)
+      await rotateAndDistributeSessionKeys(conversationId, req.user.deviceId, tx)
       return await tx.participant.findMany({ where: { conversationId, userId: { in: userIds } }, include: { user: { select: userSelectWithKeys } } })
     })
 
@@ -412,10 +412,9 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userToRemoveId) })
     getIo().to(conversationId).emit('group:participants_changed', { conversationId: asConversationId(conversationId) })
     getIo().to(userToRemoveId).emit('conversation:deleted', { id: asConversationId(conversationId) })
-    
-    await rotateAndDistributeSessionKeys(conversationId, req.user.id)
-    res.status(204).send()
-  } catch (error) {
+
+    await rotateAndDistributeSessionKeys(conversationId, req.user.deviceId)
+    res.status(204).send()  } catch (error) {
     next(error)
   }
 })
@@ -438,8 +437,8 @@ router.delete('/:id/leave', async (req, res, next) => {
     getIo().to(conversationId).emit('group:participants_changed', { conversationId: asConversationId(conversationId) })
     getIo().to(userId).emit('conversation:deleted', { id: asConversationId(conversationId) })
 
-    const remainingAdmin = await prisma.participant.findFirst({ where: { conversationId, role: 'ADMIN', userId: { not: userId } } })
-    if (remainingAdmin) await rotateAndDistributeSessionKeys(conversationId, remainingAdmin.userId)
+    const remainingAdmin = await prisma.participant.findFirst({ where: { conversationId, role: 'ADMIN', userId: { not: userId } }, include: { user: { include: { devices: true } } } })
+    if (remainingAdmin && remainingAdmin.user.devices.length > 0) await rotateAndDistributeSessionKeys(conversationId, remainingAdmin.user.devices[0].id)
     
     res.status(204).send()
   } catch (error) {

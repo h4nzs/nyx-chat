@@ -94,26 +94,10 @@ export async function setupBiometricUnlock(
   
   if (prfSupported) {
       // 1. Cek apakah Authenticator (misal Mac TouchID) sudah langsung memberikan kunci PRF saat Registrasi
-      let keyBuffer = extensionResults.prf?.results?.first;
+      const keyBuffer = extensionResults.prf?.results?.first;
       
-      // 2. Jika belum (misal YubiKey lama atau Android tertentu), baru kita minta silent Auth
       if (!keyBuffer) {
-          const loginOptions = await getLoginOptions();
-          
-          const unlockOptions = {
-            optionsJSON: {
-              ...loginOptions,
-              extensions: { 
-                ...(loginOptions.extensions as Record<string, unknown> || {}),
-                prf: { eval: { first: salt } } 
-              }
-            } as PublicKeyCredentialRequestOptionsJSON
-          };
-
-          const silentAuthResp = await startAuthentication(unlockOptions as unknown as Parameters<typeof startAuthentication>[0]);
-          const prfResults = silentAuthResp.clientExtensionResults as PRFClientExtensionResults;
-
-          keyBuffer = prfResults.prf?.results?.first;
+          throw new Error("Biometric registration requires a separate authentication step to complete setup. Please re-authenticate to enable vault encryption.");
       }
 
       if (keyBuffer) {

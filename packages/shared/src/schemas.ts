@@ -38,13 +38,21 @@ export const MinimalConversationSchema = z.object({
 export const ParticipantSchema = z.object({
   id: UserIdSchema,
   userId: UserIdSchema.optional(),
+  user: z.object({
+    id: UserIdSchema,
+    publicKey: z.string().optional(),
+    pqPublicKey: z.string().optional(),
+    signingKey: z.string().optional(),
+  }).passthrough().optional(),
   encryptedProfile: Base64StringSchema.nullable().optional(),
   publicKey: z.string().optional(),
+  pqPublicKey: z.string().optional(),
   signingKey: z.string().optional(),
   devices: z.array(z.object({
     id: z.string(),
     publicKey: z.string(),
-    signingKey: z.string()
+    pqPublicKey: z.string().nullable().optional(),
+    signingKey: z.string().optional()
   })).optional(),
   role: z.enum(["ADMIN", "MEMBER", "admin", "member"]),
   isPinned: z.boolean().optional(),

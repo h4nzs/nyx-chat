@@ -493,38 +493,32 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
       ];
 
       // --- DEVICE-SPECIFIC ENCRYPTION FOR HISTORY SYNC ---
-      try {
-          const { useAuthStore } = await import('@store/auth');
-          const masterSeed = await useAuthStore.getState().getMasterSeed();
-          if (masterSeed) {
-              const { worker_encrypt_session_key } = await import('@lib/crypto-worker-proxy');
-              
-              if (importData['messageKeys']) {
-                  for (const mk of importData['messageKeys']) {
-                      try {
-                          const m = mk as { key: Uint8Array, plaintext?: string };
-                          if (m.plaintext) {
-                              // FIX: Safe native base64 decode in browser
-                              const mkBytes = base64ToBytes(m.plaintext);
-                              m.key = await worker_encrypt_session_key(mkBytes, masterSeed);
-                              delete m.plaintext;
-                          }
-                      } catch (e) {}
+      const { useAuthStore } = await import('@store/auth');
+      const masterSeed = await useAuthStore.getState().getMasterSeed();
+      if (masterSeed) {
+          const { worker_encrypt_session_key } = await import('@lib/crypto-worker-proxy');
+          
+          if (importData['messageKeys']) {
+              for (const mk of importData['messageKeys']) {
+                  const m = mk as { key: Uint8Array, plaintext?: string };
+                  if (m.plaintext) {
+                      // FIX: Safe native base64 decode in browser
+                      const mkBytes = base64ToBytes(m.plaintext);
+                      m.key = await worker_encrypt_session_key(mkBytes, masterSeed);
+                      delete m.plaintext;
                   }
               }
           }
+      }
 
-          const { encryptVaultText } = await import('@lib/shadowVaultDb');
-          if (importData['messages']) {
-              for (const msg of importData['messages']) {
-                  const m = msg as { content?: string, fileMeta?: string, senderName?: string };
-                  if (m.content) m.content = await encryptVaultText(m.content);
-                  if (m.fileMeta) m.fileMeta = await encryptVaultText(m.fileMeta);
-                  if (m.senderName) m.senderName = await encryptVaultText(m.senderName);
-              }
+      const { encryptVaultText } = await import('@lib/shadowVaultDb');
+      if (importData['messages']) {
+          for (const msg of importData['messages']) {
+              const m = msg as { content?: string, fileMeta?: string, senderName?: string };
+              if (m.content) m.content = await encryptVaultText(m.content);
+              if (m.fileMeta) m.fileMeta = await encryptVaultText(m.fileMeta);
+              if (m.senderName) m.senderName = await encryptVaultText(m.senderName);
           }
-      } catch {
-          console.warn("Failed to encrypt imported payload");
       }
 
       await db.transaction('rw', tables.map(t => db.table(t)), async () => {

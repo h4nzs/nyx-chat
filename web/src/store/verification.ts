@@ -63,7 +63,7 @@ export const computeFingerprint = async (peer: any) => {
       return await generateSafetyNumber(myPublicKeyCombined, theirPublicKeyCombined);
   } catch (e) {
       console.error('Failed to compute safety fingerprint', e);
-      return peer.publicKey; // fallback
+      return null;
   }
 };
 

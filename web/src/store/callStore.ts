@@ -89,7 +89,7 @@ export const useCallStore = create<CallStoreState>((set, get) => ({
         isVideoCall: isVideo,
         isReceivingCall: false,
         isMinimized: false,
-        ephemeralCallKey: key,
+        ephemeralCallKey: key || null,
     });
   },
 
