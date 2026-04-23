@@ -495,10 +495,15 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
       // --- DEVICE-SPECIFIC ENCRYPTION FOR HISTORY SYNC ---
       const { useAuthStore } = await import('@store/auth');
       const masterSeed = await useAuthStore.getState().getMasterSeed();
-      if (masterSeed) {
-          const { worker_encrypt_session_key } = await import('@lib/crypto-worker-proxy');
-          
-          if (importData['messageKeys']) {
+
+      if (importData['messageKeys']) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const hasPlaintext = importData['messageKeys'].some((mk: any) => mk.plaintext);
+          if (hasPlaintext) {
+              if (!masterSeed) {
+                  throw new Error("Missing master seed: Cannot securely import plaintext message keys.");
+              }
+              const { worker_encrypt_session_key } = await import('@lib/crypto-worker-proxy');
               for (const mk of importData['messageKeys']) {
                   const m = mk as { key: Uint8Array, plaintext?: string };
                   if (m.plaintext) {
@@ -510,7 +515,6 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
               }
           }
       }
-
       const { encryptVaultText } = await import('@lib/shadowVaultDb');
       if (importData['messages']) {
           for (const msg of importData['messages']) {

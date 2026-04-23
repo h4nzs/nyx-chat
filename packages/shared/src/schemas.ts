@@ -64,7 +64,10 @@ export const ParticipantSchema = z.object({
 export const ConversationSchema = MinimalConversationSchema.extend({
   participants: z.array(ParticipantSchema),
   lastMessage: z.any().nullable(),
-  lastUpdated: z.number().optional(),
+  lastUpdated: z.number().optional()
+}).passthrough();
+
+export const ConversationUiSchema = ConversationSchema.extend({
   decryptedMetadata: z.object({
     title: z.string().optional(),
     description: z.string().optional(),

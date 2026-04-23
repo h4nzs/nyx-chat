@@ -7,7 +7,7 @@ export const LANGUAGES = [
 ];
 
 const localeFiles = import.meta.glob('../locales/**/*.json', { eager: true });
-const translations: Record<string, unknown> = {};
+const translations: Record<string, Record<string, unknown>> = {};
 
 for (const path in localeFiles) {
   // Memecah path (contoh: '../locales/id/landing.json' menjadi array)
@@ -18,8 +18,9 @@ for (const path in localeFiles) {
   const ns = parts[parts.length - 1].replace('.json', '');
   
   if (!translations[lng]) translations[lng] = {};
-  // @ts-expect-error - Kita tahu struktur ini benar karena kontrol kita atas file JSON
-  translations[lng][ns] = localeFiles[path].default || localeFiles[path];
+  
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  translations[lng][ns] = (localeFiles[path] as any).default || localeFiles[path];
 }
 
 export function getLangFromUrl(url: URL) {

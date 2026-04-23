@@ -5,6 +5,7 @@ import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { Prisma } from '@prisma/client'
 import { requireAuth } from '../middleware/auth.js'
+import { generalLimiter } from '../middleware/rateLimiter.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
@@ -175,14 +176,11 @@ router.get(
           let otpk = null;
           if (device.preKeyBundle) {
               otpk = await prisma.$queryRaw`
-                DELETE FROM "OneTimePreKey" 
-                WHERE id = (
-                  SELECT id FROM "OneTimePreKey" 
-                  WHERE "deviceId" = ${device.id} 
-                  ORDER BY "createdAt" ASC 
-                  LIMIT 1
-                )
-                RETURNING id, "keyId", "publicKey", "pqPublicKey"
+                SELECT id, "keyId", "publicKey", "pqPublicKey"
+                FROM "OneTimePreKey" 
+                WHERE "deviceId" = ${device.id} 
+                ORDER BY "createdAt" ASC 
+                LIMIT 1
               `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
           }
 
@@ -228,7 +226,8 @@ router.get(
 router.post(
   '/prekey-bundles',
   requireAuth,
-  zodValidate({ body: z.object({ userIds: z.array(z.string()) }) }),
+  generalLimiter,
+  zodValidate({ body: z.object({ userIds: z.array(z.string().min(1)).max(50) }) }),
   async (req, res, next) => {
     try {
       const { userIds } = req.body
@@ -257,14 +256,11 @@ router.post(
           let otpk = null;
           if (device.preKeyBundle) {
               otpk = await prisma.$queryRaw`
-                DELETE FROM "OneTimePreKey" 
-                WHERE id = (
-                  SELECT id FROM "OneTimePreKey" 
-                  WHERE "deviceId" = ${device.id} 
-                  ORDER BY "createdAt" ASC 
-                  LIMIT 1
-                )
-                RETURNING id, "keyId", "publicKey", "pqPublicKey"
+                SELECT id, "keyId", "publicKey", "pqPublicKey"
+                FROM "OneTimePreKey" 
+                WHERE "deviceId" = ${device.id} 
+                ORDER BY "createdAt" ASC 
+                LIMIT 1
               `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
           }
 

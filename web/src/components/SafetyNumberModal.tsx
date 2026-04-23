@@ -96,14 +96,14 @@ export default function SafetyNumberModal({
                   <FiShield className="text-orange-500 shrink-0 mt-1" size={18} />
                   <div>
                     <h4 className="text-orange-500 font-bold text-[11px] uppercase tracking-wider mb-1">
-                      Reduced Protection
+                      {t('modals.reducedProtection.title', 'Reduced Protection')}
                     </h4>
                     <p className="text-xs text-text-secondary leading-relaxed">
                       {!hasPeerPQ && !hasPeerSigning 
-                        ? "This contact is using an older version. Post-Quantum and Identity Signing protections are disabled for this session."
+                        ? t('modals.reducedProtection.message.older', 'This contact is using an older version. Post-Quantum and Identity Signing protections are disabled for this session.')
                         : !hasPeerPQ 
-                          ? "This contact's device doesn't support Post-Quantum encryption yet. Falling back to classical X25519."
-                          : "This contact is missing Identity Signing. The safety number uses only encryption keys."}
+                          ? t('modals.reducedProtection.message.noPQ', "This contact's device doesn't support Post-Quantum encryption yet. Falling back to classical X25519.")
+                          : t('modals.reducedProtection.message.noSigning', 'This contact is missing Identity Signing. The safety number uses only encryption keys.')}
                     </p>
                   </div>
                 </div>

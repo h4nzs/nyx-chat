@@ -7,7 +7,7 @@ import { useMessageStore, decryptMessageObject } from "./message";
 import { getSocket, emitSessionKeyRequest, fireGhostSync, emitGroupKeyDistribution } from "@lib/socket";
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
-import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage, Message, Participant, Conversation } from '@nyx/shared';
+import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage, Message, Participant, ConversationUi as Conversation } from '@nyx/shared';
 // Removed all crypto imports
 import toast from 'react-hot-toast';
 

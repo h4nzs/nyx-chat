@@ -102,7 +102,8 @@
     "message_deleted": "This message was deleted",
     "security_info": "End-to-End Encrypted via Signal Protocol",
     "message_id_toast": "Message ID: {{id}}",
-    "message_retracted": "A message has been retracted by the sender."
+    "message_retracted": "A message has been retracted by the sender.",
+    "edited": "(edited)"
   },
   "media": {
     "decrypting": "Decrypting...",

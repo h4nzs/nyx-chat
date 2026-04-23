@@ -71,8 +71,7 @@ async function decryptData(ciphertextB64: string, ivB64: string, keyBuffer: Arra
 export async function setupBiometricUnlock(
   // Terima objek mentah dari API agar kompatibel dengan pemanggilan dari SettingsPage
   rawOptions: Record<string, unknown> | PublicKeyCredentialCreationOptionsJSON, 
-  recoveryPhrase: string, 
-  getLoginOptions: () => Promise<PublicKeyCredentialRequestOptionsJSON>
+  recoveryPhrase: string
 ): Promise<RegistrationResponseJSON> {
   const salt = await getPrfSalt();
   

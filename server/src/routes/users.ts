@@ -177,12 +177,27 @@ router.put('/me',
 )
 
 // UPDATE Public Keys (Me)
+const isValidBase64Url = (str: string, expectedBytes?: number) => {
+  if (!/^[A-Za-z0-9_-]+={0,2}$/.test(str)) return false;
+  if (expectedBytes) {
+    try {
+      const buf = Buffer.from(str, 'base64url');
+      if (buf.byteLength !== expectedBytes) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+};
+
+const validateKey = (expectedBytes?: number) => z.string().refine(val => isValidBase64Url(val, expectedBytes), { message: `Invalid key format or length (expected ${expectedBytes || 'valid base64url'})` });
+
 const base64UrlRegex = /^[A-Za-z0-9_-]+$/
 router.put('/me/keys',
   zodValidate({
     body: z.object({
       publicKey: z.string().min(43).max(256).regex(base64UrlRegex, { message: 'Invalid public key format.' }),
-      pqPublicKey: z.string().min(43).max(2048).regex(base64UrlRegex, { message: 'Invalid PQ public key format.' }),
+      pqPublicKey: validateKey(1216),
       signingKey: z.string().min(43).max(256).regex(base64UrlRegex, { message: 'Invalid signing key format.' })
     })
   }),

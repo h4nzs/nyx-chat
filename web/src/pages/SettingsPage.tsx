@@ -327,15 +327,9 @@ export default function SettingsPage() {
       toast.loading(t('settings:messages.biometric_scan_now'), { id: 'passkey' });
       
       const attResp = await setupBiometricUnlock(
-        options as Record<string, unknown>, 
-        phraseToLock,
-        // Fungsi callback untuk generate silent auth options
-        async () => {
-           const res = await api<import('@simplewebauthn/browser').PublicKeyCredentialRequestOptionsJSON>('/api/auth/webauthn/login/options');
-           return res;
-        }
-      );
-      
+        options as Record<string, unknown>,
+        phraseToLock
+      );      
       const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {
         method: "POST",
         body: JSON.stringify(attResp),

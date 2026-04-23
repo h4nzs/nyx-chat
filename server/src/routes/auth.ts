@@ -422,10 +422,11 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
     if (!ip && !userId) {
       throw new ApiError(400, 'Cannot determine client identifier for PoW challenge.');
     }
-    
-    const rateKey = ip ? `pow:ip_count:${ip}` : `pow:user_count:${userId}`;
-    let count = await redisClient.incr(rateKey);
 
+    const identifier = ip || userId;
+    const idHash = crypto.createHash('sha256').update(`${salt}:${identifier}`).digest('hex').slice(0, 16);
+    const rateKey = ip ? `pow:ip_count:${idHash}` : `pow:user_count:${idHash}`;
+    let count = await redisClient.incr(rateKey);
     if (count === 1) {
         await redisClient.expire(rateKey, 86400);
     } else if (Number.isNaN(count) || count < 0) {

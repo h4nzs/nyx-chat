@@ -582,16 +582,19 @@ export async function ensureGroupSession(conversationId: string, participants: P
       }
 
       if (distributionKeys.length === 0) {
-          console.warn(`No distribution keys generated for group ${conversationId}. Skipping sender state creation.`);
-          return [];
+          console.warn(`No distribution keys generated for group ${conversationId}. Sender state will be saved anyway.`);
       }
 
-      // 3. Save Initial Sender State ONLY after successful encryption fan-out
+      // 3. Save Initial Sender State
       await saveGroupSenderState({
           conversationId: conversationId as ConversationId,
           CK: senderKeyB64,
           N: 0
       });
+
+      if (distributionKeys.length === 0) {
+          return [];
+      }
 
       return distributionKeys.filter(Boolean);
     } finally {
@@ -1269,7 +1272,18 @@ interface ReceiveKeyPayload {
 export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload): Promise<void> {
   const { conversationId, requesterId, requesterPublicKey: requesterPublicKeyB64, requesterPqPublicKey: requesterPqPublicKeyB64 } = payload;
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-  if (!conversation || !conversation.participants.some(p => p.id === requesterId)) return;
+  if (!conversation) return;
+  const requester = conversation.participants.find(p => p.id === requesterId);
+  if (!requester || !requester.devices) {
+      console.warn("Group key fulfillment: Requester or requester devices not found.");
+      return;
+  }
+
+  const isMatched = requester.devices.some(d => d.publicKey === requesterPublicKeyB64 && d.pqPublicKey === requesterPqPublicKeyB64);
+  if (!isMatched) {
+      console.warn("Group key fulfillment: Provided keys do not match any registered device keys for requester. Aborting.");
+      return;
+  }
 
   // [FIX] Send the CURRENT Sender Key (Ratchet Chain Key)
   const senderState = await getGroupSenderState(conversationId);
@@ -1309,6 +1323,20 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
   const { conversationId, sessionId, requesterId, requesterPublicKey: requesterPublicKeyB64, requesterPqPublicKey: requesterPqPublicKeyB64 } = payload;
   const key = await retrieveSessionKeySecurely(conversationId, sessionId);
   if (!key) return;
+
+  const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  if (!conversation) return;
+  const requester = conversation.participants.find(p => p.id === requesterId);
+  if (!requester || !requester.devices) {
+      console.warn("Session key fulfillment: Requester or requester devices not found.");
+      return;
+  }
+
+  const isMatched = requester.devices.some(d => d.publicKey === requesterPublicKeyB64 && d.pqPublicKey === requesterPqPublicKeyB64);
+  if (!isMatched) {
+      console.warn("Session key fulfillment: Provided keys do not match any registered device keys for requester. Aborting.");
+      return;
+  }
 
   const sodium = await getSodiumLib();
   const { worker_pq_box_seal } = await getWorkerProxy();

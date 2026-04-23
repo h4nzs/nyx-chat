@@ -61,6 +61,9 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { conversationId } = req.params
     const userId = req.user.id
+    if (!req.user.deviceId) {
+      throw new ApiError(400, 'Device ID is required to ratchet session keys.')
+    }
 
     const conversation = await prisma.conversation.findFirst({
       where: {

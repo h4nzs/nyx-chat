@@ -251,6 +251,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
       await coreSendMessage(conversationId, {
           content: JSON.stringify(metadata),
+          repliedToId: replyingTo?.id || undefined,
           repliedTo: replyingTo || undefined,
           expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
           isViewOnce
@@ -366,6 +367,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
 
       await coreSendMessage(conversationId, {
           content: JSON.stringify(metadata),
+          repliedToId: replyingTo?.id || undefined,
           repliedTo: replyingTo || undefined,
           expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
           isViewOnce

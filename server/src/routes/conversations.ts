@@ -161,7 +161,7 @@ const initialSessionSchema = z.object({
     userId: z.string(),
     key: z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url')
   })),
-  initiatorCiphertextsPerUser: z.record(z.string(), z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url'))
+  initiatorCiphertextsPerDevice: z.record(z.string(), z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url'))
 }).optional()
 
 // CREATE a new conversation
@@ -236,29 +236,28 @@ router.post(
         })
 
         if (initialSession) {
-          const { sessionId, initialKeys, initiatorCiphertextsPerUser } = initialSession
-          if (!sessionId || !initialKeys || !initiatorCiphertextsPerUser) throw new Error('Incomplete initial session data provided.')
+          const { sessionId, initialKeys, initiatorCiphertextsPerDevice } = initialSession
+          if (!sessionId || !initialKeys || !initiatorCiphertextsPerDevice) throw new Error('Incomplete initial session data provided.')
 
           const targetUserIds = initialKeys.map((ik: { userId: string }) => ik.userId);
           const devices = await tx.device.findMany({ where: { userId: { in: targetUserIds } }, select: { id: true, userId: true } });
 
           const keyRecords = [];
           for (const ik of initialKeys) {
-             const userCiphertext = initiatorCiphertextsPerUser[ik.userId];
-             if (!userCiphertext) {
-                 throw new Error(`Missing initiator ciphertext for user ${ik.userId} in conversation ${conversation.id} by creator ${creatorId}`);
-             }
-
              const userDevices = devices.filter(d => d.userId === ik.userId);
              for (const d of userDevices) {
+                const deviceCiphertext = initiatorCiphertextsPerDevice[d.id];
+                if (!deviceCiphertext) {
+                    console.error(`Missing initiator ciphertext for device ${d.id} of user ${ik.userId} in conversation ${conversation.id} by creator ${creatorId}`);
+                    throw new Error('Missing initiator ciphertext for a participant device');
+                }
+
                 keyRecords.push({
                    sessionId,
                    encryptedKey: Buffer.from(ik.key, 'base64url'),
                    deviceId: d.id,
                    conversationId: conversation.id,
-                   // DOCUMENTATION: initiatorCiphertextsPerUser contains the full X3DH
-                   // initiator ciphertexts object ({ek, ct_id, ct_spk, ct_otpk}) and is shared per user
-                   initiatorCiphertexts: Buffer.from(userCiphertext, 'base64url'),
+                   initiatorCiphertexts: Buffer.from(deviceCiphertext, 'base64url'),
                    isInitiator: ik.userId === creatorId
                 });
              }
@@ -401,19 +400,22 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
     if (!adminParticipant || adminParticipant.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden.' })
     if (req.user.id === userToRemoveId) return res.status(400).json({ error: 'Cannot remove yourself.' })
 
-    const result = await prisma.participant.deleteMany({
-        where: { userId: userToRemoveId, conversationId }
-    });
+    await prisma.$transaction(async (tx) => {
+        const result = await tx.participant.deleteMany({
+            where: { userId: userToRemoveId, conversationId }
+        });
 
-    if (result.count === 0) {
-        return res.status(404).json({ error: 'Participant not found in this conversation' });
-    }
+        if (result.count === 0) {
+            throw new ApiError(404, 'Participant not found in this conversation');
+        }
+
+        await rotateAndDistributeSessionKeys(conversationId, req.user!.deviceId, tx);
+    });
     
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userToRemoveId) })
     getIo().to(conversationId).emit('group:participants_changed', { conversationId: asConversationId(conversationId) })
     getIo().to(userToRemoveId).emit('conversation:deleted', { id: asConversationId(conversationId) })
 
-    await rotateAndDistributeSessionKeys(conversationId, req.user.deviceId)
     res.status(204).send()  } catch (error) {
     next(error)
   }
@@ -431,14 +433,17 @@ router.delete('/:id/leave', async (req, res, next) => {
     const conversation = await prisma.conversation.findUnique({ where: { id: conversationId } })
     if (conversation?.creatorId === userId) return res.status(400).json({ error: 'Creator cannot leave.' })
 
-    await prisma.participant.delete({ where: { userId_conversationId: { userId, conversationId } } })
+    await prisma.$transaction(async (tx) => {
+        await tx.participant.delete({ where: { userId_conversationId: { userId, conversationId } } });
+        const remainingAdmin = await tx.participant.findFirst({ where: { conversationId, role: 'ADMIN', userId: { not: userId } }, include: { user: { include: { devices: true } } } });
+        if (remainingAdmin && remainingAdmin.user.devices.length > 0) {
+            await rotateAndDistributeSessionKeys(conversationId, remainingAdmin.user.devices[0].id, tx);
+        }
+    });
     
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userId) })
     getIo().to(conversationId).emit('group:participants_changed', { conversationId: asConversationId(conversationId) })
     getIo().to(userId).emit('conversation:deleted', { id: asConversationId(conversationId) })
-
-    const remainingAdmin = await prisma.participant.findFirst({ where: { conversationId, role: 'ADMIN', userId: { not: userId } }, include: { user: { include: { devices: true } } } })
-    if (remainingAdmin && remainingAdmin.user.devices.length > 0) await rotateAndDistributeSessionKeys(conversationId, remainingAdmin.user.devices[0].id)
     
     res.status(204).send()
   } catch (error) {

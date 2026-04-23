@@ -49,6 +49,10 @@ export const useCallStore = create<CallStoreState>((set, get) => ({
   })),
 
   removeRemoteStream: (userId) => set((state) => {
+    const stream = state.remoteStreams[userId];
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+    }
     const newStreams = { ...state.remoteStreams };
     delete newStreams[userId];
     return { remoteStreams: newStreams };

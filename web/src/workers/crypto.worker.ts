@@ -213,16 +213,16 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
         : privateKeysRaw;
 
       const keys = privateKeysObj as { encryption: string; pqEncryption?: string; signing: string; signedPreKey: string; pqSignedPreKey?: string; masterSeed?: string };
-      if (!keys.signedPreKey) return { success: false, reason: 'legacy_bundle' };
+      if (!keys.signedPreKey || !keys.pqEncryption || !keys.pqSignedPreKey) return { success: false, reason: 'legacy_bundle' };
 
       return {
         success: true,
         keys: {
           encryption: sodium.from_base64(keys.encryption, sodium.base64_variants[B64_VARIANT]),
-          pqEncryption: keys.pqEncryption ? sodium.from_base64(keys.pqEncryption, sodium.base64_variants[B64_VARIANT]) : undefined,
+          pqEncryption: sodium.from_base64(keys.pqEncryption, sodium.base64_variants[B64_VARIANT]),
           signing: sodium.from_base64(keys.signing, sodium.base64_variants[B64_VARIANT]),
           signedPreKey: sodium.from_base64(keys.signedPreKey, sodium.base64_variants[B64_VARIANT]),
-          pqSignedPreKey: keys.pqSignedPreKey ? sodium.from_base64(keys.pqSignedPreKey, sodium.base64_variants[B64_VARIANT]) : undefined,
+          pqSignedPreKey: sodium.from_base64(keys.pqSignedPreKey, sodium.base64_variants[B64_VARIANT]),
           masterSeed: keys.masterSeed ? sodium.from_base64(keys.masterSeed, sodium.base64_variants[B64_VARIANT]) : undefined,
         }
       };
@@ -619,8 +619,10 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           throw new Error("Invalid signature on signed pre-key.");
         }
 
-        if (theirPqSignedPreKey) {
-            if (!pqSignature) throw new Error("Missing PQ signature for PQ signed pre-key.");
+        if (theirPqSignedPreKey || pqSignature) {
+            if (!theirPqSignedPreKey || !pqSignature) {
+                throw new Error("Incomplete PQ bundle: missing PQ signed pre-key or signature.");
+            }
             const pqSignatureBytes = new Uint8Array(pqSignature);
             const theirPqSignedPreKeyBytes = new Uint8Array(theirPqSignedPreKey);
             if (!sodium.crypto_sign_verify_detached(pqSignatureBytes, theirPqSignedPreKeyBytes, theirSigningKeyBytes)) {

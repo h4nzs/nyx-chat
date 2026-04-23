@@ -79,7 +79,7 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
           encryptedKey: encryptedKeyB64,
           deviceId: device.id,
           conversationId,
-          initiatorCiphertexts: null, // Add placeholder ephemeral key
+          initiatorCiphertexts: null,
           isInitiator: isInitiatorDevice
         })
 
@@ -87,31 +87,31 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
           initiatorHasKey = true
           initiatorEncryptedKey = encryptedKeyB64
         }
-      } catch (e: unknown) {
+        } catch (e: unknown) {
         const errorMessage = e instanceof Error ? e.message : 'Unknown error'
         console.error(`Failed to process public key for device ${sanitizeForLog(device.id)}. Error: ${sanitizeForLog(errorMessage)}`)
         throw new Error(`Corrupted public key found for device ${sanitizeForLog(device.id)}. Cannot establish secure session.`)
-      }
-    }
-  }
+        }
+        }
+        }
 
-  if (keyRecords.length === 0) {
-    throw new Error(`Failed to create session keys: No valid devices found in conversation ${sanitizeForLog(conversationId)}.`)
-  }
+        if (keyRecords.length === 0) {
+        throw new Error(`Failed to create session keys: No valid devices found in conversation ${sanitizeForLog(conversationId)}.`)
+        }
 
-  if (!initiatorHasKey) {
-    throw new Error('Could not find a valid session key for the initiator\'s device.')
-  }
+        if (!initiatorHasKey) {
+        throw new Error('Could not find a valid session key for the initiator\'s device.')
+        }
 
-  // Simpan kunci ke database untuk didistribusikan ke masing-masing device
-  await db.sessionKey.createMany({
-      data: keyRecords.map(k => ({
+        // Simpan kunci ke database untuk didistribusikan ke masing-masing device
+        await db.sessionKey.createMany({
+        data: keyRecords.map(k => ({
         ...k,
         // Konversi eksplisit Buffer ke Uint8Array murni agar kompatibel dengan Prisma Bytes
         encryptedKey: new Uint8Array(Buffer.from(k.encryptedKey, 'base64url')),
-        initiatorCiphertexts: null
-      }))
-    });
+        initiatorCiphertexts: k.initiatorCiphertexts ? new Uint8Array(k.initiatorCiphertexts) : null
+        }))
+        });
 
     return { sessionId, encryptedKey: initiatorEncryptedKey };
 }

@@ -315,7 +315,7 @@ export async function decryptMessageObject(
                const { worker_dr_init_bob } = await import('@lib/crypto-worker-proxy');
                const newState = await worker_dr_init_bob({
                    sk: sessionKey,
-                   mySignedPreKey: mySignedPreKeyPair
+                   mySignedPreKey: myPqSignedPreKeyPair
                });
 
                await storeRatchetStateSecurely(rawMsg.conversationId, newState);

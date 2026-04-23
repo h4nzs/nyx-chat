@@ -19,6 +19,8 @@ import { useTranslation } from 'react-i18next';
 
 export default function MigrationReceivePage() {
   const { t } = useTranslation(['common']);
+  const tRef = useRef(t);
+  tRef.current = t;
   const [qrData, setQrData] = useState<string | null>(null);
   const [progress, setProgress] = useState<number>(0);
   const [status, setStatus] = useState<'waiting' | 'receiving' | 'decrypting' | 'success'>('waiting');
@@ -54,7 +56,7 @@ export default function MigrationReceivePage() {
         chunksRef.current = new Array(data.totalChunks);
         migrationStartedRef.current = false;
         setStatus('receiving');
-        toast.loading(t('common:migration.receiving_data', 'Menerima data...'), { id: 'mig' });
+        toast.loading(tRef.current('common:migration.receiving_data', 'Menerima data...'), { id: 'mig' });
       });
 
       socket.on('migration:chunk', async (data) => {
@@ -66,7 +68,7 @@ export default function MigrationReceivePage() {
         if (receivedCount === total && !migrationStartedRef.current) {
           migrationStartedRef.current = true;
           setStatus('decrypting');
-          toast.loading(t('common:migration.decrypting_vault', 'Mendekripsi brankas...'), { id: 'mig' });
+          toast.loading(tRef.current('common:migration.decrypting_vault', 'Mendekripsi brankas...'), { id: 'mig' });
           await processMigration(sodium);
         }
       });
@@ -79,7 +81,7 @@ export default function MigrationReceivePage() {
       socket.off('migration:start');
       socket.off('migration:chunk');
     };
-  }, [t]);
+  }, []);
 
   const processMigration = async (sodium: typeof import('libsodium-wrappers')) => {
     try {
@@ -113,11 +115,11 @@ export default function MigrationReceivePage() {
       socket.emit('migration:ack', { roomId: metaRef.current!.roomId, success: true });
 
       setStatus('success');
-      toast.success(t('common:migration.complete', 'Migrasi Selesai!'), { id: 'mig' });
+      toast.success(tRef.current('common:migration.complete', 'Migrasi Selesai!'), { id: 'mig' });
       setTimeout(() => window.location.href = '/', 2000); // Hard reload to clear RAM
     } catch (e) {
       console.error(e);
-      toast.error(t('common:migration.decryption_failed', 'Gagal mendekripsi data.'), { id: 'mig' });
+      toast.error(tRef.current('common:migration.decryption_failed', 'Gagal mendekripsi data.'), { id: 'mig' });
       
       const socket = getSocket();
       if (metaRef.current?.roomId) {

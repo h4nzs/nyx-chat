@@ -102,7 +102,8 @@
     "message_deleted": "Esta mensagem foi apagada",
     "security_info": "Criptografado de ponta a ponta via Protocolo Signal",
     "message_id_toast": "ID da Mensagem: {{id}}",
-    "message_retracted": "Uma mensagem foi retratada pelo remetente."
+    "message_retracted": "Uma mensagem foi retratada pelo remetente.",
+    "edited": "(editado)"
   },
   "media": {
     "decrypting": "Descriptografando...",

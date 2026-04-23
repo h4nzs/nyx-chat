@@ -94,6 +94,7 @@ export const useVerificationStore = create<VerificationState>((set, _get) => ({
   },
 
   setVerified: (conversationId, fingerprint) => {
+    if (!fingerprint) return;
     localStorage.setItem(`${VERIFIED_PREFIX}${conversationId}`, fingerprint);
     set(state => ({
       verifiedStatus: { ...state.verifiedStatus, [conversationId]: true },

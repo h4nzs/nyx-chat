@@ -91,6 +91,9 @@ export type Conversation = z.infer<typeof MinimalConversationSchema> & {
   participants: Participant[];
   lastMessage: (Message & { preview?: string }) | null;
   lastUpdated?: number;
+};
+
+export type ConversationUi = Conversation & {
   decryptedMetadata?: {
     title?: string;
     description?: string;

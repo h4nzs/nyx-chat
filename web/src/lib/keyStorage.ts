@@ -2,7 +2,7 @@
 import { db } from './db';
 // FIX 1: Perbaikan case-sensitivity nama file agar aman di build Linux/Vercel
 import { clearAllKeys as clearSessionKeys } from './keychainDb';
-import { sha256 } from 'hash-wasm';
+import { sha256, argon2id } from 'hash-wasm';
 
 const STORAGE_KEYS = {
   ENCRYPTED_KEYS: 'nyx_encrypted_keys',
@@ -25,21 +25,90 @@ const del = async (key: string) => {
   await db.kvStore.delete(key);
 };
 
+const arrayBufferToBase64 = (buffer: Uint8Array) => {
+  let binary = '';
+  const len = buffer.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(buffer[i]);
+  }
+  return window.btoa(binary);
+};
+
+const base64ToArrayBuffer = (base64: string) => {
+  const binary_string = window.atob(base64);
+  const len = binary_string.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary_string.charCodeAt(i);
+  }
+  return bytes;
+};
+
 // FIX 2: Pindahkan Panic Hash ke IndexedDB (kvStore) agar tersentralisasi
 export const setPanicPassword = async (password: string) => {
   if (!password) {
     await del(STORAGE_KEYS.PANIC_HASH);
     return;
   }
-  const hash = await sha256(password);
-  await set(STORAGE_KEYS.PANIC_HASH, hash);
+  
+  const saltBytes = window.crypto.getRandomValues(new Uint8Array(16));
+  const salt = arrayBufferToBase64(saltBytes);
+  const params = {
+    timeCost: 2,
+    memoryCost: 19456,
+    parallelism: 1,
+    hashLength: 32
+  };
+  
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const hashHex = (await argon2id({
+    password,
+    salt: saltBytes,
+    ...params
+  } as any)) as unknown as string;
+  
+  const hashBytes = new Uint8Array(hashHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+  const hash = arrayBufferToBase64(hashBytes);
+
+  const record = {
+    alg: "NYX_PANIC_VERIFY_V1",
+    salt,
+    params,
+    hash
+  };
+  
+  await set(STORAGE_KEYS.PANIC_HASH, JSON.stringify(record));
 };
 
 export const checkPanicPassword = async (password: string): Promise<boolean> => {
-  const storedHash = await get<string>(STORAGE_KEYS.PANIC_HASH);
-  if (!storedHash) return false;
-  const hash = await sha256(password);
-  return hash === storedHash;
+  const storedRecordStr = await get<string>(STORAGE_KEYS.PANIC_HASH);
+  if (!storedRecordStr) return false;
+  
+  try {
+    if (!storedRecordStr.startsWith('{')) {
+      const hash = await sha256(password);
+      return hash === storedRecordStr;
+    }
+    
+    const record = JSON.parse(storedRecordStr);
+    if (record.alg !== "NYX_PANIC_VERIFY_V1") return false;
+    
+    const saltBytes = base64ToArrayBuffer(record.salt);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const derivedHashHex = (await argon2id({
+      password,
+      salt: saltBytes,
+      ...record.params
+    } as any)) as unknown as string;
+    
+    const derivedHashBytes = new Uint8Array(derivedHashHex.match(/.{1,2}/g)!.map((byte: string) => parseInt(byte, 16)));
+    const derivedHash = arrayBufferToBase64(derivedHashBytes);
+    
+    return derivedHash === record.hash;
+  } catch (e) {
+    console.error("Error verifying panic password", e);
+    return false;
+  }
 };
 
 /**
