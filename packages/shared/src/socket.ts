@@ -40,6 +40,9 @@ export interface KeyRequestPayload {
   sessionId: string;
   targetId?: string;
   requesterId?: string;
+  requesterPublicKey?: string;
+  requesterPqPublicKey?: string;
+  requesterDeviceId?: string;
 }
 
 export interface GroupKeyRequestPayload {
@@ -119,7 +122,14 @@ export interface ServerToClientEvents {
     'auth:banned': (payload: { reason: string }) => void; // Added
     'user:identity_changed': (data: { userId: string; name?: string }) => void; // Made name optional
     "group:participants_changed": (payload: { conversationId: string }) => void;
-    "session:request_key": (payload: { conversationId: string; requesterId: string; sessionId: string }) => void;
+    "session:request_key": (payload: { 
+        conversationId: string; 
+        requesterId: string; 
+        sessionId: string;
+        requesterPublicKey?: string;
+        requesterPqPublicKey?: string;
+        requesterDeviceId?: string;
+    }) => void;
 
     // --- WEBRTC E2EE SIGNALING ---
     "webrtc:secure_signal": (payload: { from: string; type: string; payload: string }) => void;

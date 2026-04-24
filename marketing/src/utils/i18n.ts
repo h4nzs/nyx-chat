@@ -6,6 +6,11 @@ export const LANGUAGES = [
   { code: 'pt-BR', short: 'PT', label: '🇧🇷 Português' },
 ];
 
+interface ViteLocaleModule {
+  default?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
 const localeFiles = import.meta.glob('../locales/**/*.json', { eager: true });
 const translations: Record<string, Record<string, unknown>> = {};
 
@@ -19,10 +24,9 @@ for (const path in localeFiles) {
   
   if (!translations[lng]) translations[lng] = {};
   
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  translations[lng][ns] = (localeFiles[path] as any).default || localeFiles[path];
+  const moduleData = localeFiles[path] as ViteLocaleModule;
+  translations[lng][ns] = moduleData.default || moduleData;
 }
-
 export function getLangFromUrl(url: URL) {
   // Pecah URL (contoh: '/id/privacy' menjadi ['id', 'privacy'])
   const parts = url.pathname.split('/').filter(Boolean);

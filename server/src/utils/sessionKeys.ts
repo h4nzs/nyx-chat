@@ -3,115 +3,49 @@
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { prisma } from '../lib/prisma.js'
 import { PrismaClient } from '@prisma/client'
-import { getSodium } from '../lib/sodium.js'
-import { sanitizeForLog } from './logger.js'
 
 export type PrismaTransactionClient = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">
 
-const B64_VARIANT = 'URLSAFE_NO_PADDING'
+/**
+ * Payload interface for client-encrypted session keys.
+ */
+export interface ClientSessionKeyPayload {
+  deviceId: string;
+  encryptedKey: string; // Base64url encoded
+  initiatorCiphertexts?: string; // Optional, Base64url encoded
+  isInitiator?: boolean;
+}
 
 /**
- * Creates a new session key from scratch on the server and encrypts it for all participant devices.
- * This is used for ratcheting sessions or as a fallback.
+ * Relays client-encrypted session keys to the database for distribution.
+ * Pure Blind Relay implementation: Server does not generate or see any plaintext keys.
  */
-export async function rotateAndDistributeSessionKeys (conversationId: string, initiatorDeviceId: string, tx?: PrismaTransactionClient) {
+export async function relaySessionKeys(
+  conversationId: string,
+  sessionId: string,
+  keys: ClientSessionKeyPayload[],
+  tx?: PrismaTransactionClient
+) {
   const db = tx || prisma
-  const sodium = await getSodium()
-  const sessionKey = sodium.crypto_secretbox_keygen()
-  const sessionId = `session_${sodium.to_hex(sodium.randombytes_buf(16))}`
 
-  // ✅ FIX: Tarik partisipan sekaligus dengan SEMUA perangkat aktif mereka
-  const participants = await db.participant.findMany({
-    where: { conversationId },
-    include: { 
-      user: { 
-        include: { 
-          devices: {
-            select: { id: true, publicKey: true, userId: true }
-          }
-        } 
-      } 
-    }
-  })
-
-  if (participants.length === 0) {
-    throw new Error(`No participants found for conversation ${conversationId}`)
+  if (!keys || keys.length === 0) {
+    throw new Error(`No session keys provided for conversation ${conversationId}`)
   }
 
-  // Tipe data yang valid untuk di-insert ke tabel SessionKey skema baru
-  type SessionKeyRecord = {
-    sessionId: string;
-    encryptedKey: string;
-    deviceId: string;
-    conversationId: string;
-    initiatorCiphertexts: Buffer | null;
-    isInitiator: boolean;
-  }
+  // Map client payloads to database records
+  const keyRecords = keys.map(k => ({
+    conversationId,
+    sessionId,
+    deviceId: k.deviceId,
+    encryptedKey: Buffer.from(k.encryptedKey, 'base64url'),
+    initiatorCiphertexts: k.initiatorCiphertexts ? Buffer.from(k.initiatorCiphertexts, 'base64url') : null,
+    isInitiator: k.isInitiator || false
+  }))
 
-  const keyRecords: SessionKeyRecord[] = []
-  let initiatorHasKey = false;
-  let initiatorEncryptedKey = '';
+  // Save keys to database for retrieval by participant devices
+  await db.sessionKey.createMany({
+    data: keyRecords
+  });
 
-  // ✅ FIX: Looping Ganda (1 User -> Banyak Device)
-  for (const p of participants) {
-    const devices = p.user.devices
-
-    if (!devices || devices.length === 0) {
-      console.warn(`User ${sanitizeForLog(p.user.id)} in conversation ${sanitizeForLog(conversationId)} has no active devices.`)
-      continue
-    }
-
-    for (const device of devices) {
-      if (!device.publicKey) {
-        console.warn(`Device ${sanitizeForLog(device.id)} for user ${sanitizeForLog(p.user.id)} has no public key.`)
-        continue
-      }
-
-      try {
-        const recipientPublicKey = new Uint8Array(device.publicKey);
-        const encryptedKey = sodium.crypto_box_seal(sessionKey, recipientPublicKey)
-        const encryptedKeyB64 = sodium.to_base64(encryptedKey, sodium.base64_variants[B64_VARIANT])
-
-        const isInitiatorDevice = device.id === initiatorDeviceId
-
-        keyRecords.push({
-          sessionId,
-          encryptedKey: encryptedKeyB64,
-          deviceId: device.id,
-          conversationId,
-          initiatorCiphertexts: null,
-          isInitiator: isInitiatorDevice
-        })
-
-        if (isInitiatorDevice && !initiatorHasKey) {
-          initiatorHasKey = true
-          initiatorEncryptedKey = encryptedKeyB64
-        }
-        } catch (e: unknown) {
-        const errorMessage = e instanceof Error ? e.message : 'Unknown error'
-        console.error(`Failed to process public key for device ${sanitizeForLog(device.id)}. Error: ${sanitizeForLog(errorMessage)}`)
-        throw new Error(`Corrupted public key found for device ${sanitizeForLog(device.id)}. Cannot establish secure session.`)
-        }
-        }
-        }
-
-        if (keyRecords.length === 0) {
-        throw new Error(`Failed to create session keys: No valid devices found in conversation ${sanitizeForLog(conversationId)}.`)
-        }
-
-        if (!initiatorHasKey) {
-        throw new Error('Could not find a valid session key for the initiator\'s device.')
-        }
-
-        // Simpan kunci ke database untuk didistribusikan ke masing-masing device
-        await db.sessionKey.createMany({
-        data: keyRecords.map(k => ({
-        ...k,
-        // Konversi eksplisit Buffer ke Uint8Array murni agar kompatibel dengan Prisma Bytes
-        encryptedKey: new Uint8Array(Buffer.from(k.encryptedKey, 'base64url')),
-        initiatorCiphertexts: k.initiatorCiphertexts ? new Uint8Array(k.initiatorCiphertexts) : null
-        }))
-        });
-
-    return { sessionId, encryptedKey: initiatorEncryptedKey };
+  return { sessionId };
 }

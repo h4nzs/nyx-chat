@@ -7,16 +7,15 @@ import type { User } from '@store/auth';
 import { Spinner } from './Spinner';
 import SafetyNumberModal from './SafetyNumberModal';
 import { useConversationStore } from '@store/conversation';
+import { useAuthStore } from '@store/auth';
 import { useVerificationStore, computeFingerprint } from '@store/verification';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { useUserProfile } from '@hooks/useUserProfile';
 import MediaGallery from './MediaGallery';
-import type { UserId } from '@nyx/shared';
+import type { UserId, ProfileUser } from '@nyx/shared';
 import { asConversationId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
-
-type ProfileUser = User & { publicKey?: string; pqPublicKey?: string; signingKey?: string };
 
 export default function UserInfoPanel({ userId }: { userId: UserId }) {
   // Tambahkan namespace 'common' untuk menangkap pesan error global
@@ -75,8 +74,7 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
 
     try {
       const { generateSafetyNumber } = await import('@lib/crypto-worker-proxy');
-      const { getSodium } = await import('@lib/sodiumInitializer');
-      const { useAuthStore } = await import('@store/auth');
+      const { computeSafetyNumberParts } = await import('@utils/safetyNumber');
       const { getEncryptionKeyPair, getPqEncryptionKeyPair, getSigningPrivateKey } = useAuthStore.getState();
 
       const keyPair = await getEncryptionKeyPair();
@@ -85,43 +83,15 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
       }
       
       const pqKeyPair = await getPqEncryptionKeyPair().catch(() => null);
-
-      const sodium = await getSodium();
       const mySigningKey = await getSigningPrivateKey();
-      const mySigningPubKey = mySigningKey.slice(32);
-      
-      // Combine all available keys for a robust safety number
-      const myParts = [keyPair.publicKey];
-      if (pqKeyPair?.publicKey) myParts.push(pqKeyPair.publicKey);
-      myParts.push(mySigningPubKey);
-      
-      const myTotalLen = myParts.reduce((acc, p) => acc + p.length, 0);
-      const myPublicKeyCombined = new Uint8Array(myTotalLen);
-      let myOffset = 0;
-      for (const part of myParts) {
-        myPublicKeyCombined.set(part, myOffset);
-        myOffset += part.length;
-      }
 
-      const theirX25519PubKey = sodium.from_base64(user.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-      const theirPqPubKey = user.pqPublicKey 
-          ? sodium.from_base64(user.pqPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING) 
-          : null;
-      const theirSigningPubKey = user.signingKey 
-          ? sodium.from_base64(user.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING) 
-          : new Uint8Array(0);
-          
-      const theirParts = [theirX25519PubKey];
-      if (theirPqPubKey) theirParts.push(theirPqPubKey);
-      theirParts.push(theirSigningPubKey);
-      
-      const theirTotalLen = theirParts.reduce((acc, p) => acc + p.length, 0);
-      const theirPublicKeyCombined = new Uint8Array(theirTotalLen);
-      let theirOffset = 0;
-      for (const part of theirParts) {
-        theirPublicKeyCombined.set(part, theirOffset);
-        theirOffset += part.length;
-      }
+      // FIXED: user as ProfileUser
+      const { myPublicKeyCombined, theirPublicKeyCombined } = await computeSafetyNumberParts(
+        keyPair.publicKey,
+        pqKeyPair?.publicKey || null,
+        mySigningKey,
+        user as ProfileUser & { publicKey: string }
+      );
 
       const sn = await generateSafetyNumber(myPublicKeyCombined, theirPublicKeyCombined);
       setSafetyNumber(sn);
@@ -221,15 +191,15 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
       {showSafetyModal && user && (
         <SafetyNumberModal
           safetyNumber={safetyNumber}
-          userName={profile.name}
+          // FIXED: removed unnecessary any cast
+          userName={profile.name || ''}
           onClose={() => setShowSafetyModal(false)}
-          onVerify={async () => {
-            if (activeId && user) {
-              const fingerprint = await computeFingerprint(user);
-              setVerified(activeId, fingerprint);
-            }
-            setShowSafetyModal(false);
-          }}
+          onVerify={() => {
+        if (activeId && safetyNumber) {
+          setVerified(activeId, safetyNumber);
+        }
+        setShowSafetyModal(false);
+      }}
           isVerified={isAlreadyVerified}
           hasPeerPQ={!!user.pqPublicKey}
           hasPeerSigning={!!user.signingKey}

@@ -275,13 +275,13 @@ export async function decryptMessageObject(
            if (mk) {
                contentToDecrypt = payload.ciphertext;
            } else if (payload.x3dh && payload.ciphertext) {
-               const { ik, ek, otpkId } = payload.x3dh;
+               const { initiatorSigningKey, initiatorCiphertexts, otpkId } = payload.x3dh;
                const ciphertext = payload.ciphertext;
 
                const myIdentityKeyPair = await getMyEncryptionKeyPair();
                const { getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
                const mySignedPreKeyPair = await getSignedPreKeyPair();
-               
+
                const myPqIdentityKeyPair = await getPqEncryptionKeyPair();
                const myPqSignedPreKeyPair = await getPqSignedPreKeyPair();
 
@@ -290,20 +290,19 @@ export async function decryptMessageObject(
                    mySignedPreKeyPair,
                    myPqIdentityKeyPair,
                    myPqSignedPreKeyPair,
-                   ik,
-                   ek,
+                   initiatorSigningKey,
+                   initiatorCiphertexts,
                    otpkId
                );
-
                let theirRatchetPublicKey: Uint8Array | undefined;
                
                try {
                    const innerPayload = JSON.parse(ciphertext);
                    if (innerPayload.dr) {
-                        const epk = innerPayload.dr.dh || innerPayload.dr.epk;
-                        if (epk) {
+                        const kemPk = innerPayload.dr.kemPk;
+                        if (kemPk) {
                             const sodium = await getSodium();
-                            theirRatchetPublicKey = sodium.from_base64(epk, sodium.base64_variants.URLSAFE_NO_PADDING);
+                            theirRatchetPublicKey = sodium.from_base64(kemPk, sodium.base64_variants.URLSAFE_NO_PADDING);
                         }
                    }
                } catch (_e) {}
@@ -1695,9 +1694,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         for (const m of combined) {
             const existing = uniqueMessagesMap.get(m.id);
             if (existing) {
-                const existingIsValid = existing.content && !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error'].includes(existing.content);
-                const mIsFailure = !m.content || ['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error'].includes(m.content);
-
+                const existingIsValid = (existing.content || existing.fileMeta || existing.fileUrl) && !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error'].includes(existing.content || '');
+                const mIsFailure = (!m.content && !m.fileMeta && !m.fileUrl) || ['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error'].includes(m.content || '');
                 if (existingIsValid && mIsFailure) {
                     uniqueMessagesMap.set(m.id, { ...existing, repliedTo: existing.repliedTo || m.repliedTo });
                 } else if (!existingIsValid && !mIsFailure) {

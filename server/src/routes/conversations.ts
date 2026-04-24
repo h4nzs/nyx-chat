@@ -8,7 +8,7 @@ import { requireAuth } from '../middleware/auth.js'
 import { getIo } from '../socket.js'
 import { asConversationId, asUserId, type User, ConversationSchema, ParticipantSchema } from '@nyx/shared'
 import { toConversation, toParticipant } from '../utils/mappers.js';
-import { rotateAndDistributeSessionKeys } from '../utils/sessionKeys.js'
+import { relaySessionKeys } from '../utils/sessionKeys.js'
 import { ApiError } from '../utils/errors.js'
 import { zodValidate } from '../utils/validate.js'
 import { redisClient } from '../lib/redis.js'
@@ -157,10 +157,7 @@ router.get('/', async (req, res, next) => {
 
 const initialSessionSchema = z.object({
   sessionId: z.string(),
-  initialKeys: z.array(z.object({
-    userId: z.string(),
-    key: z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url')
-  })),
+  initialKeysPerDevice: z.record(z.string(), z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url')),
   initiatorCiphertextsPerDevice: z.record(z.string(), z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url'))
 }).optional()
 
@@ -236,33 +233,32 @@ router.post(
         })
 
         if (initialSession) {
-          const { sessionId, initialKeys, initiatorCiphertextsPerDevice } = initialSession
-          if (!sessionId || !initialKeys || !initiatorCiphertextsPerDevice) throw new Error('Incomplete initial session data provided.')
+          const { sessionId, initialKeysPerDevice, initiatorCiphertextsPerDevice } = initialSession
+          if (!sessionId || !initialKeysPerDevice || !initiatorCiphertextsPerDevice) throw new Error('Incomplete initial session data provided.')
 
-          const targetUserIds = initialKeys.map((ik: { userId: string }) => ik.userId);
-          const devices = await tx.device.findMany({ where: { userId: { in: targetUserIds } }, select: { id: true, userId: true } });
+          const targetDeviceIds = Object.keys(initialKeysPerDevice);
+          const devices = await tx.device.findMany({ where: { id: { in: targetDeviceIds } }, select: { id: true, userId: true } });
 
           const keyRecords = [];
-          for (const ik of initialKeys) {
-             const userDevices = devices.filter(d => d.userId === ik.userId);
-             for (const d of userDevices) {
-                const deviceCiphertext = initiatorCiphertextsPerDevice[d.id];
-                if (!deviceCiphertext) {
-                    console.error(`Missing initiator ciphertext for device ${d.id} of user ${ik.userId} in conversation ${conversation.id} by creator ${creatorId}`);
-                    throw new Error('Missing initiator ciphertext for a participant device');
-                }
-
-                keyRecords.push({
-                   sessionId,
-                   encryptedKey: Buffer.from(ik.key, 'base64url'),
-                   deviceId: d.id,
-                   conversationId: conversation.id,
-                   initiatorCiphertexts: Buffer.from(deviceCiphertext, 'base64url'),
-                   isInitiator: ik.userId === creatorId
-                });
+          for (const d of devices) {
+             const deviceKey = initialKeysPerDevice[d.id];
+             const deviceCiphertext = initiatorCiphertextsPerDevice[d.id];
+             if (!deviceCiphertext || !deviceKey) {
+                 console.error('Missing initiator ciphertext or key for participant device during conversation creation');
+                 throw new Error('Missing initiator ciphertext or key for a participant device');
              }
-          }          await tx.sessionKey.createMany({ data: keyRecords })        } else if (isGroup) {
-          await rotateAndDistributeSessionKeys(conversation.id, req.user.deviceId, tx)
+             keyRecords.push({
+                sessionId,
+                encryptedKey: Buffer.from(deviceKey, 'base64url'),
+                deviceId: d.id,
+                conversationId: conversation.id,
+                initiatorCiphertexts: Buffer.from(deviceCiphertext, 'base64url'),
+                isInitiator: d.userId === creatorId
+             });
+          }
+          await tx.sessionKey.createMany({ data: keyRecords })
+        } else if (isGroup) {
+          // No server-side key generation. Clients will rotate keys on membership change.
         }
         return conversation
       })
@@ -334,7 +330,7 @@ router.post('/:id/participants', async (req, res, next) => {
 
     const newParticipantsRaw = await prisma.$transaction(async (tx) => {
       await Promise.all(userIds.map((userId: string) => tx.participant.upsert({ where: { userId_conversationId: { userId, conversationId } }, create: { userId, conversationId, joinedAt: new Date() }, update: {} })))
-      await rotateAndDistributeSessionKeys(conversationId, req.user.deviceId, tx)
+      // No server-side key generation. Clients will rotate keys on next message.
       return await tx.participant.findMany({ where: { conversationId, userId: { in: userIds } }, include: { user: { select: userSelectWithKeys } } })
     })
 
@@ -409,7 +405,7 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
             throw new ApiError(404, 'Participant not found in this conversation');
         }
 
-        await rotateAndDistributeSessionKeys(conversationId, req.user!.deviceId, tx);
+        // No server-side key generation. Remaining clients will rotate keys.
     });
     
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userToRemoveId) })
@@ -436,9 +432,7 @@ router.delete('/:id/leave', async (req, res, next) => {
     await prisma.$transaction(async (tx) => {
         await tx.participant.delete({ where: { userId_conversationId: { userId, conversationId } } });
         const remainingAdmin = await tx.participant.findFirst({ where: { conversationId, role: 'ADMIN', userId: { not: userId } }, include: { user: { include: { devices: true } } } });
-        if (remainingAdmin && remainingAdmin.user.devices.length > 0) {
-            await rotateAndDistributeSessionKeys(conversationId, remainingAdmin.user.devices[0].id, tx);
-        }
+        // No server-side key generation. Remaining clients will rotate keys.
     });
     
     getIo().to(conversationId).emit('conversation:participant_removed', { conversationId: asConversationId(conversationId), userId: asUserId(userId) })

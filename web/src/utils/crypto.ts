@@ -458,16 +458,62 @@ export async function decryptSessionKeyForUser(
 
 export async function ensureAndRatchetSession(conversationId: string): Promise<void> {
   try {
-    const { sessionId, encryptedKey } = await authFetch<{ sessionId: string; encryptedKey: string }>(
-      `/api/session-keys/${conversationId}/ratchet`, { method: 'POST' }
-    );
-    const { publicKey, privateKey } = await getMyEncryptionKeyPair();
-    const newSessionKey = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+    const sodium = await getSodiumLib();
+    const { worker_pq_box_seal } = await getWorkerProxy();
+    const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
+    const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    
+    // 1. Generate local session key and ID
+    const sessionId = crypto.randomUUID();
+    const sessionKey = sodium.randombytes_buf(32);
+    
+    const conversationStore = useConversationStore.getState();
+    const conversation = conversationStore.conversations.find(c => c.id === conversationId);
+    if (!conversation) throw new Error("Conversation not found for ratcheting");
 
-    await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
+    // 2. Fetch all participant bundles
+    const userIds = conversation.participants.map(p => p.id);
+    const bundlesMap = await fetchPreKeyBundles(userIds);
+    
+    const keysPayload: Record<string, unknown>[] = [];
+    const myId = useAuthStore.getState().user?.id;
+
+    // 3. Encrypt for all devices of all participants
+    for (const uId of userIds) {
+      const bundles = bundlesMap[uId] || [];
+      for (const bundle of bundles) {
+        // Skip current device
+        if (uId === myId && bundle.identityKey === myIdentityKeyB64) continue;
+
+        const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const theirPqPublicKey = bundle.pqIdentityKey ? sodium.from_base64(bundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
+
+        if (!theirPqPublicKey) {
+          console.warn(`Skipping device ${bundle.deviceId} for user ${uId}: Missing PQ key`);
+          continue;
+        }
+
+        const encryptedKey = await worker_pq_box_seal(sessionKey, theirPqPublicKey, theirPublicKey);
+        
+        keysPayload.push({
+          deviceId: bundle.deviceId,
+          encryptedKey: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+          isInitiator: uId === myId
+        });
+      }
+    }
+
+    // 4. Relay to server
+    await authFetch(`/api/session-keys/${conversationId}/ratchet`, {
+      method: 'POST',
+      body: JSON.stringify({ sessionId, keys: keysPayload })
+    });
+
+    // 5. Store locally
+    await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
   } catch (error) {
     console.error(`Failed to ratchet session for ${conversationId}:`, error);
-    throw new Error('Could not establish a secure session.');
+    throw new Error('Could not establish a secure session locally.');
   }
 }
 
@@ -582,7 +628,8 @@ export async function ensureGroupSession(conversationId: string, participants: P
       }
 
       if (distributionKeys.length === 0) {
-          console.warn(`No distribution keys generated for group ${conversationId}. Sender state will be saved anyway.`);
+          console.warn(`No distribution keys generated for group ${conversationId}. Aborting sender state save.`);
+          return null;
       }
 
       // 3. Save Initial Sender State
@@ -591,10 +638,6 @@ export async function ensureGroupSession(conversationId: string, participants: P
           CK: senderKeyB64,
           N: 0
       });
-
-      if (distributionKeys.length === 0) {
-          return [];
-      }
 
       return distributionKeys.filter(Boolean);
     } finally {
@@ -673,6 +716,8 @@ export async function rotateGroupKey(conversationId: string, reason: 'membership
       const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
       if (distributionKeys) {
         emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+      } else {
+        throw new Error("Security Failure: One or more devices do not support mandatory Post-Quantum encryption. Key rotation aborted.");
       }
     }
   }
@@ -1121,36 +1166,27 @@ export async function establishSessionFromPreKeyBundle(
   const sodium = await getSodiumLib();
   const { worker_x3dh_initiator } = await getWorkerProxy();
 
-  const isHybrid = !!preKeyBundle.pqIdentityKey;
-
+  if (!preKeyBundle.pqIdentityKey || !preKeyBundle.signedPreKey.pqKey || !preKeyBundle.signedPreKey.pqSignature) {
+      throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+  }
+  
   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirSigningKey = sodium.from_base64(preKeyBundle.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const signature = sodium.from_base64(preKeyBundle.signedPreKey.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-  let theirPqIdentityKey: Uint8Array | undefined;
-  let theirPqSignedPreKey: Uint8Array | undefined;
-  let pqSignature: Uint8Array | undefined;
-
-  if (isHybrid) {
-      if (!preKeyBundle.signedPreKey.pqKey || !preKeyBundle.signedPreKey.pqSignature) {
-          throw new Error("Missing required PQ fields in hybrid pre-key bundle.");
-      }
-      theirPqIdentityKey = sodium.from_base64(preKeyBundle.pqIdentityKey!, sodium.base64_variants.URLSAFE_NO_PADDING);
-      theirPqSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-      pqSignature = sodium.from_base64(preKeyBundle.signedPreKey.pqSignature, sodium.base64_variants.URLSAFE_NO_PADDING);
-  }
+  const theirPqIdentityKey = sodium.from_base64(preKeyBundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const theirPqSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const pqSignature = sodium.from_base64(preKeyBundle.signedPreKey.pqSignature, sodium.base64_variants.URLSAFE_NO_PADDING);
 
   let theirOneTimePreKey: Uint8Array | undefined;
   let theirPqOneTimePreKey: Uint8Array | undefined;
   if (preKeyBundle.oneTimePreKey) {
     theirOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
-    if (isHybrid) {
-      if (!preKeyBundle.oneTimePreKey.pqKey) {
-        throw new Error("Missing required PQ OTPK in hybrid pre-key bundle.");
-      }
-      theirPqOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    if (!preKeyBundle.oneTimePreKey.pqKey) {
+      throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
     }
+    theirPqOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   }
 
   const result = await worker_x3dh_initiator({
@@ -1273,13 +1309,13 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
   const { conversationId, requesterId, requesterPublicKey: requesterPublicKeyB64, requesterPqPublicKey: requesterPqPublicKeyB64 } = payload;
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (!conversation) return;
-  const requester = conversation.participants.find(p => p.id === requesterId);
-  if (!requester || !requester.devices) {
-      console.warn("Group key fulfillment: Requester or requester devices not found.");
-      return;
-  }
+  const requester = conversation.participants.find(p => (p.userId || p.id) === requesterId);
+  if (!requester) return;
 
-  const isMatched = requester.devices.some(d => d.publicKey === requesterPublicKeyB64 && d.pqPublicKey === requesterPqPublicKeyB64);
+  const userObj = requester.user || requester;
+  const targetDevices = userObj.devices || requester.devices || [];
+
+  const isMatched = targetDevices.some(d => d.publicKey === requesterPublicKeyB64 && d.pqPublicKey === requesterPqPublicKeyB64);
   if (!isMatched) {
       console.warn("Group key fulfillment: Provided keys do not match any registered device keys for requester. Aborting.");
       return;
@@ -1326,13 +1362,13 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
 
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
   if (!conversation) return;
-  const requester = conversation.participants.find(p => p.id === requesterId);
-  if (!requester || !requester.devices) {
-      console.warn("Session key fulfillment: Requester or requester devices not found.");
-      return;
-  }
+  const requester = conversation.participants.find(p => (p.userId || p.id) === requesterId);
+  if (!requester) return;
 
-  const isMatched = requester.devices.some(d => d.publicKey === requesterPublicKeyB64 && d.pqPublicKey === requesterPqPublicKeyB64);
+  const userObj = requester.user || requester;
+  const targetDevices = userObj.devices || requester.devices || [];
+
+  const isMatched = targetDevices.some(d => d.publicKey === requesterPublicKeyB64 && d.pqPublicKey === requesterPqPublicKeyB64);
   if (!isMatched) {
       console.warn("Session key fulfillment: Provided keys do not match any registered device keys for requester. Aborting.");
       return;

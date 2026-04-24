@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.6.0-blue?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.6.1-blue?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/License-AGPLv3-red?style=for-the-badge" alt="License">
   <img src="https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white" alt="Typescript">
   <img src="https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React">
@@ -38,11 +38,11 @@ NYX is a radical experiment in **Pure Anonymity** and **Zero-Knowledge Architect
 
 NYX runs its cryptographic engine entirely inside a dedicated **Web Worker** using WebAssembly, ensuring the main UI thread is never blocked during heavy encryption cycles.
 
-### Hybrid Post-Quantum Cryptography
-To protect against "Harvest Now, Decrypt Later" attacks by future quantum computers, NYX employs a hybrid cryptographic architecture combining classical elliptic curves with lattice-based cryptography:
+### Strict Post-Quantum Cryptography
+To protect against "Harvest Now, Decrypt Later" attacks by future quantum computers, NYX operates in a **Mandatory Post-Quantum Mode** (rejecting classical-only downgrades). It employs a strict cryptographic architecture:
 
-* **Key Exchange (Hybrid PQX3DH):** Combines classical X25519 with **ML-KEM (Kyber / X-Wing)** for asynchronous key agreement. A session is only compromised if an attacker breaks *both* algorithms.
-* **Message Encryption:** Universal **Fan-Out Sender Key Protocol** (XChaCha20-Poly1305 + HMAC-SHA256) for all chats (1-on-1 and Groups), secured by PQ-Seals during distribution. Symmetric ratcheting provides natural quantum resistance.
+* **Key Exchange (Strict PQX3DH):** Combines classical X25519 with **ML-KEM-768 (Kyber / X-Wing)** for asynchronous key agreement. This establishes the initial quantum-resistant shared secrets between devices.
+* **Message Encryption & Distribution:** Universal **Client-Side Fan-Out Sender Key Protocol** (XChaCha20-Poly1305) for all chats. While the message payloads use symmetric ratcheting (which is naturally quantum-resistant), the critical **distribution of these session keys** to group members is secured using the **PQX3DH channels and ML-KEM encapsulation (PQ-Seals)**. The server acts purely as a **Blind Relay**, routing opaque ciphertext blobs without ever seeing plaintext keys.
 * **Hardware-Bound Local Vault:** Your master seed and recovery phrases are encrypted locally using **WebAuthn PRF (Biometric Binding)** stretched through an Argon2id KDF (128MB memory cost), ensuring keys cannot be extracted even if the device storage is physically compromised.
 * **Primitives:**
   * **Cipher:** XChaCha20-Poly1305 (IETF)
