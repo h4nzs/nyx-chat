@@ -59,7 +59,8 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
   const refresh = signAccessToken({ sub: user.id, jti, deviceId }, { expiresIn: '30d' })
 
   const rawIp = req.ip || '';
-  const ipAddress = crypto.createHash('sha256').update(rawIp).digest('hex').substring(0, 16);
+  const sodium = await getSodium();
+  const ipAddress = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(rawIp), null)).substring(0, 16);
   const userAgent = req.headers['user-agent']
 
   await prisma.refreshToken.create({
@@ -300,7 +301,8 @@ router.get('/recover/challenge', authLimiter, async (req, res, next) => {
   try {
     const { identifier } = req.query;
     if (!identifier || typeof identifier !== 'string') throw new ApiError(400, "Identifier is required.");
-    const nonce = crypto.randomBytes(32).toString('hex');
+    const sodium = await getSodium();
+    const nonce = sodium.to_hex(sodium.randombytes_buf(32));
     await redisClient.setEx(`recover_nonce:${identifier}`, 300, nonce);
     res.json({ nonce });
   } catch (e) { next(e); }
@@ -415,7 +417,8 @@ router.post('/logout', async (req, res) => {
 
 router.get('/pow/challenge', requireAuth, async (req, res, next) => {
   try {
-    const salt = crypto.randomBytes(16).toString('hex');
+    const sodium = await getSodium();
+    const salt = sodium.to_hex(sodium.randombytes_buf(16));
     const ip = req.ip || req.socket.remoteAddress;
     const userId = req.user?.id;
     
@@ -424,7 +427,7 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
     }
 
     const identifier = ip || userId;
-    const stableHash = crypto.createHash('sha256').update(String(identifier)).digest('hex').slice(0, 16);
+    const stableHash = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(String(identifier)), null)).slice(0, 16);
     const rateKey = ip ? `pow:ip_count:${stableHash}` : `pow:user_count:${stableHash}`;
     let count = await redisClient.incr(rateKey);
     if (count === 1) {

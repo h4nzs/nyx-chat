@@ -5,7 +5,7 @@ import { getIo } from '../socket.js'
 import { ApiError } from '../utils/errors.js'
 import { UAParser } from 'ua-parser-js'
 import { verifyJwt } from '../utils/jwt.js'
-import crypto from 'crypto'
+import { getSodium } from '../lib/sodium.js'
 
 const router: Router = Router()
 
@@ -43,7 +43,8 @@ router.get('/', requireAuth, async (req, res, next) => {
     })
 
     const rawIp = req.ip || '';
-    const currentIpHash = crypto.createHash('sha256').update(rawIp).digest('hex').substring(0, 16);
+    const sodium = await getSodium();
+    const currentIpHash = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(rawIp), null)).substring(0, 16);
 
     const parsedSessions = sessions.map(s => {
       const parser = new UAParser(s.userAgent || "")

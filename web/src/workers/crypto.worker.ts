@@ -48,19 +48,12 @@ async function ensureSodiumReady() {
 // --- INTERNAL HELPER FUNCTIONS FOR CORE CRYPTO LOGIC ---
 
 export async function kdfChain(chainKey: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    chainKey as BufferSource,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-
+  await ensureSodiumReady();
   const messageKeyInput = new Uint8Array([0x01]);
   const newChainKeyInput = new Uint8Array([0x02]);
 
-  const messageKey = new Uint8Array(await crypto.subtle.sign("HMAC", key, messageKeyInput));
-  const newChainKey = new Uint8Array(await crypto.subtle.sign("HMAC", key, newChainKeyInput));
+  const messageKey = sodium.crypto_generichash(32, messageKeyInput, chainKey);
+  const newChainKey = sodium.crypto_generichash(32, newChainKeyInput, chainKey);
 
   return [newChainKey, messageKey];
 }
@@ -166,7 +159,7 @@ async function storePrivateKeys(keys: {
     masterSeed: keys.masterSeed ? sodium.to_base64(keys.masterSeed, sodium.base64_variants[B64_VARIANT]) : undefined,
   };
 
-  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const salt = sodium.randombytes_buf(16);
   let kek: Uint8Array | null = null;
 
   try {

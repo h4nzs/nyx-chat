@@ -10,7 +10,7 @@ import { sendPushNotification } from "./utils/sendPushNotification.js";
 import { redisClient } from "./lib/redis.js"; 
 import { AuthPayload } from "./types/auth.js";
 import cookie from "cookie"; 
-import crypto from "crypto";
+import { getSodium } from "./lib/sodium.js";
 
 // --- REDIS ADAPTER IMPORTS ---
 import { createClient } from "redis";
@@ -154,7 +154,8 @@ export function registerSocket(httpServer: HttpServer) {
 
     if (!userId) {
       socket.on("auth:request_linking_qr", async (payload: { publicKey: string }, callback) => {
-         const linkingToken = crypto.randomBytes(32).toString('hex');
+         const sodium = await getSodium();
+         const linkingToken = sodium.to_hex(sodium.randombytes_buf(32));
          await socket.join(`linking:${linkingToken}`);
          if (typeof callback === 'function') callback({ ok: true, qrData: linkingToken });
       });

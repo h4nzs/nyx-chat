@@ -3,6 +3,7 @@ import { db } from './db';
 // FIX 1: Perbaikan case-sensitivity nama file agar aman di build Linux/Vercel
 import { clearAllKeys as clearSessionKeys } from './keychainDb';
 import { sha256, argon2id } from 'hash-wasm';
+import { getSodium } from './sodiumInitializer';
 
 const STORAGE_KEYS = {
   ENCRYPTED_KEYS: 'nyx_encrypted_keys',
@@ -74,7 +75,8 @@ export const setPanicPassword = async (password: string) => {
     return;
   }
   
-  const saltBytes = window.crypto.getRandomValues(new Uint8Array(16));
+  const sodium = await getSodium();
+  const saltBytes = sodium.randombytes_buf(16);
   const salt = arrayBufferToBase64(saltBytes);
   const params = {
     iterations: 2,
