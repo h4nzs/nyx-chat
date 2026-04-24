@@ -45,14 +45,6 @@ import type { Participant } from '@store/conversation';
 
 // --- Group Metadata Helpers ---
 
-interface ExtendedParticipant extends Participant {
-  user?: {
-    id: string;
-    signingKey?: string;
-    publicKey?: string;
-  };
-}
-
 export async function encryptGroupMetadata(
   metadata: { title?: string; description?: string; avatarUrl?: string },
   conversationId: string
@@ -202,14 +194,18 @@ export async function deleteMessageKeySecurely(messageId: string): Promise<void>
 export interface PreKeyBundle {
   deviceId: string;
   identityKey: string;
+  pqIdentityKey?: string; // NEW
   signingKey: string;
   signedPreKey: {
     key: string;
+    pqKey?: string; // NEW
     signature: string;
+    pqSignature?: string; // NEW
   };
   oneTimePreKey?: {
     keyId: number;
     key: string;
+    pqKey?: string; // NEW
   };
 }
 
@@ -247,34 +243,39 @@ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
   try {
     const { count } = await authFetch<{ count: number }>('/api/keys/count-otpk');
     const OTPK_THRESHOLD = 50;
-    const OTPK_BATCH_SIZE = 100;
+    const OTPK_BATCH_SIZE = 20;
 
     if (count >= OTPK_THRESHOLD) return;
 
     const masterSeed = await getMasterSeedOrThrow();
-    const startId = (await getLastOtpkId()) + 1;
-    
+    let currentStartId = (await getLastOtpkId()) + 1;
+    let currentCount = count;
+
     // Dynamic import for worker proxy
     const { worker_generate_otpk_batch } = await import('@lib/crypto-worker-proxy');
-    
-    const batch = await worker_generate_otpk_batch(OTPK_BATCH_SIZE, startId, masterSeed);
-    
-    // Store private keys locally
-    for (const key of batch) {
-      await storeOneTimePreKey(key.keyId, key.encryptedPrivateKey);
-    }
 
-    // Upload public keys
-    const publicKeys = batch.map(k => ({ keyId: k.keyId, publicKey: k.publicKey }));
-    await authFetch('/api/keys/upload-otpk', {
-      method: 'POST',
-      body: JSON.stringify({ keys: publicKeys })
-    });
+    while (currentCount < OTPK_THRESHOLD) {
+        const batch = await worker_generate_otpk_batch(OTPK_BATCH_SIZE, currentStartId, masterSeed);
+
+        // Store private keys locally
+        for (const key of batch) {
+          await storeOneTimePreKey(key.keyId, key.encryptedPrivateKey);
+        }
+
+        // Upload public keys
+        const publicKeys = batch.map(k => ({ keyId: k.keyId, publicKey: k.publicKey, pqPublicKey: k.pqPublicKey }));
+        await authFetch('/api/keys/upload-otpk', {
+          method: 'POST',
+          body: JSON.stringify({ keys: publicKeys })
+        });
+        
+        currentCount += batch.length;
+        currentStartId += batch.length;
+    }
   } catch (error) {
     console.error("[Crypto] Failed to refill One-Time Pre-Keys:", error);
   }
 }
-
 export async function resetOneTimePreKeys(): Promise<void> {
   try {
     await authFetch('/api/keys/otpk', { method: 'DELETE' });
@@ -358,15 +359,10 @@ const groupSessionLocks = new Set<string>();
 // --- E2EE WebRTC Signaling Helpers ---
 
 export async function generateCallKey(): Promise<string> {
-  const key = await crypto.subtle.generateKey(
-    { name: 'AES-GCM', length: 256 },
-    true,
-    ['encrypt', 'decrypt']
-  );
-  const exported = await crypto.subtle.exportKey('raw', key);
   const { getSodium } = await import('@lib/sodiumInitializer');
   const sodium = await getSodium();
-  return sodium.to_base64(new Uint8Array(exported), sodium.base64_variants.URLSAFE_NO_PADDING);
+  const key = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
+  return sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
 }
 
 export async function encryptCallSignal(payload: object, base64Key: string): Promise<string> {
@@ -374,27 +370,20 @@ export async function encryptCallSignal(payload: object, base64Key: string): Pro
   const sodium = await getSodium();
   const keyBytes = sodium.from_base64(base64Key, sodium.base64_variants.URLSAFE_NO_PADDING);
   
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw',
-    keyBytes,
-    { name: 'AES-GCM' },
-    false,
-    ['encrypt']
-  );
-
-  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const nonce = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
   const encodedPayload = new TextEncoder().encode(JSON.stringify(payload));
   
-  const encryptedBuf = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    cryptoKey,
-    encodedPayload
+  const encryptedBytes = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+    encodedPayload,
+    null,
+    null,
+    nonce,
+    keyBytes
   );
 
-  const encryptedBytes = new Uint8Array(encryptedBuf);
-  const combined = new Uint8Array(iv.length + encryptedBytes.length);
-  combined.set(iv, 0);
-  combined.set(encryptedBytes, iv.length);
+  const combined = new Uint8Array(nonce.length + encryptedBytes.length);
+  combined.set(nonce, 0);
+  combined.set(encryptedBytes, nonce.length);
 
   return sodium.to_base64(combined, sodium.base64_variants.URLSAFE_NO_PADDING);
 }
@@ -405,21 +394,16 @@ export async function decryptCallSignal(encryptedStr: string, base64Key: string)
   const keyBytes = sodium.from_base64(base64Key, sodium.base64_variants.URLSAFE_NO_PADDING);
   const combined = sodium.from_base64(encryptedStr, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-  const iv = combined.slice(0, 12);
-  const encryptedBytes = combined.slice(12);
+  const nonceLength = sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+  const nonce = combined.slice(0, nonceLength);
+  const encryptedBytes = combined.slice(nonceLength);
 
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw',
-    keyBytes,
-    { name: 'AES-GCM' },
-    false,
-    ['decrypt']
-  );
-
-  const decryptedBuf = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
-    cryptoKey,
-    encryptedBytes
+  const decryptedBuf = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+    null,
+    encryptedBytes,
+    null,
+    nonce,
+    keyBytes
   );
 
   const jsonStr = new TextDecoder().decode(decryptedBuf);
@@ -431,7 +415,7 @@ async function getWorkerProxy() {
   return import('@lib/crypto-worker-proxy');
 }
 
-async function getSodiumLib() {
+export async function getSodiumLib() {
   const { getSodium } = await import('@lib/sodiumInitializer');
   return getSodium();
 }
@@ -495,11 +479,13 @@ export async function ensureGroupSession(conversationId: string, participants: P
   if (pending) return pending;
 
   if (groupSessionLocks.has(conversationId)) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const interval = setInterval(() => {
         if (!groupSessionLocks.has(conversationId)) {
           clearInterval(interval);
-          ensureGroupSession(conversationId, participants, forceRotate).then(resolve);
+          ensureGroupSession(conversationId, participants, forceRotate)
+            .then(resolve)
+            .catch(reject);
         }
       }, 10);
     });
@@ -519,7 +505,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
       if (existingSenderState) return null; // We already have a sender key for this group
 
       const sodium = await getSodiumLib();
-      const { groupInitSenderKey, worker_crypto_box_seal } = await getWorkerProxy();
+      const { groupInitSenderKey, worker_pq_box_seal } = await getWorkerProxy();
       const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
       const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
@@ -533,7 +519,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
       // 2. ✅ FAN-OUT (Optimized with Bulk Fetch): Ambil semua bundle dalam 1 query
       const userIdsToFetch: string[] = [];
       for (const p of participants) {
-          const extP = p as ExtendedParticipant;
+          const extP = p as Participant;
           const uId = extP.userId || extP.user?.id || extP.id;
           if (uId) userIdsToFetch.push(uId);
       }
@@ -562,8 +548,26 @@ export async function ensureGroupSession(conversationId: string, participants: P
               }
 
               const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-              const encryptedKey = await worker_crypto_box_seal(
+              const theirPqPublicKey = bundle.pqIdentityKey ? sodium.from_base64(bundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING) : new Uint8Array(0);
+              
+              if (theirPqPublicKey.length === 0) {
+                  console.warn(`Skipping device ${bundle.deviceId} for user ${uId} due to missing PQ Identity Key.`);
+                  continue;
+              }
+
+              // Validate key lengths before calling worker
+              if (theirPublicKey.length !== 32) {
+                  console.error(`Invalid classical public key length for device ${bundle.deviceId}: expected 32, got ${theirPublicKey.length}`);
+                  continue;
+              }
+              if (theirPqPublicKey.length !== sodium.crypto_kem_xwing_PUBLICKEYBYTES) {
+                  console.error(`Invalid PQ public key length for device ${bundle.deviceId}: expected ${sodium.crypto_kem_xwing_PUBLICKEYBYTES}, got ${theirPqPublicKey.length}`);
+                  continue;
+              }
+
+              const encryptedKey = await worker_pq_box_seal(
                   sodium.from_base64(senderKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING), 
+                  theirPqPublicKey,
                   theirPublicKey
               );
               
@@ -577,12 +581,20 @@ export async function ensureGroupSession(conversationId: string, participants: P
           }
       }
 
-      // 3. Save Initial Sender State ONLY after successful encryption fan-out
+      if (distributionKeys.length === 0) {
+          console.warn(`No distribution keys generated for group ${conversationId}. Sender state will be saved anyway.`);
+      }
+
+      // 3. Save Initial Sender State
       await saveGroupSenderState({
           conversationId: conversationId as ConversationId,
           CK: senderKeyB64,
           N: 0
       });
+
+      if (distributionKeys.length === 0) {
+          return [];
+      }
 
       return distributionKeys.filter(Boolean);
     } finally {
@@ -605,13 +617,16 @@ export async function handleGroupKeyDistribution(
     senderId: string,
     senderDeviceKey?: string
 ): Promise<void> {
-  const { publicKey, privateKey } = await getMyEncryptionKeyPair();
+  const { privateKey: classicalPrivateKey } = await getMyEncryptionKeyPair();
+  const { privateKey: pqPrivateKey } = await useAuthStore.getState().getPqEncryptionKeyPair();
   const sodium = await getSodiumLib();
+  const { worker_pq_box_seal_open } = await getWorkerProxy();
 
   // 1. Decrypt the Sender Key (Chain Key)
   let senderKeyBytes: Uint8Array;
   try {
-      senderKeyBytes = await decryptSessionKeyForUser(encryptedKey, publicKey, privateKey);
+      const encryptedKeyBytes = sodium.from_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      senderKeyBytes = await worker_pq_box_seal_open(encryptedKeyBytes, pqPrivateKey, classicalPrivateKey);
   } catch (e) {
       console.warn(`[Key Distribution] Ignored group key distribution for convo ${conversationId}, likely meant for another device.`);
       return; // Skip silently if decryption fails
@@ -708,10 +723,10 @@ async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0, t
 const XCHACHA20_NONCE_BYTES = 24;
 
 export interface DrHeader {
-  dh: string;
-  pn: number;
+  kemPk: string; // Ganti 'dh' jadi 'kemPk'
+  ct: string;    // Tambahkan 'ct' (Ciphertext)
   n: number;
-  epk?: string;
+  pn: number;
 }
 
 // --- Unified Ratchet Mutex ---
@@ -941,7 +956,7 @@ async function doDecryptMessage(
                 console.warn("Cannot fallback to current device signing key for a message sent from our other device.");
             } else {
                 const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-                const sender = conversation?.participants.find(p => p.id === senderId || ('userId' in p && p.userId === senderId)) as ExtendedParticipant | undefined;
+                const sender = conversation?.participants.find(p => p.id === senderId || ('userId' in p && p.userId === senderId)) as Participant | undefined;
                 keyToUse = sender?.signingKey || sender?.user?.signingKey;
             }
         }
@@ -955,7 +970,7 @@ async function doDecryptMessage(
 
         // 1. CHECK SKIPPED KEYS FIRST (ATOMIC)
         const { takeGroupSkippedKey, storeGroupSkippedKey } = await import('@lib/keychainDb');
-        const skippedMkB64 = await takeGroupSkippedKey(conversationId, senderId, header.n);
+        const skippedMkB64 = await takeGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n);
         
         if (skippedMkB64) {
             const { groupDecryptSkipped } = await getWorkerProxy();
@@ -985,7 +1000,7 @@ async function doDecryptMessage(
         );
         
         for (const sk of result.skippedKeys) {
-            await storeGroupSkippedKey(conversationId, senderId, sk.n, sk.mk);
+            await storeGroupSkippedKey(conversationId, senderId, senderDeviceKey, sk.n, sk.mk);
         }
 
         await saveGroupReceiverState({
@@ -1043,9 +1058,10 @@ async function doDecryptMessage(
 
       const drHeader = payload.dr;
       const actualCipher = payload.ciphertext;
-      // Prefer epk if present, otherwise fallback to dh
-      const dhKey = drHeader.epk || drHeader.dh;
-      const headerKey = `${conversationId}_${dhKey}_${drHeader.n}`;
+      
+      // ✅ FIX: Get the post-quantum key directly from the new KEM header structure
+      const kemPk = drHeader.kemPk;
+      const headerKey = `${conversationId}_${kemPk}_${drHeader.n}`;
 
       const skippedMkStr = await retrieveSkippedMessageKeySecurely(headerKey);
       if (skippedMkStr) {
@@ -1075,8 +1091,7 @@ async function doDecryptMessage(
 
       // [FIX] ATOMIC ORDER: Store intermediate keys (gaps) FIRST
       for (const sk of result.skippedKeys) {
-          const skDhKey = sk.epk || sk.dh;
-          const hKey = `${conversationId}_${skDhKey}_${sk.n}`;
+          const hKey = `${conversationId}_${sk.kemPk}_${sk.n}`;
           await storeSkippedMessageKeySecurely(hKey, sk.mk);
       }
 
@@ -1100,33 +1115,60 @@ async function doDecryptMessage(
 // --- Pre-Key Handshake (Full X3DH with OTPK) ---
 
 export async function establishSessionFromPreKeyBundle(
-  myIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
+  mySigningKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   preKeyBundle: PreKeyBundle
-): Promise<{ sessionKey: Uint8Array, ephemeralPublicKey: string, otpkId?: number }> {
+): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: string, otpkId?: number }> {
   const sodium = await getSodiumLib();
   const { worker_x3dh_initiator } = await getWorkerProxy();
+
+  const isHybrid = !!preKeyBundle.pqIdentityKey;
 
   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirSigningKey = sodium.from_base64(preKeyBundle.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const signature = sodium.from_base64(preKeyBundle.signedPreKey.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
 
+  let theirPqIdentityKey: Uint8Array | undefined;
+  let theirPqSignedPreKey: Uint8Array | undefined;
+  let pqSignature: Uint8Array | undefined;
+
+  if (isHybrid) {
+      if (!preKeyBundle.signedPreKey.pqKey || !preKeyBundle.signedPreKey.pqSignature) {
+          throw new Error("Missing required PQ fields in hybrid pre-key bundle.");
+      }
+      theirPqIdentityKey = sodium.from_base64(preKeyBundle.pqIdentityKey!, sodium.base64_variants.URLSAFE_NO_PADDING);
+      theirPqSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      pqSignature = sodium.from_base64(preKeyBundle.signedPreKey.pqSignature, sodium.base64_variants.URLSAFE_NO_PADDING);
+  }
+
   let theirOneTimePreKey: Uint8Array | undefined;
+  let theirPqOneTimePreKey: Uint8Array | undefined;
   if (preKeyBundle.oneTimePreKey) {
     theirOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
+    if (isHybrid) {
+      if (!preKeyBundle.oneTimePreKey.pqKey) {
+        throw new Error("Missing required PQ OTPK in hybrid pre-key bundle.");
+      }
+      theirPqOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    }
   }
 
   const result = await worker_x3dh_initiator({
-    myIdentityKey: myIdentityKeyPair,
+    mySigningKey: mySigningKeyPair,
     theirIdentityKey,
+    theirPqIdentityKey,
     theirSignedPreKey,
+    theirPqSignedPreKey,
     theirSigningKey,
     signature,
-    theirOneTimePreKey // Pass OTPK if available
+    pqSignature,
+    theirOneTimePreKey,
+    theirPqOneTimePreKey
   });
 
   return {
-    ...result,
+    sessionKey: result.sessionKey,
+    initiatorCiphertexts: result.initiatorCiphertexts, // Pastikan ini namanya initiatorCiphertexts, bukan ephemeralPublicKey
     otpkId: preKeyBundle.oneTimePreKey?.keyId
   };
 }
@@ -1134,24 +1176,24 @@ export async function establishSessionFromPreKeyBundle(
 export async function deriveSessionKeyAsRecipient(
   myIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   mySignedPreKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
-  initiatorIdentityKeyStr: string,
-  initiatorEphemeralKeyStr: string,
+  myPqIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
+  myPqSignedPreKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
+  initiatorSigningKeyStr: string,      // Harus string
+  initiatorCiphertextsStr: string,     // Harus string
   otpkId?: number
 ): Promise<Uint8Array> {
   const sodium = await getSodiumLib();
   const { worker_x3dh_recipient, worker_decrypt_session_key } = await getWorkerProxy();
 
-  const theirIdentityKey = sodium.from_base64(initiatorIdentityKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const theirEphemeralKey = sodium.from_base64(initiatorEphemeralKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
+  // ERROR KEMUNGKINAN TERJADI DI SINI
+  const theirSigningKey = sodium.from_base64(initiatorSigningKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const initiatorCiphertexts = initiatorCiphertextsStr;
   
   let myOneTimePreKey: { privateKey: Uint8Array } | undefined;
 
   if (otpkId !== undefined) {
     const masterSeed = await getMasterSeedOrThrow();
-    
-    // 1. Try Retrieve Encrypted OTPK Private Key from Local Storage
     const encryptedOtpk = await getOneTimePreKey(otpkId);
-    
     if (encryptedOtpk) {
       try {
         const otpkPrivateKey = await worker_decrypt_session_key(encryptedOtpk, masterSeed);
@@ -1160,8 +1202,6 @@ export async function deriveSessionKeyAsRecipient(
         console.error("Failed to decrypt stored OTPK:", e);
       }
     } 
-    
-    // 2. RECOVERY: If not found (e.g. after logout/restore), Regenerate Deterministically
     if (!myOneTimePreKey) {
         try {
             const { worker_x3dh_recipient_regenerate } = await getWorkerProxy();
@@ -1170,8 +1210,10 @@ export async function deriveSessionKeyAsRecipient(
                 masterSeed,
                 myIdentityKey: myIdentityKeyPair,
                 mySignedPreKey: mySignedPreKeyPair,
-                theirIdentityKey: sodium.from_base64(initiatorIdentityKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING),
-                theirEphemeralKey: sodium.from_base64(initiatorEphemeralKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING)
+                myPqIdentityKey: myPqIdentityKeyPair,
+                myPqSignedPreKey: myPqSignedPreKeyPair,
+                theirSigningKey,
+                initiatorCiphertexts
             });
             return sessionKey;
         } catch (e) {
@@ -1184,20 +1226,17 @@ export async function deriveSessionKeyAsRecipient(
     const sessionKey = await worker_x3dh_recipient({
       myIdentityKey: myIdentityKeyPair,
       mySignedPreKey: mySignedPreKeyPair,
-      theirIdentityKey,
-      theirEphemeralKey,
+      myPqIdentityKey: myPqIdentityKeyPair,
+      myPqSignedPreKey: myPqSignedPreKeyPair,
+      theirSigningKey,         // Hapus baris theirIdentityKey dan theirEphemeralKey, ganti dengan ini
+      initiatorCiphertexts,    // Tambahkan baris ini
       myOneTimePreKey
     });
-
-    // 3. Perfect Forward Secrecy: Delete the OTPK after use
-    // Even if we regenerated it, we don't store it back, just use and forget.
     if (otpkId !== undefined) {
       await deleteOneTimePreKey(otpkId);
     }
-
     return sessionKey;
   } finally {
-    // Cleanup if needed (worker handles most)
   }
 }
 
@@ -1207,6 +1246,7 @@ interface GroupFulfillRequestPayload {
   conversationId: string;
   requesterId: string;
   requesterPublicKey: string;
+  requesterPqPublicKey?: string;
   requesterDeviceId?: string;
 }
 
@@ -1215,6 +1255,7 @@ interface FulfillRequestPayload {
   sessionId: string;
   requesterId: string;
   requesterPublicKey: string;
+  requesterPqPublicKey: string;
 }
 
 interface ReceiveKeyPayload {
@@ -1224,23 +1265,39 @@ interface ReceiveKeyPayload {
   type?: 'GROUP_KEY' | 'SESSION_KEY';
   senderId?: string; // New: Needed for Group Sender Keys
   senderDeviceKey?: string;
-  initiatorEphemeralKey?: string; // Need this for X3DH calc
-  initiatorIdentityKey?: string; // Need this for X3DH calc
+  initiatorCiphertextsStr?: string;
+  initiatorSigningKey?: string;
 }
 
 export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload): Promise<void> {
-  const { conversationId, requesterId, requesterPublicKey: requesterPublicKeyB64 } = payload;
+  const { conversationId, requesterId, requesterPublicKey: requesterPublicKeyB64, requesterPqPublicKey: requesterPqPublicKeyB64 } = payload;
   const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-  if (!conversation || !conversation.participants.some(p => p.id === requesterId)) return;
+  if (!conversation) return;
+  const requester = conversation.participants.find(p => p.id === requesterId);
+  if (!requester || !requester.devices) {
+      console.warn("Group key fulfillment: Requester or requester devices not found.");
+      return;
+  }
+
+  const isMatched = requester.devices.some(d => d.publicKey === requesterPublicKeyB64 && d.pqPublicKey === requesterPqPublicKeyB64);
+  if (!isMatched) {
+      console.warn("Group key fulfillment: Provided keys do not match any registered device keys for requester. Aborting.");
+      return;
+  }
 
   // [FIX] Send the CURRENT Sender Key (Ratchet Chain Key)
   const senderState = await getGroupSenderState(conversationId);
   if (!senderState) return;
 
   const sodium = await getSodiumLib();
-  const { worker_crypto_box_seal } = await getWorkerProxy();
+  const { worker_pq_box_seal } = await getWorkerProxy();
 
   const requesterPublicKey = sodium.from_base64(requesterPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+  if (!requesterPqPublicKeyB64) {
+      console.warn("Group key fulfillment: Missing PQ key for requester. Cannot safely fulfill.");
+      return;
+  }
+  const requesterPqPublicKey = sodium.from_base64(requesterPqPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
   const senderKeyBytes = sodium.from_base64(senderState.CK, sodium.base64_variants.URLSAFE_NO_PADDING);
   
   // Pack N (4 bytes) + CK (32 bytes)
@@ -1248,7 +1305,7 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
   new DataView(payloadToEncrypt.buffer).setUint32(0, senderState.N || 0, false); // Big Endian
   payloadToEncrypt.set(senderKeyBytes, 4);
 
-  const encryptedKeyForRequester = await worker_crypto_box_seal(payloadToEncrypt, requesterPublicKey);
+  const encryptedKeyForRequester = await worker_pq_box_seal(payloadToEncrypt, requesterPqPublicKey, requesterPublicKey);
 
   const { publicKey: myIdentityKey } = await getMyEncryptionKeyPair();
   const myIdentityKeyB64 = sodium.to_base64(myIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -1263,15 +1320,32 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
 }
 
 export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise<void> {
-  const { conversationId, sessionId, requesterId, requesterPublicKey: requesterPublicKeyB64 } = payload;
+  const { conversationId, sessionId, requesterId, requesterPublicKey: requesterPublicKeyB64, requesterPqPublicKey: requesterPqPublicKeyB64 } = payload;
   const key = await retrieveSessionKeySecurely(conversationId, sessionId);
   if (!key) return;
 
+  const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  if (!conversation) return;
+  const requester = conversation.participants.find(p => p.id === requesterId);
+  if (!requester || !requester.devices) {
+      console.warn("Session key fulfillment: Requester or requester devices not found.");
+      return;
+  }
+
+  const isMatched = requester.devices.some(d => d.publicKey === requesterPublicKeyB64 && d.pqPublicKey === requesterPqPublicKeyB64);
+  if (!isMatched) {
+      console.warn("Session key fulfillment: Provided keys do not match any registered device keys for requester. Aborting.");
+      return;
+  }
+
   const sodium = await getSodiumLib();
-  const { worker_crypto_box_seal } = await getWorkerProxy();
+  const { worker_pq_box_seal } = await getWorkerProxy();
 
   const requesterPublicKey = sodium.from_base64(requesterPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const encryptedKeyForRequester = await worker_crypto_box_seal(key, requesterPublicKey);
+  if (!requesterPqPublicKeyB64) return;
+  const requesterPqPublicKey = sodium.from_base64(requesterPqPublicKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+  
+  const encryptedKeyForRequester = await worker_pq_box_seal(key, requesterPqPublicKey, requesterPublicKey);
 
   emitSessionKeyFulfillment({
     requesterId,
@@ -1283,7 +1357,7 @@ export async function fulfillKeyRequest(payload: FulfillRequestPayload): Promise
 
 export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promise<void> {
   if (!payload || typeof payload !== 'object') return;
-  const { conversationId, sessionId, encryptedKey, type, senderId, senderDeviceKey, initiatorEphemeralKey, initiatorIdentityKey } = payload;
+  const { conversationId, sessionId, encryptedKey, type, senderId, senderDeviceKey, initiatorCiphertextsStr, initiatorSigningKey } = payload;
   
   if (encryptedKey === 'dummy' || (sessionId && sessionId.startsWith('dummy'))) {
       console.warn("🛡️ [Crypto] BERHASIL MEMBLOKIR KUNCI DUMMY DARI SERVER!", { conversationId, sessionId });
@@ -1317,16 +1391,20 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     if (encryptedKey.startsWith('{') && encryptedKey.includes('"x3dh":true')) {
         try {
             const metadata = JSON.parse(encryptedKey);
-            if (metadata.x3dh && initiatorEphemeralKey && initiatorIdentityKey) {
-                const { getEncryptionKeyPair, getSignedPreKeyPair } = useAuthStore.getState();
+            if (metadata.x3dh && initiatorCiphertextsStr && initiatorSigningKey) {
+                const { getEncryptionKeyPair, getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
                 const myIdentityKeyPair = await getEncryptionKeyPair();
                 const mySignedPreKeyPair = await getSignedPreKeyPair();
+                const myPqIdentityKeyPair = await getPqEncryptionKeyPair();
+                const myPqSignedPreKeyPair = await getPqSignedPreKeyPair();
 
                 newSessionKey = await deriveSessionKeyAsRecipient(
                     myIdentityKeyPair,
                     mySignedPreKeyPair,
-                    initiatorIdentityKey,
-                    initiatorEphemeralKey,
+                    myPqIdentityKeyPair,
+                    myPqSignedPreKeyPair,
+                    initiatorSigningKey,
+                    initiatorCiphertextsStr,
                     metadata.otpkId
                 );
             } else {
@@ -1364,20 +1442,14 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
 
 // --- File Encryption/Decryption ---
 
-const IV_LENGTH = 12;
-
 export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; key: string }> {
-  // Legacy / Sync version (Used by older components)
   const fileData = await blob.arrayBuffer();
   const sodium = await getSodiumLib();
   const { worker_file_encrypt } = await getWorkerProxy();
   
-  const { encryptedData, iv, key } = await worker_file_encrypt(fileData);
+  const { combinedData, key } = await worker_file_encrypt(fileData);
 
-  const combined = new Uint8Array(iv.length + encryptedData.byteLength);
-  combined.set(iv);
-  combined.set(new Uint8Array(encryptedData), iv.length);
-  const encryptedBlob = new Blob([combined], { type: 'application/octet-stream' });
+  const encryptedBlob = new Blob([combinedData], { type: 'application/octet-stream' });
 
   const keyB64 = sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
 
@@ -1395,12 +1467,9 @@ export async function encryptFileViaWorker(blob: Blob): Promise<{ encryptedBlob:
   const sodium = await getSodiumLib();
   const { worker_file_encrypt } = await getWorkerProxy();
   
-  const { encryptedData, iv, key } = await worker_file_encrypt(fileData);
+  const { combinedData, key } = await worker_file_encrypt(fileData);
 
-  const combined = new Uint8Array(iv.length + encryptedData.byteLength);
-  combined.set(iv);
-  combined.set(new Uint8Array(encryptedData), iv.length);
-  const encryptedBlob = new Blob([combined], { type: 'application/octet-stream' });
+  const encryptedBlob = new Blob([combinedData], { type: 'application/octet-stream' });
 
   const keyB64 = sodium.to_base64(key, sodium.base64_variants.URLSAFE_NO_PADDING);
 
@@ -1420,7 +1489,8 @@ export async function decryptFile(encryptedBlob: Blob, keyB64: string, originalT
       reader.readAsArrayBuffer(encryptedBlob);
   });
 
-  if (combinedData.byteLength < IV_LENGTH) throw new Error("Encrypted file is too short.");
+  const HEADER_BYTES = sodium.crypto_secretstream_xchacha20poly1305_HEADERBYTES;
+  if (combinedData.byteLength < HEADER_BYTES) throw new Error("Encrypted file is too short.");
 
   const decryptedData = await worker_file_decrypt(combinedData, keyBytes);
 

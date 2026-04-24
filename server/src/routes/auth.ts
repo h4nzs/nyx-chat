@@ -11,6 +11,7 @@ import { zodValidate } from '../utils/validate.js'
 import { env } from '../config.js'
 import { requireAuth } from '../middleware/auth.js'
 import { authLimiter } from '../middleware/rateLimiter.js'
+import { getSodium } from '../lib/sodium.js'
 import { nanoid } from 'nanoid'
 import crypto from 'crypto'
 import {
@@ -84,13 +85,29 @@ async function verifyTurnstileToken (token: string): Promise<boolean> {
   }
 }
 
+const isValidBase64Url = (str: string, expectedBytes?: number) => {
+  if (!/^[A-Za-z0-9_-]+={0,2}$/.test(str)) return false;
+  if (expectedBytes) {
+    try {
+      const buf = Buffer.from(str, 'base64url');
+      if (buf.byteLength !== expectedBytes) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+};
+
+const validateKey = (expectedBytes?: number) => z.string().refine(val => isValidBase64Url(val, expectedBytes), { message: `Invalid key format or length (expected ${expectedBytes || 'valid base64url'})` });
+
 router.post('/register', authLimiter, zodValidate({
   body: z.object({
     usernameHash: z.string().min(10),
     password: z.string().min(8).max(128),
     encryptedProfile: z.string().optional(),
-    publicKey: z.string().optional(),
-    signingKey: z.string().optional(),
+    publicKey: validateKey(32),
+    pqPublicKey: validateKey(1216).optional(),
+    signingKey: validateKey(32),
     encryptedPrivateKeys: z.string().optional(),
     deviceName: z.string().optional(),
     turnstileToken: z.string().optional()
@@ -98,10 +115,10 @@ router.post('/register', authLimiter, zodValidate({
 }),
 async (req, res, next) => {
   try {
-    const { usernameHash, password, encryptedProfile, publicKey, signingKey, encryptedPrivateKeys, deviceName, turnstileToken } = req.body
+    const { usernameHash, password, encryptedProfile, publicKey, pqPublicKey, signingKey, encryptedPrivateKeys, deviceName, turnstileToken } = req.body
 
     const isHuman = await verifyTurnstileToken(turnstileToken || '')
-    if (!isHuman) throw new ApiError(400, 'Bot detected. Please try again.')
+    if (!isHuman) throw new ApiError(400, 'Bot detected. Please try again or reload page.')
 
     const existingUser = await prisma.user.findUnique({ where: { usernameHash } })
     if (existingUser) throw new ApiError(409, 'Username already taken (Hash Collision).')
@@ -116,14 +133,18 @@ async (req, res, next) => {
         isVerified: false,
         devices: {
           create: {
-            publicKey: publicKey || '',
-            signingKey: signingKey || '',
-            encryptedPrivateKey: encryptedPrivateKeys,
+            // FIX 1: Safe Buffer conversion for optional inputs
+            publicKey: Buffer.from(publicKey, 'base64url'),
+            pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
+            signingKey: Buffer.from(signingKey, 'base64url'),
+            encryptedPrivateKey: encryptedPrivateKeys ? Buffer.from(encryptedPrivateKeys, 'utf8') : null,
             name: deviceName || 'Primary Device'
           }
         }
       },
-      include: { devices: true }
+      include: {
+        devices: true
+      }
     })
 
     const deviceId = user.devices[0].id
@@ -145,18 +166,19 @@ async (req, res, next) => {
 })
 
 router.post('/login', authLimiter, zodValidate({
-  body: z.object({ 
-    usernameHash: z.string().min(10), 
+  body: z.object({
+    usernameHash: z.string().min(10),
     password: z.string().min(8),
-    publicKey: z.string().optional(),
-    signingKey: z.string().optional(),
+    publicKey: validateKey(32),
+    pqPublicKey: validateKey(1216).optional(),
+    signingKey: validateKey(32),
     encryptedPrivateKey: z.string().optional(),
-    deviceName: z.string().optional()
+    deviceName: z.string().optional(),
+    deviceId: z.string().optional()
   })
-}),
-async (req, res, next) => {
+}),async (req, res, next) => {
   try {
-    const { usernameHash, password, publicKey, signingKey, encryptedPrivateKey, deviceName } = req.body
+    const { usernameHash, password, publicKey, pqPublicKey, signingKey, encryptedPrivateKey, deviceName } = req.body
     
     const user = await prisma.user.findUnique({
       where: { usernameHash },
@@ -176,39 +198,51 @@ async (req, res, next) => {
 
     if (publicKey && signingKey && encryptedPrivateKey) {
       let device = await prisma.device.findFirst({
-         where: { userId: user.id, publicKey }
-      });
+        where: {
+          userId: user.id,
+          publicKey: Buffer.from(publicKey, 'base64')
+        }
+      })
       
       if (device) {
           device = await prisma.device.update({
               where: { id: device.id },
-              data: { lastActiveAt: new Date(), signingKey, encryptedPrivateKey, name: getGenericDeviceName(req.headers['user-agent']) }
+              data: { 
+                lastActiveAt: new Date(), 
+                // FIX 2: Buffer conversion for updates
+                pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64') : device.pqPublicKey,
+                signingKey: Buffer.from(signingKey, 'base64'), 
+                encryptedPrivateKey: Buffer.from(encryptedPrivateKey, 'utf8'), 
+                name: deviceName || getGenericDeviceName(req.headers['user-agent']) 
+              }
           });
       } else {
           device = await prisma.device.create({
             data: {
               userId: user.id,
-              publicKey,
-              signingKey,
-              encryptedPrivateKey,
-              name: getGenericDeviceName(req.headers['user-agent'])
+              // FIX 3: Buffer conversion for creates
+              publicKey: Buffer.from(publicKey, 'base64'),
+              pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64') : null,
+              signingKey: Buffer.from(signingKey, 'base64'),
+              encryptedPrivateKey: Buffer.from(encryptedPrivateKey, 'utf8'),
+              name: deviceName || getGenericDeviceName(req.headers['user-agent'])
             }
           });
       }
       activeDeviceId = device.id;
-      activeEncryptedPrivateKey = device.encryptedPrivateKey!;
+      activeEncryptedPrivateKey = device.encryptedPrivateKey ? Buffer.from(device.encryptedPrivateKey).toString('utf8') : '';
     } else {
       const explicitDeviceId = req.body.deviceId;
       if (explicitDeviceId) {
           const device = user.devices.find(d => d.id === explicitDeviceId);
           if (!device) throw new ApiError(404, 'Specified device not found.');
           activeDeviceId = device.id;
-          activeEncryptedPrivateKey = device.encryptedPrivateKey!;
+          activeEncryptedPrivateKey = device.encryptedPrivateKey ? Buffer.from(device.encryptedPrivateKey).toString('utf8') : '';
           await prisma.device.update({ where: { id: device.id }, data: { lastActiveAt: new Date() } });
       } else {
           if (user.devices.length === 0) throw new ApiError(404, 'No device found. Please recover your account.');
           activeDeviceId = user.devices[0].id;
-          activeEncryptedPrivateKey = user.devices[0].encryptedPrivateKey!;
+          activeEncryptedPrivateKey = user.devices[0].encryptedPrivateKey ? Buffer.from(user.devices[0].encryptedPrivateKey).toString('utf8') : '';
           await prisma.device.update({ where: { id: activeDeviceId }, data: { lastActiveAt: new Date() } });
       }
     }
@@ -277,15 +311,16 @@ router.post('/recover', authLimiter, zodValidate({
     identifier: z.string().min(10),
     newPassword: z.string().min(8),
     newEncryptedKeys: z.string(),
-    publicKey: z.string().optional(),
-    signingKey: z.string().optional(),
+    publicKey: validateKey(32),
+    pqPublicKey: validateKey(1216).optional(),
+    signingKey: validateKey(32),
     signature: z.string(),
     timestamp: z.number(),
     nonce: z.string()
   })
 }), async (req, res, next) => {
   try {
-    const { identifier: usernameHash, newPassword, newEncryptedKeys, publicKey, signingKey, signature, timestamp, nonce } = req.body;
+    const { identifier: usernameHash, newPassword, newEncryptedKeys, publicKey, pqPublicKey, signingKey, signature, timestamp, nonce } = req.body;
 
     const now = Date.now();
     if (Math.abs(now - timestamp) > 5 * 60 * 1000) throw new ApiError(400, "Recovery request expired.");
@@ -299,14 +334,15 @@ router.post('/recover', authLimiter, zodValidate({
 
     const { getSodium } = await import('../lib/sodium.js');
     const sodium = await getSodium();
-    const messageString = `${usernameHash}:${timestamp}:${nonce}:${newPassword}:${newEncryptedKeys}`;
+    const pqKeyStr = pqPublicKey || "";
+    const messageString = `${usernameHash}:${timestamp}:${nonce}:${newPassword}:${newEncryptedKeys}:${publicKey}:${pqKeyStr}:${signingKey}`;
     const messageBytes = Buffer.from(messageString, 'utf-8');
     const signatureBytes = sodium.from_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING);
     
     let isValid = false;
     for (const device of user.devices) {
         try {
-            const publicKeyBytes = sodium.from_base64(device.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+            const publicKeyBytes = new Uint8Array(device.signingKey);
             if (sodium.crypto_sign_verify_detached(signatureBytes, messageBytes, publicKeyBytes)) {
                 isValid = true;
                 break;
@@ -316,18 +352,24 @@ router.post('/recover', authLimiter, zodValidate({
 
     if (!isValid) throw new ApiError(401, "Cryptographic signature verification failed.");
 
+    if (!publicKey || !signingKey || !newEncryptedKeys) {
+      throw new ApiError(400, 'Missing required cryptographic keys or encrypted private keys.');
+    }
+
     const passwordHash = await hashPassword(newPassword);
 
     const [updatedUser, _, __, newDevice] = await prisma.$transaction([
         prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
-        prisma.device.deleteMany({ where: { userId: user.id } }), // 1. Sapu bersih perangkat lama yang bocor
-        prisma.authenticator.deleteMany({ where: { userId: user.id } }), // 2. Bersihkan sesi biometrik lama
-        prisma.device.create({ // 3. Buat perangkat yang baru dipulihkan
+        prisma.device.deleteMany({ where: { userId: user.id } }), 
+        prisma.authenticator.deleteMany({ where: { userId: user.id } }), 
+        prisma.device.create({ 
           data: {
             userId: user.id,
-            publicKey: publicKey || '',
-            signingKey: signingKey || '',
-            encryptedPrivateKey: newEncryptedKeys,
+            // FIX 4: Safe buffer conversion for Recovery creation
+            publicKey: Buffer.from(publicKey, 'base64url'),
+            pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
+            signingKey: Buffer.from(signingKey, 'base64url'),
+            encryptedPrivateKey: newEncryptedKeys ? Buffer.from(newEncryptedKeys, 'utf8') : null,
             name: 'Recovered Device'
           }
         })
@@ -380,10 +422,11 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
     if (!ip && !userId) {
       throw new ApiError(400, 'Cannot determine client identifier for PoW challenge.');
     }
-    
-    const rateKey = ip ? `pow:ip_count:${ip}` : `pow:user_count:${userId}`;
-    let count = await redisClient.incr(rateKey);
 
+    const identifier = ip || userId;
+    const idHash = crypto.createHash('sha256').update(`${salt}:${identifier}`).digest('hex').slice(0, 16);
+    const rateKey = ip ? `pow:ip_count:${idHash}` : `pow:user_count:${idHash}`;
+    let count = await redisClient.incr(rateKey);
     if (count === 1) {
         await redisClient.expire(rateKey, 86400);
     } else if (Number.isNaN(count) || count < 0) {
@@ -415,10 +458,16 @@ router.post('/pow/verify',
       }
       
       const { salt, difficulty } = JSON.parse(challengeData as string);
-      const hash = crypto.createHash('sha256').update(salt + nonce.toString()).digest('hex');
-      
-      if (hash.startsWith('0'.repeat(difficulty))) {
-          await redisClient.del(`pow:challenge:${userId}`);
+      const sodium = await getSodium();
+      const input = Buffer.concat([
+        Buffer.from(salt),
+        Buffer.from(nonce.toString())
+      ]);
+
+      const hashBuffer = sodium.crypto_generichash(64, input, null);
+      const hash = Buffer.from(hashBuffer).toString('hex');
+
+      if (hash.startsWith('0'.repeat(difficulty))) {          await redisClient.del(`pow:challenge:${userId}`);
           await prisma.user.update({
               where: { id: userId },
               data: { isVerified: true }
@@ -598,13 +647,17 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
       setAuthCookies(res, tokens)
       res.clearCookie('webauthn_challenge')
 
-      res.json({ 
-        verified: true, 
-        user: { id: safeUser.id, usernameHash: safeUser.usernameHash, encryptedProfile: safeUser.encryptedProfile, isVerified: safeUser.isVerified, role: safeUser.role }, 
+      // FIX 5: Convert encryptedPrivateKey Buffer to string before sending
+      const encryptedPrivKeyStr = safeUser.devices[0]?.encryptedPrivateKey
+        ? Buffer.from(safeUser.devices[0].encryptedPrivateKey).toString('utf8')
+        : null;
+
+      res.json({
+        verified: true,
+        user: { id: safeUser.id, usernameHash: safeUser.usernameHash, encryptedProfile: safeUser.encryptedProfile, isVerified: safeUser.isVerified, role: safeUser.role },
         accessToken: tokens.access,
-        encryptedPrivateKey: safeUser.devices[0]?.encryptedPrivateKey 
-      })
-    } else {
+        encryptedPrivateKey: encryptedPrivKeyStr
+      })    } else {
       res.status(400).json({ verified: false })
     }
   } catch (e) { next(e) }

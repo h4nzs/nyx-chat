@@ -15,6 +15,7 @@
   "identity": {
     "anonymous_id": "ID ANONIM",
     "verified": "Terverifikasi",
+    "unverified": "Belum Terverifikasi",
     "sandboxed": "Sandbox (Tingkatkan)",
     "display_name": "Nama Tampilan",
     "bio": "Biodata",
@@ -98,6 +99,7 @@
   "profile_page": {
     "title": "Profil Operator",
     "active": "AKTIF",
+    "inactive": "TIDAK AKTIF",
     "edit_record": "UBAH_REKAMAN",
     "security_clearance": "Izin Keamanan",
     "encryption_protocol": "Protokol Enkripsi",

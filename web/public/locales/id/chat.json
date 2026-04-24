@@ -102,7 +102,8 @@
     "message_deleted": "Pesan ini telah dihapus",
     "security_info": "Terenkripsi E2E via Protokol Signal",
     "message_id_toast": "ID Pesan: {{id}}",
-    "message_retracted": "Sebuah pesan telah ditarik oleh pengirim."
+    "message_retracted": "Sebuah pesan telah ditarik oleh pengirim.",
+    "edited": "(diedit)"
   },
   "media": {
     "decrypting": "Mendekripsi...",

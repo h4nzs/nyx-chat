@@ -32,7 +32,8 @@
     "view_profile": "View Profile",
     "toggle_cloak": "Toggle Privacy Cloak",
     "settings": "Settings",
-    "logout": "Logout"
+    "logout": "Logout",
+    "more_reactions": "More Reactions"
   },
   "action": {
     "abort": "ABORT",

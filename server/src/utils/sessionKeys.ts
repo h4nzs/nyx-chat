@@ -14,7 +14,7 @@ const B64_VARIANT = 'URLSAFE_NO_PADDING'
  * Creates a new session key from scratch on the server and encrypts it for all participant devices.
  * This is used for ratcheting sessions or as a fallback.
  */
-export async function rotateAndDistributeSessionKeys (conversationId: string, initiatorId: string, tx?: PrismaTransactionClient) {
+export async function rotateAndDistributeSessionKeys (conversationId: string, initiatorDeviceId: string, tx?: PrismaTransactionClient) {
   const db = tx || prisma
   const sodium = await getSodium()
   const sessionKey = sodium.crypto_secretbox_keygen()
@@ -27,7 +27,7 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
       user: { 
         include: { 
           devices: {
-            select: { id: true, publicKey: true }
+            select: { id: true, publicKey: true, userId: true }
           }
         } 
       } 
@@ -44,7 +44,7 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
     encryptedKey: string;
     deviceId: string;
     conversationId: string;
-    initiatorEphemeralKey: string;
+    initiatorCiphertexts: Buffer | null;
     isInitiator: boolean;
   }
 
@@ -68,45 +68,50 @@ export async function rotateAndDistributeSessionKeys (conversationId: string, in
       }
 
       try {
-        const recipientPublicKey = sodium.from_base64(device.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING)
+        const recipientPublicKey = new Uint8Array(device.publicKey);
         const encryptedKey = sodium.crypto_box_seal(sessionKey, recipientPublicKey)
         const encryptedKeyB64 = sodium.to_base64(encryptedKey, sodium.base64_variants[B64_VARIANT])
 
-        const isInitiator = p.user.id === initiatorId
+        const isInitiatorDevice = device.id === initiatorDeviceId
 
         keyRecords.push({
           sessionId,
           encryptedKey: encryptedKeyB64,
           deviceId: device.id,
           conversationId,
-          initiatorEphemeralKey: 'server-ratchet', // Add placeholder ephemeral key
-          isInitiator
+          initiatorCiphertexts: null,
+          isInitiator: isInitiatorDevice
         })
 
-        if (isInitiator && !initiatorHasKey) {
+        if (isInitiatorDevice && !initiatorHasKey) {
           initiatorHasKey = true
           initiatorEncryptedKey = encryptedKeyB64
         }
-      } catch (e: unknown) {
+        } catch (e: unknown) {
         const errorMessage = e instanceof Error ? e.message : 'Unknown error'
         console.error(`Failed to process public key for device ${sanitizeForLog(device.id)}. Error: ${sanitizeForLog(errorMessage)}`)
         throw new Error(`Corrupted public key found for device ${sanitizeForLog(device.id)}. Cannot establish secure session.`)
-      }
-    }
-  }
+        }
+        }
+        }
 
-  if (keyRecords.length === 0) {
-    throw new Error(`Failed to create session keys: No valid devices found in conversation ${sanitizeForLog(conversationId)}.`)
-  }
+        if (keyRecords.length === 0) {
+        throw new Error(`Failed to create session keys: No valid devices found in conversation ${sanitizeForLog(conversationId)}.`)
+        }
 
-  if (!initiatorHasKey) {
-    throw new Error('Could not find a valid session key for the initiator\'s device.')
-  }
+        if (!initiatorHasKey) {
+        throw new Error('Could not find a valid session key for the initiator\'s device.')
+        }
 
-  // Simpan kunci ke database untuk didistribusikan ke masing-masing device
-  await db.sessionKey.createMany({
-    data: keyRecords
-  })
+        // Simpan kunci ke database untuk didistribusikan ke masing-masing device
+        await db.sessionKey.createMany({
+        data: keyRecords.map(k => ({
+        ...k,
+        // Konversi eksplisit Buffer ke Uint8Array murni agar kompatibel dengan Prisma Bytes
+        encryptedKey: new Uint8Array(Buffer.from(k.encryptedKey, 'base64url')),
+        initiatorCiphertexts: k.initiatorCiphertexts ? new Uint8Array(k.initiatorCiphertexts) : null
+        }))
+        });
 
-  return { sessionId, encryptedKey: initiatorEncryptedKey }
+    return { sessionId, encryptedKey: initiatorEncryptedKey };
 }

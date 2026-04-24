@@ -32,7 +32,7 @@ import type {
 
 // ✅ FIX: Tambahkan deviceId ke dalam interface
 interface AuthenticatedSocket extends Socket<ClientToServerEvents, ServerToClientEvents> {
-  user?: AuthPayload & { publicKey?: string | null, deviceId?: string };
+  user?: AuthPayload & { publicKey?: string | null, pqPublicKey?: string | null, deviceId?: string };
 }
 
 export let io: Server<ClientToServerEvents, ServerToClientEvents>;
@@ -127,22 +127,21 @@ export function registerSocket(httpServer: HttpServer) {
       }
 
       // ✅ FIX: Ambil publicKey dari relasi devices, bukan langsung dari user
-      const user = await prisma.user.findUnique({ 
+      const user = await prisma.user.findUnique({
         where: { id: userId },
-        select: { id: true, devices: { where: { id: deviceId }, select: { publicKey: true } } }
+        select: { id: true, devices: { where: { id: deviceId }, select: { publicKey: true, pqPublicKey: true } } }
       });
-
       if (!user || user.devices.length === 0) {
         socket.user = undefined;
         return next();
       }
 
-      socket.user = { 
-        id: user.id, 
-        publicKey: user.devices[0].publicKey,
+      socket.user = {
+        id: user.id,
+        publicKey: Buffer.from(user.devices[0].publicKey).toString('base64url'),
+        pqPublicKey: user.devices[0].pqPublicKey ? Buffer.from(user.devices[0].pqPublicKey).toString('base64url') : null,
         deviceId: deviceId
-      };
-      next();
+      };      next();
     } catch (err) {
       console.error("[Socket] Auth Middleware Error:", err);
       socket.user = undefined;
@@ -463,18 +462,21 @@ export function registerSocket(httpServer: HttpServer) {
         
         if (fulfillerSocket && fulfillerId) {
           const requesterPublicKey = socket.user?.publicKey;
+          const requesterPqPublicKey = socket.user?.pqPublicKey;
           const requesterDeviceId = socket.user?.deviceId;
-          
-          if (requesterPublicKey) {
+
+          if (requesterPublicKey && requesterPqPublicKey) {
             fulfillerSocket.emit('group:fulfill_key_request', {
-              conversationId, 
-              requesterId: userId, 
+              conversationId,
+              requesterId: userId,
               requesterPublicKey,
+              requesterPqPublicKey,
               requesterDeviceId
             });
+          } else {
+             socket.emit("group:key_request_failed", { conversationId, reason: "Missing classical or PQ public key" });
           }
-        }
-      } catch (error) {}
+        }      } catch (error) {}
     });
 
     socket.on('group:fulfilled_key', async (payload: KeyFulfillmentPayload) => {
@@ -544,12 +546,14 @@ export function registerSocket(httpServer: HttpServer) {
         if (onlineParticipants.length > 0) {
           const fulfillerId = onlineParticipants[0].userId;
           const requesterPublicKey = socket.user?.publicKey;
-          
-          if (requesterPublicKey) {
-            io.to(fulfillerId).emit('session:fulfill_request', { conversationId, sessionId, requesterId: userId, requesterPublicKey: requesterPublicKey });
+          const requesterPqPublicKey = socket.user?.pqPublicKey;
+
+          if (requesterPublicKey && requesterPqPublicKey) {
+            io.to(fulfillerId).emit('session:fulfill_request', { conversationId, sessionId, requesterId: userId, requesterPublicKey: requesterPublicKey, requesterPqPublicKey: requesterPqPublicKey });
+          } else {
+            socket.emit("session:request_key_failed", { sessionId, targetId: fulfillerId, reason: "Missing PQ or classical public key" });
           }
-        }
-      } catch (error) {}
+        }      } catch (error) {}
     });
 
     socket.on('session:fulfill_response', ({ requesterId, conversationId, sessionId, encryptedKey }: KeyFulfillmentPayload) => {
@@ -570,9 +574,13 @@ export function registerSocket(httpServer: HttpServer) {
       if (typeof roomId === 'string' && roomId.startsWith('mig_') && roomId.length > 20) socket.join(roomId);
     });
 
-    socket.on('migration:start', async (data: { roomId: string, totalChunks: number, sealedKey: string, iv: string }) => {
-      if (!data || !data.roomId || typeof data.roomId !== 'string' || !data.roomId.startsWith('mig_')) return;
-      await redisClient.setEx(`migration_owner:${data.roomId}`, 3600, userId);
+    socket.on('migration:start', async (data: { roomId: string, totalChunks: number, sealedKey: string }) => {
+      if (!data || !data.roomId || typeof data.roomId !== 'string' || !data.roomId.startsWith('mig_') || data.roomId.length <= 20) return;
+      if (!await checkRateLimit(userId, 'migration_start', 10, 60)) {
+        socket.emit("error", { message: "Rate limit exceeded for migration" });
+        return;
+      }
+      await redisClient.set(`migration_owner:${data.roomId}`, userId, { EX: 3600 });
       socket.to(data.roomId).emit('migration:start', data);
     });
 

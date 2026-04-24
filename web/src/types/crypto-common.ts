@@ -19,7 +19,8 @@ export interface GroupRatchetHeader {
 }
 
 export interface DoubleRatchetHeader {
-  dh: string;
+  kemPk: string;
+  ct: string;
   n: number;
   pn: number;
 }

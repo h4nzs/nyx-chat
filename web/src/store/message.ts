@@ -96,10 +96,11 @@ export async function decryptMessageObject(
 
   // ✅ FIX: Parse tempId agar selalu menjadi number | undefined
   let parsedTempId: number | undefined = undefined;
-  if (typeof rawMsg.tempId === 'number') {
+  if (typeof rawMsg.tempId === 'number' && Number.isSafeInteger(rawMsg.tempId)) {
       parsedTempId = rawMsg.tempId;
   } else if (typeof rawMsg.tempId === 'string' && /^\d+$/.test(rawMsg.tempId)) {
-      parsedTempId = parseInt(rawMsg.tempId, 10);
+      const num = Number(rawMsg.tempId);
+      if (Number.isSafeInteger(num)) parsedTempId = num;
   }
 
   // ✅ FIX: Konversi string mentah menjadi Branded Types
@@ -219,6 +220,14 @@ export async function decryptMessageObject(
                     }
                     if (rawMsg.repliedTo) {
                         finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
+                    } else if (rawMsg.repliedToId) {
+                        try {
+                            const { shadowVault } = await import('@lib/shadowVaultDb');
+                            const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
+                            if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
+                        } catch (e) {
+                            console.error('[Vault] Failed to fetch replied message locally', e);
+                        }
                     }
                     return finalMessage;
                 } catch (e) {
@@ -270,12 +279,17 @@ export async function decryptMessageObject(
                const ciphertext = payload.ciphertext;
 
                const myIdentityKeyPair = await getMyEncryptionKeyPair();
-               const { getSignedPreKeyPair } = useAuthStore.getState();
+               const { getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
                const mySignedPreKeyPair = await getSignedPreKeyPair();
+               
+               const myPqIdentityKeyPair = await getPqEncryptionKeyPair();
+               const myPqSignedPreKeyPair = await getPqSignedPreKeyPair();
 
                const sessionKey = await deriveSessionKeyAsRecipient(
                    myIdentityKeyPair,
                    mySignedPreKeyPair,
+                   myPqIdentityKeyPair,
+                   myPqSignedPreKeyPair,
                    ik,
                    ek,
                    otpkId
@@ -301,7 +315,7 @@ export async function decryptMessageObject(
                const { worker_dr_init_bob } = await import('@lib/crypto-worker-proxy');
                const newState = await worker_dr_init_bob({
                    sk: sessionKey,
-                   mySignedPreKey: mySignedPreKeyPair
+                   mySignedPreKey: myPqSignedPreKeyPair
                });
 
                await storeRatchetStateSecurely(rawMsg.conversationId, newState);
@@ -309,6 +323,9 @@ export async function decryptMessageObject(
            }
        } catch (e) {
            console.error("[X3DH] Failed to parse/derive from header:", e);
+           if (e instanceof Error && (e.message.includes("Account upgrade required") || e.message.includes("PQ keys missing"))) {
+               throw e;
+           }
        }
     }
 
@@ -969,23 +986,21 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const forceRotate = conversation.requiresKeyRotation === true;
 
     // ✅ FASE 3: Selalu gunakan protokol Fan-Out Sender Key untuk SEMUA tipe percakapan (termasuk 1-on-1)
-    if (useConnectionStore.getState().status === 'connected') {
-      try {
-        const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, forceRotate);
-        if (distributionKeys && distributionKeys.length > 0) {
-          // ✅ FIX: Hapus any, gunakan tipe data ketat sesuai kembalian dari ensureGroupSession
-          emitGroupKeyDistribution(
-            conversationId, 
-            distributionKeys as { userId: string; targetDeviceId: string; key: string; type: string }[]
-          );
-          if (forceRotate) {
-              useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
-          }
-          await new Promise(r => setTimeout(r, 300)); 
+    try {
+      const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, forceRotate);
+      if (distributionKeys && distributionKeys.length > 0) {
+        emitGroupKeyDistribution(
+          conversationId,
+          distributionKeys as { userId: string; key: string }[]
+        );        if (forceRotate) {
+            useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
         }
-      } catch (e) {
-        console.error("Failed to ensure session", e);
+        await new Promise(r => setTimeout(r, 300)); 
       }
+    } catch (e) {
+      console.error("Failed to ensure session", e);
+      toast.error(i18n.t('errors:failed_to_establish_secure_session', 'Failed to establish secure session. Please try again.'));
+      return; // ✅ FIX: Stop execution if session establishment fails
     }
 
     const actualTempId = tempId !== undefined ? tempId : generateTempId();
@@ -1182,7 +1197,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                        const targetPublicKey = device.publicKey;
                        if (targetPublicKey) {
                            try {
-                               const recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                               let recipientPubBytes;
+                               try {
+                                   recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                               } catch (e1) {
+                                   try {
+                                       recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.ORIGINAL);
+                                   } catch (e2) {
+                                       recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE);
+                                   }
+                               }
                                const sealed = await worker_crypto_box_seal(pushDataBytes, recipientPubBytes);
                                pushPayloads[device.id] = sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
                            } catch (e) {
@@ -1321,7 +1345,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 fileSize: existingMsg?.fileSize,
                 duration: existingMsg?.duration,
                 status: 'SENT' as const
-            } as Partial<Message>;
+            } as unknown as Partial<Message>;
             
             // Ubah bubble optimistik menjadi bubble permanen
             get().replaceOptimisticMessage(conversationId, actualTempId, updatedMsg);
@@ -1423,8 +1447,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 if (reactionData) {
                     const tempReactionId = `temp_react_${tempId}`;
                     get().replaceOptimisticReaction(conversationId, reactionData.targetMessageId, tempReactionId, {
-                        ...reactionData,
                         id: res.msg.id, 
+                        emoji: reactionData.emoji,
                         userId: useAuthStore.getState().user!.id,
                         isMessage: true
                     });
@@ -1494,7 +1518,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                 fileSize: existingMsg?.fileSize,
                 duration: existingMsg?.duration,
                 status: 'SENT' as const
-            } as Partial<Message>;
+            } as unknown as Partial<Message>;
             
             get().replaceOptimisticMessage(conversationId, tempId, updatedMsg);
 
@@ -1667,7 +1691,25 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         // 2. PROSES & GABUNGKAN DATA DI LUAR LOOP
         const existingMessages = get().messages[id] || [];
         const combined = [...existingMessages, ...processedMessages];
-        const uniqueMessages = Array.from(new Map(combined.map(m => [m.id, m])).values());
+        const uniqueMessagesMap = new Map<string, Message>();
+        for (const m of combined) {
+            const existing = uniqueMessagesMap.get(m.id);
+            if (existing) {
+                const existingIsValid = existing.content && !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error'].includes(existing.content);
+                const mIsFailure = !m.content || ['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error'].includes(m.content);
+
+                if (existingIsValid && mIsFailure) {
+                    uniqueMessagesMap.set(m.id, { ...existing, repliedTo: existing.repliedTo || m.repliedTo });
+                } else if (!existingIsValid && !mIsFailure) {
+                    uniqueMessagesMap.set(m.id, { ...m, repliedTo: m.repliedTo || existing.repliedTo });
+                } else {
+                    uniqueMessagesMap.set(m.id, { ...existing, ...m, repliedTo: m.repliedTo || existing.repliedTo });
+                }
+            } else {
+                uniqueMessagesMap.set(m.id, m);
+            }
+        }
+        const uniqueMessages = Array.from(uniqueMessagesMap.values());
 
         const allMessages = processMessagesAndReactions(uniqueMessages, []);
         const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
@@ -1829,30 +1871,21 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   doAddIncomingMessage: async (conversationId, message) => {
       const currentUser = useAuthStore.getState().user;
 
-      let decrypted = message;
+      // 1. ALWAYS decrypt to ensure cryptographic integrity
+      let decrypted = await decryptMessageObject(message);
 
       if (currentUser && message.senderId === currentUser.id && message.tempId) {
           const optimistic = get().messages[conversationId]?.find(m => m.tempId && String(m.tempId) === String(message.tempId));
           if (optimistic) {
+              // 2. Do NOT copy optimistic.content. Only merge UI statuses.
               decrypted = {
-                  ...message,
-                  content: optimistic.content,
-                  fileUrl: optimistic.fileUrl,
-                  fileName: optimistic.fileName,
-                  fileSize: optimistic.fileSize,
-                  fileType: optimistic.fileType,
-                  isBlindAttachment: optimistic.isBlindAttachment,
-                  repliedTo: optimistic.repliedTo,
-                  isSilent: optimistic.isSilent,
+                  ...decrypted,
                   id: message.id,
+                  tempId: message.tempId,
                   createdAt: message.createdAt,
                   statuses: (message.statuses && message.statuses.length > 0) ? message.statuses : (optimistic.statuses || [])
               };
-          } else {
-              decrypted = await decryptMessageObject(message);
           }
-      } else {
-          decrypted = await decryptMessageObject(message);
       }
 
       if (decrypted.content === 'waiting_for_key' || decrypted.error) {
@@ -2236,7 +2269,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         ...(newMessage as Message), 
         // === FIX CENTANG BIRU HILANG ===
         statuses: finalStatuses,
-        content: oldMsg?.content !== undefined ? oldMsg.content : newMessage.content,
+        content: newMessage.content !== undefined ? newMessage.content : oldMsg?.content,
         fileUrl: newMessage.fileUrl !== undefined ? newMessage.fileUrl : oldMsg?.fileUrl,
         fileKey: newMessage.fileKey !== undefined ? newMessage.fileKey : oldMsg?.fileKey,
         fileName: newMessage.fileName !== undefined ? newMessage.fileName : oldMsg?.fileName,

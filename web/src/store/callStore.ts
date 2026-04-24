@@ -16,7 +16,7 @@ interface CallStoreState {
 
   setCallState: (state: CallState) => void;
   setIncomingCall: (from: UserId, isVideo: boolean, profile?: MinimalProfile, key?: string) => void;
-  setOutgoingCall: (to: UserId | UserId[], isVideo: boolean, profile: MinimalProfile | MinimalProfile[], key: string) => void;
+  setOutgoingCall: (to: UserId | UserId[], isVideo: boolean, profile?: MinimalProfile | MinimalProfile[], key?: string) => void;
   setLocalStream: (stream: MediaStream | null) => void;
   addRemoteStream: (userId: UserId, stream: MediaStream) => void;
   removeRemoteStream: (userId: UserId) => void;
@@ -28,7 +28,7 @@ interface CallStoreState {
   setCallKey: (key: string) => void;
 }
 
-export const useCallStore = create<CallStoreState>((set) => ({
+export const useCallStore = create<CallStoreState>((set, get) => ({
   callState: 'idle',
   remoteUsers: [],
   remoteStreams: {},
@@ -49,6 +49,10 @@ export const useCallStore = create<CallStoreState>((set) => ({
   })),
 
   removeRemoteStream: (userId) => set((state) => {
+    const stream = state.remoteStreams[userId];
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop());
+    }
     const newStreams = { ...state.remoteStreams };
     delete newStreams[userId];
     return { remoteStreams: newStreams };
@@ -65,7 +69,8 @@ export const useCallStore = create<CallStoreState>((set) => ({
 
   setIncomingCall: (from, isVideo, profile, key) => set({
     callState: 'ringing',
-    remoteUsers: profile ? [profile] : [{ id: from, name: 'Unknown User' }],
+    // FIX 1: Provide a fully compliant MinimalProfile fallback
+    remoteUsers: profile ? [profile] : [{ id: from, username: 'Unknown', name: 'Unknown User' }],
     isVideoCall: isVideo,
     isReceivingCall: true,
     isMinimized: false,
@@ -78,7 +83,8 @@ export const useCallStore = create<CallStoreState>((set) => ({
     
     const initialUsers = toArray.map(id => {
       const existing = profileArray.find(p => p.id === id);
-      return existing || { id, name: 'Unknown User' };
+      // FIX 2: Provide a fully compliant MinimalProfile fallback
+      return existing || { id, username: 'Unknown', name: 'Unknown User' };
     });
 
     set({
@@ -87,18 +93,31 @@ export const useCallStore = create<CallStoreState>((set) => ({
         isVideoCall: isVideo,
         isReceivingCall: false,
         isMinimized: false,
-        ephemeralCallKey: key,
+        ephemeralCallKey: key || null,
     });
   },
 
-  endCall: () => set({
-    callState: 'idle',
-    remoteUsers: [],
-    remoteStreams: {},
-    isVideoCall: false,
-    isReceivingCall: false,
-    localStream: null,
-    isMinimized: false,
-    ephemeralCallKey: null,
-  }),
+  endCall: () => {
+    const state = get();
+    
+    // FIX 3: Mencegah Memory Leak dengan mematikan hardware tracks
+    if (state.localStream) {
+      state.localStream.getTracks().forEach(track => track.stop());
+    }
+
+    Object.values(state.remoteStreams).forEach(stream => {
+      stream.getTracks().forEach(track => track.stop());
+    });
+
+    set({
+      callState: 'idle',
+      remoteUsers: [],
+      remoteStreams: {},
+      isVideoCall: false,
+      isReceivingCall: false,
+      localStream: null,
+      isMinimized: false,
+      ephemeralCallKey: null,
+    });
+  },
 }));

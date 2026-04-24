@@ -16,7 +16,6 @@ router.get('/', requireAuth, async (req, res, next) => {
 
     let currentJti: string | null = null
     try {
-      // CodeQL Fix: Do not branch on user-controlled data directly. Rely on crypto verification.
       const payload = verifyJwt(String(req.cookies?.rt || ''))
       if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
         currentJti = payload.jti
@@ -25,11 +24,17 @@ router.get('/', requireAuth, async (req, res, next) => {
       // Invalid or empty token, ignore safely
     }
 
+    // FIX 1: Cari device milik user dulu, karena RefreshToken sekarang terikat ke Device, bukan User
+    const userDevices = await prisma.device.findMany({
+      where: { userId: req.user.id },
+      select: { id: true, name: true }
+    });
+
+    const deviceIds = userDevices.map(d => d.id);
+
     const sessions = await prisma.refreshToken.findMany({
       where: {
-        device: {
-          userId: req.user.id
-        },
+        deviceId: { in: deviceIds }, // Cari token yang deviceId-nya ada di daftar device milik user
         revokedAt: null // Only show active sessions
       },
       orderBy: {
@@ -37,7 +42,6 @@ router.get('/', requireAuth, async (req, res, next) => {
       }
     })
 
-    // Calculate hash of current requester's IP to match against DB
     const rawIp = req.ip || '';
     const currentIpHash = crypto.createHash('sha256').update(rawIp).digest('hex').substring(0, 16);
 
@@ -45,25 +49,21 @@ router.get('/', requireAuth, async (req, res, next) => {
       const parser = new UAParser(s.userAgent || "")
       const browser = parser.getBrowser()
       const os = parser.getOS()
-      const device = parser.getDevice()
+      const parsedDevice = parser.getDevice()
 
       const deviceInfo = [
-        device.vendor,
-        device.model,
+        parsedDevice.vendor,
+        parsedDevice.model,
         os.name,
         browser.name
       ].filter(Boolean).join(' ') || 'Unknown Device'
 
-      // Check if this session is from the same IP as the current request
       let displayIp = s.ipAddress;
       if (s.ipAddress === currentIpHash) {
-          // It's a match! Show the real IP.
           displayIp = rawIp;
-          // Clean up IPv6 prefix if local
           if (displayIp === '::1') displayIp = '127.0.0.1';
           if (displayIp.startsWith('::ffff:')) displayIp = displayIp.replace('::ffff:', '');
       } else {
-          // Mask the hash so it doesn't look scary/ugly
           if (s.ipAddress) {
              displayIp = `HIDDEN (${s.ipAddress.substring(0, 6)}...)`;
           } else {
@@ -71,11 +71,19 @@ router.get('/', requireAuth, async (req, res, next) => {
           }
       }
 
+      // Ambil nama device dari database jika ada
+      const dbDevice = userDevices.find(d => d.id === s.deviceId);
+
       return {
-        ...s,
+        id: s.id, // Pastikan mengirim ID untuk keperluan key/revocation di frontend
+        jti: s.jti,
+        deviceId: s.deviceId,
+        deviceName: dbDevice?.name || 'Unknown Device', // Tambahkan nama device
         ipAddress: displayIp,
         isCurrent: s.jti === currentJti,
-        deviceInfo
+        deviceInfo,
+        lastUsedAt: s.lastUsedAt,
+        createdAt: s.createdAt
       }
     })
 
@@ -92,9 +100,18 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
     const { jti } = req.params
     const userId = req.user.id
 
-    // For security, ensure the token being revoked belongs to the user making the request
+    // FIX 2: Verifikasi kepemilikan melalui Device
+    const userDevices = await prisma.device.findMany({
+      where: { userId },
+      select: { id: true }
+    });
+    const deviceIds = userDevices.map(d => d.id);
+
     const token = await prisma.refreshToken.findFirst({
-      where: { jti: jti as string, userId: userId as string }
+      where: { 
+        jti: jti as string, 
+        deviceId: { in: deviceIds } // Pastikan token milik salah satu device user
+      }
     })
 
     if (!token) {
@@ -106,12 +123,8 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
       data: { revokedAt: new Date() }
     })
 
-    // Emit a force_logout event to the specific session if socket is available
     const socketServer = getIo()
     if (socketServer) {
-      // We need a way to map jti to a socket id. This is a complex problem.
-      // For now, we will broadcast to all sockets for this user.
-      // A better solution would involve a mapping of jti -> socket.id in Redis or memory.
       socketServer.to(userId).emit('force_logout', { jti: jti as string })
     }
 

@@ -13,6 +13,8 @@ import toast from "react-hot-toast";
 import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, nuclearWipe } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; 
 import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; 
+import type { UserId, User } from '@nyx/shared';
+import i18n from '../i18n';
 
 // ✅ Helper pendeteksi nama perangkat
 const getDeviceName = () => {
@@ -41,26 +43,33 @@ const getDeviceName = () => {
  */
 export async function setupAndUploadPreKeyBundle() {
   try {
-    const { getSodium } = await import('@lib/sodiumInitializer');
+    const { getSodiumLib } = await import('@utils/crypto');
     
-    const { getSigningPrivateKey, getEncryptionKeyPair, getSignedPreKeyPair } = useAuthStore.getState();
+    const { getSigningPrivateKey, getEncryptionKeyPair, getSignedPreKeyPair, getPqEncryptionKeyPair, getPqSignedPreKeyPair } = useAuthStore.getState();
 
-    const sodium = await getSodium();
+    const sodium = await getSodiumLib();
     const signingPrivateKey = await getSigningPrivateKey();
     const { publicKey: identityKey } = await getEncryptionKeyPair();
     const { publicKey: signedPreKey } = await getSignedPreKeyPair();
+    const { publicKey: pqIdentityKey } = await getPqEncryptionKeyPair();
+    const { publicKey: pqSignedPreKey } = await getPqSignedPreKeyPair();
 
     const identityKeyB64 = sodium.to_base64(identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    const pqIdentityKeyB64 = sodium.to_base64(pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
     const signingPublicKey = signingPrivateKey.slice(32);
 
     const signature = sodium.crypto_sign_detached(signedPreKey, signingPrivateKey);
+    const pqSignature = sodium.crypto_sign_detached(pqSignedPreKey, signingPrivateKey);
 
     const bundle = {
       identityKey: identityKeyB64,
+      pqIdentityKey: pqIdentityKeyB64,
       signingKey: sodium.to_base64(signingPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING),
       signedPreKey: {
         key: sodium.to_base64(signedPreKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+        pqKey: sodium.to_base64(pqSignedPreKey, sodium.base64_variants.URLSAFE_NO_PADDING),
         signature: sodium.to_base64(signature, sodium.base64_variants.URLSAFE_NO_PADDING),
+        pqSignature: sodium.to_base64(pqSignature, sodium.base64_variants.URLSAFE_NO_PADDING),
       },
     };
     await authFetch("/api/keys/prekey-bundle", {
@@ -72,11 +81,10 @@ export async function setupAndUploadPreKeyBundle() {
 
   } catch (e) {
     console.error("Failed to set up and upload pre-key bundle:", e);
+    throw e;
   }
 }
 
-import type { UserId, User } from '@nyx/shared';
-import i18n from '../i18n';
 export type { User };
 
 type State = {
@@ -109,8 +117,10 @@ type Actions = {
   logout: () => Promise<void>;
   emergencyLogout: () => Promise<void>; // Nuclear Option
   getEncryptionKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
+  getPqEncryptionKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getSigningPrivateKey: () => Promise<Uint8Array>;
   getSignedPreKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
+  getPqSignedPreKeyPair: () => Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>;
   getMasterSeed: () => Promise<Uint8Array | undefined>;
   setUser: (user: User) => void;
   setAccessToken: (token: string | null) => void;
@@ -163,6 +173,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       console.error("Failed to read keys/auto-unlock info:", _e);
     }
 
+    // Attempt auto-unlock if both exist
     if (autoUnlockKey && encryptedKeys) {
       try {
         const result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
@@ -173,6 +184,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       } catch (e) {}
     }
 
+    // Fallback: Prompt user for password manually
     const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
       return new Promise((resolve, reject) => {
         const unsubscribe = useModalStore.subscribe((state) => {
@@ -241,6 +253,11 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             privateKeysCache = result.keys;
             set({ hasRestoredKeys: true });
             await setDeviceAutoUnlockReady(true);
+            
+            import('./auth').then(({ setupAndUploadPreKeyBundle }) => {
+              setupAndUploadPreKeyBundle().catch(e => console.warn("[Auto-Heal] Failed to upload keys:", e));
+            });
+            
             return true;
           }
         } catch (e) { console.error("Error during auto-unlock:", e); } finally { set({ isInitializingCrypto: false }); }
@@ -252,10 +269,13 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       privateKeysCache = keys;
       set({ hasRestoredKeys: true });
       await setDeviceAutoUnlockReady(true);
+      
+      import('./auth').then(({ setupAndUploadPreKeyBundle }) => {
+        setupAndUploadPreKeyBundle().catch(e => console.warn("[Auto-Heal] Failed to upload keys:", e));
+      });
     },
 
     bootstrap: async (force = false) => {
-      // If we already have a token and user profile, and we aren't forcing a refresh, return early.
       if (!force && get().accessToken && get().user) {
         set({ isBootstrapping: false });
         return;
@@ -293,38 +313,70 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       set({ isInitializingCrypto: true });
 
       try {
-        let newPublicKey = undefined;
-        let newSigningKey = undefined;
-        let newEncryptedPrivateKey = undefined;
+        let newPublicKey: string | undefined = undefined;
+        let newPqPublicKey: string | undefined = undefined;
+        let newSigningKey: string | undefined = undefined;
+        let newEncryptedPrivateKey: string | undefined = undefined;
 
-        // If this is a fresh login on a new device, generate a new cryptographic identity
+        // Cek apakah user sudah punya kunci lokal (misal: Device lama tapi sesi expired)
         const alreadyHasKeys = await hasStoredKeys();
-        if (alreadyHasKeys) {
+        
+        if (alreadyHasKeys && !restoredNotSynced) {
             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
-            const encryptedKeys = await getEncryptedKeys();
-            const result = await retrievePrivateKeys(encryptedKeys!, password);
+            const localEncryptedKeys = await getEncryptedKeys();
+            if (!localEncryptedKeys) throw new Error("Local keys missing unexpectedly.");
+
+            const result = await retrievePrivateKeys(localEncryptedKeys, password);
             if (result.success && result.keys) {
-                const { getSodium } = await import('@lib/sodiumInitializer');
-                const sodium = await getSodium();
+                const { getSodiumLib } = await import('@utils/crypto');
+                const sodium = await getSodiumLib();
                 
-                const encryptionPublicKeyBytes = sodium.crypto_scalarmult_base(result.keys.encryption);
+                // Regenerate public keys from decrypted private keys for server sync
+                const encryptionKeyPair = sodium.crypto_box_seed_keypair(result.keys.encryption);
+                const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(result.keys.pqEncryption);
                 const signingPublicKeyBytes = result.keys.signing.slice(32);
                 
-                newPublicKey = sodium.to_base64(encryptionPublicKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newPublicKey = sodium.to_base64(encryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newPqPublicKey = sodium.to_base64(pqEncryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
                 newSigningKey = sodium.to_base64(signingPublicKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
-                newEncryptedPrivateKey = encryptedKeys!;
+                newEncryptedPrivateKey = localEncryptedKeys;
             } else {
                 throw new Error("Invalid password for local keys. Please recover your account.");
             }
-        } else if (!restoredNotSynced) {
-            const { registerAndGenerateKeys } = await import('@lib/crypto-worker-proxy');
-            const keys = await registerAndGenerateKeys(password);
+        } else if (!alreadyHasKeys && !restoredNotSynced) {
+            // Fresh login on a brand new device -> Generate completely new identities
+            const { generateNewKeys } = await import('@lib/crypto-worker-proxy');
+            const keys = await generateNewKeys(password);
             
             newPublicKey = keys.encryptionPublicKeyB64;
+            newPqPublicKey = keys.pqEncryptionPublicKeyB64;
             newSigningKey = keys.signingPublicKeyB64;
             newEncryptedPrivateKey = keys.encryptedPrivateKeys;
+        } else if (restoredNotSynced) {
+            // Restored from phrase, but not synced to server yet
+            const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+            const localEncryptedKeys = await getEncryptedKeys();
+            if (!localEncryptedKeys) throw new Error("Local keys missing unexpectedly after restore.");
+
+            const result = await retrievePrivateKeys(localEncryptedKeys, password);
+            if (result.success && result.keys) {
+                const { getSodiumLib } = await import('@utils/crypto');
+                const sodium = await getSodiumLib();
+                
+                const encryptionKeyPair = sodium.crypto_box_seed_keypair(result.keys.encryption);
+                const pqEncryptionKeyPair = sodium.crypto_kem_xwing_seed_keypair(result.keys.pqEncryption);
+                const signingPublicKeyBytes = result.keys.signing.slice(32);
+                
+                newPublicKey = sodium.to_base64(encryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newPqPublicKey = sodium.to_base64(pqEncryptionKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newSigningKey = sodium.to_base64(signingPublicKeyBytes, sodium.base64_variants.URLSAFE_NO_PADDING);
+                newEncryptedPrivateKey = localEncryptedKeys;
+            } else {
+                throw new Error("Failed to read restored keys. Please restore your account again.");
+            }
         }
 
+        // Call API
         const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/login", {
           method: "POST",
           body: JSON.stringify({ 
@@ -332,34 +384,39 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
               password,
               deviceName: getDeviceName(),
               publicKey: newPublicKey,
+              pqPublicKey: newPqPublicKey,
               signingKey: newSigningKey,
               encryptedPrivateKey: newEncryptedPrivateKey
           }),
         });
 
+        // FIX 1: SIMPAN encryptedPrivateKey DARI SERVER DULU sebelum mencoba membukanya
         if (res.encryptedPrivateKey) {
           await saveEncryptedKeys(res.encryptedPrivateKey);
           await saveDeviceAutoUnlockKey(password);
           await setDeviceAutoUnlockReady(true);
-          set({ hasRestoredKeys: true });
         }
 
-        const hasKeys = await hasStoredKeys();
-        set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeys, blockedUserIds: [] });
+        const hasKeysNow = await hasStoredKeys();
+        set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeysNow, blockedUserIds: [] });
         localStorage.setItem("user", JSON.stringify(res.user));
 
-        if (hasKeys) {
+        // FIX 2: Buka kunci MENGGUNAKAN data yang baru saja disave
+        if (hasKeysNow) {
           try {
             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
-            const encryptedKeys = await getEncryptedKeys();
-            const result = await retrievePrivateKeys(encryptedKeys!, password);
+            const storedEncryptedKeys = await getEncryptedKeys();
+            if (storedEncryptedKeys) {
+                const result = await retrievePrivateKeys(storedEncryptedKeys, password);
 
-            if (result.success) {
-              privateKeysCache = result.keys;
-              await saveDeviceAutoUnlockKey(password);
-              await setDeviceAutoUnlockReady(true);
-            } else {
-              throw new Error(`Login successful, but failed to decrypt keys: ${result.reason}`);
+                if (result.success) {
+                  privateKeysCache = result.keys;
+                  // Persist for auto-unlock
+                  await saveDeviceAutoUnlockKey(password);
+                  await setDeviceAutoUnlockReady(true);
+                } else {
+                  throw new Error(`Login successful, but failed to decrypt keys: ${result.reason}`);
+                }
             }
           } catch (e) {
             console.error("Failed to decrypt keys on login:", e);
@@ -394,12 +451,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         const { registerAndGenerateKeys, retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
         const {
           encryptionPublicKeyB64,
+          pqEncryptionPublicKeyB64,
           signingPublicKeyB64,
           encryptedPrivateKeys,
           phrase
         } = await registerAndGenerateKeys(password);
 
-        // API Call First
         const res = await api<{ accessToken: string; user: User }>("/api/auth/register", {
           method: "POST",
           body: JSON.stringify({
@@ -407,20 +464,19 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             password,
             encryptedProfile,
             publicKey: encryptionPublicKeyB64,
+            pqPublicKey: pqEncryptionPublicKeyB64,
             signingKey: signingPublicKeyB64,
             encryptedPrivateKeys,
-            deviceName: getDeviceName(), // 👈 Mengirim nama perangkat
+            deviceName: getDeviceName(),
             turnstileToken
           }),
         });
 
-        // Only persist local vault state if the server registration succeeds
         await saveEncryptedKeys(encryptedPrivateKeys);
         await saveDeviceAutoUnlockKey(password);
         await setDeviceAutoUnlockReady(true);
         set({ hasRestoredKeys: true });
 
-        // Cache keys
         try {
           const result = await retrievePrivateKeys(encryptedPrivateKeys, password);
           if (result.success) privateKeysCache = result.keys;
@@ -467,10 +523,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
     emergencyLogout: async () => {
       try {
-        // 1. Tell server to kill ALL sessions
         await api("/api/auth/logout-all", { method: "POST" }).catch((e) => console.error("Server kill failed:", e));
         
-        // 2. Unsubscribe Push (Optional, best effort)
         if ('serviceWorker' in navigator && 'PushManager' in window) {
            const registration = await navigator.serviceWorker.ready;
            const subscription = await registration.pushManager.getSubscription();
@@ -479,23 +533,20 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       } catch (e) { 
         console.error("Emergency logout error", e); 
       } finally {
-        // 3. NUCLEAR WIPE LOCAL
         clearAuthCookies();
         privateKeysCache = null;
-        await nuclearWipe(); // THE BIG ONE
+        await nuclearWipe(); 
         
         set({ user: null, accessToken: null });
         disconnectSocket();
         useConversationStore.getState().reset();
         useMessageStore.getState().reset();
         
-        // Force reload to clear memory state
         window.location.href = '/login';
       }
     },
 
     updateProfile: async (data) => {
-      // Data is expected to be { encryptedProfile: string } now
       const updatedUser = await authFetch<User>('/api/users/me', {
         method: 'PUT',
         body: JSON.stringify(data),
@@ -509,8 +560,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     updateAvatar: async (avatar: File) => {
-      // Avatar upload is tricky because it needs to update the encrypted profile.
-      // For now, just upload the file and return. The UI needs to handle updating the profile JSON.
       const toastId = toast.loading(i18n.t('common:processing_avatar', 'Processing avatar...'));
       const { compressImage } = await import('@lib/fileUtils');
       const { uploadToR2 } = await import('@lib/r2');
@@ -522,9 +571,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         toast.loading('Uploading to Cloud...', { id: toastId });
         const fileUrl = await uploadToR2(fileToProcess, 'avatars', () => {});
         toast.success('Avatar uploaded! (Profile update required)', { id: toastId });
-        // NOTE: We do not call API to save avatarUrl directly anymore.
-        // The caller must update their local profile JSON and call updateProfile.
-        return fileUrl; // Returning the URL so caller can use it
+        return fileUrl; 
       } catch (e: unknown) {
         console.error(e);
         toast.error(`Update failed: ${(e instanceof Error ? e.message : 'Unknown error')}`, { id: toastId });
@@ -542,17 +589,29 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
     async getEncryptionKeyPair() {
       const keys = await retrieveAndCacheKeys();
-      const { getSodium } = await import('@lib/sodiumInitializer');
-      const sodium = await getSodium();
-      const publicKey = sodium.crypto_scalarmult_base(keys.encryption);
-      return { publicKey, privateKey: keys.encryption };
+      const { getSodiumLib } = await import('@utils/crypto');
+      const sodium = await getSodiumLib();
+      return sodium.crypto_box_seed_keypair(keys.encryption);
+    },
+    async getPqEncryptionKeyPair() {
+      const keys = await retrieveAndCacheKeys();
+      const { getSodiumLib } = await import('@utils/crypto');
+      const sodium = await getSodiumLib();
+      if (!keys.pqEncryption) throw new Error("PQ Encryption key missing");
+      return sodium.crypto_kem_xwing_seed_keypair(keys.pqEncryption);
     },
     async getSignedPreKeyPair() {
       const keys = await retrieveAndCacheKeys();
-      const { getSodium } = await import('@lib/sodiumInitializer');
-      const sodium = await getSodium();
-      const publicKey = sodium.crypto_scalarmult_base(keys.signedPreKey);
-      return { publicKey, privateKey: keys.signedPreKey };
+      const { getSodiumLib } = await import('@utils/crypto');
+      const sodium = await getSodiumLib();
+      return sodium.crypto_box_seed_keypair(keys.signedPreKey);
+    },
+    async getPqSignedPreKeyPair() {
+      const keys = await retrieveAndCacheKeys();
+      const { getSodiumLib } = await import('@utils/crypto');
+      const sodium = await getSodiumLib();
+      if (!keys.pqSignedPreKey) throw new Error("PQ Signed PreKey missing");
+      return sodium.crypto_kem_xwing_seed_keypair(keys.pqSignedPreKey);
     },
     setUser: (user) => {
       set({ user });
@@ -616,3 +675,4 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
   };
 }, Object.is);
+;

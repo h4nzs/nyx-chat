@@ -32,7 +32,8 @@
     "view_profile": "Lihat Profil",
     "toggle_cloak": "Alihkan Jubah Privasi",
     "settings": "Pengaturan",
-    "logout": "Keluar"
+    "logout": "Keluar",
+    "more_reactions": "Reaksi Lainnya"
   },
   "action": {
     "abort": "BATALKAN",

@@ -15,6 +15,7 @@
   "identity": {
     "anonymous_id": "ANONYMOUS ID",
     "verified": "Verified",
+    "unverified": "Unverified",
     "sandboxed": "Sandboxed (Upgrade)",
     "display_name": "Display Name",
     "bio": "Bio-Data",
@@ -98,6 +99,7 @@
   "profile_page": {
     "title": "Operator Profile",
     "active": "ACTIVE",
+    "inactive": "INACTIVE",
     "edit_record": "EDIT_RECORD",
     "security_clearance": "Security Clearance",
     "encryption_protocol": "Encryption Protocol",

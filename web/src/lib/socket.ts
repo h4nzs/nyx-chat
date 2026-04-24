@@ -1,6 +1,7 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
+import { z } from 'zod';
 import io from "socket.io-client";
 import type { Socket } from "socket.io-client";
 import toast from "react-hot-toast";
@@ -186,10 +187,10 @@ export function getSocket() {
       const parsed = RawServerMessageSchema.safeParse(rawPayload);
 
       if (!parsed.success) {
-          console.error("[Zod Shield] Dropping invalid incoming message:", parsed.error.format());
-          return; 
+          const payloadSummary = typeof rawPayload === 'object' && rawPayload !== null ? Object.keys(rawPayload) : typeof rawPayload;
+          console.error("[Zod Shield] Dropping invalid incoming message:", JSON.stringify(parsed.error.format(), null, 2), "Raw Payload Keys:", payloadSummary);
+          return;
       }
-
       const safeMessage = parsed.data;
 
       // ✅ FIX 2: Kirim ACK "Delivered" ke server segera setelah diterima dengan aman!
@@ -200,7 +201,7 @@ export function getSocket() {
       });
 
       // ✅ FIX 3: Lempar ke keranjang Batching
-      incomingMessageBuffer.push(safeMessage as Message);
+      incomingMessageBuffer.push(safeMessage as unknown as Message);
       
       // Reset timer. Kita tunggu "badai" reda selama 100ms. 
       // Jika dalam 100ms tidak ada pesan baru lagi yang masuk, proses semua yang ada di keranjang.
@@ -336,7 +337,23 @@ export function getSocket() {
         })
         .catch(console.error);
     });
-    socket.on('force_logout', () => {
+    socket.on('force_logout', (payload) => {
+      const currentToken = useAuthStore.getState().accessToken;
+      if (payload?.jti && currentToken) {
+         try {
+            const base64Url = currentToken.split('.')[1];
+            let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            while (base64.length % 4) {
+              base64 += '=';
+            }
+            const decoded = JSON.parse(atob(base64));
+            if (decoded.jti !== payload.jti) return;
+         } catch(e) {
+            console.error("Failed to decode token for force_logout", e);
+            return;
+         }
+      }
+
       toast.error(i18n.t('errors:this_session_has_been_logged_out_remotel', 'This session has been logged out remotely.'));
       useAuthStore.getState().logout();
       disconnectSocket();

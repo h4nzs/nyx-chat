@@ -7,22 +7,49 @@ import { ApiError } from '../utils/errors.js'
 const router: Router = Router()
 router.use(requireAuth)
 
-// GET all encrypted session keys for a user in a conversation
+// GET all encrypted session keys for a user's device in a conversation
 router.get('/:conversationId', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { conversationId } = req.params
-    const userId = req.user.id
+    const { deviceId } = req.query
 
+    // Kunci sesi sekarang spesifik per-perangkat (Multi-Device E2EE)
+    if (!deviceId || typeof deviceId !== 'string') {
+      throw new ApiError(400, 'deviceId query parameter is required.')
+    }
+
+    // Verifikasi kepemilikan perangkat untuk keamanan tambahan
+    const device = await prisma.device.findFirst({
+      where: { id: deviceId, userId: req.user.id }
+    })
+
+    if (!device) {
+      throw new ApiError(403, 'Device not found or unauthorized.')
+    }
+
+    const isParticipant = await prisma.participant.findFirst({
+      where: { conversationId, userId: req.user.id }
+    })
+
+    if (!isParticipant) {
+      throw new ApiError(403, 'You are not a participant in this conversation.')
+    }
+
+    // Cari SessionKey berdasarkan deviceId, bukan userId
     const sessionKeys = await prisma.sessionKey.findMany({
-      where: { conversationId, userId },
+      where: { conversationId, deviceId },
       select: { sessionId: true, encryptedKey: true },
       orderBy: { createdAt: 'asc' }
     })
 
-    // This endpoint is now primarily for fetching historical keys.
-    // If no keys exist, it's not necessarily an error, the client can ratchet a new one.
-    res.json({ keys: sessionKeys })
+    // Konversi Prisma Bytes (Buffer) kembali menjadi string Base64 untuk JSON response
+    const formattedKeys = sessionKeys.map(sk => ({
+      sessionId: sk.sessionId,
+      encryptedKey: Buffer.from(sk.encryptedKey).toString('base64url')
+    }))
+
+    res.json({ keys: formattedKeys })
   } catch (error) {
     next(error)
   }
@@ -34,6 +61,9 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { conversationId } = req.params
     const userId = req.user.id
+    if (!req.user.deviceId) {
+      throw new ApiError(400, 'Device ID is required to ratchet session keys.')
+    }
 
     const conversation = await prisma.conversation.findFirst({
       where: {
@@ -43,25 +73,20 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
     })
 
     if (!conversation) {
-      return res.status(404).json({ error: 'Conversation not found or you are not a participant.' })
+      throw new ApiError(404, 'Conversation not found or you are not a participant.')
     }
 
-    // This function now handles distribution to all participants and returns the key
-    // specifically for the initiator.
-    const { sessionId, encryptedKey } = await rotateAndDistributeSessionKeys(conversationId, userId)
+    // Fungsi ini akan membuat SessionKey baru dan mendistribusikannya
+    // ke semua device partisipan yang valid, lalu mengembalikan kunci
+    // dalam bentuk string Base64 untuk inisiator.
+    const { sessionId, encryptedKey } = await rotateAndDistributeSessionKeys(conversationId, req.user.deviceId)
 
     if (!sessionId || !encryptedKey) {
-      return res.status(500).json({ error: 'Failed to create and retrieve session key for initiator.' })
+      throw new ApiError(500, 'Failed to create and retrieve session key for initiator.')
     }
-
-    // The key is already distributed to all members within rotateAndDistributeSessionKeys.
-    // The client requesting the ratchet gets the key back directly in this response.
-    // Other clients will get the new key when they next fetch messages or via a push.
-    // The old proactive push logic is removed for simplicity and robustness.
-
     res.status(201).json({
       sessionId,
-      encryptedKey
+      encryptedKey 
     })
   } catch (error) {
     next(error)

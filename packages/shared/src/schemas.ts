@@ -2,8 +2,9 @@ import { z } from 'zod';
 import { asUserId, asConversationId, asMessageId, asStoryId } from './brands.js';
 
 // --- Validasi Kriptografi Khusus ---
-// Memastikan string hanya berisi karakter Base64 atau URL-Safe Base64 yang valid
-export const Base64StringSchema = z.string().regex(/^(?=.{2,}$)(?:[A-Za-z0-9+/_-]{4})*(?:[A-Za-z0-9+/_-]{2}(?:==)?|[A-Za-z0-9+/_-]{3}=?)?$/, "Invalid Base64 format");
+// Memastikan string hanya berisi karakter Base64 atau URL-Safe Base64 yang valid (dan max len wajar)
+export const Base64StringSchema = z.string().regex(/^[A-Za-z0-9+/_-]+={0,2}$/, 'Invalid base64/base64url format').max(1000000, 'Payload too large');
+export const PayloadStringSchema = z.string().max(1000000, 'Payload too large');
 
 // --- Base ID Schemas (Transforming to Branded Types) ---
 export const UserIdSchema = z.string().min(1).transform((val) => asUserId(val));
@@ -34,11 +35,51 @@ export const MinimalConversationSchema = z.object({
   requiresKeyRotation: z.boolean().optional(),
 }).passthrough();
 
+export const ParticipantSchema = z.object({
+  id: UserIdSchema,
+  userId: UserIdSchema.optional(),
+  user: z.object({
+    id: UserIdSchema,
+    publicKey: z.string().optional(),
+    pqPublicKey: z.string().optional(),
+    signingKey: z.string().optional(),
+  }).passthrough().optional(),
+  encryptedProfile: Base64StringSchema.nullable().optional(),
+  publicKey: z.string().optional(),
+  pqPublicKey: z.string().optional(),
+  signingKey: z.string().optional(),
+  devices: z.array(z.object({
+    id: z.string(),
+    publicKey: z.string(),
+    pqPublicKey: z.string().nullable().optional(),
+    signingKey: z.string().optional()
+  })).optional(),
+  role: z.enum(["ADMIN", "MEMBER", "admin", "member"]),
+  isPinned: z.boolean().optional(),
+  name: z.string().optional(),
+  username: z.string().optional(),
+  avatarUrl: z.string().nullable().optional()
+}).passthrough();
+
+export const ConversationSchema = MinimalConversationSchema.extend({
+  participants: z.array(ParticipantSchema),
+  lastMessage: z.any().nullable(),
+  lastUpdated: z.number().optional()
+}).passthrough();
+
+export const ConversationUiSchema = ConversationSchema.extend({
+  decryptedMetadata: z.object({
+    title: z.string().optional(),
+    description: z.string().optional(),
+    avatarUrl: z.string().optional()
+  }).optional()
+}).passthrough();
+
 export const IncomingMessageSchema = z.object({
   id: MessageIdSchema,
   conversationId: ConversationIdSchema,
   senderId: UserIdSchema,
-  content: Base64StringSchema.nullable().optional(),
+  content: PayloadStringSchema.optional().nullable(),
   timestamp: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as string | number | Date); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
   createdAt: z.preprocess((val) => {
     if (val === null || val === undefined) return undefined;
@@ -84,11 +125,11 @@ const RawServerMessageBaseSchema = z.object({
     username: z.string().optional(),
     avatarUrl: z.string().nullable().optional(),
   }).optional(),
-  ciphertext: Base64StringSchema.nullable().optional(),
-  content: Base64StringSchema.nullable().optional(),
+  ciphertext: PayloadStringSchema,
+  content: PayloadStringSchema.optional().nullable(),
   fileKey: Base64StringSchema.nullable().optional(),
   sessionId: z.string().nullable().optional(),
-  encryptedSessionKey: Base64StringSchema.nullable().optional(),
+  encryptedSessionKey: PayloadStringSchema.optional().nullable(),
   createdAt: z.string(),
   repliedToId: z.string().optional(),
   linkPreview: z.unknown().optional(),
@@ -112,7 +153,7 @@ export const ShadowVaultMessageSchema = z.object({
   id: MessageIdSchema,
   conversationId: ConversationIdSchema,
   senderId: UserIdSchema,
-  content: Base64StringSchema.nullable().optional(),
+  content: PayloadStringSchema.optional().nullable(),
   createdAt: z.preprocess((val) => {
       if (val === null || val === undefined) return undefined;
 

@@ -32,7 +32,8 @@
     "view_profile": "Ver Perfil",
     "toggle_cloak": "Alternar Capa de Privacidade",
     "settings": "Configurações",
-    "logout": "Sair"
+    "logout": "Sair",
+    "more_reactions": "Mais reações"
   },
   "action": {
     "abort": "ABORTAR",

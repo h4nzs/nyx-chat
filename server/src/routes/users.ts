@@ -9,6 +9,7 @@ import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
 import { getIo } from '../socket.js'
 import type { UserId, AuthJwtPayload } from '@nyx/shared'
+import { Buffer } from 'buffer'
 
 const router = Router()
 
@@ -29,16 +30,21 @@ router.get('/search', async (req, res, next) => {
     
     const users = await prisma.user.findMany({
       where: { usernameHash: q },
-      select: { id: true, encryptedProfile: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true } } },
+      select: { id: true, encryptedProfile: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true, pqPublicKey: true, signingKey: true } } },
       take: 20
     })
 
-    const mappedUsers = users.map(u => ({
-      id: u.id,
-      encryptedProfile: u.encryptedProfile,
-      isVerified: u.isVerified,
-      publicKey: u.devices[0]?.publicKey
-    }))
+    const mappedUsers = users.map(u => {
+      const device = u.devices[0];
+      return {
+        id: u.id,
+        encryptedProfile: u.encryptedProfile,
+        isVerified: u.isVerified,
+        publicKey: device?.publicKey ? Buffer.from(device.publicKey).toString('base64url') : undefined,
+        pqPublicKey: device?.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : undefined,
+        signingKey: device?.signingKey ? Buffer.from(device.signingKey).toString('base64url') : undefined
+      };
+    })
 
     res.json(mappedUsers)
 
@@ -171,29 +177,49 @@ router.put('/me',
 )
 
 // UPDATE Public Keys (Me)
+const isValidBase64Url = (str: string, expectedBytes?: number) => {
+  if (!/^[A-Za-z0-9_-]+={0,2}$/.test(str)) return false;
+  if (expectedBytes) {
+    try {
+      const buf = Buffer.from(str, 'base64url');
+      if (buf.byteLength !== expectedBytes) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+};
+
+const validateKey = (expectedBytes?: number) => z.string().refine(val => isValidBase64Url(val, expectedBytes), { message: `Invalid key format or length (expected ${expectedBytes || 'valid base64url'})` });
+
 const base64UrlRegex = /^[A-Za-z0-9_-]+$/
 router.put('/me/keys',
   zodValidate({
     body: z.object({
       publicKey: z.string().min(43).max(256).regex(base64UrlRegex, { message: 'Invalid public key format.' }),
+      pqPublicKey: validateKey(1216),
       signingKey: z.string().min(43).max(256).regex(base64UrlRegex, { message: 'Invalid signing key format.' })
     })
   }),
   async (req, res, next) => {
     try {
       if (!req.user) throw new ApiError(401, 'Authentication required.')
-      
-      // ✅ FIX: Update kunci E2EE di tabel Device, bukan di tabel User
+
       const authUser = req.user as AuthJwtPayload;
+      const userId = authUser.id;
       const deviceId = authUser.deviceId;
       if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
-        
-      const userId = authUser.id
-      const { publicKey, signingKey } = req.body
 
+      const { publicKey, pqPublicKey, signingKey } = req.body
+
+      // FIX 2: Konversi String Base64 dari Client menjadi Buffer untuk Prisma Bytes
       await prisma.device.update({
         where: { id: deviceId },
-        data: { publicKey, signingKey }
+        data: {
+            publicKey: Buffer.from(publicKey, 'base64url'),
+            pqPublicKey: Buffer.from(pqPublicKey, 'base64url'),
+            signingKey: Buffer.from(signingKey, 'base64url')
+        }
       })
 
       const conversations = await prisma.conversation.findMany({
@@ -283,18 +309,21 @@ router.get('/:userId', async (req, res, next) => {
     const { userId } = req.params
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      // ✅ FIX: Ambil publicKey dari device terakhir
-      select: { id: true, encryptedProfile: true, createdAt: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true } } }
+      select: { id: true, encryptedProfile: true, createdAt: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true, pqPublicKey: true, signingKey: true } } }
     })
 
     if (!user) return res.status(404).json({ error: 'User not found' })
+    
+    const device = user.devices[0];
     
     const mappedUser = {
         id: user.id,
         encryptedProfile: user.encryptedProfile,
         createdAt: user.createdAt,
         isVerified: user.isVerified,
-        publicKey: user.devices[0]?.publicKey
+        publicKey: device?.publicKey ? Buffer.from(device.publicKey).toString('base64url') : undefined,
+        pqPublicKey: device?.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : undefined,
+        signingKey: device?.signingKey ? Buffer.from(device.signingKey).toString('base64url') : undefined
     }
     
     res.json(mappedUser)

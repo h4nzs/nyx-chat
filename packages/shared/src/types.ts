@@ -70,13 +70,15 @@ export type Message = z.infer<typeof IncomingMessageSchema> & {
   isSilent?: boolean;
   isDeletedLocal?: boolean;
 };
-
 export type Participant = {
   id: UserId;
   userId?: UserId;
+  user?: { id: UserId; publicKey?: string; pqPublicKey?: string; signingKey?: string; [key: string]: unknown };
   encryptedProfile?: string | null;
   publicKey?: string;
+  pqPublicKey?: string;
   signingKey?: string;
+  devices?: { id: string; publicKey: string; signingKey?: string; pqPublicKey?: string | null }[];
   role: "ADMIN" | "MEMBER" | "admin" | "member";
   isPinned?: boolean;
   name?: string;
@@ -89,6 +91,9 @@ export type Conversation = z.infer<typeof MinimalConversationSchema> & {
   participants: Participant[];
   lastMessage: (Message & { preview?: string }) | null;
   lastUpdated?: number;
+};
+
+export type ConversationUi = Conversation & {
   decryptedMetadata?: {
     title?: string;
     description?: string;
@@ -122,8 +127,9 @@ export interface AuthJwtPayload {
 }
 
 export interface DoubleRatchetState {
-  DHs: { publicKey: string; privateKey: string } | null;
-  DHr: string | null;
+  KEMs: { publicKey: string; privateKey: string } | null;
+  KEMr: string | null;
+  savedCt: string | null;
   RK: string | null;
   CKs: string | null;
   CKr: string | null;

@@ -1,6 +1,7 @@
 import Dexie, { Table } from 'dexie';
 import type { Message } from '@store/conversation';
-import type { ConversationId, UserId, MessageId, StoryId } from '@nyx/shared';
+import type { ConversationId, UserId, MessageId, StoryId, DoubleRatchetState } from '@nyx/shared';
+import type { GroupRatchetState } from '../types/crypto-common';
 
 // --- Interfaces for ShadowVault (Messages) ---
 export interface DecryptedMessageRecord {
@@ -43,39 +44,36 @@ export interface GroupKey {
   key: Uint8Array;
 }
 
+// Menyelaraskan dengan output worker_generate_otpk_batch
 export interface PreKey {
   keyId: number;
-  keyPair: Uint8Array; // Encrypted private key
+  pqPublicKey?: string;
+  encryptedPrivateKey: Uint8Array;
 }
-
 export interface IdentityKey {
   userId: UserId;
-  key: string; // Base64 public key
+  key: string; // Base64 public key (Gabungan X-Wing + Ed25519)
 }
 
+// Menggunakan tipe State yang sesuai dari shared
 export interface RatchetSession {
   conversationId: ConversationId;
-  state: Uint8Array;
+  state: Uint8Array; // serialized encrypted state
 }
 
+// Menggunakan tipe State yang sesuai dari crypto-common
 export interface GroupSenderState {
   conversationId: ConversationId;
-  state: {
-    CK: string;
-    N: number;
-  };
+  state: GroupRatchetState; // serialized state
 }
 
 export interface GroupReceiverState {
   id: string; // conversationId_senderId
-  state: {
-    CK: string;
-    N: number;
-  };
+  state: GroupRatchetState; // serialized state
 }
 
 export interface SkippedKey {
-  headerKey: string;
+  headerKey: string; // format: conversationId_kemPk_n
   key: Uint8Array;
 }
 
@@ -151,6 +149,15 @@ export class NyxDatabase extends Dexie {
       messageKeys: 'messageId',
       pendingHeaders: 'conversationId',
       groupSkippedKeys: 'key'
+    });
+
+    this.version(2).upgrade(trans => {
+      return trans.table('preKeys').toCollection().modify((preKey: any) => {
+        if (preKey.keyPair) {
+          preKey.encryptedPrivateKey = preKey.keyPair;
+          delete preKey.keyPair;
+        }
+      });
     });
   }
 }

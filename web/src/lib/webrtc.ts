@@ -435,8 +435,20 @@ export const initWebRTCListeners = (socket: Socket | null) => {
     } catch (e) {
         console.error(`Failed to decrypt and process secure signal ${data.type}`, e);
         if (e instanceof DOMException || (e as Error).name === 'OperationError') {
-            console.warn(`[WebRTC] Invalid call key detected. Purging current call state to allow recovery.`);
-            useCallStore.getState().endCall();
+            console.warn(`[WebRTC] Invalid call key detected for peer ${data.from}. Removing peer from call.`);
+            const pc = peerConnections.get(data.from);
+            if (pc) {
+                pc.close();
+                peerConnections.delete(data.from);
+            }
+            const store = useCallStore.getState();
+            store.removeRemoteStream(data.from);
+            store.removeRemoteUser(data.from);
+
+            if (peerConnections.size === 0) {
+                console.warn(`[WebRTC] No peers left. Purging current call state to allow recovery.`);
+                cleanupCall();
+            }
         }
     }
   });

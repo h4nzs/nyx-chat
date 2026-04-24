@@ -302,7 +302,9 @@ export default function SettingsPage() {
       if (autoUnlockKey && encryptedKeysStr) {
           try {
               phraseToLock = await getRecoveryPhrase(encryptedKeysStr, autoUnlockKey);
-          } catch (e) {}
+          } catch (e) {
+              console.error('getRecoveryPhrase failed', e instanceof Error ? { message: e.message, name: e.name } : { error: 'Unknown error' });
+          }
       }
 
       if (!phraseToLock) {
@@ -324,8 +326,10 @@ export default function SettingsPage() {
       
       toast.loading(t('settings:messages.biometric_scan_now'), { id: 'passkey' });
       
-      const attResp = await setupBiometricUnlock(options as Record<string, unknown>, phraseToLock);
-      
+      const attResp = await setupBiometricUnlock(
+        options as Record<string, unknown>,
+        phraseToLock
+      );      
       const verificationResp = await api<{ verified: boolean }>("/api/auth/webauthn/register/verify", {
         method: "POST",
         body: JSON.stringify(attResp),
