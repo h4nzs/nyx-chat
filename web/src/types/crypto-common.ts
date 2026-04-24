@@ -12,6 +12,9 @@ export interface SodiumKeyPair {
 export interface GroupRatchetState {
   CK: string;
   N: number;
+  createdAt?: number;
+  messageCount?: number;
+  lastActivityTime?: number;
 }
 
 export interface GroupRatchetHeader {

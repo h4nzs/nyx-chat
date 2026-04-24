@@ -9,7 +9,7 @@ import AddParticipantModal from './AddParticipantModal';
 import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import { toAbsoluteUrl } from '@utils/url';
-import { FiEdit2, FiLogOut, FiPlus, FiX } from 'react-icons/fi';
+import { FiEdit2, FiLogOut, FiPlus, FiX, FiLock } from 'react-icons/fi';
 import { useGlobalEscape } from '../hooks/useGlobalEscape';
 import MediaGallery from './MediaGallery';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -114,6 +114,27 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
     }
   };
 
+  const handleForceRotateKeys = async () => {
+    const toastId = toast.loading('Rotating encryption keys via ML-KEM...');
+    try {
+      const { forceRotateGroupSenderKey, ensureGroupSession } = await import('@utils/crypto');
+      const { emitGroupKeyDistribution } = await import('@lib/socket');
+      
+      await forceRotateGroupSenderKey(conversation.id);
+      
+      const distributionKeys = await ensureGroupSession(conversation.id, conversation.participants, true);
+      if (distributionKeys) {
+          emitGroupKeyDistribution(conversation.id, distributionKeys as { userId: string; key: string }[]);
+          toast.success('Encryption keys rotated successfully via ML-KEM', { id: toastId });
+      } else {
+          throw new Error("Failed to generate new keys");
+      }
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : t('common:errors.unknown');
+      toast.error(`Key rotation failed: ${msg}`, { id: toastId });
+    }
+  };
+
   const handleLeaveGroup = async () => {
     const toastId = toast.loading(t('modals:group_info.toasts.leaving'));
     try {
@@ -211,10 +232,17 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
                   </div>
 
                   {/* Actions Card */}
-                  <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex">
+                  <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex flex flex-col">
+                    <button
+                      onClick={handleForceRotateKeys}
+                      className="w-full flex items-center justify-center p-4 font-semibold text-orange-500 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all rounded-t-xl border-b border-border"
+                    >
+                      <FiLock className="mr-3" />
+                      <span>Rotate Encryption Keys Now</span>
+                    </button>
                     <button
                       onClick={handleLeaveGroup}
-                      className="w-full flex items-center justify-center p-4 font-semibold text-red-500 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all rounded-xl"
+                      className="w-full flex items-center justify-center p-4 font-semibold text-red-500 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all rounded-b-xl"
                     >
                       <FiLogOut className="mr-3" />
                       <span>{t('modals:group_info.leave_group')}</span>

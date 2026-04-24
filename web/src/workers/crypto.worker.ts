@@ -279,6 +279,8 @@ interface RuntimeDoubleRatchetState {
   Ns: number;
   Nr: number;
   PN: number;
+  messageCount?: number;
+  lastActivityTime?: number;
 }
 
 function deserializeState(serialized: DoubleRatchetState): RuntimeDoubleRatchetState {
@@ -311,7 +313,9 @@ function serializeState(runtime: RuntimeDoubleRatchetState): DoubleRatchetState 
     CKr: bytesToB64(runtime.CKr),
     Ns: runtime.Ns,
     Nr: runtime.Nr,
-    PN: runtime.PN
+    PN: runtime.PN,
+    messageCount: runtime.messageCount,
+    lastActivityTime: runtime.lastActivityTime
   };
 }
 
@@ -620,7 +624,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         }
 
         if (!theirPqIdentityKey || !theirPqSignedPreKey || !pqSignature) {
-            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+            throw new Error("Post-Quantum Handshake Mandatory");
         }
 
         const pqSignatureBytes = new Uint8Array(pqSignature);
@@ -658,7 +662,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
           if (theirOneTimePreKey || theirPqOneTimePreKey) {
              if (!theirOneTimePreKey || !theirPqOneTimePreKey) {
-                 throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+                 throw new Error("Post-Quantum Handshake Mandatory");
              }
              const theirOneTimePreKeyBytes = new Uint8Array(theirOneTimePreKey);
              const dh4 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirOneTimePreKeyBytes);
@@ -722,7 +726,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
         
         if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
-            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+            throw new Error("Post-Quantum Handshake Mandatory");
         }
 
         const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -1322,7 +1326,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
         
         if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
-            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+            throw new Error("Post-Quantum Handshake Mandatory");
         }
 
         const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);

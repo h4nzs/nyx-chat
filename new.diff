@@ -1,0 +1,473 @@
+diff --git a/packages/shared/src/types.ts b/packages/shared/src/types.ts
+index 7bde4f2e..659f0f1a 100644
+--- a/packages/shared/src/types.ts
++++ b/packages/shared/src/types.ts
+@@ -156,4 +156,6 @@ export interface DoubleRatchetState {
+   Ns: number;
+   Nr: number;
+   PN: number;
++  messageCount?: number;
++  lastActivityTime?: number;
+ }
+diff --git a/server/src/app.ts b/server/src/app.ts
+index 224a7a37..c11ba56f 100644
+--- a/server/src/app.ts
++++ b/server/src/app.ts
+@@ -211,8 +211,8 @@ app.use(logger("dev"));
+ app.use(cookieParser());
+ 
+ // Body Parser Split: Uploads butuh limit besar, lainnya kecil (Security)
+-// app.use("/api/uploads", express.json({ limit: "100mb" }));
+-// app.use("/api/uploads", express.urlencoded({ extended: true, limit: "100mb" }));
++app.use("/api/uploads", express.json({ limit: "100mb" }));
++app.use("/api/uploads", express.urlencoded({ extended: true, limit: "100mb" }));
+ 
+ app.use(express.json({ limit: "1mb" }));
+ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+diff --git a/web/src/components/GroupInfoPanel.tsx b/web/src/components/GroupInfoPanel.tsx
+index 36070fbf..9fd1d9f3 100644
+--- a/web/src/components/GroupInfoPanel.tsx
++++ b/web/src/components/GroupInfoPanel.tsx
+@@ -9,7 +9,7 @@ import AddParticipantModal from './AddParticipantModal';
+ import { api } from '@lib/api';
+ import toast from 'react-hot-toast';
+ import { toAbsoluteUrl } from '@utils/url';
+-import { FiEdit2, FiLogOut, FiPlus, FiX } from 'react-icons/fi';
++import { FiEdit2, FiLogOut, FiPlus, FiX, FiLock } from 'react-icons/fi';
+ import { useGlobalEscape } from '../hooks/useGlobalEscape';
+ import MediaGallery from './MediaGallery';
+ import { motion, AnimatePresence } from 'framer-motion';
+@@ -114,6 +114,27 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
+     }
+   };
+ 
++  const handleForceRotateKeys = async () => {
++    const toastId = toast.loading('Rotating encryption keys via ML-KEM...');
++    try {
++      const { forceRotateGroupSenderKey, ensureGroupSession } = await import('@utils/crypto');
++      const { emitGroupKeyDistribution } = await import('@lib/socket');
++      
++      await forceRotateGroupSenderKey(conversation.id);
++      
++      const distributionKeys = await ensureGroupSession(conversation.id, conversation.participants, true);
++      if (distributionKeys) {
++          emitGroupKeyDistribution(conversation.id, distributionKeys as { userId: string; key: string }[]);
++          toast.success('Encryption keys rotated successfully via ML-KEM', { id: toastId });
++      } else {
++          throw new Error("Failed to generate new keys");
++      }
++    } catch (error: unknown) {
++      const msg = error instanceof Error ? error.message : t('common:errors.unknown');
++      toast.error(`Key rotation failed: ${msg}`, { id: toastId });
++    }
++  };
++
+   const handleLeaveGroup = async () => {
+     const toastId = toast.loading(t('modals:group_info.toasts.leaving'));
+     try {
+@@ -211,10 +232,17 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
+                   </div>
+ 
+                   {/* Actions Card */}
+-                  <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex">
++                  <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex flex flex-col">
++                    <button
++                      onClick={handleForceRotateKeys}
++                      className="w-full flex items-center justify-center p-4 font-semibold text-orange-500 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all rounded-t-xl border-b border-border"
++                    >
++                      <FiLock className="mr-3" />
++                      <span>Rotate Encryption Keys Now</span>
++                    </button>
+                     <button
+                       onClick={handleLeaveGroup}
+-                      className="w-full flex items-center justify-center p-4 font-semibold text-red-500 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all rounded-xl"
++                      className="w-full flex items-center justify-center p-4 font-semibold text-red-500 shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all rounded-b-xl"
+                     >
+                       <FiLogOut className="mr-3" />
+                       <span>{t('modals:group_info.leave_group')}</span>
+diff --git a/web/src/lib/keychainDb.ts b/web/src/lib/keychainDb.ts
+index 359633ed..6895ce7d 100644
+--- a/web/src/lib/keychainDb.ts
++++ b/web/src/lib/keychainDb.ts
+@@ -10,6 +10,9 @@ export interface GroupSenderState {
+   conversationId: ConversationId;
+   CK: string;
+   N: number;
++  createdAt?: number;
++  messageCount?: number;
++  lastActivityTime?: number;
+ }
+ 
+ export interface GroupReceiverState {
+@@ -77,7 +80,10 @@ export async function getGroupSenderState(conversationId: string): Promise<Group
+   return record ? {
+       conversationId: asConversationId(record.conversationId),
+       CK: ckString,
+-      N: record.state.N
++      N: record.state.N,
++      createdAt: record.state.createdAt,
++      messageCount: record.state.messageCount,
++      lastActivityTime: record.state.lastActivityTime
+   } : null;
+ }
+ 
+@@ -86,7 +92,12 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
+       // Sama seperti di atas, kita simpan sesuai schema yang baru (string)
+       await db.groupSenderStates.put({
+           conversationId: state.conversationId,
+-          state: { CK: state.CK, N: state.N }
++          state: { 
++            CK: state.CK, 
++            N: state.N,
++            createdAt: state.createdAt,
++            messageCount: state.messageCount
++          }
+       });
+   });
+ }
+diff --git a/web/src/lib/socket.ts b/web/src/lib/socket.ts
+index ff93755e..75fa7cc0 100644
+--- a/web/src/lib/socket.ts
++++ b/web/src/lib/socket.ts
+@@ -288,9 +288,9 @@ export function getSocket() {
+ 
+     socket.on("conversation:updated", (updates) => conversationStore.updateConversation(updates.id, updates));
+     socket.on("conversation:deleted", ({ id }) => conversationStore.removeConversation(id));
+-
+     socket.on('group:participants_changed', (data: { conversationId: string }) => {
+         useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
++        import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(data.conversationId).catch(console.error));
+         useConversationStore.getState().loadConversations();
+         fireGhostSync(data.conversationId, 1000);
+     });
+diff --git a/web/src/store/conversation.ts b/web/src/store/conversation.ts
+index 842c1a57..d5eecc9b 100644
+--- a/web/src/store/conversation.ts
++++ b/web/src/store/conversation.ts
+@@ -486,17 +486,30 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
+ 
+   updateParticipantDetails: (user) => {
+     const { role, ...userDetails } = user;
+-    set(state => ({
+-      conversations: state.conversations.map(c => ({
+-        ...c,
+-        participants: c.participants.map(p => 
+-          p.id === user.id ? { ...p, ...userDetails } : p
+-        ),
+-      }))
+-    }));
++    set(state => {
++      // Force key rotation on conversations containing this user (topology might change)
++      state.conversations.forEach(c => {
++         if (c.participants.some(p => p.id === user.id)) {
++            import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(c.id).catch(console.error));
++         }
++      });
++      return {
++        conversations: state.conversations.map(c => {
++          const hasUser = c.participants.some(p => p.id === user.id);
++          return {
++            ...c,
++            requiresKeyRotation: hasUser ? true : c.requiresKeyRotation,
++            participants: c.participants.map(p => 
++              p.id === user.id ? { ...p, ...userDetails } : p
++            ),
++          };
++        })
++      };
++    });
+   },
+ 
+   addParticipants: (conversationId, newParticipants) => {
++    import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(conversationId).catch(console.error));
+     set(state => ({
+       conversations: state.conversations.map(c => {
+         if (c.id === conversationId) {
+@@ -508,7 +521,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
+              if (p && p.id) uniqueMap.set(p.id, p);
+           });
+ 
+-          return { ...c, participants: Array.from(uniqueMap.values()) };
++          return { ...c, participants: Array.from(uniqueMap.values()), requiresKeyRotation: true };
+         }
+         return c;
+       }),
+@@ -516,10 +529,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
+   },
+ 
+   removeParticipant: (conversationId, userId) => {
++    import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(conversationId).catch(console.error));
+     set(state => ({
+       conversations: state.conversations.map(c => {
+         if (c.id === conversationId) {
+-          return { ...c, participants: c.participants.filter(p => p.id !== userId) };
++          return { ...c, participants: c.participants.filter(p => p.id !== userId), requiresKeyRotation: true };
+         }
+         return c;
+       }),
+diff --git a/web/src/types/crypto-common.ts b/web/src/types/crypto-common.ts
+index caae70dc..42c8df49 100644
+--- a/web/src/types/crypto-common.ts
++++ b/web/src/types/crypto-common.ts
+@@ -12,6 +12,9 @@ export interface SodiumKeyPair {
+ export interface GroupRatchetState {
+   CK: string;
+   N: number;
++  createdAt?: number;
++  messageCount?: number;
++  lastActivityTime?: number;
+ }
+ 
+ export interface GroupRatchetHeader {
+diff --git a/web/src/utils/crypto.ts b/web/src/utils/crypto.ts
+index f53f1d4c..b20caaec 100644
+--- a/web/src/utils/crypto.ts
++++ b/web/src/utils/crypto.ts
+@@ -819,73 +819,88 @@ async function doEncryptMessage(
+   messageId?: string
+ ): Promise<{ ciphertext: string; sessionId?: string; drHeader?: DrHeader; mk?: Uint8Array }> {
+   const sodium = await getSodiumLib();
+-  const { worker_dr_ratchet_encrypt, groupRatchetEncrypt } = await getWorkerProxy();
++  const { groupRatchetEncrypt } = await getWorkerProxy();
+ 
+-  if (isGroup) {
+-    // SENDER KEY PROTOCOL
+-    const senderState = await getGroupSenderState(conversationId);
+-    if (!senderState) throw new Error(`No sender key available for conversation ${conversationId}.`);
+-    
+-    const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
+-    
+-    // Encrypt & Ratchet
+-    const result = await groupRatchetEncrypt(
+-        { CK: senderState.CK, N: senderState.N },
+-        text,
+-        signingPrivateKey
+-    );
+-    
+-    // [FIX] Atomic order: save key before state
+-    if (messageId && result.mk) {
+-        await storeMessageKeySecurely(messageId, result.mk);
+-    }
+-
+-    // Update State
+-    await saveGroupSenderState({
+-        conversationId: conversationId as ConversationId,
+-        CK: result.state.CK,
+-        N: result.state.N
+-    });
+-    
+-    const myId = useAuthStore.getState().user?.id;
+-    const { publicKey } = await getMyEncryptionKeyPair();
+-    const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+-
+-    // ✅ FIX: Menyisipkan senderId dan senderDeviceKey langsung ke dalam cipher agar Decryptor bisa Auto-Detect
+-    const payload = JSON.stringify({
+-        header: result.header,
+-        ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
+-        signature: result.signature,
+-        senderId: myId,
+-        senderDeviceKey: myPublicKeyB64
+-    });
+-    
+-    return { ciphertext: payload, mk: result.mk };
+-    
+-  } else {
+-    // DOUBLE RATCHET (Legacy Fallback)
+-    const state = await retrieveRatchetStateSecurely(conversationId);
+-    if (!state) throw new Error('Ratchet state not initialized for encryption.');
+-
+-    const result = await worker_dr_ratchet_encrypt({
+-        serializedState: state,
+-        plaintext: text
+-    });
+-
+-    const mkUint8 = new Uint8Array(result.mk);
+-
+-    if (messageId) {
+-       await storeMessageKeySecurely(messageId, mkUint8);
+-    }
+-
+-    await storeRatchetStateSecurely(conversationId, result.state);
++  // SENDER KEY PROTOCOL (UNIVERSAL FAN-OUT)
++  let senderState = await getGroupSenderState(conversationId);
++  
++  // --- SMART KEY ROTATION (PCS) ---
++  if (senderState) {
++      const MAX_MESSAGES = isGroup ? 50 : 5;
++      const MAX_AGE_MS = isGroup ? 24 * 60 * 60 * 1000 : 5 * 60 * 1000;
++      const now = Date.now();
++      const count = senderState.messageCount || 0;
++      
++      let needsRotation = false;
++      if (count >= MAX_MESSAGES) {
++          needsRotation = true;
++      } else if (isGroup) {
++          const age = senderState.createdAt ? now - senderState.createdAt : 0;
++          if (senderState.createdAt && age >= MAX_AGE_MS) needsRotation = true;
++      } else {
++          const idleTime = senderState.lastActivityTime ? now - senderState.lastActivityTime : 0;
++          if (senderState.lastActivityTime && idleTime >= MAX_AGE_MS) needsRotation = true;
++      }
++      
++      if (needsRotation) {
++          console.log(`[Smart Key Rotation] Triggered for ${conversationId}. Count: ${count}, isGroup: ${isGroup}`);
++          // Don't block UI with pq_box_seal, let ensureGroupSession run in background via worker proxy
++          await forceRotateGroupSenderKey(conversationId);
++          
++          const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
++          if (conversation) {
++             const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true);
++             if (distributionKeys) {
++               emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
++             } else {
++               throw new Error("Security Failure: One or more devices do not support mandatory Post-Quantum encryption. Key rotation aborted.");
++             }
++          }
++          senderState = await getGroupSenderState(conversationId);
++      }
++  }
++  // ---------------------------------
+ 
+-    return { 
+-        ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
+-        drHeader: result.header,
+-        mk: mkUint8 
+-    };
++  if (!senderState) throw new Error(`No sender key available for conversation ${conversationId}.`);
++  
++  const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
++  
++  // Encrypt & Ratchet
++  const result = await groupRatchetEncrypt(
++      { CK: senderState.CK, N: senderState.N },
++      text,
++      signingPrivateKey
++  );
++  
++  // [FIX] Atomic order: save key before state
++  if (messageId && result.mk) {
++      await storeMessageKeySecurely(messageId, result.mk);
+   }
++
++  // Update State (messageCount only increments for sent messages)
++  await saveGroupSenderState({
++      conversationId: conversationId as ConversationId,
++      CK: result.state.CK,
++      N: result.state.N,
++      createdAt: senderState.createdAt || Date.now(),
++      messageCount: (senderState.messageCount || 0) + 1,
++      lastActivityTime: Date.now()
++  });
++  
++  const myId = useAuthStore.getState().user?.id;
++  const { publicKey } = await getMyEncryptionKeyPair();
++  const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
++
++  // ✅ FIX: Menyisipkan senderId dan senderDeviceKey langsung ke dalam cipher agar Decryptor bisa Auto-Detect
++  const payload = JSON.stringify({
++      header: result.header,
++      ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
++      signature: result.signature,
++      senderId: myId,
++      senderDeviceKey: myPublicKeyB64
++  });
++  
++  return { ciphertext: payload, mk: result.mk };
+ }
+ 
+ export async function decryptMessage(
+@@ -1061,6 +1076,16 @@ async function doDecryptMessage(
+             await storeMessageKeySecurely(messageId, result.mk);
+         }
+         
++        // --- SMART KEY ROTATION: Update idle time on received message ---
++        const localSenderState = await getGroupSenderState(conversationId);
++        if (localSenderState) {
++            await saveGroupSenderState({
++                ...localSenderState,
++                lastActivityTime: Date.now()
++            });
++        }
++        // ----------------------------------------------------------------
++        
+         return { status: 'success', value: sodium.to_string(result.plaintext) };
+         
+     } catch (e: unknown) {
+@@ -1167,7 +1192,7 @@ export async function establishSessionFromPreKeyBundle(
+   const { worker_x3dh_initiator } = await getWorkerProxy();
+ 
+   if (!preKeyBundle.pqIdentityKey || !preKeyBundle.signedPreKey.pqKey || !preKeyBundle.signedPreKey.pqSignature) {
+-      throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
++      throw new Error("Post-Quantum Handshake Mandatory");
+   }
+   
+   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+@@ -1184,7 +1209,7 @@ export async function establishSessionFromPreKeyBundle(
+   if (preKeyBundle.oneTimePreKey) {
+     theirOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
+     if (!preKeyBundle.oneTimePreKey.pqKey) {
+-      throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
++      throw new Error("Post-Quantum Handshake Mandatory");
+     }
+     theirPqOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+   }
+diff --git a/web/src/workers/crypto.worker.ts b/web/src/workers/crypto.worker.ts
+index 3e22d6b0..5c63fba4 100644
+--- a/web/src/workers/crypto.worker.ts
++++ b/web/src/workers/crypto.worker.ts
+@@ -279,6 +279,8 @@ interface RuntimeDoubleRatchetState {
+   Ns: number;
+   Nr: number;
+   PN: number;
++  messageCount?: number;
++  lastActivityTime?: number;
+ }
+ 
+ function deserializeState(serialized: DoubleRatchetState): RuntimeDoubleRatchetState {
+@@ -311,7 +313,9 @@ function serializeState(runtime: RuntimeDoubleRatchetState): DoubleRatchetState
+     CKr: bytesToB64(runtime.CKr),
+     Ns: runtime.Ns,
+     Nr: runtime.Nr,
+-    PN: runtime.PN
++    PN: runtime.PN,
++    messageCount: runtime.messageCount,
++    lastActivityTime: runtime.lastActivityTime
+   };
+ }
+ 
+@@ -620,7 +624,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+         }
+ 
+         if (!theirPqIdentityKey || !theirPqSignedPreKey || !pqSignature) {
+-            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
++            throw new Error("Post-Quantum Handshake Mandatory");
+         }
+ 
+         const pqSignatureBytes = new Uint8Array(pqSignature);
+@@ -658,7 +662,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+ 
+           if (theirOneTimePreKey || theirPqOneTimePreKey) {
+              if (!theirOneTimePreKey || !theirPqOneTimePreKey) {
+-                 throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
++                 throw new Error("Post-Quantum Handshake Mandatory");
+              }
+              const theirOneTimePreKeyBytes = new Uint8Array(theirOneTimePreKey);
+              const dh4 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirOneTimePreKeyBytes);
+@@ -722,7 +726,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+         const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
+         
+         if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
+-            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
++            throw new Error("Post-Quantum Handshake Mandatory");
+         }
+ 
+         const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
+@@ -1322,7 +1326,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+         const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
+         
+         if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
+-            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
++            throw new Error("Post-Quantum Handshake Mandatory");
+         }
+ 
+         const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);

@@ -819,73 +819,88 @@ async function doEncryptMessage(
   messageId?: string
 ): Promise<{ ciphertext: string; sessionId?: string; drHeader?: DrHeader; mk?: Uint8Array }> {
   const sodium = await getSodiumLib();
-  const { worker_dr_ratchet_encrypt, groupRatchetEncrypt } = await getWorkerProxy();
+  const { groupRatchetEncrypt } = await getWorkerProxy();
 
-  if (isGroup) {
-    // SENDER KEY PROTOCOL
-    const senderState = await getGroupSenderState(conversationId);
-    if (!senderState) throw new Error(`No sender key available for conversation ${conversationId}.`);
-    
-    const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
-    
-    // Encrypt & Ratchet
-    const result = await groupRatchetEncrypt(
-        { CK: senderState.CK, N: senderState.N },
-        text,
-        signingPrivateKey
-    );
-    
-    // [FIX] Atomic order: save key before state
-    if (messageId && result.mk) {
-        await storeMessageKeySecurely(messageId, result.mk);
-    }
-
-    // Update State
-    await saveGroupSenderState({
-        conversationId: conversationId as ConversationId,
-        CK: result.state.CK,
-        N: result.state.N
-    });
-    
-    const myId = useAuthStore.getState().user?.id;
-    const { publicKey } = await getMyEncryptionKeyPair();
-    const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-
-    // ✅ FIX: Menyisipkan senderId dan senderDeviceKey langsung ke dalam cipher agar Decryptor bisa Auto-Detect
-    const payload = JSON.stringify({
-        header: result.header,
-        ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
-        signature: result.signature,
-        senderId: myId,
-        senderDeviceKey: myPublicKeyB64
-    });
-    
-    return { ciphertext: payload, mk: result.mk };
-    
-  } else {
-    // DOUBLE RATCHET (Legacy Fallback)
-    const state = await retrieveRatchetStateSecurely(conversationId);
-    if (!state) throw new Error('Ratchet state not initialized for encryption.');
-
-    const result = await worker_dr_ratchet_encrypt({
-        serializedState: state,
-        plaintext: text
-    });
-
-    const mkUint8 = new Uint8Array(result.mk);
-
-    if (messageId) {
-       await storeMessageKeySecurely(messageId, mkUint8);
-    }
-
-    await storeRatchetStateSecurely(conversationId, result.state);
-
-    return { 
-        ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
-        drHeader: result.header,
-        mk: mkUint8 
-    };
+  // SENDER KEY PROTOCOL (UNIVERSAL FAN-OUT)
+  let senderState = await getGroupSenderState(conversationId);
+  
+  // --- SMART KEY ROTATION (PCS) ---
+  if (senderState) {
+      const MAX_MESSAGES = isGroup ? 50 : 5;
+      const MAX_AGE_MS = isGroup ? 24 * 60 * 60 * 1000 : 5 * 60 * 1000;
+      const now = Date.now();
+      const count = senderState.messageCount || 0;
+      
+      let needsRotation = false;
+      if (count >= MAX_MESSAGES) {
+          needsRotation = true;
+      } else if (isGroup) {
+          const age = senderState.createdAt ? now - senderState.createdAt : 0;
+          if (senderState.createdAt && age >= MAX_AGE_MS) needsRotation = true;
+      } else {
+          const idleTime = senderState.lastActivityTime ? now - senderState.lastActivityTime : 0;
+          if (senderState.lastActivityTime && idleTime >= MAX_AGE_MS) needsRotation = true;
+      }
+      
+      if (needsRotation) {
+          console.log(`[Smart Key Rotation] Triggered for ${conversationId}. Count: ${count}, isGroup: ${isGroup}`);
+          // Don't block UI with pq_box_seal, let ensureGroupSession run in background via worker proxy
+          await forceRotateGroupSenderKey(conversationId);
+          
+          const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+          if (conversation) {
+             const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true);
+             if (distributionKeys) {
+               emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+             } else {
+               throw new Error("Security Failure: One or more devices do not support mandatory Post-Quantum encryption. Key rotation aborted.");
+             }
+          }
+          senderState = await getGroupSenderState(conversationId);
+      }
   }
+  // ---------------------------------
+
+  if (!senderState) throw new Error(`No sender key available for conversation ${conversationId}.`);
+  
+  const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
+  
+  // Encrypt & Ratchet
+  const result = await groupRatchetEncrypt(
+      { CK: senderState.CK, N: senderState.N },
+      text,
+      signingPrivateKey
+  );
+  
+  // [FIX] Atomic order: save key before state
+  if (messageId && result.mk) {
+      await storeMessageKeySecurely(messageId, result.mk);
+  }
+
+  // Update State (messageCount only increments for sent messages)
+  await saveGroupSenderState({
+      conversationId: conversationId as ConversationId,
+      CK: result.state.CK,
+      N: result.state.N,
+      createdAt: senderState.createdAt || Date.now(),
+      messageCount: (senderState.messageCount || 0) + 1,
+      lastActivityTime: Date.now()
+  });
+  
+  const myId = useAuthStore.getState().user?.id;
+  const { publicKey } = await getMyEncryptionKeyPair();
+  const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+  // ✅ FIX: Menyisipkan senderId dan senderDeviceKey langsung ke dalam cipher agar Decryptor bisa Auto-Detect
+  const payload = JSON.stringify({
+      header: result.header,
+      ciphertext: sodium.to_base64(result.ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING),
+      signature: result.signature,
+      senderId: myId,
+      senderDeviceKey: myPublicKeyB64
+  });
+  
+  return { ciphertext: payload, mk: result.mk };
 }
 
 export async function decryptMessage(
@@ -1061,6 +1076,16 @@ async function doDecryptMessage(
             await storeMessageKeySecurely(messageId, result.mk);
         }
         
+        // --- SMART KEY ROTATION: Update idle time on received message ---
+        const localSenderState = await getGroupSenderState(conversationId);
+        if (localSenderState) {
+            await saveGroupSenderState({
+                ...localSenderState,
+                lastActivityTime: Date.now()
+            });
+        }
+        // ----------------------------------------------------------------
+        
         return { status: 'success', value: sodium.to_string(result.plaintext) };
         
     } catch (e: unknown) {
@@ -1167,7 +1192,7 @@ export async function establishSessionFromPreKeyBundle(
   const { worker_x3dh_initiator } = await getWorkerProxy();
 
   if (!preKeyBundle.pqIdentityKey || !preKeyBundle.signedPreKey.pqKey || !preKeyBundle.signedPreKey.pqSignature) {
-      throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+      throw new Error("Post-Quantum Handshake Mandatory");
   }
   
   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -1184,7 +1209,7 @@ export async function establishSessionFromPreKeyBundle(
   if (preKeyBundle.oneTimePreKey) {
     theirOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
     if (!preKeyBundle.oneTimePreKey.pqKey) {
-      throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+      throw new Error("Post-Quantum Handshake Mandatory");
     }
     theirPqOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   }

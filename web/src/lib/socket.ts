@@ -288,9 +288,9 @@ export function getSocket() {
 
     socket.on("conversation:updated", (updates) => conversationStore.updateConversation(updates.id, updates));
     socket.on("conversation:deleted", ({ id }) => conversationStore.removeConversation(id));
-
     socket.on('group:participants_changed', (data: { conversationId: string }) => {
         useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
+        import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(data.conversationId).catch(console.error));
         useConversationStore.getState().loadConversations();
         fireGhostSync(data.conversationId, 1000);
     });

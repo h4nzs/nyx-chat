@@ -486,17 +486,30 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
   updateParticipantDetails: (user) => {
     const { role, ...userDetails } = user;
-    set(state => ({
-      conversations: state.conversations.map(c => ({
-        ...c,
-        participants: c.participants.map(p => 
-          p.id === user.id ? { ...p, ...userDetails } : p
-        ),
-      }))
-    }));
+    set(state => {
+      // Force key rotation on conversations containing this user (topology might change)
+      state.conversations.forEach(c => {
+         if (c.participants.some(p => p.id === user.id)) {
+            import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(c.id).catch(console.error));
+         }
+      });
+      return {
+        conversations: state.conversations.map(c => {
+          const hasUser = c.participants.some(p => p.id === user.id);
+          return {
+            ...c,
+            requiresKeyRotation: hasUser ? true : c.requiresKeyRotation,
+            participants: c.participants.map(p => 
+              p.id === user.id ? { ...p, ...userDetails } : p
+            ),
+          };
+        })
+      };
+    });
   },
 
   addParticipants: (conversationId, newParticipants) => {
+    import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(conversationId).catch(console.error));
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
@@ -508,7 +521,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
              if (p && p.id) uniqueMap.set(p.id, p);
           });
 
-          return { ...c, participants: Array.from(uniqueMap.values()) };
+          return { ...c, participants: Array.from(uniqueMap.values()), requiresKeyRotation: true };
         }
         return c;
       }),
@@ -516,10 +529,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   removeParticipant: (conversationId, userId) => {
+    import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(conversationId).catch(console.error));
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
-          return { ...c, participants: c.participants.filter(p => p.id !== userId) };
+          return { ...c, participants: c.participants.filter(p => p.id !== userId), requiresKeyRotation: true };
         }
         return c;
       }),

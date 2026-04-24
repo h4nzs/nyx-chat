@@ -10,6 +10,9 @@ export interface GroupSenderState {
   conversationId: ConversationId;
   CK: string;
   N: number;
+  createdAt?: number;
+  messageCount?: number;
+  lastActivityTime?: number;
 }
 
 export interface GroupReceiverState {
@@ -77,7 +80,10 @@ export async function getGroupSenderState(conversationId: string): Promise<Group
   return record ? {
       conversationId: asConversationId(record.conversationId),
       CK: ckString,
-      N: record.state.N
+      N: record.state.N,
+      createdAt: record.state.createdAt,
+      messageCount: record.state.messageCount,
+      lastActivityTime: record.state.lastActivityTime
   } : null;
 }
 
@@ -86,7 +92,12 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
       // Sama seperti di atas, kita simpan sesuai schema yang baru (string)
       await db.groupSenderStates.put({
           conversationId: state.conversationId,
-          state: { CK: state.CK, N: state.N }
+          state: { 
+            CK: state.CK, 
+            N: state.N,
+            createdAt: state.createdAt,
+            messageCount: state.messageCount
+          }
       });
   });
 }
