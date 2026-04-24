@@ -525,7 +525,14 @@ export function registerSocket(httpServer: HttpServer) {
             const participantIds = participants.map(p => p.userId);
             if (!participantIds.includes(userId) || !participantIds.includes(targetId)) return;
 
-            io.to(targetId).emit('session:request_key', { conversationId, requesterId: userId, sessionId });
+            io.to(targetId).emit('session:request_key', { 
+              conversationId, 
+              requesterId: userId, 
+              sessionId,
+              requesterPublicKey: socket.user?.publicKey || undefined,
+              requesterPqPublicKey: socket.user?.pqPublicKey || undefined,
+              requesterDeviceId: socket.user?.deviceId || socket.id
+            });
           } catch (error) {}
           return;
       }

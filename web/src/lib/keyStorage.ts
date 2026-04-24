@@ -44,6 +44,23 @@ const base64ToArrayBuffer = (base64: string) => {
   return bytes;
 };
 
+const hexToUint8Array = (hex: string): Uint8Array => {
+  const matches = hex.match(/.{1,2}/g);
+  if (!matches) {
+    throw new Error("Invalid Argon2id hex format: No hex pairs found");
+  }
+  
+  const bytes = matches.map((byte, index) => {
+    const parsed = parseInt(byte, 16);
+    if (isNaN(parsed)) {
+      throw new Error(`Invalid Argon2id hex format: Non-hex character at pair ${index} (${byte})`);
+    }
+    return parsed;
+  });
+  
+  return new Uint8Array(bytes);
+};
+
 // FIX 2: Pindahkan Panic Hash ke IndexedDB (kvStore) agar tersentralisasi
 export const setPanicPassword = async (password: string) => {
   if (!password) {
@@ -54,20 +71,19 @@ export const setPanicPassword = async (password: string) => {
   const saltBytes = window.crypto.getRandomValues(new Uint8Array(16));
   const salt = arrayBufferToBase64(saltBytes);
   const params = {
-    timeCost: 2,
-    memoryCost: 19456,
+    iterations: 2,
+    memorySize: 19456,
     parallelism: 1,
     hashLength: 32
   };
   
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const hashHex = (await argon2id({
     password,
     salt: saltBytes,
     ...params
-  } as any)) as unknown as string;
+  })) as unknown as string;
   
-  const hashBytes = new Uint8Array(hashHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+  const hashBytes = hexToUint8Array(hashHex);
   const hash = arrayBufferToBase64(hashBytes);
 
   const record = {
@@ -94,14 +110,13 @@ export const checkPanicPassword = async (password: string): Promise<boolean> => 
     if (record.alg !== "NYX_PANIC_VERIFY_V1") return false;
     
     const saltBytes = base64ToArrayBuffer(record.salt);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const derivedHashHex = (await argon2id({
       password,
       salt: saltBytes,
       ...record.params
-    } as any)) as unknown as string;
+    })) as string;
     
-    const derivedHashBytes = new Uint8Array(derivedHashHex.match(/.{1,2}/g)!.map((byte: string) => parseInt(byte, 16)));
+    const derivedHashBytes = hexToUint8Array(derivedHashHex);
     const derivedHash = arrayBufferToBase64(derivedHashBytes);
     
     return derivedHash === record.hash;

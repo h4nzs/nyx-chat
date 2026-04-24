@@ -405,39 +405,6 @@ export async function exportDatabaseToJson(): Promise<string> {
      }
   }
 
-  // --- DEVICE-SPECIFIC DECRYPTION FOR HISTORY SYNC ---
-  try {
-      const { useAuthStore } = await import('@store/auth');
-      const masterSeed = await useAuthStore.getState().getMasterSeed();
-      if (masterSeed) {
-          const { worker_decrypt_session_key } = await import('@lib/crypto-worker-proxy');
-
-          if (exportData['messageKeys']) {
-              for (const mk of exportData['messageKeys']) {
-                  try {
-                      const m = mk as { key: Uint8Array, plaintext?: string };
-                      const decrypted = await worker_decrypt_session_key(m.key, masterSeed);
-                      // FIX: Safe native base64 in browser
-                      m.plaintext = bytesToBase64(decrypted);
-                  } catch (e) {}
-              }
-          }
-      }
-
-      const { decryptVaultText } = await import('@lib/shadowVaultDb');
-      if (exportData['messages']) {
-          for (const msg of exportData['messages']) {
-              const m = msg as { content?: string, fileMeta?: string, senderName?: string };
-              // FIX: Clean up legacy fields (preview, fileUrl)
-              if (m.content) m.content = await decryptVaultText(m.content) || m.content;
-              if (m.fileMeta) m.fileMeta = await decryptVaultText(m.fileMeta) || m.fileMeta;
-              if (m.senderName) m.senderName = await decryptVaultText(m.senderName) || m.senderName;
-          }
-      }
-  } catch (e) {
-      console.warn("Failed to decrypt local payload for export", e);
-  }
-
   return JSON.stringify(exportData, (key, value) => {
     if (value instanceof Uint8Array) {
       return { __type: 'Uint8Array', data: Array.from(value) };

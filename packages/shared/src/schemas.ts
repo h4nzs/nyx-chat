@@ -55,15 +55,12 @@ export const ParticipantSchema = z.object({
     signingKey: z.string().optional()
   })).optional(),
   role: z.enum(["ADMIN", "MEMBER", "admin", "member"]),
-  isPinned: z.boolean().optional(),
-  name: z.string().optional(),
-  username: z.string().optional(),
-  avatarUrl: z.string().nullable().optional()
-}).passthrough();
+  isPinned: z.boolean().optional()
+});
 
 export const ConversationSchema = MinimalConversationSchema.extend({
   participants: z.array(ParticipantSchema),
-  lastMessage: z.any().nullable(),
+  lastMessage: z.lazy(() => IncomingMessageSchema).nullable(),
   lastUpdated: z.number().optional()
 }).passthrough();
 

@@ -176,11 +176,14 @@ router.get(
           let otpk = null;
           if (device.preKeyBundle) {
               otpk = await prisma.$queryRaw`
-                SELECT id, "keyId", "publicKey", "pqPublicKey"
-                FROM "OneTimePreKey" 
-                WHERE "deviceId" = ${device.id} 
-                ORDER BY "createdAt" ASC 
-                LIMIT 1
+                DELETE FROM "OneTimePreKey"
+                WHERE id = (
+                  SELECT id FROM "OneTimePreKey"
+                  WHERE "deviceId" = ${device.id}
+                  ORDER BY "createdAt" ASC
+                  LIMIT 1
+                )
+                RETURNING id, "keyId", "publicKey", "pqPublicKey"
               `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
           }
 
@@ -256,11 +259,14 @@ router.post(
           let otpk = null;
           if (device.preKeyBundle) {
               otpk = await prisma.$queryRaw`
-                SELECT id, "keyId", "publicKey", "pqPublicKey"
-                FROM "OneTimePreKey" 
-                WHERE "deviceId" = ${device.id} 
-                ORDER BY "createdAt" ASC 
-                LIMIT 1
+                DELETE FROM "OneTimePreKey"
+                WHERE id = (
+                  SELECT id FROM "OneTimePreKey"
+                  WHERE "deviceId" = ${device.id}
+                  ORDER BY "createdAt" ASC
+                  LIMIT 1
+                )
+                RETURNING id, "keyId", "publicKey", "pqPublicKey"
               `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
           }
 

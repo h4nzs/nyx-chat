@@ -18,10 +18,8 @@ import ModalBase from './ui/ModalBase';
 import MediaGallery from './MediaGallery';
 import { AnimatedTabs } from './ui/AnimatedTabs';
 import { useUserProfile } from '@hooks/useUserProfile';
-import { asConversationId } from '@nyx/shared';
+import { asConversationId, ProfileUser } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
-
-type ProfileUser = User & { publicKey?: string; pqPublicKey?: string; signingKey?: string };
 
 export default function UserInfoModal() {
   const { t } = useTranslation(['modals', 'common', 'chat']);
@@ -87,7 +85,7 @@ export default function UserInfoModal() {
 
     try {
       const { generateSafetyNumber } = await import('@lib/crypto-worker-proxy');
-      const { getSodium } = await import('@lib/sodiumInitializer');
+      const { computeSafetyNumberParts } = await import('@utils/safetyNumber');
       const { getEncryptionKeyPair, getPqEncryptionKeyPair, getSigningPrivateKey } = useAuthStore.getState();
 
       const keyPair = await getEncryptionKeyPair();
@@ -96,43 +94,15 @@ export default function UserInfoModal() {
       }
       
       const pqKeyPair = await getPqEncryptionKeyPair().catch(() => null);
-
-      const sodium = await getSodium();
       const mySigningKey = await getSigningPrivateKey();
-      const mySigningPubKey = mySigningKey.slice(32);
-      
-      // Combine all available keys for a robust safety number
-      const myParts = [keyPair.publicKey];
-      if (pqKeyPair?.publicKey) myParts.push(pqKeyPair.publicKey);
-      myParts.push(mySigningPubKey);
-      
-      const myTotalLen = myParts.reduce((acc, p) => acc + p.length, 0);
-      const myPublicKeyCombined = new Uint8Array(myTotalLen);
-      let myOffset = 0;
-      for (const part of myParts) {
-        myPublicKeyCombined.set(part, myOffset);
-        myOffset += part.length;
-      }
 
-      const theirX25519PubKey = sodium.from_base64(user.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-      const theirPqPubKey = user.pqPublicKey 
-          ? sodium.from_base64(user.pqPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING) 
-          : null;
-      const theirSigningPubKey = user.signingKey 
-          ? sodium.from_base64(user.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING) 
-          : new Uint8Array(0);
-          
-      const theirParts = [theirX25519PubKey];
-      if (theirPqPubKey) theirParts.push(theirPqPubKey);
-      theirParts.push(theirSigningPubKey);
-      
-      const theirTotalLen = theirParts.reduce((acc, p) => acc + p.length, 0);
-      const theirPublicKeyCombined = new Uint8Array(theirTotalLen);
-      let theirOffset = 0;
-      for (const part of theirParts) {
-        theirPublicKeyCombined.set(part, theirOffset);
-        theirOffset += part.length;
-      }
+      // FIXED: Removed 'any' and explicitly cast to ProfileUser
+      const { myPublicKeyCombined, theirPublicKeyCombined } = await computeSafetyNumberParts(
+        keyPair.publicKey,
+        pqKeyPair?.publicKey || null,
+        mySigningKey,
+        user as ProfileUser & { publicKey: string }
+      );
 
       const sn = await generateSafetyNumber(myPublicKeyCombined, theirPublicKeyCombined);
       setSafetyNumber(sn);

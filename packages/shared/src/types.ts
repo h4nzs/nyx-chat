@@ -14,6 +14,7 @@ export type MinimalProfile = {
   id: UserId;
   name?: string;
   username?: string;
+  usernameHash?: string;
   avatarUrl?: string | null;
   [key: string]: unknown;
 };
@@ -23,6 +24,18 @@ export type User = z.infer<typeof MinimalUserSchema> & {
   hasCompletedOnboarding?: boolean;
   usernameHash?: string;
   autoDestructDays?: number | null;
+};
+
+export type ProfileUser = {
+  id: UserId;
+  name?: string;
+  username?: string;
+  avatarUrl?: string | null;
+  encryptedProfile?: string | null;
+  publicKey?: string;
+  pqPublicKey?: string;
+  signingKey?: string;
+  isVerified?: boolean;
 };
 
 export type MessageStatus = {
@@ -73,17 +86,24 @@ export type Message = z.infer<typeof IncomingMessageSchema> & {
 export type Participant = {
   id: UserId;
   userId?: UserId;
-  user?: { id: UserId; publicKey?: string; pqPublicKey?: string; signingKey?: string; [key: string]: unknown };
+  user?: { 
+      id: UserId; 
+      publicKey?: string; 
+      pqPublicKey?: string; 
+      signingKey?: string; 
+      devices?: { id: string; publicKey: string; signingKey?: string; pqPublicKey?: string | null }[];
+      [key: string]: unknown 
+  };
   encryptedProfile?: string | null;
   publicKey?: string;
   pqPublicKey?: string;
   signingKey?: string;
   devices?: { id: string; publicKey: string; signingKey?: string; pqPublicKey?: string | null }[];
-  role: "ADMIN" | "MEMBER" | "admin" | "member";
-  isPinned?: boolean;
   name?: string;
   username?: string;
   avatarUrl?: string | null;
+  role: "ADMIN" | "MEMBER" | "admin" | "member";
+  isPinned?: boolean;
   joinedAt?: number;
 };
 

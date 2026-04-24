@@ -200,7 +200,7 @@ router.post('/login', authLimiter, zodValidate({
       let device = await prisma.device.findFirst({
         where: {
           userId: user.id,
-          publicKey: Buffer.from(publicKey, 'base64')
+          publicKey: Buffer.from(publicKey, 'base64url')
         }
       })
       
@@ -210,8 +210,8 @@ router.post('/login', authLimiter, zodValidate({
               data: { 
                 lastActiveAt: new Date(), 
                 // FIX 2: Buffer conversion for updates
-                pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64') : device.pqPublicKey,
-                signingKey: Buffer.from(signingKey, 'base64'), 
+                pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : device.pqPublicKey,
+                signingKey: Buffer.from(signingKey, 'base64url'), 
                 encryptedPrivateKey: Buffer.from(encryptedPrivateKey, 'utf8'), 
                 name: deviceName || getGenericDeviceName(req.headers['user-agent']) 
               }
@@ -221,9 +221,9 @@ router.post('/login', authLimiter, zodValidate({
             data: {
               userId: user.id,
               // FIX 3: Buffer conversion for creates
-              publicKey: Buffer.from(publicKey, 'base64'),
-              pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64') : null,
-              signingKey: Buffer.from(signingKey, 'base64'),
+              publicKey: Buffer.from(publicKey, 'base64url'),
+              pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
+              signingKey: Buffer.from(signingKey, 'base64url'),
               encryptedPrivateKey: Buffer.from(encryptedPrivateKey, 'utf8'),
               name: deviceName || getGenericDeviceName(req.headers['user-agent'])
             }
@@ -424,8 +424,8 @@ router.get('/pow/challenge', requireAuth, async (req, res, next) => {
     }
 
     const identifier = ip || userId;
-    const idHash = crypto.createHash('sha256').update(`${salt}:${identifier}`).digest('hex').slice(0, 16);
-    const rateKey = ip ? `pow:ip_count:${idHash}` : `pow:user_count:${idHash}`;
+    const stableHash = crypto.createHash('sha256').update(String(identifier)).digest('hex').slice(0, 16);
+    const rateKey = ip ? `pow:ip_count:${stableHash}` : `pow:user_count:${stableHash}`;
     let count = await redisClient.incr(rateKey);
     if (count === 1) {
         await redisClient.expire(rateKey, 86400);

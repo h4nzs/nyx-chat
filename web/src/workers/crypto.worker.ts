@@ -619,15 +619,14 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           throw new Error("Invalid signature on signed pre-key.");
         }
 
-        if (theirPqSignedPreKey || pqSignature) {
-            if (!theirPqSignedPreKey || !pqSignature) {
-                throw new Error("Incomplete PQ bundle: missing PQ signed pre-key or signature.");
-            }
-            const pqSignatureBytes = new Uint8Array(pqSignature);
-            const theirPqSignedPreKeyBytes = new Uint8Array(theirPqSignedPreKey);
-            if (!sodium.crypto_sign_verify_detached(pqSignatureBytes, theirPqSignedPreKeyBytes, theirSigningKeyBytes)) {
-                throw new Error("Invalid signature on PQ signed pre-key.");
-            }
+        if (!theirPqIdentityKey || !theirPqSignedPreKey || !pqSignature) {
+            throw new Error("Missing mandatory Post-Quantum cryptographic keys for session establishment.");
+        }
+
+        const pqSignatureBytes = new Uint8Array(pqSignature);
+        const theirPqSignedPreKeyBytes = new Uint8Array(theirPqSignedPreKey);
+        if (!sodium.crypto_sign_verify_detached(pqSignatureBytes, theirPqSignedPreKeyBytes, theirSigningKeyBytes)) {
+            throw new Error("Invalid Post-Quantum signature on PQ signed pre-key.");
         }
 
         const mySigningKeyPrivateBytes = new Uint8Array(mySigningKey.privateKey);
@@ -647,15 +646,13 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           let ct_id: Uint8Array | undefined = undefined;
           let ct_spk: Uint8Array | undefined = undefined;
 
-          if (theirPqIdentityKey && theirPqSignedPreKey) {
-            const pqIdResult = sodium.crypto_kem_xwing_enc(new Uint8Array(theirPqIdentityKey));
-            secrets.push(pqIdResult.sharedSecret);
-            ct_id = pqIdResult.ciphertext;
+          const pqIdResult = sodium.crypto_kem_xwing_enc(new Uint8Array(theirPqIdentityKey));
+          secrets.push(pqIdResult.sharedSecret);
+          ct_id = pqIdResult.ciphertext;
 
-            const pqSpkResult = sodium.crypto_kem_xwing_enc(new Uint8Array(theirPqSignedPreKey));
-            secrets.push(pqSpkResult.sharedSecret);
-            ct_spk = pqSpkResult.ciphertext;
-          }
+          const pqSpkResult = sodium.crypto_kem_xwing_enc(theirPqSignedPreKeyBytes);
+          secrets.push(pqSpkResult.sharedSecret);
+          ct_spk = pqSpkResult.ciphertext;
 
           let ct_otpk: Uint8Array | undefined = undefined;
 
@@ -720,6 +717,11 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const ciphertexts = JSON.parse(ciphertextsStr);
 
         const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
+        
+        if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
+            throw new Error("Missing mandatory Post-Quantum ciphertexts in received session payload.");
+        }
+
         const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
         const ct_spk = sodium.from_base64(ciphertexts.ct_spk, sodium.base64_variants.URLSAFE_NO_PADDING);
 
@@ -1315,6 +1317,11 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const ciphertexts = JSON.parse(ciphertextsStr);
 
         const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
+        
+        if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
+            throw new Error("Missing mandatory Post-Quantum ciphertexts in received session payload.");
+        }
+
         const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
         const ct_spk = sodium.from_base64(ciphertexts.ct_spk, sodium.base64_variants.URLSAFE_NO_PADDING);
 

@@ -61,8 +61,8 @@ export interface PrismaConversationInput {
 
 export const toMinimalProfile = (user: PrismaUserProfileInput): MinimalProfile => ({
   id: asUserId(user.id),
-  // Karena arsitektur ZKP, kita kembalikan usernameHash sebagai identifier darurat
-  username: user.usernameHash ?? '', 
+  username: '', 
+  usernameHash: user.usernameHash ?? '',
   name: '', // Selalu kosong dari server, didekripsi di klien
   avatarUrl: null, // Selalu null dari server, didekripsi di klien
   encryptedProfile: user.encryptedProfile,
@@ -75,9 +75,6 @@ export const toParticipant = (p: PrismaParticipantInput): Participant => ({
   role: (p.role === 'ADMIN' || p.role === 'MEMBER' || p.role === 'admin' || p.role === 'member') ? p.role as Participant['role'] : 'MEMBER',
   isPinned: p.isPinned ?? false,
   // Hapus name/username/avatarUrl yang tidak aman, klien akan mendekripsi encryptedProfile
-  name: undefined,
-  username: undefined,
-  avatarUrl: undefined,
   encryptedProfile: p.user?.encryptedProfile ?? undefined,
   publicKey: p.user?.publicKey ?? undefined,
   pqPublicKey: p.user?.pqPublicKey ?? undefined,
