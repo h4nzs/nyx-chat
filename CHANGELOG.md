@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔒 [2.6.1] - 2026-04-24
+
+This maintenance release focuses on absolute Zero-Knowledge integrity and Post-Quantum hardening. We have completely removed the server's role in cryptographic key generation, ensuring the backend remains a blind relay that never touches plaintext keys.
+
+### 🛡️ Security & Cryptography
+* **Pure Blind Relay Architecture:** Stripped all key generation (`sodium.crypto_secretbox_keygen`) and encryption (`crypto_box_seal`) from the server. The backend now only routes and stores opaque, client-encrypted blobs.
+* **Client-Authoritative Key Distribution:** Key rotation is now managed exclusively by the client. The initiator client generates the `sessionKey` locally and distributes it to all group members via hybrid **ML-KEM-768 (Post-Quantum)** + X25519 (X-Wing construct).
+* **Privacy Hardening:** Patched potential leaks of IP addresses and device names.
+* **Network Security:** Implemented strict rate-limiting for WebRTC signaling and fixed zombie socket connection cleanup.
+* **Database Integrity:** Migrated all key storage types in Prisma to `Bytes` (Buffer) for consistent binary handling.
+
+### 🐛 Bug Fixes & Stability
+* **Fatal Crash Prevention:** Replaced dangerous non-null assertions and unsafe `parseInt` logic in the local vault hex-parsing utility to prevent "White Screen" crashes during Argon2id verification.
+* **UI Logic:** Fixed bugs in the UI reply bubble logic to ensure consistent rendering of message threads.
+* **Socket Reliability:** Resolved race conditions in push notifications for multi-device environments.
+* **Crypto Validation:** Hardened Zod schemas for cryptographic payloads to prevent malformed packet injection.
+
+### 🛠️ Maintenance & Testing
+* **E2EE Testing Framework:** Fully integrated **Playwright** for comprehensive end-to-end (E2E) cryptographic testing.
+* **Localization:** Conducted a major update to the localization library, stores, and hooks to support expanded multi-language features.
+* **Clean Up:** Removed obsolete unit tests that relied on legacy, non-PQC architectures.
+* **Dependencies:** Bumped `axios` and various frontend/backend packages to resolve vulnerabilities and improve performance.
+
 ## 🚀 [v2.6.0] - 2026-04-11
 
 This release brings one of the most significant architectural updates to Nyx Chat. We have completely rewritten the core cryptographic engine to support multiple simultaneous devices, ensuring you stay connected everywhere without compromising End-to-End Encryption (E2EE) privacy.
