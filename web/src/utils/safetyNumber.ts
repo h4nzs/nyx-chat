@@ -17,7 +17,16 @@ export async function computeSafetyNumberParts(
   // My Parts
   const myParts = [myIdentityKey];
   if (myPqIdentityKey) myParts.push(myPqIdentityKey);
-  myParts.push(mySigningKey.slice(32)); // Use public part of signing key
+  
+  let normalizedMySigningKey: Uint8Array;
+  if (mySigningKey.length === 64) {
+    normalizedMySigningKey = mySigningKey.slice(32);
+  } else if (mySigningKey.length === 32) {
+    normalizedMySigningKey = mySigningKey;
+  } else {
+    throw new Error(`Invalid mySigningKey length: expected 32 or 64, got ${mySigningKey.length}`);
+  }
+  myParts.push(normalizedMySigningKey);
   
   const myTotalLen = myParts.reduce((acc: number, p: Uint8Array) => acc + p.length, 0);
   const myPublicKeyCombined = new Uint8Array(myTotalLen);
@@ -32,13 +41,24 @@ export async function computeSafetyNumberParts(
   const theirPqPubKey = peer.pqPublicKey 
       ? sodium.from_base64(peer.pqPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING) 
       : null;
-  const theirSigningPubKey = peer.signingKey 
+  const theirSigningPubKeyRaw = peer.signingKey 
       ? sodium.from_base64(peer.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING) 
       : new Uint8Array(0);
+
+  let normalizedTheirSigningKey: Uint8Array;
+  if (theirSigningPubKeyRaw.length === 64) {
+    normalizedTheirSigningKey = theirSigningPubKeyRaw.slice(32);
+  } else if (theirSigningPubKeyRaw.length === 32) {
+    normalizedTheirSigningKey = theirSigningPubKeyRaw;
+  } else if (theirSigningPubKeyRaw.length === 0) {
+    normalizedTheirSigningKey = theirSigningPubKeyRaw; // Allow empty for legacy/fallback cases if necessary, though ideally it should be present.
+  } else {
+    throw new Error(`Invalid peer signingKey length: expected 32 or 64, got ${theirSigningPubKeyRaw.length}`);
+  }
       
   const theirParts = [theirX25519PubKey];
   if (theirPqPubKey) theirParts.push(theirPqPubKey);
-  theirParts.push(theirSigningPubKey);
+  theirParts.push(normalizedTheirSigningKey);
   
   const theirTotalLen = theirParts.reduce((acc: number, p: Uint8Array) => acc + p.length, 0);
   const theirPublicKeyCombined = new Uint8Array(theirTotalLen);

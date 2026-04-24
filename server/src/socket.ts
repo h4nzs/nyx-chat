@@ -563,9 +563,22 @@ export function registerSocket(httpServer: HttpServer) {
         }      } catch (error) {}
     });
 
-    socket.on('session:fulfill_response', ({ requesterId, conversationId, sessionId, encryptedKey }: KeyFulfillmentPayload) => {
+    socket.on('session:fulfill_response', async (payload: KeyFulfillmentPayload) => {
+      const { requesterId, conversationId, sessionId, encryptedKey, targetDeviceId } = payload;
       if (!requesterId || !encryptedKey) return;
-      io.to(requesterId).emit('session:new_key', { conversationId, sessionId, encryptedKey, type: 'SESSION_KEY', senderId: userId });
+      const emitPayload = { conversationId, sessionId, encryptedKey, type: 'SESSION_KEY' as const, senderId: userId };
+      
+      if (targetDeviceId) {
+         const targetSockets = await io.in(requesterId).fetchSockets();
+         for (const s of targetSockets) {
+            const authSocket = s as unknown as AuthenticatedSocket;
+            if (authSocket.user?.deviceId === targetDeviceId) {
+                authSocket.emit('session:new_key', emitPayload);
+            }
+         }
+      } else {
+         io.to(requesterId).emit('session:new_key', emitPayload);
+      }
     });
 
     socket.on('webrtc:secure_signal', async (data: { to: string, type: string, payload: string }) => {

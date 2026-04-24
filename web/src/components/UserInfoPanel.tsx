@@ -194,14 +194,9 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
           // FIXED: removed unnecessary any cast
           userName={profile.name || ''}
           onClose={() => setShowSafetyModal(false)}
-          onVerify={async () => {
-        // Tambahkan pengecekan user.publicKey di if statement
-        if (activeId && user && user.publicKey) {
-          // Cast dengan intersection type
-          const fingerprint = await computeFingerprint(user as ProfileUser & { publicKey: string });
-          if (fingerprint) {
-            setVerified(activeId, fingerprint);
-          }
+          onVerify={() => {
+        if (activeId && safetyNumber) {
+          setVerified(activeId, safetyNumber);
         }
         setShowSafetyModal(false);
       }}

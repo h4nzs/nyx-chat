@@ -233,31 +233,31 @@ router.post(
         })
 
         if (initialSession) {
-          const { sessionId, initialKeys, initiatorCiphertextsPerDevice } = initialSession
-          if (!sessionId || !initialKeys || !initiatorCiphertextsPerDevice) throw new Error('Incomplete initial session data provided.')
+          const { sessionId, initialKeysPerDevice, initiatorCiphertextsPerDevice } = initialSession
+          if (!sessionId || !initialKeysPerDevice || !initiatorCiphertextsPerDevice) throw new Error('Incomplete initial session data provided.')
 
-          const targetUserIds = initialKeys.map((ik: { userId: string }) => ik.userId);
-          const devices = await tx.device.findMany({ where: { userId: { in: targetUserIds } }, select: { id: true, userId: true } });
+          const targetDeviceIds = Object.keys(initialKeysPerDevice);
+          const devices = await tx.device.findMany({ where: { id: { in: targetDeviceIds } }, select: { id: true, userId: true } });
 
           const keyRecords = [];
-          for (const ik of initialKeys) {
-             const userDevices = devices.filter(d => d.userId === ik.userId);
-             for (const d of userDevices) {
-                const deviceCiphertext = initiatorCiphertextsPerDevice[d.id];
-                if (!deviceCiphertext) {
-                    console.error('Missing initiator ciphertext for participant device during conversation creation');
-                    throw new Error('Missing initiator ciphertext for a participant device');
-                }
-                keyRecords.push({
-                   sessionId,
-                   encryptedKey: Buffer.from(ik.key, 'base64url'),
-                   deviceId: d.id,
-                   conversationId: conversation.id,
-                   initiatorCiphertexts: Buffer.from(deviceCiphertext, 'base64url'),
-                   isInitiator: ik.userId === creatorId
-                });
+          for (const d of devices) {
+             const deviceKey = initialKeysPerDevice[d.id];
+             const deviceCiphertext = initiatorCiphertextsPerDevice[d.id];
+             if (!deviceCiphertext || !deviceKey) {
+                 console.error('Missing initiator ciphertext or key for participant device during conversation creation');
+                 throw new Error('Missing initiator ciphertext or key for a participant device');
              }
-          }          await tx.sessionKey.createMany({ data: keyRecords })        } else if (isGroup) {
+             keyRecords.push({
+                sessionId,
+                encryptedKey: Buffer.from(deviceKey, 'base64url'),
+                deviceId: d.id,
+                conversationId: conversation.id,
+                initiatorCiphertexts: Buffer.from(deviceCiphertext, 'base64url'),
+                isInitiator: d.userId === creatorId
+             });
+          }
+          await tx.sessionKey.createMany({ data: keyRecords })
+        } else if (isGroup) {
           // No server-side key generation. Clients will rotate keys on membership change.
         }
         return conversation

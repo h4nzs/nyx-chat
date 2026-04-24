@@ -23,13 +23,13 @@ router.post(
   zodValidate({
     body: z.object({
       identityKey: z.string().regex(base64UrlRegex, 'Invalid identity key format'),
-      pqIdentityKey: z.string().regex(base64UrlRegex, 'Invalid pq identity key format').optional(),
-      signingKey: z.string().regex(base64UrlRegex, 'Invalid signing key format').optional(),
+      pqIdentityKey: z.string().regex(base64UrlRegex, 'Invalid pq identity key format'),
+      signingKey: z.string().regex(base64UrlRegex, 'Invalid signing key format'),
       signedPreKey: z.object({
         key: z.string().regex(base64UrlRegex, 'Invalid pre-key format'),
-        pqKey: z.string().regex(base64UrlRegex, 'Invalid pq pre-key format').optional(),
+        pqKey: z.string().regex(base64UrlRegex, 'Invalid pq pre-key format'),
         signature: z.string().regex(base64UrlRegex, 'Invalid signature format'),
-        pqSignature: z.string().regex(base64UrlRegex, 'Invalid pq signature format').optional()
+        pqSignature: z.string().regex(base64UrlRegex, 'Invalid pq signature format')
       })
     })
   }),
@@ -181,6 +181,7 @@ router.get(
                   SELECT id FROM "OneTimePreKey"
                   WHERE "deviceId" = ${device.id}
                   ORDER BY "createdAt" ASC
+                  FOR UPDATE SKIP LOCKED
                   LIMIT 1
                 )
                 RETURNING id, "keyId", "publicKey", "pqPublicKey"
@@ -264,6 +265,7 @@ router.post(
                   SELECT id FROM "OneTimePreKey"
                   WHERE "deviceId" = ${device.id}
                   ORDER BY "createdAt" ASC
+                  FOR UPDATE SKIP LOCKED
                   LIMIT 1
                 )
                 RETURNING id, "keyId", "publicKey", "pqPublicKey"

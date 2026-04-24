@@ -446,7 +446,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
             store.removeRemoteStream(data.from);
             store.removeRemoteUser(data.from);
 
-            if (store.remoteUsers.length === 0) {
+            if (useCallStore.getState().remoteUsers.length === 0) {
                 console.warn(`[WebRTC] No peers left. Purging current call state to allow recovery.`);
                 cleanupCall();
             }

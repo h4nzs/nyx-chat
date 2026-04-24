@@ -629,7 +629,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
 
       if (distributionKeys.length === 0) {
           console.warn(`No distribution keys generated for group ${conversationId}. Aborting sender state save.`);
-          return [];
+          return null;
       }
 
       // 3. Save Initial Sender State
@@ -716,6 +716,8 @@ export async function rotateGroupKey(conversationId: string, reason: 'membership
       const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
       if (distributionKeys) {
         emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+      } else {
+        throw new Error("Security Failure: One or more devices do not support mandatory Post-Quantum encryption. Key rotation aborted.");
       }
     }
   }
@@ -1164,36 +1166,27 @@ export async function establishSessionFromPreKeyBundle(
   const sodium = await getSodiumLib();
   const { worker_x3dh_initiator } = await getWorkerProxy();
 
-  const isHybrid = !!preKeyBundle.pqIdentityKey;
-
+  if (!preKeyBundle.pqIdentityKey || !preKeyBundle.signedPreKey.pqKey || !preKeyBundle.signedPreKey.pqSignature) {
+      throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+  }
+  
   const theirIdentityKey = sodium.from_base64(preKeyBundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
   const theirSigningKey = sodium.from_base64(preKeyBundle.signingKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   const signature = sodium.from_base64(preKeyBundle.signedPreKey.signature, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-  let theirPqIdentityKey: Uint8Array | undefined;
-  let theirPqSignedPreKey: Uint8Array | undefined;
-  let pqSignature: Uint8Array | undefined;
-
-  if (isHybrid) {
-      if (!preKeyBundle.signedPreKey.pqKey || !preKeyBundle.signedPreKey.pqSignature) {
-          throw new Error("Missing required PQ fields in hybrid pre-key bundle.");
-      }
-      theirPqIdentityKey = sodium.from_base64(preKeyBundle.pqIdentityKey!, sodium.base64_variants.URLSAFE_NO_PADDING);
-      theirPqSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-      pqSignature = sodium.from_base64(preKeyBundle.signedPreKey.pqSignature, sodium.base64_variants.URLSAFE_NO_PADDING);
-  }
+  const theirPqIdentityKey = sodium.from_base64(preKeyBundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const theirPqSignedPreKey = sodium.from_base64(preKeyBundle.signedPreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  const pqSignature = sodium.from_base64(preKeyBundle.signedPreKey.pqSignature, sodium.base64_variants.URLSAFE_NO_PADDING);
 
   let theirOneTimePreKey: Uint8Array | undefined;
   let theirPqOneTimePreKey: Uint8Array | undefined;
   if (preKeyBundle.oneTimePreKey) {
     theirOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.key, sodium.base64_variants.URLSAFE_NO_PADDING);
-    if (isHybrid) {
-      if (!preKeyBundle.oneTimePreKey.pqKey) {
-        throw new Error("Missing required PQ OTPK in hybrid pre-key bundle.");
-      }
-      theirPqOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+    if (!preKeyBundle.oneTimePreKey.pqKey) {
+      throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
     }
+    theirPqOneTimePreKey = sodium.from_base64(preKeyBundle.oneTimePreKey.pqKey, sodium.base64_variants.URLSAFE_NO_PADDING);
   }
 
   const result = await worker_x3dh_initiator({

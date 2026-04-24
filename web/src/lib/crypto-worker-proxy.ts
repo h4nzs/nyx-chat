@@ -229,12 +229,12 @@ export function worker_pq_box_seal_open(combinedPayload: CryptoBuffer, pqPrivate
 export function worker_x3dh_initiator(payload: {
     mySigningKey: SodiumKeyPair,
     theirIdentityKey: CryptoBuffer,
-    theirPqIdentityKey?: CryptoBuffer,
+    theirPqIdentityKey: CryptoBuffer,
     theirSignedPreKey: CryptoBuffer,
-    theirPqSignedPreKey?: CryptoBuffer,
+    theirPqSignedPreKey: CryptoBuffer,
     theirSigningKey: CryptoBuffer,
     signature: CryptoBuffer,
-    pqSignature?: CryptoBuffer,
+    pqSignature: CryptoBuffer,
     theirOneTimePreKey?: CryptoBuffer,
     theirPqOneTimePreKey?: CryptoBuffer
 }): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: string }> {

@@ -329,7 +329,7 @@ export type WorkerMessage =
   | { type: 'crypto_box_seal_open'; payload: { ciphertext: CryptoBuffer; publicKey: CryptoBuffer; privateKey: CryptoBuffer }; id: string }
   | { type: 'pq_box_seal'; payload: { message: CryptoBuffer | string; pqPublicKey: CryptoBuffer; classicalPublicKey: CryptoBuffer }; id: string }
   | { type: 'pq_box_seal_open'; payload: { combinedPayload: CryptoBuffer; pqPrivateKey: CryptoBuffer; classicalPrivateKey: CryptoBuffer }; id: string }
-  | { type: 'x3dh_initiator'; payload: { mySigningKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirPqIdentityKey?: CryptoBuffer; theirSignedPreKey: CryptoBuffer; theirPqSignedPreKey?: CryptoBuffer; theirSigningKey: CryptoBuffer; signature: CryptoBuffer; pqSignature?: CryptoBuffer; theirOneTimePreKey?: CryptoBuffer; theirPqOneTimePreKey?: CryptoBuffer }; id: string }
+  | { type: 'x3dh_initiator'; payload: { mySigningKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirPqIdentityKey: CryptoBuffer; theirSignedPreKey: CryptoBuffer; theirPqSignedPreKey: CryptoBuffer; theirSigningKey: CryptoBuffer; signature: CryptoBuffer; pqSignature: CryptoBuffer; theirOneTimePreKey?: CryptoBuffer; theirPqOneTimePreKey?: CryptoBuffer }; id: string }
   | { type: 'x3dh_recipient'; payload: { myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; myPqIdentityKey: SodiumKeyPair; myPqSignedPreKey: SodiumKeyPair; theirSigningKey: CryptoBuffer; initiatorCiphertexts: string; myOneTimePreKey?: { privateKey: CryptoBuffer } }; id: string }
   | { type: 'crypto_box_seal'; payload: { message: CryptoBuffer; publicKey: CryptoBuffer }; id: string }
   | { type: 'file_encrypt'; payload: { fileBuffer: ArrayBuffer | Uint8Array }; id: string }
@@ -620,7 +620,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         }
 
         if (!theirPqIdentityKey || !theirPqSignedPreKey || !pqSignature) {
-            throw new Error("Missing mandatory Post-Quantum cryptographic keys for session establishment.");
+            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
         }
 
         const pqSignatureBytes = new Uint8Array(pqSignature);
@@ -656,7 +656,10 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
           let ct_otpk: Uint8Array | undefined = undefined;
 
-          if (theirOneTimePreKey && theirPqOneTimePreKey) {
+          if (theirOneTimePreKey || theirPqOneTimePreKey) {
+             if (!theirOneTimePreKey || !theirPqOneTimePreKey) {
+                 throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+             }
              const theirOneTimePreKeyBytes = new Uint8Array(theirOneTimePreKey);
              const dh4 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirOneTimePreKeyBytes);
              secrets.push(dh4);
@@ -719,7 +722,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
         
         if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
-            throw new Error("Missing mandatory Post-Quantum ciphertexts in received session payload.");
+            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
         }
 
         const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -1319,7 +1322,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
         
         if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
-            throw new Error("Missing mandatory Post-Quantum ciphertexts in received session payload.");
+            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
         }
 
         const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);

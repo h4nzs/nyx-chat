@@ -45,6 +45,12 @@ const base64ToArrayBuffer = (base64: string) => {
 };
 
 const hexToUint8Array = (hex: string): Uint8Array => {
+  if (hex.length % 2 !== 0) {
+    throw new Error("Invalid Argon2id hex format: Length must be even");
+  }
+  if (/[^0-9a-fA-F]/.test(hex)) {
+    throw new Error("Invalid Argon2id hex format: Contains non-hex characters");
+  }
   const matches = hex.match(/.{1,2}/g);
   if (!matches) {
     throw new Error("Invalid Argon2id hex format: No hex pairs found");
