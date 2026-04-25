@@ -94,7 +94,15 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       toast.loading(t('modals:group_info.toasts.updating'), { id: toastId });
       
       // [FIX] ZERO-KNOWLEDGE METADATA UPDATE
-      const { encryptGroupMetadata } = await import('@utils/crypto');
+      const { encryptGroupMetadata, ensureGroupSession } = await import('@utils/crypto');
+      const { emitGroupKeyDistribution } = await import('@lib/socket');
+
+      // Ensure session exists
+      const distributionKeys = await ensureGroupSession(conversation.id, conversation.participants);
+      if (distributionKeys && distributionKeys.length > 0) {
+        emitGroupKeyDistribution(conversation.id, distributionKeys as { userId: string; key: string }[]);
+      }
+
       const currentMetadata = conversation.decryptedMetadata || {};
       const newMetadata = { ...currentMetadata, avatarUrl: fileUrl };
       const encryptedMetadata = await encryptGroupMetadata(newMetadata, conversation.id);

@@ -486,22 +486,46 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
   updateParticipantDetails: (user) => {
     const { role, ...userDetails } = user;
+    
     set(state => {
-      // Force key rotation on conversations containing this user (topology might change)
+      const affectedConvoIds: string[] = [];
+      
       state.conversations.forEach(c => {
-         if (c.participants.some(p => p.id === user.id)) {
-            import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(c.id).catch(console.error));
-         }
+        const existingParticipant = c.participants.find(p => p.id === user.id);
+        if (!existingParticipant) return;
+
+        // Check for cryptographic or membership changes
+        const hasCryptoChanged = 
+          (userDetails.publicKey !== undefined && userDetails.publicKey !== existingParticipant.publicKey) ||
+          (userDetails.pqPublicKey !== undefined && userDetails.pqPublicKey !== existingParticipant.pqPublicKey) ||
+          (userDetails.signingKey !== undefined && userDetails.signingKey !== existingParticipant.signingKey) ||
+          (userDetails.devices !== undefined && JSON.stringify(userDetails.devices) !== JSON.stringify(existingParticipant.devices)) ||
+          (role !== undefined && role !== existingParticipant.role);
+
+        if (hasCryptoChanged) {
+          affectedConvoIds.push(c.id);
+          import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(c.id).catch(console.error));
+        }
       });
+
       return {
         conversations: state.conversations.map(c => {
-          const hasUser = c.participants.some(p => p.id === user.id);
+          if (!affectedConvoIds.includes(c.id) && !c.participants.some(p => p.id === user.id)) {
+            return c;
+          }
+          
           return {
             ...c,
-            requiresKeyRotation: hasUser ? true : c.requiresKeyRotation,
-            participants: c.participants.map(p => 
-              p.id === user.id ? { ...p, ...userDetails } : p
-            ),
+            requiresKeyRotation: affectedConvoIds.includes(c.id) ? true : c.requiresKeyRotation,
+            participants: c.participants.map(p => {
+              if (p.id !== user.id) return p;
+              
+              const updatedParticipant = { ...p, ...userDetails };
+              if (role === "ADMIN" || role === "MEMBER" || role === "admin" || role === "member") {
+                updatedParticipant.role = role;
+              }
+              return updatedParticipant;
+            }),
           };
         })
       };

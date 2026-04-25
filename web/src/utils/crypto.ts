@@ -49,6 +49,20 @@ export async function encryptGroupMetadata(
   metadata: { title?: string; description?: string; avatarUrl?: string },
   conversationId: string
 ): Promise<string> {
+  // Ensure we have a valid session before encrypting metadata
+  const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+  if (conversation) {
+    const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
+    if (distributionKeys && distributionKeys.length > 0) {
+      emitGroupKeyDistribution(
+        conversationId,
+        distributionKeys as { userId: string; key: string }[]
+      );
+      // Brief delay to allow key distribution to process if it's the first time
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+
   const payload = JSON.stringify(metadata);
   // Encrypt as a group message, saving the Message Key locally using a pseudo-messageId
   const result = await encryptMessage(payload, conversationId, true, undefined, `meta_${conversationId}`);

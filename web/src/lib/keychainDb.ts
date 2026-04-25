@@ -92,14 +92,14 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
       // Sama seperti di atas, kita simpan sesuai schema yang baru (string)
       await db.groupSenderStates.put({
           conversationId: state.conversationId,
-          state: { 
-            CK: state.CK, 
+          state: {
+            CK: state.CK,
             N: state.N,
             createdAt: state.createdAt,
-            messageCount: state.messageCount
+            messageCount: state.messageCount,
+            lastActivityTime: state.lastActivityTime
           }
-      });
-  });
+      });  });
 }
 
 export async function getGroupReceiverState(conversationId: string, senderId: string, senderDeviceKey?: string): Promise<GroupReceiverState | null> {
