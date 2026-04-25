@@ -6,6 +6,7 @@ import {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON
 } from '@simplewebauthn/browser';
+import { getSodium } from './sodiumInitializer';
 
 /**
  * Interface khusus untuk memetakan hasil ekstensi PRF WebAuthn secara Type-Safe
@@ -21,10 +22,10 @@ interface PRFClientExtensionResults {
 }
 
 async function getPrfSalt(): Promise<Uint8Array> {
+  const sodium = await getSodium();
   const encoder = new TextEncoder();
   const data = encoder.encode("NYX_CYPHERPUNK_LOCAL_UNLOCK_SALT_V1");
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return new Uint8Array(hashBuffer);
+  return sodium.crypto_generichash(32, data);
 }
 
 function bufferToBase64(buffer: ArrayBuffer): string {
@@ -46,22 +47,29 @@ function base64ToBuffer(base64: string): ArrayBuffer {
 }
 
 async function encryptData(text: string, keyBuffer: ArrayBuffer): Promise<{ ciphertext: string, iv: string }> {
-  const key = await crypto.subtle.importKey('raw', keyBuffer, 'AES-GCM', false, ['encrypt']);
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(text));
+  const sodium = await getSodium();
+  const key = new Uint8Array(keyBuffer);
+  // Ensure the key is exactly 32 bytes for XChaCha20Poly1305
+  const finalKey = sodium.crypto_generichash(sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES, key);
+  const iv = sodium.randombytes_buf(sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+  const encodedText = new TextEncoder().encode(text);
+  
+  const encrypted = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(encodedText, null, null, iv, finalKey);
   
   return { 
-    ciphertext: bufferToBase64(encrypted), 
-    iv: bufferToBase64(iv.buffer) 
+    ciphertext: sodium.to_base64(encrypted, sodium.base64_variants.ORIGINAL), 
+    iv: sodium.to_base64(iv, sodium.base64_variants.ORIGINAL) 
   };
 }
 
 async function decryptData(ciphertextB64: string, ivB64: string, keyBuffer: ArrayBuffer): Promise<string> {
-  const key = await crypto.subtle.importKey('raw', keyBuffer, 'AES-GCM', false, ['decrypt']);
-  const iv = new Uint8Array(base64ToBuffer(ivB64));
-  const encrypted = base64ToBuffer(ciphertextB64);
+  const sodium = await getSodium();
+  const key = new Uint8Array(keyBuffer);
+  const finalKey = sodium.crypto_generichash(sodium.crypto_aead_xchacha20poly1305_ietf_KEYBYTES, key);
+  const iv = sodium.from_base64(ivB64, sodium.base64_variants.ORIGINAL);
+  const encrypted = sodium.from_base64(ciphertextB64, sodium.base64_variants.ORIGINAL);
   
-  const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, encrypted);
+  const decrypted = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, encrypted, null, iv, finalKey);
   return new TextDecoder().decode(decrypted);
 }
 

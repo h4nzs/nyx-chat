@@ -23,11 +23,20 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
     e.preventDefault();
     setIsLoading(true);
     try {
-      const { encryptGroupMetadata } = await import('@utils/crypto');
+      const { encryptGroupMetadata, ensureGroupSession } = await import('@utils/crypto');
       const { useConversationStore } = await import('@store/conversation');
+      const { emitGroupKeyDistribution } = await import('@lib/socket');
       
       const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-      const currentMetadata = conversation?.decryptedMetadata || {};
+      if (!conversation) throw new Error("Conversation not found");
+
+      // Ensure session exists
+      const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
+      if (distributionKeys && distributionKeys.length > 0) {
+        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+      }
+
+      const currentMetadata = conversation.decryptedMetadata || {};
       
       const newMetadata = {
           ...currentMetadata,

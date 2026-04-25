@@ -48,19 +48,12 @@ async function ensureSodiumReady() {
 // --- INTERNAL HELPER FUNCTIONS FOR CORE CRYPTO LOGIC ---
 
 export async function kdfChain(chainKey: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
-  const key = await crypto.subtle.importKey(
-    "raw",
-    chainKey as BufferSource,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
-
+  await ensureSodiumReady();
   const messageKeyInput = new Uint8Array([0x01]);
   const newChainKeyInput = new Uint8Array([0x02]);
 
-  const messageKey = new Uint8Array(await crypto.subtle.sign("HMAC", key, messageKeyInput));
-  const newChainKey = new Uint8Array(await crypto.subtle.sign("HMAC", key, newChainKeyInput));
+  const messageKey = sodium.crypto_generichash(32, messageKeyInput, chainKey);
+  const newChainKey = sodium.crypto_generichash(32, newChainKeyInput, chainKey);
 
   return [newChainKey, messageKey];
 }
@@ -166,7 +159,7 @@ async function storePrivateKeys(keys: {
     masterSeed: keys.masterSeed ? sodium.to_base64(keys.masterSeed, sodium.base64_variants[B64_VARIANT]) : undefined,
   };
 
-  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const salt = sodium.randombytes_buf(16);
   let kek: Uint8Array | null = null;
 
   try {
@@ -279,6 +272,8 @@ interface RuntimeDoubleRatchetState {
   Ns: number;
   Nr: number;
   PN: number;
+  messageCount?: number;
+  lastActivityTime?: number;
 }
 
 function deserializeState(serialized: DoubleRatchetState): RuntimeDoubleRatchetState {
@@ -311,7 +306,9 @@ function serializeState(runtime: RuntimeDoubleRatchetState): DoubleRatchetState 
     CKr: bytesToB64(runtime.CKr),
     Ns: runtime.Ns,
     Nr: runtime.Nr,
-    PN: runtime.PN
+    PN: runtime.PN,
+    messageCount: runtime.messageCount,
+    lastActivityTime: runtime.lastActivityTime
   };
 }
 
@@ -620,7 +617,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         }
 
         if (!theirPqIdentityKey || !theirPqSignedPreKey || !pqSignature) {
-            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+            throw new Error("Post-Quantum Handshake Mandatory");
         }
 
         const pqSignatureBytes = new Uint8Array(pqSignature);
@@ -658,7 +655,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
           if (theirOneTimePreKey || theirPqOneTimePreKey) {
              if (!theirOneTimePreKey || !theirPqOneTimePreKey) {
-                 throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+                 throw new Error("Post-Quantum Handshake Mandatory");
              }
              const theirOneTimePreKeyBytes = new Uint8Array(theirOneTimePreKey);
              const dh4 = sodium.crypto_scalarmult(ephemeralKeyPair.privateKey, theirOneTimePreKeyBytes);
@@ -722,7 +719,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
         
         if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
-            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+            throw new Error("Post-Quantum Handshake Mandatory");
         }
 
         const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -1322,7 +1319,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
         
         if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
-            throw new Error("Incompatible Device: Post-Quantum protection is mandatory");
+            throw new Error("Post-Quantum Handshake Mandatory");
         }
 
         const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);

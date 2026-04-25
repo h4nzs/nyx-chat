@@ -91,23 +91,20 @@ self.addEventListener('push', (event: PushEvent) => {
                    outputType: 'binary'
                });
 
-               // 3. Decrypt the Private Keys using WebCrypto AES-GCM
-               const cryptoKey = await crypto.subtle.importKey(
-                   'raw',
-                   kek as unknown as BufferSource,
-                   { name: 'AES-GCM' },
-                   false,
-                   ['decrypt']
-               );
-
+               // 3. Decrypt the Private Keys using Libsodium xchacha20poly1305_ietf
                const parsedData = JSON.parse(encryptedString);
                const iv = new Uint8Array(parsedData.iv);
                const ciphertext = new Uint8Array(parsedData.data);
 
-               const decryptedContent = await crypto.subtle.decrypt(
-                   { name: 'AES-GCM', iv },
-                   cryptoKey,
-                   ciphertext
+               // Handle keys derived from argon2id that might be represented differently
+               const keyBytes = new Uint8Array(kek as unknown as ArrayBuffer);
+
+               const decryptedContent = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+                   null,
+                   ciphertext,
+                   null,
+                   iv,
+                   keyBytes
                );
 
                const decryptedString = new TextDecoder().decode(decryptedContent);

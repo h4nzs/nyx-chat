@@ -156,4 +156,6 @@ export interface DoubleRatchetState {
   Ns: number;
   Nr: number;
   PN: number;
+  messageCount?: number;
+  lastActivityTime?: number;
 }

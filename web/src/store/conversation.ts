@@ -486,17 +486,54 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
   updateParticipantDetails: (user) => {
     const { role, ...userDetails } = user;
-    set(state => ({
-      conversations: state.conversations.map(c => ({
-        ...c,
-        participants: c.participants.map(p => 
-          p.id === user.id ? { ...p, ...userDetails } : p
-        ),
-      }))
-    }));
+    
+    set(state => {
+      const affectedConvoIds: string[] = [];
+      
+      state.conversations.forEach(c => {
+        const existingParticipant = c.participants.find(p => p.id === user.id);
+        if (!existingParticipant) return;
+
+        // Check for cryptographic or membership changes
+        const hasCryptoChanged = 
+          (userDetails.publicKey !== undefined && userDetails.publicKey !== existingParticipant.publicKey) ||
+          (userDetails.pqPublicKey !== undefined && userDetails.pqPublicKey !== existingParticipant.pqPublicKey) ||
+          (userDetails.signingKey !== undefined && userDetails.signingKey !== existingParticipant.signingKey) ||
+          (userDetails.devices !== undefined && JSON.stringify(userDetails.devices) !== JSON.stringify(existingParticipant.devices)) ||
+          (role !== undefined && role !== existingParticipant.role);
+
+        if (hasCryptoChanged) {
+          affectedConvoIds.push(c.id);
+          import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(c.id).catch(console.error));
+        }
+      });
+
+      return {
+        conversations: state.conversations.map(c => {
+          if (!affectedConvoIds.includes(c.id) && !c.participants.some(p => p.id === user.id)) {
+            return c;
+          }
+          
+          return {
+            ...c,
+            requiresKeyRotation: affectedConvoIds.includes(c.id) ? true : c.requiresKeyRotation,
+            participants: c.participants.map(p => {
+              if (p.id !== user.id) return p;
+              
+              const updatedParticipant = { ...p, ...userDetails };
+              if (role === "ADMIN" || role === "MEMBER" || role === "admin" || role === "member") {
+                updatedParticipant.role = role;
+              }
+              return updatedParticipant;
+            }),
+          };
+        })
+      };
+    });
   },
 
   addParticipants: (conversationId, newParticipants) => {
+    import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(conversationId).catch(console.error));
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
@@ -508,7 +545,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
              if (p && p.id) uniqueMap.set(p.id, p);
           });
 
-          return { ...c, participants: Array.from(uniqueMap.values()) };
+          return { ...c, participants: Array.from(uniqueMap.values()), requiresKeyRotation: true };
         }
         return c;
       }),
@@ -516,10 +553,11 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   removeParticipant: (conversationId, userId) => {
+    import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(conversationId).catch(console.error));
     set(state => ({
       conversations: state.conversations.map(c => {
         if (c.id === conversationId) {
-          return { ...c, participants: c.participants.filter(p => p.id !== userId) };
+          return { ...c, participants: c.participants.filter(p => p.id !== userId), requiresKeyRotation: true };
         }
         return c;
       }),
