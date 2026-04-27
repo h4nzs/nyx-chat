@@ -314,6 +314,26 @@ function serializeState(runtime: RuntimeDoubleRatchetState): DoubleRatchetState 
 
 // --- MAIN MESSAGE HANDLER ---
 
+export interface BurnerDoubleRatchetState {
+  RK: string | null;
+  CKs: string | null;
+  CKr: string | null;
+  KEMs_pub: string | null;
+  KEMs_priv: string | null;
+  KEMr: string | null;
+  savedCt: string | null;
+  Ns: number;
+  Nr: number;
+  PN: number;
+}
+
+export interface BurnerDoubleRatchetHeader {
+  kemPk: string;
+  ct: string;
+  n: number;
+  pn: number;
+}
+
 export type WorkerMessage =
   | { type: 'DERIVE_KEY'; payload: { password: string; salt: CryptoBuffer }; id: string }
   | { type: 'ENCRYPT_DATA'; payload: { keyBytes: CryptoBuffer; data: unknown }; id: string }
@@ -352,7 +372,11 @@ export type WorkerMessage =
   | { type: 'group_init_sender_key'; payload: void; id: string }
   | { type: 'group_ratchet_encrypt'; payload: { serializedState: GroupRatchetState; plaintext: string | CryptoBuffer; signingPrivateKey: CryptoBuffer }; id: string }
   | { type: 'group_ratchet_decrypt'; payload: { serializedState: GroupRatchetState; header: GroupRatchetHeader; ciphertext: CryptoBuffer; signature: string; senderSigningPublicKey: CryptoBuffer }; id: string }
-  | { type: 'group_decrypt_skipped'; payload: { mk: string; headerN: number; ciphertext: CryptoBuffer; signature: string; senderSigningPublicKey: CryptoBuffer }; id: string };
+  | { type: 'group_decrypt_skipped'; payload: { mk: string; headerN: number; ciphertext: CryptoBuffer; signature: string; senderSigningPublicKey: CryptoBuffer }; id: string }
+  | { type: 'burner_dr_init_guest'; payload: { hostClassicalPk: CryptoBuffer; hostPqPk: CryptoBuffer }; id: string }
+  | { type: 'burner_dr_init_host'; payload: { guestClassicalPk: CryptoBuffer; hostClassicalSk: CryptoBuffer; savedCt: CryptoBuffer; hostPqSk: CryptoBuffer }; id: string }
+  | { type: 'burner_dr_encrypt'; payload: { state: BurnerDoubleRatchetState; plaintext: string | CryptoBuffer }; id: string }
+  | { type: 'burner_dr_decrypt'; payload: { state: BurnerDoubleRatchetState; header: BurnerDoubleRatchetHeader; ciphertext: CryptoBuffer }; id: string };
 
 self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
   const { type, payload, id } = event.data;
@@ -1790,6 +1814,302 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         }
         break;
       }
+      // --- BURNER PROTOCOL (EXCLUSIVE PQ-DR) ---
+
+      case 'burner_dr_init_guest': {
+        const { hostClassicalPk, hostPqPk } = payload as { hostClassicalPk: CryptoBuffer, hostPqPk: CryptoBuffer };
+        const hCPK = new Uint8Array(hostClassicalPk);
+        const hPQPK = new Uint8Array(hostPqPk);
+        
+        let pqKeypair: { publicKey: Uint8Array, privateKey: Uint8Array } | null = null;
+        let guestClassicalKeypair: SodiumKeyPair | null = null;
+
+        try {
+          pqKeypair = sodium.crypto_kem_xwing_keypair();
+          guestClassicalKeypair = sodium.crypto_box_keypair();
+          
+          if (!pqKeypair || !guestClassicalKeypair) {
+             throw new Error("Keypair generation failed");
+          }
+
+          // Encapsulate ke Host (PQ)
+          const pqResult = sodium.crypto_kem_xwing_enc(hPQPK);
+          
+          // Key Exchange Klasik (X25519)
+          const classicalShared = sodium.crypto_scalarmult(guestClassicalKeypair.privateKey, hCPK);
+          
+          // Gabungkan (Hybrid PQ-DR Root Key)
+          const combinedSecret = new Uint8Array(classicalShared.length + pqResult.sharedSecret.length);
+          combinedSecret.set(classicalShared, 0);
+          combinedSecret.set(pqResult.sharedSecret, classicalShared.length);
+
+          const KDF = sodium.crypto_generichash(64, combinedSecret, null);
+          
+          const state: BurnerDoubleRatchetState = {
+            RK: bytesToB64(KDF.slice(0, 32)) || null,
+            CKs: bytesToB64(KDF.slice(32, 64)) || null,
+            CKr: null,
+            KEMs_pub: pqKeypair ? bytesToB64(pqKeypair.publicKey) || null : null,
+            KEMs_priv: pqKeypair ? bytesToB64(pqKeypair.privateKey) || null : null,
+            KEMr: bytesToB64(hPQPK) || null,
+            savedCt: bytesToB64(pqResult.ciphertext) || null,
+            Ns: 0, Nr: 0, PN: 0
+          };
+          
+          result = { 
+            state, 
+            guestClassicalPk: guestClassicalKeypair && guestClassicalKeypair.publicKey ? bytesToB64(new Uint8Array(guestClassicalKeypair.publicKey as Iterable<number>)) || '' : ''
+          };
+          
+          sodium.memzero(KDF);
+          sodium.memzero(combinedSecret);
+        } finally {
+           // Bersihkan memori worker
+           if (pqKeypair) sodium.memzero(pqKeypair.privateKey);
+           if (guestClassicalKeypair) sodium.memzero(guestClassicalKeypair.privateKey);
+           sodium.memzero(hCPK);
+           sodium.memzero(hPQPK);
+        }
+        break;
+      }
+
+      case 'burner_dr_init_host': {
+        const { guestClassicalPk, hostClassicalSk, savedCt, hostPqSk } = payload as { guestClassicalPk: CryptoBuffer, hostClassicalSk: CryptoBuffer, savedCt: CryptoBuffer, hostPqSk: CryptoBuffer };
+        const gCPK = new Uint8Array(guestClassicalPk);
+        const hCSK = new Uint8Array(hostClassicalSk);
+        const ct = new Uint8Array(savedCt);
+        const hPQSK = new Uint8Array(hostPqSk);
+
+        try {
+          // Decapsulate dari Guest (PQ)
+          const pqSharedSecret = sodium.crypto_kem_xwing_dec(ct, hPQSK);
+
+          // Key Exchange Klasik (X25519)
+          const classicalShared = sodium.crypto_scalarmult(hCSK, gCPK);
+
+          // Gabungkan
+          const combinedSecret = new Uint8Array(classicalShared.length + pqSharedSecret.length);
+          combinedSecret.set(classicalShared, 0);
+          combinedSecret.set(pqSharedSecret, classicalShared.length);
+
+          const KDF = sodium.crypto_generichash(64, combinedSecret, null);
+
+          const state: BurnerDoubleRatchetState = {
+            RK: bytesToB64(KDF.slice(0, 32)) || null,
+            CKs: null,
+            CKr: bytesToB64(KDF.slice(32, 64)) || null,
+            KEMs_pub: null,
+            KEMs_priv: null,
+            KEMr: bytesToB64(gCPK) || null, // Not strictly correct, KEMr should be guest PQ PK if they ever sent one, but guest sent ct and generated ephemeral KEM
+            savedCt: null,
+            Ns: 0, Nr: 0, PN: 0
+          };
+
+          result = { state };
+
+          sodium.memzero(KDF);
+          sodium.memzero(combinedSecret);
+          sodium.memzero(pqSharedSecret);
+          sodium.memzero(classicalShared);
+        } finally {
+          sodium.memzero(gCPK);
+          sodium.memzero(hCSK);
+          sodium.memzero(ct);
+          sodium.memzero(hPQSK);
+        }
+        break;
+      }
+
+      case 'burner_dr_encrypt': {
+        const { state: serializedState, plaintext } = payload as { state: BurnerDoubleRatchetState, plaintext: CryptoBuffer | string };
+        const state = { ...serializedState };
+        const plaintextBytes = typeof plaintext === 'string' ? new TextEncoder().encode(plaintext) : new Uint8Array(plaintext);
+
+        let mk: Uint8Array | null = null;
+        let nonce: Uint8Array | null = null;
+        let ciphertext: Uint8Array | null = null;
+        const cksBytes = state.CKs ? b64ToBytes(state.CKs) : null;
+
+        try {
+          if (!cksBytes) throw new Error("Cannot encrypt: CKs is null");
+
+          const [newCKs, messageKey] = await kdfChain(cksBytes);
+          sodium.memzero(cksBytes);
+          state.CKs = bytesToB64(newCKs) || null;
+          mk = messageKey;
+
+          nonce = sodium.randombytes_buf(24);
+          ciphertext = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(plaintextBytes, null, null, nonce, mk);
+          
+          if (!nonce || !ciphertext) throw new Error("Encryption failed");
+
+          const combined = new Uint8Array(nonce.length + ciphertext.length);
+          combined.set(nonce);
+          combined.set(ciphertext, nonce.length);
+
+          const header: BurnerDoubleRatchetHeader = {
+            kemPk: state.KEMs_pub || '',
+            ct: state.savedCt || '',
+            n: state.Ns,
+            pn: state.PN
+          };
+
+          state.Ns += 1;
+
+          result = {
+            state,
+            header,
+            ciphertext: Array.from(combined),
+            mk: Array.from(mk)
+          };
+        } finally {
+          if (mk) sodium.memzero(mk);
+          if (nonce) sodium.memzero(nonce);
+          if (ciphertext) sodium.memzero(ciphertext);
+          sodium.memzero(plaintextBytes);
+        }
+        break;
+      }
+
+      case 'burner_dr_decrypt': {
+        const { state: serializedState, header, ciphertext } = payload as { state: BurnerDoubleRatchetState, header: BurnerDoubleRatchetHeader, ciphertext: CryptoBuffer };
+        const state = { ...serializedState };
+        const ciphertextBytes = new Uint8Array(ciphertext);
+        const headerKemPk = header.kemPk ? b64ToBytes(header.kemPk) : null;
+        const headerCt = header.ct ? b64ToBytes(header.ct) : null;
+        
+        if (!headerKemPk) throw new Error("Missing kemPk in header");
+        if (!state.RK) throw new Error("RK is missing");
+
+        const rkBytes = b64ToBytes(state.RK);
+        if (!rkBytes) throw new Error("RK invalid format");
+
+        const skippedKeys: { kemPk: string, n: number, mk: string }[] = [];
+        let mk: Uint8Array | null = null;
+        let sharedSecret1: Uint8Array | null = null;
+        let sharedSecret2: Uint8Array | null = null;
+        let newKEMs: { publicKey: Uint8Array, privateKey: Uint8Array } | null = null;
+        let plaintext: Uint8Array | null = null;
+
+        try {
+          const stateKemRBytes = state.KEMr ? b64ToBytes(state.KEMr) : null;
+
+          if (!stateKemRBytes || sodium.compare(headerKemPk, stateKemRBytes) !== 0) {
+            // PRE-RATCHET SKIP LOOP
+            const MAX_SKIP = 1000;
+            if (header.pn - state.Nr > MAX_SKIP) {
+              throw new Error(`Too many skipped messages: ${header.pn - state.Nr}`);
+            }
+
+            let ckrBytes = state.CKr ? b64ToBytes(state.CKr) : null;
+            if (ckrBytes && state.KEMr) {
+              while (state.Nr < header.pn) {
+                const [nextCKr, skippedMK] = await kdfChain(ckrBytes);
+                skippedKeys.push({ kemPk: state.KEMr, n: state.Nr, mk: bytesToB64(skippedMK) || '' });
+                sodium.memzero(ckrBytes);
+                ckrBytes = nextCKr;
+                state.Nr++;
+              }
+              state.CKr = bytesToB64(ckrBytes) || null;
+            }
+
+            if (headerCt && state.KEMs_priv) {
+              const kemsPrivBytes = b64ToBytes(state.KEMs_priv);
+              if (kemsPrivBytes) {
+                const pqSharedSecret = sodium.crypto_kem_xwing_dec(headerCt, kemsPrivBytes);
+                sharedSecret1 = new Uint8Array(32 + pqSharedSecret.length);
+                sharedSecret1.set(rkBytes, 0);
+                sharedSecret1.set(pqSharedSecret, 32);
+
+                const KDF1 = sodium.crypto_generichash(64, sharedSecret1, null);
+                
+                rkBytes.set(KDF1.slice(0, 32));
+                state.RK = bytesToB64(rkBytes) || null;
+                state.CKr = bytesToB64(KDF1.slice(32, 64)) || null;
+                
+                sodium.memzero(pqSharedSecret);
+                sodium.memzero(KDF1);
+                sodium.memzero(kemsPrivBytes);
+              }
+            }
+
+            state.PN = state.Ns;
+            state.Ns = 0;
+            state.Nr = 0;
+            state.KEMr = header.kemPk;
+
+            newKEMs = sodium.crypto_kem_xwing_keypair();
+            if (!newKEMs) throw new Error("KEM Keypair generation failed");
+            const pqResult = sodium.crypto_kem_xwing_enc(headerKemPk);
+            state.savedCt = bytesToB64(pqResult.ciphertext) || null;
+
+            sharedSecret2 = new Uint8Array(32 + pqResult.sharedSecret.length);
+            sharedSecret2.set(rkBytes, 0);
+            sharedSecret2.set(pqResult.sharedSecret, 32);
+
+            const KDF2 = sodium.crypto_generichash(64, sharedSecret2, null);
+            rkBytes.set(KDF2.slice(0, 32));
+            state.RK = bytesToB64(rkBytes) || null;
+            state.CKs = bytesToB64(KDF2.slice(32, 64)) || null;
+            
+            sodium.memzero(pqResult.sharedSecret);
+            sodium.memzero(KDF2);
+
+            state.KEMs_pub = bytesToB64(newKEMs.publicKey) || null;
+            state.KEMs_priv = bytesToB64(newKEMs.privateKey) || null;
+          }
+
+          const MAX_SKIP = 1000;
+          if (header.n - state.Nr > MAX_SKIP) {
+            throw new Error(`Too many skipped messages: ${header.n - state.Nr}`);
+          }
+
+          let ckrBytes = state.CKr ? b64ToBytes(state.CKr) : null;
+          while (state.Nr < header.n) {
+            if (!ckrBytes) throw new Error("CKr is missing");
+            const [nextCKr, skippedMK] = await kdfChain(ckrBytes);
+            skippedKeys.push({ kemPk: header.kemPk, n: state.Nr, mk: bytesToB64(skippedMK) || '' });
+            sodium.memzero(ckrBytes);
+            ckrBytes = nextCKr;
+            state.Nr++;
+          }
+
+          if (state.Nr === header.n) {
+            if (!ckrBytes) throw new Error("CKr is missing");
+            const [nextCKr, messageKey] = await kdfChain(ckrBytes);
+            mk = messageKey;
+            sodium.memzero(ckrBytes);
+            ckrBytes = nextCKr;
+            state.Nr++;
+          } else {
+            throw new Error("Message N is older than current state");
+          }
+          state.CKr = bytesToB64(ckrBytes) || null;
+
+          const nonce = ciphertextBytes.slice(0, 24);
+          const ctext = ciphertextBytes.slice(24);
+          plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
+          if (!plaintext) throw new Error("Decryption failed");
+
+          result = {
+            state,
+            plaintext: Array.from(plaintext),
+            skippedKeys,
+            mk: Array.from(mk)
+          };
+        } finally {
+          if (sharedSecret1) sodium.memzero(sharedSecret1);
+          if (sharedSecret2) sodium.memzero(sharedSecret2);
+          if (mk) sodium.memzero(mk);
+          if (headerKemPk) sodium.memzero(headerKemPk);
+          if (headerCt) sodium.memzero(headerCt);
+          if (newKEMs) sodium.memzero(newKEMs.privateKey);
+          if (plaintext) sodium.memzero(plaintext);
+          if (rkBytes) sodium.memzero(rkBytes);
+        }
+        break;
+      }
+
       default:
         self.postMessage({ type: 'error', id, error: `Unknown worker command: ${type}` });
         return;

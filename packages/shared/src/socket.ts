@@ -139,6 +139,7 @@ export interface ServerToClientEvents {
     "migration:chunk": (payload: { roomId: string; chunkIndex: number; chunk: ArrayBuffer }) => void;
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
     'message:deleted_remotely': (payload: { messageId: string; conversationId: string; deletedBy: string }) => void;
+    "burner:receive": (payload: { roomId: string; ciphertext: string }) => void;
 }
 
 export interface ClientToServerEvents {
@@ -171,4 +172,5 @@ export interface ClientToServerEvents {
     "migration:ack": (payload: { roomId: string; success: boolean }) => void;
     'message:unsend': (payload: { messageId: string; conversationId: string }) => void;
     'message:view_once_opened': (payload: { messageId: string; conversationId: string }) => void;
+    "burner:send": (payload: { roomId: string; targetDeviceId: string; ciphertext: string; hostUserId: string }, callback: (res: { ok: boolean; error?: string }) => void) => void;
 }

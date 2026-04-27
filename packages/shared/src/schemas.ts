@@ -27,7 +27,7 @@ export const MinimalUserSchema = z.object({
 export const MinimalConversationSchema = z.object({
   id: ConversationIdSchema,
   isGroup: z.boolean().default(false),
-  encryptedMetadata: Base64StringSchema.nullable().optional(),
+  encryptedMetadata: PayloadStringSchema.nullable().optional(),
   creatorId: UserIdSchema.nullable().optional(),
   updatedAt: z.preprocess((val) => { if (val == null) return undefined; try { const d = new Date(val as string | number | Date); return isNaN(d.getTime()) ? undefined : d.toISOString(); } catch { return undefined; } }, z.string().optional()),
   unreadCount: z.number().default(0),

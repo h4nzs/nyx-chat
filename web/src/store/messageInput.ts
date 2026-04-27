@@ -209,8 +209,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
       
       const fileRetention = expiresIn ? expiresIn : (isViewOnce ? 1209600 : 0);
+      const endpoint = conversationId.startsWith('burner_') ? '/api/uploads/burner-presigned' : '/api/uploads/presigned';
 
-      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
+      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>(endpoint, {
           method: 'POST',
           body: JSON.stringify({
               fileName: file.name,
@@ -326,8 +327,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
       
       const fileRetention = expiresIn ? expiresIn : (isViewOnce ? 1209600 : 0);
+      const endpoint = conversationId.startsWith('burner_') ? '/api/uploads/burner-presigned' : '/api/uploads/presigned';
 
-      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/presigned', {
+      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>(endpoint, {
           method: 'POST',
           body: JSON.stringify({
               fileName: "voice-message.webm",

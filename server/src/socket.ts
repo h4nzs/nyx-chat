@@ -266,6 +266,43 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
+    socket.on('burner:send', async (payload: { roomId: string, targetDeviceId: string, ciphertext: string, hostUserId: string }, callback) => {
+        // Guest mengirim pesan. Kita tahu hostUserId dari metadata link.
+        if (!payload.targetDeviceId || !payload.hostUserId) {
+            return callback?.({ ok: false, error: "Invalid burner routing metadata" });
+        }
+
+        try {
+            // Ambil semua socket yang terhubung dengan akun Host
+            const targetSockets = await io.in(payload.hostUserId).fetchSockets();
+            let delivered = false;
+
+            for (const s of targetSockets) {
+                const authSocket = s as unknown as AuthenticatedSocket;
+                
+                // SECURITY GATE: "TIED-TO-DEVICE"
+                // Pastikan deviceId yang aktif di socket ini SAMA PERSIS dengan 
+                // deviceId Host pencipta Burner Link
+                if (authSocket.user?.deviceId === payload.targetDeviceId) {
+                    authSocket.emit('burner:receive', {
+                        roomId: payload.roomId,
+                        ciphertext: payload.ciphertext
+                    });
+                    delivered = true;
+                }
+            }
+
+            if (delivered) {
+                callback?.({ ok: true });
+            } else {
+                callback?.({ ok: false, error: "Host device is offline or unavailable." });
+            }
+
+        } catch (e) {
+            callback?.({ ok: false, error: "Routing failed." });
+        }
+    });
+
     socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => void) => {
       const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
 

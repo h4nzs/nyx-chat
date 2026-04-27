@@ -436,3 +436,61 @@ export async function groupDecryptSkipped(
     plaintext: new Uint8Array(res.plaintext)
   }));
 }
+
+// --- BURNER PROTOCOL (PQ-DR) PROXY FUNCTIONS ---
+
+import type { BurnerDoubleRatchetState, BurnerDoubleRatchetHeader } from '../workers/crypto.worker';
+
+export function worker_burner_dr_init_guest(payload: {
+  hostClassicalPk: CryptoBuffer;
+  hostPqPk: CryptoBuffer;
+}): Promise<{ state: BurnerDoubleRatchetState; guestClassicalPk: string }> {
+  return sendToWorker<{ state: BurnerDoubleRatchetState; guestClassicalPk: string }>('burner_dr_init_guest', {
+    hostClassicalPk: toArray(payload.hostClassicalPk),
+    hostPqPk: toArray(payload.hostPqPk)
+  });
+}
+
+export function worker_burner_dr_init_host(payload: {
+  guestClassicalPk: CryptoBuffer;
+  hostClassicalSk: CryptoBuffer;
+  savedCt: CryptoBuffer;
+  hostPqSk: CryptoBuffer;
+}): Promise<{ state: BurnerDoubleRatchetState }> {
+  return sendToWorker<{ state: BurnerDoubleRatchetState }>('burner_dr_init_host', {
+    guestClassicalPk: toArray(payload.guestClassicalPk),
+    hostClassicalSk: toArray(payload.hostClassicalSk),
+    savedCt: toArray(payload.savedCt),
+    hostPqSk: toArray(payload.hostPqSk)
+  });
+}
+
+export function worker_burner_dr_encrypt(payload: {
+  state: BurnerDoubleRatchetState;
+  plaintext: string | CryptoBuffer;
+}): Promise<{ state: BurnerDoubleRatchetState; header: BurnerDoubleRatchetHeader; ciphertext: Uint8Array; mk: Uint8Array }> {
+  return sendToWorker<{ state: BurnerDoubleRatchetState; header: BurnerDoubleRatchetHeader; ciphertext: ArrayBuffer; mk: ArrayBuffer }>('burner_dr_encrypt', {
+    state: payload.state,
+    plaintext: typeof payload.plaintext === 'string' ? payload.plaintext : toArray(payload.plaintext)
+  }).then(res => ({
+    ...res,
+    ciphertext: new Uint8Array(res.ciphertext),
+    mk: new Uint8Array(res.mk)
+  }));
+}
+
+export function worker_burner_dr_decrypt(payload: {
+  state: BurnerDoubleRatchetState;
+  header: BurnerDoubleRatchetHeader;
+  ciphertext: CryptoBuffer;
+}): Promise<{ state: BurnerDoubleRatchetState; plaintext: Uint8Array; skippedKeys: { kemPk: string; n: number; mk: string }[]; mk: Uint8Array }> {
+  return sendToWorker<{ state: BurnerDoubleRatchetState; plaintext: ArrayBuffer; skippedKeys: { kemPk: string; n: number; mk: string }[]; mk: ArrayBuffer }>('burner_dr_decrypt', {
+    state: payload.state,
+    header: payload.header,
+    ciphertext: toArray(payload.ciphertext)
+  }).then(res => ({
+    ...res,
+    plaintext: new Uint8Array(res.plaintext),
+    mk: new Uint8Array(res.mk)
+  }));
+}
