@@ -281,6 +281,23 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   deleteConversation: async (id) => {
+    if (id.startsWith('burner_')) {
+      set((state) => {
+        const newConvos = state.conversations.filter(c => c.id !== id);
+        return { 
+          conversations: newConvos,
+          activeId: state.activeId === id ? null : state.activeId,
+          isSidebarOpen: state.activeId === id ? true : state.isSidebarOpen
+        };
+      });
+      try {
+        const { shadowVault } = await import('@lib/shadowVaultDb');
+        await shadowVault.deleteConversation(id);
+      } catch (e) {
+        console.error("Failed to delete burner conversation from local DB", e);
+      }
+      return;
+    }
     try {
       await authFetch(`/api/conversations/${id}`, { method: 'DELETE' });
       get().removeConversation(id);

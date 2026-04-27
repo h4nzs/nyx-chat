@@ -10,6 +10,11 @@ export type BurnerMessage = {
   senderId: string; // 'host' or 'guest'
   content: string;
   createdAt: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
+  fileKey?: string;
 };
 
 interface BurnerState {
@@ -29,6 +34,7 @@ interface BurnerActions {
   initializeFromHash: (hash: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
   receiveMessage: (roomId: string, ciphertext: string) => Promise<void>;
+  terminateSession: (reason: string) => void;
   destroyBurnerSession: (roomId: string) => void;
   reset: () => void;
 }
@@ -48,6 +54,10 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
   ...initialState,
 
   reset: () => set(initialState),
+
+  terminateSession: (reason: string) => {
+    set({ error: reason, isInitialized: true, activeSessions: {} });
+  },
 
   initializeFromHash: async (hash: string) => {
     try {
@@ -137,11 +147,31 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         ciphertext: JSON.stringify(payload)
       }, (res: any) => {
         if (res && res.ok) {
+          let parsedContent = content;
+          let fileData = {};
+
+          if (content.startsWith('{')) {
+            try {
+              const data = JSON.parse(content);
+              if (data.type === 'file') {
+                parsedContent = data.text || '';
+                fileData = {
+                  fileUrl: data.fileUrl,
+                  fileName: data.fileName,
+                  fileType: data.fileType,
+                  fileSize: data.fileSize,
+                  fileKey: data.fileKey
+                };
+              }
+            } catch (e) {}
+          }
+
           const msg: BurnerMessage = {
             id: Date.now().toString(),
             senderId: 'guest',
-            content,
-            createdAt: new Date().toISOString()
+            content: parsedContent,
+            createdAt: new Date().toISOString(),
+            ...fileData
           };
           set(s => ({ messages: [...s.messages, msg] }));
         } else {
@@ -154,6 +184,8 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
   },
 
   receiveMessage: async (roomId: string, cipherString: string) => {
+    if (localStorage.getItem('burned_' + roomId)) return; // Reject zombie messages
+
     const session = get().activeSessions[roomId] || { drState: null, guestClassicalPk: null };
     let state = session.drState;
     let guestPkState = session.guestClassicalPk;
@@ -206,12 +238,34 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
       }));
 
       const content = new TextDecoder().decode(plaintext);
+      let parsedContent = content;
+      let fileData = {};
+
+      if (content.startsWith('{')) {
+        try {
+          const data = JSON.parse(content);
+          if (data.type === 'file') {
+            parsedContent = data.text || '';
+            fileData = {
+              fileUrl: data.fileUrl,
+              fileName: data.fileName,
+              fileType: data.fileType,
+              fileSize: data.fileSize,
+              fileKey: data.fileKey
+            };
+          }
+        } catch (e) {
+          console.warn('Failed to parse message JSON:', e);
+        }
+      }
+
       const isHost = !!useAuthStore.getState().user;
       const msg: BurnerMessage = {
         id: Date.now().toString(),
         senderId: isHost ? 'guest' : 'host',
-        content,
-        createdAt: new Date().toISOString()
+        content: parsedContent,
+        createdAt: new Date().toISOString(),
+        ...fileData
       };
       
       // If we are Host, push to UI chat list
@@ -227,7 +281,8 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
            isSilent: false,
            isEdited: false,
            isViewOnce: false,
-           isViewed: false
+           isViewed: false,
+           ...fileData
         };
         useMessageStore.getState().addOptimisticMessage(roomId, mainMsg as any);
         
@@ -242,18 +297,34 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
     }
   },
 
-  destroyBurnerSession: (roomId: string) => {
+  destroyBurnerSession: async (roomId: string) => {
+    localStorage.setItem('burned_' + roomId, 'true'); // Local blacklist
+    
+    // 1. Remove from burner active sessions
     set(s => {
       const newSessions = { ...s.activeSessions };
       delete newSessions[roomId];
       return { activeSessions: newSessions };
     });
-    import('./conversation').then(m => {
-      m.useConversationStore.getState().deleteConversation(roomId);
-    });
+
+    // 2. Local-only conversation cleanup (Host/Guest UI)
+    const { useConversationStore } = await import('./conversation');
+    await useConversationStore.getState().deleteConversation(roomId);
+
+    // 3. Clear RAM messages
+    const { useMessageStore } = await import('./message');
+    useMessageStore.getState().clearMessagesForConversation(roomId);
+
+    // 4. Emit to server for blacklist reinforcement
     const socket = getSocket();
     if (socket) {
       socket.emit('burner:destroy', { roomId });
+    }
+
+    // 5. Atomic Redirection
+    window.location.hash = '';
+    if (window.location.pathname.includes('/drop')) {
+       window.location.href = '/chat';
     }
   }
 }));

@@ -250,9 +250,10 @@ export function getSocket() {
     socket.on("burner:terminated", async (payload: { roomId: string }) => {
       const { useBurnerStore } = await import('@store/burner');
       if (payload?.roomId) {
-        useBurnerStore.getState().destroyBurnerSession(payload.roomId);
-        const toast = (await import('react-hot-toast')).default;
-        toast("This secure session has been terminated by the host.", { icon: '⚠️' });
+        useBurnerStore.getState().terminateSession('This secure session has been terminated by the host.');
+        // Clean up the conversation list
+        const { useConversationStore } = await import('@store/conversation');
+        useConversationStore.getState().deleteConversation(payload.roomId);
       }
     });
 

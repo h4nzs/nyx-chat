@@ -10,16 +10,16 @@ import toast from 'react-hot-toast';
 
 export default function BurnerChat() {
   const location = useLocation();
-  const { error, messages, initializeFromHash, sendMessage, activeSessions } = useBurnerStore();
+  const { error, messages, isInitialized, initializeFromHash, sendMessage, activeSessions } = useBurnerStore();
   const [inputText, setInputText] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Extract roomId from hash
+  // Extract roomId from hash for reference
   const hashPart = location.hash.split('#')[1];
   const roomId = hashPart ? hashPart.split(':')[0] : '';
-  const isInitialized = !!activeSessions[roomId]?.drState;
+  // Removed local isInitialized calculation as it's now handled by the store.
 
   useEffect(() => {
     const socket = getSocket();
@@ -67,10 +67,6 @@ export default function BurnerChat() {
       const encryptedBlob = encryptRes.encryptedBlob;
       const rawFileKey = encryptRes.key;
       
-      const { getSodiumLib } = await import('../utils/crypto');
-      const sodium = await getSodiumLib();
-      const fileKeyB64 = sodium.to_base64(rawFileKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-
       // 2. Get Presigned URL
       const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/burner-presigned', {
           method: 'POST',
@@ -103,7 +99,7 @@ export default function BurnerChat() {
         fileName: file.name,
         fileType: file.type,
         fileSize: file.size,
-        fileKey: fileKeyB64 
+        fileKey: rawFileKey 
       });
 
       await sendMessage(finalContent);
@@ -162,35 +158,22 @@ export default function BurnerChat() {
           messages.map((msg, index) => {
             const isMe = msg.senderId === 'guest';
             
-            let parsedContent = msg.content;
-            let fileUrl, fileName, fileType, fileKey, fileSize;
-            
-            try {
-               if (msg.content.startsWith('{')) {
-                  const data = JSON.parse(msg.content);
-                  if (data.type === 'file') {
-                     parsedContent = data.text || '';
-                     fileUrl = data.fileUrl;
-                     fileName = data.fileName;
-                     fileType = data.fileType;
-                     fileKey = data.fileKey;
-                     fileSize = data.fileSize;
-                  }
-               }
-            } catch(e) {}
-
             const messageObj = {
               id: msg.id,
               conversationId: roomId || '',
               senderId: msg.senderId,
-              content: parsedContent,
+              content: msg.content,
               createdAt: msg.createdAt,
               updatedAt: msg.createdAt,
               isSilent: false,
               isEdited: false,
               isViewOnce: false,
               isViewed: true,
-              fileUrl, fileName, fileType, fileKey, fileSize
+              fileUrl: msg.fileUrl,
+              fileName: msg.fileName,
+              fileType: msg.fileType,
+              fileKey: msg.fileKey,
+              fileSize: msg.fileSize
             } as unknown as Message;
 
             return (

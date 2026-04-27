@@ -12,6 +12,8 @@ import { AuthPayload } from "./types/auth.js";
 import cookie from "cookie"; 
 import { getSodium } from "./lib/sodium.js";
 
+const terminatedBurners = new Set<string>();
+
 // --- REDIS ADAPTER IMPORTS ---
 import { createClient } from "redis";
 import { createAdapter } from "@socket.io/redis-adapter";
@@ -155,6 +157,10 @@ export function registerSocket(httpServer: HttpServer) {
     // BURNER EVENTS (Accessible to both unauth Guests and auth Hosts)
     socket.on('burner:join', (payload: { roomId: string }) => {
       if (payload && payload.roomId && typeof payload.roomId === 'string') {
+        if (terminatedBurners.has(payload.roomId)) {
+          socket.emit('burner:terminated', { roomId: payload.roomId });
+          return;
+        }
         socket.join(payload.roomId);
       }
     });
@@ -162,6 +168,9 @@ export function registerSocket(httpServer: HttpServer) {
     socket.on('burner:send', async (payload: { roomId: string, targetDeviceId: string, ciphertext: string, hostUserId: string }, callback) => {
         if (!payload.targetDeviceId || !payload.hostUserId) {
             return callback?.({ ok: false, error: "Invalid burner routing metadata" });
+        }
+        if (terminatedBurners.has(payload.roomId)) {
+            return callback?.({ ok: false, error: "Room has been terminated." });
         }
         try {
             const targetSockets = await io.in(payload.hostUserId).fetchSockets();
@@ -188,12 +197,14 @@ export function registerSocket(httpServer: HttpServer) {
 
     socket.on('burner:reply', (payload: { roomId: string, ciphertext: string }) => {
         if (payload?.roomId && payload?.ciphertext) {
+            if (terminatedBurners.has(payload.roomId)) return;
             io.to(payload.roomId).emit('burner:receive', { roomId: payload.roomId, ciphertext: payload.ciphertext });
         }
     });
 
     socket.on('burner:destroy', (payload: { roomId: string }) => {
         if (payload?.roomId) {
+            terminatedBurners.add(payload.roomId);
             io.to(payload.roomId).emit('burner:terminated', { roomId: payload.roomId });
             io.in(payload.roomId).socketsLeave(payload.roomId);
         }
