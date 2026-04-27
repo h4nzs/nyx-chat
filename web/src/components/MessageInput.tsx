@@ -9,6 +9,7 @@ import { useMessageInputStore } from '@store/messageInput';
 import { useConnectionStore } from '@store/connection';
 import { useAuthStore } from '@store/auth';
 import { useThemeStore } from '@store/theme';
+import { useBurnerStore } from '@store/burner';
 import LinkPreviewCard from './LinkPreviewCard';
 import SmartReply from './SmartReply';
 import { useMessageStore } from '@store/message';
@@ -169,7 +170,17 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
   const otherParticipant = isOneToOne && (conversation.participants as { id: string }[] | undefined)?.find(p => p.id !== useAuthStore.getState().user?.id);
   const isOtherParticipantBlocked = isOneToOne && otherParticipant && blockedUserIds.includes(otherParticipant.id);
   const isConnected = connectionStatus === 'connected';
-  const isInputDisabled = !isConnected || isOtherParticipantBlocked;
+  
+  const isBurner = conversation.id.startsWith('burner_');
+  const burnerSession = useBurnerStore((s: any) => s.activeSessions[conversation.id]);
+  const isWaitingForGuest = isBurner && !burnerSession?.drState && !!useAuthStore.getState().user;
+
+  const isInputDisabled = !isConnected || isOtherParticipantBlocked || isWaitingForGuest;
+
+  const getPlaceholderText = () => {
+    if (isWaitingForGuest) return "Waiting for guest to establish secure connection...";
+    return t('chat:input.placeholder');
+  };
 
   const absoluteLastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
   const isLastMessageFromOther = absoluteLastMessage?.senderId !== user?.id;
@@ -558,7 +569,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
               type="text"
               onChange={handleTextChange}
               disabled={isInputDisabled}
-              placeholder={isConnected ? (expiresIn ? t('input.placeholder_disappearing') : t('input.placeholder_default')) : t('input.placeholder_offline')}
+              placeholder={getPlaceholderText()}
               className="w-full bg-transparent border-none outline-none text-text-primary placeholder:text-text-secondary/50 h-10 px-2 font-medium"
             />
           </div>

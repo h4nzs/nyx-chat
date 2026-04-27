@@ -8,6 +8,8 @@ interface Props {
   onClose: () => void;
 }
 
+import { useConversationStore } from '@store/conversation';
+
 export default function CreateBurnerModal({ onClose }: Props) {
   const { t } = useTranslation(['modals', 'common']);
   const [copied, setCopied] = useState(false);
@@ -43,6 +45,24 @@ export default function CreateBurnerModal({ onClose }: Props) {
       await navigator.clipboard.writeText(link);
       setCopied(true);
       toast.success('Burner Chat link copied!');
+
+      const hashPart = link.split('#')[1];
+      if (hashPart) {
+        const [roomId] = hashPart.split(':');
+        if (roomId) {
+           useConversationStore.getState().addOrUpdateConversation({
+             id: roomId,
+             isGroup: false,
+             participants: [],
+             messages: [],
+             unreadCount: 0,
+             createdAt: new Date().toISOString(),
+             updatedAt: new Date().toISOString(),
+             encryptedMetadata: "BURNER_CHAT"
+           } as any);
+        }
+      }
+
       setTimeout(() => setCopied(false), 2000);
     } catch {
       toast.error('Failed to copy link');

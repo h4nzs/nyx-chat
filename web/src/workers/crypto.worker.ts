@@ -1994,7 +1994,11 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         try {
           const stateKemRBytes = state.KEMr ? b64ToBytes(state.KEMr) : null;
 
-          if (!stateKemRBytes || sodium.compare(headerKemPk, stateKemRBytes) !== 0) {
+          const isNewKey = !stateKemRBytes || 
+                           (headerKemPk.length !== stateKemRBytes.length) || 
+                           (sodium.compare(headerKemPk, stateKemRBytes) !== 0);
+
+          if (isNewKey) {
             // PRE-RATCHET SKIP LOOP
             const MAX_SKIP = 1000;
             if (header.pn - state.Nr > MAX_SKIP) {

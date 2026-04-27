@@ -239,6 +239,23 @@ export function getSocket() {
       removeMessage(conversationId, id);
     });
 
+    socket.on("burner:receive", async (payload: { roomId?: string, ciphertext: string }) => {
+      const { useBurnerStore } = await import('@store/burner');
+      const roomId = payload.roomId || Object.keys(useBurnerStore.getState().activeSessions)[0];
+      if (roomId) {
+        await useBurnerStore.getState().receiveMessage(roomId, payload.ciphertext);
+      }
+    });
+
+    socket.on("burner:terminated", async (payload: { roomId: string }) => {
+      const { useBurnerStore } = await import('@store/burner');
+      if (payload?.roomId) {
+        useBurnerStore.getState().destroyBurnerSession(payload.roomId);
+        const toast = (await import('react-hot-toast')).default;
+        toast("This secure session has been terminated by the host.", { icon: '⚠️' });
+      }
+    });
+
     socket.on("messages:expired", ({ messageIds }: { messageIds: string[] }) => {
       const { messages, removeMessage } = useMessageStore.getState();
       const expiredSet = new Set(messageIds);

@@ -155,14 +155,15 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     // FIX 1: Extract functions correctly
     const { addOptimisticMessage, updateMessage, sendMessage: coreSendMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
+    const isGuestBurner = !me && conversationId.startsWith('burner_');
     
-    if (!me) {
+    if (!me && !isGuestBurner) {
       removeActivity(activityId);
       toast.error(i18n.t('errors:user_not_authenticated', 'User not authenticated.'));
       return;
     }
 
-    if (!await ensureGroupSessionIfNeeded(conversationId)) {
+    if (!isGuestBurner && !await ensureGroupSessionIfNeeded(conversationId)) {
       removeActivity(activityId);
       return;
     }
@@ -171,23 +172,25 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
     // FIX 2: Use underscore for tempId consistency (temp_12345)
-    const optimisticMessage: Message = {
-      id: asMessageId(`temp_${tempId}`),
-      tempId,
-      conversationId: asConversationId(conversationId),
-      senderId: asUserId(me.id),
-      sender: me,
-      createdAt: new Date().toISOString(),
-      optimistic: true,
-      fileUrl: URL.createObjectURL(file), 
-      fileName: file.name,
-      fileType: file.type,
-      fileSize: file.size,
-      expiresAt,
-      repliedTo: replyingTo || undefined,
-      isViewOnce,
-    };
-    addOptimisticMessage(conversationId, optimisticMessage);
+    if (!isGuestBurner) {
+      const optimisticMessage: Message = {
+        id: asMessageId(`temp_${tempId}`),
+        tempId,
+        conversationId: asConversationId(conversationId),
+        senderId: asUserId(me!.id),
+        sender: me!,
+        createdAt: new Date().toISOString(),
+        optimistic: true,
+        fileUrl: URL.createObjectURL(file), 
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        expiresAt,
+        repliedTo: replyingTo || undefined,
+        isViewOnce,
+      };
+      addOptimisticMessage(conversationId, optimisticMessage);
+    }
     
     set({ replyingTo: null, isViewOnce: false, isHD: false });
 
@@ -280,13 +283,14 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     // FIX 5: Extract functions correctly
     const { addOptimisticMessage, updateMessage, sendMessage: coreSendMessage } = useMessageStore.getState();
     const me = useAuthStore.getState().user;
+    const isGuestBurner = !me && conversationId.startsWith('burner_');
     
-    if (!me) {
+    if (!me && !isGuestBurner) {
       removeActivity(activityId);
       return;
     }
     
-    if (!await ensureGroupSessionIfNeeded(conversationId)) {
+    if (!isGuestBurner && !await ensureGroupSessionIfNeeded(conversationId)) {
       removeActivity(activityId);
       return;
     }
@@ -295,25 +299,27 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
 
     // FIX 6: Use underscore for tempId consistency (temp_12345)
-    const optimisticMessage: Message = {
-      id: asMessageId(`temp_${tempId}`),
-      tempId,
-      conversationId: asConversationId(conversationId),
-      senderId: asUserId(me.id),
-      sender: me,
-      createdAt: new Date().toISOString(),
-      optimistic: true,
-      fileUrl: URL.createObjectURL(blob),
-      fileName: "voice-message.webm",
-      fileType: "audio/webm",
-      fileSize: blob.size,
-      duration,
-      expiresAt,
-      repliedTo: replyingTo || undefined,
-      isViewOnce,
-    };
-    
-    addOptimisticMessage(conversationId, optimisticMessage);
+    if (!isGuestBurner) {
+      const optimisticMessage: Message = {
+        id: asMessageId(`temp_${tempId}`),
+        tempId,
+        conversationId: asConversationId(conversationId),
+        senderId: asUserId(me!.id),
+        sender: me!,
+        createdAt: new Date().toISOString(),
+        optimistic: true,
+        fileUrl: URL.createObjectURL(blob),
+        fileName: "voice-message.webm",
+        fileType: "audio/webm",
+        fileSize: blob.size,
+        duration,
+        expiresAt,
+        repliedTo: replyingTo || undefined,
+        isViewOnce,
+      };
+      
+      addOptimisticMessage(conversationId, optimisticMessage);
+    }
     set({ replyingTo: null, isViewOnce: false });
 
     try {
@@ -367,13 +373,18 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           duration
       };
 
-      await coreSendMessage(conversationId, {
-          content: JSON.stringify(metadata),
-          repliedToId: replyingTo?.id || undefined,
-          repliedTo: replyingTo || undefined,
-          expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
-          isViewOnce
-      }, tempId);
+      if (isGuestBurner) {
+        const { useBurnerStore } = await import('./burner');
+        await useBurnerStore.getState().sendMessage(JSON.stringify(metadata));
+      } else {
+        await coreSendMessage(conversationId, {
+            content: JSON.stringify(metadata),
+            repliedToId: replyingTo?.id || undefined,
+            repliedTo: replyingTo || undefined,
+            expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
+            isViewOnce
+        }, tempId);
+      }
       
       updateActivity(activityId, { progress: 100, fileName: 'Sent!' });
       setTimeout(() => removeActivity(activityId), 1000); 
@@ -383,7 +394,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       toast.error(i18n.t('errors:voice_message_failed', `Voice message failed: ${errorMsg}`, { error: errorMsg }));
       removeActivity(activityId);
       // FIX 7: Use consistent temp_ prefix
-      updateMessage(conversationId, `temp_${tempId}`, { error: true, optimistic: false });
+      if (!isGuestBurner) {
+        updateMessage(conversationId, `temp_${tempId}`, { error: true, optimistic: false });
+      }
     }
   },
 

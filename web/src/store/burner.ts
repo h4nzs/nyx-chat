@@ -13,15 +13,12 @@ export type BurnerMessage = {
 };
 
 interface BurnerState {
-  roomId: string | null;
   hostDeviceId: string | null;
   hostPqPk: string | null;
   hostClassicalPk: string | null;
   hostUserId: string | null;
   
-  // Guest Crypto State (RAM ONLY)
-  drState: BurnerDoubleRatchetState | null;
-  guestClassicalPk: string | null;
+  activeSessions: Record<string, { drState: BurnerDoubleRatchetState | null; guestClassicalPk: string | null }>;
   
   messages: BurnerMessage[];
   isInitialized: boolean;
@@ -31,18 +28,17 @@ interface BurnerState {
 interface BurnerActions {
   initializeFromHash: (hash: string) => Promise<void>;
   sendMessage: (content: string) => Promise<void>;
-  receiveMessage: (ciphertext: string) => Promise<void>;
+  receiveMessage: (roomId: string, ciphertext: string) => Promise<void>;
+  destroyBurnerSession: (roomId: string) => void;
   reset: () => void;
 }
 
 const initialState: BurnerState = {
-  roomId: null,
   hostDeviceId: null,
   hostPqPk: null,
   hostClassicalPk: null,
   hostUserId: null,
-  drState: null,
-  guestClassicalPk: null,
+  activeSessions: {},
   messages: [],
   isInitialized: false,
   error: null,
@@ -75,22 +71,23 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
       const hostPqPkBytes = sodium.from_base64(safePqPk, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       // Initialize Guest Double Ratchet State
-      const { state, guestClassicalPk: guestPk } = await worker_burner_dr_init_guest({
+      const { state: stateFromWorker, guestClassicalPk: guestPk } = await worker_burner_dr_init_guest({
         hostClassicalPk: hostClassicalPkBytes.buffer,
         hostPqPk: hostPqPkBytes.buffer
       });
 
-      set({
-        roomId,
+      set(state => ({
         hostUserId,
         hostDeviceId,
         hostPqPk,
         hostClassicalPk,
-        drState: state,
-        guestClassicalPk: guestPk,
+        activeSessions: {
+          ...state.activeSessions,
+          [roomId]: { drState: stateFromWorker, guestClassicalPk: guestPk }
+        },
         isInitialized: true,
         error: null
-      });
+      }));
       
       // Optionally, we could send a "Hello, I joined" message here, but we'll leave it to the UI.
 
@@ -101,9 +98,11 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
   },
 
   sendMessage: async (content: string) => {
-    const state = get().drState;
-    const { roomId, hostDeviceId, hostUserId } = get();
-    if (!state || !roomId || !hostDeviceId || !hostUserId) return;
+    const roomId = Object.keys(get().activeSessions)[0];
+    const session = roomId ? get().activeSessions[roomId] : null;
+    const state = session?.drState;
+    const { hostDeviceId, hostUserId } = get();
+    if (!state || !roomId || !hostDeviceId || !hostUserId || !session) return;
 
     try {
       const { state: newState, header, ciphertext } = await worker_burner_dr_encrypt({
@@ -112,7 +111,12 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
       });
 
       // Update state
-      set({ drState: newState });
+      set(s => ({
+        activeSessions: {
+          ...s.activeSessions,
+          [roomId]: { ...session, drState: newState }
+        }
+      }));
 
       const sodium = await getSodiumLib();
       const ciphertextB64 = sodium.to_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -122,7 +126,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         ciphertext: ciphertextB64,
         // Since we are guest, we need to send our guestClassicalPk on the first message so Host knows who we are.
         // But for simplicity, we can include it in the header or as a separate field.
-        guestClassicalPk: get().guestClassicalPk
+        guestClassicalPk: session.guestClassicalPk
       };
 
       const socket = getSocket();
@@ -149,14 +153,42 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
     }
   },
 
-  receiveMessage: async (cipherString: string) => {
-    const state = get().drState;
-    if (!state) return;
+  receiveMessage: async (roomId: string, cipherString: string) => {
+    const session = get().activeSessions[roomId] || { drState: null, guestClassicalPk: null };
+    let state = session.drState;
+    let guestPkState = session.guestClassicalPk;
 
     try {
       const payload = JSON.parse(cipherString);
-      const { header, ciphertext: ciphertextB64 } = payload;
-      
+      const { header, ciphertext: ciphertextB64, guestClassicalPk } = payload;
+
+      // Host initialization on first message from Guest
+      if (!state) {
+        if (guestClassicalPk) {
+          const sodium = await getSodiumLib();
+          const { getMyEncryptionKeyPair } = await import('../utils/crypto');
+          const myDeviceKeys = await getMyEncryptionKeyPair(); // Host classical
+          const authStore = useAuthStore.getState();
+          const myPqKeys = await authStore.getPqEncryptionKeyPair(); // Host PQ
+
+          const guestPkBytes = sodium.from_base64(guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
+          const savedCtBytes = sodium.from_base64((header as any).ct, sodium.base64_variants.URLSAFE_NO_PADDING);
+          
+          const { worker_burner_dr_init_host } = await import('../lib/crypto-worker-proxy');
+          const initRes = await worker_burner_dr_init_host({
+             hostClassicalSk: myDeviceKeys.privateKey,
+             hostPqSk: myPqKeys.privateKey,
+             guestClassicalPk: guestPkBytes,
+             savedCt: savedCtBytes
+          });
+          
+          state = initRes.state;
+          guestPkState = guestClassicalPk;
+        } else {
+           return; // Cannot decrypt without drState or guestPk
+        }
+      }
+
       const sodium = await getSodiumLib();
       const ciphertext = sodium.from_base64(ciphertextB64, sodium.base64_variants.URLSAFE_NO_PADDING);
 
@@ -166,19 +198,62 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         ciphertext: ciphertext.buffer
       });
 
-      set({ drState: newState });
+      set(s => ({
+        activeSessions: {
+          ...s.activeSessions,
+          [roomId]: { drState: newState, guestClassicalPk: guestPkState }
+        }
+      }));
 
       const content = new TextDecoder().decode(plaintext);
+      const isHost = !!useAuthStore.getState().user;
       const msg: BurnerMessage = {
         id: Date.now().toString(),
-        senderId: 'host',
+        senderId: isHost ? 'guest' : 'host',
         content,
         createdAt: new Date().toISOString()
       };
+      
+      // If we are Host, push to UI chat list
+      if (isHost) {
+        const { useMessageStore } = await import('./message');
+        const mainMsg = {
+           id: msg.id,
+           conversationId: roomId,
+           senderId: 'guest_user', 
+           content: msg.content,
+           createdAt: msg.createdAt,
+           updatedAt: msg.createdAt,
+           isSilent: false,
+           isEdited: false,
+           isViewOnce: false,
+           isViewed: false
+        };
+        useMessageStore.getState().addOptimisticMessage(roomId, mainMsg as any);
+        
+        const { useConversationStore } = await import('./conversation');
+        useConversationStore.getState().updateConversationLastMessage(roomId, mainMsg as any);
+      }
+
       set(s => ({ messages: [...s.messages, msg] }));
 
     } catch (e) {
       console.error('Burner decrypt failed:', e);
+    }
+  },
+
+  destroyBurnerSession: (roomId: string) => {
+    set(s => {
+      const newSessions = { ...s.activeSessions };
+      delete newSessions[roomId];
+      return { activeSessions: newSessions };
+    });
+    import('./conversation').then(m => {
+      m.useConversationStore.getState().deleteConversation(roomId);
+    });
+    const socket = getSocket();
+    if (socket) {
+      socket.emit('burner:destroy', { roomId });
     }
   }
 }));

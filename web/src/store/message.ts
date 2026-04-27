@@ -958,6 +958,70 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const { user, hasRestoredKeys } = useAuthStore.getState();
     if (!user) return;
 
+    if (conversationId.startsWith('burner_')) {
+      const actualTempId = tempId !== undefined ? tempId : generateTempId();
+      
+      const { useBurnerStore } = await import('./burner');
+      const burnerState = useBurnerStore.getState();
+      const session = burnerState.activeSessions[conversationId];
+      const state = session?.drState;
+
+      if (!state) {
+        toast.error("Waiting for guest to connect first.");
+        return;
+      }
+      
+      let lastMsgPreview = data.content;
+      try {
+         if (lastMsgPreview?.startsWith('{') && lastMsgPreview.includes('"type":"file"')) {
+             lastMsgPreview = '📎 Sent a file';
+         }
+      } catch {}
+
+      const msg = {
+          id: `temp_${actualTempId}` as any, tempId: actualTempId, optimistic: true,
+          content: data.content, senderId: user.id as any, sender: user,
+          createdAt: new Date().toISOString(), conversationId: conversationId as any, status: 'SENDING',
+          isSilent: isSilent
+      } as Message;
+
+      if (!isSilent) {
+        get().addOptimisticMessage(conversationId, msg);
+        const { useConversationStore } = await import('./conversation');
+        useConversationStore.getState().updateConversationLastMessage(conversationId, { ...msg, content: lastMsgPreview, fileType: data.fileType, fileName: data.fileName } as any);
+      }
+      
+      try {
+        const { worker_burner_dr_encrypt } = await import('../lib/crypto-worker-proxy');
+        const { state: newState, header, ciphertext } = await worker_burner_dr_encrypt({
+          state,
+          plaintext: data.content || ""
+        });
+        useBurnerStore.setState((s) => ({
+          activeSessions: {
+            ...s.activeSessions,
+            [conversationId]: { ...session, drState: newState }
+          }
+        }));
+        
+        const { getSodiumLib } = await import('../utils/crypto');
+        const sodium = await getSodiumLib();
+        const ciphertextB64 = sodium.to_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const payload = { header, ciphertext: ciphertextB64 };
+        
+        const socket = (await import('../lib/socket')).getSocket();
+        socket.emit('burner:reply', { roomId: conversationId, ciphertext: JSON.stringify(payload) });
+        
+        // Update local status to SENT
+        get().updateMessage(conversationId, `temp_${actualTempId}`, { status: 'SENT' });
+      } catch (e) {
+        console.error('Burner encrypt failed:', e);
+        toast.error("Failed to send burner message");
+        get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true });
+      }
+      return;
+    }
+
     // FAKE SEND FOR DECOY
     if (sessionStorage.getItem('nyx_decoy_mode') === 'true') {
         const actualTempId = tempId !== undefined ? tempId : Date.now();
@@ -1645,6 +1709,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   loadMessagesForConversation: async (id) => {
+    if (id.startsWith('burner_')) return;
+
     if (sessionStorage.getItem('nyx_decoy_mode') === 'true') {
        set(state => ({
           messages: { ...state.messages, [id]: [{ id: 'msg-1', content: 'Welcome to NYX. No active chats found.', senderId: 'bot-1', createdAt: new Date().toISOString(), conversationId: id, type: 'SYSTEM' } as Message] },
@@ -1752,6 +1818,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   loadPreviousMessages: async (conversationId) => {
+    if (conversationId.startsWith('burner_')) return;
+
     const { isFetchingMore, hasMore, messages } = get();
     if (isFetchingMore[conversationId] || !hasMore[conversationId]) return;
     

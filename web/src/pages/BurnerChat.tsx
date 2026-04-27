@@ -2,18 +2,26 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useBurnerStore } from '../store/burner';
 import { getSocket, connectSocket } from '../lib/socket';
+import { FiPaperclip, FiMic, FiSend } from 'react-icons/fi';
+import MessageBubble from '../components/MessageBubble';
+import type { Message } from '@nyx/shared';
+import { api } from '../lib/api';
+import toast from 'react-hot-toast';
 
 export default function BurnerChat() {
   const location = useLocation();
-  const { isInitialized, error, messages, initializeFromHash, sendMessage } = useBurnerStore();
+  const { error, messages, initializeFromHash, sendMessage, activeSessions } = useBurnerStore();
   const [inputText, setInputText] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Extract roomId from hash
+  const hashPart = location.hash.split('#')[1];
+  const roomId = hashPart ? hashPart.split(':')[0] : '';
+  const isInitialized = !!activeSessions[roomId]?.drState;
 
   useEffect(() => {
-    // If socket isn't connected (guest user not logged in), connect it manually.
-    // In NYX, if there's no JWT, socket connection still establishes but as an anonymous socket.
-    // Since Burner Chat is host-to-guest and the host relies on socket routing,
-    // the guest must be connected to the socket server.
     const socket = getSocket();
     if (!socket?.connected) {
       connectSocket();
@@ -23,6 +31,16 @@ export default function BurnerChat() {
   useEffect(() => {
     if (location.hash) {
       initializeFromHash(location.hash);
+    }
+    
+    // Explicitly join the room for anonymous guest
+    const socket = getSocket();
+    if (socket && location.hash) {
+       const hashPart = location.hash.split('#')[1];
+       if (hashPart) {
+          const [id] = hashPart.split(':');
+          socket.emit('burner:join', { roomId: id });
+       }
     }
   }, [location.hash, initializeFromHash]);
 
@@ -35,6 +53,67 @@ export default function BurnerChat() {
     if (!inputText.trim()) return;
     await sendMessage(inputText);
     setInputText('');
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      // 1. Encrypt file using worker
+      const { encryptFileViaWorker } = await import('../utils/crypto');
+      const encryptRes = await encryptFileViaWorker(file);
+      const encryptedBlob = encryptRes.encryptedBlob;
+      const rawFileKey = encryptRes.key;
+      
+      const { getSodiumLib } = await import('../utils/crypto');
+      const sodium = await getSodiumLib();
+      const fileKeyB64 = sodium.to_base64(rawFileKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+      // 2. Get Presigned URL
+      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>('/api/uploads/burner-presigned', {
+          method: 'POST',
+          body: JSON.stringify({
+              fileName: file.name,
+              fileType: 'application/octet-stream',
+              folder: 'attachments',
+              fileSize: encryptedBlob.size,
+              fileRetention: 0
+          })
+      });
+
+      // 3. Upload file
+      await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('PUT', presignedRes.uploadUrl, true);
+          xhr.onload = () => {
+              if (xhr.status === 200) resolve();
+              else reject(new Error('Upload failed'));
+          };
+          xhr.onerror = () => reject(new Error('Upload failed'));
+          xhr.send(encryptedBlob);
+      });
+
+      // 4. Send Message JSON
+      const finalContent = JSON.stringify({
+        type: "file",
+        text: "",
+        fileUrl: presignedRes.publicUrl,
+        fileName: file.name,
+        fileType: file.type,
+        fileSize: file.size,
+        fileKey: fileKeyB64 
+      });
+
+      await sendMessage(finalContent);
+    } catch (err) {
+      console.error(err);
+      toast.error('Failed to upload file');
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   if (error) {
@@ -60,7 +139,7 @@ export default function BurnerChat() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-bg-main">
+    <div className="flex flex-col h-full w-full bg-bg-main relative">
       <header className="flex items-center justify-between p-4 border-b border-border bg-bg-surface/50 backdrop-blur-md sticky top-0 z-10">
         <div>
           <h1 className="text-lg font-bold text-text-primary flex items-center gap-2">
@@ -80,48 +159,97 @@ export default function BurnerChat() {
             <p>Session is live. Messages are ephemeral.</p>
           </div>
         ) : (
-          messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex ${msg.senderId === 'guest' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className={`max-w-[80%] rounded-2xl px-4 py-2 ${
-                  msg.senderId === 'guest'
-                    ? 'bg-accent text-white rounded-tr-sm'
-                    : 'bg-bg-surface border border-border text-text-primary rounded-tl-sm'
-                }`}
-              >
-                <p className="break-words">{msg.content}</p>
-                <p className="text-[10px] opacity-60 mt-1 text-right">
-                  {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </p>
-              </div>
-            </div>
-          ))
+          messages.map((msg, index) => {
+            const isMe = msg.senderId === 'guest';
+            
+            let parsedContent = msg.content;
+            let fileUrl, fileName, fileType, fileKey, fileSize;
+            
+            try {
+               if (msg.content.startsWith('{')) {
+                  const data = JSON.parse(msg.content);
+                  if (data.type === 'file') {
+                     parsedContent = data.text || '';
+                     fileUrl = data.fileUrl;
+                     fileName = data.fileName;
+                     fileType = data.fileType;
+                     fileKey = data.fileKey;
+                     fileSize = data.fileSize;
+                  }
+               }
+            } catch(e) {}
+
+            const messageObj = {
+              id: msg.id,
+              conversationId: roomId || '',
+              senderId: msg.senderId,
+              content: parsedContent,
+              createdAt: msg.createdAt,
+              updatedAt: msg.createdAt,
+              isSilent: false,
+              isEdited: false,
+              isViewOnce: false,
+              isViewed: true,
+              fileUrl, fileName, fileType, fileKey, fileSize
+            } as unknown as Message;
+
+            return (
+              <MessageBubble 
+                key={msg.id} 
+                message={messageObj} 
+                isOwn={isMe} 
+                isLastInSequence={index === messages.length - 1}
+              />
+            );
+          })
         )}
         <div ref={messagesEndRef} />
       </main>
 
       <footer className="p-4 bg-bg-surface/50 border-t border-border">
-        <form onSubmit={handleSend} className="flex gap-2">
+        {isUploading && (
+           <div className="text-xs text-accent mb-2 px-2 animate-pulse">Uploading encrypted attachment...</div>
+        )}
+        <form onSubmit={handleSend} className="flex gap-2 items-center bg-bg-main border border-border rounded-full pr-2 pl-1 py-1">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2 text-text-secondary hover:text-accent transition-colors rounded-full"
+          >
+            <FiPaperclip size={20} />
+          </button>
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleFileUpload} 
+            className="hidden" 
+          />
+          
           <input
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             placeholder="Type an ephemeral message..."
-            className="flex-1 bg-bg-main border border-border rounded-full px-4 py-2 text-text-primary focus:outline-none focus:border-accent transition-colors"
+            className="flex-1 bg-transparent px-2 py-2 text-text-primary focus:outline-none placeholder-text-secondary/50"
             autoFocus
           />
-          <button
-            type="submit"
-            disabled={!inputText.trim()}
-            className="bg-accent hover:bg-accent/90 disabled:opacity-50 text-white rounded-full p-2 w-10 h-10 flex items-center justify-center transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-            </svg>
-          </button>
+          
+          {inputText.trim() ? (
+            <button
+              type="submit"
+              disabled={isUploading}
+              className="bg-accent hover:bg-accent/90 disabled:opacity-50 text-white rounded-full p-2 w-10 h-10 flex items-center justify-center transition-colors"
+            >
+              <FiSend size={18} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="text-text-secondary hover:text-accent p-2 rounded-full transition-colors"
+            >
+              <FiMic size={20} />
+            </button>
+          )}
         </form>
       </footer>
     </div>
