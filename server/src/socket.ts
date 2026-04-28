@@ -12,8 +12,6 @@ import { AuthPayload } from "./types/auth.js";
 import cookie from "cookie"; 
 import { getSodium } from "./lib/sodium.js";
 
-const terminatedBurners = new Set<string>();
-
 // --- REDIS ADAPTER IMPORTS ---
 import { createClient } from "redis";
 import { createAdapter } from "@socket.io/redis-adapter";
@@ -155,9 +153,10 @@ export function registerSocket(httpServer: HttpServer) {
     const userId = socket.user?.id;
 
     // BURNER EVENTS (Accessible to both unauth Guests and auth Hosts)
-    socket.on('burner:join', (payload: { roomId: string }) => {
+    socket.on('burner:join', async (payload: { roomId: string }) => {
       if (payload && payload.roomId && typeof payload.roomId === 'string') {
-        if (terminatedBurners.has(payload.roomId)) {
+        const isTerminated = await redisClient.exists(`burner:terminated:${payload.roomId}`);
+        if (isTerminated) {
           socket.emit('burner:terminated', { roomId: payload.roomId });
           return;
         }
@@ -169,7 +168,8 @@ export function registerSocket(httpServer: HttpServer) {
         if (!payload.targetDeviceId || !payload.hostUserId) {
             return callback?.({ ok: false, error: "Invalid burner routing metadata" });
         }
-        if (terminatedBurners.has(payload.roomId)) {
+        const isTerminated = await redisClient.exists(`burner:terminated:${payload.roomId}`);
+        if (isTerminated) {
             return callback?.({ ok: false, error: "Room has been terminated." });
         }
         try {
@@ -195,16 +195,20 @@ export function registerSocket(httpServer: HttpServer) {
         }
     });
 
-    socket.on('burner:reply', (payload: { roomId: string, ciphertext: string }) => {
+    socket.on('burner:reply', async (payload: { roomId: string, ciphertext: string }) => {
         if (payload?.roomId && payload?.ciphertext) {
-            if (terminatedBurners.has(payload.roomId)) return;
+            const isTerminated = await redisClient.exists(`burner:terminated:${payload.roomId}`);
+            if (isTerminated) return;
             io.to(payload.roomId).emit('burner:receive', { roomId: payload.roomId, ciphertext: payload.ciphertext });
         }
     });
 
-    socket.on('burner:destroy', (payload: { roomId: string }) => {
+    socket.on('burner:destroy', async (payload: { roomId: string, hostUserId?: string }) => {
         if (payload?.roomId) {
-            terminatedBurners.add(payload.roomId);
+            if (payload.hostUserId && socket.user?.id !== payload.hostUserId) return;
+            if (!socket.user && !payload.hostUserId) return;
+
+            await redisClient.set(`burner:terminated:${payload.roomId}`, "1", { EX: 86400 });
             io.to(payload.roomId).emit('burner:terminated', { roomId: payload.roomId });
             io.in(payload.roomId).socketsLeave(payload.roomId);
         }

@@ -176,5 +176,5 @@ export interface ClientToServerEvents {
     "burner:send": (payload: { roomId: string; targetDeviceId: string; ciphertext: string; hostUserId: string }, callback: (res: { ok: boolean; error?: string }) => void) => void;
     "burner:join": (payload: { roomId: string }) => void;
     "burner:reply": (payload: { roomId: string; ciphertext: string }) => void;
-    "burner:destroy": (payload: { roomId: string }) => void;
+    "burner:destroy": (payload: { roomId: string; hostUserId?: string }) => void;
 }

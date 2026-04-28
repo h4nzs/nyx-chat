@@ -50,6 +50,22 @@ const initialState: BurnerState = {
   error: null,
 };
 
+const roomLocks: Record<string, Promise<void>> = {};
+
+async function withRoomLock<T>(roomId: string, task: () => Promise<T>): Promise<T> {
+  const previous = roomLocks[roomId] || Promise.resolve();
+  let release: () => void;
+  const next = new Promise<void>(resolve => { release = resolve; });
+  roomLocks[roomId] = previous.then(() => next);
+  
+  try {
+    await previous;
+    return await task();
+  } finally {
+    release!();
+  }
+}
+
 export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>((set, get) => ({
   ...initialState,
 
@@ -109,192 +125,207 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
 
   sendMessage: async (content: string) => {
     const roomId = Object.keys(get().activeSessions)[0];
-    const session = roomId ? get().activeSessions[roomId] : null;
-    const state = session?.drState;
-    const { hostDeviceId, hostUserId } = get();
-    if (!state || !roomId || !hostDeviceId || !hostUserId || !session) return;
+    if (!roomId) return;
 
-    try {
-      const { state: newState, header, ciphertext } = await worker_burner_dr_encrypt({
-        state,
-        plaintext: content
-      });
+    await withRoomLock(roomId, async () => {
+      const session = get().activeSessions[roomId];
+      const state = session?.drState;
+      const { hostDeviceId, hostUserId } = get();
+      if (!state || !hostDeviceId || !hostUserId || !session) return;
 
-      // Update state
-      set(s => ({
-        activeSessions: {
-          ...s.activeSessions,
-          [roomId]: { ...session, drState: newState }
-        }
-      }));
+      try {
+        const { state: newState, header, ciphertext } = await worker_burner_dr_encrypt({
+          state,
+          plaintext: content
+        });
 
-      const sodium = await getSodiumLib();
-      const ciphertextB64 = sodium.to_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
-      
-      const payload = {
-        header,
-        ciphertext: ciphertextB64,
-        // Since we are guest, we need to send our guestClassicalPk on the first message so Host knows who we are.
-        // But for simplicity, we can include it in the header or as a separate field.
-        guestClassicalPk: session.guestClassicalPk
-      };
-
-      const socket = getSocket();
-      socket.emit('burner:send', {
-        roomId,
-        targetDeviceId: hostDeviceId,
-        hostUserId,
-        ciphertext: JSON.stringify(payload)
-      }, (res: any) => {
-        if (res && res.ok) {
-          let parsedContent = content;
-          let fileData = {};
-
-          if (content.startsWith('{')) {
-            try {
-              const data = JSON.parse(content);
-              if (data.type === 'file') {
-                parsedContent = data.text || '';
-                fileData = {
-                  fileUrl: data.fileUrl,
-                  fileName: data.fileName,
-                  fileType: data.fileType,
-                  fileSize: data.fileSize,
-                  fileKey: data.fileKey
-                };
-              }
-            } catch (e) {}
+        // Update state
+        set(s => ({
+          activeSessions: {
+            ...s.activeSessions,
+            [roomId]: { ...session, drState: newState }
           }
+        }));
 
-          const msg: BurnerMessage = {
-            id: Date.now().toString(),
-            senderId: 'guest',
-            content: parsedContent,
-            createdAt: new Date().toISOString(),
-            ...fileData
-          };
-          set(s => ({ messages: [...s.messages, msg] }));
-        } else {
-          console.error("Failed to send burner message:", res?.error);
-        }
-      });
-    } catch (e) {
-      console.error('Burner encrypt failed:', e);
-    }
+        const sodium = await getSodiumLib();
+        const ciphertextB64 = sodium.to_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
+        
+        const payload = {
+          header,
+          ciphertext: ciphertextB64,
+          guestClassicalPk: session.guestClassicalPk
+        };
+
+        const socket = getSocket();
+        socket.emit('burner:send', {
+          roomId,
+          targetDeviceId: hostDeviceId,
+          hostUserId,
+          ciphertext: JSON.stringify(payload)
+        }, (res: any) => {
+          if (res && res.ok) {
+            let parsedContent = content;
+            let fileData = {};
+
+            if (content.startsWith('{')) {
+              try {
+                const data = JSON.parse(content);
+                if (data.type === 'file') {
+                  parsedContent = data.text || '';
+                  fileData = {
+                    fileUrl: data.fileUrl,
+                    fileName: data.fileName,
+                    fileType: data.fileType,
+                    fileSize: data.fileSize,
+                    fileKey: data.fileKey
+                  };
+                }
+              } catch (e) {}
+            }
+
+            const msg: BurnerMessage = {
+              id: Date.now().toString(),
+              senderId: 'guest',
+              content: parsedContent,
+              createdAt: new Date().toISOString(),
+              ...fileData
+            };
+            set(s => ({ messages: [...s.messages, msg] }));
+          } else {
+            console.error("Failed to send burner message:", res?.error);
+          }
+        });
+      } catch (e) {
+        console.error('Burner encrypt failed:', e);
+      }
+    });
   },
 
   receiveMessage: async (roomId: string, cipherString: string) => {
     if (localStorage.getItem('burned_' + roomId)) return; // Reject zombie messages
 
-    const session = get().activeSessions[roomId] || { drState: null, guestClassicalPk: null };
-    let state = session.drState;
-    let guestPkState = session.guestClassicalPk;
+    await withRoomLock(roomId, async () => {
+      const session = get().activeSessions[roomId] || { drState: null, guestClassicalPk: null };
+      let state = session.drState;
+      let guestPkState = session.guestClassicalPk;
 
-    try {
-      const payload = JSON.parse(cipherString);
-      const { header, ciphertext: ciphertextB64, guestClassicalPk } = payload;
+      try {
+        const payload = JSON.parse(cipherString);
+        const { header, ciphertext: ciphertextB64, guestClassicalPk } = payload;
 
-      // Host initialization on first message from Guest
-      if (!state) {
-        if (guestClassicalPk) {
-          const sodium = await getSodiumLib();
-          const { getMyEncryptionKeyPair } = await import('../utils/crypto');
-          const myDeviceKeys = await getMyEncryptionKeyPair(); // Host classical
-          const authStore = useAuthStore.getState();
-          const myPqKeys = await authStore.getPqEncryptionKeyPair(); // Host PQ
+        // Host initialization on first message from Guest
+        if (!state) {
+          if (guestClassicalPk) {
+            const sodium = await getSodiumLib();
+            const { getMyEncryptionKeyPair } = await import('../utils/crypto');
+            const myDeviceKeys = await getMyEncryptionKeyPair(); // Host classical
+            const authStore = useAuthStore.getState();
+            const myPqKeys = await authStore.getPqEncryptionKeyPair(); // Host PQ
 
-          const guestPkBytes = sodium.from_base64(guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
-          const savedCtBytes = sodium.from_base64((header as any).ct, sodium.base64_variants.URLSAFE_NO_PADDING);
-          
-          const { worker_burner_dr_init_host } = await import('../lib/crypto-worker-proxy');
-          const initRes = await worker_burner_dr_init_host({
-             hostClassicalSk: myDeviceKeys.privateKey,
-             hostPqSk: myPqKeys.privateKey,
-             guestClassicalPk: guestPkBytes,
-             savedCt: savedCtBytes
-          });
-          
-          state = initRes.state;
-          guestPkState = guestClassicalPk;
-        } else {
-           return; // Cannot decrypt without drState or guestPk
-        }
-      }
-
-      const sodium = await getSodiumLib();
-      const ciphertext = sodium.from_base64(ciphertextB64, sodium.base64_variants.URLSAFE_NO_PADDING);
-
-      const { state: newState, plaintext } = await worker_burner_dr_decrypt({
-        state,
-        header: header as BurnerDoubleRatchetHeader,
-        ciphertext: ciphertext.buffer
-      });
-
-      set(s => ({
-        activeSessions: {
-          ...s.activeSessions,
-          [roomId]: { drState: newState, guestClassicalPk: guestPkState }
-        }
-      }));
-
-      const content = new TextDecoder().decode(plaintext);
-      let parsedContent = content;
-      let fileData = {};
-
-      if (content.startsWith('{')) {
-        try {
-          const data = JSON.parse(content);
-          if (data.type === 'file') {
-            parsedContent = data.text || '';
-            fileData = {
-              fileUrl: data.fileUrl,
-              fileName: data.fileName,
-              fileType: data.fileType,
-              fileSize: data.fileSize,
-              fileKey: data.fileKey
-            };
+            const guestPkBytes = sodium.from_base64(guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
+            const savedCtBytes = sodium.from_base64((header as any).ct, sodium.base64_variants.URLSAFE_NO_PADDING);
+            
+            const { worker_burner_dr_init_host } = await import('../lib/crypto-worker-proxy');
+            const initRes = await worker_burner_dr_init_host({
+               hostClassicalSk: myDeviceKeys.privateKey,
+               hostPqSk: myPqKeys.privateKey,
+               guestClassicalPk: guestPkBytes,
+               savedCt: savedCtBytes
+            });
+            
+            state = initRes.state;
+            guestPkState = guestClassicalPk;
+          } else {
+             return; // Cannot decrypt without drState or guestPk
           }
-        } catch (e) {
-          console.warn('Failed to parse message JSON:', e);
         }
-      }
 
-      const isHost = !!useAuthStore.getState().user;
-      const msg: BurnerMessage = {
-        id: Date.now().toString(),
-        senderId: isHost ? 'guest' : 'host',
-        content: parsedContent,
-        createdAt: new Date().toISOString(),
-        ...fileData
-      };
-      
-      // If we are Host, push to UI chat list
-      if (isHost) {
-        const { useMessageStore } = await import('./message');
-        const mainMsg = {
-           id: msg.id,
-           conversationId: roomId,
-           senderId: 'guest_user', 
-           content: msg.content,
-           createdAt: msg.createdAt,
-           updatedAt: msg.createdAt,
-           isSilent: false,
-           isEdited: false,
-           isViewOnce: false,
-           isViewed: false,
-           ...fileData
-        };
-        useMessageStore.getState().addOptimisticMessage(roomId, mainMsg as any);
+        const sodium = await getSodiumLib();
+        const ciphertext = sodium.from_base64(ciphertextB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+        const { state: newState, plaintext } = await worker_burner_dr_decrypt({
+          state,
+          header: header as BurnerDoubleRatchetHeader,
+          ciphertext: ciphertext.buffer
+        });
+
+        set(s => ({
+          activeSessions: {
+            ...s.activeSessions,
+            [roomId]: { drState: newState, guestClassicalPk: guestPkState }
+          }
+        }));
+
+        const content = new TextDecoder().decode(plaintext);
+        let parsedContent = content;
+        let fileData = {};
+
+        if (content.startsWith('{')) {
+          try {
+            const data = JSON.parse(content);
+            if (data.type === 'file') {
+              parsedContent = data.text || '';
+              fileData = {
+                fileUrl: data.fileUrl,
+                fileName: data.fileName,
+                fileType: data.fileType,
+                fileSize: data.fileSize,
+                fileKey: data.fileKey
+              };
+            }
+          } catch (e) {
+            console.warn('Failed to parse message JSON:', e);
+          }
+        }
+
+        const currentUser = useAuthStore.getState().user;
+        const storedHostId = get().hostUserId;
         
-        const { useConversationStore } = await import('./conversation');
-        useConversationStore.getState().updateConversationLastMessage(roomId, mainMsg as any);
+        let isHost = false;
+        if (currentUser) {
+          if (storedHostId) {
+            isHost = currentUser.id === storedHostId;
+          } else {
+            isHost = true;
+          }
+        }
+
+        const msg: BurnerMessage = {
+          id: Date.now().toString(),
+          senderId: isHost ? 'guest' : 'host',
+          content: parsedContent,
+          createdAt: new Date().toISOString(),
+          ...fileData
+        };
+        
+        // If we are Host, push to UI chat list
+        if (isHost) {
+          const { useMessageStore } = await import('./message');
+          const mainMsg = {
+             id: msg.id,
+             conversationId: roomId,
+             senderId: 'guest_user', 
+             content: msg.content,
+             createdAt: msg.createdAt,
+             updatedAt: msg.createdAt,
+             isSilent: false,
+             isEdited: false,
+             isViewOnce: false,
+             isViewed: false,
+             ...fileData
+          };
+          useMessageStore.getState().addOptimisticMessage(roomId, mainMsg as any);
+          
+          const { useConversationStore } = await import('./conversation');
+          useConversationStore.getState().updateConversationLastMessage(roomId, mainMsg as any);
+        }
+
+        set(s => ({ messages: [...s.messages, msg] }));
+
+      } catch (e) {
+        console.error('Burner decrypt failed:', e);
       }
-
-      set(s => ({ messages: [...s.messages, msg] }));
-
-    } catch (e) {
-      console.error('Burner decrypt failed:', e);
-    }
+    });
   },
 
   destroyBurnerSession: async (roomId: string) => {
@@ -318,7 +349,8 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
     // 4. Emit to server for blacklist reinforcement
     const socket = getSocket();
     if (socket) {
-      socket.emit('burner:destroy', { roomId });
+      const myUserId = useAuthStore.getState().user?.id;
+      socket.emit('burner:destroy', { roomId, hostUserId: myUserId });
     }
 
     // 5. Atomic Redirection

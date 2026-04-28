@@ -83,6 +83,7 @@ export default function BurnerChat() {
       await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('PUT', presignedRes.uploadUrl, true);
+          xhr.setRequestHeader('Content-Type', 'application/octet-stream');
           xhr.onload = () => {
               if (xhr.status === 200) resolve();
               else reject(new Error('Upload failed'));

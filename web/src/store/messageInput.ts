@@ -253,13 +253,18 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
           mimeType: file.type,
       };
 
-      await coreSendMessage(conversationId, {
-          content: JSON.stringify(metadata),
-          repliedToId: replyingTo?.id || undefined,
-          repliedTo: replyingTo || undefined,
-          expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
-          isViewOnce
-      }, tempId);
+      if (isGuestBurner) {
+        const { useBurnerStore } = await import('./burner');
+        await useBurnerStore.getState().sendMessage(JSON.stringify(metadata));
+      } else {
+        await coreSendMessage(conversationId, {
+            content: JSON.stringify(metadata),
+            repliedToId: replyingTo?.id || undefined,
+            repliedTo: replyingTo || undefined,
+            expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
+            isViewOnce
+        }, tempId);
+      }
       
       updateActivity(activityId, { progress: 100, fileName: 'Done!' });
       setTimeout(() => removeActivity(activityId), 1000); 
@@ -270,7 +275,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       toast.error(i18n.t('errors:file_upload_failed', 'File upload failed: {{error}}', { error: errorMsg }));
       removeActivity(activityId);
       // FIX 4: Use consistent temp_ prefix
-      updateMessage(conversationId, `temp_${tempId}`, { error: true, optimistic: false });
+      if (!isGuestBurner) {
+        updateMessage(conversationId, `temp_${tempId}`, { error: true, optimistic: false });
+      }
     }
   },
 
