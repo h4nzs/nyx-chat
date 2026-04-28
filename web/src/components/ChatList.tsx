@@ -16,10 +16,11 @@ import type { Conversation } from '@store/conversation';
 
 import { toAbsoluteUrl } from '@utils/url';
 
-import { FiUsers, FiSearch, FiSettings, FiLogOut, FiUser, FiMaximize2, FiSlash, FiTrash2, FiEye, FiEyeOff, FiLock } from 'react-icons/fi';
+import { FiUsers, FiSearch, FiSettings, FiLogOut, FiUser, FiMaximize2, FiSlash, FiTrash2, FiEye, FiEyeOff, FiLock, FiZap } from 'react-icons/fi';
 import { BiQrScan } from 'react-icons/bi';
 
 import CreateGroupChat from './CreateGroupChat';
+import CreateBurnerModal from './CreateBurnerModal';
 import ScanQRModal from './ScanQRModal';
 import ShareProfileModal from './ShareProfileModal';
 import NotificationBell from './NotificationBell';
@@ -422,6 +423,7 @@ export default function ChatList() {
   })));
 
   const [showGroupModal, setShowGroupModal] = useState(false);
+  const [showBurnerModal, setShowBurnerModal] = useState(false);
   const [showScanModal, setShowScanModal] = useState(false);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { addCommands, removeCommands } = useCommandPaletteStore(useShallow(s => ({
@@ -430,15 +432,22 @@ export default function ChatList() {
   const privacyCloak = useSettingsStore(s => s.privacyCloak);
 
   const openCreateGroupModal = useCallback(() => setShowGroupModal(true), []);
+  const handleCreateBurner = useCallback(() => setShowBurnerModal(true), []);
 
   useEffect(() => {
-    const commands = [{
-      id: 'new-group', name: t('chat:sidebar.new_group'), action: openCreateGroupModal,
-      icon: <FiUsers />, section: 'General', keywords: 'create group chat conversation',
-    }];
+    const commands = [
+      {
+        id: 'new-group', name: t('chat:sidebar.new_group'), action: openCreateGroupModal,
+        icon: <FiUsers />, section: 'General', keywords: 'create group chat conversation',
+      },
+      {
+        id: 'new-burner', name: t('chat:sidebar.new_burner', 'New Burner Chat'), action: handleCreateBurner,
+        icon: <FiZap />, section: 'General', keywords: 'create burner temporary secure incognito',
+      }
+    ];
     addCommands(commands);
     return () => removeCommands(commands.map(c => c.id));
-  }, [addCommands, removeCommands, openCreateGroupModal, t]);
+  }, [addCommands, removeCommands, openCreateGroupModal, handleCreateBurner, t]);
 
   const itemContent = useCallback((index: number, c: Conversation) => {
     const peerUser = !c.isGroup ? c.participants?.find(p => p.id !== meId) : null;
@@ -507,6 +516,17 @@ export default function ChatList() {
               <BiQrScan size={18} />
             </button>
             <button 
+              onClick={handleCreateBurner} 
+              title={t('chat:sidebar.new_burner', 'Create Burner Link')}
+              aria-label={t('chat:sidebar.new_burner', 'Create Burner Link')}
+              className="
+                p-2 rounded-full text-text-secondary
+                hover:text-accent active:scale-95 transition-all
+              "
+            >
+              <FiZap size={20} />
+            </button>
+            <button 
               onClick={openCreateGroupModal} 
               title={t('chat:sidebar.new_group')}
               aria-label={t('chat:sidebar.new_group')}
@@ -567,6 +587,7 @@ export default function ChatList() {
       </div>
       
       {showGroupModal && <CreateGroupChat onClose={() => setShowGroupModal(false)} />}
+      {showBurnerModal && <CreateBurnerModal onClose={() => setShowBurnerModal(false)} />}
       {showScanModal && (
         <ScanQRModal 
           onClose={() => setShowScanModal(false)} 

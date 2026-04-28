@@ -21,6 +21,7 @@ const MigrationReceivePage = lazy(() => import('./pages/MigrationReceivePage'));
 const MigrationSendPage = lazy(() => import('./pages/MigrationSendPage'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
+const BurnerChat = lazy(() => import('./pages/BurnerChat'));
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -176,15 +177,19 @@ const AppContent = () => {
   // 1. Bootstrap Auth
   useEffect(() => {
     const initAuth = async () => {
-      await bootstrap();
-      
-      const { user, accessToken, silentRefresh, logout } = useAuthStore.getState();
-      // If we think we are logged in, but we don't have an AT
-      if (user && !accessToken) {
-        const success = await silentRefresh();
-        if (!success) {
-            logout();
+      try {
+        await bootstrap();
+        
+        const { user, accessToken, silentRefresh, logout } = useAuthStore.getState();
+        // If we think we are logged in, but we don't have an AT
+        if (user && !accessToken) {
+          const success = await silentRefresh();
+          if (!success) {
+              logout();
+          }
         }
+      } catch (e) {
+        console.log("Bootstrap error (normal for guests):", e);
       }
     };
     initAuth();
@@ -206,7 +211,10 @@ const AppContent = () => {
         });
       }
     } else {
-      disconnectSocket();
+      // Don't disconnect if on Burner Chat drop route (guest needs it)
+      if (location.pathname !== '/drop') {
+         disconnectSocket();
+      }
     }
   }, [user, location.pathname, isDeviceFlow]);
 
@@ -336,6 +344,7 @@ const AppContent = () => {
             />
             <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
             <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
+            <Route path="/drop" element={<PageWrapper noScroll={true}><BurnerChat /></PageWrapper>} />
 
             {/* Protected Routes */}
             <Route element={<ProtectedRoute />}>

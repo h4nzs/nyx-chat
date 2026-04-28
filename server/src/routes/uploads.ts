@@ -87,6 +87,58 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
   }
 })
 
+// === 0.1 BURNER CHAT PRESIGNED URL (ANONYMOUS) ===
+router.post('/burner-presigned', uploadLimiter, async (req, res, next) => {
+  try {
+    const { fileName, fileType, folder } = req.body
+
+    if (!fileName || !fileType || folder !== 'attachments') {
+      return res.status(400).json({ error: 'Missing required fields or invalid folder for burner' })
+    }
+
+    if (fileType !== 'application/octet-stream') {
+      return res.status(400).json({ error: "Protocol violation: Only encrypted 'application/octet-stream' payloads are permitted." })
+    }
+
+    const fileSize = req.body.fileSize ? parseInt(req.body.fileSize, 10) : 0
+    if (fileSize > 0) {
+      const ATTACHMENT_LIMIT = 50 * 1024 * 1024; // 50 MB max for burner
+      const ENCRYPTION_OVERHEAD = 1024; 
+      const allowedMax = ATTACHMENT_LIMIT + ENCRYPTION_OVERHEAD;
+
+      if (fileSize > allowedMax) {
+        return res.status(400).json({
+          error: `Payload too large. Maximum size is 50MB.`
+        })
+      }
+    }
+
+    const ext = fileName.split('.').pop()?.toLowerCase()
+    if (!ext) {
+      return res.status(400).json({ error: 'File extension not found in filename' })
+    }
+
+    let deleteAt: Date | undefined;
+    const fileRetention = req.body.fileRetention ? parseInt(req.body.fileRetention, 10) : 0;
+    if (fileRetention > 0) {
+      deleteAt = new Date();
+      deleteAt.setSeconds(deleteAt.getSeconds() + fileRetention);
+    }
+
+    const key = `burner/${nanoid()}.${ext}`
+    const uploadUrl = await getPresignedUploadUrl(key, 'application/octet-stream', 300, deleteAt)
+
+    res.json({
+      uploadUrl,
+      key,
+      publicUrl: `${env.r2PublicDomain}/${key}`
+    })
+  } catch (error) {
+    console.error('[PRESIGNED-URL-ERROR] Failed to generate Burner URL')
+    next(error)
+  }
+})
+
 // User avatars are now E2E Encrypted and updated via PUT /api/users/me along with the profile.
 // The server cannot decrypt the profile to extract the old avatar URL, so client must handle garbage collection or rely on orphaned file cleanup.
 

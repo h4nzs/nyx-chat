@@ -300,6 +300,18 @@ class NyxShadowVaultProxy {
     }
   }
 
+  async deleteConversation(id: string) {
+    try {
+      await this.deleteConversationMessages(id);
+      // Clean up related crypto states if they exist
+      await db.ratchetSessions.delete(id);
+      await db.groupSenderStates.delete(id);
+      await db.groupReceiverStates.where('id').startsWith(id + '_').delete();
+    } catch (e) {
+      console.error("Failed to delete conversation data from vault", e);
+    }
+  }
+
   async deleteConversationMessages(conversationId: string) {
     try {
       await db.messages.where('conversationId').equals(conversationId).delete();

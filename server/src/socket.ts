@@ -152,6 +152,68 @@ export function registerSocket(httpServer: HttpServer) {
   io.on("connection", async (socket: AuthenticatedSocket) => {
     const userId = socket.user?.id;
 
+    // BURNER EVENTS (Accessible to both unauth Guests and auth Hosts)
+    socket.on('burner:join', async (payload: { roomId: string }) => {
+      if (payload && payload.roomId && typeof payload.roomId === 'string') {
+        const isTerminated = await redisClient.exists(`burner:terminated:${payload.roomId}`);
+        if (isTerminated) {
+          socket.emit('burner:terminated', { roomId: payload.roomId });
+          return;
+        }
+        socket.join(payload.roomId);
+      }
+    });
+
+    socket.on('burner:send', async (payload: { roomId: string, targetDeviceId: string, ciphertext: string, hostUserId: string }, callback) => {
+        if (!payload.targetDeviceId || !payload.hostUserId) {
+            return callback?.({ ok: false, error: "Invalid burner routing metadata" });
+        }
+        const isTerminated = await redisClient.exists(`burner:terminated:${payload.roomId}`);
+        if (isTerminated) {
+            return callback?.({ ok: false, error: "Room has been terminated." });
+        }
+        try {
+            const targetSockets = await io.in(payload.hostUserId).fetchSockets();
+            let delivered = false;
+            for (const s of targetSockets) {
+                const authSocket = s as unknown as AuthenticatedSocket;
+                if (authSocket.user?.deviceId === payload.targetDeviceId) {
+                    authSocket.emit('burner:receive', {
+                        roomId: payload.roomId,
+                        ciphertext: payload.ciphertext
+                    });
+                    delivered = true;
+                }
+            }
+            if (delivered) {
+                callback?.({ ok: true });
+            } else {
+                callback?.({ ok: false, error: "Host device is offline or unavailable." });
+            }
+        } catch (e) {
+            callback?.({ ok: false, error: "Routing failed." });
+        }
+    });
+
+    socket.on('burner:reply', async (payload: { roomId: string, ciphertext: string }) => {
+        if (payload?.roomId && payload?.ciphertext) {
+            const isTerminated = await redisClient.exists(`burner:terminated:${payload.roomId}`);
+            if (isTerminated) return;
+            io.to(payload.roomId).emit('burner:receive', { roomId: payload.roomId, ciphertext: payload.ciphertext });
+        }
+    });
+
+    socket.on('burner:destroy', async (payload: { roomId: string, hostUserId?: string }) => {
+        if (payload?.roomId) {
+            if (payload.hostUserId && socket.user?.id !== payload.hostUserId) return;
+            if (!socket.user && !payload.hostUserId) return;
+
+            await redisClient.set(`burner:terminated:${payload.roomId}`, "1", { EX: 86400 });
+            io.to(payload.roomId).emit('burner:terminated', { roomId: payload.roomId });
+            io.in(payload.roomId).socketsLeave(payload.roomId);
+        }
+    });
+
     if (!userId) {
       socket.on("auth:request_linking_qr", async (payload: { publicKey: string }, callback) => {
          const sodium = await getSodium();

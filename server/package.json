@@ -19,8 +19,8 @@
     "format": "prettier --write src/**/*.ts"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1035.0",
-    "@aws-sdk/s3-request-presigner": "^3.1035.0",
+    "@aws-sdk/client-s3": "^3.1037.0",
+    "@aws-sdk/s3-request-presigner": "^3.1037.0",
     "@google/generative-ai": "^0.24.1",
     "@nyx/shared": "workspace:*",
     "@prisma/adapter-pg": "^7.8.0",
@@ -75,7 +75,7 @@
     "eslint-config-standard": "^17.1.0",
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-n": "^17.24.0",
-    "eslint-plugin-promise": "^7.2.1",
+    "eslint-plugin-promise": "^7.3.0",
     "jest": "^30.3.0",
     "prisma": "^7.8.0",
     "prisma-erd-generator": "^2.4.2",

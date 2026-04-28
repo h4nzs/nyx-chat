@@ -117,6 +117,15 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
     }
   };
 
+  const isBurner = conversation.id.startsWith('burner_');
+
+  const handleDestroyBurner = async () => {
+    const { useBurnerStore } = await import('@store/burner');
+    useBurnerStore.getState().destroyBurnerSession(conversation.id);
+    import('react-hot-toast').then(m => m.default.success("Burner Session Destroyed"));
+    useConversationStore.getState().openConversation(null);
+  };
+
   return (
     <div className="
       flex items-center justify-between px-4 py-3 z-30
@@ -180,7 +189,17 @@ const ChatHeader = ({ conversation, onBack, onInfoToggle, onMenuClick }: { conve
 
       {/* Action Module */}
       <div className="flex items-center gap-2 md:gap-3">
-        {!conversation.isGroup && (
+        {isBurner && (
+          <button
+            onClick={handleDestroyBurner}
+            aria-label="Destroy Burner Session"
+            className="flex items-center justify-center px-3 h-9 rounded-full bg-red-500/10 text-red-500 hover:bg-red-500/20 active:bg-red-500/30 transition-all duration-200 border border-red-500/20 text-xs font-bold uppercase tracking-wider"
+          >
+            Destroy
+          </button>
+        )}
+        
+        {!conversation.isGroup && !isBurner && (
           <>
             <button
               onClick={handleVoiceCall}
