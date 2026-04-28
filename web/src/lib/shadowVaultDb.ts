@@ -1,4 +1,4 @@
-import { db, DecryptedMessageRecord } from './db';
+import { db, DecryptedMessageRecord, PqDrSessionRecord } from './db';
 import { Dexie } from 'dexie';
 import type { Message } from '@store/conversation';
 import { getSodium } from '@lib/sodiumInitializer';
@@ -57,6 +57,58 @@ class NyxShadowVaultProxy {
 
   get storyKeys() {
     return db.storyKeys;
+  }
+
+  async savePqDrSession(record: PqDrSessionRecord): Promise<void> {
+    try {
+      const encryptedState = await encryptVaultText(JSON.stringify(record.state));
+      await db.pqDrSessions.put({
+        ...record,
+        state: encryptedState as any // Stored encrypted
+      });
+    } catch (e) {
+      console.error("Failed to save PQ-DR session:", e);
+    }
+  }
+
+  async getPqDrSession(conversationId: string): Promise<PqDrSessionRecord | undefined> {
+    try {
+      const record = await db.pqDrSessions.get(conversationId);
+      if (!record) return undefined;
+      
+      // Attempt decryption
+      if (typeof record.state === 'string') {
+        const decryptedStateStr = await decryptVaultText(record.state);
+        if (decryptedStateStr) {
+          return {
+            ...record,
+            state: JSON.parse(decryptedStateStr)
+          };
+        }
+      }
+      return undefined;
+    } catch (e) {
+      console.error("Failed to get PQ-DR session:", e);
+      return undefined;
+    }
+  }
+
+  async hasPqDrSession(conversationId: string): Promise<boolean> {
+    try {
+      const count = await db.pqDrSessions.where('conversationId').equals(conversationId).count();
+      return count > 0;
+    } catch (e) {
+      console.error("Failed to check PQ-DR session:", e);
+      return false;
+    }
+  }
+
+  async deletePqDrSession(conversationId: string): Promise<void> {
+    try {
+      await db.pqDrSessions.delete(conversationId);
+    } catch (e) {
+      console.error("Failed to delete PQ-DR session:", e);
+    }
   }
 
   async exportDatabase(): Promise<string> {

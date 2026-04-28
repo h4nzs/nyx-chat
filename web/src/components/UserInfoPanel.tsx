@@ -20,7 +20,7 @@ import { useTranslation } from 'react-i18next';
 export default function UserInfoPanel({ userId }: { userId: UserId }) {
   // Tambahkan namespace 'common' untuk menangkap pesan error global
   const { t } = useTranslation(['modals', 'common']);
-  const { activeId } = useConversationStore();
+  const { activeId, conversations, upgradeToPqDr, downgradeToSenderKey } = useConversationStore();
   const { verifiedStatus, setVerified } = useVerificationStore();
   const navigate = useNavigate();
   const [user, setUser] = useState<ProfileUser | null>(null);
@@ -30,6 +30,9 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
   const [showSafetyModal, setShowSafetyModal] = useState(false);
   const [safetyNumber, setSafetyNumber] = useState('');
   const [activeTab, setActiveTab] = useState('details');
+
+  const activeConversation = conversations.find(c => c.id === activeId);
+  const isPqDr = activeConversation?.encryptionMode === 'PQ_DR';
 
   const tabs = [
     { id: 'details', label: t('modals:user_info.tabs.details') },
@@ -128,6 +131,20 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
             </p>
           </div>
           <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-4 space-y-2">
+            <div className="flex items-center justify-between p-3 rounded-lg bg-bg-surface shadow-neumorphic-pressed">
+              <span className="font-semibold text-text-primary">Paranoid Mode (PQ-DR)</span>
+              <button
+                onClick={() => {
+                  if (activeId) {
+                    if (isPqDr) downgradeToSenderKey(activeId, false);
+                    else upgradeToPqDr(activeId);
+                  }
+                }}
+                className={`w-12 h-6 rounded-full transition-colors relative ${isPqDr ? 'bg-accent' : 'bg-border'}`}
+              >
+                <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${isPqDr ? 'translate-x-6' : ''}`} />
+              </button>
+            </div>
             <button
               onClick={handleViewProfile}
               className="w-full p-3 rounded-lg font-semibold text-white bg-accent shadow-neumorphic-convex active:shadow-neumorphic-pressed transition-all"

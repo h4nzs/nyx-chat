@@ -14,6 +14,9 @@ export const StoryIdSchema = z.string().min(1).transform((val) => asStoryId(val)
 
 // --- Minimal Shared Schemas ---
 // Digunakan sebagai pondasi awal sebelum kita memvalidasi seluruh entitas
+export const EncryptionModeEnum = z.enum(['SENDER_KEY', 'PQ_DR']);
+export type EncryptionMode = z.infer<typeof EncryptionModeEnum>;
+
 export const MinimalUserSchema = z.object({
   id: UserIdSchema,
   username: z.string().optional(),
@@ -33,6 +36,8 @@ export const MinimalConversationSchema = z.object({
   unreadCount: z.number().default(0),
   keyRotationPending: z.boolean().optional(),
   requiresKeyRotation: z.boolean().optional(),
+  encryptionMode: EncryptionModeEnum.default('SENDER_KEY'),
+  activePqDeviceId: z.string().nullable().optional(),
 }).passthrough();
 
 export const ParticipantSchema = z.object({
