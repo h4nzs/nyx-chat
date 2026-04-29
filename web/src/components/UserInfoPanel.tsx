@@ -16,11 +16,17 @@ import MediaGallery from './MediaGallery';
 import type { UserId, ProfileUser } from '@nyx/shared';
 import { asConversationId } from '@nyx/shared';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 
 export default function UserInfoPanel({ userId }: { userId: UserId }) {
   // Tambahkan namespace 'common' untuk menangkap pesan error global
   const { t } = useTranslation(['modals', 'common']);
-  const { activeId, conversations, upgradeToPqDr, downgradeToSenderKey } = useConversationStore();
+  const { activeId, conversations, upgradeToPqDr, downgradeToSenderKey } = useConversationStore(useShallow(s => ({
+    activeId: s.activeId,
+    conversations: s.conversations,
+    upgradeToPqDr: s.upgradeToPqDr,
+    downgradeToSenderKey: s.downgradeToSenderKey
+  })));
   const { verifiedStatus, setVerified } = useVerificationStore();
   const navigate = useNavigate();
   const [user, setUser] = useState<ProfileUser | null>(null);

@@ -475,8 +475,7 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
       const masterSeed = await useAuthStore.getState().getMasterSeed();
 
       if (importData['messageKeys']) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const hasPlaintext = importData['messageKeys'].some((mk: any) => mk.plaintext);
+          const hasPlaintext = importData['messageKeys'].some((mk: unknown) => mk && typeof mk === 'object' && 'plaintext' in mk && mk.plaintext);
           if (hasPlaintext) {
               if (!masterSeed) {
                   throw new Error("Missing master seed: Cannot securely import plaintext message keys.");

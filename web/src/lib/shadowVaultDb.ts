@@ -64,7 +64,7 @@ class NyxShadowVaultProxy {
       const encryptedState = await encryptVaultText(JSON.stringify(record.state));
       await db.pqDrSessions.put({
         ...record,
-        state: encryptedState as any // Stored encrypted
+        state: encryptedState as unknown as PqDrSessionRecord['state'] // Stored encrypted but typed appropriately for Dexie
       });
     } catch (e) {
       console.error("Failed to save PQ-DR session:", e);

@@ -164,7 +164,7 @@ export class NyxDatabase extends Dexie {
     });
 
     this.version(2).upgrade(trans => {
-      return trans.table('preKeys').toCollection().modify((preKey: any) => {
+      return trans.table('preKeys').toCollection().modify((preKey: Record<string, unknown>) => {
         if (preKey.keyPair) {
           preKey.encryptedPrivateKey = preKey.keyPair;
           delete preKey.keyPair;
