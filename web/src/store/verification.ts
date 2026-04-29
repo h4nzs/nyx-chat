@@ -51,7 +51,7 @@ export const useVerificationStore = create<VerificationState>((set, _get) => ({
       if (peer && peer.publicKey) {
         const storedKey = localStorage.getItem(`${VERIFIED_PREFIX}${convo.id}`);
         if (storedKey) {
-          const fingerprint = await computeFingerprint(peer as any);
+          const fingerprint = await computeFingerprint(peer as import('@utils/safetyNumber').PeerSecurityInfo);
           if (storedKey === fingerprint) {
             initialStatus[convo.id] = true;
           } else if (fingerprint && storedKey === peer.publicKey) {

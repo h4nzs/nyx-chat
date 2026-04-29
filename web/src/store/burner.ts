@@ -162,7 +162,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
           targetDeviceId: hostDeviceId,
           hostUserId,
           ciphertext: JSON.stringify(payload)
-        }, (res: any) => {
+        }, (res: { ok?: boolean; error?: string } | null | undefined) => {
           if (res && res.ok) {
             let parsedContent = content;
             let fileData = {};
@@ -222,7 +222,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
             const myPqKeys = await authStore.getPqEncryptionKeyPair(); // Host PQ
 
             const guestPkBytes = sodium.from_base64(guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
-            const savedCtBytes = sodium.from_base64((header as any).ct, sodium.base64_variants.URLSAFE_NO_PADDING);
+            const savedCtBytes = sodium.from_base64((header as { ct: string }).ct, sodium.base64_variants.URLSAFE_NO_PADDING);
             
             const { worker_burner_dr_init_host } = await import('../lib/crypto-worker-proxy');
             const initRes = await worker_burner_dr_init_host({
@@ -313,10 +313,10 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
              isViewed: false,
              ...fileData
           };
-          useMessageStore.getState().addOptimisticMessage(roomId, mainMsg as any);
+          useMessageStore.getState().addOptimisticMessage(roomId, mainMsg as unknown as import('@nyx/shared').Message);
           
           const { useConversationStore } = await import('./conversation');
-          useConversationStore.getState().updateConversationLastMessage(roomId, mainMsg as any);
+          useConversationStore.getState().updateConversationLastMessage(roomId, mainMsg as unknown as import('@nyx/shared').Message);
         }
 
         set(s => ({ messages: [...s.messages, msg] }));
@@ -373,7 +373,8 @@ export async function generateBurnerLink(): Promise<string> {
 
   // Fetch current device ID
   const { authFetch } = await import('../lib/api');
-  const devices = await authFetch<any[]>('/api/users/me/devices');
+  interface Device { id: string; isCurrent: boolean; name: string; lastActiveAt: string; createdAt: string; }
+  const devices = await authFetch<Device[]>('/api/users/me/devices');
   const currentDevice = devices.find(d => d.isCurrent);
   if (!currentDevice) throw new Error("Could not determine current device ID");
   const myDeviceId = currentDevice.id;
