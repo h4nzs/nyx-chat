@@ -498,6 +498,9 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
     if (payload.type === 'GHOST_SYNC') {
       return payload;
     }
+    if (['PROTOCOL_UPGRADE_REQ', 'PROTOCOL_UPGRADE_ACK', 'PROTOCOL_DOWNGRADE'].includes(payload.type)) {
+      return payload;
+    }
     if (payload.type === 'STORY_KEY') {
       return payload;
     }
@@ -1076,7 +1079,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const isGhostSync = silentPayload?.type === 'GHOST_SYNC';
     const isUnsend = silentPayload?.type === 'UNSEND';
     const isReactionRemove = silentPayload?.type === 'reaction_remove';
-    const shouldBeSilent = isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload;
+    const isProtocolUpgradeReq = silentPayload?.type === 'PROTOCOL_UPGRADE_REQ';
+    const isProtocolUpgradeAck = silentPayload?.type === 'PROTOCOL_UPGRADE_ACK';
+    const isProtocolDowngrade = silentPayload?.type === 'PROTOCOL_DOWNGRADE';
+    const shouldBeSilent = isSilent || data.isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload || isProtocolUpgradeReq || isProtocolUpgradeAck || isProtocolDowngrade;
 
     if (!shouldBeSilent) {
         let optimisticContent = data.content;
@@ -1501,8 +1507,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             const isGhostSync = silentPayload?.type === 'GHOST_SYNC';
             const isUnsend = silentPayload?.type === 'UNSEND';
             const isReactionRemove = silentPayload?.type === 'reaction_remove';
+            const isProtocolUpgradeReq = silentPayload?.type === 'PROTOCOL_UPGRADE_REQ';
+            const isProtocolUpgradeAck = silentPayload?.type === 'PROTOCOL_UPGRADE_ACK';
+            const isProtocolDowngrade = silentPayload?.type === 'PROTOCOL_DOWNGRADE';
             
-            const shouldBeSilent = payloadData.isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload;
+            const shouldBeSilent = payloadData.isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload || isProtocolUpgradeReq || isProtocolUpgradeAck || isProtocolDowngrade;
 
             // 2. Tangani Reaksi (Tanpa Bubble)
             if (isReactionPayload) {
@@ -1747,10 +1756,32 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       if (fetchedMessages.length > 0) {
         const processedMessages: Message[] = [];
 
-        // 1. HANYA DEKRIPSI DI DALAM LOOP
+        // 1. CEK LOKAL DAN DEKRIPSI HANYA PESAN BARU
         for (const message of fetchedMessages) {
-          const decrypted = await decryptMessageObject(message, undefined, 0, { skipRetries: true });
-          processedMessages.push(decrypted);
+          try {
+            // Cek Local Cache Lebih Dulu
+            const localMessage = await shadowVault.getMessage(message.id);
+            
+            // Gunakan Plaintext Lokal jika sudah terdekripsi dengan baik
+            const isLocalValid = localMessage && localMessage.content && !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error', '<Decryption Failed>'].includes(localMessage.content || '');
+            
+            if (isLocalValid) {
+              processedMessages.push({ ...message, ...localMessage });
+              continue;
+            }
+
+            // Dekripsi Hanya Pesan Baru
+            const decrypted = await decryptMessageObject(message, undefined, 0, { skipRetries: true });
+            processedMessages.push(decrypted);
+          } catch (err) {
+            console.error(`[Decrypt] Error decrypting message ${message.id}:`, err);
+            // Error Boundary pada Dekripsi
+            processedMessages.push({
+              ...message,
+              content: '<Decryption Failed>',
+              error: true
+            } as unknown as Message);
+          }
         }
 
         // 2. PROSES & GABUNGKAN DATA DI LUAR LOOP
@@ -1984,6 +2015,113 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               console.error('[Stories] Failed to parse incoming story key message', e);
           }
           return null; 
+      }
+
+      if (decrypted.content && decrypted.content.startsWith('{')) {
+          try {
+              const data = JSON.parse(decrypted.content);
+              
+              if (data.type === 'PROTOCOL_UPGRADE_REQ' && data.deviceId && data.hostClassicalPk && data.hostPqPk) {
+                  const { authFetch } = await import('@lib/api');
+                  const myDevices = await authFetch<any[]>('/api/users/me/devices');
+                  const currentDevice = myDevices.find(d => d.isCurrent);
+                  const myDeviceId = currentDevice?.id || '';
+                  const peerDeviceId = data.deviceId;
+                  
+                  const isPending = (window as any)[`pendingPqUpgrade_${conversationId}`];
+                  
+                  if (isPending && myDeviceId.localeCompare(peerDeviceId) > 0) {
+                      // We both sent a REQ, and I am the tie-breaker winner (Host).
+                      // Ignore this REQ, wait for the other side to process my REQ and send an ACK.
+                      return null;
+                  }
+                  
+                  // Otherwise, I act as Guest. (Either I didn't send a REQ, or I sent one but lost the tie-breaker).
+                  if (isPending) {
+                      delete (window as any)[`pendingPqUpgrade_${conversationId}`];
+                  }
+
+                  const { worker_burner_dr_init_guest } = await import('@lib/crypto-worker-proxy');
+                  const { getSodiumLib } = await import('@utils/crypto');
+                  const sodium = await getSodiumLib();
+                  
+                  const hostClassicalPkBytes = sodium.from_base64(data.hostClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  const hostPqPkBytes = sodium.from_base64(data.hostPqPk, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  
+                  const { state: newState, guestClassicalPk: guestPk } = await worker_burner_dr_init_guest({
+                      hostClassicalPk: hostClassicalPkBytes,
+                      hostPqPk: hostPqPkBytes
+                  });
+                  
+                  const { shadowVault } = await import('@lib/shadowVaultDb');
+                  await shadowVault.savePqDrSession({
+                      conversationId,
+                      state: newState,
+                      peerClassicalPk: data.hostClassicalPk,
+                      peerDeviceId: peerDeviceId,
+                      version: 1,
+                      negotiationStatus: 'ESTABLISHED',
+                      lastActivity: Date.now()
+                  });
+                  
+                  await get().sendMessage(conversationId, {
+                      content: JSON.stringify({ 
+                          type: "PROTOCOL_UPGRADE_ACK", 
+                          savedCt: newState.savedCt,
+                          guestClassicalPk: guestPk 
+                      }),
+                      isSilent: true
+                  });
+                  
+                  const { useConversationStore } = await import('@store/conversation');
+                  useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'PQ_DR', activePqDeviceId: peerDeviceId });
+                  
+                  return null;
+              }
+              
+              if (data.type === 'PROTOCOL_UPGRADE_ACK' && data.savedCt && data.guestClassicalPk) {
+                  const { worker_burner_dr_init_host } = await import('@lib/crypto-worker-proxy');
+                  const { getSodiumLib, getMyEncryptionKeyPair } = await import('@utils/crypto');
+                  const sodium = await getSodiumLib();
+                  const authStore = (await import('@store/auth')).useAuthStore.getState();
+                  const myPqKeys = await authStore.getPqEncryptionKeyPair();
+                  const myClassicalKeys = await getMyEncryptionKeyPair();
+                  
+                  const guestClassicalPkBytes = sodium.from_base64(data.guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  const savedCtBytes = sodium.from_base64(data.savedCt, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  
+                  const { state: newState } = await worker_burner_dr_init_host({
+                      guestClassicalPk: guestClassicalPkBytes,
+                      hostClassicalSk: myClassicalKeys.privateKey,
+                      savedCt: savedCtBytes,
+                      hostPqSk: myPqKeys.privateKey
+                  });
+                  
+                  const { shadowVault } = await import('@lib/shadowVaultDb');
+                  await shadowVault.savePqDrSession({
+                      conversationId,
+                      state: newState,
+                      peerClassicalPk: data.guestClassicalPk,
+                      peerDeviceId: null, // Since we act as host, we locked to our own device earlier
+                      version: 1,
+                      negotiationStatus: 'ESTABLISHED',
+                      lastActivity: Date.now()
+                  });
+                  
+                  const { useConversationStore } = await import('@store/conversation');
+                  useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'PQ_DR' });
+                  return null;
+              }
+              
+              if (data.type === 'PROTOCOL_DOWNGRADE') {
+                  const { shadowVault } = await import('@lib/shadowVaultDb');
+                  await shadowVault.deletePqDrSession(conversationId);
+                  
+                  const { useConversationStore } = await import('@store/conversation');
+                  useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'SENDER_KEY', activePqDeviceId: null });
+                  return null;
+              }
+          } catch (e) {}
       }
 
       if (decrypted.error || decrypted.content === 'waiting_for_key' || decrypted.content?.startsWith('[')) {

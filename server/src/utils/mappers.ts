@@ -93,6 +93,8 @@ export const toConversation = (conv: PrismaConversationInput): Conversation => (
   participants: conv.participants ? conv.participants.map(toParticipant) : [],
   unreadCount: 0,
   lastMessage: null,
+  encryptionMode: 'SENDER_KEY',
+  activePqDeviceId: undefined,
 });
 
 export const toRawServerMessage = (msg: PrismaMessageInput): RawServerMessage => ({
