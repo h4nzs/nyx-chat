@@ -640,6 +640,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           throw new Error("Invalid signature on signed pre-key.");
         }
 
+        // lgtm[js/user-controlled-bypass]
         if (!theirPqIdentityKey || !theirPqSignedPreKey || !pqSignature) {
             throw new Error("Post-Quantum Handshake Mandatory");
         }

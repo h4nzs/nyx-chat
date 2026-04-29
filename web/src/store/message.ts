@@ -982,16 +982,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       } catch {}
 
       const msg = {
-          id: `temp_${actualTempId}` as any, tempId: actualTempId, optimistic: true,
-          content: data.content, senderId: user.id as any, sender: user,
-          createdAt: new Date().toISOString(), conversationId: conversationId as any, status: 'SENDING',
+          id: `temp_${actualTempId}`, tempId: actualTempId, optimistic: true,
+          content: data.content, senderId: user.id, sender: user,
+          createdAt: new Date().toISOString(), conversationId: conversationId, status: 'SENDING',
           isSilent: isSilent
-      } as Message;
+      } as unknown as Message;
 
       if (!isSilent) {
         get().addOptimisticMessage(conversationId, msg);
         const { useConversationStore } = await import('./conversation');
-        useConversationStore.getState().updateConversationLastMessage(conversationId, { ...msg, content: lastMsgPreview, fileType: data.fileType, fileName: data.fileName } as any);
+        useConversationStore.getState().updateConversationLastMessage(conversationId, { ...msg, content: lastMsgPreview, fileType: data.fileType, fileName: data.fileName } as unknown as Message);
       }
       
       try {
@@ -2023,12 +2023,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               
               if (data.type === 'PROTOCOL_UPGRADE_REQ' && data.deviceId && data.hostClassicalPk && data.hostPqPk) {
                   const { authFetch } = await import('@lib/api');
-                  const myDevices = await authFetch<any[]>('/api/users/me/devices');
+                  interface Device { id: string; isCurrent: boolean; name: string; lastActiveAt: string; createdAt: string; }
+                  const myDevices = await authFetch<Device[]>('/api/users/me/devices');
                   const currentDevice = myDevices.find(d => d.isCurrent);
                   const myDeviceId = currentDevice?.id || '';
                   const peerDeviceId = data.deviceId;
                   
-                  const isPending = (window as any)[`pendingPqUpgrade_${conversationId}`];
+                  type WindowWithPending = Window & typeof globalThis & Record<string, unknown>;
+                  const isPending = (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`];
                   
                   if (isPending && myDeviceId.localeCompare(peerDeviceId) > 0) {
                       // We both sent a REQ, and I am the tie-breaker winner (Host).
@@ -2038,7 +2040,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   
                   // Otherwise, I act as Guest. (Either I didn't send a REQ, or I sent one but lost the tie-breaker).
                   if (isPending) {
-                      delete (window as any)[`pendingPqUpgrade_${conversationId}`];
+                      delete (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`];
                   }
 
                   const { worker_burner_dr_init_guest } = await import('@lib/crypto-worker-proxy');
@@ -2121,7 +2123,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'SENDER_KEY', activePqDeviceId: null });
                   return null;
               }
-          } catch (e) {}
+          } catch (e) {
+              console.error(`[Shield] Error processing protocol message for conversation ${conversationId}`, { error: e, content: decrypted.content });
+          }
       }
 
       if (decrypted.error || decrypted.content === 'waiting_for_key' || decrypted.content?.startsWith('[')) {

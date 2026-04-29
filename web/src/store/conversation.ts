@@ -158,39 +158,54 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   upgradeToPqDr: async (conversationId: string) => {
-    (window as any)[`pendingPqUpgrade_${conversationId}`] = true;
+    type WindowWithPending = Window & typeof globalThis & Record<string, unknown>;
+    (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`] = true;
     
-    const { authFetch } = await import('@lib/api');
-    const { getSodiumLib, getMyEncryptionKeyPair } = await import('@utils/crypto');
-    const authStore = (await import('./auth')).useAuthStore.getState();
-    const myClassicalKeys = await getMyEncryptionKeyPair();
-    const myPqKeys = await authStore.getPqEncryptionKeyPair();
-    
-    const myDevices = await authFetch<any[]>('/api/users/me/devices');
-    const currentDevice = myDevices.find(d => d.isCurrent);
-    const myDeviceId = currentDevice?.id || '';
+    try {
+      const { authFetch } = await import('@lib/api');
+      const { getSodiumLib, getMyEncryptionKeyPair } = await import('@utils/crypto');
+      const authStore = (await import('./auth')).useAuthStore.getState();
+      const myClassicalKeys = await getMyEncryptionKeyPair();
+      const myPqKeys = await authStore.getPqEncryptionKeyPair();
+      
+      interface Device { id: string; isCurrent: boolean; name: string; lastActiveAt: string; createdAt: string; }
+      const myDevices = await authFetch<Device[]>('/api/users/me/devices');
+      const currentDevice = myDevices.find(d => d.isCurrent);
+      if (!currentDevice?.id) {
+          throw new Error('Current device ID not found');
+      }
+      const myDeviceId = currentDevice.id;
 
-    const sodium = await getSodiumLib();
-    const hostClassicalPk = sodium.to_base64(myClassicalKeys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-    const hostPqPk = sodium.to_base64(myPqKeys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const sodium = await getSodiumLib();
+      const hostClassicalPk = sodium.to_base64(myClassicalKeys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      const hostPqPk = sodium.to_base64(myPqKeys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
 
-    const { useMessageStore } = await import('./message');
-    await useMessageStore.getState().sendMessage(conversationId, {
-      content: JSON.stringify({ 
-          type: 'PROTOCOL_UPGRADE_REQ',
-          deviceId: myDeviceId,
-          hostClassicalPk,
-          hostPqPk
-      }),
-      isSilent: true
-    });
+      const { useMessageStore } = await import('./message');
+      await useMessageStore.getState().sendMessage(conversationId, {
+        content: JSON.stringify({ 
+            type: 'PROTOCOL_UPGRADE_REQ',
+            deviceId: myDeviceId,
+            hostClassicalPk,
+            hostPqPk
+        }),
+        isSilent: true
+      });
+
+      // Auto-clear after a short TTL
+      setTimeout(() => {
+        delete (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`];
+      }, 30000);
+    } catch (error) {
+      delete (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`];
+      throw error;
+    }
   },
 
   downgradeToSenderKey: async (conversationId: string, isFromPeer = false) => {
     const { shadowVault } = await import('@lib/shadowVaultDb');
     await shadowVault.deletePqDrSession(conversationId);
     
-    get().updateConversation(conversationId, { encryptionMode: 'SENDER_KEY', activePqDeviceId: null });
+    await get().updateConversation(conversationId, { encryptionMode: 'SENDER_KEY', activePqDeviceId: null });
     
     if (!isFromPeer) {
       const { useMessageStore } = await import('./message');

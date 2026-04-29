@@ -526,7 +526,7 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
     // 5. Store locally
     await storeSessionKeySecurely(conversationId, sessionId, sessionKey);
   } catch (error) {
-    console.error(`Failed to ratchet session for ${conversationId}:`, error);
+    console.error('Failed to ratchet session for:', conversationId, error);
     throw new Error('Could not establish a secure session locally.');
   }
 }
@@ -1190,7 +1190,7 @@ async function doDecryptMessage(
       return { status: 'success', value: sodium.to_string(result.plaintext) };
 
     } catch (e: unknown) {
-      console.error(`DR Decryption failed for convo ${conversationId}:`, e);
+      console.error('DR Decryption failed for convo:', conversationId, e);
       return { status: 'error', error: e instanceof Error ? e : new Error('Failed to decrypt message') };
     }
   }
@@ -1292,7 +1292,7 @@ export async function deriveSessionKeyAsRecipient(
             });
             return sessionKey;
         } catch (e) {
-            console.error(`[X3DH] Failed to regenerate OTPK ${otpkId}:`, e);
+            console.error('[X3DH] Failed to regenerate OTPK:', otpkId, e);
         }
     }
   }
@@ -1586,3 +1586,5 @@ export async function forceRotateGroupSenderKey(conversationId: string) {
         console.error('Failed to rotate group key:', e);
     }
 }
+
+
