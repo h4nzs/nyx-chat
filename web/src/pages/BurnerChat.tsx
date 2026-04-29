@@ -166,15 +166,16 @@ export default function BurnerChat() {
               content: msg.content,
               createdAt: msg.createdAt,
               updatedAt: msg.createdAt,
-              isSilent: false,
-              isEdited: false,
-              isViewOnce: false,
-              isViewed: true,
+              type: msg.fileUrl ? 'FILE' : 'TEXT', // WAJIB UNTUK MERENDER COMPONENT BUBBLE NYX
               fileUrl: msg.fileUrl,
               fileName: msg.fileName,
               fileType: msg.fileType,
               fileKey: msg.fileKey,
-              fileSize: msg.fileSize
+              fileSize: msg.fileSize,
+              isSilent: false,
+              isEdited: false,
+              isViewOnce: false,
+              isViewed: true,
             } as unknown as Message;
 
             return (

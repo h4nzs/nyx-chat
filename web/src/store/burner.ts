@@ -166,9 +166,8 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
           if (res && res.ok) {
             let parsedContent = content;
             let fileData = {};
-
-            if (content.startsWith('{')) {
-              try {
+            try {
+              if (content.startsWith('{')) {
                 const data = JSON.parse(content);
                 if (data.type === 'file') {
                   parsedContent = data.text || '';
@@ -180,8 +179,8 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
                     fileKey: data.fileKey
                   };
                 }
-              } catch (e) {}
-            }
+              }
+            } catch (e) {}
 
             const msg: BurnerMessage = {
               id: Date.now().toString(),

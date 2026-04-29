@@ -2,6 +2,7 @@ import Dexie, { Table } from 'dexie';
 import type { Message } from '@store/conversation';
 import type { ConversationId, UserId, MessageId, StoryId, DoubleRatchetState } from '@nyx/shared';
 import type { GroupRatchetState } from '../types/crypto-common';
+import type { BurnerDoubleRatchetState } from '../workers/crypto.worker';
 
 // --- Interfaces for ShadowVault (Messages) ---
 export interface DecryptedMessageRecord {
@@ -20,6 +21,16 @@ export interface DecryptedMessageRecord {
   isDeletedLocal?: boolean;
   fileMeta?: string;
   expiresAt?: string | null;
+}
+
+export interface PqDrSessionRecord {
+  conversationId: string;
+  state: BurnerDoubleRatchetState;
+  peerClassicalPk: string | null;
+  peerDeviceId: string | null;
+  version: number;
+  negotiationStatus: 'INITIATED' | 'ESTABLISHED' | 'FAILED';
+  lastActivity: number;
 }
 
 // --- Interfaces for OfflineQueue ---
@@ -121,6 +132,7 @@ export class NyxDatabase extends Dexie {
   messageKeys!: Table<MessageKey, string>;
   pendingHeaders!: Table<PendingHeader, string>;
   groupSkippedKeys!: Table<{ key: string; mk: string }, string>;
+  pqDrSessions!: Table<PqDrSessionRecord, string>;
 
   constructor() {
     super('NyxUnifiedDB');
@@ -158,6 +170,10 @@ export class NyxDatabase extends Dexie {
           delete preKey.keyPair;
         }
       });
+    });
+
+    this.version(3).stores({
+      pqDrSessions: 'conversationId'
     });
   }
 }
