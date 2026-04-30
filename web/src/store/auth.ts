@@ -344,14 +344,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
                 throw new Error("Invalid password for local keys. Please recover your account.");
             }
         } else if (!alreadyHasKeys && !restoredNotSynced) {
-            // Fresh login on a brand new device -> Generate completely new identities
-            const { generateNewKeys } = await import('@lib/crypto-worker-proxy');
-            const keys = await generateNewKeys(password);
-            
-            newPublicKey = keys.encryptionPublicKeyB64;
-            newPqPublicKey = keys.pqEncryptionPublicKeyB64;
-            newSigningKey = keys.signingPublicKeyB64;
-            newEncryptedPrivateKey = keys.encryptedPrivateKeys;
+            // Fresh login on a brand new linked device -> Do not generate new keys!
+            // We will fetch the existing encryptedPrivateKey from the server and decrypt it.
+            newPublicKey = undefined;
+            newPqPublicKey = undefined;
+            newSigningKey = undefined;
+            newEncryptedPrivateKey = undefined;
         } else if (restoredNotSynced) {
             // Restored from phrase, but not synced to server yet
             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');

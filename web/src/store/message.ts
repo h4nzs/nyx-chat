@@ -836,10 +836,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             xhr.send(encryptedBlob);
         });
 
+        const syncId = crypto.randomUUID();
+        type WindowWithSync = Window & typeof globalThis & Record<string, string>;
+        (window as WindowWithSync)._nyx_last_sync_id = syncId;
+
         const payload = {
             type: 'HISTORY_SYNC',
             url: presignedRes.publicUrl,
-            key: key
+            key: key,
+            syncId: syncId
         };
         
         // Kirim E2EE payload ini ke "Self-Chat" (Pesan Tersimpan)
@@ -2208,6 +2213,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               const isSelfChat = conversation?.participants.length === 1 && conversation.participants[0].id === currentUser?.id;
 
               if (!currentUser || decrypted.senderId !== currentUser.id || !isSelfChat) {
+                  return decrypted;
+              }
+
+              type WindowWithSync = Window & typeof globalThis & Record<string, string>;
+              const mySyncId = (window as WindowWithSync)._nyx_last_sync_id;
+              if ('syncId' in silentPayload && silentPayload.syncId === mySyncId) {                  console.log('[History Sync] Ignored own sync payload on current device');
                   return decrypted;
               }
 
