@@ -85,6 +85,7 @@
     "no_conversations": "Aún no hay conversaciones",
     "new_group": "Nuevo grupo",
     "scan_qr": "Escanear código QR",
+    "new_burner": "Crear enlace de conversación temporal",
     "connection_error": "Error de conexión",
     "reconnect": "Reconectar"
   },

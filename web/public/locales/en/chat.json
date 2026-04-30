@@ -85,6 +85,7 @@
     "no_conversations": "No conversations yet",
     "new_group": "New Group",
     "scan_qr": "Scan QR Code",
+    "new_burner": "Create burner conversation link",
     "connection_error": "Connection Error",
     "reconnect": "Reconnect"
   },
