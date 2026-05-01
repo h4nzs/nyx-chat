@@ -478,7 +478,7 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
     const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
     
     // 1. Generate local session key and ID
-    const sessionId = crypto.randomUUID();
+    const sessionId = sodium.to_hex(sodium.randombytes_buf(16));
     const sessionKey = sodium.randombytes_buf(32);
     
     const conversationStore = useConversationStore.getState();

@@ -58,5 +58,8 @@
       "sharp",
       "unrs-resolver"
     ]
+  },
+  "devDependencies": {
+    "node-gyp": "^12.3.0"
   }
 }

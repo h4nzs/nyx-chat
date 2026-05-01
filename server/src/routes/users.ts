@@ -1,3 +1,4 @@
+import { getIo } from "../socket.js";
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
@@ -7,7 +8,6 @@ import { requireAuth } from '../middleware/auth.js'
 import { z } from 'zod'
 import { zodValidate } from '../utils/validate.js'
 import { ApiError } from '../utils/errors.js'
-import { getIo } from '../socket.js'
 import type { UserId, AuthJwtPayload } from '@nyx/shared'
 import { Buffer } from 'buffer'
 
@@ -97,6 +97,7 @@ router.get('/me/devices', requireAuth, async (req, res, next) => {
   }
 });
 
+
 // DELETE: Cabut akses (Logout) perangkat tertentu dari jarak jauh
 router.delete('/me/devices/:deviceId', requireAuth, async (req, res, next) => {
   try {
@@ -120,6 +121,15 @@ router.delete('/me/devices/:deviceId', requireAuth, async (req, res, next) => {
     await prisma.refreshToken.deleteMany({
         where: { deviceId: targetDeviceId }
     });
+
+    // 3. Kick Socket Connection
+    const io = getIo();
+    const targetSockets = await io.in(authUser.id).fetchSockets();
+    for (const socket of targetSockets) {
+      if ((socket as any).user?.deviceId === targetDeviceId) {
+         socket.disconnect(true);
+      }
+    }
 
     res.json({ message: "Device access revoked successfully." });
   } catch (e) { 

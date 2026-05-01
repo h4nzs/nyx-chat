@@ -47,6 +47,13 @@ async function ensureSodiumReady() {
 
 // --- INTERNAL HELPER FUNCTIONS FOR CORE CRYPTO LOGIC ---
 
+function _sanitizeError(error: unknown): string {
+    if (!error) return 'Unknown Error';
+    let msg = error instanceof Error ? error.message : String(error);
+    // Scrub potential JSON and long base64 strings
+    return msg.replace(/\{.*?\}/g, '[REDACTED_OBJ]').replace(/\b[a-zA-Z0-9+/=_-]{32,}\b/g, '[REDACTED_STR]').substring(0, 150);
+}
+
 export async function kdfChain(chainKey: Uint8Array): Promise<[Uint8Array, Uint8Array]> {
   await ensureSodiumReady();
   const messageKeyInput = new Uint8Array([0x01]);
@@ -220,10 +227,9 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
         }
       };
     } catch (error: unknown) {
-      console.error("Failed to retrieve private keys:", error);
+      console.error("Failed to retrieve private keys:", _sanitizeError(error));
       return { success: false, reason: 'incorrect_password' };
-    } finally {
-      if (kek) {
+    } finally {      if (kek) {
         try { sodium.memzero(kek); } catch { kek.fill(0); }
       }
     }
@@ -2123,8 +2129,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
     self.postMessage({ success: true, id, result });
 
   } catch (error: unknown) {
-    console.error('Error in crypto worker for type:', type, error);
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-    self.postMessage({ success: false, id, error: errorMessage });
+    const sanitizedError = _sanitizeError(error);
+    console.error('Error in crypto worker for type:', type, sanitizedError);
+    self.postMessage({ success: false, id, error: sanitizedError });
   }
 };

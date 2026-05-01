@@ -104,7 +104,15 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
         const encryptedBlob = await response.blob();
 
         const originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
-        const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
+        let decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
+
+        // ✅ SECURITY: Sanitize SVG files to prevent XSS if opened directly
+        if (originalType === 'image/svg+xml') {
+            const svgText = await decryptedBlob.text();
+            const DOMPurify = (await import('dompurify')).default;
+            const sanitizedSvg = DOMPurify.sanitize(svgText, { USE_PROFILES: { svg: true } });
+            decryptedBlob = new Blob([sanitizedSvg], { type: 'image/svg+xml' });
+        }
 
         if (isMounted) {
           objectUrl = URL.createObjectURL(decryptedBlob);

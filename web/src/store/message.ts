@@ -836,7 +836,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             xhr.send(encryptedBlob);
         });
 
-        const syncId = crypto.randomUUID();
+        const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+        const syncId = sodium.to_hex(sodium.randombytes_buf(16));
         type WindowWithSync = Window & typeof globalThis & Record<string, string>;
         (window as WindowWithSync)._nyx_last_sync_id = syncId;
 
@@ -1323,10 +1324,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         isViewOnce: payload.isViewOnce ?? false
       };
 
-      socket?.emit(
+      socket?.timeout(15000).emit(
         "message:send",
         sendPayload, 
-        async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
+        async (err: Error | null, res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
+          if (err) {
+              console.error("Socket timeout or error:", err);
+              if (!isReactionPayload && !shouldBeSilent) {
+                  get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
+                  toast.error(i18n.t('errors:failed_to_send_message_timeout', 'Failed to send message (Timeout).'));
+              }
+              return;
+          }
+
           if (res.ok && res.msg) {
               
             // 1. Pindah Kunci Dekripsi Segera
