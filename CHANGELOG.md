@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔒 [2.6.2] - 2026-05-01
+
+This update marks the completion of our transition to a fully Post-Quantum Hardened architecture. We have finalized the migration to `libsodium-wrappers` as our primary cryptographic provider and implemented rigorous security patches across the entire application layer.
+
+### 🛡️ Security & Cryptography
+* **Full Libsodium Migration:** Completed the migration of all cryptographic operations to `libsodium-wrappers`. Eliminated all remnants of the WebCrypto API (`crypto.randomUUID`, `crypto.subtle`) for core security functions to ensure a single, audited source of truth.
+* **Post-Quantum Hardening:** Enforced ML-KEM-768 (X-Wing) hybrid key exchange across all messaging protocols.
+* **Dynamic Sender Key Rotation:** Implemented a new smart rotation system for Sender Keys to maintain Post-Compromise Security (PCS), specifically hardening the unified Fan-Out architecture used for both 1-on-1 and group chats.
+* **Cryptographic App Lock:** Strengthened the "App Lock" by moving auto-unlock keys to `sessionStorage` (ephemeral) and implementing a memory-level wipe that clears private keys from RAM when the app loses focus.
+* **XSS & DOM Hardening:** Implemented specialized SVG sanitization for decrypted attachments and hardened the Markdown parser to block `javascript:` protocol execution in links.
+* **Paranoid Mode (PQ-DR):** Introduced "Paranoid Mode" (Post-Quantum Double Ratchet) for 1-on-1 messaging, providing a higher tier of security against future quantum threats.
+
+### ✨ New Features
+* **Stable Burner Chat:** Released the first stable version of Burner Chat sessions, providing a highly ephemeral and anonymous communication channel via secure link-based handshakes.
+* **Protocol Signaling:** Added dynamic protocol switch messaging to support seamless upgrades to PQC-hardened sessions.
+
+### 🐛 Bug Fixes & Stability
+* **Crypto Engine Reliability:** Fixed critical bugs in the PQC chain derivation and resolved race conditions in the key rotation sender state.
+* **Optimistic UI Timeout:** Added a 15-second timeout to all message-sending socket events, ensuring the UI correctly transitions to a "FAILED" state during network interruptions.
+* **Data Leakage Prevention:** Implemented `sanitizeErrorLog` to ensure that private keys, plaintext, or sensitive JSON metadata never leak into the browser console or UI toast notifications.
+* **Force Device Revocation:** Fixed a loophole where revoked devices could remain connected via Socket.IO; the server now enforces immediate disconnection upon device removal.
+
+### 🛠️ Maintenance & Testing
+* **Deep Security Audit:** Completed a comprehensive E2E security audit covering the UI, Zustand stores, and the Web Worker-based crypto engine.
+* **PQC Testing:** Integrated new cryptographic tests specifically for ML-KEM-768 and X-Wing constructs to ensure long-term stability and backward compatibility of keys.
+
 ## 🔒 [2.6.1] - 2026-04-24
 
 This maintenance release focuses on absolute Zero-Knowledge integrity and Post-Quantum hardening. We have completely removed the server's role in cryptographic key generation, ensuring the backend remains a blind relay that never touches plaintext keys.
