@@ -99,7 +99,8 @@ export default function Login() {
         if (recoveryPhrase) {
             // Kita punya Phrase! Kita bisa regenerasi semua kunci tanpa password user.
             // Buat password sementara untuk sesi lokal ini agar bisa disimpan di IDB
-            const sessionPassword = crypto.randomUUID(); 
+            const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+            const sessionPassword = sodium.to_hex(sodium.randombytes_buf(16)); 
             
             // Regenerasi bundle kunci dari phrase
             const { encryptedPrivateKeys } = await restoreFromPhrase(recoveryPhrase, sessionPassword);

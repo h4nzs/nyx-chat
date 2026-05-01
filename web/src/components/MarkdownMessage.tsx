@@ -53,12 +53,17 @@ const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content, isOwn = fals
             );
           },
           a({ node, ...props }) {
+            const safeHref = props.href?.startsWith('http://') || props.href?.startsWith('https://') || props.href?.startsWith('mailto:') 
+              ? props.href 
+              : '#';
+
             return (
               <a 
                 {...props} 
+                href={safeHref}
                 target="_blank" 
-                rel="noreferrer" 
-                className={isOwn ? "text-white underline font-medium hover:text-white/80" : "text-accent hover:underline cursor-pointer"}
+                rel="noopener noreferrer" 
+                className={isOwn ? "text-white underline font-medium hover:text-white/80 break-all" : "text-accent hover:underline cursor-pointer break-all"}
                 onClick={(e) => e.stopPropagation()} 
               />
             );

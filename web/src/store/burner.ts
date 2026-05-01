@@ -157,12 +157,16 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         };
 
         const socket = getSocket();
-        socket.emit('burner:send', {
+        socket.timeout(15000).emit('burner:send', {
           roomId,
           targetDeviceId: hostDeviceId,
           hostUserId,
           ciphertext: JSON.stringify(payload)
-        }, (res: { ok?: boolean; error?: string } | null | undefined) => {
+        }, (err: Error | null, res: { ok?: boolean; error?: string } | null | undefined) => {
+          if (err) {
+            console.error("Burner message timeout:", err);
+            return;
+          }
           if (res && res.ok) {
             let parsedContent = content;
             let fileData = {};
@@ -362,8 +366,8 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
 
 // Utility to generate a burner link for the Host
 export async function generateBurnerLink(): Promise<string> {
-  const roomId = `burner_${crypto.randomUUID()}`; 
   const sodium = await getSodiumLib();
+  const roomId = `burner_${sodium.to_hex(sodium.randombytes_buf(16))}`;
   
   // Host keys
   const authStore = useAuthStore.getState();

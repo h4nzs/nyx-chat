@@ -1,6 +1,7 @@
-import { Component, ReactNode } from 'react';
+import { Component, ReactNode, ErrorInfo } from 'react';
 import { FiAlertTriangle, FiRefreshCw } from 'react-icons/fi';
 import { withTranslation, WithTranslation } from 'react-i18next';
+import { sanitizeErrorLog } from '../utils/sanitize';
 
 interface ErrorBoundaryProps extends WithTranslation {
   children: ReactNode;
@@ -22,8 +23,12 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error('Error caught by boundary:', error, errorInfo);
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    const safeError = sanitizeErrorLog(error);
+    const safeComponentStack = sanitizeErrorLog(errorInfo.componentStack);
+    
+    // Only log sanitized strings, not the raw error objects
+    console.error('Error caught by boundary:', safeError, '\\nStack:', safeComponentStack);
   }
 
   handleReload = () => {

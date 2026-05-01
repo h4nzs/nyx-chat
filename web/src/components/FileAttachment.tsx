@@ -136,7 +136,15 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
 
         // 4. Dekripsi file dengan kunci yang valid
         const originalType = getFileType(); // Fungsi getFileType() yang sudah kita buat sebelumnya
-        const decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
+        let decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
+
+        // ✅ SECURITY: Sanitize SVG files to prevent XSS if opened directly
+        if (originalType === 'image/svg+xml') {
+            const svgText = await decryptedBlob.text();
+            const DOMPurify = (await import('dompurify')).default;
+            const sanitizedSvg = DOMPurify.sanitize(svgText, { USE_PROFILES: { svg: true } });
+            decryptedBlob = new Blob([sanitizedSvg], { type: 'image/svg+xml' });
+        }
 
         // 5. Render ke layar!
         if (isMounted) {

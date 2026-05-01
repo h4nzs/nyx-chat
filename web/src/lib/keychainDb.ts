@@ -44,24 +44,6 @@ export async function closeDatabaseConnection() {
   }
 }
 
-// Helper: Konversi Base64 <-> Uint8Array untuk di Browser
-function bytesToBase64(bytes: Uint8Array): string {
-    let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-}
-
-function base64ToBytes(base64: string): Uint8Array {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-}
-
 // ... existing helpers ...
 
 export async function getGroupSenderState(conversationId: string): Promise<GroupSenderState | null> {
@@ -73,7 +55,8 @@ export async function getGroupSenderState(conversationId: string): Promise<Group
       if (typeof record.state.CK === 'string') {
           ckString = record.state.CK;
       } else if ((record.state.CK as unknown) instanceof Uint8Array) {
-          ckString = bytesToBase64(record.state.CK);
+          const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+          ckString = sodium.to_base64(record.state.CK as unknown as Uint8Array, sodium.base64_variants.URLSAFE_NO_PADDING);
       }
   }
   
@@ -111,7 +94,8 @@ export async function getGroupReceiverState(conversationId: string, senderId: st
       if (typeof record.state.CK === 'string') {
           ckString = record.state.CK;
       } else if ((record.state.CK as unknown) instanceof Uint8Array) {
-          ckString = bytesToBase64(record.state.CK);
+          const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+          ckString = sodium.to_base64(record.state.CK as unknown as Uint8Array, sodium.base64_variants.URLSAFE_NO_PADDING);
       }
   }
 
@@ -416,9 +400,14 @@ export async function exportDatabaseToJson(): Promise<string> {
      }
   }
 
+  const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+
   return JSON.stringify(exportData, (key, value) => {
     if (value instanceof Uint8Array) {
-      return { __type: 'Uint8Array', data: Array.from(value) };
+      return { __type: 'Uint8Array', data: sodium.to_base64(value, sodium.base64_variants.URLSAFE_NO_PADDING) };
+    }
+    if (value instanceof ArrayBuffer) {
+      return { __type: 'Uint8Array', data: sodium.to_base64(new Uint8Array(value), sodium.base64_variants.URLSAFE_NO_PADDING) };
     }
     return value;
   });
@@ -450,8 +439,12 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
               finalJsonStr = await decryptWithKey(key, parsedInit.data) as string;
           }
 
+          const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
           importData = JSON.parse(finalJsonStr, (key, value) => {
             if (value && typeof value === 'object' && value.__type === 'Uint8Array') {
+              if (typeof value.data === 'string') {
+                  return sodium.from_base64(value.data, sodium.base64_variants.URLSAFE_NO_PADDING);
+              }
               return new Uint8Array(value.data);
             }
             return value;
@@ -469,38 +462,6 @@ export async function importDatabaseFromJson(jsonString: string, password?: stri
         'groupReceiverStates', 
         'groupSkippedKeys'
       ];
-
-      // --- DEVICE-SPECIFIC ENCRYPTION FOR HISTORY SYNC ---
-      const { useAuthStore } = await import('@store/auth');
-      const masterSeed = await useAuthStore.getState().getMasterSeed();
-
-      if (importData['messageKeys']) {
-          const hasPlaintext = importData['messageKeys'].some((mk: unknown) => mk && typeof mk === 'object' && 'plaintext' in mk && mk.plaintext);
-          if (hasPlaintext) {
-              if (!masterSeed) {
-                  throw new Error("Missing master seed: Cannot securely import plaintext message keys.");
-              }
-              const { worker_encrypt_session_key } = await import('@lib/crypto-worker-proxy');
-              for (const mk of importData['messageKeys']) {
-                  const m = mk as { key: Uint8Array, plaintext?: string };
-                  if (m.plaintext) {
-                      // FIX: Safe native base64 decode in browser
-                      const mkBytes = base64ToBytes(m.plaintext);
-                      m.key = await worker_encrypt_session_key(mkBytes, masterSeed);
-                      delete m.plaintext;
-                  }
-              }
-          }
-      }
-      const { encryptVaultText } = await import('@lib/shadowVaultDb');
-      if (importData['messages']) {
-          for (const msg of importData['messages']) {
-              const m = msg as { content?: string, fileMeta?: string, senderName?: string };
-              if (m.content) m.content = await encryptVaultText(m.content);
-              if (m.fileMeta) m.fileMeta = await encryptVaultText(m.fileMeta);
-              if (m.senderName) m.senderName = await encryptVaultText(m.senderName);
-          }
-      }
 
       await db.transaction('rw', tables.map(t => db.table(t)), async () => {
           for (const tableName of tables) {

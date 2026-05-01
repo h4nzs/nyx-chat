@@ -106,6 +106,7 @@ type RegisterResponse = {
 type Actions = {
   bootstrap: (force?: boolean) => Promise<void>;
   tryAutoUnlock: () => Promise<boolean>;
+  lockApp: () => void;
   login: (usernameHash: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
   registerAndGeneratePhrase: (data: { 
     encryptedProfile: string; 
@@ -265,6 +266,17 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       return false;
     },
 
+    lockApp: async () => {
+      // WIPE memory cache so decryption fails until unlocked
+      privateKeysCache = null;
+      set({ hasRestoredKeys: false });
+      
+      // Wipe sessionStorage so auto-unlock fails
+      const { setDeviceAutoUnlockReady } = await import('@lib/keyStorage');
+      sessionStorage.removeItem('nyx_device_auto_unlock_key');
+      await setDeviceAutoUnlockReady(false);
+    },
+
     setDecryptedKeys: async (keys: RetrievedKeys) => {
       privateKeysCache = keys;
       set({ hasRestoredKeys: true });
@@ -344,14 +356,12 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
                 throw new Error("Invalid password for local keys. Please recover your account.");
             }
         } else if (!alreadyHasKeys && !restoredNotSynced) {
-            // Fresh login on a brand new device -> Generate completely new identities
-            const { generateNewKeys } = await import('@lib/crypto-worker-proxy');
-            const keys = await generateNewKeys(password);
-            
-            newPublicKey = keys.encryptionPublicKeyB64;
-            newPqPublicKey = keys.pqEncryptionPublicKeyB64;
-            newSigningKey = keys.signingPublicKeyB64;
-            newEncryptedPrivateKey = keys.encryptedPrivateKeys;
+            // Fresh login on a brand new linked device -> Do not generate new keys!
+            // We will fetch the existing encryptedPrivateKey from the server and decrypt it.
+            newPublicKey = undefined;
+            newPqPublicKey = undefined;
+            newSigningKey = undefined;
+            newEncryptedPrivateKey = undefined;
         } else if (restoredNotSynced) {
             // Restored from phrase, but not synced to server yet
             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');

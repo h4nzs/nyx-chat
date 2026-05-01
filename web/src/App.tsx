@@ -244,6 +244,10 @@ const AppContent = () => {
           await silentRefresh();
         }
 
+        // If the app was locked in the background, we need to prompt the user.
+        // `hasRestoredKeys` will be false, so the UI will naturally prompt them
+        // if they try to read messages or if we trigger the auth check here.
+
         if (!socket?.connected) {
           if (user) {
             connectSocket();
@@ -263,6 +267,13 @@ const AppContent = () => {
         if (socket?.connected) {
           // Kasih tau server kalau user lagi minimize app/pindah tab/kunci layar
           socket.emit("user:away");
+        }
+
+        // --- AUTH LOCK (Cryptographic Wipe) ---
+        // If the user has Privacy Cloak enabled, we also wipe the keys from RAM and sessionStorage.
+        const { privacyCloak } = await import('./store/settings').then(m => m.useSettingsStore.getState());
+        if (privacyCloak) {
+           useAuthStore.getState().lockApp();
         }
       }
     };

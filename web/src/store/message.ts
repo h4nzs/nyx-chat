@@ -836,10 +836,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             xhr.send(encryptedBlob);
         });
 
+        const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+        const syncId = sodium.to_hex(sodium.randombytes_buf(16));
+        type WindowWithSync = Window & typeof globalThis & Record<string, string>;
+        (window as WindowWithSync)._nyx_last_sync_id = syncId;
+
         const payload = {
             type: 'HISTORY_SYNC',
             url: presignedRes.publicUrl,
-            key: key
+            key: key,
+            syncId: syncId
         };
         
         // Kirim E2EE payload ini ke "Self-Chat" (Pesan Tersimpan)
@@ -1318,10 +1324,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         isViewOnce: payload.isViewOnce ?? false
       };
 
-      socket?.emit(
+      socket?.timeout(15000).emit(
         "message:send",
         sendPayload, 
-        async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
+        async (err: Error | null, res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
+          if (err) {
+              console.error("Socket timeout or error:", err);
+              if (!isReactionPayload && !shouldBeSilent) {
+                  get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
+                  toast.error(i18n.t('errors:failed_to_send_message_timeout', 'Failed to send message (Timeout).'));
+              }
+              return;
+          }
+
           if (res.ok && res.msg) {
               
             // 1. Pindah Kunci Dekripsi Segera
@@ -2208,6 +2223,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               const isSelfChat = conversation?.participants.length === 1 && conversation.participants[0].id === currentUser?.id;
 
               if (!currentUser || decrypted.senderId !== currentUser.id || !isSelfChat) {
+                  return decrypted;
+              }
+
+              type WindowWithSync = Window & typeof globalThis & Record<string, string>;
+              const mySyncId = (window as WindowWithSync)._nyx_last_sync_id;
+              if ('syncId' in silentPayload && silentPayload.syncId === mySyncId) {                  console.log('[History Sync] Ignored own sync payload on current device');
                   return decrypted;
               }
 
