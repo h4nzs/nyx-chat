@@ -19,6 +19,7 @@ import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
 import ReportBugModal from '../components/ReportBugModal';
 import { api } from '@lib/api';
+import { sanitizeErrorLog } from '../utils/sanitize';
 import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@lib/keychainDb';
 import { executeLocalWipe } from '@lib/nukeProtocol';
 import { useUserProfile } from '@hooks/useUserProfile';
@@ -51,10 +52,6 @@ const parseApiError = (error: unknown, fallback: string): string => {
     }
   }
   return fallback;
-};
-
-const sanitizeErrorLog = (error: unknown): string => {
-  return error instanceof Error ? `${error.name}: ${error.message}` : 'UnknownError';
 };
 
 const RockerSwitch = ({ checked, onChange, disabled, label, ariaLabel }: { checked: boolean; onChange: () => void; disabled?: boolean; label?: string; ariaLabel?: string }) => (

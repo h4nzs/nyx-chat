@@ -24,7 +24,8 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
   currentSearchToken: null,
 
   searchMessages: async (query, conversationId) => {
-    const token = crypto.randomUUID();
+    const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+    const token = sodium.to_hex(sodium.randombytes_buf(16));
     set({ searchQuery: query, isSearching: true, currentSearchToken: token });
     
     if (!query.trim()) {

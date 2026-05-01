@@ -106,6 +106,7 @@ type RegisterResponse = {
 type Actions = {
   bootstrap: (force?: boolean) => Promise<void>;
   tryAutoUnlock: () => Promise<boolean>;
+  lockApp: () => void;
   login: (usernameHash: string, password: string, restoredNotSynced?: boolean) => Promise<void>;
   registerAndGeneratePhrase: (data: { 
     encryptedProfile: string; 
@@ -263,6 +264,17 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         } catch (e) { console.error("Error during auto-unlock:", e); } finally { set({ isInitializingCrypto: false }); }
       }
       return false;
+    },
+
+    lockApp: async () => {
+      // WIPE memory cache so decryption fails until unlocked
+      privateKeysCache = null;
+      set({ hasRestoredKeys: false });
+      
+      // Wipe sessionStorage so auto-unlock fails
+      const { setDeviceAutoUnlockReady } = await import('@lib/keyStorage');
+      sessionStorage.removeItem('nyx_device_auto_unlock_key');
+      await setDeviceAutoUnlockReady(false);
     },
 
     setDecryptedKeys: async (keys: RetrievedKeys) => {

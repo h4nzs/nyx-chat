@@ -127,6 +127,13 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
     const socketServer = getIo()
     if (socketServer) {
       socketServer.to(userId).emit('force_logout', { jti: jti as string })
+      
+      const targetSockets = await socketServer.in(userId).fetchSockets();
+      for (const socket of targetSockets) {
+        if ((socket as any).user?.deviceId === token.deviceId) {
+           socket.disconnect(true);
+        }
+      }
     }
 
     res.status(204).send()

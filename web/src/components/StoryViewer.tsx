@@ -80,8 +80,17 @@ export default function StoryViewer({ userId, onClose, onReply }: { userId: User
         try {
           const res = await fetch(currentStory.decryptedData.mediaUrl);
           const encryptedBlob = await res.blob();
-          const decryptedBlob = await decryptFile(encryptedBlob, currentStory.decryptedData.fileKey, currentStory.decryptedData.mimeType || 'application/octet-stream');
+          const originalType = currentStory.decryptedData.mimeType || 'application/octet-stream';
+          let decryptedBlob = await decryptFile(encryptedBlob, currentStory.decryptedData.fileKey, originalType);
           
+          // ✅ SECURITY: Sanitize SVG files to prevent XSS if opened directly
+          if (originalType === 'image/svg+xml') {
+              const svgText = await decryptedBlob.text();
+              const DOMPurify = (await import('dompurify')).default;
+              const sanitizedSvg = DOMPurify.sanitize(svgText, { USE_PROFILES: { svg: true } });
+              decryptedBlob = new Blob([sanitizedSvg], { type: 'image/svg+xml' });
+          }
+
           if (isActive) {
             const url = URL.createObjectURL(decryptedBlob);
             mediaBlobUrlRef.current = url;
