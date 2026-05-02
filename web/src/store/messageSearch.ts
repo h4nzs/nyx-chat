@@ -24,18 +24,19 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
   currentSearchToken: null,
 
   searchMessages: async (query, conversationId) => {
-    const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
-    const token = sodium.to_hex(sodium.randombytes_buf(16));
-    set({ searchQuery: query, isSearching: true, currentSearchToken: token });
-    
     if (!query.trim()) {
-      set({ searchResults: [], isSearching: false });
+      set({ searchResults: [], isSearching: false, searchQuery: query });
       return;
     }
 
     const normalizedQuery = query.toLowerCase();
+    let token: string | null = null;
 
     try {
+      const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+      token = sodium.to_hex(sodium.randombytes_buf(16));
+      set({ searchQuery: query, isSearching: true, currentSearchToken: token });
+      
       // 1. Fetch raw encrypted records for this conversation
       const rawResults = await shadowVault.messages
         .where('conversationId')

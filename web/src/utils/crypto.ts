@@ -54,7 +54,7 @@ export async function encryptGroupMetadata(
   if (conversation) {
     const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
     if (distributionKeys && distributionKeys.length > 0) {
-      emitGroupKeyDistribution(
+      await emitGroupKeyDistribution(
         conversationId,
         distributionKeys as { userId: string; key: string }[]
       );
@@ -535,7 +535,8 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
 
 // ✅ FASE 3: FAN-OUT GROUP SESSION BUILDER
 export async function ensureGroupSession(conversationId: string, participants: Participant[], forceRotate: boolean = false): Promise<Record<string, unknown>[] | null> {
-  const pending = pendingGroupSessionPromises.get(conversationId);
+  const cacheKey = `${conversationId}:${forceRotate}`;
+  const pending = pendingGroupSessionPromises.get(cacheKey);
   if (pending) return pending;
 
   if (groupSessionLocks.has(conversationId)) {
@@ -665,12 +666,12 @@ export async function ensureGroupSession(conversationId: string, participants: P
     }
   })();
 
-  pendingGroupSessionPromises.set(conversationId, promise as Promise<Record<string, unknown>[] | null>);
+  pendingGroupSessionPromises.set(cacheKey, promise as Promise<Record<string, unknown>[] | null>);
 
   try {
     return await promise as Record<string, unknown>[] | null;
   } finally {
-    pendingGroupSessionPromises.delete(conversationId);
+    pendingGroupSessionPromises.delete(cacheKey);
   }
 }
 
@@ -735,7 +736,7 @@ export async function rotateGroupKey(conversationId: string, reason: 'membership
     if (conversation) {
       const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
       if (distributionKeys) {
-        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+        await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
       } else {
         throw new Error("Security Failure: One or more devices do not support mandatory Post-Quantum encryption. Key rotation aborted.");
       }
@@ -871,7 +872,7 @@ async function doEncryptMessage(
           if (conversation) {
              const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true);
              if (distributionKeys) {
-               emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+               await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
              } else {
                throw new Error("Security Failure: One or more devices do not support mandatory Post-Quantum encryption. Key rotation aborted.");
              }

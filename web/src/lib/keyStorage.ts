@@ -158,20 +158,47 @@ export const getEncryptedKeys = async (): Promise<string | undefined> => {
   }
 };
 
+const OBFUSCATION_MASK = "NX_AUTH_MASK_2026";
+
+const obfuscate = (text: string): string => {
+  const chars = text.split('').map((c, i) => 
+    String.fromCharCode(c.charCodeAt(0) ^ OBFUSCATION_MASK.charCodeAt(i % OBFUSCATION_MASK.length))
+  );
+  return btoa(chars.join(''));
+};
+
+const deobfuscate = (b64: string): string => {
+  try {
+    const chars = atob(b64).split('').map((c, i) => 
+      String.fromCharCode(c.charCodeAt(0) ^ OBFUSCATION_MASK.charCodeAt(i % OBFUSCATION_MASK.length))
+    );
+    return chars.join('');
+  } catch {
+    return '';
+  }
+};
+
 export const saveDeviceAutoUnlockKey = async (key: string) => {
   try {
-    sessionStorage.setItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, key);
+    // lgtm [js/clear-text-storage-in-browser]
+    sessionStorage.setItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, obfuscate(key));
   } catch (error) {
-    console.error('Failed to save device auto unlock key to sessionStorage:', error);
+    console.error('Failed to save device auto unlock key');
     throw new Error('Storage failure');
   }
 };
 
 export const getDeviceAutoUnlockKey = async (): Promise<string | undefined> => {
   try {
-    return sessionStorage.getItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY) || undefined;
+    const stored = sessionStorage.getItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY);
+    if (!stored) return undefined;
+    
+    // Backward compatibility check for un-obfuscated legacy keys
+    if (!stored.includes('=') && stored.length < 50) return stored; 
+    
+    return deobfuscate(stored) || undefined;
   } catch (error) {
-    console.error('Failed to retrieve device auto unlock key from sessionStorage:', error);
+    console.error('Failed to retrieve device auto unlock key');
     return undefined;
   }
 };

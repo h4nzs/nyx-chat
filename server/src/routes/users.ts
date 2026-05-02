@@ -123,12 +123,16 @@ router.delete('/me/devices/:deviceId', requireAuth, async (req, res, next) => {
     });
 
     // 3. Kick Socket Connection
-    const io = getIo();
-    const targetSockets = await io.in(authUser.id).fetchSockets();
-    for (const socket of targetSockets) {
-      if ((socket as any).user?.deviceId === targetDeviceId) {
-         socket.disconnect(true);
+    try {
+      const io = getIo();
+      const targetSockets = await io.in(authUser.id).fetchSockets();
+      for (const socket of targetSockets) {
+        if ((socket as any).user?.deviceId === targetDeviceId) {
+           socket.disconnect(true);
+        }
       }
+    } catch (err) {
+      console.error("[Users] Failed to fetch sockets or disconnect:", err);
     }
 
     res.json({ message: "Device access revoked successfully." });

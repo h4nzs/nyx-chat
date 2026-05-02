@@ -62,7 +62,7 @@ const ensureGroupSessionIfNeeded = async (conversationId: string): Promise<boole
     try {
       const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
       if (distributionKeys && distributionKeys.length > 0) {
-        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+        await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string, targetDeviceId?: string, senderDeviceKey?: string }[]);
       }
     } catch (e: unknown) {
       console.error("Failed to ensure group session.", e);
