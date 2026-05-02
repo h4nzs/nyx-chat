@@ -103,7 +103,11 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
         }
         const encryptedBlob = await response.blob();
 
-        const originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
+        let originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
+        if (message.fileName?.toLowerCase().endsWith('.svg')) {
+            originalType = 'image/svg+xml';
+        }
+        
         let decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
 
         // ✅ SECURITY: Sanitize SVG files to prevent XSS if opened directly

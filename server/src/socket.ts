@@ -126,6 +126,17 @@ export function registerSocket(httpServer: HttpServer) {
         return next();
       }
 
+      // Check if device was recently revoked via sessions route
+      try {
+        const isRevoked = await redisClient.get(`revoked:device:${deviceId}`);
+        if (isRevoked === "1") {
+          socket.user = undefined;
+          return next();
+        }
+      } catch (err) {
+        console.error("[Socket] Failed to check revoked status in Redis:", err);
+      }
+
       // ✅ FIX: Ambil publicKey dari relasi devices, bukan langsung dari user
       const user = await prisma.user.findUnique({
         where: { id: userId },
@@ -281,50 +292,66 @@ export function registerSocket(httpServer: HttpServer) {
        if (conversationId && socket.user) socket.to(conversationId).emit("typing:update", { userId: socket.user.id, conversationId, isTyping: false });
     });
 
-    socket.on('messages:distribute_keys', async ({ conversationId, keys }: DistributeKeysPayload) => {
-      if (!await checkRateLimit(userId, 'keys', 50, 60)) return; 
-      if (!keys || !Array.isArray(keys) || !conversationId) return;
+    socket.on('messages:distribute_keys', async ({ conversationId, keys }: DistributeKeysPayload, callback?: (res: { ok: boolean }) => void) => {
+      if (!await checkRateLimit(userId, 'keys', 50, 60)) {
+         callback?.({ ok: false });
+         return;
+      }
+      if (!keys || !Array.isArray(keys) || !conversationId) {
+         callback?.({ ok: false });
+         return;
+      }
       
       try {
         const participant = await prisma.participant.findFirst({ where: { conversationId, userId } });
-        if (!participant) return;
+        if (!participant) {
+           callback?.({ ok: false });
+           return;
+        }
         
-        // ✅ SMART ROUTING: Kirim kunci HANYA ke perangkat tujuan
+        // Simpan kunci ke dalam database sebagai SYSTEM message agar bisa di-fetch oleh user offline (At-Least-Once Delivery)
         for (const keyPackage of keys) {
           if (keyPackage.userId && keyPackage.key) {
+            const payloadContent = JSON.stringify({
+              type: 'GROUP_KEY_DISTRIBUTION',
+              conversationId,
+              encryptedKey: keyPackage.key,
+              targetDeviceId: keyPackage.targetDeviceId,
+              senderId: userId,
+              senderDeviceKey: keyPackage.senderDeviceKey
+            });
+
+            // Persist the key distribution as a system message directed to the specific user/device
+            const newMessageRaw = await prisma.message.create({
+              data: {
+                conversationId,
+                senderId: userId,
+                content: payloadContent,
+                type: 'SYSTEM',
+                isViewOnce: false,
+                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 Days TTL for keys
+              }
+            });
+
+            const safeMessage = toRawServerMessage(newMessageRaw);
             
             if (keyPackage.targetDeviceId) {
-               // Cari semua socket milik user tujuan
                const targetSockets = await io.in(keyPackage.userId).fetchSockets();
-               
                for (const s of targetSockets) {
                   const authSocket = s as unknown as AuthenticatedSocket;
-                  // Tembakkan hanya jika deviceId socket cocok dengan targetDeviceId
                   if (authSocket.user?.deviceId === keyPackage.targetDeviceId) {
-                      authSocket.emit('session:new_key', {
-                          conversationId,
-                          encryptedKey: keyPackage.key,
-                          type: 'GROUP_KEY',
-                          senderId: userId,
-                          senderDeviceKey: keyPackage.senderDeviceKey
-                      });
+                      authSocket.emit('message:new', safeMessage);
                   }
                }
             } else {
-               // Fallback: Jika tidak ada targetDeviceId, broadcast ke semua (untuk kompabilitas mundur)
-               io.to(keyPackage.userId).emit('session:new_key', {
-                  conversationId,
-                  encryptedKey: keyPackage.key,
-                  type: 'GROUP_KEY',
-                  senderId: userId,
-                  senderDeviceKey: keyPackage.senderDeviceKey
-               });
+               io.to(keyPackage.userId).emit('message:new', safeMessage);
             }
-            
           }
         }
+        callback?.({ ok: true });
       } catch (error) {
         console.error(`[Key Distribution] Error:`, error);
+        callback?.({ ok: false });
       }
     });
 

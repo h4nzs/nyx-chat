@@ -439,8 +439,15 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
   getSocket()?.emit('session:fulfill_response', payload);
 }
 
-export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string }[]) {
-  getSocket()?.emit('messages:distribute_keys', { conversationId, keys });
+export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, senderDeviceKey?: string }[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = getSocket();
+    if (!socket?.connected) return reject(new Error('Socket not connected'));
+    (socket as any).emit('messages:distribute_keys', { conversationId, keys }, (res?: { ok: boolean }) => {
+      if (!res?.ok) return reject(new Error('Failed to distribute keys'));
+      resolve();
+    });
+  });
 }
 
 export function emitGroupKeyRequest(conversationId: string, targetSenderId?: string, targetDeviceKey?: string) {

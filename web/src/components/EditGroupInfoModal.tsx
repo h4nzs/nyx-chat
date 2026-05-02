@@ -33,7 +33,7 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
       // Ensure session exists
       const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
       if (distributionKeys && distributionKeys.length > 0) {
-        emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
+        await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string }[]);
       }
 
       const currentMetadata = conversation.decryptedMetadata || {};

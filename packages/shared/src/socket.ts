@@ -156,7 +156,7 @@ export interface ClientToServerEvents {
     "session:request_key": (payload: KeyRequestPayload) => void;
     "session:request_missing": (payload: { conversationId: string; sessionId: string }) => void; // Added
     "session:fulfill_response": (payload: KeyFulfillmentPayload) => void;
-    "messages:distribute_keys": (payload: DistributeKeysPayload) => void;
+    "messages:distribute_keys": (payload: DistributeKeysPayload, callback: (res: { ok: boolean }) => void) => void;
     "group:request_key": (payload: GroupKeyRequestPayload) => void;
     "group:fulfilled_key": (payload: KeyFulfillmentPayload) => void;
     "push:subscribe": (payload: PushSubscribePayload) => void;
