@@ -1932,8 +1932,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
              try {
                 const payload = JSON.parse(msg.content || '{}');
                 if (payload.type === 'GROUP_KEY_DISTRIBUTION') {
-                   const devices = (useAuthStore.getState().user as any)?.devices;
-                   const myDevice = Array.isArray(devices) ? devices.find((d: any) => d.isCurrent)?.id : undefined;
+                   type AuthUserWithDevices = { devices?: { id: string; isCurrent?: boolean }[] };
+                   const devices = (useAuthStore.getState().user as AuthUserWithDevices | null)?.devices;
+                   const myDevice = Array.isArray(devices) ? devices.find((d) => d.isCurrent)?.id : undefined;
                    
                    // Fallback for broadcast or specific device targeting
                    if (!payload.targetDeviceId || payload.targetDeviceId === myDevice) {

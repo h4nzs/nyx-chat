@@ -59,7 +59,7 @@ export default function CreateBurnerModal({ onClose }: Props) {
              createdAt: new Date().toISOString(),
              updatedAt: new Date().toISOString(),
              encryptedMetadata: "BURNER_CHAT"
-           } as any);
+           } as unknown as import('@nyx/shared').ConversationUi);
         }
       }
 

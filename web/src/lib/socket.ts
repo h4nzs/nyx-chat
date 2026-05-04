@@ -443,7 +443,7 @@ export function emitGroupKeyDistribution(conversationId: string, keys: { userId:
   return new Promise((resolve, reject) => {
     const socket = getSocket();
     if (!socket?.connected) return reject(new Error('Socket not connected'));
-    (socket as any).emit('messages:distribute_keys', { conversationId, keys }, (res?: { ok: boolean }) => {
+    (socket as unknown as import('socket.io-client').Socket).emit('messages:distribute_keys', { conversationId, keys }, (res?: { ok: boolean }) => {
       if (!res?.ok) return reject(new Error('Failed to distribute keys'));
       resolve();
     });

@@ -138,7 +138,7 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
       try {
         const targetSockets = await socketServer.in(userId).fetchSockets();
         for (const socket of targetSockets) {
-          if ((socket as any).user?.deviceId === token.deviceId) {
+          if ((socket as unknown as { user?: { deviceId?: string } }).user?.deviceId === token.deviceId) {
              socket.disconnect(true);
           }
         }
