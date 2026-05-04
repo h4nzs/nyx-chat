@@ -792,6 +792,17 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
       if (decrypted.content && decrypted.content.startsWith('{')) {
           try {
               const data = JSON.parse(decrypted.content);
+              const messageVersion = data.version || 0;
+              
+              if (data.type === 'PROTOCOL_UPGRADE_REQ' || data.type === 'PROTOCOL_UPGRADE_ACK' || data.type === 'PROTOCOL_DOWNGRADE') {
+                  const { shadowVault } = await import('@lib/shadowVaultDb');
+                  const currentSession = await shadowVault.getPqDrSession(conversationId);
+                  
+                  if (currentSession && messageVersion <= (currentSession.version || 0)) {
+                      console.log(`[Shield] Ignoring replay attack or old control message. Msg version: ${messageVersion}, Current: ${currentSession.version}`);
+                      return true; 
+                  }
+              }
               
               if (data.type === 'PROTOCOL_UPGRADE_REQ' && data.deviceId && data.hostClassicalPk && data.hostPqPk) {
                   const { authFetch } = await import('@lib/api');
@@ -830,7 +841,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                       state: newState,
                       peerClassicalPk: data.hostClassicalPk,
                       peerDeviceId: peerDeviceId,
-                      version: 1,
+                      version: messageVersion || 1,
                       negotiationStatus: 'ESTABLISHED',
                       lastActivity: Date.now()
                   });
@@ -839,7 +850,8 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                       content: JSON.stringify({ 
                           type: "PROTOCOL_UPGRADE_ACK", 
                           savedCt: newState.savedCt,
-                          guestClassicalPk: guestPk 
+                          guestClassicalPk: guestPk,
+                          version: messageVersion ? messageVersion + 1 : 2
                       }),
                       isSilent: true
                   });
@@ -874,7 +886,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                       state: newState,
                       peerClassicalPk: data.guestClassicalPk,
                       peerDeviceId: null,
-                      version: 1,
+                      version: messageVersion || 1,
                       negotiationStatus: 'ESTABLISHED',
                       lastActivity: Date.now()
                   });

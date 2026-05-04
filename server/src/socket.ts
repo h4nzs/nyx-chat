@@ -135,6 +135,16 @@ export function registerSocket(httpServer: HttpServer) {
         }
       } catch (err) {
         console.error("[Socket] Failed to check revoked status in Redis:", err);
+        try {
+          const device = await prisma.device.findUnique({ where: { id: deviceId } });
+          if (!device) {
+            socket.user = undefined;
+            return next();
+          }
+        } catch (dbErr) {
+          console.error("[Socket] DB fallback revocation check failed:", dbErr);
+          return next(new Error("Revocation check failed"));
+        }
       }
 
       // ✅ FIX: Ambil publicKey dari relasi devices, bukan langsung dari user
@@ -303,54 +313,63 @@ export function registerSocket(httpServer: HttpServer) {
       }
       
       try {
-        const participant = await prisma.participant.findFirst({ where: { conversationId, userId } });
-        if (!participant) {
+        const participants = await prisma.participant.findMany({ where: { conversationId }, select: { userId: true } });
+        const isMember = participants.some(p => p.userId === userId);
+        if (!isMember) {
            callback?.({ ok: false });
            return;
         }
-        
-        // Simpan kunci ke dalam database sebagai SYSTEM message agar bisa di-fetch oleh user offline (At-Least-Once Delivery)
-        for (const keyPackage of keys) {
-          if (keyPackage.userId && keyPackage.key) {
-            const payloadContent = JSON.stringify({
-              type: 'GROUP_KEY_DISTRIBUTION',
-              conversationId,
-              encryptedKey: keyPackage.key,
-              targetDeviceId: keyPackage.targetDeviceId,
-              senderId: userId,
-              senderDeviceKey: keyPackage.senderDeviceKey
-            });
 
-            // Persist the key distribution as a system message directed to the specific user/device
-            const newMessageRaw = await prisma.message.create({
-              data: {
-                conversationId,
-                senderId: userId,
-                content: payloadContent,
-                type: 'SYSTEM',
-                isViewOnce: false,
-                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 Days TTL for keys
-              }
-            });
+        const validParticipantIds = new Set(participants.map(p => p.userId));
+        const validKeys = keys.filter(k => k.userId && k.key && validParticipantIds.has(k.userId));
 
-            const safeMessage = toRawServerMessage(newMessageRaw);
-            
-            if (keyPackage.targetDeviceId) {
-               const targetSockets = await io.in(keyPackage.userId).fetchSockets();
-               for (const s of targetSockets) {
-                  const authSocket = s as unknown as AuthenticatedSocket;
-                  if (authSocket.user?.deviceId === keyPackage.targetDeviceId) {
-                      authSocket.emit('message:new', safeMessage);
-                  }
-               }
-            } else {
-               io.to(keyPackage.userId).emit('message:new', safeMessage);
-            }
-          }
+        if (validKeys.length === 0) {
+           callback?.({ ok: true });
+           return;
         }
+
+        const newMessagesData = validKeys.map(keyPackage => {
+           return {
+             conversationId,
+             senderId: userId,
+             content: JSON.stringify({
+               type: 'GROUP_KEY_DISTRIBUTION',
+               conversationId,
+               encryptedKey: keyPackage.key,
+               targetDeviceId: keyPackage.targetDeviceId,
+               senderId: userId,
+               senderDeviceKey: keyPackage.senderDeviceKey
+             }),
+             type: 'SYSTEM' as const,
+             isViewOnce: false,
+             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 Days TTL for keys
+           };
+        });
+
+        const createdMessages = await prisma.$transaction(
+          newMessagesData.map(data => prisma.message.create({ data }))
+        );
+
+        for (let i = 0; i < validKeys.length; i++) {
+           const keyPackage = validKeys[i];
+           const rawMessage = createdMessages[i];
+           const safeMessage = toRawServerMessage(rawMessage);
+
+           if (keyPackage.targetDeviceId) {
+              const targetSockets = await io.in(keyPackage.userId).fetchSockets();
+              for (const s of targetSockets) {
+                 const authSocket = s as unknown as AuthenticatedSocket;
+                 if (authSocket.user?.deviceId === keyPackage.targetDeviceId) {
+                     authSocket.emit('message:new', safeMessage);
+                 }
+              }
+           } else {
+              io.to(keyPackage.userId).emit('message:new', safeMessage);
+           }
+        }
+
         callback?.({ ok: true });
-      } catch (error) {
-        console.error(`[Key Distribution] Error:`, error);
+      } catch (error) {        console.error(`[Key Distribution] Error:`, error);
         callback?.({ ok: false });
       }
     });

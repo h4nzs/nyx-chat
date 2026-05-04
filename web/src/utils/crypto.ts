@@ -367,7 +367,7 @@ const pendingGroupKeyRequests = new Map<string, { timerId: number }>();
 const MAX_KEY_REQUEST_RETRIES = 2; // Total 3 attempts
 const KEY_REQUEST_TIMEOUT_MS = 15000; // 15 seconds
 
-const pendingGroupSessionPromises = new Map<string, Promise<Record<string, unknown>[] | null>>();
+const pendingGroupSessionPromises = new Map<string, Promise<{ userId: string; key: string, targetDeviceId?: string, senderDeviceKey?: string }[] | null>>();
 const groupSessionLocks = new Set<string>();
 
 // --- E2EE WebRTC Signaling Helpers ---
@@ -534,7 +534,7 @@ export async function ensureAndRatchetSession(conversationId: string): Promise<v
 // --- Group Key Management & Recovery ---
 
 // ✅ FASE 3: FAN-OUT GROUP SESSION BUILDER
-export async function ensureGroupSession(conversationId: string, participants: Participant[], forceRotate: boolean = false): Promise<Record<string, unknown>[] | null> {
+export async function ensureGroupSession(conversationId: string, participants: Participant[], forceRotate: boolean = false): Promise<{ userId: string; key: string, targetDeviceId?: string, senderDeviceKey?: string }[] | null> {
   const cacheKey = `${conversationId}:${forceRotate}`;
   const pending = pendingGroupSessionPromises.get(cacheKey);
   if (pending) return pending;
@@ -666,10 +666,10 @@ export async function ensureGroupSession(conversationId: string, participants: P
     }
   })();
 
-  pendingGroupSessionPromises.set(cacheKey, promise as Promise<Record<string, unknown>[] | null>);
+  pendingGroupSessionPromises.set(cacheKey, promise as Promise<{ userId: string; key: string, targetDeviceId?: string, senderDeviceKey?: string }[] | null>);
 
   try {
-    return await promise as Record<string, unknown>[] | null;
+    return await promise as { userId: string; key: string, targetDeviceId?: string, senderDeviceKey?: string }[] | null;
   } finally {
     pendingGroupSessionPromises.delete(cacheKey);
   }

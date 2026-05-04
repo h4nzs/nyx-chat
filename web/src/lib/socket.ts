@@ -443,7 +443,13 @@ export function emitGroupKeyDistribution(conversationId: string, keys: { userId:
   return new Promise((resolve, reject) => {
     const socket = getSocket();
     if (!socket?.connected) return reject(new Error('Socket not connected'));
+    
+    const timeout = setTimeout(() => {
+      reject(new Error('Request timeout: Key distribution server acknowledgment took too long'));
+    }, 10000);
+
     (socket as unknown as import('socket.io-client').Socket).emit('messages:distribute_keys', { conversationId, keys }, (res?: { ok: boolean }) => {
+      clearTimeout(timeout);
       if (!res?.ok) return reject(new Error('Failed to distribute keys'));
       resolve();
     });

@@ -140,7 +140,8 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         let decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
 
         // ✅ SECURITY: Sanitize SVG files to prevent XSS if opened directly
-        if (originalType === 'image/svg+xml') {
+        const normalizedType = originalType.split(';')[0].trim().toLowerCase();
+        if (normalizedType === 'image/svg+xml') {
             const svgText = await decryptedBlob.text();
             const DOMPurify = (await import('dompurify')).default;
             const sanitizedSvg = DOMPurify.sanitize(svgText, { USE_PROFILES: { svg: true } });

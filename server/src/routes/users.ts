@@ -132,6 +132,7 @@ router.delete('/me/devices/:deviceId', requireAuth, async (req, res, next) => {
       }
     } catch (err) {
       console.error("[Users] Failed to fetch sockets or disconnect:", err);
+      throw err;
     }
 
     res.json({ message: "Device access revoked successfully." });
