@@ -26,6 +26,7 @@ import useDynamicIslandStore, { UploadActivity } from './dynamicIsland';
 import { useConversationStore } from "./conversation";
 import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
 import { useConnectionStore } from "./connection";
+import { useKeychainStore } from "./keychain";
 import { getSodium } from "@lib/sodiumInitializer";
 import { shadowVault, saveStoryKey } from "../lib/shadowVaultDb";
 
@@ -770,6 +771,146 @@ const initialState: State = {
 // ✅ FIX: Use composite key `${conversationId}:${messageId}` to prevent race overwrites
 const pendingStatuses: Record<string, { conversationId: string; userId: string, status: string }> = {};
 
+// Helper for evaluating control messages
+const evaluateControlMessage = async (decrypted: Message, conversationId: string): Promise<boolean> => {
+      if ((decrypted as Record<string, unknown>).type === 'STORY_KEY' || (decrypted.content && decrypted.content.startsWith('STORY_KEY:'))) {
+          try {
+              const payloadStr = decrypted.content ? decrypted.content.replace('STORY_KEY:', '') : '';
+              const payload = JSON.parse(payloadStr);
+              
+              if (payload.storyId && payload.key) {
+                  const { saveStoryKey } = await import('@lib/shadowVaultDb');
+                  await saveStoryKey(payload.storyId, payload.key);
+                  console.log(`[Stories] Received and securely stored key for story ${payload.storyId}`);
+              }
+          } catch (e) {
+              console.error('[Stories] Failed to parse incoming story key message', e);
+          }
+          return true; 
+      }
+
+      if (decrypted.content && decrypted.content.startsWith('{')) {
+          try {
+              const data = JSON.parse(decrypted.content);
+              const messageVersion = data.version || 0;
+              
+              if (data.type === 'PROTOCOL_UPGRADE_REQ' || data.type === 'PROTOCOL_UPGRADE_ACK' || data.type === 'PROTOCOL_DOWNGRADE') {
+                  const { shadowVault } = await import('@lib/shadowVaultDb');
+                  const currentSession = await shadowVault.getPqDrSession(conversationId);
+                  
+                  if (currentSession && messageVersion <= (currentSession.version || 0)) {
+                      console.log(`[Shield] Ignoring replay attack or old control message. Msg version: ${messageVersion}, Current: ${currentSession.version}`);
+                      return true; 
+                  }
+              }
+              
+              if (data.type === 'PROTOCOL_UPGRADE_REQ' && data.deviceId && data.hostClassicalPk && data.hostPqPk) {
+                  const { authFetch } = await import('@lib/api');
+                  interface Device { id: string; isCurrent: boolean; name: string; lastActiveAt: string; createdAt: string; }
+                  const myDevices = await authFetch<Device[]>('/api/users/me/devices');
+                  const currentDevice = myDevices.find(d => d.isCurrent);
+                  const myDeviceId = currentDevice?.id || '';
+                  const peerDeviceId = data.deviceId;
+                  
+                  type WindowWithPending = Window & typeof globalThis & Record<string, unknown>;
+                  const isPending = (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`];
+                  
+                  if (isPending && myDeviceId.localeCompare(peerDeviceId) > 0) {
+                      return true;
+                  }
+                  
+                  if (isPending) {
+                      delete (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`];
+                  }
+
+                  const { worker_burner_dr_init_guest } = await import('@lib/crypto-worker-proxy');
+                  const { getSodiumLib } = await import('@utils/crypto');
+                  const sodium = await getSodiumLib();
+                  
+                  const hostClassicalPkBytes = sodium.from_base64(data.hostClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  const hostPqPkBytes = sodium.from_base64(data.hostPqPk, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  
+                  const { state: newState, guestClassicalPk: guestPk } = await worker_burner_dr_init_guest({
+                      hostClassicalPk: hostClassicalPkBytes,
+                      hostPqPk: hostPqPkBytes
+                  });
+                  
+                  const { shadowVault } = await import('@lib/shadowVaultDb');
+                  await shadowVault.savePqDrSession({
+                      conversationId,
+                      state: newState,
+                      peerClassicalPk: data.hostClassicalPk,
+                      peerDeviceId: peerDeviceId,
+                      version: messageVersion || 1,
+                      negotiationStatus: 'ESTABLISHED',
+                      lastActivity: Date.now()
+                  });
+                  
+                  await useMessageStore.getState().sendMessage(conversationId, {
+                      content: JSON.stringify({ 
+                          type: "PROTOCOL_UPGRADE_ACK", 
+                          savedCt: newState.savedCt,
+                          guestClassicalPk: guestPk,
+                          version: messageVersion ? messageVersion + 1 : 2
+                      }),
+                      isSilent: true
+                  });
+                  
+                  const { useConversationStore } = await import('@store/conversation');
+                  useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'PQ_DR', activePqDeviceId: peerDeviceId });
+                  
+                  return true;
+              }
+              
+              if (data.type === 'PROTOCOL_UPGRADE_ACK' && data.savedCt && data.guestClassicalPk) {
+                  const { worker_burner_dr_init_host } = await import('@lib/crypto-worker-proxy');
+                  const { getSodiumLib, getMyEncryptionKeyPair } = await import('@utils/crypto');
+                  const sodium = await getSodiumLib();
+                  const authStore = (await import('@store/auth')).useAuthStore.getState();
+                  const myPqKeys = await authStore.getPqEncryptionKeyPair();
+                  const myClassicalKeys = await getMyEncryptionKeyPair();
+                  
+                  const guestClassicalPkBytes = sodium.from_base64(data.guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  const savedCtBytes = sodium.from_base64(data.savedCt, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  
+                  const { state: newState } = await worker_burner_dr_init_host({
+                      guestClassicalPk: guestClassicalPkBytes,
+                      hostClassicalSk: myClassicalKeys.privateKey,
+                      savedCt: savedCtBytes,
+                      hostPqSk: myPqKeys.privateKey
+                  });
+                  
+                  const { shadowVault } = await import('@lib/shadowVaultDb');
+                  await shadowVault.savePqDrSession({
+                      conversationId,
+                      state: newState,
+                      peerClassicalPk: data.guestClassicalPk,
+                      peerDeviceId: null,
+                      version: messageVersion || 1,
+                      negotiationStatus: 'ESTABLISHED',
+                      lastActivity: Date.now()
+                  });
+                  
+                  const { useConversationStore } = await import('@store/conversation');
+                  useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'PQ_DR' });
+                  return true;
+              }
+              
+              if (data.type === 'PROTOCOL_DOWNGRADE') {
+                  const { shadowVault } = await import('@lib/shadowVaultDb');
+                  await shadowVault.deletePqDrSession(conversationId);
+                  
+                  const { useConversationStore } = await import('@store/conversation');
+                  useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'SENDER_KEY', activePqDeviceId: null });
+                  return true;
+              }
+          } catch (e) {
+              console.error(`[Shield] Error processing protocol message for conversation ${conversationId}`, { error: e, content: decrypted.content });
+          }
+      }
+      return false;
+};
+
 export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) => ({
   ...initialState,
 
@@ -1061,10 +1202,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     try {
       const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, forceRotate);
       if (distributionKeys && distributionKeys.length > 0) {
-        emitGroupKeyDistribution(
+        await emitGroupKeyDistribution(
           conversationId,
           distributionKeys as { userId: string; key: string }[]
-        );        if (forceRotate) {
+        );
+        if (forceRotate) {
             useConversationStore.getState().markKeyRotationNeeded(conversationId, false);
         }
         await new Promise(r => setTimeout(r, 300)); 
@@ -1333,6 +1475,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               if (!isReactionPayload && !shouldBeSilent) {
                   get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
                   toast.error(i18n.t('errors:failed_to_send_message_timeout', 'Failed to send message (Timeout).'));
+              } else if (isReactionPayload) {
+                  const reactionData = parseReaction(data.content);
+                  if (reactionData) {
+                      get().removeLocalReaction(conversationId, reactionData.targetMessageId, `temp_react_${actualTempId}`);
+                  }
               }
               return;
           }
@@ -1351,7 +1498,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
             // 2. Tangani Reaksi (Tanpa Gelembung Chat)
             if (isReactionPayload) {
-                const reactionData = parseReaction(contentToEncrypt);
+                const reactionData = parseReaction(data.content);
                 if (reactionData) {
                     const tempReactionId = `temp_react_${actualTempId}`;
                     get().replaceOptimisticReaction(conversationId, reactionData.targetMessageId, tempReactionId, {
@@ -1443,6 +1590,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                       toast.error(res.error);
                   }
               } else if (isReactionPayload) {
+                  const reactionData = parseReaction(data.content);
+                  if (reactionData) {
+                      get().removeLocalReaction(conversationId, reactionData.targetMessageId, `temp_react_${actualTempId}`);
+                  }
                   toast.error(i18n.t('errors:failed_to_send_reaction', 'Failed to send reaction'));
               }
           }
@@ -1452,6 +1603,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       console.error("Failed to encrypt/send:", error);
       if (!isReactionPayload) {
          get().updateMessage(conversationId, `temp_${actualTempId}`, { error: true, status: 'FAILED' });
+      } else {
+          const reactionData = parseReaction(data.content);
+          if (reactionData) {
+              get().removeLocalReaction(conversationId, reactionData.targetMessageId, `temp_react_${actualTempId}`);
+          }
       }
     }
   },
@@ -1771,8 +1927,48 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       if (fetchedMessages.length > 0) {
         const processedMessages: Message[] = [];
 
-        // 1. CEK LOKAL DAN DEKRIPSI HANYA PESAN BARU
+        // 1. CEK LOKAL DAN PISAHKAN CONTROL MESSAGES
+        const controlMessages: Message[] = [];
+        const normalMessages: Message[] = [];
+
         for (const message of fetchedMessages) {
+            if (message.type === 'SYSTEM' && message.content && message.content.includes('GROUP_KEY_DISTRIBUTION')) {
+                controlMessages.push(message);
+            } else {
+                normalMessages.push(message);
+            }
+        }
+
+        // 2. PROSES CONTROL MESSAGES LEBIH DULU (At-Least-Once Delivery untuk Key Distribution)
+        for (const msg of controlMessages) {
+             try {
+                const payload = JSON.parse(msg.content || '{}');
+                if (payload.type === 'GROUP_KEY_DISTRIBUTION') {
+                   type AuthUserWithDevices = { devices?: { id: string; isCurrent?: boolean }[] };
+                   const devices = (useAuthStore.getState().user as AuthUserWithDevices | null)?.devices;
+                   const myDevice = Array.isArray(devices) ? devices.find((d) => d.isCurrent)?.id : undefined;
+                   
+                   // Fallback for broadcast or specific device targeting
+                   if (!payload.targetDeviceId || payload.targetDeviceId === myDevice) {
+                       const { storeReceivedSessionKey } = await import('@utils/crypto');
+                       await storeReceivedSessionKey({
+                          conversationId: payload.conversationId,
+                          encryptedKey: payload.encryptedKey,
+                          type: 'GROUP_KEY',
+                          senderId: payload.senderId,
+                          senderDeviceKey: payload.senderDeviceKey
+                       });
+                       // Tanda bahwa key baru sudah dimuat, siap mendekripsi pesan berikutnya
+                       useKeychainStore.getState().keysUpdated();
+                   }
+                }
+             } catch (e) {
+                console.error("Failed to process control message", e);
+             }
+        }
+
+        // 3. DEKRIPSI NORMAL MESSAGES (termasuk PROTOCOL_UPGRADE_REQ yg masih terenkripsi)
+        for (const message of normalMessages) {
           try {
             // Cek Local Cache Lebih Dulu
             const localMessage = await shadowVault.getMessage(message.id);
@@ -1787,6 +1983,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
             // Dekripsi Hanya Pesan Baru
             const decrypted = await decryptMessageObject(message, undefined, 0, { skipRetries: true });
+            
+            // Evaluasi in-line control message seperti PROTOCOL_UPGRADE_REQ setelah didekripsi
+            if (await evaluateControlMessage(decrypted, id)) {
+                continue; // Jangan masukkan ke UI
+            }
+
             processedMessages.push(decrypted);
           } catch (err) {
             console.error(`[Decrypt] Error decrypting message ${message.id}:`, err);
@@ -2017,130 +2219,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           }
       }
 
-      if ((decrypted as Record<string, unknown>).type === 'STORY_KEY' || (decrypted.content && decrypted.content.startsWith('STORY_KEY:'))) {
-          try {
-              const payloadStr = decrypted.content ? decrypted.content.replace('STORY_KEY:', '') : '';
-              const payload = JSON.parse(payloadStr);
-              
-              if (payload.storyId && payload.key) {
-                  await saveStoryKey(payload.storyId, payload.key);
-                  console.log(`[Stories] Received and securely stored key for story ${payload.storyId}`);
-              }
-          } catch (e) {
-              console.error('[Stories] Failed to parse incoming story key message', e);
-          }
-          return null; 
-      }
-
-      if (decrypted.content && decrypted.content.startsWith('{')) {
-          try {
-              const data = JSON.parse(decrypted.content);
-              
-              if (data.type === 'PROTOCOL_UPGRADE_REQ' && data.deviceId && data.hostClassicalPk && data.hostPqPk) {
-                  const { authFetch } = await import('@lib/api');
-                  interface Device { id: string; isCurrent: boolean; name: string; lastActiveAt: string; createdAt: string; }
-                  const myDevices = await authFetch<Device[]>('/api/users/me/devices');
-                  const currentDevice = myDevices.find(d => d.isCurrent);
-                  const myDeviceId = currentDevice?.id || '';
-                  const peerDeviceId = data.deviceId;
-                  
-                  type WindowWithPending = Window & typeof globalThis & Record<string, unknown>;
-                  const isPending = (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`];
-                  
-                  if (isPending && myDeviceId.localeCompare(peerDeviceId) > 0) {
-                      // We both sent a REQ, and I am the tie-breaker winner (Host).
-                      // Ignore this REQ, wait for the other side to process my REQ and send an ACK.
-                      return null;
-                  }
-                  
-                  // Otherwise, I act as Guest. (Either I didn't send a REQ, or I sent one but lost the tie-breaker).
-                  if (isPending) {
-                      delete (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`];
-                  }
-
-                  const { worker_burner_dr_init_guest } = await import('@lib/crypto-worker-proxy');
-                  const { getSodiumLib } = await import('@utils/crypto');
-                  const sodium = await getSodiumLib();
-                  
-                  const hostClassicalPkBytes = sodium.from_base64(data.hostClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
-                  const hostPqPkBytes = sodium.from_base64(data.hostPqPk, sodium.base64_variants.URLSAFE_NO_PADDING);
-                  
-                  const { state: newState, guestClassicalPk: guestPk } = await worker_burner_dr_init_guest({
-                      hostClassicalPk: hostClassicalPkBytes,
-                      hostPqPk: hostPqPkBytes
-                  });
-                  
-                  const { shadowVault } = await import('@lib/shadowVaultDb');
-                  await shadowVault.savePqDrSession({
-                      conversationId,
-                      state: newState,
-                      peerClassicalPk: data.hostClassicalPk,
-                      peerDeviceId: peerDeviceId,
-                      version: 1,
-                      negotiationStatus: 'ESTABLISHED',
-                      lastActivity: Date.now()
-                  });
-                  
-                  await get().sendMessage(conversationId, {
-                      content: JSON.stringify({ 
-                          type: "PROTOCOL_UPGRADE_ACK", 
-                          savedCt: newState.savedCt,
-                          guestClassicalPk: guestPk 
-                      }),
-                      isSilent: true
-                  });
-                  
-                  const { useConversationStore } = await import('@store/conversation');
-                  useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'PQ_DR', activePqDeviceId: peerDeviceId });
-                  
-                  return null;
-              }
-              
-              if (data.type === 'PROTOCOL_UPGRADE_ACK' && data.savedCt && data.guestClassicalPk) {
-                  const { worker_burner_dr_init_host } = await import('@lib/crypto-worker-proxy');
-                  const { getSodiumLib, getMyEncryptionKeyPair } = await import('@utils/crypto');
-                  const sodium = await getSodiumLib();
-                  const authStore = (await import('@store/auth')).useAuthStore.getState();
-                  const myPqKeys = await authStore.getPqEncryptionKeyPair();
-                  const myClassicalKeys = await getMyEncryptionKeyPair();
-                  
-                  const guestClassicalPkBytes = sodium.from_base64(data.guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
-                  const savedCtBytes = sodium.from_base64(data.savedCt, sodium.base64_variants.URLSAFE_NO_PADDING);
-                  
-                  const { state: newState } = await worker_burner_dr_init_host({
-                      guestClassicalPk: guestClassicalPkBytes,
-                      hostClassicalSk: myClassicalKeys.privateKey,
-                      savedCt: savedCtBytes,
-                      hostPqSk: myPqKeys.privateKey
-                  });
-                  
-                  const { shadowVault } = await import('@lib/shadowVaultDb');
-                  await shadowVault.savePqDrSession({
-                      conversationId,
-                      state: newState,
-                      peerClassicalPk: data.guestClassicalPk,
-                      peerDeviceId: null, // Since we act as host, we locked to our own device earlier
-                      version: 1,
-                      negotiationStatus: 'ESTABLISHED',
-                      lastActivity: Date.now()
-                  });
-                  
-                  const { useConversationStore } = await import('@store/conversation');
-                  useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'PQ_DR' });
-                  return null;
-              }
-              
-              if (data.type === 'PROTOCOL_DOWNGRADE') {
-                  const { shadowVault } = await import('@lib/shadowVaultDb');
-                  await shadowVault.deletePqDrSession(conversationId);
-                  
-                  const { useConversationStore } = await import('@store/conversation');
-                  useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'SENDER_KEY', activePqDeviceId: null });
-                  return null;
-              }
-          } catch (e) {
-              console.error(`[Shield] Error processing protocol message for conversation ${conversationId}`, { error: e, content: decrypted.content });
-          }
+      if (await evaluateControlMessage(decrypted, conversationId)) {
+          return null;
       }
 
       if (decrypted.error || decrypted.content === 'waiting_for_key' || decrypted.content?.startsWith('[')) {

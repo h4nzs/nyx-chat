@@ -6,6 +6,7 @@ import { ApiError } from '../utils/errors.js'
 import { UAParser } from 'ua-parser-js'
 import { verifyJwt } from '../utils/jwt.js'
 import { getSodium } from '../lib/sodium.js'
+import { redisClient } from '../lib/redis.js'
 
 const router: Router = Router()
 
@@ -124,15 +125,26 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
       data: { revokedAt: new Date() }
     })
 
+    try {
+      await redisClient.setEx(`revoked:device:${token.deviceId}`, 900, "1")
+    } catch (err) {
+      console.error("[Session] Failed to set revoked flag in Redis:", err)
+    }
+
     const socketServer = getIo()
     if (socketServer) {
       socketServer.to(userId).emit('force_logout', { jti: jti as string })
       
-      const targetSockets = await socketServer.in(userId).fetchSockets();
-      for (const socket of targetSockets) {
-        if ((socket as any).user?.deviceId === token.deviceId) {
-           socket.disconnect(true);
+      try {
+        const targetSockets = await socketServer.in(userId).fetchSockets();
+        for (const socket of targetSockets) {
+          if ((socket as unknown as { user?: { deviceId?: string } }).user?.deviceId === token.deviceId) {
+             socket.disconnect(true);
+          }
         }
+      } catch (err) {
+        console.error("[Session] Failed to fetch sockets or disconnect:", err)
+        throw err;
       }
     }
 

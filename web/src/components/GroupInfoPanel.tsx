@@ -100,7 +100,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       // Ensure session exists
       const distributionKeys = await ensureGroupSession(conversation.id, conversation.participants);
       if (distributionKeys && distributionKeys.length > 0) {
-        emitGroupKeyDistribution(conversation.id, distributionKeys as { userId: string; key: string }[]);
+        await emitGroupKeyDistribution(conversation.id, distributionKeys as { userId: string; key: string }[]);
       }
 
       const currentMetadata = conversation.decryptedMetadata || {};
@@ -132,7 +132,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       
       const distributionKeys = await ensureGroupSession(conversation.id, conversation.participants, true);
       if (distributionKeys) {
-          emitGroupKeyDistribution(conversation.id, distributionKeys as { userId: string; key: string }[]);
+          await emitGroupKeyDistribution(conversation.id, distributionKeys as { userId: string; key: string }[]);
           toast.success('Encryption keys rotated successfully via ML-KEM', { id: toastId });
       } else {
           throw new Error("Failed to generate new keys");

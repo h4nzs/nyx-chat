@@ -172,7 +172,7 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
   const isConnected = connectionStatus === 'connected';
   
   const isBurner = conversation.id.startsWith('burner_');
-  const burnerSession = useBurnerStore((s: any) => s.activeSessions[conversation.id]);
+  const burnerSession = useBurnerStore((s) => s.activeSessions[conversation.id]);
   const isWaitingForGuest = isBurner && !burnerSession?.drState && !!useAuthStore.getState().user;
 
   const isInputDisabled = !isConnected || isOtherParticipantBlocked || isWaitingForGuest;

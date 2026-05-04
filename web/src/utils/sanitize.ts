@@ -35,7 +35,7 @@ export function sanitizeErrorLog(error: unknown): string {
   let errorMsg = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
 
   // 1. Scrub JSON-like objects (e.g. {"ciphertext": "..."})
-  errorMsg = errorMsg.replace(/\{.*?\}/g, '[REDACTED_OBJECT]');
+  errorMsg = errorMsg.replace(/\{[\s\S]*?\}/g, '[REDACTED_OBJECT]');
   
   // 2. Scrub long contiguous strings that look like base64 or hex keys (length > 32)
   errorMsg = errorMsg.replace(/\b[a-zA-Z0-9+/=_-]{32,}\b/g, '[REDACTED_KEY_OR_B64]');

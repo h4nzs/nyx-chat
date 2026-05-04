@@ -439,8 +439,21 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
   getSocket()?.emit('session:fulfill_response', payload);
 }
 
-export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string }[]) {
-  getSocket()?.emit('messages:distribute_keys', { conversationId, keys });
+export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, senderDeviceKey?: string }[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = getSocket();
+    if (!socket?.connected) return reject(new Error('Socket not connected'));
+    
+    const timeout = setTimeout(() => {
+      reject(new Error('Request timeout: Key distribution server acknowledgment took too long'));
+    }, 10000);
+
+    (socket as unknown as import('socket.io-client').Socket).emit('messages:distribute_keys', { conversationId, keys }, (res?: { ok: boolean }) => {
+      clearTimeout(timeout);
+      if (!res?.ok) return reject(new Error('Failed to distribute keys'));
+      resolve();
+    });
+  });
 }
 
 export function emitGroupKeyRequest(conversationId: string, targetSenderId?: string, targetDeviceKey?: string) {

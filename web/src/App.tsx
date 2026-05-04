@@ -272,7 +272,9 @@ const AppContent = () => {
         // --- AUTH LOCK (Cryptographic Wipe) ---
         // If the user has Privacy Cloak enabled, we also wipe the keys from RAM and sessionStorage.
         const { privacyCloak } = await import('./store/settings').then(m => m.useSettingsStore.getState());
-        if (privacyCloak) {
+        
+        // Re-check visibility state after the async import to prevent race conditions
+        if (privacyCloak && document.visibilityState === 'hidden') {
            useAuthStore.getState().lockApp();
         }
       }
