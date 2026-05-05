@@ -238,10 +238,10 @@ app.post("/api/admin/cleanup", async (req, res) => {
     return res.status(403).json({ error: "Forbidden" });
   }
 
-  const providedBuffer = Buffer.from(providedKey);
-  const secretBuffer = Buffer.from(secretKey);
+  const providedHash = crypto.createHash('sha256').update(providedKey).digest();
+  const secretHash = crypto.createHash('sha256').update(secretKey).digest();
 
-  if (providedBuffer.length !== secretBuffer.length || !crypto.timingSafeEqual(providedBuffer, secretBuffer)) {
+  if (!crypto.timingSafeEqual(providedHash, secretHash)) {
     return res.status(403).json({ error: "Forbidden" });
   }
   // TODO: Add actual cleanup logic here
@@ -251,7 +251,7 @@ app.post("/api/admin/cleanup", async (req, res) => {
 // === CSRF Protection ===
 const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
   getSecret: () => env.jwtSecret,
-  getSessionIdentifier: (req) => "api",
+  getSessionIdentifier: (req) => (req as unknown as { user?: { id?: string } }).user?.id || req.cookies?.refreshToken || "api",
   cookieName: "x-csrf-token",
   cookieOptions: {
     httpOnly: true,

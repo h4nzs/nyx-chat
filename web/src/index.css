@@ -65,17 +65,17 @@
   --background-image-aurora-gradient: linear-gradient(to right, hsl(var(--grad-start)), hsl(var(--grad-end)));
 
   /* Fonts */
-  --font-sans: 'Inter', sans-serif;
+  --font-sans: Inter, sans-serif;
 
   /* Animations & Keyframes */
-  --animate-fade-in: fadeIn 0.3s ease-out;
-  --animate-fade-in-up: fadeInUp 0.3s ease-out;
+  --animate-fade-in: fade-in 0.3s ease-out;
+  --animate-fade-in-up: fade-in-up 0.3s ease-out;
 
-  @keyframes fadeIn {
+  @keyframes fade-in {
     from { opacity: 0; }
     to { opacity: 1; }
   }
-  @keyframes fadeInUp {
+  @keyframes fade-in-up {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: translateY(0); }
   }
@@ -241,7 +241,7 @@
   }
 
   body {
-    font-family: 'Inter', sans-serif;
+    font-family: Inter, sans-serif;
   }
 
   /* Custom Scrollbar */
@@ -302,7 +302,7 @@
 .user-color-name {
   color: var(--user-color);
 }
-.dark .user-color-name {
+:root .user-color-name {
   filter: brightness(1.5);
 }
 

@@ -187,7 +187,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
             } catch (e) {}
 
             const msg: BurnerMessage = {
-              id: Date.now().toString(),
+              id: crypto.randomUUID(),
               senderId: 'guest',
               content: parsedContent,
               createdAt: new Date().toISOString(),

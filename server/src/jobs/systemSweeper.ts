@@ -32,7 +32,10 @@ export const startSystemSweeper = () => {
         where: {
           OR: [
             { expiresAt: { not: null, lte: now } }, // Expired explicitly
-            { createdAt: { lte: thirtyDaysAgo } }   // Stale/Old keys
+            { 
+              createdAt: { lte: thirtyDaysAgo },
+              expiresAt: null 
+            }   // Stale/Old keys without explicit expiry
           ]
         }
       });

@@ -26,11 +26,11 @@ redisClient.on('connect', () => {
   console.log(`✅ Redis Client Connected to ${maskedUrl}`)
 });
 
-// Auto Connect
-(async () => {
+export async function connectRedis() {
   if (!redisClient.isOpen) {
     await redisClient.connect().catch((err) => {
-      console.error('❌ Fatal: Failed to connect to Redis', err)
-    })
+      console.error('❌ Fatal: Failed to connect to Redis', err);
+      throw err;
+    });
   }
-})()
+}

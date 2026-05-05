@@ -11,6 +11,7 @@ import { redisClient } from "./lib/redis.js";
 import { AuthPayload } from "./types/auth.js";
 import cookie from "cookie"; 
 import { getSodium } from "./lib/sodium.js";
+import { processLogger } from "./utils/logger.js";
 
 // --- REDIS ADAPTER IMPORTS ---
 import { createClient } from "redis";
@@ -80,7 +81,7 @@ export function registerSocket(httpServer: HttpServer) {
     connectionStateRecovery: { maxDisconnectionDuration: 2 * 60 * 1000, skipMiddlewares: true },
     allowEIO3: true,
     pingTimeout: 30000,
-    pingInterval: 35000 
+    pingInterval: 25000 
   });
 
   const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
@@ -236,7 +237,7 @@ export function registerSocket(httpServer: HttpServer) {
     });
 
     if (!userId) {
-      socket.on("auth:request_linking_qr", async (payload: { publicKey: string }, callback) => {
+      socket.on("auth:request_linking_qr", async (payload: { publicKey: string }, callback?: (res: { ok: boolean, qrData?: string }) => void) => {
          const sodium = await getSodium();
          const linkingToken = sodium.to_hex(sodium.randombytes_buf(32));
          await socket.join(`linking:${linkingToken}`);
@@ -290,7 +291,7 @@ export function registerSocket(httpServer: HttpServer) {
           where: { userId_conversationId: { userId, conversationId } }
         });
         if (participant) socket.join(conversationId);
-      } catch (e) {}
+      } catch (e) { processLogger.error(e); }
     });
 
     socket.on("typing:start", async ({ conversationId }: TypingPayload) => {
@@ -416,7 +417,10 @@ export function registerSocket(httpServer: HttpServer) {
         });
         
         const safeMessage = toRawServerMessage(newMessageRaw);
-        if (tempId !== undefined) safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
+        if (tempId !== undefined) {
+          const parsed = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
+          if (!Number.isNaN(parsed)) safeMessage.tempId = parsed;
+        }
         
         conversation.participants.forEach(participant => {
           io.to(participant.userId).emit('message:new', safeMessage);
@@ -448,7 +452,7 @@ export function registerSocket(httpServer: HttpServer) {
 
         await prisma.message.deleteMany({ where: { id: messageId, senderId: uid } });
         socket.to(conversationId).emit('message:deleted_remotely', { messageId, conversationId, deletedBy: uid });
-      } catch (error) {}
+      } catch (error) { processLogger.error(error); }
     });
 
     socket.on('message:view_once_opened', async ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
@@ -465,7 +469,7 @@ export function registerSocket(httpServer: HttpServer) {
             if (msg.senderId === uid) return;
 
             socket.to(conversationId).emit('message:viewed', { messageId, conversationId });
-        } catch (error) {}
+        } catch (error) { processLogger.error(error); }
     });
 
     socket.on("push:subscribe", async (data: PushSubscribePayload) => {
@@ -506,9 +510,7 @@ export function registerSocket(httpServer: HttpServer) {
           data: { lastReadMsgId: messageId }
         });
 
-        if (msg.senderId !== uid) {
-          io.to(msg.senderId).emit('message:status_updated', { messageId, conversationId: msg.conversationId, readBy: uid, status: 'READ' });
-        }
+        io.to(msg.senderId).emit('message:status_updated', { messageId, conversationId: msg.conversationId, readBy: uid, status: 'READ' });
 
         if (msg.conversation.isGroup) {
            await prisma.messageStatus.upsert({
@@ -517,7 +519,7 @@ export function registerSocket(httpServer: HttpServer) {
              create: { messageId, userId: uid, status: 'READ' },
            });
         }
-      } catch (error) {}
+      } catch (error) { processLogger.error(error); }
     });
 
     // --- E2EE Key Recovery Handlers ---
@@ -585,7 +587,7 @@ export function registerSocket(httpServer: HttpServer) {
           } else {
              socket.emit("group:key_request_failed", { conversationId, reason: "Missing classical or PQ public key" });
           }
-        }      } catch (error) {}
+        }      } catch (error) { processLogger.error(error); }
     });
 
     socket.on('group:fulfilled_key', async (payload: KeyFulfillmentPayload) => {
@@ -617,7 +619,7 @@ export function registerSocket(httpServer: HttpServer) {
 
         if (!await checkRateLimit(uid, 'session_request_missing', 10, 60)) return;
         socket.to(conversationId).emit("session:key_requested", { requesterId: uid, conversationId, sessionId });
-      } catch (error) {}
+      } catch (error) { processLogger.error(error); }
     });
 
     socket.on('session:request_key', async (data: KeyRequestPayload) => {
@@ -642,7 +644,7 @@ export function registerSocket(httpServer: HttpServer) {
               requesterPqPublicKey: socket.user?.pqPublicKey || undefined,
               requesterDeviceId: socket.user?.deviceId || socket.id
             });
-          } catch (error) {}
+          } catch (error) { processLogger.error(error); }
           return;
       }
 
@@ -669,7 +671,7 @@ export function registerSocket(httpServer: HttpServer) {
           } else {
             socket.emit("session:request_key_failed", { sessionId, targetId: fulfillerId, reason: "Missing PQ or classical public key" });
           }
-        }      } catch (error) {}
+        }      } catch (error) { processLogger.error(error); }
     });
 
     socket.on('session:fulfill_response', async (payload: KeyFulfillmentPayload) => {

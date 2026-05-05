@@ -388,7 +388,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                 }
                 break;
             case 'reject':
-            case 'end':
+            case 'end': {
                 if (pc) {
                     pc.close();
                     peerConnections.delete(data.from as string);
@@ -401,6 +401,7 @@ export const initWebRTCListeners = (socket: Socket | null) => {
                     cleanupCall();
                 }
                 break;
+            }
             case 'offer':
                 if (!pc) {
                     const iceServers = await getDynamicIceServers();

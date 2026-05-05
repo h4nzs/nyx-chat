@@ -30,6 +30,8 @@ interface DynamicIslandState {
   removeActivity: (id: string) => void;
 }
 
+const timers: Record<string, NodeJS.Timeout> = {};
+
 const useDynamicIslandStore = create<DynamicIslandState>((set, get) => ({
   activities: [],
 
@@ -40,7 +42,7 @@ const useDynamicIslandStore = create<DynamicIslandState>((set, get) => ({
     set(state => ({ activities: [newActivity, ...state.activities] }));
 
     if (timeout) {
-      setTimeout(() => {
+      timers[id] = setTimeout(() => {
         get().removeActivity(id);
       }, timeout);
     }
@@ -57,6 +59,10 @@ const useDynamicIslandStore = create<DynamicIslandState>((set, get) => ({
   },
 
   removeActivity: (id) => {
+    if (timers[id]) {
+      clearTimeout(timers[id]);
+      delete timers[id];
+    }
     set(state => ({ activities: state.activities.filter(activity => activity.id !== id) }));
   },
 }));

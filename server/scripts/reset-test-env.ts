@@ -19,18 +19,26 @@ const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
   throw new Error("DATABASE_URL is not set in the environment variables.");
 }
+
+const REDIS_URL = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+const TEST_DB_INDEX = process.env.TEST_DB_INDEX || '1';
+
+const dbUrl = new URL(connectionString);
+const loopbackIps = ['localhost', '127.0.0.1', '::1'];
+if (!loopbackIps.includes(dbUrl.hostname)) {
+  console.error(`❌ DANGER: DATABASE_URL hostname is ${dbUrl.hostname}. Reset is only allowed on loopback interfaces!`);
+  process.exit(1);
+}
+
 const pool = new Pool({ connectionString });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
-const redis = createClient({ url: process.env.REDIS_URL || 'redis://127.0.0.1:6379' });
+const redis = createClient({ url: REDIS_URL });
 
 async function reset() {
   // 🚨 CRITICAL GUARDRAIL: Mencegah eksekusi tidak sengaja di Production atau DB eksternal
-  if (
-    process.env.NODE_ENV === 'production' || 
-    (process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('localhost') && !process.env.DATABASE_URL.includes('127.0.0.1') && !process.env.DATABASE_URL.includes('postgres'))
-  ) {
+  if (process.env.NODE_ENV === 'production') {
     console.error('❌ DANGER: Attempted to wipe database in non-local/production environment!');
     process.exit(1);
   }

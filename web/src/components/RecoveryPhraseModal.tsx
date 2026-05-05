@@ -42,6 +42,13 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
     try {
       await navigator.clipboard.writeText(phrase);
       toast.success(t('modals:recovery.copy_success'));
+      setTimeout(async () => {
+        try {
+          await navigator.clipboard.writeText('');
+        } catch (err) {
+          console.error("Failed to clear clipboard", err);
+        }
+      }, 60000);
     } catch (err) {
       toast.error(t('modals:recovery.copy_fail'));
     }
@@ -58,7 +65,8 @@ export default function RecoveryPhraseModal({ phrase, onClose }: RecoveryPhraseM
 
   const handleVerify = () => {
     const selectedWords = selectedIndices.map(i => words[i]);
-    if (selectedWords.join(' ') === phrase) {
+    const normalizedPhrase = phrase.trim().split(/\s+/).join(' ');
+    if (selectedWords.join(' ') === normalizedPhrase) {
       toast.success(t('modals:recovery.verify_success'));
       onClose();
     } else {

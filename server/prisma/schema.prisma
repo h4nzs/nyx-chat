@@ -160,6 +160,7 @@ model Conversation {
   updatedAt     DateTime       @updatedAt
   participants  Participant[]
   messages      Message[]
+  sessionKeys   SessionKey[]
   hiddenBy      UserHiddenConversation[]
 
   @@index([lastMessageAt(sort: Desc)])
@@ -278,6 +279,11 @@ model Story {
   expiresAt        DateTime
 
   sender           User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([expiresAt])
+}
+rences: [id], onDelete: Cascade)
 
   @@index([senderId])
   @@index([expiresAt])

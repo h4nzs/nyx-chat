@@ -33,6 +33,9 @@ WORKDIR /app
 # Install dependencies sistem (OpenSSL wajib untuk Prisma)
 RUN corepack enable && apk add --no-cache openssl
 
+# Create non-root user
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 # Copy file package
 COPY package.json pnpm-lock.yaml ./
 
@@ -44,9 +47,14 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 
+# Change ownership to non-root user
+RUN chown -R appuser:appgroup /app
+
 # Set Port Koyeb (8000)
 ENV PORT=4000
 EXPOSE 4000
+
+USER appuser
 
 # Command Start
 CMD ["node", "dist/index.js"]

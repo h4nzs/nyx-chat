@@ -97,7 +97,7 @@ export const toConversation = (conv: PrismaConversationInput): Conversation => (
   activePqDeviceId: undefined,
 });
 
-export const toRawServerMessage = (msg: PrismaMessageInput): RawServerMessage => ({
+export const toRawServerMessage = (msg: PrismaMessageInput, maxDepth = 1): RawServerMessage => ({
   id: asMessageId(msg.id),
   tempId: msg.tempId ?? undefined,
   type: (msg.type === 'USER' || msg.type === 'SYSTEM') ? msg.type : 'USER',
@@ -115,5 +115,5 @@ export const toRawServerMessage = (msg: PrismaMessageInput): RawServerMessage =>
   expiresAt: msg.expiresAt ? new Date(msg.expiresAt).toISOString() : undefined,
   isViewOnce: msg.isViewOnce ?? false,
   repliedToId: msg.repliedToId ? asMessageId(msg.repliedToId) : undefined,
-  repliedTo: msg.repliedTo ? toRawServerMessage(msg.repliedTo) : undefined,
+  repliedTo: (msg.repliedTo && maxDepth > 0) ? toRawServerMessage(msg.repliedTo, maxDepth - 1) : undefined,
 });

@@ -12,7 +12,12 @@ interface Props {
 export default function ScanQRModal({ onClose, onScanSuccess }: Props) {
   const { t } = useTranslation(['modals']);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const onScanSuccessRef = useRef(onScanSuccess);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onScanSuccessRef.current = onScanSuccess;
+  }, [onScanSuccess]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -29,7 +34,7 @@ export default function ScanQRModal({ onClose, onScanSuccess }: Props) {
               if (scannerRef.current) {
                 await scannerRef.current.stop();
               }
-              onScanSuccess(u);
+              onScanSuccessRef.current(u);
             } else {
               // Not a valid connect link but keep scanning
             }
@@ -50,7 +55,7 @@ export default function ScanQRModal({ onClose, onScanSuccess }: Props) {
         scannerRef.current.stop().catch(() => {});
       }
     };
-  }, [onScanSuccess, t]);
+  }, [t]);
 
   return (
     <AnimatePresence>

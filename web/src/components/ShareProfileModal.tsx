@@ -7,6 +7,7 @@ import { useState } from 'react';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 import DefaultAvatar from '@/components/ui/DefaultAvatar';
+import { toAbsoluteUrl } from '@utils/url';
 
 const QRCode = (
   (QRCodeRaw as unknown as { default?: { default?: typeof QRCodeRaw } }).default?.default ||
@@ -77,7 +78,7 @@ export default function ShareProfileModal({ onClose }: Props) {
             <div className="w-16 h-16 rounded-full overflow-hidden shadow-neu-flat-light dark:shadow-neu-flat-dark border-2 border-accent mb-3">
               {profile?.avatarUrl ? (
                 <img 
-                  src={profile.avatarUrl} 
+                  src={toAbsoluteUrl(profile.avatarUrl)} 
                   alt="Avatar" 
                   className="w-full h-full object-cover"
                 />

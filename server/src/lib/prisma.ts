@@ -20,11 +20,7 @@ const poolConfig: PoolConfig = { connectionString };
 
 if (!isLocalEnv) {
   if (!fs.existsSync(caPath)) {
-    if (env === 'production') {
-      throw new Error("Production environment requires ca.pem for database connection.");
-    } else {
-      poolConfig.ssl = { rejectUnauthorized: false };
-    }
+    throw new Error("Non-local environment requires ca.pem for database connection to prevent MITM attacks.");
   } else {
     poolConfig.ssl = {
       rejectUnauthorized: true,

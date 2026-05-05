@@ -244,7 +244,7 @@ export default function Login() {
                     toast.error(t('auth:messages.decrypt_failed'));
                 }
             } catch (e) {
-                toast.error(i18n.t('auth:messages.decrypt_failed', 'An error occurred during decryption.'));
+                toast.error(t('auth:messages.decrypt_failed', 'An error occurred during decryption.'));
             }
          });
       }

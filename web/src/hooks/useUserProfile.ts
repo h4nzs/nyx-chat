@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useProfileStore, DecryptedProfile } from '@store/profile';
 import type { UserId } from '@nyx/shared';
-import i18n from '../i18n';
+import { useTranslation } from 'react-i18next';
 
 export function useUserProfile(userInput?: { id: string | UserId; encryptedProfile?: string | null; name?: string; avatarUrl?: string | null; description?: string | null } | UserId | null | undefined) {
+  const { t } = useTranslation(['common']);
   const user = typeof userInput === 'string' 
     ? { id: userInput, encryptedProfile: undefined, name: undefined, avatarUrl: undefined } 
     : userInput;
@@ -30,7 +31,7 @@ export function useUserProfile(userInput?: { id: string | UserId; encryptedProfi
     return () => { isMounted = false; };
   }, [user?.id, user?.encryptedProfile, cachedProfile, decryptAndCache]);
 
-  if (!user) return { name: i18n.t('common:defaults.unknown', "Unknown"), avatarUrl: null, description: null };
+  if (!user) return { name: t('common:defaults.unknown', "Unknown"), avatarUrl: null, description: null };
   if (cachedProfile) return cachedProfile; 
   if (localProfile) return localProfile;   
   
@@ -39,7 +40,7 @@ export function useUserProfile(userInput?: { id: string | UserId; encryptedProfi
       return { name: user.name, avatarUrl: user.avatarUrl || null, description: user.description || null };
   }
 
-  if (!user.encryptedProfile) return { name: i18n.t('common:defaults.anonymous', "Anonymous"), avatarUrl: null, description: null };
+  if (!user.encryptedProfile) return { name: t('common:defaults.anonymous', "Anonymous"), avatarUrl: null, description: null };
 
-  return { name: i18n.t('common:defaults.encrypted_user', "Encrypted User"), avatarUrl: null, description: null };
+  return { name: t('common:defaults.encrypted_user', "Encrypted User"), avatarUrl: null, description: null };
 }

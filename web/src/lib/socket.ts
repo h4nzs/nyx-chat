@@ -109,7 +109,7 @@ const handleKeyRotation = async (conversationId: string) => {
       if (attempt >= MAX_RETRIES) {
         console.error(`[socket] All key rotation retries failed for ${conversationId}. Marking as pending.`);
         useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: true });
-        toast.error(`CRITICAL: Failed to rotate keys for group. The chat is insecure.`, { duration: 10000 });
+        toast.error(i18n.t('errors:group_key_rotation_critical', 'CRITICAL: Failed to rotate keys for group. The chat is insecure.'), { duration: 10000 });
       } else {
         const delay = Math.pow(2, attempt) * 1000;
         await new Promise(resolve => setTimeout(resolve, delay));

@@ -44,7 +44,8 @@ export async function relaySessionKeys(
 
   // Save keys to database for retrieval by participant devices
   await db.sessionKey.createMany({
-    data: keyRecords
+    data: keyRecords,
+    skipDuplicates: true
   });
 
   return { sessionId };

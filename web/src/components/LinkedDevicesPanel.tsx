@@ -75,7 +75,7 @@ export const LinkedDevicesPanel: React.FC = () => {
         }
     };
 
-    if (isLoading) return <div className="p-4 text-center text-text-secondary">Loading devices...</div>;
+    if (isLoading) return <div className="p-4 text-center text-text-secondary">{t('linked_devices.loading', 'Loading devices...')}</div>;
 
     return (
         <div className="relative bg-bg-main rounded-xl p-6 overflow-hidden shadow-neu-flat dark:shadow-neu-flat-dark border-t border-white/40 dark:border-white/5">
@@ -90,7 +90,7 @@ export const LinkedDevicesPanel: React.FC = () => {
               <div className="p-2 rounded-lg bg-bg-main shadow-neu-icon dark:shadow-neu-icon-dark text-accent">
                 <FiShield size={16} />
               </div>
-              <h3 className="text-xs font-black tracking-[0.2em] uppercase text-text-secondary hidden sm:block">Linked Devices</h3>
+              <h3 className="text-xs font-black tracking-[0.2em] uppercase text-text-secondary hidden sm:block">{t('linked_devices.title', 'Linked Devices')}</h3>
               <div className="h-[2px] flex-1 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark rounded-full"></div>
               
               <button 
@@ -98,7 +98,7 @@ export const LinkedDevicesPanel: React.FC = () => {
                   className="flex items-center gap-2 px-4 py-2 bg-bg-main text-accent shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark rounded-xl text-xs font-bold uppercase tracking-wider transition-all hover:brightness-110"
               >
                   <FiRefreshCw size={14} />
-                  Sync History
+                  {t('linked_devices.sync_history', 'Sync History')}
               </button>
             </div>
 
@@ -113,15 +113,15 @@ export const LinkedDevicesPanel: React.FC = () => {
                                 </div>
                                 <div className="min-w-0 pr-2">
                                     <div className="flex items-center gap-2 flex-wrap">
-                                        <p className="font-bold text-sm text-text-primary truncate max-w-[150px] sm:max-w-xs">{device.name || 'Unknown Device'}</p>
+                                        <p className="font-bold text-sm text-text-primary truncate max-w-[150px] sm:max-w-xs">{device.name || t('linked_devices.unknown_device', 'Unknown Device')}</p>
                                         {device.isCurrent && (
                                             <span className="px-2 py-0.5 shadow-neu-flat dark:shadow-neu-flat-dark text-emerald-500 text-[10px] uppercase font-bold rounded-md whitespace-nowrap">
-                                                This Device
+                                                {t('linked_devices.this_device', 'This Device')}
                                             </span>
                                         )}
                                     </div>
                                     <p className="text-[10px] text-text-secondary mt-1 uppercase tracking-wider font-mono truncate">
-                                        Active: {new Date(device.lastActiveAt).toLocaleDateString()} {new Date(device.lastActiveAt).toLocaleTimeString()}
+                                        {t('linked_devices.active', 'Active: ')} {new Date(device.lastActiveAt).toLocaleDateString()} {new Date(device.lastActiveAt).toLocaleTimeString()}
                                     </p>
                                 </div>
                             </div>
@@ -130,7 +130,8 @@ export const LinkedDevicesPanel: React.FC = () => {
                                 <button 
                                     onClick={() => handleRevoke(device.id)}
                                     className="p-3 text-red-500 shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark rounded-xl transition-all hover:scale-105 shrink-0"
-                                    title="Revoke Access"
+                                    title={t('linked_devices.revoke_access', 'Revoke Access')}
+                                    aria-label={t('linked_devices.revoke_access', 'Revoke Access')}
                                 >
                                     <FiTrash2 className="w-4 h-4" />
                                 </button>

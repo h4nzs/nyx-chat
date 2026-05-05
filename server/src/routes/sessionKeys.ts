@@ -67,17 +67,50 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
       throw new ApiError(400, 'sessionId and an array of encrypted keys are required.')
     }
 
+    for (const key of keys) {
+      if (!key.deviceId || typeof key.deviceId !== 'string' || key.deviceId.trim() === '') {
+        throw new ApiError(400, 'Invalid deviceId in keys payload.');
+      }
+      if (!key.encryptedKey || typeof key.encryptedKey !== 'string' || key.encryptedKey.trim() === '') {
+        throw new ApiError(400, 'Invalid encryptedKey in keys payload.');
+      }
+    }
+
     const userId = req.user.id
 
     const conversation = await prisma.conversation.findFirst({
       where: {
         id: conversationId,
         participants: { some: { userId } }
+      },
+      include: {
+        participants: {
+          select: { userId: true }
+        }
       }
     })
 
     if (!conversation) {
       throw new ApiError(404, 'Conversation not found or you are not a participant.')
+    }
+
+    const participantUserIds = conversation.participants.map(p => p.userId);
+
+    const devices = await prisma.device.findMany({
+      where: {
+        id: { in: keys.map(k => k.deviceId) }
+      },
+      select: { id: true, userId: true }
+    });
+
+    const validDeviceIds = new Set(
+      devices.filter(d => participantUserIds.includes(d.userId)).map(d => d.id)
+    );
+
+    for (const key of keys) {
+      if (!validDeviceIds.has(key.deviceId)) {
+        throw new ApiError(403, 'Unauthorized target deviceId detected.');
+      }
     }
 
     // Relay client-encrypted keys to the database

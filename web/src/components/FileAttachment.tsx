@@ -50,11 +50,12 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
     }
     if (message.fileName) {
       const ext = message.fileName.split('.').pop()?.toLowerCase();
+      if (!ext) return 'application/octet-stream';
       if (ext === 'pdf') return 'application/pdf';
       if (ext === 'svg') return 'image/svg+xml';
-      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext!)) return 'image/' + ext!;
-      if (['mp4', 'webm', 'ogg', 'mov'].includes(ext!)) return 'video/' + ext!;
-      if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext!)) return 'audio/' + ext!;
+      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return 'image/' + ext;
+      if (['mp4', 'webm', 'ogg', 'mov'].includes(ext)) return 'video/' + ext;
+      if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) return 'audio/' + ext;
     }
     return 'application/octet-stream';
   };
