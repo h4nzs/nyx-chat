@@ -22,7 +22,10 @@ export default function LanguageSwitcher({ isAbsolute = true }: LanguageSwitcher
     i18n.changeLanguage(lng);
   };
 
-  const currentLang = LANGUAGES.find(l => l.code === i18n.language) || LANGUAGES[0];
+  const rawLang = i18n.language || 'en';
+  const normalizedLang = rawLang.includes('pt') ? 'pt-BR' : rawLang.split('-')[0];
+
+  const currentLang = LANGUAGES.find(l => l.code === normalizedLang) || LANGUAGES[0];
 
   // Logic untuk menentukan class berdasarkan posisi
   const containerClass = isAbsolute 
@@ -46,7 +49,7 @@ export default function LanguageSwitcher({ isAbsolute = true }: LanguageSwitcher
             align="end"
           >
             {LANGUAGES.map((lang) => {
-              const isActive = i18n.language === lang.code;
+              const isActive = normalizedLang === lang.code;
               return (
                 <DropdownMenu.Item 
                   key={lang.code}

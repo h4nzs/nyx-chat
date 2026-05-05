@@ -30,11 +30,14 @@ router.post('/user', generalLimiter, requireAuth, async (req, res) => {
       }]
     }
 
-    await fetch(env.discordReportWebhookUrl, {
+    const response = await fetch(env.discordReportWebhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(discordPayload)
-    })
+    });
+    if (!response.ok) {
+      console.error('Failed discord webhook', response.statusText);
+    }
 
     res.json({ success: true })
   } catch (error) {

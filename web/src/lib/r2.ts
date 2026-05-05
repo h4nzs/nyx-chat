@@ -49,7 +49,7 @@ export async function uploadToR2(
     };
 
     xhr.onload = () => {
-      if (xhr.status === 200) {
+      if (xhr.status >= 200 && xhr.status < 300) {
         resolve(publicUrl); // Kembalikan URL publik R2
       } else {
         reject(new Error(`Upload failed: ${xhr.statusText}`));

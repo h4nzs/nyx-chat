@@ -18,10 +18,17 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
   const [title, setTitle] = useState(currentTitle);
   const [description, setDescription] = useState(currentDescription || '');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setError(t('modals:edit_group.error_empty_title', 'Title cannot be empty'));
+      return;
+    }
     setIsLoading(true);
+    setError(null);
     try {
       const { encryptGroupMetadata, ensureGroupSession } = await import('@utils/crypto');
       const { useConversationStore } = await import('@store/conversation');
@@ -40,7 +47,7 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
       
       const newMetadata = {
           ...currentMetadata,
-          title: title.trim(),
+          title: trimmedTitle,
           description: description.trim()
       };
       
@@ -78,6 +85,7 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
       )}
     >
       <form id="edit-group-form" onSubmit={handleSubmit} className="space-y-4">
+        {error && <div className="text-red-500 text-sm mb-2">{error}</div>}
         <div>
           <label htmlFor="group-title" className="block text-sm font-medium text-text-secondary mb-1">{t('modals:edit_group.group_name')}</label>
             <input

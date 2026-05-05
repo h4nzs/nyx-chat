@@ -49,7 +49,8 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
       }
     }
 
-    const ext = fileName.split('.').pop()?.toLowerCase()
+    const extMatch = fileName.match(/\.([a-z0-9]+)$/i);
+    const ext = extMatch ? extMatch[1].toLowerCase() : null;
     if (!ext) {
       return res.status(400).json({ error: 'File extension not found in filename' })
     }
@@ -113,7 +114,8 @@ router.post('/burner-presigned', uploadLimiter, async (req, res, next) => {
       }
     }
 
-    const ext = fileName.split('.').pop()?.toLowerCase()
+    const extMatch = fileName.match(/\.([a-z0-9]+)$/i);
+    const ext = extMatch ? extMatch[1].toLowerCase() : null;
     if (!ext) {
       return res.status(400).json({ error: 'File extension not found in filename' })
     }
@@ -169,7 +171,7 @@ router.post(
       // Client akan men-generate ulang encryptedMetadata dan memanggil endpoint update.
       res.json({
         fileUrl,
-        fileKey: req.file?.key
+        fileKey: fileUrl.substring(fileUrl.lastIndexOf('/') + 1)
       })
     } catch (e) {
       next(e)

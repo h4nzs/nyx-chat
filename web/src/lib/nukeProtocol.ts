@@ -31,13 +31,19 @@ export const executeLocalWipe = async () => {
         } catch (_e) {}
     }
 
-    for (const db of databases) {
-      const req = indexedDB.deleteDatabase(db);
-      req.onblocked = () => {
-          console.warn(`[Nuke] Database ${db} is blocked. Closing page to force release.`);
-          window.location.reload();
-      };
-    }
+    const dbPromises = databases.map(db => {
+      return new Promise<void>((resolve) => {
+        const req = indexedDB.deleteDatabase(db);
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => {
+            console.warn(`[Nuke] Database ${db} is blocked. Closing page to force release.`);
+            window.location.reload();
+        };
+      });
+    });
+    
+    await Promise.all(dbPromises);
 
     // 2. Wipe Local & Session Storage completely
     localStorage.clear();

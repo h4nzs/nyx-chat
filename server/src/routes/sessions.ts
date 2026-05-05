@@ -144,7 +144,6 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
         }
       } catch (err) {
         console.error("[Session] Failed to fetch sockets or disconnect:", err)
-        throw err;
       }
     }
 

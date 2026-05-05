@@ -30,7 +30,7 @@ export default function CreateBurnerModal({ onClose }: Props) {
       } catch (e) {
         console.error(e);
         if (mounted) {
-          setError('Failed to generate secure burner link.');
+          setError(t('burner.failed_generate', 'Failed to generate secure burner link.'));
           setIsGenerating(false);
         }
       }
@@ -44,7 +44,7 @@ export default function CreateBurnerModal({ onClose }: Props) {
     try {
       await navigator.clipboard.writeText(link);
       setCopied(true);
-      toast.success('Burner Chat link copied!');
+      toast.success(t('burner.link_copied', 'Burner Chat link copied!'));
 
       const hashPart = link.split('#')[1];
       if (hashPart) {
@@ -65,7 +65,7 @@ export default function CreateBurnerModal({ onClose }: Props) {
 
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      toast.error('Failed to copy link');
+      toast.error(t('burner.failed_copy', 'Failed to copy link'));
     }
   };
 
@@ -96,9 +96,9 @@ export default function CreateBurnerModal({ onClose }: Props) {
             <div className="mx-auto w-12 h-12 rounded-full bg-accent/20 text-accent flex items-center justify-center mb-4">
               <FiZap size={24} />
             </div>
-            <h2 className="text-xl font-black uppercase tracking-widest text-text-primary">Burner Chat</h2>
+            <h2 className="text-xl font-black uppercase tracking-widest text-text-primary">{t('burner.title', 'Burner Chat')}</h2>
             <p className="text-xs text-text-secondary mt-2 font-mono leading-relaxed">
-              Generate a one-time, post-quantum encrypted ephemeral chat link. Data exists only in RAM.
+              {t('burner.description', 'Generate a one-time, post-quantum encrypted ephemeral chat link. Data exists only in RAM.')}
             </p>
           </div>
 
@@ -106,7 +106,7 @@ export default function CreateBurnerModal({ onClose }: Props) {
             {isGenerating ? (
               <div className="flex items-center gap-3 text-text-secondary">
                  <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin"></div>
-                 <span className="text-sm font-mono">Provisioning keys...</span>
+                 <span className="text-sm font-mono">{t('burner.provisioning', 'Provisioning keys...')}</span>
               </div>
             ) : error ? (
               <span className="text-sm font-mono text-red-500">{error}</span>
@@ -125,7 +125,7 @@ export default function CreateBurnerModal({ onClose }: Props) {
             className="w-full py-3 rounded-xl bg-accent text-white font-bold uppercase tracking-wider hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 shadow-neu-flat-light dark:shadow-neu-flat-dark"
           >
             {copied ? <FiCheck className="text-white" /> : <FiCopy />}
-            {copied ? 'Copied to Clipboard' : 'Copy Secure Link'}
+            {copied ? t('burner.copied', 'Copied to Clipboard') : t('burner.copy_link', 'Copy Secure Link')}
           </button>
         </motion.div>
       </motion.div>

@@ -28,8 +28,8 @@ export default function ReportUserModal({ isOpen, onClose, reportedUserId, repor
         body: JSON.stringify({ reportedUserId, reason })
       });
       toast.success(t('modals:report.success'));
-      onClose();
       setReason('');
+      onClose();
     } catch (e: unknown) {
       toast.error((e instanceof Error ? e.message : 'Unknown error') || t('modals:report.failed'));
     } finally {

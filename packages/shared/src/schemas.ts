@@ -3,7 +3,7 @@ import { asUserId, asConversationId, asMessageId, asStoryId } from './brands.js'
 
 // --- Validasi Kriptografi Khusus ---
 // Memastikan string hanya berisi karakter Base64 atau URL-Safe Base64 yang valid (dan max len wajar)
-export const Base64StringSchema = z.string().regex(/^[A-Za-z0-9+/_-]+={0,2}$/, 'Invalid base64/base64url format').max(1000000, 'Payload too large');
+export const Base64StringSchema = z.union([z.string().base64(), z.string().base64url()]).refine(val => val.length <= 1000000, 'Payload too large');
 export const PayloadStringSchema = z.string().max(1000000, 'Payload too large');
 
 // --- Base ID Schemas (Transforming to Branded Types) ---

@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { zodValidate } from '../utils/validate.js';
 import os from 'os';
 import { Router } from 'express';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
@@ -34,10 +36,16 @@ router.get('/system-status', requireAuth, requireAdmin, async (req, res) => {
     let totalFiles = 0;
     let totalSize = 0;
     try {
-        const command = new ListObjectsV2Command({ Bucket: env.r2BucketName });
-        const r2Data = await s3Client.send(command);
-        totalFiles = r2Data.KeyCount || 0;
-        r2Data.Contents?.forEach(item => { totalSize += item.Size || 0; });
+        let isTruncated = true;
+        let continuationToken: string | undefined = undefined;
+        while (isTruncated) {
+          const command: any = new ListObjectsV2Command({ Bucket: env.r2BucketName, ContinuationToken: continuationToken });
+          const r2Data: any = await s3Client.send(command);
+          totalFiles += r2Data.KeyCount || 0;
+          r2Data.Contents?.forEach((item: any) => { totalSize += item.Size || 0; });
+          isTruncated = !!r2Data.IsTruncated;
+          continuationToken = r2Data.NextContinuationToken;
+        }
     } catch (e) {
         console.error("R2 Metrics Error:", e);
     }
@@ -74,7 +82,7 @@ router.get('/banned-users', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // 2. Ban User
-router.post('/ban', requireAuth, requireAdmin, async (req, res) => {
+router.post('/ban', requireAuth, requireAdmin, zodValidate({ body: z.object({ userId: z.string().min(1), reason: z.string().optional() }) }), async (req, res) => {
   const { userId, reason } = req.body;
   if (!userId) return res.status(400).json({ error: 'User ID required' });
 

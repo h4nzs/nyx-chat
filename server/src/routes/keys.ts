@@ -23,13 +23,13 @@ router.post(
   zodValidate({
     body: z.object({
       identityKey: z.string().regex(base64UrlRegex, 'Invalid identity key format'),
-      pqIdentityKey: z.string().regex(base64UrlRegex, 'Invalid pq identity key format'),
+      pqIdentityKey: z.string().regex(base64UrlRegex, 'Invalid pq identity key format').optional().nullable(),
       signingKey: z.string().regex(base64UrlRegex, 'Invalid signing key format'),
       signedPreKey: z.object({
         key: z.string().regex(base64UrlRegex, 'Invalid pre-key format'),
-        pqKey: z.string().regex(base64UrlRegex, 'Invalid pq pre-key format'),
+        pqKey: z.string().regex(base64UrlRegex, 'Invalid pq pre-key format').optional().nullable(),
         signature: z.string().regex(base64UrlRegex, 'Invalid signature format'),
-        pqSignature: z.string().regex(base64UrlRegex, 'Invalid pq signature format')
+        pqSignature: z.string().regex(base64UrlRegex, 'Invalid pq signature format').optional().nullable()
       })
     })
   }),
@@ -327,6 +327,14 @@ router.get(
       const conversationId = String(req.params.conversationId);
       const sessionId = String(req.params.sessionId);
 
+      // Membership Check
+      const isParticipant = await prisma.participant.findFirst({
+        where: { conversationId, userId: authUser.id }
+      });
+      if (!isParticipant) {
+        return res.status(403).json({ error: 'Forbidden: You are not a participant of this conversation.' });
+      }
+
       const keyRecord = await prisma.sessionKey.findFirst({
         where: { conversationId, sessionId, deviceId }
       })
@@ -370,24 +378,39 @@ router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
     }
 
     const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${env.cfTurnKeyId}/credentials/generate-ice-servers`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${env.cfTurnApiToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ ttl: 86400 })
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
 
-    const data = await response.json() as unknown as TurnResponse;
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${env.cfTurnApiToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ttl: 86400 }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
 
-    if (data.iceServers) {
-      return res.json({ iceServers: data.iceServers });
+      const data = await response.json() as unknown as TurnResponse;
+
+      if (data.iceServers) {
+        return res.json({ iceServers: data.iceServers });
+      }
+    } catch (err: unknown) {
+      clearTimeout(timeoutId);
+      if (err instanceof Error && err.name === 'AbortError') {
+        console.warn('[TURN] Cloudflare API timed out, falling back to STUN');
+      } else {
+        console.error('[TURN] Failed to fetch credentials:', err);
+      }
+      return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
     }
 
     return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
   } catch (error) {
-    console.error('[TURN] Failed to fetch credentials:', error);
+    console.error('[TURN] Unexpected error:', error);
     return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
   }
 });

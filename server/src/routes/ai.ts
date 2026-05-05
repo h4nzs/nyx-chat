@@ -4,7 +4,11 @@ import { requireAuth } from '../middleware/auth.js';
 import { generalLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
+let genAI: GoogleGenerativeAI | null = null;
+if (process.env.GEMINI_API_KEY) {
+  genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+}
 
 // Rate limit to prevent abuse
 router.post('/smart-reply', requireAuth, generalLimiter, async (req, res) => {
@@ -15,6 +19,9 @@ router.post('/smart-reply', requireAuth, generalLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Message is required' });
     }
 
+    if (!genAI) {
+      return res.status(500).json({ error: 'AI service is not configured' });
+    }
     // Use Flash model for speed
     const model = genAI.getGenerativeModel({ 
       model: "gemini-2.5-flash",

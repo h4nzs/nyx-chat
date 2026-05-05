@@ -9,7 +9,7 @@ export function signAccessToken (payload: string | Buffer | object, opts: SignOp
   if (env.nodeEnv === 'production' && env.jwtSecret === 'dev-secret') {
     throw new Error('JWT_SECRET must be set in production environment')
   }
-  return jwt.sign(payload, env.jwtSecret, { expiresIn: ACCESS_TTL, ...opts })
+  return jwt.sign(payload, env.jwtSecret, { ...opts, expiresIn: ACCESS_TTL })
 }
 
 export function verifyJwt (token: string): JwtPayload | string | null {

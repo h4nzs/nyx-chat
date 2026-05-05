@@ -453,9 +453,13 @@ router.post('/pow/verify',
   async (req, res, next) => {
     try {
       const { nonce } = req.body;
-      const userId = req.user!.id;
+      const ip = req.ip || req.socket.remoteAddress;
+      const userId = req.user?.id;
+      const identifier = ip || userId;
       
-      const challengeData = await redisClient.get(`pow:challenge:${userId}`);
+      if (!identifier) throw new ApiError(400, 'Cannot determine client identifier.');
+      
+      const challengeData = await redisClient.get(`pow:challenge:${identifier}`);
       if (!challengeData) {
         throw new ApiError(400, 'Challenge expired or invalid. Please request a new one.');
       }
@@ -470,11 +474,13 @@ router.post('/pow/verify',
       const hashBuffer = sodium.crypto_generichash(64, input, null);
       const hash = Buffer.from(hashBuffer).toString('hex');
 
-      if (hash.startsWith('0'.repeat(difficulty))) {          await redisClient.del(`pow:challenge:${userId}`);
-          await prisma.user.update({
-              where: { id: userId },
-              data: { isVerified: true }
-          });
+      if (hash.startsWith('0'.repeat(difficulty))) {          await redisClient.del(`pow:challenge:${identifier}`);
+          if (userId) {
+            await prisma.user.update({
+                where: { id: userId },
+                data: { isVerified: true }
+            });
+          }
           res.json({ success: true, message: 'Account verified via Proof of Work' });
       } else {
           throw new ApiError(400, 'Invalid Proof of Work. Hash does not meet difficulty target.');
@@ -583,7 +589,7 @@ router.get('/webauthn/login/options', async (req, res, next) => {
       rpID,
       userVerification: 'preferred'
     })
-    res.cookie('webauthn_challenge', options.challenge, { httpOnly: true, maxAge: 60000, secure: env.nodeEnv === 'production' })
+    res.cookie('webauthn_challenge', options.challenge, { httpOnly: true, maxAge: 60000, secure: env.nodeEnv === 'production', sameSite: 'lax' })
     res.json(options)
   } catch (e) { next(e) }
 })

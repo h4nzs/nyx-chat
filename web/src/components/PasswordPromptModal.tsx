@@ -38,14 +38,13 @@ export default function PasswordPromptModal() {
     setIsLoading(true);
     setError('');
     try {
-      onPasswordSubmit(password);
+      await onPasswordSubmit(password);
       setPassword('');
       hidePasswordPrompt();
-    } catch (e) {
+    } catch (err) {
       setError(t('modals:password_prompt.error'));
     } finally {
       setIsLoading(false);
-      setPassword('');
     }
   };
 

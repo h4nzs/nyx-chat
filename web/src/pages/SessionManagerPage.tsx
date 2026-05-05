@@ -16,7 +16,7 @@ const parseUserAgent = (ua: string) => {
   return { browser: 'Unknown', os: 'Device' };
 };
 
-const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean, [key: string]: unknown }, onLogout: (jti: string) => void, isCurrent: boolean }) => {
+const SessionBlade = ({ session, onLogout, isCurrent, isEjecting }: { session: { userAgent: string, ipAddress: string, lastUsedAt: string | number | Date, jti: string, isCurrent?: boolean, [key: string]: unknown }, onLogout: (jti: string) => void, isCurrent: boolean, isEjecting?: boolean }) => {
   const { browser, os } = parseUserAgent(session.userAgent);
   const { t } = useTranslation(['settings', 'common']);
   const Icon = os === 'Mobile' ? FiSmartphone : FiMonitor;
@@ -61,12 +61,14 @@ const SessionBlade = ({ session, onLogout, isCurrent }: { session: { userAgent: 
       {!isCurrent && (
         <button
           onClick={() => onLogout(session.jti)}
+          disabled={isEjecting}
           className="
             p-3 rounded-xl text-red-500
             bg-bg-main
             shadow-neu-flat-light dark:shadow-neu-flat-dark
             active:shadow-neu-pressed-light dark:active:shadow-neu-pressed-dark
             hover:text-red-600 hover:scale-105 active:scale-95 transition-all
+            disabled:opacity-50 disabled:cursor-not-allowed
           "
           title={t('settings:emergency.eject')}
         >
@@ -81,6 +83,7 @@ export default function SessionManagerPage() {
   const { t } = useTranslation(['settings', 'common']);
   const [sessions, setSessions] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
+  const [ejectingJtis, setEjectingJtis] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const fetchSessions = async () => {
@@ -109,6 +112,8 @@ export default function SessionManagerPage() {
   }, [t]);
 
   const handleLogoutSession = async (jti: string) => {
+    if (ejectingJtis.has(jti)) return;
+    setEjectingJtis(prev => new Set(prev).add(jti));
     const toastId = toast.loading(t('settings:messages.ejecting'));
     try {
       await api(`/api/sessions/${jti}`, { method: 'DELETE' });
@@ -116,6 +121,12 @@ export default function SessionManagerPage() {
       toast.success(t('settings:messages.terminated'), { id: toastId });
     } catch (error) {
       toast.error(t('settings:messages.eject_failed'), { id: toastId });
+    } finally {
+      setEjectingJtis(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(jti);
+        return newSet;
+      });
     }
   };
 
@@ -161,7 +172,8 @@ export default function SessionManagerPage() {
                 key={sessionProps.jti}
                 session={sessionProps}
                 onLogout={handleLogoutSession}
-                isCurrent={sessionProps.isCurrent ?? false} 
+                isCurrent={sessionProps.isCurrent ?? false}
+                isEjecting={ejectingJtis.has(sessionProps.jti)}
               />
             )})}
             

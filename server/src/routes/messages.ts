@@ -171,14 +171,6 @@ router.delete('/:id', async (req, res, next) => {
     const messageId = req.params.id
     const r2Key = req.query.r2Key as string | undefined
 
-    // Dalam E2EE, server mungkin sudah menghapus pesannya dari DB (Kadaluarsa otomatis).
-    // Jika pesan masih ada, kita hapus secara eksplisit.
-    try {
-      await prisma.message.deleteMany({ where: { id: messageId, senderId: userId } });
-    } catch (e) {
-      console.error('[Messages] Failed to delete message:', e);
-    }
-
     // Tugas utama rute ini sekarang HANYA menghapus file fisik di Cloudflare R2.
     if (r2Key) {
        const safeR2Key = r2Key.replace(/[^a-zA-Z0-9_\-\./]/g, '').substring(0, 255);
@@ -196,9 +188,17 @@ router.delete('/:id', async (req, res, next) => {
           } catch (err) {
              const errorMessage = err instanceof Error ? err.message : String(err);
              console.error('[R2] Failed to delete blind file:', sanitizeForLog(safeR2Key), ':', sanitizeForLog(errorMessage));
-             return res.status(500).json({ error: 'Failed to delete file from storage' });
+             // Do not throw 500, proceed to DB deletion
           }
        }
+    }
+
+    // Dalam E2EE, server mungkin sudah menghapus pesannya dari DB (Kadaluarsa otomatis).
+    // Jika pesan masih ada, kita hapus secara eksplisit.
+    try {
+      await prisma.message.deleteMany({ where: { id: messageId, senderId: userId } });
+    } catch (e) {
+      console.error('[Messages] Failed to delete message:', e);
     }
 
     // Beritahu sukses, tidak peduli apakah pesan ada di DB server atau tidak

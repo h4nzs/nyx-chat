@@ -9,15 +9,15 @@ const NotificationItem = ({ notification }: { notification: { message: string, t
   const timeAgo = (timestamp: number) => {
     const seconds = Math.floor((new Date().getTime() - timestamp) / 1000);
     let interval = seconds / 31536000;
-    if (interval > 1) return t('time.ago_y', { count: Math.floor(interval) });
+    if (interval >= 1) return t('time.ago_y', { count: Math.floor(interval) });
     interval = seconds / 2592000;
-    if (interval > 1) return t('time.ago_mo', { count: Math.floor(interval) });
+    if (interval >= 1) return t('time.ago_mo', { count: Math.floor(interval) });
     interval = seconds / 86400;
-    if (interval > 1) return t('time.ago_d', { count: Math.floor(interval) });
+    if (interval >= 1) return t('time.ago_d', { count: Math.floor(interval) });
     interval = seconds / 3600;
-    if (interval > 1) return t('time.ago_h', { count: Math.floor(interval) });
+    if (interval >= 1) return t('time.ago_h', { count: Math.floor(interval) });
     interval = seconds / 60;
-    if (interval > 1) return t('time.ago_m', { count: Math.floor(interval) });
+    if (interval >= 1) return t('time.ago_m', { count: Math.floor(interval) });
     return t('time.ago_s', { count: Math.floor(seconds) });
   };
 
