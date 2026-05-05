@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect } from 'react'
 
 /**
  * A custom hook that listens for the 'Escape' key press globally
@@ -9,14 +9,14 @@ export function useGlobalEscape(callback: () => void) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        callback();
+        callback()
       }
-    };
+    }
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown)
 
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [callback]); // Re-run the effect if the callback changes
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [callback]) // Re-run the effect if the callback changes
 }

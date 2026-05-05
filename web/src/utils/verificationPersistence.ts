@@ -1,35 +1,38 @@
 // Helper functions to manage email verification state persistence
 
-const VERIFICATION_STATE_KEY = 'pending_email_verification';
+const VERIFICATION_STATE_KEY = 'pending_email_verification'
 
 export interface VerificationState {
-  userId: string;
-  email: string;
-  timestamp: number; // Unix timestamp when state was saved
-  phrase?: string; // Optional recovery phrase
+  userId: string
+  email: string
+  timestamp: number // Unix timestamp when state was saved
+  phrase?: string // Optional recovery phrase
 }
 
 /**
  * Check if we're in a browser environment with localStorage available
  */
 function isBrowserWithLocalStorage(): boolean {
-  return typeof window !== 'undefined' &&
-         typeof window.localStorage !== 'undefined';
+  return (
+    typeof window !== 'undefined' && typeof window.localStorage !== 'undefined'
+  )
 }
 
 /**
  * Validate that the parsed value has the expected shape
  */
 function isValidVerificationState(obj: unknown): obj is VerificationState {
-  const o = obj as Record<string, unknown>;
-  return obj !== null &&
-         typeof obj === 'object' &&
-         typeof o.userId === 'string' &&
-         typeof o.email === 'string' &&
-         typeof o.timestamp === 'number' &&
-         !isNaN(o.timestamp as number) &&
-         (o.timestamp as number) > 0 &&
-         (o.phrase === undefined || typeof o.phrase === 'string');
+  const o = obj as Record<string, unknown>
+  return (
+    obj !== null &&
+    typeof obj === 'object' &&
+    typeof o.userId === 'string' &&
+    typeof o.email === 'string' &&
+    typeof o.timestamp === 'number' &&
+    !isNaN(o.timestamp as number) &&
+    (o.timestamp as number) > 0 &&
+    (o.phrase === undefined || typeof o.phrase === 'string')
+  )
 }
 
 /**
@@ -38,13 +41,13 @@ function isValidVerificationState(obj: unknown): obj is VerificationState {
 export function saveVerificationState(state: VerificationState): void {
   // Skip if window or localStorage is not available
   if (!isBrowserWithLocalStorage()) {
-    return;
+    return
   }
 
   try {
-    localStorage.setItem(VERIFICATION_STATE_KEY, JSON.stringify(state));
+    localStorage.setItem(VERIFICATION_STATE_KEY, JSON.stringify(state))
   } catch (error) {
-    console.error('Failed to save verification state:', error);
+    console.error('Failed to save verification state:', error)
   }
 }
 
@@ -54,35 +57,35 @@ export function saveVerificationState(state: VerificationState): void {
 export function getVerificationState(): VerificationState | null {
   // Return null if window or localStorage is not available
   if (!isBrowserWithLocalStorage()) {
-    return null;
+    return null
   }
 
   try {
-    const stored = localStorage.getItem(VERIFICATION_STATE_KEY);
-    if (!stored) return null;
+    const stored = localStorage.getItem(VERIFICATION_STATE_KEY)
+    if (!stored) return null
 
-    const parsed = JSON.parse(stored);
+    const parsed = JSON.parse(stored)
 
     // Validate the shape of the parsed object
     if (!isValidVerificationState(parsed)) {
-      clearVerificationState();
-      return null;
+      clearVerificationState()
+      return null
     }
 
     // Check if the state is still valid (less than 30 minutes old)
-    const age = Date.now() - parsed.timestamp;
-    const THIRTY_MINUTES = 30 * 60 * 1000;
+    const age = Date.now() - parsed.timestamp
+    const THIRTY_MINUTES = 30 * 60 * 1000
 
     if (age > THIRTY_MINUTES) {
-      clearVerificationState();
-      return null;
+      clearVerificationState()
+      return null
     }
 
-    return parsed;
+    return parsed
   } catch (error) {
-    console.error('Failed to parse verification state:', error);
-    clearVerificationState();
-    return null;
+    console.error('Failed to parse verification state:', error)
+    clearVerificationState()
+    return null
   }
 }
 
@@ -92,12 +95,12 @@ export function getVerificationState(): VerificationState | null {
 export function clearVerificationState(): void {
   // Skip if window or localStorage is not available
   if (!isBrowserWithLocalStorage()) {
-    return;
+    return
   }
 
   try {
-    localStorage.removeItem(VERIFICATION_STATE_KEY);
+    localStorage.removeItem(VERIFICATION_STATE_KEY)
   } catch (error) {
-    console.error('Failed to clear verification state:', error);
+    console.error('Failed to clear verification state:', error)
   }
 }

@@ -1,178 +1,227 @@
-import DefaultAvatar from '@/components/ui/DefaultAvatar';
-import { useEffect, useState } from 'react';
-import { useModalStore } from '@store/modal';
-import { useNavigate } from 'react-router-dom';
-import { toAbsoluteUrl } from '@utils/url';
-import { authFetch, handleApiError } from '@lib/api';
-import type { User } from '@store/auth';
-import { Spinner } from './Spinner';
-import toast from 'react-hot-toast';
+import DefaultAvatar from '@/components/ui/DefaultAvatar'
+import { useEffect, useState } from 'react'
+import { useModalStore } from '@store/modal'
+import { useNavigate } from 'react-router-dom'
+import { toAbsoluteUrl } from '@utils/url'
+import { authFetch, handleApiError } from '@lib/api'
+import type { User } from '@store/auth'
+import { Spinner } from './Spinner'
+import toast from 'react-hot-toast'
 
-import SafetyNumberModal from './SafetyNumberModal';
-import { useConversationStore } from '@store/conversation';
-import { useVerificationStore } from '@store/verification';
-import { useAuthStore } from '@store/auth';
-import { usePresenceStore } from '@store/presence';
-import { useShallow } from 'zustand/react/shallow';
-import ModalBase from './ui/ModalBase';
-import MediaGallery from './MediaGallery';
-import { AnimatedTabs } from './ui/AnimatedTabs';
-import { useUserProfile } from '@hooks/useUserProfile';
-import { asConversationId, ProfileUser } from '@nyx/shared';
-import { useTranslation } from 'react-i18next';
+import SafetyNumberModal from './SafetyNumberModal'
+import { useConversationStore } from '@store/conversation'
+import { useVerificationStore } from '@store/verification'
+import { useAuthStore } from '@store/auth'
+import { usePresenceStore } from '@store/presence'
+import { useShallow } from 'zustand/react/shallow'
+import ModalBase from './ui/ModalBase'
+import MediaGallery from './MediaGallery'
+import { AnimatedTabs } from './ui/AnimatedTabs'
+import { useUserProfile } from '@hooks/useUserProfile'
+import { asConversationId, ProfileUser } from '@nyx/shared'
+import { useTranslation } from 'react-i18next'
 
 export default function UserInfoModal() {
-  const { t } = useTranslation(['modals', 'common', 'chat']);
-  const { isProfileModalOpen, profileUserId, closeProfileModal } = useModalStore(useShallow(s => ({
-    isProfileModalOpen: s.isProfileModalOpen, profileUserId: s.profileUserId, closeProfileModal: s.closeProfileModal
-  })));
-  const { activeId, conversations, upgradeToPqDr, downgradeToSenderKey } = useConversationStore(useShallow(s => ({ 
-    activeId: s.activeId, 
-    conversations: s.conversations,
-    upgradeToPqDr: s.upgradeToPqDr,
-    downgradeToSenderKey: s.downgradeToSenderKey
-  })));
-  
-  const activeConversation = conversations.find(c => c.id === activeId);
-  const isPqDr = activeConversation?.encryptionMode === 'PQ_DR';
+  const { t } = useTranslation(['modals', 'common', 'chat'])
+  const { isProfileModalOpen, profileUserId, closeProfileModal } =
+    useModalStore(
+      useShallow((s) => ({
+        isProfileModalOpen: s.isProfileModalOpen,
+        profileUserId: s.profileUserId,
+        closeProfileModal: s.closeProfileModal
+      }))
+    )
+  const { activeId, conversations, upgradeToPqDr, downgradeToSenderKey } =
+    useConversationStore(
+      useShallow((s) => ({
+        activeId: s.activeId,
+        conversations: s.conversations,
+        upgradeToPqDr: s.upgradeToPqDr,
+        downgradeToSenderKey: s.downgradeToSenderKey
+      }))
+    )
 
-  const { verifiedStatus, setVerified } = useVerificationStore(useShallow(s => ({ verifiedStatus: s.verifiedStatus, setVerified: s.setVerified })));
-  const onlineUsers = usePresenceStore(s => s.onlineUsers);
-  const navigate = useNavigate();
-  const [user, setUser] = useState<ProfileUser | null>(null);
-  const profile = useUserProfile(user);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [showSafetyModal, setShowSafetyModal] = useState(false);
-  const [safetyNumber, setSafetyNumber] = useState('');
-  const [activeTab, setActiveTab] = useState('about');
+  const activeConversation = conversations.find((c) => c.id === activeId)
+  const isPqDr = activeConversation?.encryptionMode === 'PQ_DR'
+
+  const { verifiedStatus, setVerified } = useVerificationStore(
+    useShallow((s) => ({
+      verifiedStatus: s.verifiedStatus,
+      setVerified: s.setVerified
+    }))
+  )
+  const onlineUsers = usePresenceStore((s) => s.onlineUsers)
+  const navigate = useNavigate()
+  const [user, setUser] = useState<ProfileUser | null>(null)
+  const profile = useUserProfile(user)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [showSafetyModal, setShowSafetyModal] = useState(false)
+  const [safetyNumber, setSafetyNumber] = useState('')
+  const [activeTab, setActiveTab] = useState('about')
 
   // Subscribe to blockedUserIds changes to ensure UI updates when blocking/unblocking
-  const blockedUserIds = useAuthStore(state => state.blockedUserIds);
+  const blockedUserIds = useAuthStore((state) => state.blockedUserIds)
 
   const tabs = [
     { id: 'about', label: t('modals:user_info_modal.about', 'About') },
-    { id: 'media', label: t('modals:user_info_modal.media', 'Media') },
-  ];
+    { id: 'media', label: t('modals:user_info_modal.media', 'Media') }
+  ]
 
-  const isAlreadyVerified = activeId ? verifiedStatus[activeId] : false;
+  const isAlreadyVerified = activeId ? verifiedStatus[activeId] : false
 
   useEffect(() => {
     if (!profileUserId) {
-      setUser(null);
-      return;
+      setUser(null)
+      return
     }
 
     const fetchUser = async () => {
-      setLoading(true);
-      setError(null);
-      setUser(null);
+      setLoading(true)
+      setError(null)
+      setUser(null)
       try {
-        const userData = await authFetch<ProfileUser>(`/api/users/${profileUserId}`);
-        setUser(userData);
+        const userData = await authFetch<ProfileUser>(
+          `/api/users/${profileUserId}`
+        )
+        setUser(userData)
       } catch (e) {
-        setError(handleApiError(e));
+        setError(handleApiError(e))
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
-    };
+    }
 
-    fetchUser();
-  }, [profileUserId]);
+    fetchUser()
+  }, [profileUserId])
 
   const handleViewProfile = () => {
-    if (!user) return;
-    closeProfileModal();
-    navigate(`/profile/${user.id}`);
-  };
+    if (!user) return
+    closeProfileModal()
+    navigate(`/profile/${user.id}`)
+  }
 
   const handleVerifySecurity = async () => {
     if (!user?.publicKey) {
-      setError(t('modals:user_info.errors.no_keys'));
-      return;
+      setError(t('modals:user_info.errors.no_keys'))
+      return
     }
 
     try {
-      const { generateSafetyNumber } = await import('@lib/crypto-worker-proxy');
-      const { computeSafetyNumberParts } = await import('@utils/safetyNumber');
-      const { getEncryptionKeyPair, getPqEncryptionKeyPair, getSigningPrivateKey } = useAuthStore.getState();
+      const { generateSafetyNumber } = await import('@lib/crypto-worker-proxy')
+      const { computeSafetyNumberParts } = await import('@utils/safetyNumber')
+      const {
+        getEncryptionKeyPair,
+        getPqEncryptionKeyPair,
+        getSigningPrivateKey
+      } = useAuthStore.getState()
 
-      const keyPair = await getEncryptionKeyPair();
+      const keyPair = await getEncryptionKeyPair()
       if (!keyPair || !keyPair.publicKey) {
-        throw new Error(t('modals:user_info.errors.my_key_missing'));
+        throw new Error(t('modals:user_info.errors.my_key_missing'))
       }
-      
-      const pqKeyPair = await getPqEncryptionKeyPair().catch(() => null);
-      const mySigningKey = await getSigningPrivateKey();
+
+      const pqKeyPair = await getPqEncryptionKeyPair().catch(() => null)
+      const mySigningKey = await getSigningPrivateKey()
 
       // FIXED: Removed 'any' and explicitly cast to ProfileUser
-      const { myPublicKeyCombined, theirPublicKeyCombined } = await computeSafetyNumberParts(
-        keyPair.publicKey,
-        pqKeyPair?.publicKey || null,
-        mySigningKey,
-        user as ProfileUser & { publicKey: string }
-      );
+      const { myPublicKeyCombined, theirPublicKeyCombined } =
+        await computeSafetyNumberParts(
+          keyPair.publicKey,
+          pqKeyPair?.publicKey || null,
+          mySigningKey,
+          user as ProfileUser & { publicKey: string }
+        )
 
-      const sn = await generateSafetyNumber(myPublicKeyCombined, theirPublicKeyCombined);
-      setSafetyNumber(sn);
-      setShowSafetyModal(true);
-
+      const sn = await generateSafetyNumber(
+        myPublicKeyCombined,
+        theirPublicKeyCombined
+      )
+      setSafetyNumber(sn)
+      setShowSafetyModal(true)
     } catch (e: unknown) {
-      console.error("Safety Number generation error:", e);
-      setError((e instanceof Error ? e.message : t('common:errors.unknown')) || t('modals:user_info.errors.safety_number_failed'));
+      console.error('Safety Number generation error:', e)
+      setError(
+        (e instanceof Error ? e.message : t('common:errors.unknown')) ||
+          t('modals:user_info.errors.safety_number_failed')
+      )
     }
-  };
+  }
 
   const handleReportUser = async () => {
-    if (!user) return;
-    const reason = prompt(t('modals:user_info_modal.prompt_report', 'Enter reason for reporting this user:'));
-    if (!reason) return;
-    
+    if (!user) return
+    const reason = prompt(
+      t(
+        'modals:user_info_modal.prompt_report',
+        'Enter reason for reporting this user:'
+      )
+    )
+    if (!reason) return
+
     try {
       await authFetch('/api/reports/user', {
         method: 'POST',
         body: JSON.stringify({ reportedUserId: user.id, reason })
-      });
-      toast.success(t('modals:report.success'));
+      })
+      toast.success(t('modals:report.success'))
     } catch (e: unknown) {
-      toast.error((e instanceof Error ? e.message : t('common:errors.unknown')) || t('modals:report.failed'));
+      toast.error(
+        (e instanceof Error ? e.message : t('common:errors.unknown')) ||
+          t('modals:report.failed')
+      )
     }
-  };
+  }
 
   const renderContent = () => {
-    if (loading) return <div className="flex justify-center items-center min-h-[200px]"><Spinner /></div>;
-    if (error) return <p className="text-center text-red-500 font-mono text-sm">{error}</p>;
+    if (loading)
+      return (
+        <div className="flex justify-center items-center min-h-[200px]">
+          <Spinner />
+        </div>
+      )
+    if (error)
+      return (
+        <p className="text-center text-red-500 font-mono text-sm">{error}</p>
+      )
     if (user) {
-      const isOnline = onlineUsers.has(user.id);
+      const isOnline = onlineUsers.has(user.id)
       return (
         <div className="flex flex-col gap-6">
           <div className="flex items-start gap-6">
             {/* Avatar: INSET (Pressed in) - Looks like a porthole */}
             <div className="relative w-24 h-24 rounded-full shadow-neu-pressed dark:shadow-neu-pressed-dark flex items-center justify-center p-1 bg-bg-main">
-               {profile.avatarUrl ? (
-                 <img
-                   src={toAbsoluteUrl(profile.avatarUrl)}
-                   alt={profile.name}
-                   className="w-full h-full rounded-full object-cover"
-                 />
-               ) : (
-                 <DefaultAvatar
-                   name={profile.name}
-                   id={user?.id}
-                   className="w-full h-full"
-                 />
-               )}
-               <div className={`absolute bottom-1 right-1 w-4 h-4 border-2 border-bg-main rounded-full shadow-neu-flat dark:shadow-neu-flat-dark ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`} />
+              {profile.avatarUrl ? (
+                <img
+                  src={toAbsoluteUrl(profile.avatarUrl)}
+                  alt={profile.name}
+                  className="w-full h-full rounded-full object-cover"
+                />
+              ) : (
+                <DefaultAvatar
+                  name={profile.name}
+                  id={user?.id}
+                  className="w-full h-full"
+                />
+              )}
+              <div
+                className={`absolute bottom-1 right-1 w-4 h-4 border-2 border-bg-main rounded-full shadow-neu-flat dark:shadow-neu-flat-dark ${isOnline ? 'bg-green-500' : 'bg-gray-400'}`}
+              />
             </div>
 
             {/* Info: Left Aligned */}
             <div className="flex-1 pt-2">
-              <h3 className="text-2xl font-bold tracking-tight text-text-primary">{profile.name}</h3>
+              <h3 className="text-2xl font-bold tracking-tight text-text-primary">
+                {profile.name}
+              </h3>
               {/* ID Badge: Extruded pill */}
               <div className="flex flex-col items-start gap-2 mt-2">
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full shadow-neu-flat dark:shadow-neu-flat-dark bg-bg-main">
-                   <span className="text-xs font-mono text-text-secondary uppercase">ID</span>
-                   <span className="text-sm font-mono text-accent">#{user.id.substring(0, 8)}</span>
+                  <span className="text-xs font-mono text-text-secondary uppercase">
+                    ID
+                  </span>
+                  <span className="text-sm font-mono text-accent">
+                    #{user.id.substring(0, 8)}
+                  </span>
                 </div>
                 {user.isVerified && (
                   <span className="text-[10px] text-emerald-500 font-bold tracking-widest uppercase px-2">
@@ -184,38 +233,50 @@ export default function UserInfoModal() {
           </div>
 
           <div className="w-full text-left">
-             <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2 mb-1 block">{t('common:profile.bio_data')}</label>
-             <div className="
+            <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary pl-2 mb-1 block">
+              {t('common:profile.bio_data')}
+            </label>
+            <div
+              className="
                w-full p-4 rounded-xl min-h-[80px]
                bg-bg-main text-text-primary text-sm font-medium
                shadow-neu-pressed dark:shadow-neu-pressed-dark
                border border-white/5
-             ">
-               {profile.description || <span className="opacity-40 italic">{t('modals:user_info_modal.no_data', 'No data available.')}</span>}
-             </div>
+             "
+            >
+              {profile.description || (
+                <span className="opacity-40 italic">
+                  {t('modals:user_info_modal.no_data', 'No data available.')}
+                </span>
+              )}
+            </div>
           </div>
-          
+
           <div className="w-full">
             <div className="flex items-center justify-between p-4 rounded-xl bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark border border-white/5">
-              <span className="font-bold text-sm uppercase tracking-wider text-text-primary">Paranoid Mode (PQ-DR)</span>
+              <span className="font-bold text-sm uppercase tracking-wider text-text-primary">
+                Paranoid Mode (PQ-DR)
+              </span>
               <button
                 onClick={() => {
                   if (activeId) {
-                    if (isPqDr) downgradeToSenderKey(activeId, false);
-                    else upgradeToPqDr(activeId);
+                    if (isPqDr) downgradeToSenderKey(activeId, false)
+                    else upgradeToPqDr(activeId)
                   }
                 }}
                 className={`w-14 h-7 rounded-full transition-colors relative shadow-neu-flat dark:shadow-neu-flat-dark ${isPqDr ? 'bg-accent' : 'bg-bg-main'}`}
               >
-                <div className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${isPqDr ? 'translate-x-7 shadow-[0_0_10px_rgba(255,255,255,0.5)]' : 'bg-text-secondary opacity-50'}`} />
+                <div
+                  className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${isPqDr ? 'translate-x-7 shadow-[0_0_10px_rgba(255,255,255,0.5)]' : 'bg-text-secondary opacity-50'}`}
+                />
               </button>
             </div>
           </div>
         </div>
-      );
+      )
     }
-    return null;
-  };
+    return null
+  }
 
   return (
     <>
@@ -226,7 +287,11 @@ export default function UserInfoModal() {
       >
         <div className="flex flex-col gap-4">
           <div className="px-4 md:px-0">
-            <AnimatedTabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />
+            <AnimatedTabs
+              tabs={tabs}
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+            />
           </div>
 
           {activeTab === 'about' && (
@@ -244,7 +309,10 @@ export default function UserInfoModal() {
                       hover:text-accent transition-all
                     "
                   >
-                    {t('modals:user_info_modal.view_personnel', 'View Personnel File')}
+                    {t(
+                      'modals:user_info_modal.view_personnel',
+                      'View Personnel File'
+                    )}
                   </button>
                   <button
                     onClick={handleVerifySecurity}
@@ -256,14 +324,20 @@ export default function UserInfoModal() {
                       hover:text-green-500 transition-all
                     "
                   >
-                    {t('modals:user_info_modal.verify_handshake', 'Verify Encryption Handshake')}
+                    {t(
+                      'modals:user_info_modal.verify_handshake',
+                      'Verify Encryption Handshake'
+                    )}
                   </button>
                   {user && user.id !== useAuthStore.getState().user?.id && (
                     <>
                       {blockedUserIds.includes(user.id) ? (
                         <button
                           onClick={() => {
-                            useAuthStore.getState().unblockUser(user.id).catch(console.error);
+                            useAuthStore
+                              .getState()
+                              .unblockUser(user.id)
+                              .catch(console.error)
                           }}
                           className="
                             w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
@@ -273,12 +347,18 @@ export default function UserInfoModal() {
                             hover:bg-red-500 hover:text-white transition-all
                           "
                         >
-                          {t('modals:user_info_modal.unblock_signal', 'Unblock Signal')}
+                          {t(
+                            'modals:user_info_modal.unblock_signal',
+                            'Unblock Signal'
+                          )}
                         </button>
                       ) : (
                         <button
                           onClick={() => {
-                            useAuthStore.getState().blockUser(user.id).catch(console.error);
+                            useAuthStore
+                              .getState()
+                              .blockUser(user.id)
+                              .catch(console.error)
                           }}
                           className="
                             w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
@@ -288,10 +368,13 @@ export default function UserInfoModal() {
                             hover:text-red-500 transition-all
                           "
                         >
-                          {t('modals:user_info_modal.block_signal', 'Block Signal')}
+                          {t(
+                            'modals:user_info_modal.block_signal',
+                            'Block Signal'
+                          )}
                         </button>
                       )}
-                      
+
                       <button
                         onClick={handleReportUser}
                         className="
@@ -302,7 +385,10 @@ export default function UserInfoModal() {
                           hover:text-yellow-500 transition-all
                         "
                       >
-                        {t('modals:user_info_modal.report_signal', 'Report Signal')}
+                        {t(
+                          'modals:user_info_modal.report_signal',
+                          'Report Signal'
+                        )}
                       </button>
                     </>
                   )}
@@ -318,7 +404,7 @@ export default function UserInfoModal() {
           )}
         </div>
       </ModalBase>
-      
+
       {showSafetyModal && user && (
         <SafetyNumberModal
           safetyNumber={safetyNumber}
@@ -326,9 +412,9 @@ export default function UserInfoModal() {
           onClose={() => setShowSafetyModal(false)}
           onVerify={() => {
             if (activeId && user.publicKey) {
-              setVerified(activeId, safetyNumber);
+              setVerified(activeId, safetyNumber)
             }
-            setShowSafetyModal(false);
+            setShowSafetyModal(false)
           }}
           isVerified={isAlreadyVerified}
           hasPeerPQ={!!user.pqPublicKey}
@@ -336,5 +422,5 @@ export default function UserInfoModal() {
         />
       )}
     </>
-  );
+  )
 }

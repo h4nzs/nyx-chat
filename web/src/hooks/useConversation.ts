@@ -1,36 +1,57 @@
-import { useConversationStore } from '@store/conversation';
-import { useMessageStore } from '@store/message';
-import { useMessageInputStore } from '@store/messageInput';
-import { useShallow } from 'zustand/react/shallow';
-import { useMemo } from 'react';
-import type { Message } from '@store/conversation';
+import { useConversationStore } from '@store/conversation'
+import { useMessageStore } from '@store/message'
+import { useMessageInputStore } from '@store/messageInput'
+import { useShallow } from 'zustand/react/shallow'
+import { useMemo } from 'react'
+import type { Message } from '@store/conversation'
 
 export function useConversation(conversationId: string) {
-  const conversation = useConversationStore(state => 
-    state.conversations.find(c => c.id === conversationId)
-  );
-  
-  const { messages, hasMore, isFetchingMore, loadPreviousMessages, loadMessagesForConversation } = useMessageStore(useShallow(state => ({
-    messages: state.messages[conversationId] || [],
-    hasMore: state.hasMore[conversationId],
-    isFetchingMore: state.isFetchingMore[conversationId],
-    loadPreviousMessages: state.loadPreviousMessages,
-    loadMessagesForConversation: state.loadMessagesForConversation,
-  })));
+  const conversation = useConversationStore((state) =>
+    state.conversations.find((c) => c.id === conversationId)
+  )
 
-  const { sendMessage, uploadFile, retrySendMessage } = useMessageInputStore(useShallow(state => ({
-    sendMessage: state.sendMessage,
-    uploadFile: state.uploadFile,
-    retrySendMessage: state.retrySendMessage,
-  })));
+  const {
+    messages,
+    hasMore,
+    isFetchingMore,
+    loadPreviousMessages,
+    loadMessagesForConversation
+  } = useMessageStore(
+    useShallow((state) => ({
+      messages: state.messages[conversationId] || [],
+      hasMore: state.hasMore[conversationId],
+      isFetchingMore: state.isFetchingMore[conversationId],
+      loadPreviousMessages: state.loadPreviousMessages,
+      loadMessagesForConversation: state.loadMessagesForConversation
+    }))
+  )
 
-  const actions = useMemo(() => ({
-    loadPrevious: () => loadPreviousMessages(conversationId),
-    loadMessages: () => loadMessagesForConversation(conversationId),
-    sendMessage: (data: { content: string }) => sendMessage(conversationId, data),
-    uploadFile: (file: File) => uploadFile(conversationId, file),
-    retrySendMessage: (message: Message) => retrySendMessage(message),
-  }), [conversationId, loadPreviousMessages, loadMessagesForConversation, sendMessage, uploadFile, retrySendMessage]);
+  const { sendMessage, uploadFile, retrySendMessage } = useMessageInputStore(
+    useShallow((state) => ({
+      sendMessage: state.sendMessage,
+      uploadFile: state.uploadFile,
+      retrySendMessage: state.retrySendMessage
+    }))
+  )
+
+  const actions = useMemo(
+    () => ({
+      loadPrevious: () => loadPreviousMessages(conversationId),
+      loadMessages: () => loadMessagesForConversation(conversationId),
+      sendMessage: (data: { content: string }) =>
+        sendMessage(conversationId, data),
+      uploadFile: (file: File) => uploadFile(conversationId, file),
+      retrySendMessage: (message: Message) => retrySendMessage(message)
+    }),
+    [
+      conversationId,
+      loadPreviousMessages,
+      loadMessagesForConversation,
+      sendMessage,
+      uploadFile,
+      retrySendMessage
+    ]
+  )
 
   return {
     conversation,
@@ -39,8 +60,8 @@ export function useConversation(conversationId: string) {
     hasMore,
     isFetchingMore,
     // Add a general loading state, true if conversation is missing but id is present
-    isLoading: !!conversationId && !conversation, 
+    isLoading: !!conversationId && !conversation,
     // You can add a more specific error state if needed
-    error: null, 
-  };
+    error: null
+  }
 }

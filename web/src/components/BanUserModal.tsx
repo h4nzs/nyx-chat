@@ -1,56 +1,66 @@
-import { useState, useEffect } from 'react';
-import ModalBase from './ui/ModalBase';
-import { authFetch } from '@lib/api';
-import toast from 'react-hot-toast';
-import { useTranslation } from 'react-i18next';
+import { useState, useEffect } from 'react'
+import ModalBase from './ui/ModalBase'
+import { authFetch } from '@lib/api'
+import toast from 'react-hot-toast'
+import { useTranslation } from 'react-i18next'
 
 interface Props {
-  isOpen: boolean;
-  onClose: () => void;
-  targetUserId?: string; // Optional, if banning from list or profile directly
-  onSuccess: () => void;
+  isOpen: boolean
+  onClose: () => void
+  targetUserId?: string // Optional, if banning from list or profile directly
+  onSuccess: () => void
 }
 
-export default function BanUserModal({ isOpen, onClose, targetUserId, onSuccess }: Props) {
-  const { t } = useTranslation(['modals', 'common']);
-  const [userId, setUserId] = useState(targetUserId || '');
-  const [reason, setReason] = useState('');
-  const [loading, setLoading] = useState(false);
+export default function BanUserModal({
+  isOpen,
+  onClose,
+  targetUserId,
+  onSuccess
+}: Props) {
+  const { t } = useTranslation(['modals', 'common'])
+  const [userId, setUserId] = useState(targetUserId || '')
+  const [reason, setReason] = useState('')
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (isOpen && targetUserId) {
-      setUserId(targetUserId);
+      setUserId(targetUserId)
     }
-  }, [isOpen, targetUserId]);
+  }, [isOpen, targetUserId])
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userId.trim()) return toast.error(t('modals:ban.no_id'));
-    if (!reason.trim()) return toast.error(t('modals:ban.no_reason'));
+    e.preventDefault()
+    if (!userId.trim()) return toast.error(t('modals:ban.no_id'))
+    if (!reason.trim()) return toast.error(t('modals:ban.no_reason'))
 
-    setLoading(true);
+    setLoading(true)
     try {
       await authFetch('/api/admin/ban', {
         method: 'POST',
         body: JSON.stringify({ userId, reason })
-      });
-      toast.success(t('modals:ban.success'));
-      onSuccess();
-      onClose();
-      setReason('');
-      if (!targetUserId) setUserId('');
+      })
+      toast.success(t('modals:ban.success'))
+      onSuccess()
+      onClose()
+      setReason('')
+      if (!targetUserId) setUserId('')
     } catch (e: unknown) {
-      toast.error((e instanceof Error ? e.message : 'Unknown error') || t('modals:ban.failed'));
+      toast.error(
+        (e instanceof Error ? e.message : 'Unknown error') ||
+          t('modals:ban.failed')
+      )
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   return (
     <ModalBase isOpen={isOpen} onClose={onClose} title={t('modals:ban.title')}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-bold uppercase text-text-secondary">{t('modals:ban.id_label')}</label>
+          <label className="text-xs font-bold uppercase text-text-secondary">
+            {t('modals:ban.id_label')}
+          </label>
           <input
             type="text"
             value={userId}
@@ -60,9 +70,11 @@ export default function BanUserModal({ isOpen, onClose, targetUserId, onSuccess 
             disabled={!!targetUserId} // Lock if ID passed via props
           />
         </div>
-        
+
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-bold uppercase text-text-secondary">{t('modals:ban.reason_label')}</label>
+          <label className="text-xs font-bold uppercase text-text-secondary">
+            {t('modals:ban.reason_label')}
+          </label>
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
@@ -98,5 +110,5 @@ export default function BanUserModal({ isOpen, onClose, targetUserId, onSuccess 
         </div>
       </form>
     </ModalBase>
-  );
+  )
 }

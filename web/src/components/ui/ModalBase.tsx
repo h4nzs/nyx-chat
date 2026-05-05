@@ -1,60 +1,66 @@
-import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { FiX } from 'react-icons/fi';
-import React from 'react';
-import { useGlobalEscape } from '../../hooks/useGlobalEscape';
+import { motion, AnimatePresence, Variants } from 'framer-motion'
+import { FiX } from 'react-icons/fi'
+import React from 'react'
+import { useGlobalEscape } from '../../hooks/useGlobalEscape'
 
 interface ModalBaseProps {
-  isOpen: boolean;
-  onClose: () => void;
-  title: string;
-  children: React.ReactNode;
-  footer?: React.ReactNode;
+  isOpen: boolean
+  onClose: () => void
+  title: string
+  children: React.ReactNode
+  footer?: React.ReactNode
 }
 
 const dropIn: Variants = {
   hidden: {
-    y: "20px",
+    y: '20px',
     opacity: 0,
-    scale: 0.98,
+    scale: 0.98
   },
   visible: {
-    y: "0",
+    y: '0',
     opacity: 1,
     scale: 1,
     transition: {
       duration: 0.3,
-      ease: [0.23, 1, 0.32, 1], // Cubic bezier for mechanical feel
-    },
+      ease: [0.23, 1, 0.32, 1] // Cubic bezier for mechanical feel
+    }
   },
   exit: {
-    y: "20px",
+    y: '20px',
     opacity: 0,
     scale: 0.98,
     transition: {
-      duration: 0.2,
-    },
-  },
-};
+      duration: 0.2
+    }
+  }
+}
 
-const ModalBase: React.FC<ModalBaseProps> = ({ isOpen, onClose, title, children, footer }) => {
-  useGlobalEscape(onClose);
+const ModalBase: React.FC<ModalBaseProps> = ({
+  isOpen,
+  onClose,
+  title,
+  children,
+  footer
+}) => {
+  useGlobalEscape(onClose)
 
   return (
     <AnimatePresence>
       {isOpen && (
-        <div 
+        <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           onMouseDown={onClose}
         >
           {/* Backdrop */}
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-md" 
-            aria-hidden="true" 
+            className="fixed inset-0 bg-black/60 backdrop-blur-md"
+            aria-hidden="true"
           />
-          
+
           <motion.div
             variants={dropIn}
             initial="hidden"
@@ -74,14 +80,19 @@ const ModalBase: React.FC<ModalBaseProps> = ({ isOpen, onClose, title, children,
             onMouseDown={(e) => e.stopPropagation()}
           >
             {/* Mechanical Header */}
-            <div className="
+            <div
+              className="
               flex items-center justify-between px-6 py-4 
               border-b border-black/5 dark:border-white/5
               bg-bg-main
-            ">
+            "
+            >
               <div className="flex items-center gap-3">
                 <div className="w-1.5 h-4 bg-accent rounded-full shadow-[0_0_8px_rgba(var(--accent),0.6)]"></div>
-                <h2 id="modal-title" className="text-sm font-black uppercase tracking-widest text-text-primary">
+                <h2
+                  id="modal-title"
+                  className="text-sm font-black uppercase tracking-widest text-text-primary"
+                >
                   {title}
                 </h2>
               </div>
@@ -98,7 +109,10 @@ const ModalBase: React.FC<ModalBaseProps> = ({ isOpen, onClose, title, children,
                   transition-all duration-200
                 "
               >
-                <FiX size={18} className="group-hover:rotate-90 transition-transform duration-200" />
+                <FiX
+                  size={18}
+                  className="group-hover:rotate-90 transition-transform duration-200"
+                />
               </button>
             </div>
 
@@ -109,11 +123,13 @@ const ModalBase: React.FC<ModalBaseProps> = ({ isOpen, onClose, title, children,
 
             {/* Footer Control Deck */}
             {footer && (
-              <div className="
+              <div
+                className="
                 flex justify-end gap-4 px-6 py-4 
                 bg-bg-main 
                 border-t border-black/5 dark:border-white/5
-              ">
+              "
+              >
                 {footer}
               </div>
             )}
@@ -121,7 +137,7 @@ const ModalBase: React.FC<ModalBaseProps> = ({ isOpen, onClose, title, children,
         </div>
       )}
     </AnimatePresence>
-  );
-};
+  )
+}
 
-export default ModalBase;
+export default ModalBase

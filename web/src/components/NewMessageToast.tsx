@@ -1,23 +1,29 @@
-import DefaultAvatar from "@/components/ui/DefaultAvatar";
-import { toast, type Toast } from 'react-hot-toast';
-import { toAbsoluteUrl } from '@utils/url';
-import type { ConversationId } from '@nyx/shared';
+import DefaultAvatar from '@/components/ui/DefaultAvatar'
+import { toast, type Toast } from 'react-hot-toast'
+import { toAbsoluteUrl } from '@utils/url'
+import type { ConversationId } from '@nyx/shared'
 
 interface NewMessageToastProps {
-  t: Toast;
-  senderName: string;
-  senderAvatar?: string | null;
-  message: string;
-  conversationId: ConversationId;
+  t: Toast
+  senderName: string
+  senderAvatar?: string | null
+  message: string
+  conversationId: ConversationId
 }
 
-const NewMessageToast = ({ t, senderName, senderAvatar, message, conversationId }: NewMessageToastProps) => {
+const NewMessageToast = ({
+  t,
+  senderName,
+  senderAvatar,
+  message,
+  conversationId
+}: NewMessageToastProps) => {
   // Go to conversation and dismiss toast on click
   const handleClick = () => {
     // Here you would typically navigate to the conversation
     // For now, we just log it and dismiss the toast.
-    toast.dismiss(t.id);
-  };
+    toast.dismiss(t.id)
+  }
 
   return (
     <div
@@ -39,12 +45,14 @@ const NewMessageToast = ({ t, senderName, senderAvatar, message, conversationId 
           <DefaultAvatar name={senderName} className="w-10 h-10 bg-gray-700" />
         )}
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-white truncate">{senderName}</p>
+          <p className="text-sm font-semibold text-white truncate">
+            {senderName}
+          </p>
           <p className="text-sm text-gray-400 truncate">{message}</p>
         </div>
       </div>
     </div>
-  );
-};
+  )
+}
 
-export default NewMessageToast;
+export default NewMessageToast

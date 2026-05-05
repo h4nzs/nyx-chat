@@ -15,79 +15,116 @@ import type { AuthJwtPayload } from '@nyx/shared'
 
 const router: Router = Router()
 
-const base64UrlRegex = /^[A-Za-z0-9_-]+$/;
+const base64UrlRegex = /^[A-Za-z0-9_-]+$/
 
 router.post(
   '/prekey-bundle',
   requireAuth,
   zodValidate({
     body: z.object({
-      identityKey: z.string().regex(base64UrlRegex, 'Invalid identity key format'),
-      pqIdentityKey: z.string().regex(base64UrlRegex, 'Invalid pq identity key format').optional().nullable(),
-      signingKey: z.string().regex(base64UrlRegex, 'Invalid signing key format'),
+      identityKey: z
+        .string()
+        .regex(base64UrlRegex, 'Invalid identity key format'),
+      pqIdentityKey: z
+        .string()
+        .regex(base64UrlRegex, 'Invalid pq identity key format')
+        .optional()
+        .nullable(),
+      signingKey: z
+        .string()
+        .regex(base64UrlRegex, 'Invalid signing key format'),
       signedPreKey: z.object({
         key: z.string().regex(base64UrlRegex, 'Invalid pre-key format'),
-        pqKey: z.string().regex(base64UrlRegex, 'Invalid pq pre-key format').optional().nullable(),
+        pqKey: z
+          .string()
+          .regex(base64UrlRegex, 'Invalid pq pre-key format')
+          .optional()
+          .nullable(),
         signature: z.string().regex(base64UrlRegex, 'Invalid signature format'),
-        pqSignature: z.string().regex(base64UrlRegex, 'Invalid pq signature format').optional().nullable()
+        pqSignature: z
+          .string()
+          .regex(base64UrlRegex, 'Invalid pq signature format')
+          .optional()
+          .nullable()
       })
     })
   }),
   async (req, res, next) => {
     try {
-      if (!req.user) throw new ApiError(401, 'Authentication required.');
-      
-      const authUser = req.user as AuthJwtPayload;
-      if (!authUser.deviceId) throw new ApiError(400, 'Device ID missing from session.');
-      
-      const deviceId = String(authUser.deviceId);
-      const { identityKey, pqIdentityKey, signedPreKey, signingKey } = req.body;
+      if (!req.user) throw new ApiError(401, 'Authentication required.')
+
+      const authUser = req.user as AuthJwtPayload
+      if (!authUser.deviceId)
+        throw new ApiError(400, 'Device ID missing from session.')
+
+      const deviceId = String(authUser.deviceId)
+      const { identityKey, pqIdentityKey, signedPreKey, signingKey } = req.body
 
       await prisma.$transaction(async (tx) => {
         // 1. Bersihkan sisa OTPK lama untuk mencegah "Identity Crisis"
         await tx.oneTimePreKey.deleteMany({
-          where: { deviceId } 
-        });
+          where: { deviceId }
+        })
 
         // 2. Perbarui atau Buat Bundle Baru
         await tx.preKeyBundle.upsert({
           where: { deviceId },
           update: {
             identityKey: Buffer.from(identityKey, 'base64url'),
-            pqIdentityKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null,
+            pqIdentityKey: pqIdentityKey
+              ? Buffer.from(pqIdentityKey, 'base64url')
+              : null,
             key: Buffer.from(signedPreKey.key, 'base64url'),
-            pqKey: signedPreKey.pqKey ? Buffer.from(signedPreKey.pqKey, 'base64url') : null,
+            pqKey: signedPreKey.pqKey
+              ? Buffer.from(signedPreKey.pqKey, 'base64url')
+              : null,
             signature: Buffer.from(signedPreKey.signature, 'base64url'),
-            pqSignature: signedPreKey.pqSignature ? Buffer.from(signedPreKey.pqSignature, 'base64url') : null
+            pqSignature: signedPreKey.pqSignature
+              ? Buffer.from(signedPreKey.pqSignature, 'base64url')
+              : null
           },
           create: {
             deviceId,
             identityKey: Buffer.from(identityKey, 'base64url'),
-            pqIdentityKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null,
+            pqIdentityKey: pqIdentityKey
+              ? Buffer.from(pqIdentityKey, 'base64url')
+              : null,
             key: Buffer.from(signedPreKey.key, 'base64url'),
-            pqKey: signedPreKey.pqKey ? Buffer.from(signedPreKey.pqKey, 'base64url') : null,
+            pqKey: signedPreKey.pqKey
+              ? Buffer.from(signedPreKey.pqKey, 'base64url')
+              : null,
             signature: Buffer.from(signedPreKey.signature, 'base64url'),
-            pqSignature: signedPreKey.pqSignature ? Buffer.from(signedPreKey.pqSignature, 'base64url') : null
+            pqSignature: signedPreKey.pqSignature
+              ? Buffer.from(signedPreKey.pqSignature, 'base64url')
+              : null
           }
-        });
+        })
 
         // 3. Perbarui Identitas Perangkat (Konversi aman dari base64 ke Buffer)
         await tx.device.update({
           where: { id: deviceId },
           data: {
-            ...(identityKey !== undefined && { publicKey: Buffer.from(identityKey, 'base64url') }),
-            ...(pqIdentityKey !== undefined && { pqPublicKey: pqIdentityKey ? Buffer.from(pqIdentityKey, 'base64url') : null }),
-            ...(signingKey !== undefined && { signingKey: Buffer.from(signingKey, 'base64url') })
+            ...(identityKey !== undefined && {
+              publicKey: Buffer.from(identityKey, 'base64url')
+            }),
+            ...(pqIdentityKey !== undefined && {
+              pqPublicKey: pqIdentityKey
+                ? Buffer.from(pqIdentityKey, 'base64url')
+                : null
+            }),
+            ...(signingKey !== undefined && {
+              signingKey: Buffer.from(signingKey, 'base64url')
+            })
           }
-        });
-      });
+        })
+      })
 
-      res.status(201).json({ message: 'Pre-key bundle updated successfully.' });
+      res.status(201).json({ message: 'Pre-key bundle updated successfully.' })
     } catch (e) {
-      next(e);
+      next(e)
     }
   }
-);
+)
 
 // === POST: Upload One-Time Pre-Keys (OTPK) ===
 router.post(
@@ -95,33 +132,47 @@ router.post(
   requireAuth,
   zodValidate({
     body: z.object({
-      keys: z.array(z.object({
-        keyId: z.number(),
-        publicKey: z.string().regex(base64UrlRegex, 'Must be base64url'),
-        pqPublicKey: z.string().regex(base64UrlRegex, 'Must be base64url').optional()
-      })).min(1).max(100)
+      keys: z
+        .array(
+          z.object({
+            keyId: z.number(),
+            publicKey: z.string().regex(base64UrlRegex, 'Must be base64url'),
+            pqPublicKey: z
+              .string()
+              .regex(base64UrlRegex, 'Must be base64url')
+              .optional()
+          })
+        )
+        .min(1)
+        .max(100)
     })
   }),
   async (req, res, next) => {
     try {
       if (!req.user) throw new ApiError(401, 'Authentication required.')
-      const authUser = req.user as AuthJwtPayload;
-      const deviceId = authUser.deviceId;
+      const authUser = req.user as AuthJwtPayload
+      const deviceId = authUser.deviceId
       if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
 
-      const { keys } = req.body;
+      const { keys } = req.body
 
       await prisma.oneTimePreKey.createMany({
-        data: keys.map((k: { keyId: number; publicKey: string; pqPublicKey?: string }) => ({
-          deviceId,
-          keyId: k.keyId,
-          publicKey: Buffer.from(k.publicKey, 'base64url'),
-          pqPublicKey: k.pqPublicKey ? Buffer.from(k.pqPublicKey, 'base64url') : null
-        })),
+        data: keys.map(
+          (k: { keyId: number; publicKey: string; pqPublicKey?: string }) => ({
+            deviceId,
+            keyId: k.keyId,
+            publicKey: Buffer.from(k.publicKey, 'base64url'),
+            pqPublicKey: k.pqPublicKey
+              ? Buffer.from(k.pqPublicKey, 'base64url')
+              : null
+          })
+        ),
         skipDuplicates: true
       })
 
-      res.status(201).json({ message: `Uploaded ${keys.length} One-Time Pre-Keys.` })
+      res
+        .status(201)
+        .json({ message: `Uploaded ${keys.length} One-Time Pre-Keys.` })
     } catch (e) {
       next(e)
     }
@@ -131,25 +182,29 @@ router.post(
 // === GET: Count OTPK ===
 router.get('/count-otpk', requireAuth, async (req, res, next) => {
   try {
-    const authUser = req.user as AuthJwtPayload;
-    const deviceId = authUser.deviceId;
+    const authUser = req.user as AuthJwtPayload
+    const deviceId = authUser.deviceId
     if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
 
     const count = await prisma.oneTimePreKey.count({ where: { deviceId } })
     res.json({ count })
-  } catch (e) { next(e) }
+  } catch (e) {
+    next(e)
+  }
 })
 
 // === DELETE: Clear OTPK ===
 router.delete('/otpk', requireAuth, async (req, res, next) => {
   try {
-    const authUser = req.user as AuthJwtPayload;
-    const deviceId = authUser.deviceId;
+    const authUser = req.user as AuthJwtPayload
+    const deviceId = authUser.deviceId
     if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
 
     await prisma.oneTimePreKey.deleteMany({ where: { deviceId } })
     res.status(204).send()
-  } catch (e) { next(e) }
+  } catch (e) {
+    next(e)
+  }
 })
 
 // === GET: Get ALL pre-key bundles for another user ===
@@ -170,12 +225,13 @@ router.get(
         throw new ApiError(404, 'User does not have any active devices.')
       }
 
-      const responseBundles = await Promise.all(devices.map(async (device) => {
-          if (!device.signingKey || !device.publicKey) return null;
+      const responseBundles = await Promise.all(
+        devices.map(async (device) => {
+          if (!device.signingKey || !device.publicKey) return null
 
-          let otpk = null;
+          let otpk = null
           if (device.preKeyBundle) {
-              otpk = await prisma.$queryRaw`
+            otpk = await prisma.$queryRaw`
                 DELETE FROM "OneTimePreKey"
                 WHERE id = (
                   SELECT id FROM "OneTimePreKey"
@@ -185,39 +241,92 @@ router.get(
                   LIMIT 1
                 )
                 RETURNING id, "keyId", "publicKey", "pqPublicKey"
-              `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
+              `.then(
+              (res: unknown) =>
+                (Array.isArray(res) && res.length > 0 ? res[0] : null) as {
+                  id: string
+                  keyId: number
+                  publicKey: unknown
+                  pqPublicKey: string | null
+                } | null
+            )
           }
 
           // FIX 1: Konversi Buffer ke base64url (URLSAFE_NO_PADDING) sebelum dikirim ke Client
           const bundle: Record<string, unknown> = {
             deviceId: device.id,
-            identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
-            pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
-            signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey)
+            identityKey:
+              Buffer.isBuffer(device.publicKey) ||
+              device.publicKey instanceof Uint8Array
+                ? Buffer.from(device.publicKey).toString('base64url')
+                : String(device.publicKey),
+            pqIdentityKey: device.pqPublicKey
+              ? Buffer.from(device.pqPublicKey).toString('base64url')
+              : null,
+            signingKey:
+              Buffer.isBuffer(device.signingKey) ||
+              device.signingKey instanceof Uint8Array
+                ? Buffer.from(device.signingKey).toString('base64url')
+                : String(device.signingKey)
           }
 
           if (device.preKeyBundle) {
-              bundle.signedPreKey = {
-                key: Buffer.isBuffer(device.preKeyBundle.key) || device.preKeyBundle.key instanceof Uint8Array ? Buffer.from(device.preKeyBundle.key).toString('base64url') : String(device.preKeyBundle.key),
-                pqKey: device.preKeyBundle.pqKey ? (Buffer.isBuffer(device.preKeyBundle.pqKey) || device.preKeyBundle.pqKey instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqKey).toString('base64url') : String(device.preKeyBundle.pqKey)) : null,
-                signature: Buffer.isBuffer(device.preKeyBundle.signature) || device.preKeyBundle.signature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.signature).toString('base64url') : String(device.preKeyBundle.signature),
-                pqSignature: device.preKeyBundle.pqSignature ? (Buffer.isBuffer(device.preKeyBundle.pqSignature) || device.preKeyBundle.pqSignature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqSignature).toString('base64url') : String(device.preKeyBundle.pqSignature)) : null
-              };
+            bundle.signedPreKey = {
+              key:
+                Buffer.isBuffer(device.preKeyBundle.key) ||
+                device.preKeyBundle.key instanceof Uint8Array
+                  ? Buffer.from(device.preKeyBundle.key).toString('base64url')
+                  : String(device.preKeyBundle.key),
+              pqKey: device.preKeyBundle.pqKey
+                ? Buffer.isBuffer(device.preKeyBundle.pqKey) ||
+                  device.preKeyBundle.pqKey instanceof Uint8Array
+                  ? Buffer.from(device.preKeyBundle.pqKey).toString('base64url')
+                  : String(device.preKeyBundle.pqKey)
+                : null,
+              signature:
+                Buffer.isBuffer(device.preKeyBundle.signature) ||
+                device.preKeyBundle.signature instanceof Uint8Array
+                  ? Buffer.from(device.preKeyBundle.signature).toString(
+                      'base64url'
+                    )
+                  : String(device.preKeyBundle.signature),
+              pqSignature: device.preKeyBundle.pqSignature
+                ? Buffer.isBuffer(device.preKeyBundle.pqSignature) ||
+                  device.preKeyBundle.pqSignature instanceof Uint8Array
+                  ? Buffer.from(device.preKeyBundle.pqSignature).toString(
+                      'base64url'
+                    )
+                  : String(device.preKeyBundle.pqSignature)
+                : null
+            }
           }
 
           if (otpk) {
             bundle.oneTimePreKey = {
               keyId: otpk.keyId,
               // FIX 2: Konversi jika publicKey OTPK itu Buffer
-              key: Buffer.isBuffer(otpk.publicKey) || otpk.publicKey instanceof Uint8Array ? Buffer.from(otpk.publicKey).toString('base64url') : String(otpk.publicKey),
-              pqKey: otpk.pqPublicKey ? (Buffer.isBuffer(otpk.pqPublicKey) || (otpk.pqPublicKey as unknown) instanceof Uint8Array ? Buffer.from(otpk.pqPublicKey as unknown as Uint8Array).toString('base64url') : String(otpk.pqPublicKey)) : null
+              key:
+                Buffer.isBuffer(otpk.publicKey) ||
+                otpk.publicKey instanceof Uint8Array
+                  ? Buffer.from(otpk.publicKey).toString('base64url')
+                  : String(otpk.publicKey),
+              pqKey: otpk.pqPublicKey
+                ? Buffer.isBuffer(otpk.pqPublicKey) ||
+                  (otpk.pqPublicKey as unknown) instanceof Uint8Array
+                  ? Buffer.from(
+                      otpk.pqPublicKey as unknown as Uint8Array
+                    ).toString('base64url')
+                  : String(otpk.pqPublicKey)
+                : null
             }
           }
-          return bundle;
-      }));
+          return bundle
+        })
+      )
 
-      const validBundles = responseBundles.filter(b => b !== null);
-      if (validBundles.length === 0) throw new ApiError(404, 'No valid key bundles found for this user.');
+      const validBundles = responseBundles.filter((b) => b !== null)
+      if (validBundles.length === 0)
+        throw new ApiError(404, 'No valid key bundles found for this user.')
 
       res.json(validBundles)
     } catch (e: unknown) {
@@ -231,13 +340,15 @@ router.post(
   '/prekey-bundles',
   requireAuth,
   generalLimiter,
-  zodValidate({ body: z.object({ userIds: z.array(z.string().min(1)).max(50) }) }),
+  zodValidate({
+    body: z.object({ userIds: z.array(z.string().min(1)).max(50) })
+  }),
   async (req, res, next) => {
     try {
       const { userIds } = req.body
 
       if (!userIds || userIds.length === 0) {
-        return res.json({});
+        return res.json({})
       }
 
       const devices = await prisma.device.findMany({
@@ -245,21 +356,21 @@ router.post(
         include: { preKeyBundle: true }
       })
 
-      const responseMap = new Map<string, Record<string, unknown>[]>();
+      const responseMap = new Map<string, Record<string, unknown>[]>()
       for (const uid of userIds) {
-          responseMap.set(uid, []);
+        responseMap.set(uid, [])
       }
 
       if (devices.length === 0) {
-        return res.json(Object.fromEntries(responseMap));
+        return res.json(Object.fromEntries(responseMap))
       }
 
       for (const device of devices) {
-          if (!device.signingKey || !device.publicKey) continue;
+        if (!device.signingKey || !device.publicKey) continue
 
-          let otpk = null;
-          if (device.preKeyBundle) {
-              otpk = await prisma.$queryRaw`
+        let otpk = null
+        if (device.preKeyBundle) {
+          otpk = await prisma.$queryRaw`
                 DELETE FROM "OneTimePreKey"
                 WHERE id = (
                   SELECT id FROM "OneTimePreKey"
@@ -269,39 +380,90 @@ router.post(
                   LIMIT 1
                 )
                 RETURNING id, "keyId", "publicKey", "pqPublicKey"
-              `.then((res: unknown) => (Array.isArray(res) && res.length > 0 ? res[0] : null) as { id: string; keyId: number; publicKey: unknown; pqPublicKey: string | null } | null);
-          }
+              `.then(
+            (res: unknown) =>
+              (Array.isArray(res) && res.length > 0 ? res[0] : null) as {
+                id: string
+                keyId: number
+                publicKey: unknown
+                pqPublicKey: string | null
+              } | null
+          )
+        }
 
-          // FIX 3: Konversi Buffer ke base64url (URLSAFE_NO_PADDING) sebelum dikirim ke Client
-          const bundle: Record<string, unknown> = {
-            deviceId: device.id,
-            identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
-            pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
-            signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey)
-          }
+        // FIX 3: Konversi Buffer ke base64url (URLSAFE_NO_PADDING) sebelum dikirim ke Client
+        const bundle: Record<string, unknown> = {
+          deviceId: device.id,
+          identityKey:
+            Buffer.isBuffer(device.publicKey) ||
+            device.publicKey instanceof Uint8Array
+              ? Buffer.from(device.publicKey).toString('base64url')
+              : String(device.publicKey),
+          pqIdentityKey: device.pqPublicKey
+            ? Buffer.from(device.pqPublicKey).toString('base64url')
+            : null,
+          signingKey:
+            Buffer.isBuffer(device.signingKey) ||
+            device.signingKey instanceof Uint8Array
+              ? Buffer.from(device.signingKey).toString('base64url')
+              : String(device.signingKey)
+        }
 
-          if (device.preKeyBundle) {
-              bundle.signedPreKey = {
-                key: Buffer.isBuffer(device.preKeyBundle.key) || device.preKeyBundle.key instanceof Uint8Array ? Buffer.from(device.preKeyBundle.key).toString('base64url') : String(device.preKeyBundle.key),
-                pqKey: device.preKeyBundle.pqKey ? (Buffer.isBuffer(device.preKeyBundle.pqKey) || device.preKeyBundle.pqKey instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqKey).toString('base64url') : String(device.preKeyBundle.pqKey)) : null,
-                signature: Buffer.isBuffer(device.preKeyBundle.signature) || device.preKeyBundle.signature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.signature).toString('base64url') : String(device.preKeyBundle.signature),
-                pqSignature: device.preKeyBundle.pqSignature ? (Buffer.isBuffer(device.preKeyBundle.pqSignature) || device.preKeyBundle.pqSignature instanceof Uint8Array ? Buffer.from(device.preKeyBundle.pqSignature).toString('base64url') : String(device.preKeyBundle.pqSignature)) : null
-              };
+        if (device.preKeyBundle) {
+          bundle.signedPreKey = {
+            key:
+              Buffer.isBuffer(device.preKeyBundle.key) ||
+              device.preKeyBundle.key instanceof Uint8Array
+                ? Buffer.from(device.preKeyBundle.key).toString('base64url')
+                : String(device.preKeyBundle.key),
+            pqKey: device.preKeyBundle.pqKey
+              ? Buffer.isBuffer(device.preKeyBundle.pqKey) ||
+                device.preKeyBundle.pqKey instanceof Uint8Array
+                ? Buffer.from(device.preKeyBundle.pqKey).toString('base64url')
+                : String(device.preKeyBundle.pqKey)
+              : null,
+            signature:
+              Buffer.isBuffer(device.preKeyBundle.signature) ||
+              device.preKeyBundle.signature instanceof Uint8Array
+                ? Buffer.from(device.preKeyBundle.signature).toString(
+                    'base64url'
+                  )
+                : String(device.preKeyBundle.signature),
+            pqSignature: device.preKeyBundle.pqSignature
+              ? Buffer.isBuffer(device.preKeyBundle.pqSignature) ||
+                device.preKeyBundle.pqSignature instanceof Uint8Array
+                ? Buffer.from(device.preKeyBundle.pqSignature).toString(
+                    'base64url'
+                  )
+                : String(device.preKeyBundle.pqSignature)
+              : null
           }
+        }
 
-          if (otpk) {
-            bundle.oneTimePreKey = {
-              keyId: otpk.keyId,
-               // FIX 4: Konversi jika publicKey OTPK itu Buffer
-              key: Buffer.isBuffer(otpk.publicKey) || otpk.publicKey instanceof Uint8Array ? Buffer.from(otpk.publicKey).toString('base64url') : String(otpk.publicKey),
-              pqKey: otpk.pqPublicKey ? (Buffer.isBuffer(otpk.pqPublicKey) || (otpk.pqPublicKey as unknown) instanceof Uint8Array ? Buffer.from(otpk.pqPublicKey as unknown as Uint8Array).toString('base64url') : String(otpk.pqPublicKey)) : null
-            }
+        if (otpk) {
+          bundle.oneTimePreKey = {
+            keyId: otpk.keyId,
+            // FIX 4: Konversi jika publicKey OTPK itu Buffer
+            key:
+              Buffer.isBuffer(otpk.publicKey) ||
+              otpk.publicKey instanceof Uint8Array
+                ? Buffer.from(otpk.publicKey).toString('base64url')
+                : String(otpk.publicKey),
+            pqKey: otpk.pqPublicKey
+              ? Buffer.isBuffer(otpk.pqPublicKey) ||
+                (otpk.pqPublicKey as unknown) instanceof Uint8Array
+                ? Buffer.from(
+                    otpk.pqPublicKey as unknown as Uint8Array
+                  ).toString('base64url')
+                : String(otpk.pqPublicKey)
+              : null
           }
-          
-          const userBundles = responseMap.get(device.userId);
-          if (userBundles) {
-              userBundles.push(bundle);
-          }
+        }
+
+        const userBundles = responseMap.get(device.userId)
+        if (userBundles) {
+          userBundles.push(bundle)
+        }
       }
 
       res.json(Object.fromEntries(responseMap))
@@ -315,24 +477,30 @@ router.post(
 router.get(
   '/initial-session/:conversationId/:sessionId',
   requireAuth,
-  zodValidate({ params: z.object({ conversationId: z.string(), sessionId: z.string() }) }),
+  zodValidate({
+    params: z.object({ conversationId: z.string(), sessionId: z.string() })
+  }),
   async (req, res, next) => {
     try {
       if (!req.user) throw new ApiError(401, 'Authentication required.')
-      
-      const authUser = req.user as AuthJwtPayload;
-      const deviceId = authUser.deviceId;
+
+      const authUser = req.user as AuthJwtPayload
+      const deviceId = authUser.deviceId
       if (!deviceId) throw new ApiError(400, 'Device ID missing from session.')
 
-      const conversationId = String(req.params.conversationId);
-      const sessionId = String(req.params.sessionId);
+      const conversationId = String(req.params.conversationId)
+      const sessionId = String(req.params.sessionId)
 
       // Membership Check
       const isParticipant = await prisma.participant.findFirst({
         where: { conversationId, userId: authUser.id }
-      });
+      })
       if (!isParticipant) {
-        return res.status(403).json({ error: 'Forbidden: You are not a participant of this conversation.' });
+        return res
+          .status(403)
+          .json({
+            error: 'Forbidden: You are not a participant of this conversation.'
+          })
       }
 
       const keyRecord = await prisma.sessionKey.findFirst({
@@ -340,79 +508,101 @@ router.get(
       })
 
       if (!keyRecord || !keyRecord.initiatorCiphertexts) {
-        return res.status(404).json({ error: 'Initial session data not found for this device.' })
+        return res
+          .status(404)
+          .json({ error: 'Initial session data not found for this device.' })
       }
 
       const initiatorRecord = await prisma.sessionKey.findFirst({
         where: { conversationId, sessionId, isInitiator: true },
-        include: { device: { select: { id: true, publicKey: true, signingKey: true } } }
+        include: {
+          device: { select: { id: true, publicKey: true, signingKey: true } }
+        }
       })
 
       if (!initiatorRecord?.device?.publicKey) {
-        return res.status(404).json({ error: "Initiator's public key could not be found." })
+        return res
+          .status(404)
+          .json({ error: "Initiator's public key could not be found." })
       }
 
       if (!initiatorRecord.device.signingKey) {
-        return res.status(404).json({ error: "Initiator's signing key could not be found." })
+        return res
+          .status(404)
+          .json({ error: "Initiator's signing key could not be found." })
       }
 
       res.json({
         // FIX 5: Konversi encryptedKey ke Base64
-        encryptedKey: Buffer.isBuffer(keyRecord.encryptedKey) || keyRecord.encryptedKey instanceof Uint8Array ? Buffer.from(keyRecord.encryptedKey).toString('base64url') : String(keyRecord.encryptedKey),
-        initiatorCiphertextsStr: Buffer.from(keyRecord.initiatorCiphertexts!).toString('base64url'),
-        initiatorSigningKey: Buffer.from(initiatorRecord.device.signingKey).toString('base64url')
+        encryptedKey:
+          Buffer.isBuffer(keyRecord.encryptedKey) ||
+          keyRecord.encryptedKey instanceof Uint8Array
+            ? Buffer.from(keyRecord.encryptedKey).toString('base64url')
+            : String(keyRecord.encryptedKey),
+        initiatorCiphertextsStr: Buffer.from(
+          keyRecord.initiatorCiphertexts!
+        ).toString('base64url'),
+        initiatorSigningKey: Buffer.from(
+          initiatorRecord.device.signingKey
+        ).toString('base64url')
       })
-    } catch (e) { next(e) }
+    } catch (e) {
+      next(e)
+    }
   }
 )
 
 interface TurnResponse {
-  iceServers?: Array<{ urls: string; username?: string; credential?: string }>;
+  iceServers?: Array<{ urls: string; username?: string; credential?: string }>
 }
 
 router.get('/turn', requireAuth, async (req, res): Promise<unknown> => {
   try {
-    const { env } = await import('../config.js');
+    const { env } = await import('../config.js')
     if (!env.cfAccountId || !env.cfTurnKeyId || !env.cfTurnApiToken) {
-      return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      return res.json({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      })
     }
 
-    const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${env.cfTurnKeyId}/credentials/generate-ice-servers`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout
+    const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${env.cfTurnKeyId}/credentials/generate-ice-servers`
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 2000) // 2 second timeout
 
     try {
       const response = await fetch(url, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${env.cfTurnApiToken}`,
-          'Content-Type': 'application/json',
+          Authorization: `Bearer ${env.cfTurnApiToken}`,
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({ ttl: 86400 }),
         signal: controller.signal
-      });
-      clearTimeout(timeoutId);
+      })
+      clearTimeout(timeoutId)
 
-      const data = await response.json() as unknown as TurnResponse;
+      const data = (await response.json()) as unknown as TurnResponse
 
       if (data.iceServers) {
-        return res.json({ iceServers: data.iceServers });
+        return res.json({ iceServers: data.iceServers })
       }
     } catch (err: unknown) {
-      clearTimeout(timeoutId);
+      clearTimeout(timeoutId)
       if (err instanceof Error && err.name === 'AbortError') {
-        console.warn('[TURN] Cloudflare API timed out, falling back to STUN');
+        console.warn('[TURN] Cloudflare API timed out, falling back to STUN')
       } else {
-        console.error('[TURN] Failed to fetch credentials:', err);
+        console.error('[TURN] Failed to fetch credentials:', err)
       }
-      return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      return res.json({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      })
     }
 
-    return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
   } catch (error) {
-    console.error('[TURN] Unexpected error:', error);
-    return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    console.error('[TURN] Unexpected error:', error)
+    return res.json({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
   }
-});
+})
 
 export default router

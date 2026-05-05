@@ -1,50 +1,55 @@
-import { useState, useEffect } from 'react';
-import { api } from '../lib/api';
-import { useSettingsStore } from '../store/settings';
-import { useShallow } from 'zustand/react/shallow';
-import { useTranslation } from 'react-i18next';
+import { useState, useEffect } from 'react'
+import { api } from '../lib/api'
+import { useSettingsStore } from '../store/settings'
+import { useShallow } from 'zustand/react/shallow'
+import { useTranslation } from 'react-i18next'
 
 interface SmartReplyProps {
-  lastMessage: string | null;
-  isFromMe?: boolean;
-  onSelectReply: (reply: string) => void;
+  lastMessage: string | null
+  isFromMe?: boolean
+  onSelectReply: (reply: string) => void
 }
 
-export default function SmartReply({ lastMessage, isFromMe, onSelectReply }: SmartReplyProps) {
-  const { t } = useTranslation(['chat']);
-  const { enableSmartReply } = useSettingsStore(useShallow(s => ({ enableSmartReply: s.enableSmartReply })));
-  const [replies, setReplies] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
+export default function SmartReply({
+  lastMessage,
+  isFromMe,
+  onSelectReply
+}: SmartReplyProps) {
+  const { t } = useTranslation(['chat'])
+  const { enableSmartReply } = useSettingsStore(
+    useShallow((s) => ({ enableSmartReply: s.enableSmartReply }))
+  )
+  const [replies, setReplies] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     // Don't call AI if disabled, no text, or if the message is from me
     if (!enableSmartReply || !lastMessage || isFromMe) {
-      setReplies([]);
-      return;
+      setReplies([])
+      return
     }
 
     const fetchReplies = async () => {
-      setLoading(true);
+      setLoading(true)
       try {
-        const data = await api<{ replies: string[] }>('/api/ai/smart-reply', { 
-            method: 'POST', 
-            body: JSON.stringify({ message: lastMessage }) 
-        });
-        setReplies(data.replies || []);
+        const data = await api<{ replies: string[] }>('/api/ai/smart-reply', {
+          method: 'POST',
+          body: JSON.stringify({ message: lastMessage })
+        })
+        setReplies(data.replies || [])
       } catch (error) {
-        console.error('Smart Reply error:', error);
+        console.error('Smart Reply error:', error)
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
-    };
+    }
 
     // Debounce to prevent spamming the API (reduced to 500ms)
-    const timer = setTimeout(fetchReplies, 500);
-    return () => clearTimeout(timer);
-    
-  }, [lastMessage, enableSmartReply, isFromMe]);
+    const timer = setTimeout(fetchReplies, 500)
+    return () => clearTimeout(timer)
+  }, [lastMessage, enableSmartReply, isFromMe])
 
-  if (!enableSmartReply || (replies.length === 0 && !loading)) return null;
+  if (!enableSmartReply || (replies.length === 0 && !loading)) return null
 
   return (
     <div className="flex gap-2 overflow-x-auto px-4 py-2 bg-bg-surface border-t border-white/5 custom-scrollbar">
@@ -64,5 +69,5 @@ export default function SmartReply({ lastMessage, isFromMe, onSelectReply }: Sma
         ))
       )}
     </div>
-  );
+  )
 }

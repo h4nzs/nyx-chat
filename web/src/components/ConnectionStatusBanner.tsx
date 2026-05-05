@@ -1,39 +1,45 @@
-import { useConnectionStore } from '@store/connection';
-import { Spinner } from './Spinner';
-import { motion, AnimatePresence } from 'framer-motion';
-import { FiZap, FiAlertTriangle } from 'react-icons/fi';
-import { useTranslation } from 'react-i18next';
+import { useConnectionStore } from '@store/connection'
+import { Spinner } from './Spinner'
+import { motion, AnimatePresence } from 'framer-motion'
+import { FiZap, FiAlertTriangle } from 'react-icons/fi'
+import { useTranslation } from 'react-i18next'
 
 export default function ConnectionStatusBanner() {
-  const { t } = useTranslation(['common']);
-  const { status } = useConnectionStore();
+  const { t } = useTranslation(['common'])
+  const { status } = useConnectionStore()
 
-  const isVisible = status === 'connecting' || status === 'disconnected';
+  const isVisible = status === 'connecting' || status === 'disconnected'
 
-  const config = status === 'disconnected' 
-    ? {
-        message: t('status.connection_lost'),
-        bg: 'bg-red-500',
-        stripeColor: '#991b1b', // Red-800
-        text: 'text-white',
-        showDonate: true
-      }
-    : {
-        message: t('status.establishing_uplink'),
-        bg: 'bg-yellow-500',
-        stripeColor: '#a16207', // Yellow-700
-        text: 'text-black',
-        showDonate: false
-      };
+  const config =
+    status === 'disconnected'
+      ? {
+          message: t('status.connection_lost'),
+          bg: 'bg-red-500',
+          stripeColor: '#991b1b', // Red-800
+          text: 'text-white',
+          showDonate: true
+        }
+      : {
+          message: t('status.establishing_uplink'),
+          bg: 'bg-yellow-500',
+          stripeColor: '#a16207', // Yellow-700
+          text: 'text-black',
+          showDonate: false
+        }
 
   return (
     <AnimatePresence>
       {isVisible && (
         <motion.div
-          initial={{ y: "-100%" }}
-          animate={{ y: "0%" }}
-          exit={{ y: "-100%" }}
-          transition={{ type: "spring", stiffness: 120, damping: 20, mass: 1.5 }}
+          initial={{ y: '-100%' }}
+          animate={{ y: '0%' }}
+          exit={{ y: '-100%' }}
+          transition={{
+            type: 'spring',
+            stiffness: 120,
+            damping: 20,
+            mass: 1.5
+          }}
           className={`
             fixed top-0 left-0 w-full z-[100]
             ${config.bg} ${config.text}
@@ -42,7 +48,7 @@ export default function ConnectionStatusBanner() {
           `}
         >
           {/* Hazard Stripes Pattern */}
-          <div 
+          <div
             className="absolute inset-0 opacity-20 pointer-events-none"
             style={{
               backgroundImage: `repeating-linear-gradient(
@@ -85,11 +91,11 @@ export default function ConnectionStatusBanner() {
               </a>
             )}
           </div>
-          
+
           {/* Mechanical Lip */}
           <div className="h-1 bg-black/30 w-full"></div>
         </motion.div>
       )}
     </AnimatePresence>
-  );
+  )
 }

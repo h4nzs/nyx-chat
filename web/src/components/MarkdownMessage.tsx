@@ -1,13 +1,13 @@
-import React from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeSanitize from 'rehype-sanitize';
+import React from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeSanitize from 'rehype-sanitize'
 
 // Definisikan tipe untuk node AST Markdown
 interface MarkdownNode {
-  type: string;
-  value?: string;
-  children?: MarkdownNode[];
+  type: string
+  value?: string
+  children?: MarkdownNode[]
 }
 
 // ✅ Custom Plugin: Mencegah HTML dibuang, dan mengubahnya menjadi plain text biasa
@@ -15,21 +15,24 @@ const remarkHtmlToText = () => (tree: MarkdownNode) => {
   const walk = (node: MarkdownNode) => {
     if (node.type === 'html') {
       // Ubah tipe node dari 'html' menjadi 'text' agar dirender sebagai teks literal
-      node.type = 'text';
+      node.type = 'text'
     }
     if (node.children && Array.isArray(node.children)) {
-      node.children.forEach(walk);
+      node.children.forEach(walk)
     }
-  };
-  walk(tree);
-};
-
-interface MarkdownMessageProps {
-  content: string;
-  isOwn?: boolean;
+  }
+  walk(tree)
 }
 
-const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content, isOwn = false }) => {
+interface MarkdownMessageProps {
+  content: string
+  isOwn?: boolean
+}
+
+const MarkdownMessage: React.FC<MarkdownMessageProps> = ({
+  content,
+  isOwn = false
+}) => {
   return (
     <div className="markdown-content whitespace-pre-wrap">
       <ReactMarkdown
@@ -37,43 +40,60 @@ const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content, isOwn = fals
         remarkPlugins={[remarkGfm, remarkHtmlToText]}
         rehypePlugins={[rehypeSanitize]}
         components={{
-          code({ className, children, ...props }: React.HTMLProps<HTMLElement> & {inline?: boolean}) {
-            const { inline, ...rest } = props;
+          code({
+            className,
+            children,
+            ...props
+          }: React.HTMLProps<HTMLElement> & { inline?: boolean }) {
+            const { inline, ...rest } = props
             return (
-              <code className="bg-secondary/50 px-1 py-0.5 rounded text-sm font-mono" {...rest}>
+              <code
+                className="bg-secondary/50 px-1 py-0.5 rounded text-sm font-mono"
+                {...rest}
+              >
                 {children}
               </code>
-            );
+            )
           },
           pre({ children, ...props }: React.HTMLProps<HTMLPreElement>) {
             return (
-              <pre {...props} className="block bg-secondary p-2 rounded-md my-1 text-sm font-mono overflow-x-auto [&>code]:bg-transparent [&>code]:p-0">
+              <pre
+                {...props}
+                className="block bg-secondary p-2 rounded-md my-1 text-sm font-mono overflow-x-auto [&>code]:bg-transparent [&>code]:p-0"
+              >
                 {children}
               </pre>
-            );
+            )
           },
           a({ node, ...props }) {
-            const safeHref = props.href?.startsWith('http://') || props.href?.startsWith('https://') || props.href?.startsWith('mailto:') 
-              ? props.href 
-              : '#';
+            const safeHref =
+              props.href?.startsWith('http://') ||
+              props.href?.startsWith('https://') ||
+              props.href?.startsWith('mailto:')
+                ? props.href
+                : '#'
 
             return (
-              <a 
-                {...props} 
+              <a
+                {...props}
                 href={safeHref}
-                target="_blank" 
-                rel="noopener noreferrer" 
-                className={isOwn ? "text-white underline font-medium hover:text-white/80 break-all" : "text-accent hover:underline cursor-pointer break-all"}
-                onClick={(e) => e.stopPropagation()} 
+                target="_blank"
+                rel="noopener noreferrer"
+                className={
+                  isOwn
+                    ? 'text-white underline font-medium hover:text-white/80 break-all'
+                    : 'text-accent hover:underline cursor-pointer break-all'
+                }
+                onClick={(e) => e.stopPropagation()}
               />
-            );
+            )
           }
         }}
       >
         {content}
       </ReactMarkdown>
     </div>
-  );
-};
+  )
+}
 
-export default MarkdownMessage;
+export default MarkdownMessage

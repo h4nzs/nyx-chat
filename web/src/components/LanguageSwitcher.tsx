@@ -1,10 +1,10 @@
-import { useTranslation } from 'react-i18next';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { FiGlobe, FiCheck } from 'react-icons/fi';
+import { useTranslation } from 'react-i18next'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { FiGlobe, FiCheck } from 'react-icons/fi'
 
 // Tambahkan props agar komponen ini fleksibel
 interface LanguageSwitcherProps {
-  isAbsolute?: boolean;
+  isAbsolute?: boolean
 }
 
 // Daftar bahasa ditaruh di array agar gampang ditambah/dikurangi nantinya
@@ -12,25 +12,30 @@ const LANGUAGES = [
   { code: 'en', short: 'EN', label: '🇺🇸 English' },
   { code: 'id', short: 'ID', label: '🇮🇩 Indonesia' },
   { code: 'es', short: 'ES', label: '🇪🇸 Español' },
-  { code: 'pt-BR', short: 'PT', label: '🇧🇷 Português Brazil' },
-];
+  { code: 'pt-BR', short: 'PT', label: '🇧🇷 Português Brazil' }
+]
 
-export default function LanguageSwitcher({ isAbsolute = true }: LanguageSwitcherProps) {
-  const { i18n } = useTranslation();
+export default function LanguageSwitcher({
+  isAbsolute = true
+}: LanguageSwitcherProps) {
+  const { i18n } = useTranslation()
 
   const changeLanguage = (lng: string) => {
-    i18n.changeLanguage(lng);
-  };
+    i18n.changeLanguage(lng)
+  }
 
-  const rawLang = i18n.language || 'en';
-  const normalizedLang = rawLang.includes('pt') ? 'pt-BR' : rawLang.split('-')[0];
+  const rawLang = i18n.language || 'en'
+  const normalizedLang = rawLang.includes('pt')
+    ? 'pt-BR'
+    : rawLang.split('-')[0]
 
-  const currentLang = LANGUAGES.find(l => l.code === normalizedLang) || LANGUAGES[0];
+  const currentLang =
+    LANGUAGES.find((l) => l.code === normalizedLang) || LANGUAGES[0]
 
   // Logic untuk menentukan class berdasarkan posisi
-  const containerClass = isAbsolute 
-    ? "absolute top-4 right-4 z-50" 
-    : "relative z-50";
+  const containerClass = isAbsolute
+    ? 'absolute top-4 right-4 z-50'
+    : 'relative z-50'
 
   return (
     <div className={containerClass}>
@@ -43,29 +48,31 @@ export default function LanguageSwitcher({ isAbsolute = true }: LanguageSwitcher
         </DropdownMenu.Trigger>
 
         <DropdownMenu.Portal>
-          <DropdownMenu.Content 
+          <DropdownMenu.Content
             className="min-w-[140px] bg-[#1a1a1a] rounded-md p-1 shadow-xl ring-1 ring-white/10 z-[100] animate-in fade-in zoom-in-95 duration-200"
             sideOffset={5}
             align="end"
           >
             {LANGUAGES.map((lang) => {
-              const isActive = normalizedLang === lang.code;
+              const isActive = normalizedLang === lang.code
               return (
-                <DropdownMenu.Item 
+                <DropdownMenu.Item
                   key={lang.code}
                   className={`group flex items-center px-2 py-2 text-sm rounded-md outline-none cursor-pointer transition-colors ${
-                    isActive ? 'bg-orange-500/20 text-orange-400' : 'text-gray-300 hover:bg-white/10'
+                    isActive
+                      ? 'bg-orange-500/20 text-orange-400'
+                      : 'text-gray-300 hover:bg-white/10'
                   }`}
                   onClick={() => changeLanguage(lang.code)}
                 >
                   <span className="flex-1">{lang.label}</span>
                   {isActive && <FiCheck className="ml-2 w-4 h-4" />}
                 </DropdownMenu.Item>
-              );
+              )
             })}
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
     </div>
-  );
+  )
 }

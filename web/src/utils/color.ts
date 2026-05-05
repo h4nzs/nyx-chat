@@ -6,15 +6,15 @@ const colorPalette = [
   '#FF6BEB', // Pink
   '#6BFFEB', // Cyan
   '#FFB86B', // Orange
-  '#BE6BFF', // Purple
-];
+  '#BE6BFF' // Purple
+]
 
 export function getUserColor(userId: string): string {
   // Simple hash function to get a deterministic index
-  let hash = 0;
+  let hash = 0
   for (let i = 0; i < userId.length; i++) {
-    hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+    hash = userId.charCodeAt(i) + ((hash << 5) - hash)
   }
-  const index = Math.abs(hash) % colorPalette.length;
-  return colorPalette[index];
+  const index = Math.abs(hash) % colorPalette.length
+  return colorPalette[index]
 }

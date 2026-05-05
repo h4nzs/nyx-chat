@@ -1,113 +1,147 @@
-import { useState, useRef, ChangeEvent, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import { useAuthStore, type User } from '@store/auth';
-import { useShallow } from 'zustand/react/shallow';
-import { authFetch, handleApiError } from '@lib/api';
-import { toAbsoluteUrl } from '@utils/url';
-import { FiEdit2, FiShield, FiCpu, FiGlobe, FiActivity, FiKey, FiCheck, FiArrowLeft } from 'react-icons/fi';
-import { toast } from 'react-hot-toast';
+import { useState, useRef, ChangeEvent, useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { useAuthStore, type User } from '@store/auth'
+import { useShallow } from 'zustand/react/shallow'
+import { authFetch, handleApiError } from '@lib/api'
+import { toAbsoluteUrl } from '@utils/url'
+import {
+  FiEdit2,
+  FiShield,
+  FiCpu,
+  FiGlobe,
+  FiActivity,
+  FiKey,
+  FiCheck,
+  FiArrowLeft
+} from 'react-icons/fi'
+import { toast } from 'react-hot-toast'
 
-import { useUserProfile } from '@hooks/useUserProfile';
-import type { UserId, ProfileUser } from '@nyx/shared';
-import { asUserId } from '@nyx/shared';
-import DefaultAvatar from '@/components/ui/DefaultAvatar';
+import { useUserProfile } from '@hooks/useUserProfile'
+import type { UserId, ProfileUser } from '@nyx/shared'
+import { asUserId } from '@nyx/shared'
+import DefaultAvatar from '@/components/ui/DefaultAvatar'
 
 export default function ProfilePage() {
-  const { t } = useTranslation(['settings', 'common']);
-  const { userId: rawUserId } = useParams<{ userId: string }>();
-  const userId = rawUserId ? asUserId(rawUserId) : undefined;
-  
-  const navigate = useNavigate();
-  const { user: me, updateProfile, updateAvatar } = useAuthStore(useShallow(s => ({
-    user: s.user, updateProfile: s.updateProfile, updateAvatar: s.updateAvatar
-  })));
-  
-  const [profileUser, setProfileUser] = useState<ProfileUser | null>(null);
-  const profile = useUserProfile(profileUser);
-  const [name, setName] = useState('');
-  const [bio, setBio] = useState('');
-  const [isEditing, setIsEditing] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isFetching, setIsFetching] = useState(true);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { t } = useTranslation(['settings', 'common'])
+  const { userId: rawUserId } = useParams<{ userId: string }>()
+  const userId = rawUserId ? asUserId(rawUserId) : undefined
 
-  const isMe = me?.id === userId;
+  const navigate = useNavigate()
+  const {
+    user: me,
+    updateProfile,
+    updateAvatar
+  } = useAuthStore(
+    useShallow((s) => ({
+      user: s.user,
+      updateProfile: s.updateProfile,
+      updateAvatar: s.updateAvatar
+    }))
+  )
+
+  const [profileUser, setProfileUser] = useState<ProfileUser | null>(null)
+  const profile = useUserProfile(profileUser)
+  const [name, setName] = useState('')
+  const [bio, setBio] = useState('')
+  const [isEditing, setIsEditing] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [isFetching, setIsFetching] = useState(true)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const isMe = me?.id === userId
 
   useEffect(() => {
     const fetchUser = async () => {
-      if (!userId) return;
-      setIsFetching(true);
+      if (!userId) return
+      setIsFetching(true)
       try {
         if (isMe && me) {
-          setProfileUser(me);
+          setProfileUser(me)
         } else {
-          const userData = await authFetch<ProfileUser>(`/api/users/${userId}`);
-          setProfileUser(userData);
+          const userData = await authFetch<ProfileUser>(`/api/users/${userId}`)
+          setProfileUser(userData)
         }
       } catch (e) {
-        toast.error(handleApiError(e));
+        toast.error(handleApiError(e))
       } finally {
-        setIsFetching(false);
+        setIsFetching(false)
       }
-    };
-    fetchUser();
-  }, [userId, me, isMe]);
+    }
+    fetchUser()
+  }, [userId, me, isMe])
 
   useEffect(() => {
-    if (profile && profile.name !== "Encrypted User" && profile.name !== "Unknown") {
-       setName(profile.name);
-       setBio(profile.description || '');
+    if (
+      profile &&
+      profile.name !== 'Encrypted User' &&
+      profile.name !== 'Unknown'
+    ) {
+      setName(profile.name)
+      setBio(profile.description || '')
     }
-  }, [profile]);
+  }, [profile])
 
   const stats = [
-    { 
-      label: t('settings:profile_page.security_clearance'), 
-      value: profileUser?.isVerified ? t('settings:identity.verified') : t('settings:identity.unverified', 'UNVERIFIED'), 
-      color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500', 
-      icon: FiShield 
+    {
+      label: t('settings:profile_page.security_clearance'),
+      value: profileUser?.isVerified
+        ? t('settings:identity.verified')
+        : t('settings:identity.unverified', 'UNVERIFIED'),
+      color: profileUser?.isVerified ? 'text-emerald-500' : 'text-yellow-500',
+      icon: FiShield
     },
-    { 
-      label: t('settings:profile_page.encryption_protocol'), 
-      value: profileUser?.publicKey ? t('settings:profile_page.active') : t('settings:profile_page.inactive', 'INACTIVE'), 
-      color: profileUser?.publicKey ? 'text-accent' : 'text-red-500', 
-      icon: FiKey 
+    {
+      label: t('settings:profile_page.encryption_protocol'),
+      value: profileUser?.publicKey
+        ? t('settings:profile_page.active')
+        : t('settings:profile_page.inactive', 'INACTIVE'),
+      color: profileUser?.publicKey ? 'text-accent' : 'text-red-500',
+      icon: FiKey
     },
-    { 
-      label: t('common:profile.home_server'), 
+    {
+      label: t('common:profile.home_server'),
       value: 'ap-southeast-1', // Nama region server biasanya tidak diterjemahkan
-      color: 'text-blue-500', 
-      icon: FiGlobe 
+      color: 'text-blue-500',
+      icon: FiGlobe
     },
-    { 
-      label: t('common:profile.session_status'), 
-      value: t('common:profile.encrypted'), 
-      color: 'text-emerald-500', 
-      icon: FiActivity 
-    },
-  ];
+    {
+      label: t('common:profile.session_status'),
+      value: t('common:profile.encrypted'),
+      color: 'text-emerald-500',
+      icon: FiActivity
+    }
+  ]
 
   const handleSave = async () => {
-    setIsEditing(false);
-    toast(t('common:profile.editing_notice'), { icon: 'ℹ️' });
-  };
+    setIsEditing(false)
+    toast(t('common:profile.editing_notice'), { icon: 'ℹ️' })
+  }
 
   const handleAvatarUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     // Editing moved to Settings
-  };
+  }
 
-  if (isFetching) return <div className="h-full flex items-center justify-center bg-bg-main"><div className="animate-spin rounded-full h-8 w-8 border-t-2 border-accent"></div></div>;
-  if (!profileUser) return <div className="h-full flex items-center justify-center bg-bg-main text-text-secondary">{t('common:profile.user_not_found')}</div>;
+  if (isFetching)
+    return (
+      <div className="h-full flex items-center justify-center bg-bg-main">
+        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-accent"></div>
+      </div>
+    )
+  if (!profileUser)
+    return (
+      <div className="h-full flex items-center justify-center bg-bg-main text-text-secondary">
+        {t('common:profile.user_not_found')}
+      </div>
+    )
 
   return (
     <div className="h-full overflow-y-auto bg-bg-main p-4 md:p-8">
       <div className="max-w-5xl mx-auto space-y-6">
-        
         {/* HEADER: Operator Status */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b border-black/5 dark:border-white/5 pb-6">
           <div className="flex items-center gap-4">
-            <button 
+            <button
               onClick={() => navigate(-1)}
               className="p-3 rounded-full bg-bg-main shadow-neu-flat dark:shadow-neu-flat-dark active:shadow-neu-pressed dark:active:shadow-neu-pressed-dark hover:text-accent transition-all"
             >
@@ -118,52 +152,57 @@ export default function ProfilePage() {
                 {t('settings:profile_page.title')}
               </h1>
               <p className="font-mono text-xs text-text-secondary uppercase tracking-widest mt-1">
-                ID: {profileUser.id.substring(0, 8)}-{profileUser.id.substring(profileUser.id.length - 4)} • <span className="text-emerald-500">{t('settings:profile_page.active')}</span>
+                ID: {profileUser.id.substring(0, 8)}-
+                {profileUser.id.substring(profileUser.id.length - 4)} •{' '}
+                <span className="text-emerald-500">
+                  {t('settings:profile_page.active')}
+                </span>
               </p>
             </div>
           </div>
-          
+
           {isMe && (
             <div className="flex gap-3">
-                 <button 
-                   onClick={() => navigate('/settings')}
-                   className="flex items-center gap-2 px-6 py-2 bg-bg-main text-text-primary rounded-lg font-bold shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed transition-all"
-                 >
-                   <FiEdit2 size={16} />
-                   {t('settings:profile_page.edit_record')}
-                 </button>
+              <button
+                onClick={() => navigate('/settings')}
+                className="flex items-center gap-2 px-6 py-2 bg-bg-main text-text-primary rounded-lg font-bold shadow-neu-flat dark:shadow-neu-flat-dark hover:text-accent active:shadow-neu-pressed transition-all"
+              >
+                <FiEdit2 size={16} />
+                {t('settings:profile_page.edit_record')}
+              </button>
             </div>
           )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
           {/* COLUMN 1: Visual ID Card */}
           <div className="lg:col-span-1 space-y-6">
             <div className="bg-bg-main rounded-2xl p-6 shadow-neu-flat dark:shadow-neu-flat-dark border border-white/50 dark:border-white/5 text-center relative overflow-hidden group">
               {/* ID Badge Aesthetics */}
               <div className="absolute top-0 left-0 w-full h-1 bg-accent/50" />
               <div className="absolute top-4 right-4 w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_#10b981]" />
-              
+
               <div className="relative mx-auto w-40 h-40 mb-4">
                 <div className="w-full h-full rounded-full p-2 bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark">
                   {profile.avatarUrl ? (
-                    <img 
+                    <img
                       src={toAbsoluteUrl(profile.avatarUrl)}
-                      alt={profile.name || "Profile"} 
+                      alt={profile.name || 'Profile'}
                       className="w-full h-full rounded-full object-cover"
                     />
                   ) : (
-                    <DefaultAvatar 
-                      name={profile.name || "Profile"} 
+                    <DefaultAvatar
+                      name={profile.name || 'Profile'}
                       id={profileUser.id}
-                      className="w-full h-full" 
+                      className="w-full h-full"
                     />
                   )}
                 </div>
               </div>
 
-              <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">{profile.name}</h2>
+              <h2 className="text-xl font-black text-text-primary uppercase tracking-tight">
+                {profile.name}
+              </h2>
               {profileUser.isVerified && (
                 <div className="mt-2 inline-block px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[10px] font-bold tracking-widest uppercase">
                   {t('common:profile.verified_operator')}
@@ -178,14 +217,25 @@ export default function ProfilePage() {
               </h3>
               <div className="space-y-4">
                 {stats.map((stat) => (
-                  <div key={stat.label} className="flex items-center justify-between p-3 rounded-lg bg-bg-surface/10 border border-black/5 dark:border-white/5">
+                  <div
+                    key={stat.label}
+                    className="flex items-center justify-between p-3 rounded-lg bg-bg-surface/10 border border-black/5 dark:border-white/5"
+                  >
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded bg-bg-main ${stat.color} bg-opacity-10 shadow-neu-pressed dark:shadow-neu-pressed-dark`}>
+                      <div
+                        className={`p-2 rounded bg-bg-main ${stat.color} bg-opacity-10 shadow-neu-pressed dark:shadow-neu-pressed-dark`}
+                      >
                         <stat.icon size={14} className={stat.color} />
                       </div>
-                      <span className="text-xs font-bold text-text-secondary uppercase">{stat.label}</span>
+                      <span className="text-xs font-bold text-text-secondary uppercase">
+                        {stat.label}
+                      </span>
                     </div>
-                    <span className={`text-xs font-mono font-bold ${stat.color}`}>{stat.value}</span>
+                    <span
+                      className={`text-xs font-mono font-bold ${stat.color}`}
+                    >
+                      {stat.value}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -198,10 +248,12 @@ export default function ProfilePage() {
               <h3 className="text-xs font-black uppercase tracking-widest text-text-secondary mb-6 border-b border-black/5 dark:border-white/5 pb-2">
                 {t('common:profile.bio_data')}
               </h3>
-              
+
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">{t('settings:identity.display_name')}</label>
+                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">
+                    {t('settings:identity.display_name')}
+                  </label>
                   <input
                     type="text"
                     value={name}
@@ -212,7 +264,9 @@ export default function ProfilePage() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">{t('settings:identity.bio')}</label>
+                  <label className="text-xs font-bold uppercase text-text-secondary ml-1">
+                    {t('settings:identity.bio')}
+                  </label>
                   <textarea
                     value={bio}
                     disabled={!isEditing}
@@ -237,19 +291,18 @@ export default function ProfilePage() {
               </div>
               {isMe && (
                 <div className="mt-4 flex gap-4">
-                   <button className="text-xs font-bold text-accent hover:underline uppercase tracking-wide">
-                     {t('common:profile.refresh_keys')}
-                   </button>
-                   <button className="text-xs font-bold text-red-500 hover:underline uppercase tracking-wide">
-                     {t('common:profile.revoke_access')}
-                   </button>
+                  <button className="text-xs font-bold text-accent hover:underline uppercase tracking-wide">
+                    {t('common:profile.refresh_keys')}
+                  </button>
+                  <button className="text-xs font-bold text-red-500 hover:underline uppercase tracking-wide">
+                    {t('common:profile.revoke_access')}
+                  </button>
                 </div>
               )}
             </div>
           </div>
         </div>
-
       </div>
     </div>
-  );
+  )
 }
