@@ -1,36 +1,38 @@
-import * as Popover from '@radix-ui/react-popover';
-import { FiBell } from 'react-icons/fi';
-import useNotificationStore from '@store/notification';
-import { useShallow } from 'zustand/react/shallow';
-import NotificationPopover from './NotificationPopover';
-import { useEffect, useRef } from 'react';
-import { motion, useAnimationControls } from 'framer-motion';
+import * as Popover from '@radix-ui/react-popover'
+import { FiBell } from 'react-icons/fi'
+import useNotificationStore from '@store/notification'
+import { useShallow } from 'zustand/react/shallow'
+import NotificationPopover from './NotificationPopover'
+import { useEffect, useRef } from 'react'
+import { motion, useAnimationControls } from 'framer-motion'
 
 const NotificationBell = () => {
-  const { unreadCount, markAllAsRead } = useNotificationStore(useShallow(state => ({
-    unreadCount: state.unreadCount,
-    markAllAsRead: state.markAllAsRead,
-  })));
-  const controls = useAnimationControls();
-  const prevUnreadCount = useRef(unreadCount);
+  const { unreadCount, markAllAsRead } = useNotificationStore(
+    useShallow((state) => ({
+      unreadCount: state.unreadCount,
+      markAllAsRead: state.markAllAsRead
+    }))
+  )
+  const controls = useAnimationControls()
+  const prevUnreadCount = useRef(unreadCount)
 
   useEffect(() => {
     if (unreadCount > prevUnreadCount.current) {
       controls.start({
         rotate: [0, -15, 10, -10, 5, -5, 0],
-        transition: { duration: 0.5, ease: 'easeInOut' },
-      });
+        transition: { duration: 0.5, ease: 'easeInOut' }
+      })
     }
-    prevUnreadCount.current = unreadCount;
-  }, [unreadCount, controls]);
+    prevUnreadCount.current = unreadCount
+  }, [unreadCount, controls])
 
   const handleOpenChange = (open: boolean) => {
     if (open && unreadCount > 0) {
       setTimeout(() => {
-        markAllAsRead();
-      }, 1000);
+        markAllAsRead()
+      }, 1000)
     }
-  };
+  }
 
   return (
     <Popover.Root onOpenChange={handleOpenChange}>
@@ -50,7 +52,7 @@ const NotificationBell = () => {
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
-  );
-};
+  )
+}
 
-export default NotificationBell;
+export default NotificationBell

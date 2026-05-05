@@ -1,63 +1,67 @@
-import { api } from "./api";
+import { api } from './api'
 
 interface PresignedResponse {
-  uploadUrl: string;
-  key: string;
-  publicUrl: string;
+  uploadUrl: string
+  key: string
+  publicUrl: string
 }
 
 export async function uploadToR2(
-  file: File | Blob, 
+  file: File | Blob,
   folder: 'avatars' | 'attachments' | 'groups',
   onProgress?: (percent: number) => void
 ): Promise<string> {
-  
-  let presignedResponse: PresignedResponse;
+  let presignedResponse: PresignedResponse
   try {
     presignedResponse = await api<PresignedResponse>('/api/uploads/presigned', {
       method: 'POST',
       body: JSON.stringify({
         fileName: (file as File).name || 'blob',
         // 👇 UBAH BARIS INI! Jangan pake file.type lagi! 👇
-        fileType: 'application/octet-stream', 
+        fileType: 'application/octet-stream',
         folder,
         fileSize: file.size
       })
-    });
+    })
   } catch (error: unknown) {
     // Tangani error dari server jika ukuran file melebihi batas
-    if ((error instanceof Error ? error.message : 'Unknown error') && (error instanceof Error ? error.message : 'Unknown error').includes('File too large')) {
-      throw new Error((error instanceof Error ? error.message : 'Unknown error'));
+    if (
+      (error instanceof Error ? error.message : 'Unknown error') &&
+      (error instanceof Error ? error.message : 'Unknown error').includes(
+        'File too large'
+      )
+    ) {
+      throw new Error(error instanceof Error ? error.message : 'Unknown error')
     }
-    throw error;
+    throw error
   }
 
-  const { uploadUrl, publicUrl } = presignedResponse;
+  const { uploadUrl, publicUrl } = presignedResponse
 
   // 2. Upload LANGSUNG ke R2 (Bypass Server)
   return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('PUT', uploadUrl);
-    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', uploadUrl)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
 
     // Handle Progress
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && onProgress) {
-        const percent = Math.round((event.loaded / event.total) * 100);
-        onProgress(percent);
+        const percent = Math.round((event.loaded / event.total) * 100)
+        onProgress(percent)
       }
-    };
+    }
 
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(publicUrl); // Kembalikan URL publik R2
+        resolve(publicUrl) // Kembalikan URL publik R2
       } else {
-        reject(new Error(`Upload failed: ${xhr.statusText}`));
+        reject(new Error(`Upload failed: ${xhr.statusText}`))
       }
-    };
+    }
 
-    xhr.onerror = () => reject(new Error('Network error during upload'));
-    
-    xhr.send(file);
-  });
+    xhr.onerror = () => reject(new Error('Network error during upload'))
+
+    xhr.send(file)
+  })
 }

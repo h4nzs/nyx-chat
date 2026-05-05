@@ -1,11 +1,11 @@
 // ✅ FIX: Kembali ke import statis. Vite akan mengamankannya lewat 'optimizeDeps' di vite.config.ts
-import * as sodiumExports from 'libsodium-wrappers';
+import * as sodiumExports from 'libsodium-wrappers'
 
 // Handle perbedaan export antara CJS/UMD dan ESM
-const sodium = sodiumExports.default || sodiumExports;
+const sodium = sodiumExports.default || sodiumExports
 
-let isSodiumInitialized = false;
-let sodiumInitPromise: Promise<void> | null = null;
+let isSodiumInitialized = false
+let sodiumInitPromise: Promise<void> | null = null
 
 /**
  * Initializes libsodium library
@@ -13,28 +13,28 @@ let sodiumInitPromise: Promise<void> | null = null;
  */
 export async function initializeSodium(): Promise<void> {
   if (isSodiumInitialized) {
-    return;
+    return
   }
 
   if (sodiumInitPromise) {
     // If initialization is already in progress, wait for it
-    await sodiumInitPromise;
-    return;
+    await sodiumInitPromise
+    return
   }
 
   // Gunakan promise bawaan dari library
   sodiumInitPromise = sodium.ready
     .then(() => {
-      isSodiumInitialized = true;
+      isSodiumInitialized = true
     })
     .catch((error: unknown) => {
-      console.error('Failed to initialize libsodium:', error);
+      console.error('Failed to initialize libsodium:', error)
       // Reset promise to allow retry on next call
-      sodiumInitPromise = null;
-      throw error;
-    });
+      sodiumInitPromise = null
+      throw error
+    })
 
-  await sodiumInitPromise;
+  await sodiumInitPromise
 }
 
 /**
@@ -42,14 +42,17 @@ export async function initializeSodium(): Promise<void> {
  */
 export async function getSodium(): Promise<typeof sodium> {
   try {
-    await initializeSodium();
+    await initializeSodium()
     if (!isSodiumInitialized) {
-      throw new Error('Libsodium failed to initialize');
+      throw new Error('Libsodium failed to initialize')
     }
-    return sodium;
+    return sodium
   } catch (error) {
-    console.error('Failed to initialize libsodium:', error);
-    throw new Error('Libsodium failed to initialize: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    console.error('Failed to initialize libsodium:', error)
+    throw new Error(
+      'Libsodium failed to initialize: ' +
+        (error instanceof Error ? error.message : 'Unknown error')
+    )
   }
 }
 
@@ -57,5 +60,5 @@ export async function getSodium(): Promise<typeof sodium> {
  * Checks if sodium is ready for use
  */
 export function isSodiumReady(): boolean {
-  return isSodiumInitialized;
+  return isSodiumInitialized
 }

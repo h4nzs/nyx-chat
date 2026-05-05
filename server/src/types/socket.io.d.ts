@@ -1,7 +1,7 @@
-import { AuthPayload } from './auth';
+import { AuthPayload } from './auth'
 
 declare module 'socket.io' {
   interface Socket {
-    user?: AuthPayload;
+    user?: AuthPayload
   }
 }

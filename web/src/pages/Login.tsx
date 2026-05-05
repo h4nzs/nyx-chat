@@ -1,252 +1,301 @@
-import { useState, useEffect } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
-import { useTranslation } from 'react-i18next';
-import { useAuthStore, type User } from "../store/auth";
-import { useShallow } from 'zustand/react/shallow';
-import { useModalStore } from "../store/modal";
-import AuthForm from "../components/AuthForm";
-import { IoFingerPrint } from "react-icons/io5";
-import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
-import { api } from "@lib/api";
-import { retrievePrivateKeys, restoreFromPhrase, hashUsername } from "@lib/crypto-worker-proxy";
-import { connectSocket } from "@lib/socket";
-import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, checkPanicPassword } from "@lib/keyStorage";
-import { unlockWithBiometric } from "@lib/biometricUnlock";
-import { executeLocalWipe } from "@lib/nukeProtocol";
-import toast from "react-hot-toast";
-import { FiLock, FiKey, FiShield } from "react-icons/fi";
-import SEO from '../components/SEO';
-import LanguageSwitcher from '../components/LanguageSwitcher';
+import { useState, useEffect } from 'react'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { useAuthStore, type User } from '../store/auth'
+import { useShallow } from 'zustand/react/shallow'
+import { useModalStore } from '../store/modal'
+import AuthForm from '../components/AuthForm'
+import { IoFingerPrint } from 'react-icons/io5'
+import {
+  startAuthentication,
+  platformAuthenticatorIsAvailable
+} from '@simplewebauthn/browser'
+import { api } from '@lib/api'
+import {
+  retrievePrivateKeys,
+  restoreFromPhrase,
+  hashUsername
+} from '@lib/crypto-worker-proxy'
+import { connectSocket } from '@lib/socket'
+import {
+  getEncryptedKeys,
+  saveEncryptedKeys,
+  saveDeviceAutoUnlockKey,
+  setDeviceAutoUnlockReady,
+  checkPanicPassword
+} from '@lib/keyStorage'
+import { unlockWithBiometric } from '@lib/biometricUnlock'
+import { executeLocalWipe } from '@lib/nukeProtocol'
+import toast from 'react-hot-toast'
+import { FiLock, FiKey, FiShield } from 'react-icons/fi'
+import SEO from '../components/SEO'
+import LanguageSwitcher from '../components/LanguageSwitcher'
 
-import i18n from '../i18n';
+import i18n from '../i18n'
 export default function Login() {
-  const { t } = useTranslation(['auth', 'common']);
-  const [error, setError] = useState("");
-  const [isBiometricsAvailable, setIsBiometricsAvailable] = useState(false);
-  const navigate = useNavigate();
-  const location = useLocation();
+  const { t } = useTranslation(['auth', 'common'])
+  const [error, setError] = useState('')
+  const [isBiometricsAvailable, setIsBiometricsAvailable] = useState(false)
+  const navigate = useNavigate()
+  const location = useLocation()
 
-  const { login } = useAuthStore(useShallow(s => ({
-    login: s.login,
-  })));
+  const { login } = useAuthStore(
+    useShallow((s) => ({
+      login: s.login
+    }))
+  )
 
   useEffect(() => {
     // Cek ketersediaan hardware biometric
     platformAuthenticatorIsAvailable().then((available: boolean) => {
-      setIsBiometricsAvailable(available);
-    });
-  }, []);
+      setIsBiometricsAvailable(available)
+    })
+  }, [])
 
   const handleLogin = async (data: { a: string; b?: string }) => {
     if (!data.a || !data.b) {
-      setError(t('auth:errors.required_both'));
-      return;
+      setError(t('auth:errors.required_both'))
+      return
     }
     try {
-      const restoredNotSynced = location.state?.restoredNotSynced === true;
+      const restoredNotSynced = location.state?.restoredNotSynced === true
 
       // --- PANIC PASSWORD CHECK FOR NORMAL LOGIN ---
-      const isPanic = await checkPanicPassword(data.b);
+      const isPanic = await checkPanicPassword(data.b)
       if (isPanic) {
-        const toastId = toast.loading(t('auth:status.authenticating'));
+        const toastId = toast.loading(t('auth:status.authenticating'))
         setTimeout(async () => {
           try {
-            await executeLocalWipe();
+            await executeLocalWipe()
           } catch (e) {
-            console.error("Wipe failed", e);
+            console.error('Wipe failed', e)
           } finally {
-            toast.dismiss(toastId);
+            toast.dismiss(toastId)
           }
-        }, 2000); 
-        return; 
+        }, 2000)
+        return
       }
-      
+
       // CLIENT-SIDE BLIND INDEXING
       // Hash the username input before sending to server.
-      const usernameHash = await hashUsername(data.a);
+      const usernameHash = await hashUsername(data.a)
 
-      await login(usernameHash, data.b, restoredNotSynced);
+      await login(usernameHash, data.b, restoredNotSynced)
 
-      navigate("/chat");
-
+      navigate('/chat')
     } catch (err: unknown) {
-      setError((err instanceof Error ? err.message : 'Unknown error') || t('auth:messages.login_failed'));
+      setError(
+        (err instanceof Error ? err.message : 'Unknown error') ||
+          t('auth:messages.login_failed')
+      )
     }
-  };
+  }
 
   async function handleBiometricLogin() {
     try {
-      setError("");
+      setError('')
 
       // A. Minta Challenge Login
-      const options = await api<unknown>("/api/auth/webauthn/login/options");
+      const options = await api<unknown>('/api/auth/webauthn/login/options')
 
       // B. Browser minta fingerprint user (Login Server + Unlock Local Vault)
-      const { authResp, recoveryPhrase } = await unlockWithBiometric(options as Record<string, unknown>);
+      const { authResp, recoveryPhrase } = await unlockWithBiometric(
+        options as Record<string, unknown>
+      )
 
       // C. Verifikasi ke Server
-      const result = await api<{ verified: boolean; user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/webauthn/login/verify", {
-        method: "POST",
+      const result = await api<{
+        verified: boolean
+        user: User
+        accessToken: string
+        encryptedPrivateKey?: string
+      }>('/api/auth/webauthn/login/verify', {
+        method: 'POST',
         body: JSON.stringify(authResp)
-      });
+      })
 
       if (result.verified && result.accessToken) {
         // D. Login Sukses -> Set Store
-        useAuthStore.getState().setAccessToken(result.accessToken);
-        useAuthStore.getState().setUser(result.user);
+        useAuthStore.getState().setAccessToken(result.accessToken)
+        useAuthStore.getState().setUser(result.user)
 
         // E. MAGIC UNLOCK: Jika PRF berhasil membuka Recovery Phrase
         if (recoveryPhrase) {
-            // Kita punya Phrase! Kita bisa regenerasi semua kunci tanpa password user.
-            // Buat password sementara untuk sesi lokal ini agar bisa disimpan di IDB
-            const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
-            const sessionPassword = sodium.to_hex(sodium.randombytes_buf(16)); 
-            
-            // Regenerasi bundle kunci dari phrase
-            const { encryptedPrivateKeys } = await restoreFromPhrase(recoveryPhrase, sessionPassword);
-            
-            // Simpan ke IDB
-            await saveEncryptedKeys(encryptedPrivateKeys);
-            await saveDeviceAutoUnlockKey(sessionPassword);
-            await setDeviceAutoUnlockReady(true);
-            
-            // Beritahu store bahwa kunci sudah siap
-            useAuthStore.getState().setHasRestoredKeys(true);
-            
-            toast.success(t('auth:status.vault_unlocked'));
+          // Kita punya Phrase! Kita bisa regenerasi semua kunci tanpa password user.
+          // Buat password sementara untuk sesi lokal ini agar bisa disimpan di IDB
+          const sodium = await import('@lib/sodiumInitializer').then((m) =>
+            m.getSodium()
+          )
+          const sessionPassword = sodium.to_hex(sodium.randombytes_buf(16))
+
+          // Regenerasi bundle kunci dari phrase
+          const { encryptedPrivateKeys } = await restoreFromPhrase(
+            recoveryPhrase,
+            sessionPassword
+          )
+
+          // Simpan ke IDB
+          await saveEncryptedKeys(encryptedPrivateKeys)
+          await saveDeviceAutoUnlockKey(sessionPassword)
+          await setDeviceAutoUnlockReady(true)
+
+          // Beritahu store bahwa kunci sudah siap
+          useAuthStore.getState().setHasRestoredKeys(true)
+
+          toast.success(t('auth:status.vault_unlocked'))
         } else if (result.encryptedPrivateKey) {
-            // Fallback: Jika PRF tidak jalan/tidak disetup, pakai bundle dari server (tapi masih terkunci password)
-            const { saveEncryptedKeys } = await import("@lib/keyStorage");
-            await saveEncryptedKeys(result.encryptedPrivateKey);
-            useAuthStore.getState().setHasRestoredKeys(true);
+          // Fallback: Jika PRF tidak jalan/tidak disetup, pakai bundle dari server (tapi masih terkunci password)
+          const { saveEncryptedKeys } = await import('@lib/keyStorage')
+          await saveEncryptedKeys(result.encryptedPrivateKey)
+          useAuthStore.getState().setHasRestoredKeys(true)
         }
 
         // Try auto-unlock (akan sukses jika PRF jalan tadi)
-        const autoUnlockSuccess = await useAuthStore.getState().tryAutoUnlock();
-        
+        const autoUnlockSuccess = await useAuthStore.getState().tryAutoUnlock()
+
         if (!autoUnlockSuccess) {
-             // Jika PRF gagal/belum setup, user harus input password manual untuk dekripsi
-             if (localStorage.getItem('nyx_bio_vault') && !recoveryPhrase) {
-                console.warn("Biometric PRF key derivation failed or mismatched.");
-                toast.error(t('auth:errors.biometric_corrupt'));
-                localStorage.removeItem('nyx_bio_vault'); 
-             }
-             
-             const hasKeys = await getEncryptedKeys();
-             if (hasKeys) {
-                useModalStore.getState().showPasswordPrompt(async (password) => {
-                    if (!password) return;
+          // Jika PRF gagal/belum setup, user harus input password manual untuk dekripsi
+          if (localStorage.getItem('nyx_bio_vault') && !recoveryPhrase) {
+            console.warn('Biometric PRF key derivation failed or mismatched.')
+            toast.error(t('auth:errors.biometric_corrupt'))
+            localStorage.removeItem('nyx_bio_vault')
+          }
 
-                    // --- PANIC PASSWORD CHECK ---
-                    const isPanic = await checkPanicPassword(password);
-                    if (isPanic) {
-                      // Fake loading to deceive the attacker
-                      const toastId = toast.loading(t('auth:status.decrypting'));
-                      setTimeout(async () => {
-                        try {
-                          await executeLocalWipe();
-                        } catch (e) {
-                          console.error("Wipe failed", e);
-                        } finally {
-                          toast.dismiss(toastId);
-                        }
-                      }, 2000); 
-                      return; 
-                    }
-                    // --- END PANIC CHECK ---
+          const hasKeys = await getEncryptedKeys()
+          if (hasKeys) {
+            useModalStore.getState().showPasswordPrompt(async (password) => {
+              if (!password) return
 
-                    try {
-                        const encryptedKeys = await getEncryptedKeys();
-                        if (!encryptedKeys) {
-                            toast.error(t('auth:messages.keys_not_found'));
-                            return;
-                        }
-                        const result = await retrievePrivateKeys(encryptedKeys, password);
-                        if (result.success) {
-                            const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } = await import("@lib/keyStorage");
-                            await saveDeviceAutoUnlockKey(password);
-                            await setDeviceAutoUnlockReady(true);
-                            useAuthStore.getState().setDecryptedKeys(result.keys);
-                            await useAuthStore.getState().loadBlockedUsers();
-                            connectSocket();
-                            navigate("/chat");
-                        } else {
-                            toast.error(t('auth:messages.decrypt_failed'));
-                        }
-                    } catch (e) {
-                        toast.error(i18n.t('errors:something_went_wrong_when_decrypting', 'Something went wrong when decrypting.'));
-                    }
-                });
-                return;
-             }
+              // --- PANIC PASSWORD CHECK ---
+              const isPanic = await checkPanicPassword(password)
+              if (isPanic) {
+                // Fake loading to deceive the attacker
+                const toastId = toast.loading(t('auth:status.decrypting'))
+                setTimeout(async () => {
+                  try {
+                    await executeLocalWipe()
+                  } catch (e) {
+                    console.error('Wipe failed', e)
+                  } finally {
+                    toast.dismiss(toastId)
+                  }
+                }, 2000)
+                return
+              }
+              // --- END PANIC CHECK ---
+
+              try {
+                const encryptedKeys = await getEncryptedKeys()
+                if (!encryptedKeys) {
+                  toast.error(t('auth:messages.keys_not_found'))
+                  return
+                }
+                const result = await retrievePrivateKeys(
+                  encryptedKeys,
+                  password
+                )
+                if (result.success) {
+                  const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } =
+                    await import('@lib/keyStorage')
+                  await saveDeviceAutoUnlockKey(password)
+                  await setDeviceAutoUnlockReady(true)
+                  useAuthStore.getState().setDecryptedKeys(result.keys)
+                  await useAuthStore.getState().loadBlockedUsers()
+                  connectSocket()
+                  navigate('/chat')
+                } else {
+                  toast.error(t('auth:messages.decrypt_failed'))
+                }
+              } catch (e) {
+                toast.error(
+                  i18n.t(
+                    'errors:something_went_wrong_when_decrypting',
+                    'Something went wrong when decrypting.'
+                  )
+                )
+              }
+            })
+            return
+          }
         }
-        
-        await useAuthStore.getState().loadBlockedUsers();
-        connectSocket();
 
-        navigate("/chat");
+        await useAuthStore.getState().loadBlockedUsers()
+        connectSocket()
+
+        navigate('/chat')
       }
     } catch (err: unknown) {
-      console.error("Biometric login error:", err);
+      console.error('Biometric login error:', err)
 
       // Tangani berbagai jenis error WebAuthn
-      if ((err as Error).name === 'NotAllowedError' || (err instanceof Error ? err.message : 'Unknown error')?.includes('cancelled')) {
-        setError(t('auth:messages.biometric_cancelled'));
-        return;
-      } 
-      
-      toast.error(t('auth:errors.biometric_failed'));
-      
-      if ((err as Error).name === 'SecurityError') {
-        setError(t('auth:errors.biometric_security'));
-      } else if ((err as Error).name === 'AbortError') {
-        setError(t('auth:errors.biometric_abort'));
-      } else if ((err as Error).name === 'InvalidStateError') {
-        setError(t('auth:errors.biometric_locked'));
-      } else {
-        setError(t('auth:errors.biometric_failed'));
+      if (
+        (err as Error).name === 'NotAllowedError' ||
+        (err instanceof Error ? err.message : 'Unknown error')?.includes(
+          'cancelled'
+        )
+      ) {
+        setError(t('auth:messages.biometric_cancelled'))
+        return
       }
-      
+
+      toast.error(t('auth:errors.biometric_failed'))
+
+      if ((err as Error).name === 'SecurityError') {
+        setError(t('auth:errors.biometric_security'))
+      } else if ((err as Error).name === 'AbortError') {
+        setError(t('auth:errors.biometric_abort'))
+      } else if ((err as Error).name === 'InvalidStateError') {
+        setError(t('auth:errors.biometric_locked'))
+      } else {
+        setError(t('auth:errors.biometric_failed'))
+      }
+
       // Fallback: Show password prompt if keys exist
-      const hasKeys = await getEncryptedKeys();
+      const hasKeys = await getEncryptedKeys()
       if (hasKeys) {
-         useModalStore.getState().showPasswordPrompt(async (password) => {
-            if (!password) return;
+        useModalStore.getState().showPasswordPrompt(async (password) => {
+          if (!password) return
 
-            const isPanic = await checkPanicPassword(password);
-            if (isPanic) {
-              const toastId = toast.loading(t('auth:status.decrypting'));
-              setTimeout(async () => {
-                try {
-                  await executeLocalWipe();
-                } catch (e) {
-                  console.error("Wipe failed", e);
-                } finally {
-                  toast.dismiss(toastId);
-                }
-              }, 2000); 
-              return; 
-            }
+          const isPanic = await checkPanicPassword(password)
+          if (isPanic) {
+            const toastId = toast.loading(t('auth:status.decrypting'))
+            setTimeout(async () => {
+              try {
+                await executeLocalWipe()
+              } catch (e) {
+                console.error('Wipe failed', e)
+              } finally {
+                toast.dismiss(toastId)
+              }
+            }, 2000)
+            return
+          }
 
-            try {
-                const encryptedKeys = await getEncryptedKeys();
-                if (!encryptedKeys) return;
-                const result = await retrievePrivateKeys(encryptedKeys, password);
-                if (result.success) {
-                    const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } = await import("@lib/keyStorage");
-                    await saveDeviceAutoUnlockKey(password);
-                    await setDeviceAutoUnlockReady(true);
-                    useAuthStore.getState().setDecryptedKeys(result.keys);
-                    await useAuthStore.getState().loadBlockedUsers();
-                    connectSocket();
-                    navigate("/chat");
-                } else {
-                    toast.error(t('auth:messages.decrypt_failed'));
-                }
-            } catch (e) {
-                toast.error(t('auth:messages.decrypt_failed', 'An error occurred during decryption.'));
+          try {
+            const encryptedKeys = await getEncryptedKeys()
+            if (!encryptedKeys) return
+            const result = await retrievePrivateKeys(encryptedKeys, password)
+            if (result.success) {
+              const { saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady } =
+                await import('@lib/keyStorage')
+              await saveDeviceAutoUnlockKey(password)
+              await setDeviceAutoUnlockReady(true)
+              useAuthStore.getState().setDecryptedKeys(result.keys)
+              await useAuthStore.getState().loadBlockedUsers()
+              connectSocket()
+              navigate('/chat')
+            } else {
+              toast.error(t('auth:messages.decrypt_failed'))
             }
-         });
+          } catch (e) {
+            toast.error(
+              t(
+                'auth:messages.decrypt_failed',
+                'An error occurred during decryption.'
+              )
+            )
+          }
+        })
       }
     }
   }
@@ -254,7 +303,11 @@ export default function Login() {
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-bg-main relative">
       <LanguageSwitcher />
-      <SEO title="Login" description="Sign in to your NYX secure enclave to access your E2EE chats." canonicalUrl="/login" />
+      <SEO
+        title="Login"
+        description="Sign in to your NYX secure enclave to access your E2EE chats."
+        canonicalUrl="/login"
+      />
       {/* Left Panel - Concrete Security Panel */}
       <div className="w-full md:w-2/5 bg-bg-surface p-8 flex flex-col justify-center shadow-2xl z-10">
         <div className="max-w-md w-full mx-auto">
@@ -262,20 +315,25 @@ export default function Login() {
             <div className="w-12 h-12 rounded-lg bg-accent flex items-center justify-center mr-3 shadow-neu-flat dark:shadow-neu-flat-dark">
               <div className="w-8 h-8 rounded bg-bg-main opacity-50"></div>
             </div>
-            <h1 className="text-3xl font-black text-text-primary tracking-tighter">{t('auth:titles.secure_vault')}</h1>
+            <h1 className="text-3xl font-black text-text-primary tracking-tighter">
+              {t('auth:titles.secure_vault')}
+            </h1>
           </div>
 
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-accent mb-2">{t('auth:titles.access_terminal')}</h2>
-            <p className="text-text-secondary">{t('auth:subtitles.login_desc')}</p>
+            <h2 className="text-2xl font-bold text-accent mb-2">
+              {t('auth:titles.access_terminal')}
+            </h2>
+            <p className="text-text-secondary">
+              {t('auth:subtitles.login_desc')}
+            </p>
           </div>
 
-          {error && <p className="text-red-500 text-center mb-4 text-sm">{error}</p>}
+          {error && (
+            <p className="text-red-500 text-center mb-4 text-sm">{error}</p>
+          )}
 
-          <AuthForm
-            onSubmit={handleLogin}
-            button={t('auth:buttons.login')}
-          />
+          <AuthForm onSubmit={handleLogin} button={t('auth:buttons.login')} />
 
           {isBiometricsAvailable && (
             <button
@@ -292,14 +350,37 @@ export default function Login() {
 
           <div className="text-center mt-8 pt-6 border-t border-white/10 dark:border-white/5">
             <p className="text-text-secondary text-sm mb-4">
-              {t('auth:links.no_account')} <Link to="/register" className="font-bold text-accent hover:underline">{t('auth:links.sign_up')}</Link>
+              {t('auth:links.no_account')}{' '}
+              <Link
+                to="/register"
+                className="font-bold text-accent hover:underline"
+              >
+                {t('auth:links.sign_up')}
+              </Link>
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-4">
-              <Link to="/restore" className="text-sm text-accent hover:underline">{t('auth:links.restore')}</Link>
-              <Link to="/migrate-receive" className="text-sm text-accent hover:underline">{t('auth:links.transfer')}</Link>
+              <Link
+                to="/restore"
+                className="text-sm text-accent hover:underline"
+              >
+                {t('auth:links.restore')}
+              </Link>
+              <Link
+                to="/migrate-receive"
+                className="text-sm text-accent hover:underline"
+              >
+                {t('auth:links.transfer')}
+              </Link>
             </div>
             <div className="mt-4 pt-4 border-t border-white/10 dark:border-white/5">
-              <a href="https://nyx-app.my.id/privacy" target="_blank" rel="noopener noreferrer" className="text-xs text-text-secondary hover:text-accent transition-colors">{t('common:nav.privacy')} & {t('common:nav.terms')}</a>
+              <a
+                href="https://nyx-app.my.id/privacy"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-text-secondary hover:text-accent transition-colors"
+              >
+                {t('common:nav.privacy')} & {t('common:nav.terms')}
+              </a>
             </div>
           </div>
         </div>
@@ -314,11 +395,13 @@ export default function Login() {
         </div>
 
         {/* Grid pattern */}
-        <div className="absolute inset-0 z-0 opacity-10"
-             style={{
-               backgroundImage: `linear-gradient(var(--color-text-secondary) 1px, transparent 1px), linear-gradient(to right, var(--color-text-secondary) 1px, transparent 1px)`,
-               backgroundSize: '40px 40px'
-             }}></div>
+        <div
+          className="absolute inset-0 z-0 opacity-10"
+          style={{
+            backgroundImage: `linear-gradient(var(--color-text-secondary) 1px, transparent 1px), linear-gradient(to right, var(--color-text-secondary) 1px, transparent 1px)`,
+            backgroundSize: '40px 40px'
+          }}
+        ></div>
 
         {/* Central security graphic */}
         <div className="relative z-10 text-center max-w-lg">
@@ -337,25 +420,41 @@ export default function Login() {
             <div className="absolute inset-0 rounded-full border-4 border-accent animate-ping opacity-20"></div>
           </div>
 
-          <h2 className="text-3xl font-black text-text-primary mb-4 tracking-tighter">{t('auth:marketing.industrial_security')}</h2>
-          <p className="text-text-secondary mb-6">{t('auth:marketing.industrial_desc')}</p>
+          <h2 className="text-3xl font-black text-text-primary mb-4 tracking-tighter">
+            {t('auth:marketing.industrial_security')}
+          </h2>
+          <p className="text-text-secondary mb-6">
+            {t('auth:marketing.industrial_desc')}
+          </p>
 
           <div className="grid grid-cols-3 gap-4 mt-12">
             <div className="p-4 bg-bg-surface rounded-xl shadow-neu-flat dark:shadow-neu-flat-dark">
-              <div className="text-accent mb-2 flex justify-center"><FiLock size={24} /></div>
-              <h3 className="font-bold text-text-primary text-xs uppercase tracking-wider">{t('auth:marketing.e2e_encrypted')}</h3>
+              <div className="text-accent mb-2 flex justify-center">
+                <FiLock size={24} />
+              </div>
+              <h3 className="font-bold text-text-primary text-xs uppercase tracking-wider">
+                {t('auth:marketing.e2e_encrypted')}
+              </h3>
             </div>
             <div className="p-4 bg-bg-surface rounded-xl shadow-neu-flat dark:shadow-neu-flat-dark">
-              <div className="text-accent mb-2 flex justify-center"><FiKey size={24} /></div>
-              <h3 className="font-bold text-text-primary text-xs uppercase tracking-wider">{t('auth:marketing.key_ownership')}</h3>
+              <div className="text-accent mb-2 flex justify-center">
+                <FiKey size={24} />
+              </div>
+              <h3 className="font-bold text-text-primary text-xs uppercase tracking-wider">
+                {t('auth:marketing.key_ownership')}
+              </h3>
             </div>
             <div className="p-4 bg-bg-surface rounded-xl shadow-neu-flat dark:shadow-neu-flat-dark">
-              <div className="text-accent mb-2 flex justify-center"><FiShield size={24} /></div>
-              <h3 className="font-bold text-text-primary text-xs uppercase tracking-wider">{t('auth:marketing.privacy_first')}</h3>
+              <div className="text-accent mb-2 flex justify-center">
+                <FiShield size={24} />
+              </div>
+              <h3 className="font-bold text-text-primary text-xs uppercase tracking-wider">
+                {t('auth:marketing.privacy_first')}
+              </h3>
             </div>
           </div>
         </div>
       </div>
     </div>
-  );
+  )
 }

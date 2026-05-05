@@ -1,36 +1,46 @@
-import { usePresenceStore } from '@store/presence';
-import { useConversationStore } from '@store/conversation';
-import { useAuthStore } from '@store/auth';
-import { useShallow } from 'zustand/react/shallow';
-import type { ConversationId } from '@nyx/shared';
+import { usePresenceStore } from '@store/presence'
+import { useConversationStore } from '@store/conversation'
+import { useAuthStore } from '@store/auth'
+import { useShallow } from 'zustand/react/shallow'
+import type { ConversationId } from '@nyx/shared'
 
-export default function TypingIndicator({ conversationId }: { conversationId: ConversationId }) {
-  const { typingIndicators } = usePresenceStore(useShallow(s => ({ typingIndicators: s.typingIndicators })));
-  const { conversations } = useConversationStore(useShallow(s => ({ conversations: s.conversations })));
-  const { user: me } = useAuthStore(useShallow(s => ({ user: s.user })));
+export default function TypingIndicator({
+  conversationId
+}: {
+  conversationId: ConversationId
+}) {
+  const { typingIndicators } = usePresenceStore(
+    useShallow((s) => ({ typingIndicators: s.typingIndicators }))
+  )
+  const { conversations } = useConversationStore(
+    useShallow((s) => ({ conversations: s.conversations }))
+  )
+  const { user: me } = useAuthStore(useShallow((s) => ({ user: s.user })))
 
-  const activeConversation = conversations.find(c => c.id === conversationId);
+  const activeConversation = conversations.find((c) => c.id === conversationId)
 
   const typingUsers = typingIndicators.filter(
-    indicator =>
+    (indicator) =>
       indicator.conversationId === conversationId &&
       indicator.isTyping &&
       indicator.id !== me?.id // Exclude current user
-  );
+  )
 
-  if (!typingUsers.length) return null;
+  if (!typingUsers.length) return null
 
   // Map typing user IDs to their names
-  const typingUserNames = typingUsers.map(typingUser => {
-    const participant = activeConversation?.participants.find(p => p.id === typingUser.id);
-    return 'Someone'; // Since we can't easily hook in a map here without a subcomponent, fallback.
-  });
+  const typingUserNames = typingUsers.map((typingUser) => {
+    const participant = activeConversation?.participants.find(
+      (p) => p.id === typingUser.id
+    )
+    return 'Someone' // Since we can't easily hook in a map here without a subcomponent, fallback.
+  })
 
-  let message: string;
+  let message: string
   if (typingUserNames.length === 1) {
-    message = `${typingUserNames[0]} is typing...`;
+    message = `${typingUserNames[0]} is typing...`
   } else {
-    message = `Multiple people are typing...`;
+    message = `Multiple people are typing...`
   }
 
   return (
@@ -42,5 +52,5 @@ export default function TypingIndicator({ conversationId }: { conversationId: Co
       </div>
       <span>{message}</span>
     </div>
-  );
+  )
 }

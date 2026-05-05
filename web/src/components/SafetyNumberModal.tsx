@@ -1,69 +1,75 @@
-import { useState, useEffect } from 'react';
-import QRCodeRaw from 'react-qr-code';
-import { FiShield, FiX, FiCheck } from 'react-icons/fi';
-import { Spinner } from './Spinner';
-import { useTranslation } from 'react-i18next';
+import { useState, useEffect } from 'react'
+import QRCodeRaw from 'react-qr-code'
+import { FiShield, FiX, FiCheck } from 'react-icons/fi'
+import { Spinner } from './Spinner'
+import { useTranslation } from 'react-i18next'
 
-const QRCode = (
-  (QRCodeRaw as unknown as { default?: { default?: typeof QRCodeRaw } }).default?.default ||
+const QRCode = ((
+  QRCodeRaw as unknown as { default?: { default?: typeof QRCodeRaw } }
+).default?.default ||
   (QRCodeRaw as unknown as { default?: typeof QRCodeRaw }).default ||
-  QRCodeRaw
-) as typeof QRCodeRaw;
+  QRCodeRaw) as typeof QRCodeRaw
 
 interface SafetyNumberModalProps {
-  safetyNumber: string;
-  userName: string;
-  onClose: () => void;
-  onVerify: () => void;
-  isVerified: boolean;
-  hasPeerPQ?: boolean;
-  hasPeerSigning?: boolean;
+  safetyNumber: string
+  userName: string
+  onClose: () => void
+  onVerify: () => void
+  isVerified: boolean
+  hasPeerPQ?: boolean
+  hasPeerSigning?: boolean
 }
 
-export default function SafetyNumberModal({ 
-  safetyNumber, 
-  userName, 
-  onClose, 
+export default function SafetyNumberModal({
+  safetyNumber,
+  userName,
+  onClose,
   onVerify,
   isVerified,
   hasPeerPQ = true,
   hasPeerSigning = true
 }: SafetyNumberModalProps) {
-  const { t } = useTranslation(['modals']);
-  const [isLoading, setIsLoading] = useState(true);
+  const { t } = useTranslation(['modals'])
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     if (safetyNumber) {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  }, [safetyNumber]);
+  }, [safetyNumber])
 
-  const formattedNumber = safetyNumber.replace(/(\d{5})/g, '$1 ').trim();
+  const formattedNumber = safetyNumber.replace(/(\d{5})/g, '$1 ').trim()
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <div 
+    <div
+      className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
         className="
           bg-bg-surface rounded-3xl p-8 w-full max-w-md relative 
           shadow-neumorphic-convex border border-white/10
-        " 
-        onClick={e => e.stopPropagation()}
+        "
+        onClick={(e) => e.stopPropagation()}
       >
-        <button 
-          onClick={onClose} 
+        <button
+          onClick={onClose}
           className="absolute top-4 right-4 p-2 rounded-full text-text-secondary shadow-neumorphic-convex active:shadow-neumorphic-pressed hover:text-red-500 transition-all"
         >
           <FiX size={20} />
         </button>
-        
+
         <div className="flex flex-col items-center text-center">
           <div className="p-4 rounded-full bg-bg-main shadow-neumorphic-convex text-accent mb-4">
-             <FiShield size={32} />
+            <FiShield size={32} />
           </div>
-          
-          <h2 className="text-xl font-black uppercase tracking-wide text-text-primary">{t('safety.title')}</h2>
+
+          <h2 className="text-xl font-black uppercase tracking-wide text-text-primary">
+            {t('safety.title')}
+          </h2>
           <p className="text-xs text-text-secondary mt-2 mb-6 font-mono max-w-xs">
-            {t('safety.desc')} <span className="font-bold text-text-primary">{userName}</span>.
+            {t('safety.desc')}{' '}
+            <span className="font-bold text-text-primary">{userName}</span>.
           </p>
 
           {isLoading ? (
@@ -79,31 +85,50 @@ export default function SafetyNumberModal({
                   viewBox={`0 0 256 256`}
                 />
               </div>
-              
+
               <div className="w-full mt-6 mb-6">
-                 <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary mb-2 block text-left pl-2">{t('safety.hash_label')}</label>
-                 <div className="
+                <label className="text-[10px] font-bold uppercase tracking-widest text-text-secondary mb-2 block text-left pl-2">
+                  {t('safety.hash_label')}
+                </label>
+                <div
+                  className="
                    font-mono text-lg tracking-widest text-accent text-center
                    p-4 bg-bg-main rounded-xl shadow-neumorphic-concave
                    border border-white/5 break-all
-                 ">
-                   {formattedNumber}
-                 </div>
+                 "
+                >
+                  {formattedNumber}
+                </div>
               </div>
 
               {(!hasPeerPQ || !hasPeerSigning) && (
                 <div className="w-full mb-6 p-4 rounded-xl bg-orange-500/10 border border-orange-500/20 text-left flex items-start gap-3">
-                  <FiShield className="text-orange-500 shrink-0 mt-1" size={18} />
+                  <FiShield
+                    className="text-orange-500 shrink-0 mt-1"
+                    size={18}
+                  />
                   <div>
                     <h4 className="text-orange-500 font-bold text-[11px] uppercase tracking-wider mb-1">
-                      {t('modals.reducedProtection.title', 'Reduced Protection')}
+                      {t(
+                        'modals.reducedProtection.title',
+                        'Reduced Protection'
+                      )}
                     </h4>
                     <p className="text-xs text-text-secondary leading-relaxed">
-                      {!hasPeerPQ && !hasPeerSigning 
-                        ? t('modals.reducedProtection.message.older', 'This contact is using an older version. Post-Quantum and Identity Signing protections are disabled for this session.')
-                        : !hasPeerPQ 
-                          ? t('modals.reducedProtection.message.noPQ', "This contact's device doesn't support Post-Quantum encryption yet. Falling back to classical X25519.")
-                          : t('modals.reducedProtection.message.noSigning', 'This contact is missing Identity Signing. The safety number uses only encryption keys.')}
+                      {!hasPeerPQ && !hasPeerSigning
+                        ? t(
+                            'modals.reducedProtection.message.older',
+                            'This contact is using an older version. Post-Quantum and Identity Signing protections are disabled for this session.'
+                          )
+                        : !hasPeerPQ
+                          ? t(
+                              'modals.reducedProtection.message.noPQ',
+                              "This contact's device doesn't support Post-Quantum encryption yet. Falling back to classical X25519."
+                            )
+                          : t(
+                              'modals.reducedProtection.message.noSigning',
+                              'This contact is missing Identity Signing. The safety number uses only encryption keys.'
+                            )}
                     </p>
                   </div>
                 </div>
@@ -113,10 +138,10 @@ export default function SafetyNumberModal({
 
           {isVerified ? (
             <div className="flex items-center gap-2 text-green-500 font-bold uppercase text-xs tracking-wider bg-green-500/10 px-4 py-2 rounded-full">
-               <FiCheck /> {t('safety.confirmed')}
+              <FiCheck /> {t('safety.confirmed')}
             </div>
           ) : (
-            <button 
+            <button
               onClick={onVerify}
               className="
                 w-full py-3 rounded-xl font-bold uppercase tracking-wider text-xs
@@ -131,5 +156,5 @@ export default function SafetyNumberModal({
         </div>
       </div>
     </div>
-  );
+  )
 }

@@ -1,7 +1,7 @@
-import i18n from 'i18next';
-import { initReactI18next } from 'react-i18next';
-import LanguageDetector from 'i18next-browser-languagedetector';
-import HttpBackend from 'i18next-http-backend';
+import i18n from 'i18next'
+import { initReactI18next } from 'react-i18next'
+import LanguageDetector from 'i18next-browser-languagedetector'
+import HttpBackend from 'i18next-http-backend'
 
 i18n
   // Pake backend buat narik file JSON terjemahan dari public folder
@@ -13,18 +13,18 @@ i18n
   .init({
     fallbackLng: 'en', // Kalau bahasa user ga didukung, balik ke Inggris
     debug: process.env.NODE_ENV === 'development',
-    
+
     interpolation: {
-      escapeValue: false, // React udah aman dari XSS
+      escapeValue: false // React udah aman dari XSS
     },
     backend: {
       // Path tempat kita nyimpen file terjemahan nanti
-      loadPath: '/locales/{{lng}}/{{ns}}.json',
+      loadPath: '/locales/{{lng}}/{{ns}}.json'
     },
     // Pisahin file berdasarkan konteks biar enteng
     ns: ['common', 'auth', 'errors', 'chat', 'settings', 'modals', 'admin'],
     defaultNS: 'common',
-    partialBundledLanguages: true,
-  });
+    partialBundledLanguages: true
+  })
 
-export default i18n;
+export default i18n

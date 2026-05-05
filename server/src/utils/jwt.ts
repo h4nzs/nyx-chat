@@ -5,14 +5,17 @@ import { env } from '../config.js'
 const ACCESS_TTL = '15m'
 const REFRESH_TTL_SEC = 60 * 60 * 24 * 30 // 30d
 
-export function signAccessToken (payload: string | Buffer | object, opts: SignOptions = {}) {
+export function signAccessToken(
+  payload: string | Buffer | object,
+  opts: SignOptions = {}
+) {
   if (env.nodeEnv === 'production' && env.jwtSecret === 'dev-secret') {
     throw new Error('JWT_SECRET must be set in production environment')
   }
   return jwt.sign(payload, env.jwtSecret, { ...opts, expiresIn: ACCESS_TTL })
 }
 
-export function verifyJwt (token: string): JwtPayload | string | null {
+export function verifyJwt(token: string): JwtPayload | string | null {
   try {
     return jwt.verify(token, env.jwtSecret)
   } catch {
@@ -20,10 +23,10 @@ export function verifyJwt (token: string): JwtPayload | string | null {
   }
 }
 
-export function newJti (): string {
+export function newJti(): string {
   return crypto.randomUUID()
 }
 
-export function refreshExpiryDate (): Date {
+export function refreshExpiryDate(): Date {
   return new Date(Date.now() + REFRESH_TTL_SEC * 1000)
 }

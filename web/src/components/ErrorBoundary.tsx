@@ -1,57 +1,61 @@
-import { Component, ReactNode, ErrorInfo } from 'react';
-import { FiAlertTriangle, FiRefreshCw } from 'react-icons/fi';
-import { withTranslation, WithTranslation } from 'react-i18next';
-import { sanitizeErrorLog } from '../utils/sanitize';
+import { Component, ReactNode, ErrorInfo } from 'react'
+import { FiAlertTriangle, FiRefreshCw } from 'react-icons/fi'
+import { withTranslation, WithTranslation } from 'react-i18next'
+import { sanitizeErrorLog } from '../utils/sanitize'
 
 interface ErrorBoundaryProps extends WithTranslation {
-  children: ReactNode;
-  fallback?: ReactNode;
+  children: ReactNode
+  fallback?: ReactNode
 }
 
 interface ErrorBoundaryState {
-  hasError: boolean;
-  error?: Error;
+  hasError: boolean
+  error?: Error
 }
 
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
+    super(props)
+    this.state = { hasError: false }
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error };
+    return { hasError: true, error }
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    const safeError = sanitizeErrorLog(error);
-    const safeComponentStack = sanitizeErrorLog(errorInfo.componentStack);
-    
+    const safeError = sanitizeErrorLog(error)
+    const safeComponentStack = sanitizeErrorLog(errorInfo.componentStack)
+
     // Only log sanitized strings, not the raw error objects
-    console.error('Error caught by boundary:', safeError, '\\nStack:', safeComponentStack);
+    console.error(
+      'Error caught by boundary:',
+      safeError,
+      '\\nStack:',
+      safeComponentStack
+    )
   }
 
   handleReload = () => {
-    window.location.reload();
-  };
+    window.location.reload()
+  }
 
   render() {
-    const { t } = this.props;
+    const { t } = this.props
 
     if (this.state.hasError) {
       if (this.props.fallback) {
-        return this.props.fallback;
+        return this.props.fallback
       }
 
       return (
         <div className="min-h-screen w-full flex flex-col items-center justify-center bg-bg-main p-6 text-center text-text-primary">
           <div className="max-w-md w-full flex flex-col items-center space-y-8 animate-in fade-in zoom-in duration-500">
-            
             {/* Error Icon */}
             <div className="relative">
               <div className="absolute inset-0 bg-red-500/20 blur-3xl rounded-full" />
               <div className="relative w-32 h-32 rounded-full bg-bg-main shadow-neu-pressed flex items-center justify-center text-red-500">
-                 <FiAlertTriangle size={64} />
+                <FiAlertTriangle size={64} />
               </div>
             </div>
 
@@ -90,11 +94,11 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
             {t('error_boundary.footer')}
           </div>
         </div>
-      );
+      )
     }
 
-    return this.props.children;
+    return this.props.children
   }
 }
 
-export default withTranslation('common')(ErrorBoundary);
+export default withTranslation('common')(ErrorBoundary)

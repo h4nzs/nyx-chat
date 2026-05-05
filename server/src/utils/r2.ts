@@ -1,4 +1,10 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, PutObjectCommandInput } from '@aws-sdk/client-s3'
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+  PutObjectCommandInput
+} from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { env } from '../config.js'
 
@@ -15,29 +21,34 @@ export const s3Client = new S3Client({
 // Generate URL upload yang valid selama 5 menit (default)
 // urlTtl: Berapa lama LINK upload valid (detik)
 // deleteAt: Kapan FILE harus dianggap kadaluarsa (untuk Lifecycle Rules / Metadata)
-export const getPresignedUploadUrl = async (key: string, contentType: string, urlTtl: number = 300, deleteAt?: Date) => {
+export const getPresignedUploadUrl = async (
+  key: string,
+  contentType: string,
+  urlTtl: number = 300,
+  deleteAt?: Date
+) => {
   const commandInput: PutObjectCommandInput = {
     Bucket: env.r2BucketName,
     Key: key,
     ContentType: contentType,
     // [FIX] Ensure we don't include checksums in the signature as the frontend won't send them
-    ChecksumAlgorithm: undefined 
-  };
+    ChecksumAlgorithm: undefined
+  }
 
   // Jika ada jadwal penghapusan (Disappearing Messages / Cleanup)
-  // Kita pasang Custom Metadata 'delete-at'. 
+  // Kita pasang Custom Metadata 'delete-at'.
   // NOTE: Kita tidak pakai 'Expires' header di sini karena AWS SDK akan memaksa header tersebut masuk ke signature,
   // yang menyebabkan error 403 (CORS/Signature Mismatch) jika browser tidak mengirim header 'Expires'.
   if (deleteAt) {
     commandInput.Metadata = {
       'delete-at': deleteAt.toISOString()
-    };
+    }
   }
 
   const command = new PutObjectCommand(commandInput)
 
   const url = await getSignedUrl(s3Client, command, {
-    expiresIn: urlTtl, 
+    expiresIn: urlTtl,
     // Kita hanya mengunci content-type. Header lain seperti 'host' akan diurus SDK.
     signableHeaders: new Set(['content-type'])
   })
@@ -62,7 +73,7 @@ export const deleteR2Files = async (keys: string[]) => {
   const command = new DeleteObjectsCommand({
     Bucket: env.r2BucketName,
     Delete: {
-      Objects: keys.map(Key => ({ Key })),
+      Objects: keys.map((Key) => ({ Key })),
       Quiet: true
     }
   })

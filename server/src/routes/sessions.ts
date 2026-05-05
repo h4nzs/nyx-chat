@@ -18,7 +18,12 @@ router.get('/', requireAuth, async (req, res, next) => {
     let currentJti: string | null = null
     try {
       const payload = verifyJwt(String(req.cookies?.rt || ''))
-      if (payload && typeof payload === 'object' && 'jti' in payload && typeof payload.jti === 'string') {
+      if (
+        payload &&
+        typeof payload === 'object' &&
+        'jti' in payload &&
+        typeof payload.jti === 'string'
+      ) {
         currentJti = payload.jti
       }
     } catch (_e) {
@@ -29,9 +34,9 @@ router.get('/', requireAuth, async (req, res, next) => {
     const userDevices = await prisma.device.findMany({
       where: { userId: req.user.id },
       select: { id: true, name: true }
-    });
+    })
 
-    const deviceIds = userDevices.map(d => d.id);
+    const deviceIds = userDevices.map((d) => d.id)
 
     const sessions = await prisma.refreshToken.findMany({
       where: {
@@ -43,38 +48,39 @@ router.get('/', requireAuth, async (req, res, next) => {
       }
     })
 
-    const rawIp = req.ip || '';
-    const sodium = await getSodium();
-    const currentIpHash = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(rawIp), null)).substring(0, 16);
+    const rawIp = req.ip || ''
+    const sodium = await getSodium()
+    const currentIpHash = sodium
+      .to_hex(sodium.crypto_generichash(32, Buffer.from(rawIp), null))
+      .substring(0, 16)
 
-    const parsedSessions = sessions.map(s => {
-      const parser = new UAParser(s.userAgent || "")
+    const parsedSessions = sessions.map((s) => {
+      const parser = new UAParser(s.userAgent || '')
       const browser = parser.getBrowser()
       const os = parser.getOS()
       const parsedDevice = parser.getDevice()
 
-      const deviceInfo = [
-        parsedDevice.vendor,
-        parsedDevice.model,
-        os.name,
-        browser.name
-      ].filter(Boolean).join(' ') || 'Unknown Device'
+      const deviceInfo =
+        [parsedDevice.vendor, parsedDevice.model, os.name, browser.name]
+          .filter(Boolean)
+          .join(' ') || 'Unknown Device'
 
-      let displayIp = s.ipAddress;
+      let displayIp = s.ipAddress
       if (s.ipAddress === currentIpHash) {
-          displayIp = rawIp;
-          if (displayIp === '::1') displayIp = '127.0.0.1';
-          if (displayIp.startsWith('::ffff:')) displayIp = displayIp.replace('::ffff:', '');
+        displayIp = rawIp
+        if (displayIp === '::1') displayIp = '127.0.0.1'
+        if (displayIp.startsWith('::ffff:'))
+          displayIp = displayIp.replace('::ffff:', '')
       } else {
-          if (s.ipAddress) {
-             displayIp = `HIDDEN (${s.ipAddress.substring(0, 6)}...)`;
-          } else {
-             displayIp = 'UNKNOWN';
-          }
+        if (s.ipAddress) {
+          displayIp = `HIDDEN (${s.ipAddress.substring(0, 6)}...)`
+        } else {
+          displayIp = 'UNKNOWN'
+        }
       }
 
       // Ambil nama device dari database jika ada
-      const dbDevice = userDevices.find(d => d.id === s.deviceId);
+      const dbDevice = userDevices.find((d) => d.id === s.deviceId)
 
       return {
         id: s.id, // Pastikan mengirim ID untuk keperluan key/revocation di frontend
@@ -106,18 +112,22 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
     const userDevices = await prisma.device.findMany({
       where: { userId },
       select: { id: true }
-    });
-    const deviceIds = userDevices.map(d => d.id);
+    })
+    const deviceIds = userDevices.map((d) => d.id)
 
     const token = await prisma.refreshToken.findFirst({
-      where: { 
-        jti: jti as string, 
+      where: {
+        jti: jti as string,
         deviceId: { in: deviceIds } // Pastikan token milik salah satu device user
       }
     })
 
     if (!token) {
-      return res.status(404).json({ error: 'Session not found or you do not have permission to revoke it.' })
+      return res
+        .status(404)
+        .json({
+          error: 'Session not found or you do not have permission to revoke it.'
+        })
     }
 
     await prisma.refreshToken.update({
@@ -126,24 +136,27 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
     })
 
     try {
-      await redisClient.setEx(`revoked:device:${token.deviceId}`, 900, "1")
+      await redisClient.setEx(`revoked:device:${token.deviceId}`, 900, '1')
     } catch (err) {
-      console.error("[Session] Failed to set revoked flag in Redis:", err)
+      console.error('[Session] Failed to set revoked flag in Redis:', err)
     }
 
     const socketServer = getIo()
     if (socketServer) {
       socketServer.to(userId).emit('force_logout', { jti: jti as string })
-      
+
       try {
-        const targetSockets = await socketServer.in(userId).fetchSockets();
+        const targetSockets = await socketServer.in(userId).fetchSockets()
         for (const socket of targetSockets) {
-          if ((socket as unknown as { user?: { deviceId?: string } }).user?.deviceId === token.deviceId) {
-             socket.disconnect(true);
+          if (
+            (socket as unknown as { user?: { deviceId?: string } }).user
+              ?.deviceId === token.deviceId
+          ) {
+            socket.disconnect(true)
           }
         }
       } catch (err) {
-        console.error("[Session] Failed to fetch sockets or disconnect:", err)
+        console.error('[Session] Failed to fetch sockets or disconnect:', err)
       }
     }
 

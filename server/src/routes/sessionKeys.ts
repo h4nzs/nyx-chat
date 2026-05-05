@@ -1,7 +1,10 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
-import { relaySessionKeys, ClientSessionKeyPayload } from '../utils/sessionKeys.js'
+import {
+  relaySessionKeys,
+  ClientSessionKeyPayload
+} from '../utils/sessionKeys.js'
 import { ApiError } from '../utils/errors.js'
 
 const router: Router = Router()
@@ -39,15 +42,21 @@ router.get('/:conversationId', async (req, res, next) => {
     // Cari SessionKey berdasarkan deviceId, bukan userId
     const sessionKeys = await prisma.sessionKey.findMany({
       where: { conversationId, deviceId },
-      select: { sessionId: true, encryptedKey: true, initiatorCiphertexts: true },
+      select: {
+        sessionId: true,
+        encryptedKey: true,
+        initiatorCiphertexts: true
+      },
       orderBy: { createdAt: 'asc' }
     })
 
     // Konversi Prisma Bytes (Buffer) kembali menjadi string Base64 untuk JSON response
-    const formattedKeys = sessionKeys.map(sk => ({
+    const formattedKeys = sessionKeys.map((sk) => ({
       sessionId: sk.sessionId,
       encryptedKey: Buffer.from(sk.encryptedKey).toString('base64url'),
-      initiatorCiphertexts: sk.initiatorCiphertexts ? Buffer.from(sk.initiatorCiphertexts).toString('base64url') : null
+      initiatorCiphertexts: sk.initiatorCiphertexts
+        ? Buffer.from(sk.initiatorCiphertexts).toString('base64url')
+        : null
     }))
 
     res.json({ keys: formattedKeys })
@@ -61,18 +70,32 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const { conversationId } = req.params
-    const { sessionId, keys } = req.body as { sessionId: string, keys: ClientSessionKeyPayload[] }
+    const { sessionId, keys } = req.body as {
+      sessionId: string
+      keys: ClientSessionKeyPayload[]
+    }
 
     if (!sessionId || !keys || !Array.isArray(keys) || keys.length === 0) {
-      throw new ApiError(400, 'sessionId and an array of encrypted keys are required.')
+      throw new ApiError(
+        400,
+        'sessionId and an array of encrypted keys are required.'
+      )
     }
 
     for (const key of keys) {
-      if (!key.deviceId || typeof key.deviceId !== 'string' || key.deviceId.trim() === '') {
-        throw new ApiError(400, 'Invalid deviceId in keys payload.');
+      if (
+        !key.deviceId ||
+        typeof key.deviceId !== 'string' ||
+        key.deviceId.trim() === ''
+      ) {
+        throw new ApiError(400, 'Invalid deviceId in keys payload.')
       }
-      if (!key.encryptedKey || typeof key.encryptedKey !== 'string' || key.encryptedKey.trim() === '') {
-        throw new ApiError(400, 'Invalid encryptedKey in keys payload.');
+      if (
+        !key.encryptedKey ||
+        typeof key.encryptedKey !== 'string' ||
+        key.encryptedKey.trim() === ''
+      ) {
+        throw new ApiError(400, 'Invalid encryptedKey in keys payload.')
       }
     }
 
@@ -91,25 +114,30 @@ router.post('/:conversationId/ratchet', async (req, res, next) => {
     })
 
     if (!conversation) {
-      throw new ApiError(404, 'Conversation not found or you are not a participant.')
+      throw new ApiError(
+        404,
+        'Conversation not found or you are not a participant.'
+      )
     }
 
-    const participantUserIds = conversation.participants.map(p => p.userId);
+    const participantUserIds = conversation.participants.map((p) => p.userId)
 
     const devices = await prisma.device.findMany({
       where: {
-        id: { in: keys.map(k => k.deviceId) }
+        id: { in: keys.map((k) => k.deviceId) }
       },
       select: { id: true, userId: true }
-    });
+    })
 
     const validDeviceIds = new Set(
-      devices.filter(d => participantUserIds.includes(d.userId)).map(d => d.id)
-    );
+      devices
+        .filter((d) => participantUserIds.includes(d.userId))
+        .map((d) => d.id)
+    )
 
     for (const key of keys) {
       if (!validDeviceIds.has(key.deviceId)) {
-        throw new ApiError(403, 'Unauthorized target deviceId detected.');
+        throw new ApiError(403, 'Unauthorized target deviceId detected.')
       }
     }
 

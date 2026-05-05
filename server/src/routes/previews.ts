@@ -1,5 +1,8 @@
 import { Router } from 'express'
-import { getSecureLinkPreview, validateRedirectChain } from '../utils/secureLinkPreview.js'
+import {
+  getSecureLinkPreview,
+  validateRedirectChain
+} from '../utils/secureLinkPreview.js'
 import { requireAuth } from '../middleware/auth.js'
 import { sanitizeForLog } from '../utils/logger.js'
 
@@ -16,78 +19,92 @@ router.post('/', requireAuth, async (req, res, _next) => {
     if ('title' in preview) {
       res.json(preview)
     } else {
-      res.status(404).json({ error: 'Could not generate a preview for this link.' })
+      res
+        .status(404)
+        .json({ error: 'Could not generate a preview for this link.' })
     }
   } catch (error) {
-    console.warn('[Link Preview] Failed to fetch metadata for:', sanitizeForLog(url), ':', sanitizeForLog((error as Error).message));
-    res.status(400).json({ error: 'Failed to extract link preview. Target site is protected or unreachable.' });
+    console.warn(
+      '[Link Preview] Failed to fetch metadata for:',
+      sanitizeForLog(url),
+      ':',
+      sanitizeForLog((error as Error).message)
+    )
+    res
+      .status(400)
+      .json({
+        error:
+          'Failed to extract link preview. Target site is protected or unreachable.'
+      })
   }
 })
 
 router.get('/image', requireAuth, async (req, res, _next) => {
-  const targetUrl = req.query.url as string;
-  if (!targetUrl) return res.status(400).json({ error: 'URL is required' });
+  const targetUrl = req.query.url as string
+  if (!targetUrl) return res.status(400).json({ error: 'URL is required' })
 
   try {
-    const safeUrl = await validateRedirectChain(targetUrl);
+    const safeUrl = await validateRedirectChain(targetUrl)
 
     // 2. Fetch the image safely with an AbortController (5-second timeout)
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 5000)
 
-    let imageRes;
+    let imageRes
     try {
-      imageRes = await fetch(safeUrl, { 
+      imageRes = await fetch(safeUrl, {
         signal: controller.signal,
         redirect: 'manual', // <--- CRITICAL FIX
-        headers: { 'User-Agent': 'NYX-Preview-Bot/1.0', 'Accept': 'image/*' }
-      });
+        headers: { 'User-Agent': 'NYX-Preview-Bot/1.0', Accept: 'image/*' }
+      })
     } finally {
-      clearTimeout(timeoutId);
+      clearTimeout(timeoutId)
     }
 
     if (imageRes.status >= 300 && imageRes.status < 400) {
-      throw new Error('Redirects are not allowed for security reasons (SSRF protection).');
+      throw new Error(
+        'Redirects are not allowed for security reasons (SSRF protection).'
+      )
     }
 
-    if (!imageRes.ok) throw new Error(`Target responded with ${imageRes.status}`);
+    if (!imageRes.ok)
+      throw new Error(`Target responded with ${imageRes.status}`)
 
-    const contentType = imageRes.headers.get('content-type');
+    const contentType = imageRes.headers.get('content-type')
     if (!contentType || !contentType.startsWith('image/')) {
-        throw new Error('Target is not an image');
+      throw new Error('Target is not an image')
     }
 
     // 3. Prevent memory exhaustion via streaming
-    const reader = imageRes.body?.getReader();
-    if (!reader) throw new Error('ReadableStream not supported by target');
+    const reader = imageRes.body?.getReader()
+    if (!reader) throw new Error('ReadableStream not supported by target')
 
-    let totalLength = 0;
-    const chunks: Uint8Array[] = [];
-    const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+    let totalLength = 0
+    const chunks: Uint8Array[] = []
+    const MAX_SIZE = 5 * 1024 * 1024 // 5MB
 
     while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+      const { done, value } = await reader.read()
+      if (done) break
 
       if (value) {
-        totalLength += value.length;
+        totalLength += value.length
         if (totalLength > MAX_SIZE) {
-          throw new Error('Image exceeds 5MB limit');
+          throw new Error('Image exceeds 5MB limit')
         }
-        chunks.push(value);
+        chunks.push(value)
       }
     }
 
-    const arrayBuffer = Buffer.concat(chunks);
+    const arrayBuffer = Buffer.concat(chunks)
 
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache 1 day
-    res.send(arrayBuffer);
-
+    res.setHeader('Content-Type', contentType)
+    res.setHeader('Cache-Control', 'public, max-age=86400') // Cache 1 day
+    res.send(arrayBuffer)
   } catch (error) {
-     console.error('Image proxy error:', error);
-     res.status(400).json({ error: 'Could not proxy image' });
+    console.error('Image proxy error:', error)
+    res.status(400).json({ error: 'Could not proxy image' })
   }
-});
+})
 
 export default router

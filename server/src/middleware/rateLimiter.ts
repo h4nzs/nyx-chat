@@ -2,21 +2,22 @@ import rateLimit, { ipKeyGenerator } from 'express-rate-limit'
 import { env } from '../config.js'
 import { RedisStore } from 'rate-limit-redis'
 import { redisClient } from '../lib/redis.js'
-import { Request } from 'express';
+import { Request } from 'express'
 
 // Secure IP Extractor: Pakai helper bawaan untuk cegah bypass IPv6
 const secureKeyGenerator = (req: Request): string => {
   // 1. Ambil teks IP-nya dulu (dari Cloudflare atau bawaan Express)
-  const clientIp = (req.headers['cf-connecting-ip'] as string) || req.ip || 'unknown';
-  
+  const clientIp =
+    (req.headers['cf-connecting-ip'] as string) || req.ip || 'unknown'
+
   // 2. Lempar teks IP (string) tersebut ke polisi library biar di-format dengan aman
-  return ipKeyGenerator(clientIp);
-};
+  return ipKeyGenerator(clientIp)
+}
 
 // Helper: Skip kalo di development ATAU kalau requestnya cuma OPTIONS (CORS Preflight)
 const skipRules = (req: Request) => {
-  return env.nodeEnv === 'development' || req.method === 'OPTIONS';
-};
+  return env.nodeEnv === 'development' || req.method === 'OPTIONS'
+}
 
 // 1. General Limiter: Untuk semua route API umum
 // Batas: 300 request per 15 menit per IP

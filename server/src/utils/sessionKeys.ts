@@ -4,16 +4,19 @@
 import { prisma } from '../lib/prisma.js'
 import { PrismaClient } from '@prisma/client'
 
-export type PrismaTransactionClient = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">
+export type PrismaTransactionClient = Omit<
+  PrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>
 
 /**
  * Payload interface for client-encrypted session keys.
  */
 export interface ClientSessionKeyPayload {
-  deviceId: string;
-  encryptedKey: string; // Base64url encoded
-  initiatorCiphertexts?: string; // Optional, Base64url encoded
-  isInitiator?: boolean;
+  deviceId: string
+  encryptedKey: string // Base64url encoded
+  initiatorCiphertexts?: string // Optional, Base64url encoded
+  isInitiator?: boolean
 }
 
 /**
@@ -29,16 +32,20 @@ export async function relaySessionKeys(
   const db = tx || prisma
 
   if (!keys || keys.length === 0) {
-    throw new Error(`No session keys provided for conversation ${conversationId}`)
+    throw new Error(
+      `No session keys provided for conversation ${conversationId}`
+    )
   }
 
   // Map client payloads to database records
-  const keyRecords = keys.map(k => ({
+  const keyRecords = keys.map((k) => ({
     conversationId,
     sessionId,
     deviceId: k.deviceId,
     encryptedKey: Buffer.from(k.encryptedKey, 'base64url'),
-    initiatorCiphertexts: k.initiatorCiphertexts ? Buffer.from(k.initiatorCiphertexts, 'base64url') : null,
+    initiatorCiphertexts: k.initiatorCiphertexts
+      ? Buffer.from(k.initiatorCiphertexts, 'base64url')
+      : null,
     isInitiator: k.isInitiator || false
   }))
 
@@ -46,7 +53,7 @@ export async function relaySessionKeys(
   await db.sessionKey.createMany({
     data: keyRecords,
     skipDuplicates: true
-  });
+  })
 
-  return { sessionId };
+  return { sessionId }
 }

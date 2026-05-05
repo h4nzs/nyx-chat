@@ -1,74 +1,92 @@
-import { createWithEqualityFn } from "zustand/traditional";
-import { shadowVault, decryptVaultText } from '@lib/shadowVaultDb';
-import type { Message } from "./conversation";
-import type { MessageId } from '@nyx/shared';
+import { createWithEqualityFn } from 'zustand/traditional'
+import { shadowVault, decryptVaultText } from '@lib/shadowVaultDb'
+import type { Message } from './conversation'
+import type { MessageId } from '@nyx/shared'
 
 type State = {
-  searchResults: Message[];
-  highlightedMessageId: MessageId | null;
-  searchQuery: string;
-  isSearching: boolean;
-  currentSearchToken: string | null;
-  
+  searchResults: Message[]
+  highlightedMessageId: MessageId | null
+  searchQuery: string
+  isSearching: boolean
+  currentSearchToken: string | null
+
   // Actions
-  searchMessages: (query: string, conversationId: string) => Promise<void>;
-  setHighlightedMessageId: (messageId: MessageId | null) => void;
-  clearSearch: () => void;
-};
+  searchMessages: (query: string, conversationId: string) => Promise<void>
+  setHighlightedMessageId: (messageId: MessageId | null) => void
+  clearSearch: () => void
+}
 
-export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => ({
-  searchResults: [],
-  highlightedMessageId: null,
-  searchQuery: '',
-  isSearching: false,
-  currentSearchToken: null,
+export const useMessageSearchStore = createWithEqualityFn<State>(
+  (set, get) => ({
+    searchResults: [],
+    highlightedMessageId: null,
+    searchQuery: '',
+    isSearching: false,
+    currentSearchToken: null,
 
-  searchMessages: async (query, conversationId) => {
-    if (!query.trim()) {
-      set({ searchResults: [], isSearching: false, searchQuery: query });
-      return;
-    }
+    searchMessages: async (query, conversationId) => {
+      if (!query.trim()) {
+        set({ searchResults: [], isSearching: false, searchQuery: query })
+        return
+      }
 
-    const normalizedQuery = query.toLowerCase();
-    let token: string | null = null;
+      const normalizedQuery = query.toLowerCase()
+      let token: string | null = null
 
-    try {
-      const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
-      token = sodium.to_hex(sodium.randombytes_buf(16));
-      set({ searchQuery: query, isSearching: true, currentSearchToken: token });
-      
-      // 1. Fetch raw encrypted records for this conversation
-      const rawResults = await shadowVault.messages
-        .where('conversationId')
-        .equals(conversationId)
-        .reverse()
-        .sortBy('createdAt');
-        
-      // 2. In-memory lightning decryption & filtering
-      const decryptedResults = [];
-      for (const msg of rawResults) {
-        if (msg.isViewOnce || msg.isDeletedLocal || !msg.content) continue; // Skip phantom media and tombstones
-        
-        const plainText = await decryptVaultText(msg.content);
-        if (plainText && plainText.toLowerCase().includes(normalizedQuery)) {
-          // Reconstruct the message object with the decrypted text for the UI
-          decryptedResults.push({ ...msg, content: plainText });
+      try {
+        const sodium = await import('@lib/sodiumInitializer').then((m) =>
+          m.getSodium()
+        )
+        token = sodium.to_hex(sodium.randombytes_buf(16))
+        set({
+          searchQuery: query,
+          isSearching: true,
+          currentSearchToken: token
+        })
+
+        // 1. Fetch raw encrypted records for this conversation
+        const rawResults = await shadowVault.messages
+          .where('conversationId')
+          .equals(conversationId)
+          .reverse()
+          .sortBy('createdAt')
+
+        // 2. In-memory lightning decryption & filtering
+        const decryptedResults = []
+        for (const msg of rawResults) {
+          if (msg.isViewOnce || msg.isDeletedLocal || !msg.content) continue // Skip phantom media and tombstones
+
+          const plainText = await decryptVaultText(msg.content)
+          if (plainText && plainText.toLowerCase().includes(normalizedQuery)) {
+            // Reconstruct the message object with the decrypted text for the UI
+            decryptedResults.push({ ...msg, content: plainText })
+          }
+        }
+
+        // ONLY update if the query hasn't changed while we were decrypting
+        if (get().currentSearchToken === token) {
+          set({
+            searchResults: decryptedResults as unknown as Message[],
+            isSearching: false
+          })
+        }
+      } catch (error) {
+        console.error('Iron Vault Search failed:', error)
+        if (get().currentSearchToken === token) {
+          set({ searchResults: [], isSearching: false })
         }
       }
-        
-      // ONLY update if the query hasn't changed while we were decrypting
-      if (get().currentSearchToken === token) {
-        set({ searchResults: decryptedResults as unknown as Message[], isSearching: false });
-      }
-    } catch (error) {
-      console.error("Iron Vault Search failed:", error);
-      if (get().currentSearchToken === token) {
-        set({ searchResults: [], isSearching: false });
-      }
-    }
-  },
+    },
 
-  setHighlightedMessageId: (messageId) => set({ highlightedMessageId: messageId }),
-  
-  clearSearch: () => set({ searchResults: [], searchQuery: '', isSearching: false, highlightedMessageId: null }),
-}));
+    setHighlightedMessageId: (messageId) =>
+      set({ highlightedMessageId: messageId }),
+
+    clearSearch: () =>
+      set({
+        searchResults: [],
+        searchQuery: '',
+        isSearching: false,
+        highlightedMessageId: null
+      })
+  })
+)

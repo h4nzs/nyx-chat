@@ -1,84 +1,119 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
-import type { UserId, ConversationId, MessageId } from '@nyx/shared';
-import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
-import { createWithEqualityFn } from "zustand/traditional";
-import { api, handleApiError } from "@lib/api";
-import { ensureGroupSession } from "@utils/crypto";
-import { emitGroupKeyDistribution } from "@lib/socket";
-import toast from "react-hot-toast";
-import { useAuthStore } from "./auth";
-import { useMessageStore } from "./message";
-import { useConversationStore } from "./conversation";
-import type { Message } from "./conversation";
-import { compressImage } from "@lib/fileUtils";
-import useDynamicIslandStore, { UploadActivity } from "./dynamicIsland";
-import i18n from '../i18n';
+import type { UserId, ConversationId, MessageId } from '@nyx/shared'
+import { asUserId, asConversationId, asMessageId } from '@nyx/shared'
+import { createWithEqualityFn } from 'zustand/traditional'
+import { api, handleApiError } from '@lib/api'
+import { ensureGroupSession } from '@utils/crypto'
+import { emitGroupKeyDistribution } from '@lib/socket'
+import toast from 'react-hot-toast'
+import { useAuthStore } from './auth'
+import { useMessageStore } from './message'
+import { useConversationStore } from './conversation'
+import type { Message } from './conversation'
+import { compressImage } from '@lib/fileUtils'
+import useDynamicIslandStore, { UploadActivity } from './dynamicIsland'
+import i18n from '../i18n'
 
 export type StagedFile = {
-  id: string;
-  file: File;
-};
+  id: string
+  file: File
+}
 
 type State = {
-  replyingTo: Message | null;
-  typingLinkPreview: Record<string, unknown> | null;
-  expiresIn: number | null;
-  isViewOnce: boolean;
-  stagedFiles: StagedFile[];
-  isHD: boolean;
-  isVoiceAnonymized: boolean;
-  editingMessage: Message | null;
+  replyingTo: Message | null
+  typingLinkPreview: Record<string, unknown> | null
+  expiresIn: number | null
+  isViewOnce: boolean
+  stagedFiles: StagedFile[]
+  isHD: boolean
+  isVoiceAnonymized: boolean
+  editingMessage: Message | null
 
   // Actions
-  setReplyingTo: (message: Message | null) => void;
-  setEditingMessage: (message: Message | null) => void;
-  sendEdit: (conversationId: string, messageId: string, newText: string) => Promise<void>;
-  setExpiresIn: (seconds: number | null) => void;
-  setIsViewOnce: (value: boolean) => void;
-  setIsHD: (value: boolean) => void;
-  setIsVoiceAnonymized: (value: boolean) => void;
-  fetchTypingLinkPreview: (text: string) => void;
-  clearTypingLinkPreview: () => void;
-  addStagedFiles: (files: File[]) => void;
-  updateStagedFile: (id: string, newFile: File) => void;
-  removeStagedFile: (id: string) => void;
-  clearStagedFiles: () => void;
-  sendMessage: (conversationId: string, data: { content: string }, tempId?: number, isSilent?: boolean) => Promise<void>;
-  uploadFile: (conversationId: string, file: File) => Promise<void>;
-  handleStopRecording: (conversationId: string, blob: Blob, duration: number) => Promise<void>;
-  retrySendMessage: (message: Message) => void;
-};
+  setReplyingTo: (message: Message | null) => void
+  setEditingMessage: (message: Message | null) => void
+  sendEdit: (
+    conversationId: string,
+    messageId: string,
+    newText: string
+  ) => Promise<void>
+  setExpiresIn: (seconds: number | null) => void
+  setIsViewOnce: (value: boolean) => void
+  setIsHD: (value: boolean) => void
+  setIsVoiceAnonymized: (value: boolean) => void
+  fetchTypingLinkPreview: (text: string) => void
+  clearTypingLinkPreview: () => void
+  addStagedFiles: (files: File[]) => void
+  updateStagedFile: (id: string, newFile: File) => void
+  removeStagedFile: (id: string) => void
+  clearStagedFiles: () => void
+  sendMessage: (
+    conversationId: string,
+    data: { content: string },
+    tempId?: number,
+    isSilent?: boolean
+  ) => Promise<void>
+  uploadFile: (conversationId: string, file: File) => Promise<void>
+  handleStopRecording: (
+    conversationId: string,
+    blob: Blob,
+    duration: number
+  ) => Promise<void>
+  retrySendMessage: (message: Message) => void
+}
 
-const ensureGroupSessionIfNeeded = async (conversationId: string): Promise<boolean> => {
-  const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+const ensureGroupSessionIfNeeded = async (
+  conversationId: string
+): Promise<boolean> => {
+  const conversation = useConversationStore
+    .getState()
+    .conversations.find((c) => c.id === conversationId)
   if (!conversation) {
-    toast.error(i18n.t('errors:internal_error_active_conversation_not_f', 'Internal error: Active conversation not found.'));
-    return false;
+    toast.error(
+      i18n.t(
+        'errors:internal_error_active_conversation_not_f',
+        'Internal error: Active conversation not found.'
+      )
+    )
+    return false
   }
-  
+
   if (conversation.isGroup) {
     try {
-      const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
+      const distributionKeys = await ensureGroupSession(
+        conversationId,
+        conversation.participants
+      )
       if (distributionKeys && distributionKeys.length > 0) {
-        const maskedKeys = (distributionKeys as { userId: string; key: string, targetDeviceId?: string, senderDeviceKey?: string }[]).map(k => {
-           const { targetDeviceId, ...rest } = k;
-           return rest;
-        });
-        await emitGroupKeyDistribution(conversationId, maskedKeys);
+        const maskedKeys = (
+          distributionKeys as {
+            userId: string
+            key: string
+            targetDeviceId?: string
+            senderDeviceKey?: string
+          }[]
+        ).map((k) => {
+          const { targetDeviceId, ...rest } = k
+          return rest
+        })
+        await emitGroupKeyDistribution(conversationId, maskedKeys)
       }
     } catch (e: unknown) {
-      console.error("Failed to ensure group session.", e);
-      toast.error(`Failed to establish group session: ${(e instanceof Error ? e.message : 'Unknown error')}`);
-      return false;
+      console.error('Failed to ensure group session.', e)
+      toast.error(
+        `Failed to establish group session: ${e instanceof Error ? e.message : 'Unknown error'}`
+      )
+      return false
     }
   }
-  return true;
-};
+  return true
+}
 
-let tempIdCounter = 0;
-const generateTempId = () => Date.now() * 1000 + (++tempIdCounter) + Math.floor(Math.random() * 1000);
+let tempIdCounter = 0
+const generateTempId = () =>
+  Date.now() * 1000 + ++tempIdCounter + Math.floor(Math.random() * 1000)
 
 export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   replyingTo: null,
@@ -93,87 +128,134 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
   setReplyingTo: (message) => set({ replyingTo: message }),
   setEditingMessage: (message) => set({ editingMessage: message }),
   sendEdit: async (conversationId, messageId, newText) => {
-      const payload = { type: 'edit', targetMessageId: messageId, text: newText };
-      const tempId = generateTempId();
-      await get().sendMessage(conversationId, { content: JSON.stringify(payload) }, tempId, true);
-      set({ editingMessage: null });
-      useMessageStore.getState().updateMessage(conversationId, messageId, { content: newText, isEdited: true });
+    const payload = { type: 'edit', targetMessageId: messageId, text: newText }
+    const tempId = generateTempId()
+    await get().sendMessage(
+      conversationId,
+      { content: JSON.stringify(payload) },
+      tempId,
+      true
+    )
+    set({ editingMessage: null })
+    useMessageStore
+      .getState()
+      .updateMessage(conversationId, messageId, {
+        content: newText,
+        isEdited: true
+      })
   },
   setExpiresIn: (seconds) => set({ expiresIn: seconds }),
   setIsViewOnce: (value) => set({ isViewOnce: value }),
   setIsHD: (value) => set({ isHD: value }),
   setIsVoiceAnonymized: (value) => set({ isVoiceAnonymized: value }),
-  addStagedFiles: (files) => set((state) => ({ 
-    stagedFiles: [
-      ...state.stagedFiles, 
-      ...files.map(f => ({ id: Math.random().toString(36).substring(2, 15) + Date.now().toString(36), file: f }))
-    ] 
-  })),
-  updateStagedFile: (id, newFile) => set((state) => ({
-    stagedFiles: state.stagedFiles.map(sf => sf.id === id ? { ...sf, file: newFile } : sf)
-  })),
-  removeStagedFile: (id) => set((state) => ({ stagedFiles: state.stagedFiles.filter(sf => sf.id !== id) })),
+  addStagedFiles: (files) =>
+    set((state) => ({
+      stagedFiles: [
+        ...state.stagedFiles,
+        ...files.map((f) => ({
+          id:
+            Math.random().toString(36).substring(2, 15) +
+            Date.now().toString(36),
+          file: f
+        }))
+      ]
+    })),
+  updateStagedFile: (id, newFile) =>
+    set((state) => ({
+      stagedFiles: state.stagedFiles.map((sf) =>
+        sf.id === id ? { ...sf, file: newFile } : sf
+      )
+    })),
+  removeStagedFile: (id) =>
+    set((state) => ({
+      stagedFiles: state.stagedFiles.filter((sf) => sf.id !== id)
+    })),
   clearStagedFiles: () => set({ stagedFiles: [] }),
 
   fetchTypingLinkPreview: async (text) => {
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const urls = text.match(urlRegex);
+    const urlRegex = /(https?:\/\/[^\s]+)/g
+    const urls = text.match(urlRegex)
     if (urls && urls.length > 0) {
       try {
-        const preview = await api<Record<string, unknown>>("/api/previews", {
-          method: "POST",
-          body: JSON.stringify({ url: urls[0] }),
-        });
-        set({ typingLinkPreview: preview });
+        const preview = await api<Record<string, unknown>>('/api/previews', {
+          method: 'POST',
+          body: JSON.stringify({ url: urls[0] })
+        })
+        set({ typingLinkPreview: preview })
       } catch (_error) {
-        set({ typingLinkPreview: null });
+        set({ typingLinkPreview: null })
       }
     } else {
-      set({ typingLinkPreview: null });
+      set({ typingLinkPreview: null })
     }
   },
 
   clearTypingLinkPreview: () => set({ typingLinkPreview: null }),
 
-  sendMessage: async (conversationId, data, tempId?: number, isSilent = false) => {
-    const { sendMessage: coreSendMessage } = useMessageStore.getState();
-    const { replyingTo, expiresIn, isViewOnce } = get();
+  sendMessage: async (
+    conversationId,
+    data,
+    tempId?: number,
+    isSilent = false
+  ) => {
+    const { sendMessage: coreSendMessage } = useMessageStore.getState()
+    const { replyingTo, expiresIn, isViewOnce } = get()
 
-    await coreSendMessage(conversationId, {
-      ...data,
-      repliedToId: replyingTo?.id,
-      repliedTo: replyingTo || undefined,
-      expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
-      isViewOnce,
-    }, tempId, isSilent);
+    await coreSendMessage(
+      conversationId,
+      {
+        ...data,
+        repliedToId: replyingTo?.id,
+        repliedTo: replyingTo || undefined,
+        expiresAt: expiresIn
+          ? new Date(Date.now() + expiresIn * 1000).toISOString()
+          : undefined,
+        isViewOnce
+      },
+      tempId,
+      isSilent
+    )
 
-    set({ replyingTo: null, isViewOnce: false });
+    set({ replyingTo: null, isViewOnce: false })
   },
-  
+
   uploadFile: async (conversationId, file) => {
-    const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
-    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: `Processing ${file.name}...`, progress: 0 };
-    const activityId = addActivity(activity);
-    const { replyingTo, expiresIn, isViewOnce, isHD } = get();
-    
+    const { addActivity, updateActivity, removeActivity } =
+      useDynamicIslandStore.getState()
+    const activity: Omit<UploadActivity, 'id'> = {
+      type: 'upload',
+      fileName: `Processing ${file.name}...`,
+      progress: 0
+    }
+    const activityId = addActivity(activity)
+    const { replyingTo, expiresIn, isViewOnce, isHD } = get()
+
     // FIX 1: Extract functions correctly
-    const { addOptimisticMessage, updateMessage, sendMessage: coreSendMessage } = useMessageStore.getState();
-    const me = useAuthStore.getState().user;
-    const isGuestBurner = !me && conversationId.startsWith('burner_');
-    
+    const {
+      addOptimisticMessage,
+      updateMessage,
+      sendMessage: coreSendMessage
+    } = useMessageStore.getState()
+    const me = useAuthStore.getState().user
+    const isGuestBurner = !me && conversationId.startsWith('burner_')
+
     if (!me && !isGuestBurner) {
-      removeActivity(activityId);
-      toast.error(i18n.t('errors:user_not_authenticated', 'User not authenticated.'));
-      return;
+      removeActivity(activityId)
+      toast.error(
+        i18n.t('errors:user_not_authenticated', 'User not authenticated.')
+      )
+      return
     }
 
-    if (!isGuestBurner && !await ensureGroupSessionIfNeeded(conversationId)) {
-      removeActivity(activityId);
-      return;
+    if (!isGuestBurner && !(await ensureGroupSessionIfNeeded(conversationId))) {
+      removeActivity(activityId)
+      return
     }
 
-    const tempId = generateTempId();
-    const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
+    const tempId = generateTempId()
+    const expiresAt = expiresIn
+      ? new Date(Date.now() + expiresIn * 1000).toISOString()
+      : null
 
     // FIX 2: Use underscore for tempId consistency (temp_12345)
     if (!isGuestBurner) {
@@ -185,129 +267,170 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         sender: me!,
         createdAt: new Date().toISOString(),
         optimistic: true,
-        fileUrl: URL.createObjectURL(file), 
+        fileUrl: URL.createObjectURL(file),
         fileName: file.name,
         fileType: file.type,
         fileSize: file.size,
         expiresAt,
         repliedTo: replyingTo || undefined,
-        isViewOnce,
-      };
-      addOptimisticMessage(conversationId, optimisticMessage);
+        isViewOnce
+      }
+      addOptimisticMessage(conversationId, optimisticMessage)
     }
-    
-    set({ replyingTo: null, isViewOnce: false, isHD: false });
+
+    set({ replyingTo: null, isViewOnce: false, isHD: false })
 
     try {
-      let fileToProcess = file;
+      let fileToProcess = file
       if (file.type.startsWith('image/')) {
-        updateActivity(activityId, { progress: 10, fileName: `Compressing ${file.name}...` });
-        try { fileToProcess = await compressImage(file, isHD); } catch (_e) {}
+        updateActivity(activityId, {
+          progress: 10,
+          fileName: `Compressing ${file.name}...`
+        })
+        try {
+          fileToProcess = await compressImage(file, isHD)
+        } catch (_e) {}
       }
 
-      updateActivity(activityId, { progress: 25, fileName: `Encrypting ${file.name}...` });
-      
-      const { encryptFileViaWorker } = await import('@utils/crypto');
-      // Fix 3: Ensure we are extracting string 'key' if that's what API expects
-      const encryptRes = await encryptFileViaWorker(fileToProcess);
-      const encryptedBlob = encryptRes.encryptedBlob;
-      const rawFileKey = encryptRes.key;
-      
-      updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
-      
-      const fileRetention = expiresIn ? expiresIn : (isViewOnce ? 1209600 : 0);
-      const endpoint = conversationId.startsWith('burner_') ? '/api/uploads/burner-presigned' : '/api/uploads/presigned';
+      updateActivity(activityId, {
+        progress: 25,
+        fileName: `Encrypting ${file.name}...`
+      })
 
-      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>(endpoint, {
-          method: 'POST',
-          body: JSON.stringify({
-              fileName: file.name,
-              fileType: 'application/octet-stream', 
-              folder: 'attachments',
-              fileSize: encryptedBlob.size,
-              fileRetention
-          })
-      });
+      const { encryptFileViaWorker } = await import('@utils/crypto')
+      // Fix 3: Ensure we are extracting string 'key' if that's what API expects
+      const encryptRes = await encryptFileViaWorker(fileToProcess)
+      const encryptedBlob = encryptRes.encryptedBlob
+      const rawFileKey = encryptRes.key
+
+      updateActivity(activityId, {
+        progress: 30,
+        fileName: `Uploading ${file.name}...`
+      })
+
+      const fileRetention = expiresIn ? expiresIn : isViewOnce ? 1209600 : 0
+      const endpoint = conversationId.startsWith('burner_')
+        ? '/api/uploads/burner-presigned'
+        : '/api/uploads/presigned'
+
+      const presignedRes = await api<{
+        uploadUrl: string
+        publicUrl: string
+        key: string
+      }>(endpoint, {
+        method: 'POST',
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: 'application/octet-stream',
+          folder: 'attachments',
+          fileSize: encryptedBlob.size,
+          fileRetention
+        })
+      })
 
       await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open('PUT', presignedRes.uploadUrl, true);
-          xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-          
-          xhr.upload.onprogress = (e) => {
-              if (e.lengthComputable) {
-                  const percentComplete = (e.loaded / e.total) * 60;
-                  updateActivity(activityId, { progress: 30 + percentComplete });
-              }
-          };
-          
-          xhr.onload = () => xhr.status === 200 ? resolve() : reject(new Error('Upload failed'));
-          xhr.onerror = () => reject(new Error('Network error'));
-          xhr.send(encryptedBlob);
-      });
+        const xhr = new XMLHttpRequest()
+        xhr.open('PUT', presignedRes.uploadUrl, true)
+        xhr.setRequestHeader('Content-Type', 'application/octet-stream')
 
-      updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const percentComplete = (e.loaded / e.total) * 60
+            updateActivity(activityId, { progress: 30 + percentComplete })
+          }
+        }
+
+        xhr.onload = () =>
+          xhr.status === 200 ? resolve() : reject(new Error('Upload failed'))
+        xhr.onerror = () => reject(new Error('Network error'))
+        xhr.send(encryptedBlob)
+      })
+
+      updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' })
 
       const metadata = {
-          type: 'file',
-          url: presignedRes.publicUrl,
-          key: rawFileKey, 
-          name: file.name,
-          size: file.size,
-          mimeType: file.type,
-      };
+        type: 'file',
+        url: presignedRes.publicUrl,
+        key: rawFileKey,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type
+      }
 
       if (isGuestBurner) {
-        const { useBurnerStore } = await import('./burner');
-        await useBurnerStore.getState().sendMessage(JSON.stringify(metadata));
+        const { useBurnerStore } = await import('./burner')
+        await useBurnerStore.getState().sendMessage(JSON.stringify(metadata))
       } else {
-        await coreSendMessage(conversationId, {
+        await coreSendMessage(
+          conversationId,
+          {
             content: JSON.stringify(metadata),
             repliedToId: replyingTo?.id || undefined,
             repliedTo: replyingTo || undefined,
-            expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
+            expiresAt: expiresIn
+              ? new Date(Date.now() + expiresIn * 1000).toISOString()
+              : undefined,
             isViewOnce
-        }, tempId);
+          },
+          tempId
+        )
       }
-      
-      updateActivity(activityId, { progress: 100, fileName: 'Done!' });
-      setTimeout(() => removeActivity(activityId), 1000); 
 
+      updateActivity(activityId, { progress: 100, fileName: 'Done!' })
+      setTimeout(() => removeActivity(activityId), 1000)
     } catch (error: unknown) {
-      console.error("Upload error:", error);
-      const errorMsg = handleApiError(error);
-      toast.error(i18n.t('errors:file_upload_failed', 'File upload failed: {{error}}', { error: errorMsg }));
-      removeActivity(activityId);
+      console.error('Upload error:', error)
+      const errorMsg = handleApiError(error)
+      toast.error(
+        i18n.t('errors:file_upload_failed', 'File upload failed: {{error}}', {
+          error: errorMsg
+        })
+      )
+      removeActivity(activityId)
       // FIX 4: Use consistent temp_ prefix
       if (!isGuestBurner) {
-        updateMessage(conversationId, `temp_${tempId}`, { error: true, optimistic: false });
+        updateMessage(conversationId, `temp_${tempId}`, {
+          error: true,
+          optimistic: false
+        })
       }
     }
   },
 
   handleStopRecording: async (conversationId, blob, duration) => {
-    const { addActivity, updateActivity, removeActivity } = useDynamicIslandStore.getState();
-    const activity: Omit<UploadActivity, 'id'> = { type: 'upload', fileName: 'Processing Voice...', progress: 0 };
-    const activityId = addActivity(activity);
-    const { replyingTo, expiresIn, isViewOnce } = get();
-    
-    // FIX 5: Extract functions correctly
-    const { addOptimisticMessage, updateMessage, sendMessage: coreSendMessage } = useMessageStore.getState();
-    const me = useAuthStore.getState().user;
-    const isGuestBurner = !me && conversationId.startsWith('burner_');
-    
-    if (!me && !isGuestBurner) {
-      removeActivity(activityId);
-      return;
+    const { addActivity, updateActivity, removeActivity } =
+      useDynamicIslandStore.getState()
+    const activity: Omit<UploadActivity, 'id'> = {
+      type: 'upload',
+      fileName: 'Processing Voice...',
+      progress: 0
     }
-    
-    if (!isGuestBurner && !await ensureGroupSessionIfNeeded(conversationId)) {
-      removeActivity(activityId);
-      return;
+    const activityId = addActivity(activity)
+    const { replyingTo, expiresIn, isViewOnce } = get()
+
+    // FIX 5: Extract functions correctly
+    const {
+      addOptimisticMessage,
+      updateMessage,
+      sendMessage: coreSendMessage
+    } = useMessageStore.getState()
+    const me = useAuthStore.getState().user
+    const isGuestBurner = !me && conversationId.startsWith('burner_')
+
+    if (!me && !isGuestBurner) {
+      removeActivity(activityId)
+      return
     }
 
-    const tempId = generateTempId();
-    const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
+    if (!isGuestBurner && !(await ensureGroupSessionIfNeeded(conversationId))) {
+      removeActivity(activityId)
+      return
+    }
+
+    const tempId = generateTempId()
+    const expiresAt = expiresIn
+      ? new Date(Date.now() + expiresIn * 1000).toISOString()
+      : null
 
     // FIX 6: Use underscore for tempId consistency (temp_12345)
     if (!isGuestBurner) {
@@ -320,110 +443,142 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         createdAt: new Date().toISOString(),
         optimistic: true,
         fileUrl: URL.createObjectURL(blob),
-        fileName: "voice-message.webm",
-        fileType: "audio/webm",
+        fileName: 'voice-message.webm',
+        fileType: 'audio/webm',
         fileSize: blob.size,
         duration,
         expiresAt,
         repliedTo: replyingTo || undefined,
-        isViewOnce,
-      };
-      
-      addOptimisticMessage(conversationId, optimisticMessage);
+        isViewOnce
+      }
+
+      addOptimisticMessage(conversationId, optimisticMessage)
     }
-    set({ replyingTo: null, isViewOnce: false });
+    set({ replyingTo: null, isViewOnce: false })
 
     try {
-      updateActivity(activityId, { progress: 20, fileName: 'Encrypting voice...' });
-      
-      const { encryptFileViaWorker } = await import('@utils/crypto');
-      const encryptRes = await encryptFileViaWorker(blob);
-      const encryptedBlob = encryptRes.encryptedBlob;
-      const rawFileKey = encryptRes.key;
+      updateActivity(activityId, {
+        progress: 20,
+        fileName: 'Encrypting voice...'
+      })
 
-      updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
-      
-      const fileRetention = expiresIn ? expiresIn : (isViewOnce ? 1209600 : 0);
-      const endpoint = conversationId.startsWith('burner_') ? '/api/uploads/burner-presigned' : '/api/uploads/presigned';
+      const { encryptFileViaWorker } = await import('@utils/crypto')
+      const encryptRes = await encryptFileViaWorker(blob)
+      const encryptedBlob = encryptRes.encryptedBlob
+      const rawFileKey = encryptRes.key
 
-      const presignedRes = await api<{ uploadUrl: string, publicUrl: string, key: string }>(endpoint, {
-          method: 'POST',
-          body: JSON.stringify({
-              fileName: "voice-message.webm",
-              fileType: "application/octet-stream",
-              folder: 'attachments',
-              fileSize: encryptedBlob.size,
-              fileRetention
-          })
-      });
+      updateActivity(activityId, {
+        progress: 40,
+        fileName: 'Uploading voice...'
+      })
+
+      const fileRetention = expiresIn ? expiresIn : isViewOnce ? 1209600 : 0
+      const endpoint = conversationId.startsWith('burner_')
+        ? '/api/uploads/burner-presigned'
+        : '/api/uploads/presigned'
+
+      const presignedRes = await api<{
+        uploadUrl: string
+        publicUrl: string
+        key: string
+      }>(endpoint, {
+        method: 'POST',
+        body: JSON.stringify({
+          fileName: 'voice-message.webm',
+          fileType: 'application/octet-stream',
+          folder: 'attachments',
+          fileSize: encryptedBlob.size,
+          fileRetention
+        })
+      })
 
       await new Promise<void>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open('PUT', presignedRes.uploadUrl, true);
-          xhr.setRequestHeader('Content-Type', "application/octet-stream");
-          xhr.upload.onprogress = (e) => {
-              if (e.lengthComputable) {
-                  const percentComplete = (e.loaded / e.total) * 50; 
-                  updateActivity(activityId, { progress: 40 + percentComplete });
-              }
-          };
-          xhr.onload = () => xhr.status === 200 ? resolve() : reject(new Error('Upload failed'));
-          xhr.onerror = () => reject(new Error('Network error'));
-          xhr.send(encryptedBlob);
-      });
+        const xhr = new XMLHttpRequest()
+        xhr.open('PUT', presignedRes.uploadUrl, true)
+        xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const percentComplete = (e.loaded / e.total) * 50
+            updateActivity(activityId, { progress: 40 + percentComplete })
+          }
+        }
+        xhr.onload = () =>
+          xhr.status === 200 ? resolve() : reject(new Error('Upload failed'))
+        xhr.onerror = () => reject(new Error('Network error'))
+        xhr.send(encryptedBlob)
+      })
 
-      updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' });
+      updateActivity(activityId, { progress: 95, fileName: 'Finalizing...' })
 
       const metadata = {
-          type: 'file',
-          url: presignedRes.publicUrl,
-          key: rawFileKey,
-          name: "voice-message.webm",
-          size: blob.size,
-          mimeType: "audio/webm",
-          duration
-      };
+        type: 'file',
+        url: presignedRes.publicUrl,
+        key: rawFileKey,
+        name: 'voice-message.webm',
+        size: blob.size,
+        mimeType: 'audio/webm',
+        duration
+      }
 
       if (isGuestBurner) {
-        const { useBurnerStore } = await import('./burner');
-        await useBurnerStore.getState().sendMessage(JSON.stringify(metadata));
+        const { useBurnerStore } = await import('./burner')
+        await useBurnerStore.getState().sendMessage(JSON.stringify(metadata))
       } else {
-        await coreSendMessage(conversationId, {
+        await coreSendMessage(
+          conversationId,
+          {
             content: JSON.stringify(metadata),
             repliedToId: replyingTo?.id || undefined,
             repliedTo: replyingTo || undefined,
-            expiresAt: expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : undefined,
+            expiresAt: expiresIn
+              ? new Date(Date.now() + expiresIn * 1000).toISOString()
+              : undefined,
             isViewOnce
-        }, tempId);
+          },
+          tempId
+        )
       }
-      
-      updateActivity(activityId, { progress: 100, fileName: 'Sent!' });
-      setTimeout(() => removeActivity(activityId), 1000); 
 
+      updateActivity(activityId, { progress: 100, fileName: 'Sent!' })
+      setTimeout(() => removeActivity(activityId), 1000)
     } catch (error: unknown) {
-      const errorMsg = handleApiError(error);
-      toast.error(i18n.t('errors:voice_message_failed', `Voice message failed: ${errorMsg}`, { error: errorMsg }));
-      removeActivity(activityId);
+      const errorMsg = handleApiError(error)
+      toast.error(
+        i18n.t(
+          'errors:voice_message_failed',
+          `Voice message failed: ${errorMsg}`,
+          { error: errorMsg }
+        )
+      )
+      removeActivity(activityId)
       // FIX 7: Use consistent temp_ prefix
       if (!isGuestBurner) {
-        updateMessage(conversationId, `temp_${tempId}`, { error: true, optimistic: false });
+        updateMessage(conversationId, `temp_${tempId}`, {
+          error: true,
+          optimistic: false
+        })
       }
     }
   },
 
   retrySendMessage: (message: Message) => {
-    const { conversationId, content, fileUrl, repliedTo, tempId } = message;
+    const { conversationId, content, fileUrl, repliedTo, tempId } = message
 
-    useMessageStore.getState().removeMessage(conversationId, message.id);
+    useMessageStore.getState().removeMessage(conversationId, message.id)
 
     if (fileUrl) {
-      toast.error(i18n.t('errors:cannot_retry_file_messages_automatically', 'Cannot retry file messages automatically. Please try uploading again.'));
-      return;
+      toast.error(
+        i18n.t(
+          'errors:cannot_retry_file_messages_automatically',
+          'Cannot retry file messages automatically. Please try uploading again.'
+        )
+      )
+      return
     }
 
     if (repliedTo) {
-      set({ replyingTo: repliedTo });
+      set({ replyingTo: repliedTo })
     }
-    get().sendMessage(conversationId, { content: content || '' }, tempId);
-  },
-}));
+    get().sendMessage(conversationId, { content: content || '' }, tempId)
+  }
+}))

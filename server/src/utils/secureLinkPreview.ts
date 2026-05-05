@@ -4,7 +4,7 @@ import ipaddr from 'ipaddr.js'
 import { sanitizeForLog } from './logger.js'
 
 // PERBAIKAN: Gunakan inferensi tipe dari return value fungsi
-type LinkPreview = Awaited<ReturnType<typeof getLinkPreview>>;
+type LinkPreview = Awaited<ReturnType<typeof getLinkPreview>>
 
 // List of disallowed IP ranges
 const disallowedRanges = [
@@ -18,37 +18,46 @@ const disallowedRanges = [
 ]
 
 // Custom DNS resolver to prevent SSRF
-export async function resolveDns (urlOrHostname: string): Promise<string> {
-  let hostname = urlOrHostname;
+export async function resolveDns(urlOrHostname: string): Promise<string> {
+  let hostname = urlOrHostname
   try {
     // If it's a full URL, extract the hostname
-    hostname = new URL(urlOrHostname).hostname;
+    hostname = new URL(urlOrHostname).hostname
   } catch (_e) {
     // If new URL() throws, it means it's already a plain hostname (e.g. from link-preview-js)
   }
 
   // Validate hostname format to prevent injection
-  if (!/^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(hostname) && !/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)) {
-     // Allow simple hostnames or IPs if they are valid, but be strict about weird chars
-     // For now, let dns.lookup handle validity, but we could add regex for extra safety
+  if (
+    !/^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(
+      hostname
+    ) &&
+    !/^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)
+  ) {
+    // Allow simple hostnames or IPs if they are valid, but be strict about weird chars
+    // For now, let dns.lookup handle validity, but we could add regex for extra safety
   }
 
   const { address } = await dns.lookup(hostname)
   const addr = ipaddr.parse(address)
 
   if (disallowedRanges.includes(addr.range())) {
-    throw new Error(`SSRF attempt detected: IP address ${address} is in a disallowed range.`)
+    throw new Error(
+      `SSRF attempt detected: IP address ${address} is in a disallowed range.`
+    )
   }
 
   return address
 }
 
 // Helper to manually follow redirects and validate each step
-export async function validateRedirectChain(initialUrl: string): Promise<string> {
+export async function validateRedirectChain(
+  initialUrl: string
+): Promise<string> {
   // 1. TAMBAHAN: Validasi Protokol Ketat (Hanya izinkan HTTP/HTTPS)
-  const parsedUrl = new URL(initialUrl);
+  const parsedUrl = new URL(initialUrl)
   if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-    throw new Error('SSRF attempt blocked: Invalid URL protocol.');
+    throw new Error('SSRF attempt blocked: Invalid URL protocol.')
   }
 
   let currentUrl = parsedUrl.toString()
@@ -62,12 +71,15 @@ export async function validateRedirectChain(initialUrl: string): Promise<string>
     // 2. Fetch with manual redirect using HEAD to be lightweight
     // We catch errors here to handle network failures gracefully during validation
     try {
-      const res = await fetch(currentUrl, { method: 'HEAD', redirect: 'manual' })
+      const res = await fetch(currentUrl, {
+        method: 'HEAD',
+        redirect: 'manual'
+      })
 
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get('location')
         if (!location) {
-           return currentUrl // Redirect without location, treat as final
+          return currentUrl // Redirect without location, treat as final
         }
 
         // Resolve relative URLs
@@ -80,7 +92,11 @@ export async function validateRedirectChain(initialUrl: string): Promise<string>
     } catch (_e) {
       // If HEAD fails (e.g. 405 Method Not Allowed), fallback to trying to preview the current URL directly
       // assuming resolveDns passed.
-      console.warn('Redirect validation HEAD request failed for:', currentUrl, ', proceeding with caution.')
+      console.warn(
+        'Redirect validation HEAD request failed for:',
+        currentUrl,
+        ', proceeding with caution.'
+      )
       return currentUrl
     }
   }
@@ -94,7 +110,7 @@ export async function validateRedirectChain(initialUrl: string): Promise<string>
  * @param url The URL to get a preview for.
  * @returns A promise that resolves to the link preview.
  */
-export async function getSecureLinkPreview (url: string): Promise<LinkPreview> {
+export async function getSecureLinkPreview(url: string): Promise<LinkPreview> {
   try {
     // 1. Manually validate the redirect chain
     const safeUrl = await validateRedirectChain(url)
@@ -119,14 +135,19 @@ export async function getSecureLinkPreview (url: string): Promise<LinkPreview> {
 
         // Let's check the error message implication: "no handleRedirects function is provided".
         // Providing a simple function that returns false (stop redirects) is safest since we fetched the final URL.
-        return false;
+        return false
       },
       resolveDNSHost: (u) => resolveDns(u) // Double-check the final URL
     })
     return preview as LinkPreview
   } catch (error) {
-    const errString = error instanceof Error ? error.message : String(error);
-    console.error('Secure link preview failed for URL:', sanitizeForLog(url), ':', sanitizeForLog(errString));
+    const errString = error instanceof Error ? error.message : String(error)
+    console.error(
+      'Secure link preview failed for URL:',
+      sanitizeForLog(url),
+      ':',
+      sanitizeForLog(errString)
+    )
     throw error // Re-throw the error to be handled by the caller
   }
 }

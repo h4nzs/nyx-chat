@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect } from 'react'
 
 /**
  * A custom hook that listens for a specific key combination globally
@@ -9,22 +9,22 @@ import { useEffect } from 'react';
 export function useGlobalShortcut(keyCombo: string[], callback: () => void) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const requiredKeys = keyCombo.map(k => k.toLowerCase());
-      const lastKey = requiredKeys.pop();
+      const requiredKeys = keyCombo.map((k) => k.toLowerCase())
+      const lastKey = requiredKeys.pop()
 
       if (!lastKey) {
-        return;
+        return
       }
 
       if (e.key.toLowerCase() !== lastKey) {
-        return;
+        return
       }
 
       // Check if ONLY the required modifiers are pressed
-      const requiredCtrl = requiredKeys.includes('control');
-      const requiredAlt = requiredKeys.includes('alt');
-      const requiredShift = requiredKeys.includes('shift');
-      const requiredMeta = requiredKeys.includes('meta');
+      const requiredCtrl = requiredKeys.includes('control')
+      const requiredAlt = requiredKeys.includes('alt')
+      const requiredShift = requiredKeys.includes('shift')
+      const requiredMeta = requiredKeys.includes('meta')
 
       if (
         e.ctrlKey === requiredCtrl &&
@@ -32,15 +32,15 @@ export function useGlobalShortcut(keyCombo: string[], callback: () => void) {
         e.shiftKey === requiredShift &&
         e.metaKey === requiredMeta
       ) {
-        e.preventDefault();
-        callback();
+        e.preventDefault()
+        callback()
       }
-    };
+    }
 
-    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keydown', handleKeyDown)
 
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [keyCombo, callback]);
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [keyCombo, callback])
 }

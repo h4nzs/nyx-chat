@@ -1,73 +1,74 @@
-import { Router } from 'express';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { requireAuth } from '../middleware/auth.js';
-import { generalLimiter } from '../middleware/rateLimiter.js';
+import { Router } from 'express'
+import { GoogleGenerativeAI } from '@google/generative-ai'
+import { requireAuth } from '../middleware/auth.js'
+import { generalLimiter } from '../middleware/rateLimiter.js'
 
-const router = Router();
+const router = Router()
 
-let genAI: GoogleGenerativeAI | null = null;
+let genAI: GoogleGenerativeAI | null = null
 if (process.env.GEMINI_API_KEY) {
-  genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
 }
 
 // Rate limit to prevent abuse
 router.post('/smart-reply', requireAuth, generalLimiter, async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message } = req.body
 
     if (!message || message.trim() === '') {
-      return res.status(400).json({ error: 'Message is required' });
+      return res.status(400).json({ error: 'Message is required' })
     }
 
     if (!genAI) {
-      return res.status(500).json({ error: 'AI service is not configured' });
+      return res.status(500).json({ error: 'AI service is not configured' })
     }
     // Use Flash model for speed
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash",
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash',
       generationConfig: {
-        responseMimeType: "application/json",
+        responseMimeType: 'application/json'
       }
-    });
+    })
 
     // Strict Prompt Engineering for JSON Array output
     const prompt = `You are a chat AI. Based on this message: "${message}"
 Create 3 short casual reply options (max 3 words per reply) in the same language.
-Output must be a JSON array of strings.`;
+Output must be a JSON array of strings.`
 
-    const result = await model.generateContent(prompt);
+    const result = await model.generateContent(prompt)
 
-    let replies: string[] = [];
+    let replies: string[] = []
 
     try {
-      const parsedUnknown: unknown = JSON.parse(result.response.text());
-      
+      const parsedUnknown: unknown = JSON.parse(result.response.text())
+
       // Coerce to array if single string
       if (typeof parsedUnknown === 'string') {
-        replies = [parsedUnknown];
-      } 
+        replies = [parsedUnknown]
+      }
       // Ensure array, filter to string items, and cap at 3
       else if (Array.isArray(parsedUnknown)) {
-        replies = parsedUnknown.filter(item => typeof item === 'string').slice(0, 3);
+        replies = parsedUnknown
+          .filter((item) => typeof item === 'string')
+          .slice(0, 3)
       }
-      
+
       // Fallback if empty after filtering
       if (replies.length === 0) {
-        throw new Error("Parsed array contained no valid string replies");
+        throw new Error('Parsed array contained no valid string replies')
       }
     } catch (_parseError: unknown) {
-      console.error('PARSE_ERROR_GEMINI'); // Sanitized error marker
+      console.error('PARSE_ERROR_GEMINI') // Sanitized error marker
       // Manual fallback
-      replies = ["Ok", "Got it", "Thanks"]; 
+      replies = ['Ok', 'Got it', 'Thanks']
     }
 
     // Return to frontend
-    res.json({ replies });
-
+    res.json({ replies })
   } catch (error) {
-    console.error('AI Error:', error);
-    res.status(500).json({ error: 'Failed to generate smart replies' });
+    console.error('AI Error:', error)
+    res.status(500).json({ error: 'Failed to generate smart replies' })
   }
-});
+})
 
-export default router;
+export default router

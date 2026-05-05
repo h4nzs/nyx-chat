@@ -12,31 +12,37 @@ router.post('/user', generalLimiter, requireAuth, async (req, res) => {
     const reporter = req.user!
 
     if (!env.discordReportWebhookUrl) {
-        console.warn('⚠️ DISCORD_REPORT_WEBHOOK_URL is not set.')
-        return res.json({ success: true })
+      console.warn('⚠️ DISCORD_REPORT_WEBHOOK_URL is not set.')
+      return res.json({ success: true })
     }
 
     const discordPayload = {
       username: 'NYX Watchdog',
-      embeds: [{
-        title: "🚨 USER REPORT",
-        color: 16711680, // Merah Darah
-        fields: [
-          { name: "Reporter", value: `ID: \`${reporter.id}\``, inline: true },
-          { name: "Reported User", value: `ID: \`${reportedUserId}\``, inline: true },
-          { name: "Reason", value: reason || 'No reason provided' },
-        ],
-        timestamp: new Date().toISOString(),
-      }]
+      embeds: [
+        {
+          title: '🚨 USER REPORT',
+          color: 16711680, // Merah Darah
+          fields: [
+            { name: 'Reporter', value: `ID: \`${reporter.id}\``, inline: true },
+            {
+              name: 'Reported User',
+              value: `ID: \`${reportedUserId}\``,
+              inline: true
+            },
+            { name: 'Reason', value: reason || 'No reason provided' }
+          ],
+          timestamp: new Date().toISOString()
+        }
+      ]
     }
 
     const response = await fetch(env.discordReportWebhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(discordPayload)
-    });
+    })
     if (!response.ok) {
-      console.error('Failed discord webhook', response.statusText);
+      console.error('Failed discord webhook', response.statusText)
     }
 
     res.json({ success: true })
@@ -54,7 +60,10 @@ router.post('/', generalLimiter, requireAuth, async (req, res, _next) => {
     // Jika URL Webhook belum diset, log error di server tapi jangan bikin user error
     if (!env.discordReportWebhookUrl) {
       console.warn('⚠️ DISCORD_REPORT_WEBHOOK_URL is not set. Report not sent.')
-      return res.json({ success: true, message: 'Report received (simulation)' })
+      return res.json({
+        success: true,
+        message: 'Report received (simulation)'
+      })
     }
 
     // Format Payload untuk Discord Webhook

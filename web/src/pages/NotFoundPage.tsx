@@ -1,11 +1,11 @@
-import { useNavigate } from 'react-router-dom';
-import { FiHome, FiAlertCircle } from 'react-icons/fi';
-import { motion } from 'framer-motion';
-import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom'
+import { FiHome, FiAlertCircle } from 'react-icons/fi'
+import { motion } from 'framer-motion'
+import { useTranslation } from 'react-i18next'
 
 export default function NotFoundPage() {
-  const { t } = useTranslation(['common']);
-  const navigate = useNavigate();
+  const { t } = useTranslation(['common'])
+  const navigate = useNavigate()
 
   return (
     <div className="min-h-screen w-full flex flex-col items-center justify-center bg-bg-main p-6 text-center">
@@ -19,7 +19,9 @@ export default function NotFoundPage() {
         <div className="relative">
           <div className="absolute inset-0 bg-accent/20 blur-3xl rounded-full" />
           <div className="relative w-40 h-40 rounded-full bg-bg-main shadow-neu-pressed flex items-center justify-center">
-             <span className="text-6xl font-black text-accent tracking-tighter">404</span>
+            <span className="text-6xl font-black text-accent tracking-tighter">
+              404
+            </span>
           </div>
         </div>
 
@@ -54,5 +56,5 @@ export default function NotFoundPage() {
         {t('footer.brand_protocol')} {/* End of Line */}
       </div>
     </div>
-  );
+  )
 }

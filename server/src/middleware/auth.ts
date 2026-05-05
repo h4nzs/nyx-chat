@@ -5,9 +5,10 @@ import { env } from '../config.js'
 import { AuthPayload } from '../types/auth.js'
 
 // === Middleware untuk REST API ===
-export function requireAuth (req: Request, res: Response, next: NextFunction) {
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
   // Prioritaskan pembacaan token dari cookie
-  const token = req.cookies?.at || // access token dari cookie
+  const token =
+    req.cookies?.at || // access token dari cookie
     (req.headers.authorization?.startsWith('Bearer ')
       ? req.headers.authorization.split(' ')[1]
       : null)
@@ -26,7 +27,11 @@ export function requireAuth (req: Request, res: Response, next: NextFunction) {
   }
 }
 
-export const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
+export const requireAdmin = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   try {
     if (!req.user || req.user.role !== 'ADMIN') {
       return res.status(403).json({ error: 'Access Denied: Admins Only' })
@@ -38,7 +43,7 @@ export const requireAdmin = async (req: Request, res: Response, next: NextFuncti
 }
 
 // === Helper untuk verifikasi token ===
-export function verifySocketAuth (token?: string): AuthPayload | null {
+export function verifySocketAuth(token?: string): AuthPayload | null {
   if (!token) return null
   try {
     return jwt.verify(token, env.jwtSecret) as AuthPayload
@@ -48,7 +53,7 @@ export function verifySocketAuth (token?: string): AuthPayload | null {
 }
 
 // === Middleware khusus Socket.IO ===
-export function socketAuthMiddleware (
+export function socketAuthMiddleware(
   socket: Socket,
   next: (err?: Error) => void
 ) {

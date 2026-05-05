@@ -1,95 +1,108 @@
-import { useEffect, useState } from 'react';
-import { useAuthStore } from '../store/auth';
+import { useEffect, useState } from 'react'
+import { useAuthStore } from '../store/auth'
 
 interface LinkPreviewProps {
   preview: {
-    url: string;
-    title: string;
-    description: string;
-    image: string;
-    siteName: string;
-  };
+    url: string
+    title: string
+    description: string
+    image: string
+    siteName: string
+  }
 }
 
 const LinkPreviewCard = ({ preview }: LinkPreviewProps) => {
-  const [proxiedImage, setProxiedImage] = useState<string | null>(null);
-  const [hasError, setHasError] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const token = useAuthStore(s => s.accessToken);
+  const [proxiedImage, setProxiedImage] = useState<string | null>(null)
+  const [hasError, setHasError] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const token = useAuthStore((s) => s.accessToken)
 
   useEffect(() => {
     if (!preview.image) {
-        setIsLoading(false);
-        return;
+      setIsLoading(false)
+      return
     }
 
-    let isMounted = true;
-    let objectUrl: string | null = null;
+    let isMounted = true
+    let objectUrl: string | null = null
 
     const fetchImage = async () => {
-      setIsLoading(true);
-      setHasError(false);
+      setIsLoading(true)
+      setHasError(false)
       try {
-        const baseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, "").replace(/\/$/, "");
-        const headers: Record<string, string> = {};
+        const baseUrl = (import.meta.env.VITE_API_URL || '')
+          .replace(/\/api\/?$/, '')
+          .replace(/\/$/, '')
+        const headers: Record<string, string> = {}
         if (token) {
-            headers['Authorization'] = `Bearer ${token}`;
+          headers['Authorization'] = `Bearer ${token}`
         }
-        const res = await fetch(`${baseUrl}/api/previews/image?url=${encodeURIComponent(preview.image)}`, {
-          headers
-        });
-        
+        const res = await fetch(
+          `${baseUrl}/api/previews/image?url=${encodeURIComponent(preview.image)}`,
+          {
+            headers
+          }
+        )
+
         if (res.ok && isMounted) {
-          const blob = await res.blob();
-          objectUrl = URL.createObjectURL(blob);
-          setProxiedImage(objectUrl);
+          const blob = await res.blob()
+          objectUrl = URL.createObjectURL(blob)
+          setProxiedImage(objectUrl)
         } else {
-          if (isMounted) setHasError(true);
+          if (isMounted) setHasError(true)
         }
       } catch (e) {
-        console.error('Failed to proxy image request.');
-        if (isMounted) setHasError(true);
+        console.error('Failed to proxy image request.')
+        if (isMounted) setHasError(true)
       } finally {
-          if (isMounted) setIsLoading(false);
+        if (isMounted) setIsLoading(false)
       }
-    };
+    }
 
-    fetchImage();
+    fetchImage()
 
     return () => {
-      isMounted = false;
+      isMounted = false
       if (objectUrl) {
-          URL.revokeObjectURL(objectUrl);
+        URL.revokeObjectURL(objectUrl)
       }
-      setProxiedImage(null);
-    };
-  }, [preview.image, token]);
+      setProxiedImage(null)
+    }
+  }, [preview.image, token])
 
-  if (!preview.title) return null;
+  if (!preview.title) return null
 
   return (
-    <a 
-      href={preview.url} 
-      target="_blank" 
-      rel="noopener noreferrer" 
+    <a
+      href={preview.url}
+      target="_blank"
+      rel="noopener noreferrer"
       className="block mt-2 bg-bg-surface/50 p-3 rounded-lg hover:bg-secondary transition-colors max-w-sm border border-black/5 dark:border-white/5"
     >
       {preview.image && !hasError && (
         <div className="w-full h-32 bg-black/20 dark:bg-white/5 rounded-t-lg flex items-center justify-center overflow-hidden">
-           {isLoading ? (
-              <span className="animate-pulse w-6 h-6 rounded-full border-2 border-accent border-t-transparent" />
-           ) : proxiedImage ? (
-              <img src={proxiedImage} alt={preview.title} className="w-full h-full object-cover" />
-           ) : null}
+          {isLoading ? (
+            <span className="animate-pulse w-6 h-6 rounded-full border-2 border-accent border-t-transparent" />
+          ) : proxiedImage ? (
+            <img
+              src={proxiedImage}
+              alt={preview.title}
+              className="w-full h-full object-cover"
+            />
+          ) : null}
         </div>
       )}
       <div className="p-2">
-        <p className="text-xs text-text-secondary truncate">{preview.siteName || new URL(preview.url).hostname}</p>
+        <p className="text-xs text-text-secondary truncate">
+          {preview.siteName || new URL(preview.url).hostname}
+        </p>
         <p className="font-bold text-text-primary truncate">{preview.title}</p>
-        <p className="text-sm text-text-secondary line-clamp-2">{preview.description}</p>
+        <p className="text-sm text-text-secondary line-clamp-2">
+          {preview.description}
+        </p>
       </div>
     </a>
-  );
-};
+  )
+}
 
-export default LinkPreviewCard;
+export default LinkPreviewCard
