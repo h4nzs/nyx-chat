@@ -39,7 +39,7 @@
     "ipaddr.js": "^2.3.0",
     "jsonwebtoken": "^9.0.3",
     "libsodium-wrappers": "^0.8.4",
-    "link-preview-js": "^4.0.0",
+    "link-preview-js": "^4.0.1",
     "mime": "^4.1.0",
     "morgan": "^1.10.0",
     "nanoid": "^5.1.9",
