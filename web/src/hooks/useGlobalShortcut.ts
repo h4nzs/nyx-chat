@@ -12,7 +12,7 @@ export function useGlobalShortcut(keyCombo: string[], callback: () => void) {
       const requiredKeys = keyCombo.map(k => k.toLowerCase());
       const lastKey = requiredKeys.pop();
 
-      if (!lastKey) {
+      if (!lastKey || !e.key) {
         return;
       }
 

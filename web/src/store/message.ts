@@ -1935,10 +1935,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       if (fetchedMessages.length > 0) {
         const processedMessages: Message[] = [];
 
-        // ✅ FIX: URUTKAN KRONOLOGIS SEBELUM DEKRIPSI
-        // Double Ratchet / Sender Key SANGAT sensitif terhadap urutan.
-        // Pesan harus didekripsi mulai dari yang paling lama.
-        fetchedMessages.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        // ✅ FIX: URUTKAN KRONOLOGIS SEBELUM DEKRIPSI (Gunakan ID sebagai tie-breaker untuk stabilitas)
+        fetchedMessages.sort((a, b) => {
+            const timeA = new Date(a.createdAt).getTime();
+            const timeB = new Date(b.createdAt).getTime();
+            if (timeA !== timeB) return timeA - timeB;
+            return a.id.localeCompare(b.id);
+        });
 
         // 1. CEK LOKAL DAN PISAHKAN CONTROL MESSAGES
         const controlMessages: Message[] = [];
@@ -1978,6 +1981,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
              } catch (e) {
                 console.error("Failed to process control message", e);
              }
+        }
+        
+        if (controlMessages.length > 0) {
+            // Beri jeda sebentar untuk memastikan IndexedDB menyelesaikan flush sinkronisasinya
+            await new Promise(r => setTimeout(r, 100));
         }
 
         // 3. DEKRIPSI NORMAL MESSAGES (termasuk PROTOCOL_UPGRADE_REQ yg masih terenkripsi)
@@ -2835,13 +2843,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       return;
     }
 
-    const reDecryptedMessages = await Promise.all(
-      pendingMessages.map(async (msg) => {
-          const decrypted = await decryptMessageObject(msg);
-          const [enriched] = enrichMessagesWithSenderProfile(conversationId, [decrypted]);
-          return enriched;
-      })
-    );
+    const reDecryptedMessages: Message[] = [];
+    for (const msg of pendingMessages) {
+        try {
+            const decrypted = await decryptMessageObject(msg);
+            const [enriched] = enrichMessagesWithSenderProfile(conversationId, [decrypted]);
+            reDecryptedMessages.push(enriched);
+        } catch (e) {
+            console.error(`[Re-Decrypt] Failed for msg ${msg.id}:`, e);
+            reDecryptedMessages.push(msg);
+        }
+    }
 
     const messageMap = new Map(conversationMessages.map(m => [m.id, m]));
     reDecryptedMessages.forEach(m => {
