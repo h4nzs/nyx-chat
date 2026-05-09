@@ -118,6 +118,7 @@ jobs:
             if ! command -v pnpm &> /dev/null; then
                 npm install -g pnpm
             fi
+            npm install -g tsx
             
             pm2 stop nyx-api || true
 
@@ -175,7 +176,7 @@ jobs:
             # Start ulang dengan path absolute yang statis
             pm2 start $TARGET_DIR/server/src/index.ts \
               --name "nyx-api" \
-              --interpreter $TARGET_DIR/node_modules/.bin/tsx \
+              --interpreter tsx \
               -i max \
               --node-args="--max-old-space-size=768" \
               --cwd $TARGET_DIR/server
