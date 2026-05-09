@@ -15,7 +15,7 @@ jobs:
 
       # --- SETUP PNPM ---
       - name: 🦀 Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@v6
         with:
           version: 9
 
@@ -171,8 +171,9 @@ jobs:
             pm2 delete nyx-api || true
             
             # Start ulang dengan path absolute yang statis
-            pm2 start $TARGET_DIR/server/dist/index.js \
+            pm2 start $TARGET_DIR/server/src/index.ts \
               --name "nyx-api" \
+              --interpreter $TARGET_DIR/server/node_modules/.bin/tsx \
               -i max \
               --node-args="--max-old-space-size=768" \
               --cwd $TARGET_DIR/server
