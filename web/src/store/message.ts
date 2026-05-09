@@ -892,6 +892,26 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                   useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'SENDER_KEY', activePqDeviceId: null });
                   return true;
               }
+
+              if (data.type === 'GROUP_KEY_DISTRIBUTION' && data.encryptedKey) {
+                  try {
+                      const { storeReceivedSessionKey } = await import('@utils/crypto');
+                      const senderDeviceId = data.senderDeviceKey; // Or appropriate field based on payload
+                      
+                      if (senderDeviceId) {
+                          await storeReceivedSessionKey({
+                              conversationId: data.conversationId || conversationId,
+                              encryptedKey: data.encryptedKey,
+                              senderId: data.senderId,
+                              senderDeviceKey: senderDeviceId
+                          });
+                          console.log(`[Group Ratchet] Processed and stored real-time key distribution for ${conversationId}`);
+                      }
+                  } catch (e) {
+                      console.error(`[Group Ratchet] Failed to store real-time group key`, e);
+                  }
+                  return true;
+              }
           } catch (e) {
               console.error(`[Shield] Error processing protocol message for conversation ${conversationId}`, { error: e, content: decrypted.content });
           }
@@ -1909,11 +1929,16 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     try {
       set(state => ({ isFetchingMore: { ...state.isFetchingMore, [id]: true } }));
 
-      const res = await api<{ items: Message[] }>(`/api/messages/${id}?limit=50`);
+      const res = await api<{ items: Message[] }>(`/api/messages/${id}?limit=250`);
       const fetchedMessages = res.items || [];
 
       if (fetchedMessages.length > 0) {
         const processedMessages: Message[] = [];
+
+        // ✅ FIX: URUTKAN KRONOLOGIS SEBELUM DEKRIPSI
+        // Double Ratchet / Sender Key SANGAT sensitif terhadap urutan.
+        // Pesan harus didekripsi mulai dari yang paling lama.
+        fetchedMessages.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
         // 1. CEK LOKAL DAN PISAHKAN CONTROL MESSAGES
         const controlMessages: Message[] = [];

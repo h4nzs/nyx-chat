@@ -137,6 +137,7 @@ type Actions = {
 };
 
 let privateKeysCache: RetrievedKeys | null = null;
+let refreshPromise: Promise<boolean> | null = null;
 
 export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => {
   const savedUser = localStorage.getItem("user");
@@ -295,10 +296,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
       set({ isBootstrapping: true });
       try {
-        const refreshRes = await api<{ ok: boolean; accessToken?: string }>("/api/auth/refresh", { method: "POST" });
-        if (refreshRes.accessToken) {
-          set({ accessToken: refreshRes.accessToken });
-
+        const ok = await get().silentRefresh();
+        if (ok) {
           const me = await authFetch<User>("/api/users/me");
           set({ user: me, hasRestoredKeys: await hasStoredKeys() });
           localStorage.setItem("user", JSON.stringify(me));
@@ -667,22 +666,29 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     },
 
     silentRefresh: async () => {
-      try {
-        const { api } = await import('@lib/api');
-        const data = await api<Record<string, unknown>>('/api/auth/refresh', {
-          method: 'POST',
-        });
-        
-        if (data && typeof data === 'object' && 'accessToken' in data && typeof data.accessToken === 'string') {
-          set({ accessToken: data.accessToken });
-          return true;
+      if (refreshPromise) return refreshPromise;
+
+      refreshPromise = (async () => {
+        try {
+          const { api } = await import('@lib/api');
+          const data = await api<Record<string, unknown>>('/api/auth/refresh', {
+            method: 'POST',
+          });
+
+          if (data && typeof data === 'object' && 'accessToken' in data && typeof data.accessToken === 'string') {
+            set({ accessToken: data.accessToken });
+            return true;
+          }
+          return false;
+        } catch (error) {
+          console.warn('[Auth] Silent refresh failed:', error);
+          return false;
+        } finally {
+          refreshPromise = null;
         }
-        return false;
-      } catch (error) {
-        console.warn('[Auth] Silent refresh failed:', error);
-        return false;
-      }
-    },
-  };
+      })();
+
+      return refreshPromise;
+    },  };
 }, Object.is);
 ;

@@ -45,7 +45,7 @@ router.get('/:conversationId', async (req, res, next) => {
         conversationId,
         createdAt: { gte: participant.joinedAt }
       },
-      take: 100, // Ambil cukup banyak untuk offline catch-up
+      take: 250, // Ambil cukup banyak untuk offline catch-up
       orderBy: { createdAt: 'desc' }, 
       include: {
         sender: { select: { id: true, encryptedProfile: true } },

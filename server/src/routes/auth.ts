@@ -170,9 +170,9 @@ router.post('/login', authLimiter, zodValidate({
   body: z.object({
     usernameHash: z.string().min(10),
     password: z.string().min(8),
-    publicKey: validateKey(32),
+    publicKey: validateKey(32).optional(),
     pqPublicKey: validateKey(1216).optional(),
-    signingKey: validateKey(32),
+    signingKey: validateKey(32).optional(),
     encryptedPrivateKey: z.string().optional(),
     deviceName: z.string().optional(),
     deviceId: z.string().optional()

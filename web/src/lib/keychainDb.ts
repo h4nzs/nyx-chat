@@ -128,17 +128,23 @@ export async function storeGroupSkippedKey(conversationId: string, senderId: str
 }
 
 /**
- * Retrieves and deletes a group skipped message key.
+ * Retrieves a group skipped message key without deleting it.
  */
-export async function takeGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string, n: number): Promise<string | null> {
+export async function getGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string, n: number): Promise<string | null> {
     return enqueueWrite(async () => {
         const key = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
         const record = await db.groupSkippedKeys.get(key);
-        if (record) {
-            await db.groupSkippedKeys.delete(key);
-            return record.mk;
-        }
-        return null;
+        return record ? record.mk : null;
+    });
+}
+
+/**
+ * Deletes a group skipped message key.
+ */
+export async function deleteGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string, n: number): Promise<void> {
+    return enqueueWrite(async () => {
+        const key = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
+        await db.groupSkippedKeys.delete(key);
     });
 }
 
