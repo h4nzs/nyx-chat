@@ -1050,8 +1050,8 @@ async function doDecryptMessage(
         const ciphertextBytes = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
 
         // 1. CHECK SKIPPED KEYS FIRST (ATOMIC)
-        const { takeGroupSkippedKey, storeGroupSkippedKey } = await import('@lib/keychainDb');
-        const skippedMkB64 = await takeGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n);
+        const { getGroupSkippedKey, deleteGroupSkippedKey, storeGroupSkippedKey } = await import('@lib/keychainDb');
+        const skippedMkB64 = await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n);
         
         if (skippedMkB64) {
             const { groupDecryptSkipped } = await getWorkerProxy();
@@ -1067,6 +1067,10 @@ async function doDecryptMessage(
                 const mkBytes = sodium.from_base64(skippedMkB64, sodium.base64_variants.URLSAFE_NO_PADDING);
                 await storeMessageKeySecurely(messageId, mkBytes);
             }
+            
+            // Hanya hapus key yang di-skip jika dekripsi berhasil tanpa error
+            await deleteGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n);
+
             return { status: 'success', value: sodium.to_string(result.plaintext) };
         }
         

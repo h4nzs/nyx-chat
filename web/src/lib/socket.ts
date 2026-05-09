@@ -36,6 +36,16 @@ const processMessageBuffer = async () => {
     const messagesToProcess = [...incomingMessageBuffer];
     incomingMessageBuffer.length = 0;
     
+    // ✅ FIX: Prioritaskan pesan SYSTEM (distribusi kunci) agar diproses sebelum pesan USER.
+    // Jika tidak, pesan USER mungkin gagal didekripsi karena kuncinya belum tersimpan.
+    messagesToProcess.sort((a, b) => {
+        const isSystemA = (a as any).type === 'SYSTEM' || a.content?.startsWith('{');
+        const isSystemB = (b as any).type === 'SYSTEM' || b.content?.startsWith('{');
+        if (isSystemA && !isSystemB) return -1;
+        if (!isSystemA && isSystemB) return 1;
+        return 0;
+    });
+    
     const { addIncomingMessage } = useMessageStore.getState();
     const meId = useAuthStore.getState().user?.id;
 

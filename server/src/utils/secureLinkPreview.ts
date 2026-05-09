@@ -1,4 +1,6 @@
-import { getLinkPreview } from 'link-preview-js'
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { getLinkPreview } = require('link-preview-js');
 import dns from 'dns/promises'
 import ipaddr from 'ipaddr.js'
 import { sanitizeForLog } from './logger.js'

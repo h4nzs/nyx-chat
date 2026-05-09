@@ -8,7 +8,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "zod": "^4.4.2"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "typescript": "^6.0.3"
