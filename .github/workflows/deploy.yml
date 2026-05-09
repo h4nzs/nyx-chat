@@ -82,6 +82,8 @@ jobs:
           
           # Copy Backend (Bawa Prisma hasil generate dari GitHub, TAPI TINGGALKAN node_modules)
           mkdir -p deploy_package/server
+          cp -r server/src deploy_package/server/
+          cp server/tsconfig.json deploy_package/server/
           cp -r server/dist deploy_package/server/
           cp server/package.json deploy_package/server/
           cp -r server/prisma deploy_package/server/
@@ -173,7 +175,7 @@ jobs:
             # Start ulang dengan path absolute yang statis
             pm2 start $TARGET_DIR/server/src/index.ts \
               --name "nyx-api" \
-              --interpreter $TARGET_DIR/server/node_modules/.bin/tsx \
+              --interpreter $TARGET_DIR/node_modules/.bin/tsx \
               -i max \
               --node-args="--max-old-space-size=768" \
               --cwd $TARGET_DIR/server
