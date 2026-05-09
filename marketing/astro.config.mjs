@@ -1,6 +1,6 @@
 import { defineConfig } from 'astro/config';
 import react from '@astrojs/react';
-import tailwindcss from '@tailwindcss/vite';
+// import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import packageJson from './package.json';
@@ -24,7 +24,7 @@ export default defineConfig({
   
   // Konfigurasi Vite bawaan Astro (mirip vite.config.ts kita sebelumnya)
   vite: {
-    plugins: [tailwindcss()],
+    // plugins: [tailwindcss()],
     ssr: {
       // 👇 TAMBAHKAN INI: Memaksa react-icons diproses sebagai source, bukan external
       noExternal: ['react-icons', 'react-icons/**']
