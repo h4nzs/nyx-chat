@@ -15,7 +15,7 @@ jobs:
 
       # --- SETUP PNPM ---
       - name: 🦀 Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@v6
         with:
           version: 9
 
@@ -82,6 +82,8 @@ jobs:
           
           # Copy Backend (Bawa Prisma hasil generate dari GitHub, TAPI TINGGALKAN node_modules)
           mkdir -p deploy_package/server
+          cp -r server/src deploy_package/server/
+          cp server/tsconfig.json deploy_package/server/
           cp -r server/dist deploy_package/server/
           cp server/package.json deploy_package/server/
           cp -r server/prisma deploy_package/server/
@@ -116,6 +118,7 @@ jobs:
             if ! command -v pnpm &> /dev/null; then
                 npm install -g pnpm
             fi
+            npm install -g tsx
             
             pm2 stop nyx-api || true
 
@@ -171,8 +174,9 @@ jobs:
             pm2 delete nyx-api || true
             
             # Start ulang dengan path absolute yang statis
-            pm2 start $TARGET_DIR/server/dist/index.js \
+            pm2 start $TARGET_DIR/server/src/index.ts \
               --name "nyx-api" \
+              --interpreter tsx \
               -i max \
               --node-args="--max-old-space-size=768" \
               --cwd $TARGET_DIR/server

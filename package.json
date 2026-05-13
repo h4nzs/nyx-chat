@@ -16,7 +16,7 @@
     "version": "node scripts/update-md.mjs && git add README.md web/package.json server/package.json marketing/package.json packages/shared/package.json"
   },
   "dependencies": {
-    "react-icons": "4.10.1",
+    "react-icons": "5.6.0",
     "react-pdf": "^10.4.1"
   },
   "pnpm": {

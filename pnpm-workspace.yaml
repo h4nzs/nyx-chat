@@ -4,5 +4,15 @@ packages:
   - marketing
   - packages/*
 
+allowBuilds:
+  '@parcel/watcher': true
+  '@prisma/engines': true
+  argon2: true
+  esbuild: true
+  prisma: true
+  puppeteer: true
+  sharp: true
+  unrs-resolver: true
+
 onlyBuiltDependencies:
   - supabase
