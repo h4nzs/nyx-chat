@@ -326,27 +326,26 @@ export function worker_generate_otpk_batch(count: number, startId: number, maste
 
 export function worker_dr_init_alice(payload: {
     sk: Uint8Array,
-    theirSignedPreKeyPublic: Uint8Array
+    theirPqSignedPreKeyPublic: Uint8Array
 }): Promise<DoubleRatchetState> {
-    return sendToWorker('dr_init_alice', { 
-        sk: toArray(payload.sk), 
-        theirSignedPreKeyPublic: toArray(payload.theirSignedPreKeyPublic) 
+    return sendToWorker('dr_init_alice', {
+        sk: toArray(payload.sk),
+        theirPqSignedPreKeyPublic: toArray(payload.theirPqSignedPreKeyPublic)
     });
 }
 
 export function worker_dr_init_bob(payload: {
     sk: Uint8Array,
-    mySignedPreKey: { publicKey: Uint8Array, privateKey: Uint8Array }
+    myPqSignedPreKey: { publicKey: Uint8Array, privateKey: Uint8Array }
 }): Promise<DoubleRatchetState> {
     return sendToWorker('dr_init_bob', {
         sk: toArray(payload.sk),
-        mySignedPreKey: {
-            publicKey: toArray(payload.mySignedPreKey.publicKey),
-            privateKey: toArray(payload.mySignedPreKey.privateKey)
+        myPqSignedPreKey: {
+            publicKey: toArray(payload.myPqSignedPreKey.publicKey),
+            privateKey: toArray(payload.myPqSignedPreKey.privateKey)
         }
     });
 }
-
 export function worker_dr_ratchet_encrypt(payload: {
     serializedState: DoubleRatchetState,
     plaintext: CryptoBuffer | string

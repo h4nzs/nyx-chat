@@ -1,82 +1,51 @@
-# NYX - Gemini AI Context
-
-This file provides context for Gemini AI assistants working on the NYX project.
+# NYX Project Context (GEMINI.md)
 
 ## Project Overview
+**NYX** is a "Zero-Knowledge Post-Quantum Hardened Messenger". It is a fullstack Node.js monorepo focusing on extreme privacy and security, operating under a strict "Trust No One" (TNO) model. 
 
-**NYX** is a Zero-Knowledge, Post-Quantum Hardened Messenger. It is designed with pure anonymity in mind, requiring no PII (email, phone number, etc.). 
+### Key Features
+- **Pure Anonymity:** No PII collection (no email, phone, IP). Uses blind indexing.
+- **Post-Quantum Security:** Implements WebAuthn PRF, ML-KEM-768, XChaCha20-Poly1305, and Argon2id inside a dedicated WebAssembly Web Worker.
+- **Local-First:** Chat history is stored entirely client-side using IndexedDB. Server acts as a blind relay.
 
-**Core Features:**
-- **Zero-Knowledge Architecture:** The server cannot read messages or user profiles.
-- **Post-Quantum Cryptography:** Hybrid key exchange using X25519 + ML-KEM-768 (X-Wing construct) and XChaCha20-Poly1305 + HMAC-SHA256 for messages.
-- **Local-First Sovereignty:** Chat history is stored exclusively on the client (IndexedDB) and never synced to the cloud in plaintext.
-- **Memory-Hard Hashing:** Uses Argon2id for local vault encryption and server blind indexing.
+### Architecture & Tech Stack
+The project is structured as a **pnpm workspace** monorepo with the following main directories:
+- **`web/`** (Frontend): React 19, Vite 8, Zustand v5, Tailwind CSS v4, Socket.IO Client, `dexie` (IndexedDB).
+- **`server/`** (Backend): Node.js (Express), PostgreSQL via Prisma ORM v7, Socket.IO with Redis Adapter, Cloudflare R2 (for binary blobs).
+- **`packages/shared/`**: Contains shared types and utilities between web and server.
 
-## Repository Structure
-
-The project is structured as a **pnpm monorepo** with the following main workspaces:
-
-- `web/`: The main client PWA (React 19, Vite 8, Zustand v5, Tailwind CSS v4, Web Worker-based crypto engine).
-- `server/`: The Node.js Express backend and Socket.IO real-time server (Prisma v7, PostgreSQL, Redis).
-- `marketing/`: The public-facing landing page and documentation site (Astro, React, Tailwind CSS v4).
-- `packages/shared/`: Shared TypeScript types, Zod schemas, and Socket event definitions.
-
-## Tech Stack Summary
-
-- **Frontend (`web/`):** React, TypeScript, Vite, Zustand, Tailwind CSS, `libsodium-wrappers`, Playwright for E2E.
-- **Backend (`server/`):** Node.js, Express, Socket.IO, Prisma ORM, PostgreSQL, Redis, Jest for testing.
-- **Marketing (`marketing/`):** Astro, React.
-- **Package Manager:** `pnpm`.
-
-## Development Workflows
+## Building and Running
 
 ### Prerequisites
 - Node.js 22+
 - `pnpm`
-- PostgreSQL
-- Redis
+- PostgreSQL & Redis running locally.
 
-### Setup & Initialization
-1. Install dependencies from the root directory:
-   ```bash
-   pnpm install
-   ```
-2. Configure environment variables in `server/.env` (reference `.env.example` if available).
-3. Push the database schema:
-   ```bash
-   cd server
-   npx prisma db push
-   ```
-
-### Running the Services Locally
-
-**Backend Server:**
+### Setup & Commands
 ```bash
-cd server
-pnpm dev # Runs development server via tsx watch
-```
+# Install dependencies across the workspace
+pnpm install
 
-**Web Client:**
-```bash
-cd web
-pnpm dev # Starts Vite development server
-```
+# Database setup
+cd server && npx prisma db push
 
-**Marketing Site:**
-```bash
-cd marketing
-pnpm dev # Starts Astro development server
-```
+# Start the development server (runs web and server, but requires shared package to be built first)
+pnpm dev
 
-### Global Commands (From Root)
-- `pnpm build`: Builds all workspaces.
-- `pnpm lint`: Lints all workspaces using ESLint v10.
-- `pnpm test`: Runs tests across all workspaces.
+# Build the project
+pnpm run build
+
+# Run linter
+pnpm run lint
+
+# Run tests
+pnpm run test
+```
 
 ## Development Conventions & Rules
-
-1. **Cryptography Stability:** **DO NOT** update, modify, or bump the `libsodium-wrappers` dependency unless specifically instructed to do so for newer PQC primitives. Cryptographic backward compatibility is the highest priority.
-2. **Strict Linting:** The project enforces strict linting with ESLint v10 (Flat Config). Code must pass `pnpm lint` or `npx tsc --noEmit` with zero warnings before being merged or considered complete.
-3. **Shared Types:** Any interfaces, data models, or validation schemas (Zod) that cross the client/server boundary must be defined inside `packages/shared/` to ensure end-to-end type safety and if this packages need to be modified always build first before any other workspaces.
-4. **Database Changes:** The backend uses Prisma ORM. Modify `server/prisma/schema.prisma` for database changes, and apply them using `npx prisma db push` during local development.
-5. **No PII:** When designing new features or database models, ensure absolutely no personally identifiable information (PII) is collected, transmitted, or stored in plaintext.
+1. **Package Manager:** Exclusively use `pnpm`. Do NOT use `npm` or `yarn`.
+2. **Crypto Core is Sacred:** Do **NOT** bump, update, or modify `libsodium-wrappers` or its type definitions. Backward cryptographic compatibility is paramount.
+3. **Zustand State:** When using Zustand v5, **do not return objects in selectors without `useShallow`** to prevent infinite render loops.
+4. **Linting & Formatting:** The project strictly enforces ESLint v10 (Flat Config). Code must pass `pnpm run lint` with zero warnings before committing (except `unused-var` can be ignored per README).
+5. **Commits:** Follow **Conventional Commits** (e.g., `feat: add markdown support`, `fix: memory leak`). Keep commits atomic.
+6. **Licensing:** Dual-licensed under AGPL-3.0-or-later and Commercial. Code contributions require signing a CLA.

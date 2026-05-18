@@ -371,8 +371,8 @@ export type WorkerMessage =
   | { type: 'decrypt_session_key'; payload: { encryptedKey: CryptoBuffer; masterSeed: CryptoBuffer }; id: string }
   | { type: 'generate_otpk_batch'; payload: { count: number; startId: number; masterSeed: CryptoBuffer }; id: string }
   | { type: 'x3dh_recipient_regenerate'; payload: { keyId: number; masterSeed: CryptoBuffer; myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; myPqIdentityKey: SodiumKeyPair; myPqSignedPreKey: SodiumKeyPair; theirSigningKey: CryptoBuffer; initiatorCiphertexts: string }; id: string }
-  | { type: 'dr_init_alice'; payload: { sk: CryptoBuffer; theirSignedPreKeyPublic: CryptoBuffer }; id: string }
-  | { type: 'dr_init_bob'; payload: { sk: CryptoBuffer; mySignedPreKey: SodiumKeyPair }; id: string }
+  | { type: 'dr_init_alice'; payload: { sk: CryptoBuffer; theirPqSignedPreKeyPublic: CryptoBuffer }; id: string }
+  | { type: 'dr_init_bob'; payload: { sk: CryptoBuffer; myPqSignedPreKey: SodiumKeyPair }; id: string }
   | { type: 'dr_ratchet_encrypt'; payload: { serializedState: DoubleRatchetState; plaintext: string | CryptoBuffer }; id: string }
   | { type: 'dr_ratchet_decrypt'; payload: { serializedState: DoubleRatchetState; header: DoubleRatchetHeader; ciphertext: CryptoBuffer }; id: string }
   | { type: 'group_init_sender_key'; payload: void; id: string }
@@ -1406,9 +1406,9 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
       
       case 'dr_init_alice': {
-        const { sk, theirSignedPreKeyPublic } = payload as { sk: CryptoBuffer, theirSignedPreKeyPublic: CryptoBuffer };
+        const { sk, theirPqSignedPreKeyPublic } = payload as { sk: CryptoBuffer, theirPqSignedPreKeyPublic: CryptoBuffer };
         const skBytes = new Uint8Array(sk);
-        const theirSpkBytes = new Uint8Array(theirSignedPreKeyPublic);
+        const theirPqSpkBytes = new Uint8Array(theirPqSignedPreKeyPublic);
         
         let RK: Uint8Array | null = null;
         let CKs: Uint8Array | null = null;
@@ -1418,7 +1418,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         try {
           pqKeypair = sodium.crypto_kem_xwing_keypair();
           if (!pqKeypair) throw new Error("KEM Keypair generation failed");
-          const pqResult = sodium.crypto_kem_xwing_enc(theirSpkBytes);
+          const pqResult = sodium.crypto_kem_xwing_enc(theirPqSpkBytes);
           
           sharedSecret = new Uint8Array(skBytes.length + pqResult.sharedSecret.length);
           sharedSecret.set(skBytes, 0);
@@ -1433,7 +1433,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
               publicKey: pqKeypair.publicKey,
               privateKey: pqKeypair.privateKey
             },
-            KEMr: theirSpkBytes,
+            KEMr: theirPqSpkBytes,
             savedCt: pqResult.ciphertext,
             RK,
             CKs,
@@ -1457,17 +1457,17 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       }
 
       case 'dr_init_bob': {
-        const { sk, mySignedPreKey } = payload as { sk: CryptoBuffer, mySignedPreKey: SodiumKeyPair };
-        if (!mySignedPreKey.publicKey) throw new Error("Missing public key");
+        const { sk, myPqSignedPreKey } = payload as { sk: CryptoBuffer, myPqSignedPreKey: SodiumKeyPair };
+        if (!myPqSignedPreKey.publicKey) throw new Error("Missing PQ public key");
         const skBytes = new Uint8Array(sk);
-        const mySpkPrivateBytes = new Uint8Array(mySignedPreKey.privateKey);
-        const mySpkPublicBytes = new Uint8Array(mySignedPreKey.publicKey);
-
+        const myPqSpkPrivateBytes = new Uint8Array(myPqSignedPreKey.privateKey);
+        const myPqSpkPublicBytes = new Uint8Array(myPqSignedPreKey.publicKey);
+          
         try {
           const state: RuntimeDoubleRatchetState = {
             KEMs: {
-              publicKey: mySpkPublicBytes,
-              privateKey: mySpkPrivateBytes
+              publicKey: myPqSpkPublicBytes,
+              privateKey: myPqSpkPrivateBytes
             },
             KEMr: null,
             savedCt: null,
@@ -1481,7 +1481,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           result = serializeState(state);
         } finally {
           sodium.memzero(skBytes);
-          sodium.memzero(mySpkPrivateBytes);
+          sodium.memzero(myPqSpkPrivateBytes);
         }
         break;
       }
