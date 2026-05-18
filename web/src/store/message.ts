@@ -315,7 +315,7 @@ export async function decryptMessageObject(
                const { worker_dr_init_bob } = await import('@lib/crypto-worker-proxy');
                const newState = await worker_dr_init_bob({
                    sk: sessionKey,
-                   mySignedPreKey: myPqSignedPreKeyPair
+                   myPqSignedPreKey: myPqSignedPreKeyPair // <--- FIX: Ubah key object-nya
                });
 
                await storeRatchetStateSecurely(rawMsg.conversationId, newState);
@@ -427,6 +427,9 @@ export async function decryptMessageObject(
       const errMsg = (result?.error as Error)?.message || '';
       if (errMsg.includes('waiting for key') || errMsg.includes('Missing sender')) {
           finalMessage.content = 'waiting_for_key';
+      } else if (errMsg.includes('older than current state')) {
+          finalMessage.content = '[Message too old to decrypt]';
+          finalMessage.error = true;
       } else {
           finalMessage.content = '[Decryption Failed: Key out of sync]';
           finalMessage.error = true;
@@ -902,10 +905,12 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                           await storeReceivedSessionKey({
                               conversationId: data.conversationId || conversationId,
                               encryptedKey: data.encryptedKey,
+                              type: 'GROUP_KEY',
                               senderId: data.senderId,
                               senderDeviceKey: senderDeviceId
                           });
                           console.log(`[Group Ratchet] Processed and stored real-time key distribution for ${conversationId}`);
+                          useMessageStore.getState().reDecryptPendingMessages(data.conversationId || conversationId);
                       }
                   } catch (e) {
                       console.error(`[Group Ratchet] Failed to store real-time group key`, e);
@@ -1960,24 +1965,29 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
              try {
                 const payload = JSON.parse(msg.content || '{}');
                 if (payload.type === 'GROUP_KEY_DISTRIBUTION') {
-                   type AuthUserWithDevices = { devices?: { id: string; isCurrent?: boolean }[] };
-                   const devices = (useAuthStore.getState().user as AuthUserWithDevices | null)?.devices;
-                   const myDevice = Array.isArray(devices) ? devices.find((d) => d.isCurrent)?.id : undefined;
-                   
-                   // Fallback for broadcast or specific device targeting
-                   if (!payload.targetDeviceId || payload.targetDeviceId === myDevice) {
-                       const { storeReceivedSessionKey } = await import('@utils/crypto');
-                       await storeReceivedSessionKey({
-                          conversationId: payload.conversationId,
-                          encryptedKey: payload.encryptedKey,
-                          type: 'GROUP_KEY',
-                          senderId: payload.senderId,
-                          senderDeviceKey: payload.senderDeviceKey
-                       });
-                       // Tanda bahwa key baru sudah dimuat, siap mendekripsi pesan berikutnya
-                       useKeychainStore.getState().keysUpdated();
+                  console.log('[Offline Sync] Memproses GROUP_KEY_DISTRIBUTION untuk conversation:', msg.conversationId || payload.conversationId);
+
+                  const myId = useAuthStore.getState().user?.id;
+                  const myDist = payload.distributions?.find((d: any) => d.targetUserId === myId);
+                   const extractedKey = myDist?.encryptedKey || payload.encryptedKey;
+
+                   if (!extractedKey) {
+                       console.error('[Offline Sync] Encrypted Key is undefined for payload:', payload);
+                       continue;
                    }
-                }
+
+                   const { storeReceivedSessionKey } = await import('@utils/crypto');
+                   await storeReceivedSessionKey({
+                       ...payload,
+                       type: 'GROUP_KEY',
+                       conversationId: msg.conversationId || payload.conversationId,
+                       senderId: msg.senderId || payload.senderId,
+                       encryptedKey: payload.encryptedKey,
+                       senderDeviceKey: payload.senderDeviceKey
+                   });
+
+                   // Tanda bahwa key baru sudah dimuat
+                   useKeychainStore.getState().keysUpdated();                }
              } catch (e) {
                 console.error("Failed to process control message", e);
              }
@@ -2257,7 +2267,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           const repairKey = `last_repair_${conversationId}` as keyof Window;
           const lastRepair = (window[repairKey] as number) || 0;
           
-          if (now - lastRepair > 15000) { // Limit permintaan perbaikan agar tidak spam (15 detik)
+          const isTooOld = decrypted.content === '[Message too old to decrypt]';
+          
+          if (!isTooOld && now - lastRepair > 15000) { // Limit permintaan perbaikan agar tidak spam (15 detik)
               (window as unknown as Record<string, number>)[repairKey] = now;
               console.warn(`[Auto-Heal] Kunci tidak sinkron untuk percakapan ${conversationId}. Meminta kunci ulang secara diam-diam...`);
               

@@ -53,8 +53,44 @@ router.get('/:conversationId', async (req, res, next) => {
       }
     })
 
+    // AMBIL SEMUA PESAN SYSTEM UNTUK CONVERSATION INI (Mencegah kehilangan distribusi kunci jika lebih dari 250 pesan)
+    const systemMessagesDesc = await prisma.message.findMany({
+      where: {
+        conversationId,
+        type: 'SYSTEM',
+        createdAt: { gte: participant.joinedAt }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50, // Biasanya cukup untuk menampung semua perputaran kunci terbaru
+      include: {
+        sender: { select: { id: true, encryptedProfile: true } },
+        statuses: true
+      }
+    })
+
+    // AMBIL PESAN SYSTEM PERTAMA (Untuk memastikan kunci awal selalu didapat)
+    const firstSystemMessage = await prisma.message.findFirst({
+      where: {
+        conversationId,
+        type: 'SYSTEM',
+        createdAt: { gte: participant.joinedAt }
+      },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        sender: { select: { id: true, encryptedProfile: true } },
+        statuses: true
+      }
+    })
+
+    // Gabungkan pesan normal dan pesan system (tanpa duplikasi)
+    const allMessagesMap = new Map();
+    [...messages, ...systemMessagesDesc].forEach(msg => allMessagesMap.set(msg.id, msg));
+    if (firstSystemMessage) allMessagesMap.set(firstSystemMessage.id, firstSystemMessage);
+    
+    const mergedMessages = Array.from(allMessagesMap.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
     // FIX 1: Suntikkan null untuk repliedToId agar TS tidak error
-    const safeMessages = messages.map(msg => toRawServerMessage(ensureLegacyMessageFields(msg)));
+    const safeMessages = mergedMessages.map(msg => toRawServerMessage(ensureLegacyMessageFields(msg)));
     
     // Reverse biar di frontend urutannya bener (Oldest -> Newest)
     res.json({ items: safeMessages.reverse() })

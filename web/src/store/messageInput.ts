@@ -58,18 +58,17 @@ const ensureGroupSessionIfNeeded = async (conversationId: string): Promise<boole
     return false;
   }
   
-  if (conversation.isGroup) {
-    try {
-      const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
-      if (distributionKeys && distributionKeys.length > 0) {
-        await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string, targetDeviceId?: string, senderDeviceKey?: string }[]);
-      }
-    } catch (e: unknown) {
-      console.error("Failed to ensure group session.", e);
-      toast.error(`Failed to establish group session: ${(e instanceof Error ? e.message : 'Unknown error')}`);
-      return false;
+  try {
+    const distributionKeys = await ensureGroupSession(conversationId, conversation.participants);
+    if (distributionKeys && distributionKeys.length > 0) {
+      await emitGroupKeyDistribution(conversationId, distributionKeys as { userId: string; key: string, targetDeviceId?: string, senderDeviceKey?: string }[]);
     }
+  } catch (e: unknown) {
+    console.error("Failed to ensure group session.", e);
+    toast.error(`Failed to establish secure session: ${(e instanceof Error ? e.message : 'Unknown error')}`);
+    return false;
   }
+  
   return true;
 };
 

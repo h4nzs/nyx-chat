@@ -43,7 +43,10 @@ const processMessageBuffer = async () => {
         const isSystemB = (b as any).type === 'SYSTEM' || b.content?.startsWith('{');
         if (isSystemA && !isSystemB) return -1;
         if (!isSystemA && isSystemB) return 1;
-        return 0;
+        const timeA = new Date(a.createdAt || 0).getTime();
+        const timeB = new Date(b.createdAt || 0).getTime();
+        if (timeA !== timeB) return timeA - timeB;
+        return a.id.localeCompare(b.id);
     });
     
     const { addIncomingMessage } = useMessageStore.getState();
@@ -460,8 +463,25 @@ export function emitGroupKeyDistribution(conversationId: string, keys: { userId:
   });
 }
 
-export function emitGroupKeyRequest(conversationId: string, targetSenderId?: string, targetDeviceKey?: string) {
-  getSocket()?.emit('group:request_key', { conversationId, targetSenderId, targetDeviceKey });
+export async function emitGroupKeyRequest(conversationId: string, targetSenderId?: string, targetDeviceKey?: string) {
+  const { useAuthStore } = await import('@store/auth');
+  const state = useAuthStore.getState();
+  const myId = state.user?.id;
+  
+  const { getEncryptionKeyPair } = state;
+  const { publicKey } = await getEncryptionKeyPair();
+  const { getSodiumLib } = await import('@utils/crypto');
+  const sodium = await getSodiumLib();
+  const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+  
+  getSocket()?.emit('group:request_key', { 
+      conversationId, 
+      targetSenderId, 
+      targetDeviceKey,
+      requesterId: myId,
+      requesterDeviceId: myPublicKeyB64,
+      requesterPublicKey: myPublicKeyB64
+  });
 }
 
 export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; targetDeviceId?: string; senderDeviceKey?: string; }) {

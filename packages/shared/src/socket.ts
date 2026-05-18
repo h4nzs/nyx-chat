@@ -49,6 +49,9 @@ export interface GroupKeyRequestPayload {
   conversationId: string;
   targetSenderId?: string;
   targetDeviceKey?: string;
+  requesterId?: string;
+  requesterDeviceId?: string;
+  requesterPublicKey?: string;
 }
 
 export interface KeyFulfillmentPayload {
