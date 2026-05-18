@@ -1,12 +1,12 @@
 {
+  "name": "nyx-chat",
+  "version": "2.6.2",
   "author": "Han <admin@nyx-app.my.id>",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
     "url": "https://github.com/h4nzs/nyx-chat.git"
   },
-  "name": "nyx-chat",
-  "version": "2.6.2",
   "scripts": {
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
@@ -19,47 +19,45 @@
     "react-icons": "5.6.0",
     "react-pdf": "^10.4.1"
   },
-  "pnpm": {
-    "overrides": {
-      "basic-ftp": ">=5.3.0",
-      "minimatch": ">=10.2.3",
-      "serialize-javascript": ">=7.0.3",
-      "fast-xml-parser": ">=5.5.7",
-      "rollup@^2.0.0": "^2.80.0",
-      "rollup@^4.0.0": "^4.59.0",
-      "tar": ">=7.5.11",
-      "bn.js": ">=5.2.3",
-      "qs": ">=6.14.2",
-      "hono": ">=4.12.14",
-      "@hono/node-server": ">=1.19.13",
-      "flatted": ">=3.4.2",
-      "undici": ">=7.24.0",
-      "socket.io-parser": "^4.2.6",
-      "picomatch@<2.3.2": ">=2.3.2",
-      "picomatch@>=3.0.0 <3.0.2": ">=3.0.2",
-      "picomatch@>=4.0.0 <4.0.4": ">=4.0.4",
-      "effect": ">=3.20.0",
-      "path-to-regexp@<0.1.13": ">=0.1.13",
-      "path-to-regexp": "^8.4.0",
-      "defu@<=6.1.4": ">=6.1.5",
-      "lodash-es@>=4.0.0 <=4.17.23": ">=4.18.1",
-      "lodash@>=4.0.0 <=4.17.23": ">=4.18.1",
-      "axios": ">=1.15.0",
-      "follow-redirects": ">=1.16.0",
-      "brace-expansion": "^2.0.3"
-    },
-    "onlyBuiltDependencies": [
-      "@parcel/watcher",
-      "@prisma/engines",
-      "argon2",
-      "esbuild",
-      "prisma",
-      "puppeteer",
-      "sharp",
-      "unrs-resolver"
-    ]
-  },
   "devDependencies": {
     "node-gyp": "^12.3.0"
-  }
+  },
+  "resolutions": {
+    "basic-ftp": ">=5.3.0",
+    "minimatch": ">=10.2.3",
+    "serialize-javascript": ">=7.0.3",
+    "fast-xml-parser": ">=5.5.7",
+    "rollup@^2.0.0": "^2.80.0",
+    "rollup@^4.0.0": "^4.59.0",
+    "tar": ">=7.5.11",
+    "bn.js": ">=5.2.3",
+    "qs": ">=6.14.2",
+    "hono": ">=4.12.14",
+    "@hono/node-server": ">=1.19.13",
+    "flatted": ">=3.4.2",
+    "undici": ">=7.24.0",
+    "socket.io-parser": "^4.2.6",
+    "picomatch@<2.3.2": ">=2.3.2",
+    "picomatch@>=3.0.0 <3.0.2": ">=3.0.2",
+    "picomatch@>=4.0.0 <4.0.4": ">=4.0.4",
+    "effect": ">=3.20.0",
+    "path-to-regexp@<0.1.13": ">=0.1.13",
+    "path-to-regexp": "^8.4.0",
+    "defu@<=6.1.4": ">=6.1.5",
+    "lodash-es@>=4.0.0 <=4.17.23": ">=4.18.1",
+    "lodash@>=4.0.0 <=4.17.23": ">=4.18.1",
+    "axios": ">=1.15.0",
+    "follow-redirects": ">=1.16.0",
+    "brace-expansion": "^2.0.3"
+  },
+  "pnpm.onlyBuiltDependencies": [
+    "@parcel/watcher",
+    "@prisma/engines",
+    "argon2",
+    "esbuild",
+    "prisma",
+    "puppeteer",
+    "sharp",
+    "unrs-resolver"
+  ]
 }
