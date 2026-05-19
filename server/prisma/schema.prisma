@@ -17,6 +17,7 @@ model User {
 
   hasCompletedOnboarding Boolean @default(false)
   isVerified             Boolean @default(false) // WebAuthn / Trust Tier status
+  subscriptionTier       SubscriptionTier @default(FREE) // NYX Plus subscription status
 
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
@@ -191,6 +192,11 @@ model Participant {
 enum MessageType {
   USER
   SYSTEM
+}
+
+enum SubscriptionTier {
+  FREE
+  SUBSCRIBER
 }
 
 model Message {

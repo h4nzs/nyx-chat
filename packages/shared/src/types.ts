@@ -26,6 +26,8 @@ export type User = z.infer<typeof MinimalUserSchema> & {
   autoDestructDays?: number | null;
 };
 
+import { SubscriptionTier } from './constants.js';
+
 export type ProfileUser = {
   id: UserId;
   name?: string;
@@ -36,6 +38,7 @@ export type ProfileUser = {
   pqPublicKey?: string;
   signingKey?: string;
   isVerified?: boolean;
+  subscriptionTier?: SubscriptionTier;
 };
 
 export type MessageStatus = {

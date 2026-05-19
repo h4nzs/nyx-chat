@@ -203,6 +203,9 @@ importers:
       link-preview-js:
         specifier: ^4.0.1
         version: 4.0.1
+      midtrans-client:
+        specifier: ^1.4.3
+        version: 1.4.3
       mime:
         specifier: ^4.1.0
         version: 4.1.0
@@ -261,6 +264,9 @@ importers:
       '@types/jsonwebtoken':
         specifier: ^9.0.6
         version: 9.0.10
+      '@types/midtrans-client':
+        specifier: ^1.4.0
+        version: 1.4.0
       '@types/morgan':
         specifier: ^1.9.9
         version: 1.9.10
@@ -4001,6 +4007,9 @@ packages:
   '@types/methods@1.1.4':
     resolution: {integrity: sha512-ymXWVrDiCxTBE3+RIrrP533E70eA+9qu7zdWoHuOmGujkYtzf4HQF96b8nwHLqhuf4ykX61IGRIB38CC6/sImQ==}
 
+  '@types/midtrans-client@1.4.0':
+    resolution: {integrity: sha512-7EhZ3VR/g4JhIpIywuOllBFjaS0ZDjlgbPlPmma6XsC+i6rx5+9P8Rk1y7gtRh7TRL9Zerr4MAtS3m9pIuIveQ==}
+
   '@types/morgan@1.9.10':
     resolution: {integrity: sha512-sS4A1zheMvsADRVfT0lYbJ4S9lmsey8Zo2F7cnbYjWHP67Q0AwMYuuzLlkIM2N8gAbb9cubhIVFwcIN2XyYCkA==}
 
@@ -7284,6 +7293,9 @@ packages:
   micromatch@4.0.8:
     resolution: {integrity: sha512-PXwfBhYu0hBCPw8Dn0E+WDYb7af3dSLVWKi3HGv84IdF4TyFoC0ysxFd0Goxw7nSv4T/PzEJQxsYsEiFCKo2BA==}
     engines: {node: '>=8.6'}
+
+  midtrans-client@1.4.3:
+    resolution: {integrity: sha512-2oNEYgD8+FeUIOE5rUnLmqacbh3GHWvq+xKmL3dS4ZgCAiD5uzQQrKOz7tJ+7OOi3TbHDD8POLI2D6/xzQMCxw==}
 
   mime-db@1.52.0:
     resolution: {integrity: sha512-sPU4uV7dYlvtWJxwwxHD0PuihVNiE7TyAbQ5SWxDCB9mUYvOgroQOwYQQOKPJ8CIbE+1ETVlOoK1UC2nU3gYvg==}
@@ -13358,6 +13370,8 @@ snapshots:
 
   '@types/methods@1.1.4': {}
 
+  '@types/midtrans-client@1.4.0': {}
+
   '@types/morgan@1.9.10':
     dependencies:
       '@types/node': 25.8.0
@@ -17604,6 +17618,13 @@ snapshots:
     dependencies:
       braces: 3.0.3
       picomatch: 2.3.2
+
+  midtrans-client@1.4.3:
+    dependencies:
+      axios: 1.16.0
+      lodash: 4.18.1
+    transitivePeerDependencies:
+      - debug
 
   mime-db@1.52.0: {}
 

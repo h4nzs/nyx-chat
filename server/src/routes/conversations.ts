@@ -180,11 +180,12 @@ router.post(
 
     if (!Array.isArray(userIds)) return res.status(400).json({ error: 'userIds must be an array.' })
 
-    const user = await prisma.user.findUnique({ where: { id: creatorId }, select: { isVerified: true } });
+    const user = await prisma.user.findUnique({ where: { id: creatorId }, select: { isVerified: true, subscriptionTier: true } });
     const isVerified = user?.isVerified ?? false;
+    const maxGroupMembers = user?.subscriptionTier === 'SUBSCRIBER' ? 500 : 100;
 
     if (!isVerified && isGroup) throw new ApiError(403, 'SANDBOX_GROUP_RESTRICTION: Unverified users cannot create groups.');
-    if (userIds.length > MAX_GROUP_MEMBERS) return res.status(400).json({ error: `Group cannot have more than ${MAX_GROUP_MEMBERS} members.` })
+    if (userIds.length > maxGroupMembers) return res.status(400).json({ error: `Group cannot have more than ${maxGroupMembers} members.` })
 
     if (!isGroup) {
       const isSelfChat = userIds.length === 1 && userIds[0] === creatorId;
@@ -325,8 +326,11 @@ router.post('/:id/participants', async (req, res, next) => {
     if (!adminParticipant) return res.status(403).json({ error: 'Forbidden: You are not an admin of this group.' })
     if (!Array.isArray(userIds)) return res.status(400).json({ error: 'userIds must be an array.' })
 
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { subscriptionTier: true } });
+    const maxGroupMembers = user?.subscriptionTier === 'SUBSCRIBER' ? 500 : 100;
+
     const currentCount = await prisma.participant.count({ where: { conversationId } })
-    if (currentCount + userIds.length > MAX_GROUP_MEMBERS) return res.status(400).json({ error: `Group limit reached (${MAX_GROUP_MEMBERS} members max).` })
+    if (currentCount + userIds.length > maxGroupMembers) return res.status(400).json({ error: `Group limit reached (${maxGroupMembers} members max).` })
 
     const newParticipantsRaw = await prisma.$transaction(async (tx) => {
       await Promise.all(userIds.map((userId: string) => tx.participant.upsert({ where: { userId_conversationId: { userId, conversationId } }, create: { userId, conversationId, joinedAt: new Date() }, update: {} })))

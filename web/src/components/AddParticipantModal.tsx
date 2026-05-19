@@ -3,10 +3,12 @@ import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import { toAbsoluteUrl } from '@utils/url';
 import { useConversationStore } from '@store/conversation';
+import { useAuthStore } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
 import { hashUsername } from '@lib/crypto-worker-proxy';
 import { asUserId } from '@nyx/shared';
 import type { MinimalProfile } from '@nyx/shared';
+import useDynamicIslandStore from '@store/dynamicIsland';
 import ModalBase from './ui/ModalBase';
 import DefaultAvatar from '@/components/ui/DefaultAvatar';
 import { useTranslation } from 'react-i18next';
@@ -21,6 +23,7 @@ const AddParticipantModal = ({ conversationId, onClose }: {
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const me = useAuthStore(s => s.user);
 
   const { conversation } = useConversationStore(useShallow(state => ({
     conversation: state.conversations.find(c => c.id === conversationId),
@@ -66,6 +69,21 @@ const AddParticipantModal = ({ conversationId, onClose }: {
   }, [searchTerm, existingParticipantIds]);
 
   const handleSelectUser = (userId: string) => {
+    if (!selectedUserIds.includes(userId)) {
+      const maxMembers = me?.subscriptionTier === 'SUBSCRIBER' ? 500 : 100;
+      if (existingParticipantIds.length + selectedUserIds.length >= maxMembers) {
+        if (me?.subscriptionTier !== 'SUBSCRIBER') {
+          useDynamicIslandStore.getState().addActivity({
+            type: 'upsell',
+            message: `Group limit reached (${maxMembers} max). Upgrade to host 500 members.`
+          }, 5000);
+        } else {
+          toast.error(t('modals:group_info.toasts.limit_reached', { defaultValue: `Group limit reached (${maxMembers} members max).` }));
+        }
+        return;
+      }
+    }
+    
     setSelectedUserIds(prev => 
       prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
     );

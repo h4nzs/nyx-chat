@@ -1,12 +1,14 @@
 import DefaultAvatar from "@/components/ui/DefaultAvatar";
+import { useState } from 'react';
 import { toAbsoluteUrl } from '@utils/url';
 import { useNavigate } from 'react-router-dom';
 import { useConversationStore } from '@store/conversation';
 import { motion, AnimatePresence } from 'framer-motion';
-import useDynamicIslandStore, { Activity, NotificationActivity, UploadActivity } from '@store/dynamicIsland';
-import { FiFile, FiX, FiMessageSquare, FiUploadCloud } from 'react-icons/fi';
+import useDynamicIslandStore, { Activity, NotificationActivity, UploadActivity, UpsellActivity } from '@store/dynamicIsland';
+import { FiFile, FiX, FiMessageSquare, FiUploadCloud, FiStar } from 'react-icons/fi';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useTranslation } from 'react-i18next';
+import SubscriptionModal from './SubscriptionModal';
 
 const NotificationView = ({ activity }: { activity: NotificationActivity }) => {
   const { t } = useTranslation(['common']);
@@ -92,19 +94,50 @@ const UploadView = ({ activity }: { activity: UploadActivity }) => {
   );
 };
 
+const UpsellView = ({ activity, onUpgrade }: { activity: UpsellActivity, onUpgrade: () => void }) => {
+  const removeActivity = useDynamicIslandStore(state => state.removeActivity);
+
+  return (
+    <div className="w-full h-full flex items-center gap-3 px-1">
+      <div className="w-8 h-8 rounded-full bg-yellow-500/10 flex items-center justify-center text-yellow-500">
+        <FiStar size={14} className="animate-pulse" />
+      </div>
+      
+      <div className="flex-1 min-w-0 flex flex-col justify-center cursor-pointer" onClick={() => { removeActivity(activity.id); onUpgrade(); }}>
+        <div className="flex justify-between items-baseline">
+           <p className="text-[10px] font-bold text-white/90 uppercase tracking-wider">NYX PRO</p>
+        </div>
+        <p className="text-xs text-yellow-500/80 truncate font-medium hover:text-yellow-500 transition-colors">
+          {activity.message}
+        </p>
+      </div>
+      
+      <button 
+        onClick={(e) => { e.stopPropagation(); removeActivity(activity.id); onUpgrade(); }}
+        className="text-[10px] font-bold uppercase tracking-wider bg-yellow-500 text-bg-dark px-2 py-1 rounded"
+      >
+        Upgrade
+      </button>
+    </div>
+  );
+};
+
 const DynamicIsland = () => {
   const activities = useDynamicIslandStore(state => state.activities);
   const currentActivity = activities[0]; 
+  const [showProModal, setShowProModal] = useState(false);
 
   const renderActivity = (activity: Activity) => {
     switch (activity.type) {
       case 'notification': return <NotificationView activity={activity} />;
       case 'upload': return <UploadView activity={activity} />;
+      case 'upsell': return <UpsellView activity={activity} onUpgrade={() => setShowProModal(true)} />;
       default: return null;
     }
   }
 
   return (
+    <>
     <div className="fixed top-2 left-0 right-0 z-[100] pointer-events-none flex justify-center">
       <AnimatePresence>
         {currentActivity && (
@@ -132,6 +165,8 @@ const DynamicIsland = () => {
         )}
       </AnimatePresence>
     </div>
+    {showProModal && <SubscriptionModal onClose={() => setShowProModal(false)} />}
+    </>
   );
 };
 
