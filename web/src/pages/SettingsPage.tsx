@@ -13,7 +13,7 @@ import { useThemeStore, ACCENT_COLORS, AccentColor } from '@store/theme';
 import { 
   FiChevronRight, FiEdit2, FiHeart, FiCoffee, FiFlag, FiLogOut, 
   FiShield, FiSmartphone, FiKey, FiActivity, FiMoon, FiSun, FiBell, FiHelpCircle, FiArrowLeft, FiLock,
-  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle, FiInfo, FiChevronDown
+  FiDownload, FiUpload, FiDatabase, FiSend, FiCpu, FiZap, FiAlertTriangle, FiInfo, FiChevronDown, FiStar
 } from 'react-icons/fi';
 import { startRegistration } from '@simplewebauthn/browser';
 import { IoFingerPrint } from 'react-icons/io5';
@@ -32,6 +32,7 @@ import { getDeviceAutoUnlockKey, getEncryptedKeys, setPanicPassword } from '@lib
 import { useMessageStore } from '@store/message';
 import { LinkedDevicesPanel } from '@components/LinkedDevicesPanel';
 import ImageCropperModal from '../components/ImageCropperModal';
+import SubscriptionModal from '../components/SubscriptionModal';
 
 /* --- MICRO-COMPONENTS --- */
 
@@ -166,6 +167,7 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [showProModal, setShowProModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
@@ -656,6 +658,40 @@ export default function SettingsPage() {
           </a>
         </div>
 
+        {/* 2B. NYX PRO (Subscription) */}
+        <div className="col-span-1 md:col-span-6 lg:col-span-4 flex flex-col">
+          <button 
+            onClick={() => setShowProModal(true)}
+            className="flex-1 group relative overflow-hidden rounded-3xl bg-bg-main shadow-neu-flat-light dark:shadow-neu-flat-dark border border-yellow-500/30 transition-all hover:scale-[1.02] text-left"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-yellow-500/5 to-transparent opacity-50"></div>
+            <div className="absolute top-0 right-0 p-4 opacity-20 group-hover:opacity-100 transition-opacity">
+              <FiStar size={40} className="text-yellow-500" />
+            </div>
+
+            <div className="relative z-10 p-8 h-full flex flex-col justify-between">
+              <div>
+                <div className="flex items-center gap-2 mb-2 text-yellow-500">
+                  <FiZap size={24} />
+                  <span className="font-black tracking-widest uppercase text-xs">Subscription</span>
+                </div>
+                <h3 className="text-2xl font-bold leading-tight mb-2">NYX PRO</h3>
+                <p className="text-xs text-text-secondary font-mono leading-relaxed">
+                  Unlock maximum messaging, group, and file upload limits while preserving total anonymity.
+                </p>
+              </div>
+              <div className="mt-6 flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold tracking-widest text-text-secondary/50">Status</span>
+                <div className={`px-3 py-1 rounded font-bold uppercase tracking-wider text-[10px] flex items-center gap-1 ${user?.subscriptionTier === 'SUBSCRIBER' ? 'bg-yellow-500/10 text-yellow-500' : 'bg-white/5 text-text-secondary'}`}>
+                  {user?.subscriptionTier === 'SUBSCRIBER' ? 'Active PRO' : 'Free Tier'}
+                </div>
+              </div>
+            </div>
+            
+            <div className="absolute bottom-0 left-0 w-full h-1 bg-yellow-500 shadow-[0_-2px_10px_rgba(234,179,8,1)]"></div>
+          </button>
+        </div>
+
         {/* 3. VISUAL INTERFACE (Theme) */}
         <div className="col-span-1 md:col-span-6 lg:col-span-4">
           <ControlModule title={t('settings:modules.visual')} icon={theme === 'dark' ? FiMoon : FiSun}>
@@ -1011,6 +1047,11 @@ export default function SettingsPage() {
         </div>
 
       </div>
+
+      {/* PRO MODAL */}
+      {showProModal && (
+        <SubscriptionModal onClose={() => setShowProModal(false)} />
+      )}
 
       {/* UPGRADE MODAL */}
       <ModalBase isOpen={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} title={t('settings:modals.upgrade_title')}>

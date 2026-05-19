@@ -356,7 +356,7 @@ export function registerSocket(httpServer: HttpServer) {
     });
 
     socket.on('message:send', async (message: MessageSendPayload, callback: (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => void) => {
-      const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true } });
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { isVerified: true, subscriptionTier: true } });
 
       if (!user?.isVerified) {
           try {
@@ -367,10 +367,11 @@ export function registerSocket(httpServer: HttpServer) {
           } catch (redisError) {
               return callback?.({ ok: false, error: "Service unavailable. Try again later." });
           }
-      }
-
-      if (!await checkRateLimit(userId, 'message', 15, 60)) { 
-         return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
+      } else {
+          const limit = user.subscriptionTier === 'SUBSCRIBER' ? 50 : 15;
+          if (!await checkRateLimit(userId, 'message', limit, 60)) { 
+             return callback?.({ ok: false, error: "Rate limit exceeded. Slow down." });
+          }
       }
 
       const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId } = message;

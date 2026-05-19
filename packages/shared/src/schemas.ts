@@ -17,6 +17,8 @@ export const StoryIdSchema = z.string().min(1).transform((val) => asStoryId(val)
 export const EncryptionModeEnum = z.enum(['SENDER_KEY', 'PQ_DR']);
 export type EncryptionMode = z.infer<typeof EncryptionModeEnum>;
 
+import { SubscriptionTier } from './constants.js';
+
 export const MinimalUserSchema = z.object({
   id: UserIdSchema,
   username: z.string().optional(),
@@ -25,6 +27,7 @@ export const MinimalUserSchema = z.object({
   encryptedProfile: Base64StringSchema.nullable().optional(),
   role: z.string().optional(),
   isVerified: z.boolean().optional(),
+  subscriptionTier: z.nativeEnum(SubscriptionTier).optional(),
 }).passthrough();
 
 export const MinimalConversationSchema = z.object({

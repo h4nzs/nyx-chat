@@ -10,6 +10,7 @@ import { useConnectionStore } from '@store/connection';
 import { useAuthStore } from '@store/auth';
 import { useThemeStore } from '@store/theme';
 import { useBurnerStore } from '@store/burner';
+import useDynamicIslandStore from '@store/dynamicIsland';
 import LinkPreviewCard from './LinkPreviewCard';
 import SmartReply from './SmartReply';
 import { useMessageStore } from '@store/message';
@@ -286,19 +287,24 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
     if (e.target.files && e.target.files.length > 0) {
       const selectedFiles = Array.from(e.target.files);
       const validFiles: File[] = [];
-      const MAX_FILE_SIZE = 100 * 1024 * 1024;
+      const user = useAuthStore.getState().user;
+      const MAX_FILE_SIZE = user?.subscriptionTier === 'SUBSCRIBER' ? 500 * 1024 * 1024 : 100 * 1024 * 1024;
       const MAX_FILES_PER_MESSAGE = 10;
       const restrictedExtensions = ['.exe', '.sh', '.bat', '.cmd', '.msi', '.vbs', '.js', '.ts', '.html', '.php', '.phtml', '.php5', '.py', '.rb', '.pl', '.jar', '.com', '.scr', '.cpl', '.msc'];
 
       if (stagedFiles.length + selectedFiles.length > MAX_FILES_PER_MESSAGE) {
-        toast.error(t('chat:messages.max_files', { count: MAX_FILES_PER_MESSAGE, defaultValue: `You can only send up to ${MAX_FILES_PER_MESSAGE} files at once.` }));        
+        toast.error(t('chat:messages.max_files', { count: MAX_FILES_PER_MESSAGE, defaultValue: `You can only send up to ${MAX_FILES_PER_MESSAGE} files at once.` }));
         if (fileInputRef.current) fileInputRef.current.value = '';
         return;
       }
 
       for (const file of selectedFiles) {
         if (file.size > MAX_FILE_SIZE) {
-           toast.error(t('chat:messages.file_too_large', { name: file.name, defaultValue: `"${file.name}" is too large (Max: 100MB)` }));
+           const maxSizeMB = MAX_FILE_SIZE / (1024 * 1024);
+           useDynamicIslandStore.getState().addActivity({
+             type: 'upsell',
+             message: `File too large (${Math.round(file.size / (1024 * 1024))}MB). Upgrade to send up to 500MB.`
+           }, 5000);
            continue;
         }
         const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
@@ -313,7 +319,6 @@ export default function MessageInput({ onSend, onTyping, onVoiceSend, conversati
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
-
   const hasContentToSend = hasTextUI || stagedFiles.length > 0;
 
   const handleSubmit = async (e?: React.FormEvent, forceSilent = false) => {

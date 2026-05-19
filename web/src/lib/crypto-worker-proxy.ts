@@ -296,11 +296,11 @@ export function worker_x3dh_recipient_regenerate(payload: {
 
 // --- LARGE FILE STREAMING PROXY FUNCTIONS ---
 
-export function worker_file_encrypt(fileBuffer: ArrayBuffer): Promise<{ combinedData: ArrayBuffer, key: Uint8Array }> {
+export function worker_file_encrypt(fileBuffer: ArrayBuffer | Blob): Promise<{ combinedData: ArrayBuffer, key: Uint8Array }> {
     return sendToWorker('file_encrypt', { fileBuffer });
 }
 
-export function worker_file_decrypt(combinedData: ArrayBuffer, keyBytes: Uint8Array): Promise<ArrayBuffer> {
+export function worker_file_decrypt(combinedData: ArrayBuffer | Blob, keyBytes: Uint8Array): Promise<ArrayBuffer> {
     return sendToWorker('file_decrypt', { combinedData, keyBytes: toArray(keyBytes) });
 }
 

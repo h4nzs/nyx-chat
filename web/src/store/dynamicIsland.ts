@@ -19,13 +19,19 @@ export interface UploadActivity {
   progress: number; // 0-100
 }
 
-export type Activity = NotificationActivity | UploadActivity;
+export interface UpsellActivity {
+  type: 'upsell';
+  id: string;
+  message: string;
+}
+
+export type Activity = NotificationActivity | UploadActivity | UpsellActivity;
 
 // --- Store State and Actions ---
 
 interface DynamicIslandState {
   activities: Activity[];
-  addActivity: (activityData: Omit<Activity, 'id'>, timeout?: number) => string;
+  addActivity: (activityData: Omit<NotificationActivity, 'id'> | Omit<UploadActivity, 'id'> | Omit<UpsellActivity, 'id'>, timeout?: number) => string;
   updateActivity: (id: string, updates: Partial<Activity>) => void;
   removeActivity: (id: string) => void;
 }

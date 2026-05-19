@@ -18,6 +18,12 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
       return res.status(400).json({ error: 'Missing required fields: fileName, fileType, or folder' })
     }
 
+    // [FIX] Cek status verifikasi pengguna
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { isVerified: true, subscriptionTier: true } });
+    if (!user?.isVerified) {
+        return res.status(403).json({ error: 'SANDBOX_UPLOAD_RESTRICTION: Unverified users cannot upload files.' });
+    }
+
     const allowedFolders = ['avatars', 'attachments', 'groups']
     const targetFolder = allowedFolders.includes(folder) ? folder : 'misc'
 
@@ -32,7 +38,8 @@ router.post('/presigned', requireAuth, uploadLimiter, async (req, res, next) => 
     if (fileSize > 0) {
       // Unified Zero-Knowledge Limits (in Bytes) based purely on destination folder
       const AVATAR_LIMIT = 5 * 1024 * 1024;      // 5 MB for avatars
-      const ATTACHMENT_LIMIT = 100 * 1024 * 1024; // 100 MB max for chat attachments (HD Images, Videos, Files)
+      const maxAttachmentMB = user.subscriptionTier === 'SUBSCRIBER' ? 500 : 100;
+      const ATTACHMENT_LIMIT = maxAttachmentMB * 1024 * 1024; // 100 MB or 500 MB max for chat attachments
       
       const maxSize = (targetFolder === 'avatars' || targetFolder === 'groups') ? AVATAR_LIMIT : ATTACHMENT_LIMIT;
 

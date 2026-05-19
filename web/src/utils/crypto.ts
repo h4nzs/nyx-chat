@@ -1528,11 +1528,10 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
 // --- File Encryption/Decryption ---
 
 export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; key: string }> {
-  const fileData = await blob.arrayBuffer();
   const sodium = await getSodiumLib();
   const { worker_file_encrypt } = await getWorkerProxy();
   
-  const { combinedData, key } = await worker_file_encrypt(fileData);
+  const { combinedData, key } = await worker_file_encrypt(blob);
 
   const encryptedBlob = new Blob([combinedData], { type: 'application/octet-stream' });
 
@@ -1542,17 +1541,10 @@ export async function encryptFile(blob: Blob): Promise<{ encryptedBlob: Blob; ke
 }
 
 export async function encryptFileViaWorker(blob: Blob): Promise<{ encryptedBlob: Blob; key: string }> {
-  const fileData = await new Promise<ArrayBuffer>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as ArrayBuffer);
-      reader.onerror = () => reject(new Error("Failed to read file"));
-      reader.readAsArrayBuffer(blob);
-  });
-
   const sodium = await getSodiumLib();
   const { worker_file_encrypt } = await getWorkerProxy();
   
-  const { combinedData, key } = await worker_file_encrypt(fileData);
+  const { combinedData, key } = await worker_file_encrypt(blob);
 
   const encryptedBlob = new Blob([combinedData], { type: 'application/octet-stream' });
 
@@ -1567,17 +1559,7 @@ export async function decryptFile(encryptedBlob: Blob, keyB64: string, originalT
 
   const keyBytes = sodium.from_base64(keyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
   
-  const combinedData = await new Promise<ArrayBuffer>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as ArrayBuffer);
-      reader.onerror = () => reject(new Error("Failed to read encrypted file"));
-      reader.readAsArrayBuffer(encryptedBlob);
-  });
-
-  const HEADER_BYTES = sodium.crypto_secretstream_xchacha20poly1305_HEADERBYTES;
-  if (combinedData.byteLength < HEADER_BYTES) throw new Error("Encrypted file is too short.");
-
-  const decryptedData = await worker_file_decrypt(combinedData, keyBytes);
+  const decryptedData = await worker_file_decrypt(encryptedBlob, keyBytes);
 
   return new Blob([decryptedData], { type: originalType });
 }

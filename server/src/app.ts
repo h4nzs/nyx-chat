@@ -25,6 +25,7 @@ import sessionsRouter from "./routes/sessions.js";
 import aiRoutes from "./routes/ai.js";
 import adminRouter from "./routes/admin.js";
 import storiesRoutes from "./routes/stories.js";
+import subscriptionsRouter from "./routes/subscriptions.js";
 import webpush from "web-push";
 import { generalLimiter } from "./middleware/rateLimiter.js";
 import { reportRoutes } from "./routes/reports.js";
@@ -314,6 +315,7 @@ app.use("/api/session-keys", sessionKeysRouter);
 app.use("/api/reports", reportRoutes);
 app.use("/api/admin", adminRouter);
 app.use("/api/sessions", sessionsRouter);
+app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/ai", aiRoutes);
 app.use("/api/stories", storiesRoutes);
 

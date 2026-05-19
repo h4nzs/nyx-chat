@@ -8,6 +8,7 @@ import { toAbsoluteUrl } from '@utils/url';
 import { getSocket } from '@lib/socket';
 import { hashUsername } from '@lib/crypto-worker-proxy';
 import toast from 'react-hot-toast';
+import useDynamicIslandStore from '@store/dynamicIsland';
 import ModalBase from './ui/ModalBase';
 import { FiCheck } from 'react-icons/fi';
 import type { UserId, MinimalProfile } from '@nyx/shared';
@@ -60,6 +61,19 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
   }, [searchQuery, me?.id, selectedUsers]);
 
   const handleSelectUser = (user: MinimalProfile) => {
+    const maxMembers = me?.subscriptionTier === 'SUBSCRIBER' ? 500 : 100;
+    // selectedUsers.length is currently selected, +1 for the creator, but let's just use maxMembers - 1 for new selections
+    if (selectedUsers.length >= maxMembers - 1) {
+      if (me?.subscriptionTier !== 'SUBSCRIBER') {
+        useDynamicIslandStore.getState().addActivity({
+          type: 'upsell',
+          message: `Group limit reached (${maxMembers} max). Upgrade to host 500 members.`
+        }, 5000);
+      } else {
+        toast.error(t('modals:group_info.toasts.limit_reached', { defaultValue: `Group limit reached (${maxMembers} members max).` }));
+      }
+      return;
+    }
     setSelectedUsers(prev => [...prev, user]);
     setSearchQuery('');
   };
