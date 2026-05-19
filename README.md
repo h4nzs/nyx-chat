@@ -41,7 +41,7 @@ NYX runs its cryptographic engine entirely inside a dedicated **Web Worker** usi
 ### Strict Post-Quantum Cryptography
 To protect against "Harvest Now, Decrypt Later" attacks by future quantum computers, NYX operates in a **Mandatory Post-Quantum Mode** (rejecting classical-only downgrades). It employs a strict cryptographic architecture:
 
-* **Key Exchange (Strict PQX3DH):** Combines classical X25519 with **ML-KEM-768 (Kyber / X-Wing)** for asynchronous key agreement. This establishes the initial quantum-resistant shared secrets between devices.
+* **Key Exchange (Strict PQX3DH):** Combines classical X25519 with **ML-KEM-768 (X-Wing)** for asynchronous key agreement. This establishes the initial quantum-resistant shared secrets between devices.
 * **Message Encryption & Distribution:** Universal **Client-Side Fan-Out Sender Key Protocol** (XChaCha20-Poly1305) for all chats. While the message payloads use symmetric ratcheting (which is naturally quantum-resistant), the critical **distribution of these session keys** to group members is secured using the **PQX3DH channels and ML-KEM encapsulation (PQ-Seals)**. The server acts purely as a **Blind Relay**, routing opaque ciphertext blobs without ever seeing plaintext keys.
 * **Hardware-Bound Local Vault:** Your master seed and recovery phrases are encrypted locally using **WebAuthn PRF (Biometric Binding)** stretched through an Argon2id KDF (128MB memory cost), ensuring keys cannot be extracted even if the device storage is physically compromised.
 * **Primitives:**
