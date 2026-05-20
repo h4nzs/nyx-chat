@@ -22,8 +22,7 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
 
   // Load Midtrans Snap script dynamically
   useEffect(() => {
-    const isProd = import.meta.env.PROD;
-    const scriptSrc = isProd 
+    const scriptSrc = import.meta.env.VITE_MIDTRANS_ENV === 'production'
         ? 'https://app.midtrans.com/snap/snap.js' 
         : 'https://app.sandbox.midtrans.com/snap/snap.js';
         
