@@ -256,11 +256,9 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
   cookieName: "x-csrf-token",
   cookieOptions: {
     httpOnly: true,
-    // PENTING: Gunakan 'none' agar cookie dikirim cross-site/subdomain
     sameSite: "none", 
-    secure: true, // Wajib true jika sameSite=none
+    secure: true, 
     path: "/",
-    // Domain cookie agar bisa dibaca oleh frontend dan backend
     domain: isProd ? ".nyx-app.my.id" : undefined, 
   },
   size: 64,
@@ -268,7 +266,12 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
   getCsrfTokenFromRequest: (req) => req.headers["csrf-token"] as string,
 });
 
-app.use(doubleCsrfProtection);
+app.use((req, res, next) => {
+  if (req.path === '/api/subscriptions/webhook') {
+    return next();
+  }
+  doubleCsrfProtection(req, res, next);
+});
 
 app.get("/api/csrf-token", (req: Request, res: Response) => {
   const csrfToken = generateCsrfToken(req, res);
