@@ -154,7 +154,7 @@ async (req, res, next) => {
 
     res.status(201).json({
       message: 'Registration successful.',
-      user: { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified },
+      user: { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, subscriptionTier: user.subscriptionTier },
       accessToken: tokens.access,
       needVerification: false
     })
@@ -248,7 +248,7 @@ router.post('/login', authLimiter, zodValidate({
       }
     }
 
-    const safeUser = { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, role: user.role }
+    const safeUser = { id: user.id, usernameHash: user.usernameHash, encryptedProfile: user.encryptedProfile, isVerified: user.isVerified, role: user.role, subscriptionTier: user.subscriptionTier }
 
     const tokens = await issueTokens(safeUser, activeDeviceId, req)
     setAuthCookies(res, tokens)
@@ -634,6 +634,7 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
           encryptedProfile: true,
           isVerified: true,
           role: true,
+          subscriptionTier: true,
           bannedAt: true,
           banReason: true,
           devices: { orderBy: { lastActiveAt: 'desc' }, take: 1 }
@@ -657,7 +658,7 @@ router.post('/webauthn/login/verify', async (req, res, next) => {
 
       res.json({
         verified: true,
-        user: { id: safeUser.id, usernameHash: safeUser.usernameHash, encryptedProfile: safeUser.encryptedProfile, isVerified: safeUser.isVerified, role: safeUser.role },
+        user: { id: safeUser.id, usernameHash: safeUser.usernameHash, encryptedProfile: safeUser.encryptedProfile, isVerified: safeUser.isVerified, role: safeUser.role, subscriptionTier: safeUser.subscriptionTier },
         accessToken: tokens.access,
         encryptedPrivateKey: encryptedPrivKeyStr
       })    } else {

@@ -58,7 +58,7 @@ router.get('/me', async (req, res, next) => {
     const user = await prisma.user.update({
       where: { id: req.user.id },
       data: { lastActiveAt: new Date() },
-      select: { id: true, usernameHash: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, role: true, autoDestructDays: true }
+      select: { id: true, usernameHash: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, role: true, autoDestructDays: true, subscriptionTier: true }
     })
     res.json(user)
   } catch (error) { next(error) }
