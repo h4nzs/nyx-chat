@@ -52,9 +52,9 @@ const MarkdownMessage: React.FC<MarkdownMessageProps> = ({ content, isOwn = fals
               </pre>
             );
           },
-          a({ node, ...props }) {
-            const safeHref = props.href?.startsWith('http://') || props.href?.startsWith('https://') || props.href?.startsWith('mailto:') 
-              ? props.href 
+          a({ node, href, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { node?: unknown }) {
+            const safeHref = href?.startsWith('http://') || href?.startsWith('https://') || href?.startsWith('mailto:') 
+              ? href 
               : '#';
 
             return (

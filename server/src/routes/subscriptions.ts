@@ -12,13 +12,29 @@ const isProd = process.env.MIDTRANS_ENV === 'production';
 const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-DUMMY';
 const clientKey = process.env.MIDTRANS_CLIENT_KEY || 'SB-Mid-client-DUMMY';
 
-let snap: any;
+interface MidtransNotificationResponse {
+  order_id: string;
+  transaction_status: string;
+  fraud_status?: string;
+  signature_key: string;
+  status_code: string;
+  gross_amount: string;
+  [key: string]: unknown;
+}
+
+interface SnapWithTransaction extends midtransClient.Snap {
+  transaction: {
+    notification(notification: Record<string, unknown>): Promise<MidtransNotificationResponse>;
+  };
+}
+
+let snap: SnapWithTransaction | undefined;
 try {
   snap = new midtransClient.Snap({
     isProduction: isProd,
     serverKey: serverKey,
     clientKey: clientKey
-  });
+  }) as SnapWithTransaction;
 } catch (error) {
   console.warn("Midtrans initialization failed. Payment features may not work:", error);
 }

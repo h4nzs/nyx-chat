@@ -7,10 +7,29 @@ import { FiStar, FiShield, FiZap, FiUsers, FiFile, FiLock } from 'react-icons/fi
 import { useTranslation } from 'react-i18next';
 
 // Add type for window.snap
+interface MidtransResult {
+  status_code: string;
+  transaction_id: string;
+  order_id: string;
+  gross_amount: string;
+  payment_type: string;
+  transaction_time: string;
+  transaction_status: string;
+  fraud_status?: string;
+  [key: string]: unknown;
+}
+
+interface MidtransOptions {
+  onSuccess?: (result: MidtransResult) => void;
+  onPending?: (result: MidtransResult) => void;
+  onError?: (result: MidtransResult) => void;
+  onClose?: () => void;
+}
+
 declare global {
   interface Window {
     snap: {
-      pay: (token: string, options: any) => void;
+      pay: (token: string, options: MidtransOptions) => void;
     };
   }
 }
@@ -48,15 +67,15 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
 
       if (window.snap && res.token) {
         window.snap.pay(res.token, {
-          onSuccess: function (result: any) {
+          onSuccess: function (_result: MidtransResult) {
             toast.success("Payment successful! Your account will be upgraded momentarily.");
             onClose();
           },
-          onPending: function (result: any) {
+          onPending: function (_result: MidtransResult) {
             toast.success("Payment pending. Please complete your payment.");
             onClose();
           },
-          onError: function (result: any) {
+          onError: function (_result: MidtransResult) {
             toast.error("Payment failed. Please try again.");
             setIsLoading(false);
           },
