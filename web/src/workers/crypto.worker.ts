@@ -49,7 +49,7 @@ async function ensureSodiumReady() {
 
 function _sanitizeError(error: unknown): string {
     if (!error) return 'Unknown Error';
-    let msg = error instanceof Error ? error.message : String(error);
+    const msg = error instanceof Error ? error.message : String(error);
     // Scrub potential JSON and long base64 strings
     return msg.replace(/\{.*?\}/g, '[REDACTED_OBJ]').replace(/\b[a-zA-Z0-9+/=_-]{32,}\b/g, '[REDACTED_STR]').substring(0, 150);
 }

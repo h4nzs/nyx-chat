@@ -39,14 +39,17 @@ const processMessageBuffer = async () => {
     // ✅ FIX: Prioritaskan pesan SYSTEM (distribusi kunci) agar diproses sebelum pesan USER.
     // Jika tidak, pesan USER mungkin gagal didekripsi karena kuncinya belum tersimpan.
     messagesToProcess.sort((a, b) => {
-        const isSystemA = (a as any).type === 'SYSTEM' || a.content?.startsWith('{');
-        const isSystemB = (b as any).type === 'SYSTEM' || b.content?.startsWith('{');
+        type SortableMessage = { type?: string, content?: string, createdAt?: string | Date, id: string };
+        const msgA = a as SortableMessage;
+        const msgB = b as SortableMessage;
+        const isSystemA = msgA.type === 'SYSTEM' || msgA.content?.startsWith('{');
+        const isSystemB = msgB.type === 'SYSTEM' || msgB.content?.startsWith('{');
         if (isSystemA && !isSystemB) return -1;
         if (!isSystemA && isSystemB) return 1;
-        const timeA = new Date(a.createdAt || 0).getTime();
-        const timeB = new Date(b.createdAt || 0).getTime();
+        const timeA = new Date(msgA.createdAt || 0).getTime();
+        const timeB = new Date(msgB.createdAt || 0).getTime();
         if (timeA !== timeB) return timeA - timeB;
-        return a.id.localeCompare(b.id);
+        return msgA.id.localeCompare(msgB.id);
     });
     
     const { addIncomingMessage } = useMessageStore.getState();

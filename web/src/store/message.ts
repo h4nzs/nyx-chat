@@ -1968,7 +1968,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   console.log('[Offline Sync] Memproses GROUP_KEY_DISTRIBUTION untuk conversation:', msg.conversationId || payload.conversationId);
 
                   const myId = useAuthStore.getState().user?.id;
-                  const myDist = payload.distributions?.find((d: any) => d.targetUserId === myId);
+                  const myDist = payload.distributions?.find((d: { targetUserId: string; encryptedKey: string }) => d.targetUserId === myId);
                    const extractedKey = myDist?.encryptedKey || payload.encryptedKey;
 
                    if (!extractedKey) {
