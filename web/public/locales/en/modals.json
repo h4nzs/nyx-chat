@@ -269,6 +269,41 @@
     "awaiting": "Awaiting target...",
     "camera_error": "Camera access denied or unavailable."
   },
+  "subscription": {
+    "title": "NYX PRO",
+    "subtitle": "Unlock the ultimate limits while maintaining zero-knowledge privacy.",
+    "pro_limits": "Pro Limits",
+    "features": {
+      "turbo_title": "Turbo Messaging",
+      "turbo_desc": "Up to 50 messages per minute. (Free: 15/min)",
+      "groups_title": "Massive Groups",
+      "groups_desc": "Host groups with up to 500 members. (Free: 100)",
+      "uploads_title": "Heavy Uploads",
+      "uploads_desc": "Send files up to 500 MB safely. (Free: 100 MB)",
+      "anon_title": "Total Anonymity",
+      "anon_desc": "No public badges. Your PRO status is invisible to others."
+    },
+    "pricing": {
+      "amount": "Rp55.000",
+      "per_month": "/ month"
+    },
+    "buttons": {
+      "upgrade": "Upgrade to PRO",
+      "already_subscribed": "Already Subscribed",
+      "back_to_features": "Back to features"
+    },
+    "payment": {
+      "select_method": "Select Payment Method",
+      "fiat_title": "Credit / E-Wallet (Midtrans)",
+      "fiat_desc": "Fast & easy via Midtrans",
+      "crypto_title": "Crypto (NOWPayments)",
+      "crypto_desc": "Recommended for maximum privacy"
+    },
+    "disclaimer": {
+      "guarantee": "Zero-Knowledge Guarantee:",
+      "desc": "If you choose credit/E-wallet methods, Payment is processed externally by Midtrans using an anonymous alias (<1>nyx_pay_{{id}}...</1>). Your payment details are never linked to your cryptographic identity or chat logs. But if you choose crypto, we don't even have your email! We only verify that you paid the invoice amount, without any personal info. Your privacy is 100% intact regardless of payment method."
+    }
+  },
   "user_info_modal": {
     "about": "About",
     "media": "Media",

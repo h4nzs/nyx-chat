@@ -4,7 +4,7 @@ import { api } from '@lib/api';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@store/auth';
 import { FiStar, FiShield, FiZap, FiUsers, FiFile, FiLock } from 'react-icons/fi';
-import { useTranslation } from 'react-i18next';
+import { useTranslation, Trans } from 'react-i18next';
 
 // Add type for window.snap
 interface MidtransResult {
@@ -35,7 +35,7 @@ declare global {
 }
 
 export default function SubscriptionModal({ onClose }: { onClose: () => void }) {
-  const { t } = useTranslation(['common']);
+  const { t } = useTranslation(['modals', 'common']);
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentSelector, setShowPaymentSelector] = useState(false);
   const user = useAuthStore(s => s.user);
@@ -110,22 +110,22 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
   };
 
   return (
-    <ModalBase isOpen={true} onClose={onClose} title="NYX PRO">
+    <ModalBase isOpen={true} onClose={onClose} title={t('modals:subscription.title')}>
       <div className="p-6 md:p-8 space-y-6">
         {/* Header */}
         <div className="text-center space-y-2">
           <div className="w-16 h-16 mx-auto rounded-full bg-accent/20 flex items-center justify-center border border-accent/30 shadow-[0_0_15px_rgba(var(--color-accent),0.3)]">
             <FiStar className="text-accent text-3xl" />
           </div>
-          <h2 className="text-2xl font-bold text-white tracking-wide">NYX PRO</h2>
+          <h2 className="text-2xl font-bold text-white tracking-wide">{t('modals:subscription.title')}</h2>
           <p className="text-text-secondary text-sm">
-            Unlock the ultimate limits while maintaining zero-knowledge privacy.
+            {t('modals:subscription.subtitle')}
           </p>
         </div>
 
         {showPaymentSelector ? (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
-            <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider mb-2 text-center">Select Payment Method</h3>
+            <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider mb-2 text-center">{t('modals:subscription.payment.select_method')}</h3>
             
             <button
               onClick={handleUpgrade}
@@ -136,8 +136,8 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
                  <FiZap className="text-accent" />
               </div>
               <div>
-                <div className="text-white font-bold">Credit / E-Wallet</div>
-                <div className="text-xs text-text-secondary">Fast & easy via Midtrans</div>
+                <div className="text-white font-bold">{t('modals:subscription.payment.fiat_title')}</div>
+                <div className="text-xs text-text-secondary">{t('modals:subscription.payment.fiat_desc')}</div>
               </div>
             </button>
 
@@ -150,8 +150,8 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
                  <FiLock className="text-yellow-500" />
               </div>
               <div>
-                <div className="text-white font-bold">Crypto (NOWPayments)</div>
-                <div className="text-xs text-yellow-500/80">Recommended for maximum privacy</div>
+                <div className="text-white font-bold">{t('modals:subscription.payment.crypto_title')}</div>
+                <div className="text-xs text-yellow-500/80">{t('modals:subscription.payment.crypto_desc')}</div>
               </div>
             </button>
 
@@ -159,22 +159,22 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
               onClick={() => setShowPaymentSelector(false)}
               className="w-full py-2 text-text-secondary hover:text-white text-sm transition-colors mt-2"
             >
-              Back to features
+              {t('modals:subscription.buttons.back_to_features')}
             </button>
           </div>
         ) : (
           <>
             {/* Features Comparison */}
             <div className="bg-bg-dark border border-white/10 rounded-xl p-5 space-y-4">
-              <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider mb-2">Pro Limits</h3>
+              <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider mb-2">{t('modals:subscription.pro_limits')}</h3>
               
               <div className="flex items-start gap-4">
                 <div className="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center shrink-0 mt-1">
                   <FiZap className="text-green-500" />
                 </div>
                 <div>
-                  <div className="text-white font-medium">Turbo Messaging</div>
-                  <div className="text-sm text-text-secondary">Up to 50 messages per minute. (Free: 15/min)</div>
+                  <div className="text-white font-medium">{t('modals:subscription.features.turbo_title')}</div>
+                  <div className="text-sm text-text-secondary">{t('modals:subscription.features.turbo_desc')}</div>
                 </div>
               </div>
 
@@ -183,8 +183,8 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
                   <FiUsers className="text-blue-500" />
                 </div>
                 <div>
-                  <div className="text-white font-medium">Massive Groups</div>
-                  <div className="text-sm text-text-secondary">Host groups with up to 500 members. (Free: 100)</div>
+                  <div className="text-white font-medium">{t('modals:subscription.features.groups_title')}</div>
+                  <div className="text-sm text-text-secondary">{t('modals:subscription.features.groups_desc')}</div>
                 </div>
               </div>
 
@@ -193,8 +193,8 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
                   <FiFile className="text-purple-500" />
                 </div>
                 <div>
-                  <div className="text-white font-medium">Heavy Uploads</div>
-                  <div className="text-sm text-text-secondary">Send files up to 500 MB safely. (Free: 100 MB)</div>
+                  <div className="text-white font-medium">{t('modals:subscription.features.uploads_title')}</div>
+                  <div className="text-sm text-text-secondary">{t('modals:subscription.features.uploads_desc')}</div>
                 </div>
               </div>
               
@@ -203,8 +203,8 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
                   <FiShield className="text-accent" />
                 </div>
                 <div>
-                  <div className="text-white font-medium">Total Anonymity</div>
-                  <div className="text-sm text-text-secondary">No public badges. Your PRO status is invisible to others.</div>
+                  <div className="text-white font-medium">{t('modals:subscription.features.anon_title')}</div>
+                  <div className="text-sm text-text-secondary">{t('modals:subscription.features.anon_desc')}</div>
                 </div>
               </div>
             </div>
@@ -212,8 +212,8 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
             {/* Price & CTA */}
             <div className="text-center space-y-4 pt-2">
               <div className="flex items-baseline justify-center gap-1">
-                <span className="text-3xl font-bold text-white">Rp55.000</span>
-                <span className="text-text-secondary">/ month</span>
+                <span className="text-3xl font-bold text-white">{t('modals:subscription.pricing.amount')}</span>
+                <span className="text-text-secondary">{t('modals:subscription.pricing.per_month')}</span>
               </div>
 
               <button
@@ -224,9 +224,9 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
                 {isLoading ? (
                   <span className="animate-spin w-5 h-5 border-2 border-bg-dark border-t-transparent rounded-full" />
                 ) : user?.subscriptionTier === 'SUBSCRIBER' ? (
-                  'Already Subscribed'
+                  t('modals:subscription.buttons.already_subscribed')
                 ) : (
-                  <>Upgrade to PRO <FiStar /></>
+                  <>{t('modals:subscription.buttons.upgrade')} <FiStar /></>
                 )}
               </button>
             </div>
@@ -237,7 +237,12 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
         <div className="bg-bg-dark/50 border border-yellow-500/20 rounded-lg p-3 flex items-start gap-3">
           <FiLock className="text-yellow-500 shrink-0 mt-0.5" />
           <p className="text-xs text-text-secondary leading-relaxed">
-            <strong className="text-yellow-500/90 font-medium">Zero-Knowledge Guarantee:</strong> If you choose credit/E-wallet methods, Payment is processed externally by Midtrans using an anonymous alias (<span className="font-mono">nyx_pay_{user?.id?.substring(0, 5)}...</span>). Your payment details are never linked to your cryptographic identity or chat logs. But if you choose crypto, we don't even have your email! We only verify that you paid the invoice amount, without any personal info. Your privacy is 100% intact regardless of payment method.
+            <strong className="text-yellow-500/90 font-medium">{t('modals:subscription.disclaimer.guarantee')}</strong>{' '}
+            <Trans 
+              i18nKey="modals:subscription.disclaimer.desc" 
+              values={{ id: user?.id?.substring(0, 5) }} 
+              components={{ 1: <span className="font-mono" /> }} 
+            />
           </p>
         </div>
 

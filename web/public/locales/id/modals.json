@@ -269,6 +269,41 @@
     "awaiting": "Menunggu target...",
     "camera_error": "Akses kamera ditolak atau tidak tersedia."
   },
+  "subscription": {
+    "title": "NYX PRO",
+    "subtitle": "Buka batas maksimal dengan tetap menjaga privasi zero-knowledge.",
+    "pro_limits": "Batas Pro",
+    "features": {
+      "turbo_title": "Pesan Turbo",
+      "turbo_desc": "Hingga 50 pesan per menit. (Gratis: 15/menit)",
+      "groups_title": "Grup Masif",
+      "groups_desc": "Buat grup dengan kapasitas hingga 500 anggota. (Gratis: 100)",
+      "uploads_title": "Unggahan Besar",
+      "uploads_desc": "Kirim file hingga 500 MB dengan aman. (Gratis: 100 MB)",
+      "anon_title": "Anonimitas Total",
+      "anon_desc": "Tidak ada lencana publik. Status PRO Anda tidak terlihat oleh orang lain."
+    },
+    "pricing": {
+      "amount": "Rp55.000",
+      "per_month": "/ bulan"
+    },
+    "buttons": {
+      "upgrade": "Tingkatkan ke PRO",
+      "already_subscribed": "Sudah Berlangganan",
+      "back_to_features": "Kembali ke fitur"
+    },
+    "payment": {
+      "select_method": "Pilih Metode Pembayaran",
+      "fiat_title": "Kartu Kredit / E-Wallet (Midtrans)",
+      "fiat_desc": "Cepat & mudah via Midtrans",
+      "crypto_title": "Kripto (NOWPayments)",
+      "crypto_desc": "Direkomendasikan untuk privasi maksimal"
+    },
+    "disclaimer": {
+      "guarantee": "Jaminan Zero-Knowledge:",
+      "desc": "Jika Anda memilih metode kartu kredit/e-wallet, pembayaran diproses secara eksternal oleh Midtrans menggunakan alias anonim (<1>nyx_pay_{{id}}...</1>). Detail pembayaran Anda tidak akan pernah dikaitkan dengan identitas kriptografi atau riwayat chat Anda. Namun jika Anda memilih kripto, kami bahkan tidak memiliki email Anda! Kami hanya memverifikasi bahwa Anda telah membayar jumlah tagihan, tanpa informasi pribadi apa pun. Privasi Anda 100% utuh terlepas dari metode pembayaran."
+    }
+  },
   "user_info_modal": {
     "about": "Tentang",
     "media": "Media",
