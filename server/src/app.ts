@@ -267,7 +267,7 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
 });
 
 app.use((req, res, next) => {
-  if (req.path === '/api/subscriptions/webhook') {
+  if (req.path === '/api/subscriptions/webhook' || req.path === '/api/subscriptions/nowpayments-webhook') {
     return next();
   }
   doubleCsrfProtection(req, res, next);
