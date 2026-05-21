@@ -1,11 +1,11 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
 
-// Jadwalkan untuk jalan setiap jam 3 pagi (server time) tiap hari
+// Jadwalkan untuk jalan setiap jam 00:00 (server time) tiap hari
 export const startSystemSweeper = () => {
-  console.log('🧹 System Sweeper Job scheduled (Daily at 03:00)...');
+  console.log('🧹 System Sweeper Job scheduled (Daily at 00:00)...');
 
-  cron.schedule('0 3 * * *', async () => {
+  cron.schedule('0 0 * * *', async () => {
     console.log('[Cron] Memulai pembersihan database harian...');
     const now = new Date();
 
@@ -65,6 +65,24 @@ export const startSystemSweeper = () => {
       }
       if (nukedCount > 0) {
          console.log(`[Cron] Auto-destructed ${nukedCount} dormant accounts.`);
+      }
+
+      // 4. NYX PRO Subscription Expiration (Passive Sweeper)
+      const expiredSubs = await prisma.user.updateMany({
+        where: {
+          subscriptionTier: 'SUBSCRIBER',
+          subscriptionExpiresAt: {
+            lt: now
+          }
+        },
+        data: {
+          subscriptionTier: 'FREE',
+          subscriptionExpiresAt: null
+        }
+      });
+
+      if (expiredSubs.count > 0) {
+        console.log(`[Cron] 📉 Downgraded ${expiredSubs.count} expired SUBSCRIBER accounts to FREE tier.`);
       }
 
     } catch (error) {

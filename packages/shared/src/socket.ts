@@ -1,5 +1,6 @@
 import type { Conversation, Message, User } from './types.js';
 import type { RawServerMessage } from './schemas.js';
+import { SubscriptionTier } from './constants.js';
 
 // --- Type Definitions for Socket Payloads (Zero-Knowledge) ---
 export interface TypingPayload {
@@ -111,6 +112,10 @@ export interface ServerToClientEvents {
         conversationId: string;
         sessionId: string;
         requesterId: string;
+    }) => void;
+    "subscription_updated": (payload: {
+        tier: SubscriptionTier;
+        expiresAt: string;
     }) => void;
     "group:fulfill_key_request": (payload: {
         conversationId: string;
