@@ -13,7 +13,7 @@ import toast from "react-hot-toast";
 import { getEncryptedKeys, saveEncryptedKeys, clearKeys, hasStoredKeys, getDeviceAutoUnlockKey, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, nuclearWipe } from "@lib/keyStorage";
 import type { RetrievedKeys } from "@lib/crypto-worker-proxy"; 
 import { checkAndRefillOneTimePreKeys, resetOneTimePreKeys } from "@utils/crypto"; 
-import type { UserId, User } from '@nyx/shared';
+import type { UserId, User, SubscriptionTier } from '@nyx/shared';
 import i18n from '../i18n';
 
 // ✅ Helper pendeteksi nama perangkat
@@ -126,6 +126,7 @@ type Actions = {
   setUser: (user: User) => void;
   setAccessToken: (token: string | null) => void;
   updateProfile: (data: { encryptedProfile: string }) => Promise<void>;
+  updateSubscription: (tier: SubscriptionTier) => void;
   updateAvatar: (avatar: File) => Promise<string>;
   setReadReceipts: (value: boolean) => void;
   setHasRestoredKeys: (hasKeys: boolean) => void;
@@ -566,6 +567,15 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         return { user: newUser };
       });
       toast.success(i18n.t('common:profile_updated', 'Profile updated!'));
+    },
+
+    updateSubscription: (tier: SubscriptionTier) => {
+      set(state => {
+        if (!state.user) return state;
+        const newUser = { ...state.user, subscriptionTier: tier };
+        localStorage.setItem("user", JSON.stringify(newUser));
+        return { user: newUser };
+      });
     },
 
     updateAvatar: async (avatar: File) => {

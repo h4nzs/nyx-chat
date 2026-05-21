@@ -14,7 +14,7 @@ import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGrou
 import { useKeychainStore } from "@store/keychain";
 import { asUserId } from '@nyx/shared';
 import { IncomingMessageSchema, RawServerMessageSchema } from '@nyx/shared';
-import type { ServerToClientEvents, ClientToServerEvents } from "@nyx/shared";
+import type { ServerToClientEvents, ClientToServerEvents, SubscriptionTier } from "@nyx/shared";
 import { triggerReceiveFeedback } from "@utils/feedback";
 import i18n from '../i18n';
 
@@ -420,6 +420,11 @@ export function getSocket() {
           addSystemMessage(convo.id, message);
         }
       });
+    });
+
+    socket.on('subscription_updated', (payload: { tier: SubscriptionTier, expiresAt: string }) => {
+      console.log('[Socket] Subscription updated:', payload);
+      useAuthStore.getState().updateSubscription(payload.tier);
     });
   }
   return socket;

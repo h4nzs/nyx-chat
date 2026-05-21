@@ -18,6 +18,7 @@ model User {
   hasCompletedOnboarding Boolean @default(false)
   isVerified             Boolean @default(false) // WebAuthn / Trust Tier status
   subscriptionTier       SubscriptionTier @default(FREE) // NYX Plus subscription status
+  subscriptionExpiresAt  DateTime? // NYX Plus subscription expiry date
 
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt

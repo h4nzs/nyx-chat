@@ -55,9 +55,31 @@ router.get('/search', async (req, res, next) => {
 router.get('/me', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
+    
+    // First, fetch the current user to check subscription status
+    const currentUser = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { subscriptionTier: true, subscriptionExpiresAt: true }
+    });
+
+    type UserUpdateData = {
+      lastActiveAt: Date;
+      subscriptionTier?: 'FREE' | 'SUBSCRIBER';
+      subscriptionExpiresAt?: Date | null;
+    };
+
+    const dataToUpdate: UserUpdateData = { lastActiveAt: new Date() };
+
+    // Lazy Expiration Check
+    if (currentUser?.subscriptionTier === 'SUBSCRIBER' && currentUser.subscriptionExpiresAt && new Date() > currentUser.subscriptionExpiresAt) {
+      dataToUpdate.subscriptionTier = 'FREE';
+      dataToUpdate.subscriptionExpiresAt = null;
+      console.log(`[Lazy Expiry] User ${req.user.id} subscription expired. Downgraded to FREE.`);
+    }
+
     const user = await prisma.user.update({
       where: { id: req.user.id },
-      data: { lastActiveAt: new Date() },
+      data: dataToUpdate,
       select: { id: true, usernameHash: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, role: true, autoDestructDays: true, subscriptionTier: true }
     })
     res.json(user)

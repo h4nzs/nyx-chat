@@ -5,6 +5,8 @@ import { ApiError } from '../utils/errors.js';
 import { redisClient } from '../lib/redis.js';
 import crypto from 'crypto';
 import midtransClient from 'midtrans-client';
+import { getIo } from '../socket.js';
+import { SubscriptionTier } from '@nyx/shared';
 
 const router: Router = Router();
 
@@ -133,9 +135,21 @@ router.post('/webhook', async (req: Request, res: Response, next: NextFunction) 
         return res.status(200).json({ message: 'OK - Challenged' });
       } else {
         // Success
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 30);
+
         await prisma.user.update({
           where: { id: userId },
-          data: { subscriptionTier: 'SUBSCRIBER' }
+          data: { 
+            subscriptionTier: SubscriptionTier.SUBSCRIBER,
+            subscriptionExpiresAt: expiresAt
+          }
+        });
+
+        // Emit real-time update
+        getIo().to(userId).emit('subscription_updated', {
+          tier: SubscriptionTier.SUBSCRIBER,
+          expiresAt: expiresAt.toISOString()
         });
 
         // Clear rate limit keys from Redis
