@@ -269,6 +269,41 @@
     "awaiting": "Esperando objetivo...",
     "camera_error": "Acceso a la cámara denegado o no disponible."
   },
+  "subscription": {
+    "title": "NYX PRO",
+    "subtitle": "Desbloquea los límites máximos manteniendo la privacidad zero-knowledge.",
+    "pro_limits": "Límites Pro",
+    "features": {
+      "turbo_title": "Mensajería Turbo",
+      "turbo_desc": "Hasta 50 mensajes por minuto. (Gratis: 15/min)",
+      "groups_title": "Grupos Masivos",
+      "groups_desc": "Crea grupos con hasta 500 miembros. (Gratis: 100)",
+      "uploads_title": "Cargas Pesadas",
+      "uploads_desc": "Envía archivos de hasta 500 MB de forma segura. (Gratis: 100 MB)",
+      "anon_title": "Anonimato Total",
+      "anon_desc": "Sin insignias públicas. Tu estado PRO es invisible para los demás."
+    },
+    "pricing": {
+      "amount": "Rp55.000",
+      "per_month": "/ mes"
+    },
+    "buttons": {
+      "upgrade": "Actualizar a PRO",
+      "already_subscribed": "Ya Suscrito",
+      "back_to_features": "Volver a las características"
+    },
+    "payment": {
+      "select_method": "Seleccionar Método de Pago",
+      "fiat_title": "Tarjeta de Crédito / E-Wallet (Midtrans)",
+      "fiat_desc": "Rápido y fácil a través de Midtrans",
+      "crypto_title": "Cripto (NOWPayments)",
+      "crypto_desc": "Recomendado para máxima privacidad"
+    },
+    "disclaimer": {
+      "guarantee": "Garantía Zero-Knowledge:",
+      "desc": "Si eliges métodos de tarjeta de crédito/e-wallet, el pago es procesado externamente por Midtrans usando un alias anónimo (<1>nyx_pay_{{id}}...</1>). Tus detalles de pago nunca se vinculan a tu identidad criptográfica o registros de chat. ¡Pero si eliges cripto, ni siquiera tenemos tu correo! Solo verificamos que pagaste el monto de la factura, sin información personal. Tu privacidad está 100% intacta sin importar el método de pago."
+    }
+  },
   "user_info_modal": {
     "about": "Acerca de",
     "media": "Multimedia",
