@@ -17,6 +17,7 @@ web/dist
 **/.env
 *.log
 **/.env.local
+**/*/.env
 .env.local
 .**
 

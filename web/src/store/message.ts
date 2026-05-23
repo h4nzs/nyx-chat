@@ -515,6 +515,9 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
     if (payload.type === 'UNSEND' || payload.type === 'reaction_remove') {
       return payload;
     }
+    if (payload.type === 'SYSTEM_KEY_REQUEST') {
+      return payload;
+    }
   } catch (_e) {}
   return null;
 }
@@ -795,6 +798,32 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
       if (decrypted.content && decrypted.content.startsWith('{')) {
           try {
               const data = JSON.parse(decrypted.content);
+              
+              if (data.type === 'SYSTEM_KEY_REQUEST' && data.targetUserId) {
+                  // [BUGFIX: PERSISTENT OFFLINE KEY REQUEST]
+                  // Alice menerima pesan ini (yang sudah masuk database jika dia offline sebelumnya)
+                  // dan secara diam-diam membagikan kembali kuncinya kepada peminta
+                  const authStore = (await import('@store/auth')).useAuthStore.getState();
+                  if (authStore.user?.id === data.targetUserId) {
+                      console.log(`[Offline Sync] Received persistent key request from ${decrypted.senderId}`);
+                      import('@lib/socket').then(async ({ emitGroupKeyDistribution }) => {
+                           const { ensureGroupSession } = await import('@utils/crypto');
+                           const { useConversationStore } = await import('@store/conversation');
+                           const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+                           if (conversation) {
+                               // Gunakan forceRotate=false agar hanya mendistribusikan kunci yang ada, tanpa rotasi paksa
+                               const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, false);
+                               if (distributionKeys && distributionKeys.length > 0) {
+                                   await emitGroupKeyDistribution(
+                                     conversationId,
+                                     distributionKeys as { userId: string; key: string }[]
+                                   );
+                               }
+                           }
+                      });
+                  }
+                  return true; // Cegah pesan ini masuk ke UI
+              }
               
               if (data.type === 'PROTOCOL_UPGRADE_REQ' && data.deviceId && data.hostClassicalPk && data.hostPqPk) {
                   const { authFetch } = await import('@lib/api');
@@ -1240,10 +1269,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const isGhostSync = silentPayload?.type === 'GHOST_SYNC';
     const isUnsend = silentPayload?.type === 'UNSEND';
     const isReactionRemove = silentPayload?.type === 'reaction_remove';
+    const isSystemKeyRequest = silentPayload?.type === 'SYSTEM_KEY_REQUEST';
     const isProtocolUpgradeReq = silentPayload?.type === 'PROTOCOL_UPGRADE_REQ';
     const isProtocolUpgradeAck = silentPayload?.type === 'PROTOCOL_UPGRADE_ACK';
     const isProtocolDowngrade = silentPayload?.type === 'PROTOCOL_DOWNGRADE';
-    const shouldBeSilent = isSilent || data.isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload || isProtocolUpgradeReq || isProtocolUpgradeAck || isProtocolDowngrade;
+    const shouldBeSilent = isSilent || data.isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload || isProtocolUpgradeReq || isProtocolUpgradeAck || isProtocolDowngrade || isSystemKeyRequest;
 
     if (!shouldBeSilent) {
         let optimisticContent = data.content;
@@ -1976,13 +2006,15 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                        continue;
                    }
 
+                   // [BUGFIX: SENDER KEY OFFLINE SYNC]
+                   // Gunakan extractedKey (bukan payload.encryptedKey) yang ditujukan spesifik untuk user/device ini
                    const { storeReceivedSessionKey } = await import('@utils/crypto');
                    await storeReceivedSessionKey({
                        ...payload,
                        type: 'GROUP_KEY',
                        conversationId: msg.conversationId || payload.conversationId,
                        senderId: msg.senderId || payload.senderId,
-                       encryptedKey: payload.encryptedKey,
+                       encryptedKey: extractedKey,
                        senderDeviceKey: payload.senderDeviceKey
                    });
 
@@ -2848,7 +2880,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     if (!conversationMessages) return;
 
     const pendingMessages = conversationMessages.filter(
-      m => m.content === 'waiting_for_key' || m.content === '[Requesting key to decrypt...]'
+      m => m.content === 'waiting_for_key' || m.content === '[Requesting key to decrypt...]' || m.content === '<Decryption Failed>' || (m.content && m.content.includes('[Decryption Failed'))
     );
 
     if (pendingMessages.length === 0) {
@@ -2869,7 +2901,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const messageMap = new Map(conversationMessages.map(m => [m.id, m]));
     reDecryptedMessages.forEach(m => {
-        if (m.content !== 'waiting_for_key' && m.content !== '[Requesting key to decrypt...]') {
+        if (m.content !== 'waiting_for_key' && m.content !== '[Requesting key to decrypt...]' && m.content !== '<Decryption Failed>' && !(m.content && m.content.includes('[Decryption Failed'))) {
              const payload = parseReaction(m.content);
              if (payload) {
                  get().addLocalReaction(conversationId, payload.targetMessageId, {
