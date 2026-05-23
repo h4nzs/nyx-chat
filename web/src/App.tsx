@@ -22,6 +22,7 @@ const MigrationSendPage = lazy(() => import('./pages/MigrationSendPage'));
 const ConnectPage = lazy(() => import('./pages/ConnectPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const BurnerChat = lazy(() => import('./pages/BurnerChat'));
+const EmbedChatPage = lazy(() => import('./pages/EmbedChatPage'));
 
 // Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -373,6 +374,9 @@ const AppContent = () => {
               <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
               <Route path="/connect" element={<PageWrapper><ConnectPage /></PageWrapper>} />
             </Route>
+
+            {/* Embed Route (No Layout/Sidebar) */}
+            <Route path="/embed/chat/:id" element={<EmbedChatPage />} />
 
             {/* Fallback */}
             <Route path="*" element={<PageWrapper><NotFoundPage /></PageWrapper>} />

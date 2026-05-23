@@ -24,6 +24,7 @@ import sessionKeysRouter from "./routes/sessionKeys.js";
 import sessionsRouter from "./routes/sessions.js";
 import aiRoutes from "./routes/ai.js";
 import adminRouter from "./routes/admin.js";
+import engineRouter from "./routes/engine.js";
 import storiesRoutes from "./routes/stories.js";
 import subscriptionsRouter from "./routes/subscriptions.js";
 import webpush from "web-push";
@@ -267,7 +268,7 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
 });
 
 app.use((req, res, next) => {
-  if (req.path === '/api/subscriptions/webhook' || req.path === '/api/subscriptions/nowpayments-webhook') {
+  if (req.path === '/api/subscriptions/webhook' || req.path === '/api/subscriptions/nowpayments-webhook' || req.path.startsWith('/api/engine')) {
     return next();
   }
   doubleCsrfProtection(req, res, next);
@@ -317,6 +318,7 @@ app.use("/api/previews", previewsRouter);
 app.use("/api/session-keys", sessionKeysRouter);
 app.use("/api/reports", reportRoutes);
 app.use("/api/admin", adminRouter);
+app.use("/api/engine", engineRouter);
 app.use("/api/sessions", sessionsRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/ai", aiRoutes);

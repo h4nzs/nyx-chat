@@ -15,8 +15,8 @@ model User {
   passwordHash     String
   encryptedProfile String? @db.Text
 
-  hasCompletedOnboarding Boolean @default(false)
-  isVerified             Boolean @default(false) // WebAuthn / Trust Tier status
+  hasCompletedOnboarding Boolean          @default(false)
+  isVerified             Boolean          @default(false) // WebAuthn / Trust Tier status
   subscriptionTier       SubscriptionTier @default(FREE) // NYX Plus subscription status
   subscriptionExpiresAt  DateTime? // NYX Plus subscription expiry date
 
@@ -43,8 +43,31 @@ model User {
   blockedUsers         BlockedUser[]            @relation("Blocker")
   blockedBy            BlockedUser[]            @relation("Blocked")
 
+  // --- MULTI-TENANCY (B2B BaaS) ---
+  tenantId   String?
+  tenant     Tenant? @relation(fields: [tenantId], references: [id])
+  externalId String?
+
+  @@unique([tenantId, externalId])
   @@index([createdAt])
   @@index([autoDestructDays, lastActiveAt])
+}
+
+// ==========================================
+// 🏢 TABEL BARU: TENANT (B2B BaaS)
+// ==========================================
+model Tenant {
+  id             String   @id @default(cuid())
+  name           String
+  apiKey         String   @unique
+  allowedDomains String[]
+  isActive       Boolean  @default(true)
+
+  users         User[]
+  conversations Conversation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ==========================================
@@ -154,18 +177,24 @@ model PushSubscription {
 }
 
 model Conversation {
-  id                String                   @id @default(cuid())
-  isGroup           Boolean                  @default(false)
+  id                String  @id @default(cuid())
+  isGroup           Boolean @default(false)
   encryptedMetadata String?
   creatorId         String?
-  creator           User?                    @relation("CreatedConversations", fields: [creatorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
-  lastMessageAt     DateTime?                @db.Timestamptz(6)
-  createdAt         DateTime                 @default(now())
-  updatedAt         DateTime                 @updatedAt
-  participants      Participant[]
-  messages          Message[]
-  sessionKeys       SessionKey[]
-  hiddenBy          UserHiddenConversation[]
+  creator           User?   @relation("CreatedConversations", fields: [creatorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  // --- MULTI-TENANCY (B2B BaaS) ---
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id])
+  metadata Json?
+
+  lastMessageAt DateTime?                @db.Timestamptz(6)
+  createdAt     DateTime                 @default(now())
+  updatedAt     DateTime                 @updatedAt
+  participants  Participant[]
+  messages      Message[]
+  sessionKeys   SessionKey[]
+  hiddenBy      UserHiddenConversation[]
 
   @@index([lastMessageAt(sort: Desc)])
   @@index([createdAt])
