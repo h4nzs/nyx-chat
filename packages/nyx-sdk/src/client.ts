@@ -67,7 +67,7 @@ export default class NyxClient extends EventEmitter {
     // Let's hook into the connect event once, or just do it after calling connect if we return a promise wrapper.
     
     return new Promise((resolve) => {
-      this.socket.once('connect', async () => {
+      const onConnect = async () => {
         try {
           await this.keyManager.registerDevice();
           console.log("NYX Engine Device Registered");
@@ -77,7 +77,13 @@ export default class NyxClient extends EventEmitter {
           this.emit('error', error);
           resolve(); // Still resolve so the app doesn't hang, but emit error
         }
-      });
+      };
+
+      if (this.socket.connected) {
+        onConnect();
+      } else {
+        this.socket.once('connect', onConnect);
+      }
       
       this.socket.connect(this.config.baseURL!, jwtToken);
 
