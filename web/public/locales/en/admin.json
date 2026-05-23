@@ -18,5 +18,21 @@
   "unban": "Unban",
   "unban_title": "Unban User",
   "unban_desc": "Are you sure you want to lift the ban for @{{username}}?",
-  "initializing": "INITIALIZING SYSTEM LINK..."
+  "initializing": "INITIALIZING SYSTEM LINK...",
+  "system_dashboard": "SYSTEM DASHBOARD",
+  "b2b_tenants": "B2B ENGINE / TENANTS",
+  "add_tenant": "ADD TENANT",
+  "tenant_name": "Tenant Name",
+  "allowed_domains": "Allowed Domains (Comma separated)",
+  "generate_key": "GENERATE KEY",
+  "no_tenants_found": "No tenants found",
+  "active": "ACTIVE",
+  "inactive": "INACTIVE",
+  "api_key_copied": "API Key copied to clipboard",
+  "failed_to_load_tenants": "Failed to load tenants",
+  "tenant_name_required": "Tenant name is required",
+  "tenant_created": "Tenant created successfully",
+  "failed_to_create_tenant": "Failed to create tenant",
+  "tenant_status_updated": "Tenant status updated",
+  "failed_to_toggle_tenant": "Failed to update tenant status"
 }
