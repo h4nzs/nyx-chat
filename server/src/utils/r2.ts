@@ -15,7 +15,7 @@ export const s3Client = new S3Client({
 // Generate URL upload yang valid selama 5 menit (default)
 // urlTtl: Berapa lama LINK upload valid (detik)
 // deleteAt: Kapan FILE harus dianggap kadaluarsa (untuk Lifecycle Rules / Metadata)
-export const getPresignedUploadUrl = async (key: string, contentType: string, urlTtl: number = 300, deleteAt?: Date) => {
+export const getPresignedUploadUrl = async (key: string, contentType: string, urlTtl: number = 600, deleteAt?: Date) => {
   const commandInput: PutObjectCommandInput = {
     Bucket: env.r2BucketName,
     Key: key,

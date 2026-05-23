@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@marsidev/react-turnstile": "^1.5.2",
+    "@nyx-engine/sdk": "workspace:*",
     "@nyx/shared": "workspace:*",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-popover": "^1.1.15",
