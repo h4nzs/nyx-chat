@@ -56,7 +56,8 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
 
   const content = message.content || '';
   const isLongMessage = content.length > 800 || content.split('\n').length > 12;
-  const isPlaceholder = content === 'waiting_for_key' || content.startsWith('[') || content === 'Decryption failed';
+  const isDecryptionFailure = content === '<Decryption Failed>' || content.includes('[Decryption Failed');
+  const isPlaceholder = content === 'waiting_for_key' || content.startsWith('[') || content === 'Decryption failed' || isDecryptionFailure;
 
   const cloakClass = privacyCloak ? "blur-[6px] opacity-75 hover:blur-none hover:opacity-100 active:blur-none active:opacity-100 transition-all duration-300 select-none" : "";
 
@@ -188,7 +189,11 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
                 {!!content && (
                   <div className={message.fileUrl ? "mt-2" : ""}>
                     {isPlaceholder ? (
-                      <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">{content}</p>
+                      <p className="text-base whitespace-pre-wrap break-words italic text-text-secondary">
+                        {isDecryptionFailure 
+                            ? "Menunggu kunci pesan ini. Pesan akan muncul saat pengirim terhubung." // [BUGFIX: SENDER KEY OFFLINE SYNC]
+                            : content}
+                      </p>
                     ) : (
                       <div className={clsx("text-base break-words w-full", { "text-white/95": isOwn, "text-text-primary": !isOwn })}>
                         <div 

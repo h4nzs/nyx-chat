@@ -689,11 +689,21 @@ export async function handleGroupKeyDistribution(
   // 1. Decrypt the Sender Key (Chain Key)
   let senderKeyBytes: Uint8Array;
   try {
-      const encryptedKeyBytes = sodium.from_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      // [BUGFIX: SENDER KEY OFFLINE SYNC] - Graceful Base64 decoding fallback
+      let encryptedKeyBytes: Uint8Array;
+      try {
+          encryptedKeyBytes = sodium.from_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+      } catch (err1) {
+          try {
+              encryptedKeyBytes = sodium.from_base64(encryptedKey, sodium.base64_variants.ORIGINAL);
+          } catch (err2) {
+              encryptedKeyBytes = sodium.from_base64(encryptedKey, sodium.base64_variants.URLSAFE);
+          }
+      }
       senderKeyBytes = await worker_pq_box_seal_open(encryptedKeyBytes, pqPrivateKey, classicalPrivateKey);
   } catch (e) {
       console.error('[Crypto] FATAL: Gagal unseal Sender Key:', e);
-      return; // Skip silently if decryption fails
+      throw new Error('DECRYPTION_FAILED'); // Propagate to let caller know
   }
   
   let currentN = 0;
@@ -1465,10 +1475,21 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
 
     try {
         await handleGroupKeyDistribution(conversationId, encryptedKey, senderId, senderDeviceKey);
-        import('@store/message').then(({ useMessageStore }) => {            useMessageStore.getState().reDecryptPendingMessages(conversationId);
+        import('@store/message').then(({ useMessageStore }) => {
+            useMessageStore.getState().reDecryptPendingMessages(conversationId);
         });
     } catch (e) {
-        // FASE 3: Jika Sealed Box ini ditujukan untuk perangkat kita yang lain, abaikan secara diam-diam.
+        // [BUGFIX: SENDER KEY OFFLINE SYNC] Propagate failure if needed, or emit request for new key
+        console.error('[Crypto] Group key distribution failed:', e);
+        if (e instanceof Error && e.message === 'DECRYPTION_FAILED') {
+            // [BUGFIX: PERSISTENT OFFLINE KEY REQUEST]
+            // Kirim pesan tak kasat mata (terenkripsi) ke pengirim asli
+            import('@store/message').then(({ useMessageStore }) => {
+                const reqPayload = JSON.stringify({ type: 'SYSTEM_KEY_REQUEST', targetUserId: senderId });
+                console.log(`[Offline Sync] Sending persistent key request to ${senderId}`);
+                useMessageStore.getState().sendMessage(conversationId, { content: reqPayload }, undefined, true);
+            });
+        }
     }
 
   } else if (sessionId) {    let newSessionKey: Uint8Array | undefined;

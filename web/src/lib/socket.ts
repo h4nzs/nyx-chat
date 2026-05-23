@@ -72,7 +72,7 @@ const processMessageBuffer = async () => {
                 if (safeMessage.content && safeMessage.content.startsWith('{')) {
                      try {
                          const meta = JSON.parse(safeMessage.content);
-                         if (meta.type === 'reaction' || meta.type === 'edit' || meta.type === 'silent' || meta.type === 'GHOST_SYNC') {
+                         if (meta.type === 'reaction' || meta.type === 'edit' || meta.type === 'silent' || meta.type === 'GHOST_SYNC' || meta.type === 'SYSTEM_KEY_REQUEST') {
                              continue;
                          }
                          // UNSEND tombstone TIDAK di-skip: perangkat sender juga perlu memprosesnya
