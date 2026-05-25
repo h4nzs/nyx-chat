@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "title": "Refund Policy | NYX Chat",
+    "description": "NYX Chat refund policy and 7-day money-back guarantee."
+  },
+  "title": "Refund Policy",
+  "last_updated": "Last Updated: March 2026",
+  "intro": "At NYX, we prioritize your privacy and satisfaction. This policy outlines the conditions under which refunds are provided.",
+  "fiat_title": "1. 7-Day Money-Back Guarantee (Fiat/Credit Card)",
+  "fiat_desc": "If you upgrade to NYX Pro using a credit card or e-wallet (via Midtrans) and are not satisfied, you are eligible for a full refund within 7 days of the initial purchase. Because of our Zero-Knowledge architecture, we will never ask for technical reasons related to your data content or chat history to process your refund.",
+  "crypto_title": "2. Cryptocurrency Payments",
+  "crypto_desc": "Please note that payments made via Cryptocurrency (NOWPayments) are subject to network conditions. Due to the irreversible nature of blockchain transactions and volatile gas fees, cryptocurrency payments are generally final. In exceptional cases where a refund is issued, the refund amount will be minus any network (gas) fees incurred.",
+  "zk_title": "3. Zero-Knowledge Assurance",
+  "zk_desc": "Your privacy remains intact. Claiming a refund does not require you to provide access to your device, decryption keys, or any chat content. We only verify the transaction ID.",
+  "how_to_claim_title": "4. How to Claim a Refund",
+  "how_to_claim_desc": "To request a refund, please send an email to <strong>billing@nyx-app.my.id</strong> from your contact email (if provided) or specify your <strong>Transaction ID</strong>. Our team will process eligible refunds within 5-7 business days."
+}

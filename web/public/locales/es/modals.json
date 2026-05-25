@@ -302,7 +302,9 @@
     "disclaimer": {
       "guarantee": "Garantía Zero-Knowledge:",
       "desc": "Si eliges métodos de tarjeta de crédito/e-wallet, el pago es procesado externamente por Midtrans usando un alias anónimo (<1>nyx_pay_{{id}}...</1>). Tus detalles de pago nunca se vinculan a tu identidad criptográfica o registros de chat. ¡Pero si eliges cripto, ni siquiera tenemos tu correo! Solo verificamos que pagaste el monto de la factura, sin información personal. Tu privacidad está 100% intacta sin importar el método de pago."
-    }
+    },
+    "trust_guarantee": "Garantía de Devolución de 7 Días. Pagos con criptomonedas sujetos a tarifas de red.",
+    "refund_policy": "Política de Reembolso"
   },
   "user_info_modal": {
     "about": "Acerca de",

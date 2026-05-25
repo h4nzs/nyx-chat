@@ -32,6 +32,9 @@ const t = useTranslations(lang);
       <a href={`${langPrefix}/privacy`} class="hover:text-accent transition-colors tracking-wide">{t('common:nav.privacy')}</a>
       <span class="text-white/10">•</span>
       
+      <a href={`${langPrefix}/refund`} class="hover:text-accent transition-colors tracking-wide">{t('common:nav.refund')}</a>
+      <span class="text-white/10">•</span>
+      
       <a href={`${langPrefix}/security`} class="hover:text-accent transition-colors tracking-wide">Security</a>
       <span class="text-white/10">•</span>
       
@@ -45,7 +48,11 @@ const t = useTranslations(lang);
     </div>
 
     <p class="text-[10px] text-text-secondary/40 max-w-3xl mx-auto leading-relaxed font-mono italic">
-      "In an era of total surveillance, obfuscation is the only true freedom."
+      {t('common:quote')}
+    </p>
+  </div>
+</footer>
+ce, obfuscation is the only true freedom."
     </p>
   </div>
 </footer>

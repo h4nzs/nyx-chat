@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "title": "Política de Reembolso | NYX Chat",
+    "description": "Política de reembolso do NYX Chat e garantia de devolução do dinheiro em 7 dias."
+  },
+  "title": "Política de Reembolso",
+  "last_updated": "Última atualização: Março de 2026",
+  "intro": "No NYX, priorizamos a sua privacidade e satisfação. Esta política descreve as condições sob as quais os reembolsos são fornecidos.",
+  "fiat_title": "1. Garantia de Devolução de 7 Dias (Fiat/Cartão de Crédito)",
+  "fiat_desc": "Se você fizer upgrade para o NYX Pro usando um cartão de crédito ou carteira eletrônica (via Midtrans) e não ficar satisfeito, você terá direito a um reembolso total em até 7 dias após a compra inicial. Devido à nossa arquitetura Zero-Knowledge, nunca pediremos motivos técnicos relacionados ao seu conteúdo de dados ou histórico de bate-papo para processar o seu reembolso.",
+  "crypto_title": "2. Pagamentos com Criptomoedas",
+  "crypto_desc": "Observe que os pagamentos feitos via Criptomoeda (NOWPayments) estão sujeitos às condições da rede. Devido à natureza irreversível das transações de blockchain e às voláteis taxas de gás, os pagamentos em criptomoedas geralmente são finais. Em casos excepcionais em que um reembolso é emitido, o valor do reembolso será deduzido das taxas de rede (gás) incorridas.",
+  "zk_title": "3. Garantia Zero-Knowledge",
+  "zk_desc": "Sua privacidade permanece intacta. Reivindicar um reembolso não exige que você forneça acesso ao seu dispositivo, chaves de descriptografia ou qualquer conteúdo de bate-papo. Verificamos apenas o ID da Transação.",
+  "how_to_claim_title": "4. Como Solicitar um Reembolso",
+  "how_to_claim_desc": "Para solicitar um reembolso, envie um e-mail para <strong>billing@nyx-app.my.id</strong> incluindo o seu <strong>Transaction ID</strong>. Nossa equipe processará os reembolsos elegíveis em 5-7 dias úteis."
+}
