@@ -59,7 +59,8 @@
     "hall_of_fame": "Hall da Fama",
     "api_docs": "Docs da API",
     "security": "Segurança",
-    "source": "Código Fonte"
+    "source": "Código Fonte",
+    "refund": "Política de Reembolso"
   },
   "errors": {
     "unknown": "Ocorreu um erro desconhecido",

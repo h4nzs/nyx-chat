@@ -229,6 +229,16 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
                   <>{t('modals:subscription.buttons.upgrade')} <FiStar /></>
                 )}
               </button>
+
+              <div className="flex items-start gap-2 text-sm text-text-secondary mt-3">
+                <FiShield className="shrink-0 mt-0.5 text-accent" />
+                <p className="text-left leading-relaxed">
+                  {t('modals:subscription.trust_guarantee')}{' '}
+                  <a href="https://nyx-app.my.id/refund" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+                    {t('modals:subscription.refund_policy')}
+                  </a>
+                </p>
+              </div>
             </div>
           </>
         )}

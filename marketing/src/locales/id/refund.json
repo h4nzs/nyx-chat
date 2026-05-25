@@ -1,0 +1,17 @@
+{
+  "meta": {
+    "title": "Kebijakan Pengembalian Dana | NYX Chat",
+    "description": "Kebijakan pengembalian dana NYX Chat dan garansi uang kembali 7 hari."
+  },
+  "title": "Kebijakan Pengembalian Dana",
+  "last_updated": "Terakhir Diperbarui: Maret 2026",
+  "intro": "Di NYX, kami mengutamakan privasi dan kepuasan Anda. Kebijakan ini menjelaskan kondisi di mana pengembalian dana diberikan.",
+  "fiat_title": "1. Garansi Uang Kembali 7 Hari (Fiat/Kartu Kredit)",
+  "fiat_desc": "Jika Anda meningkatkan ke NYX Pro menggunakan kartu kredit atau e-wallet (via Midtrans) dan tidak puas, Anda berhak atas pengembalian dana penuh dalam waktu 7 hari setelah pembelian awal. Karena arsitektur Zero-Knowledge kami, kami tidak akan pernah meminta alasan teknis terkait isi data atau riwayat obrolan Anda saat memproses pengembalian dana.",
+  "crypto_title": "2. Pembayaran Kripto (Cryptocurrency)",
+  "crypto_desc": "Harap perhatikan bahwa pembayaran yang dilakukan melalui Kripto (NOWPayments) tunduk pada kondisi jaringan. Mengingat sifat transaksi blockchain yang tidak dapat dibatalkan dan biaya gas yang fluktuatif, pembayaran kripto pada umumnya bersifat final. Dalam kasus pengecualian di mana pengembalian dana diberikan, jumlahnya akan dipotong biaya jaringan (gas fee).",
+  "zk_title": "3. Jaminan Zero-Knowledge",
+  "zk_desc": "Privasi Anda tetap utuh. Mengklaim pengembalian dana tidak memerlukan Anda untuk memberikan akses ke perangkat, kunci dekripsi, atau konten obrolan apa pun. Kami hanya memverifikasi ID Transaksi.",
+  "how_to_claim_title": "4. Cara Mengklaim Pengembalian Dana",
+  "how_to_claim_desc": "Untuk meminta pengembalian dana, kirimkan email ke <strong>billing@nyx-app.my.id</strong> dan sertakan <strong>Transaction ID</strong> Anda. Tim kami akan memproses pengembalian dana yang memenuhi syarat dalam 5-7 hari kerja."
+}

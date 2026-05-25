@@ -302,7 +302,9 @@
     "disclaimer": {
       "guarantee": "Zero-Knowledge Guarantee:",
       "desc": "If you choose credit/E-wallet methods, Payment is processed externally by Midtrans using an anonymous alias (<1>nyx_pay_{{id}}...</1>). Your payment details are never linked to your cryptographic identity or chat logs. But if you choose crypto, we don't even have your email! We only verify that you paid the invoice amount, without any personal info. Your privacy is 100% intact regardless of payment method."
-    }
+    },
+    "trust_guarantee": "7-Day Money-Back Guarantee. Crypto payments are subject to network fee terms.",
+    "refund_policy": "Refund Policy"
   },
   "user_info_modal": {
     "about": "About",

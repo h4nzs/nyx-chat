@@ -1,0 +1,100 @@
+---
+import MainLayout from '../layouts/MainLayout.astro';
+import Footer from '../components/Footer.astro';
+import '../index.css';
+import { getLangFromUrl, useTranslations } from '../utils/i18n';
+import { FiRefreshCcw, FiShield, FiCreditCard, FiLock, FiMail } from 'react-icons/fi';
+
+const { lang: propLang } = Astro.props;
+const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+
+const title = t('refund:meta.title') !== 'refund:meta.title' ? t('refund:meta.title') : 'Refund Policy | NYX Chat';
+const description = t('refund:meta.description') !== 'refund:meta.description' ? t('refund:meta.description') : 'NYX Chat refund policy and 7-day money-back guarantee.';
+
+const schema = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "name": title,
+  "description": description,
+  "publisher": {
+    "@type": "Organization",
+    "name": "NYX Project",
+    "logo": "https://nyx-app.my.id/pwa-192x192.png"
+  }
+});
+---
+
+<MainLayout title={title} description={description} canonicalUrl={Astro.url.pathname} schemaMarkup={schema}>
+  <div class="min-h-screen pt-24 pb-16 px-4 md:px-8 max-w-4xl mx-auto font-sans text-text-primary">
+    
+    <header class="text-center mb-16">
+      <div class="inline-flex items-center gap-2 px-3 py-1 mb-6 text-xs font-bold text-accent bg-accent/10 border border-accent/20 rounded-full tracking-widest uppercase">
+        <FiRefreshCcw size={14} /> {t('refund:title')}
+      </div>
+      <h1 class="text-4xl md:text-5xl font-black tracking-tighter mb-4 bg-gradient-to-r from-white via-white to-gray-500 bg-clip-text text-transparent">
+        {t('refund:title')}
+      </h1>
+      <p class="text-text-secondary text-sm font-mono opacity-60">
+        {t('refund:last_updated')}
+      </p>
+    </header>
+
+    <div class="space-y-8">
+      <p class="text-lg text-text-secondary leading-relaxed mb-8">
+        {t('refund:intro')}
+      </p>
+
+      <section class="card-neumorphic border-white/5">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="p-2 bg-[#0d1322] rounded-lg border border-[#1e293b] text-accent">
+            <FiCreditCard size={20} />
+          </div>
+          <h2 class="text-xl font-bold">{t('refund:fiat_title')}</h2>
+        </div>
+        <p class="text-text-secondary leading-relaxed pl-12">
+          {t('refund:fiat_desc')}
+        </p>
+      </section>
+
+      <section class="card-neumorphic border-white/5">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="p-2 bg-[#0d1322] rounded-lg border border-[#1e293b] text-yellow-500">
+            <FiLock size={20} />
+          </div>
+          <h2 class="text-xl font-bold">{t('refund:crypto_title')}</h2>
+        </div>
+        <p class="text-text-secondary leading-relaxed pl-12">
+          {t('refund:crypto_desc')}
+        </p>
+      </section>
+
+      <section class="card-neumorphic border-white/5">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="p-2 bg-[#0d1322] rounded-lg border border-[#1e293b] text-[#06b6d4]">
+            <FiShield size={20} />
+          </div>
+          <h2 class="text-xl font-bold">{t('refund:zk_title')}</h2>
+        </div>
+        <p class="text-text-secondary leading-relaxed pl-12">
+          {t('refund:zk_desc')}
+        </p>
+      </section>
+
+      <section class="card-neumorphic border-white/5 bg-accent/5">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="p-2 bg-accent/20 rounded-lg border border-accent/30 text-accent">
+            <FiMail size={20} />
+          </div>
+          <h2 class="text-xl font-bold">{t('refund:how_to_claim_title')}</h2>
+        </div>
+        <p class="text-text-secondary leading-relaxed pl-12" set:html={t('refund:how_to_claim_desc')} />
+      </section>
+
+    </div>
+
+    <div class="mt-24">
+      <Footer lang={lang} />
+    </div>
+  </div>
+</MainLayout>
