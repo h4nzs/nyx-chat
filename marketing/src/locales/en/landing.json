@@ -44,22 +44,22 @@
     }
   },
   "features": {
-    "title": "FEATURES BUILT FOR PRIVACY",
+    "title": "FEATURES BUILT FOR EXTREME PRIVACY",
+    "post_quantum": {
+      "title": "POST-QUANTUM SECURITY",
+      "desc": "Chat sessions are protected by a hybrid X25519 and ML-KEM-768 (X-Wing) scheme, immune to future quantum computer eavesdropping."
+    },
+    "burner_chat": {
+      "title": "BURNER SESSIONS",
+      "desc": "Create a temporary anonymous gateway. Share a link with outsiders to chat fully encrypted in memory without registering. Auto-nukes on close."
+    },
     "no_phone": {
       "title": "NO PHONE NUMBER",
       "desc": "Sign up with just a Username. Your real identity stays safe. No one can 'save your contact' without permission."
     },
-    "ghost_app": {
-      "title": "GHOST APP (PWA)",
-      "desc": "Zero install. Open in browser, chat, close tab, and clear data. Zero forensic footprint left on your device."
-    },
-    "argon2": {
-      "title": "ARGON2 SECURITY",
-      "desc": "The only web chat that turns your password into a military-grade encryption key using memory-hardened hashing."
-    },
     "tactile": {
-      "title": "TACTILE DESIGN",
-      "desc": "A mutated neumorphic interface with chiseled depth and grain texture for a premium physical feel."
+      "title": "MUTATED NEUMORPHIC",
+      "desc": "A mutated neumorphic interface with chiseled depth and elegant gradients for a premium physical feel."
     }
   },
   "how_it_works": {
@@ -69,31 +69,31 @@
       "desc": "Sign up via username. We automatically generate your 24-word recovery phrase for encryption."
     },
     "step_2": {
-      "title": "2. START CHATTING",
-      "desc": "Your messages are end-to-end encrypted from the very first word using the Signal Protocol."
+      "title": "2. INITIATE SECURE CHAT",
+      "desc": "Messages are E2E encrypted from the very first word. Create standard chats or temporary Burner Sessions."
     },
     "step_3": {
-      "title": "3. VANISH",
-      "desc": "Done? Close the browser. Encryption keys are wiped from memory. No trace left behind."
+      "title": "3. ZERO TRACE",
+      "desc": "Done? Close the browser. Encryption keys for Burner chats are wiped from memory immediately."
     }
   },
   "testimonials": {
-    "title": "TRUSTED BY PRIVACY ADVOCATES",
-    "yosep": "Finally, a chat app that respects my privacy without sacrificing a beautiful user experience. The fact that I control my own keys is a game-changer.",
-    "yosep_role": "Privacy Advocate",
-    "sarah": "Nyx has become essential for our team. It's simple, secure, and a pleasure to use every day.",
-    "sarah_role": "Remote Team Lead"
+    "title": "PREMIUM SCALABILITY",
+    "yosep": "Our custom deployment uses NYX's robust enterprise infrastructure, seamlessly adapting to high-demand environments.",
+    "yosep_role": "Enterprise Partner",
+    "sarah": "Contact our sales team via email to discuss custom infrastructure scalability and specialized B2B integration.",
+    "sarah_role": "NYX Corporate Team"
   },
   "faq": {
     "title": "FREQUENTLY ASKED QUESTIONS",
-    "q1": "Is NYX end-to-end encrypted?",
-    "a1": "Yes. We use the Signal Protocol (X3DH + Double Ratchet Algorithm) to ensure that only you and the person you're communicating with can read what's sent. Not even the server can decrypt your messages.",
-    "q2": "Do I need to install an app?",
-    "a2": "No. NYX is a Progressive Web App (PWA). You can use it directly in your browser or install it to your home screen for a native-like experience without the app store friction.",
-    "q3": "Is it completely free?",
-    "a3": "Yes, NYX is open-source and free to use. There are no hidden fees, ads, or data tracking.",
-    "q4": "How do I recover my account?",
-    "a4": "When you sign up, you receive a 24-word recovery phrase. This is the ONLY way to restore your account, but remember that you cannot access your messages history. And we do not store this phrase."
+    "q1": "What is a Burner Chat Session?",
+    "a1": "A temporary anonymous gateway. You can generate a unique link to chat with outsiders who don't have a NYX account. Everything happens in-memory and auto-nukes when the tab is closed.",
+    "q2": "How does Zero-Knowledge file encryption work?",
+    "a2": "File attachments are encrypted on your device using a unique, random XChaCha20-Poly1305 symmetric key before reaching the cloud. The NYX server only sees a binary blob and never possesses the decryption key.",
+    "q3": "How do I backup my cryptographic identity?",
+    "a3": "Upon registration, you are given a 24-word recovery phrase. This phrase is the sole backup of your identity keys. Store it securely offline. We cannot recover it for you.",
+    "q4": "Is NYX truly quantum-resistant?",
+    "a4": "Yes, we implement a hybrid approach combining classical X25519 and the post-quantum ML-KEM-768 (X-Wing) algorithm inside a dedicated WebAssembly Web Worker."
   },
   "cta": {
     "title": "TAKE BACK YOUR PRIVACY.",

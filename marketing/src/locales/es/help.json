@@ -1,38 +1,52 @@
 {
   "title": "Ayuda y Preguntas Frecuentes",
   "back_settings": "Volver a Configuración",
+  "topics": "Temas",
   "move_account": {
-    "title": "¿Cómo mudo mi cuenta a un nuevo dispositivo?",
-    "desc": "Como NYX guarda las claves y el historial localmente para máxima privacidad, no puedes simplemente iniciar sesión para ver tus mensajes antiguos. Hay dos formas seguras de mudarte:",
-    "migration_label": "Migración de dispositivo (Recomendado):",
-    "migration_text": "Ve a <1>Configuración > Transferir a nuevo dispositivo</1>. Esto crea un túnel directo y seguro hacia tu nuevo teléfono mediante un código QR.",
-    "backup_label": "Copia de seguridad de la Bóveda:",
-    "backup_text": "Ve a <1>Configuración > Exportar Bóveda</1>. Guarda el archivo `.nyxvault` e impórtalo en la pantalla de inicio de sesión de tu nuevo dispositivo."
+    "title": "¿Cómo muevo mi cuenta a un nuevo dispositivo?",
+    "desc": "Dado que NYX almacena sus claves e historial localmente para máxima privacidad, no puede simplemente iniciar sesión para ver mensajes antiguos. Tiene dos formas seguras de moverse:",
+    "migration_label": "Migración de Dispositivo (Recomendado):",
+    "migration_text": "Vaya a <span class=\"font-mono bg-black/30 p-1 rounded\">Configuración &gt; Transferir a Nuevo Dispositivo</span>. Esto crea un túnel seguro y directo a su nuevo teléfono mediante un código QR.",
+    "backup_label": "Respaldo de Bóveda:",
+    "backup_text": "Vaya a <span class=\"font-mono bg-black/30 p-1 rounded\">Configuración &gt; Exportar Bóveda</span>. Guarde el archivo <code>.nyxvault</code> e impórtelo en la pantalla de inicio de sesión de su nuevo dispositivo."
+  },
+  "burner": {
+    "title": "¿Qué es una Sesión de Chat Burner?",
+    "desc": "Un Chat Burner es una puerta de enlace anónima temporal. Puede generar un enlace único para chatear con personas externas que no tienen una cuenta NYX. Todo sucede en memoria y se auto-destruye cuando se cierra la pestaña."
+  },
+  "zkfiles": {
+    "title": "¿Cómo funciona el cifrado de archivos de Conocimiento Cero?",
+    "desc": "Los archivos adjuntos se cifran en su dispositivo utilizando una clave simétrica XChaCha20-Poly1305 única y aleatoria antes de llegar a la nube. El servidor NYX solo ve un blob binario dan nunca posee la clave de descifrado."
+  },
+  "backup": {
+    "title": "¿Cómo respaldo mi identidad criptográfica?",
+    "desc": "Al registrarse, se le entrega una frase de recuperación de 24 palabras. Esta frase es el único respaldo de sus claves de identidad. Guárdela de forma segura fuera de línea. No podemos recuperarla por usted."
   },
   "sandbox_mode": {
     "title": "¿Por qué mi cuenta está en \"Modo Sandbox\"?",
-    "desc": "Para evitar bots de spam sin recopilar datos personales (como números de teléfono y correos), las cuentas nuevas empiezan en <1>Modo Sandbox</1> con un límite de mensajes.",
-    "upgrade_text": "Puedes mejorar al <1>Estado VIP</1> de forma instantánea y gratuita verificando que eres humano. Ve a <2>Configuración > Mejorar a VIP</2> y elige <3>Verificación Biométrica</3> (Huella/FaceID) o <3>Proof of Work</3> (Minería por CPU)."
+    "desc": "Para prevenir bots de spam sin recolectar datos personales (como números de teléfono), las cuentas nuevas comienzan en <strong>Modo Sandbox</strong> con cuotas de mensajería limitadas.",
+    "upgrade_text": "Puede actualizar al <strong>Estado VIP</strong> instantáneamente y gratis verificando que es humano. Vaya a <span class=\"font-mono bg-black/30 p-1 rounded\">Configuración &gt; Actualizar a VIP</span> y elija entre <strong>Verificación Biométrica</strong> (Huella/FaceID) o <strong>Prueba de Trabajo</strong> (Minería de CPU)."
   },
   "forgot_password": {
     "title": "Olvidé mi contraseña. ¿Qué hago?",
-    "desc": "Como no tenemos ni tu correo ni tu número de teléfono, no podemos enviarte enlaces ni códigos de restablecimiento. Tendrás que usar tu <1>Frase de Recuperación</1>.",
-    "step1": "En la pantalla de inicio de sesión, haz clic en \"Recuperar con frase\".",
-    "step2": "Ingresa tu Frase de Recuperación de 24 palabras para probar tu identidad.",
-    "step3": "Crea una nueva contraseña.",
-    "warning": "Nota: Recuperar con la frase restablecerá tu clave de identidad. Recuperarás el acceso a tu cuenta, pero <1>el historial de chats se perderá</1> a menos que tengas una Copia de Seguridad de la Bóveda."
+    "desc": "Debido a que no tenemos su correo electrónico, no podemos enviarle un enlace de restablecimiento. Debe usar su <strong>Frase de Recuperación</strong>.",
+    "step1": "En la pantalla de inicio de sesión, haga clic en \"Restaurar desde frase\".",
+    "step2": "Ingrese su Frase de Recuperación de 24 palabras para demostrar su identidad.",
+    "step3": "Establezca una nueva contraseña.",
+    "warning": "Nota: Restaurar desde una frase restablece sus claves de identidad. Recuperará el acceso a su ID de cuenta, pero <strong>el historial de chat se perderá</strong> a menos que tenga un Respaldo de Bóveda."
   },
   "sync_issues": {
     "title": "¿Por qué mis mensajes no se sincronizan?",
-    "desc": "NYX funciona bajo un modelo <1>Local-First (Enfocado en lo local)</1>. Los mensajes viven en tu dispositivo, no en la nube. Si usas NYX en varios dispositivos (ej: Teléfono + Laptop), actúan como clientes independientes.",
-    "future_text": "Estamos trabajando en un \"Protocolo de Sincronización\" seguro para el futuro, pero por ahora, el historial no se sincroniza automáticamente entre dispositivos para garantizar la privacidad zero-knowledge (de conocimiento cero)."
+    "desc": "NYX es <strong>Local-First</strong>. Los mensajes viven en su dispositivo, no en la nube. Si usa NYX en varios dispositivos (ej. Teléfono + Laptop), estos actúan como clientes independientes.",
+    "future_text": "Estamos trabajando en un \"Protocolo de Sincronización\" seguro para el futuro, pero actualmente, el historial no se sincroniza automáticamente entre dispositivos para garantizar la privacidad de conocimiento cero."
   },
   "lost_phrase": {
     "title": "¿Qué pasa si pierdo mi Frase de Recuperación?",
-    "irrecoverable": "Tu cuenta será matemáticamente irrecuperable.",
-    "desc": "No guardamos tu frase ni tu contraseña. Si las pierdes, nadie en el mundo —incluyéndonos a nosotros— podrá descifrar tus datos. Por favor, anota tu frase y guárdala de forma segura sin conexión."
+    "irrecoverable": "Su cuenta es matemáticamente irrecuperable.",
+    "desc": "No almacenamos su frase ni su contraseña. Si las pierde, nadie en la Tierra, incluidos nosotros, puede descifrar sus datos. Por favor, anote su frase dan guárdela de forma segura fuera de línea."
   },
+  "footer_tagline": "Base de Inteligencia NYX • Nivel de Seguridad 0",
   "seo": {
-    "description": "Obtén ayuda sobre los chats E2EE de NYX, recuperación de cuentas y funciones de seguridad."
+    "description": "Obtenga ayuda con el chat cifrado de NYX, recuperación de cuenta dan funciones de seguridad."
   }
 }

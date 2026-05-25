@@ -1,0 +1,170 @@
+---
+import MainLayout from '../layouts/MainLayout.astro';
+import Footer from '../components/Footer.astro';
+import { getLangFromUrl, useTranslations } from '../utils/i18n';
+import { FiTerminal, FiKey, FiCpu, FiCode, FiLayers, FiAlertCircle } from 'react-icons/fi';
+
+const lang = Astro.currentLocale || getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+
+const title = t('api-docs:meta.title');
+const description = t('api-docs:meta.description');
+---
+
+<MainLayout title={title} description={description} canonicalUrl={Astro.url.pathname}>
+  <div class="min-h-screen pt-24 pb-16 px-4 md:px-8 max-w-7xl mx-auto">
+    
+    <header class="mb-12 border-b border-[#1e293b] pb-8">
+      <h1 class="text-4xl md:text-5xl font-black tracking-tighter mb-4 text-[#06b6d4]">{t('api-docs:hero.title')}</h1>
+      <p class="text-text-secondary text-lg max-w-3xl">{t('api-docs:hero.subtitle')}</p>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      
+      <!-- Navigation Sidebar -->
+      <aside class="lg:col-span-1 hidden lg:block sticky top-24 h-max">
+        <nav class="card-neumorphic p-4 space-y-2">
+          <h3 class="font-bold text-text-primary mb-4 uppercase tracking-wider text-sm">{t('api-docs:toc.title')}</h3>
+          <a href="#request-access" class="block py-2 px-3 rounded text-text-secondary hover:bg-[#1e293b] hover:text-[#06b6d4] transition-colors">{t('api-docs:toc.step1')}</a>
+          <a href="#integration-a" class="block py-2 px-3 rounded text-text-secondary hover:bg-[#1e293b] hover:text-[#06b6d4] transition-colors">{t('api-docs:toc.step2')}</a>
+          <a href="#integration-b" class="block py-2 px-3 rounded text-text-secondary hover:bg-[#1e293b] hover:text-[#06b6d4] transition-colors">{t('api-docs:toc.step3')}</a>
+          <a href="#troubleshooting" class="block py-2 px-3 rounded text-text-secondary hover:bg-[#1e293b] hover:text-red-400 transition-colors">{t('api-docs:toc.step4')}</a>
+        </nav>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="lg:col-span-3 space-y-16">
+        
+        <!-- Request Access -->
+        <section id="request-access" class="scroll-mt-24">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 bg-[#0d1322] rounded-lg border border-[#1e293b] text-[#06b6d4]">
+              <FiKey size={24} />
+            </div>
+            <h2 class="text-2xl md:text-3xl font-bold">{t('api-docs:request.title')}</h2>
+          </div>
+          <div class="card-neumorphic">
+            <p class="text-text-secondary mb-4 leading-relaxed" set:html={t('api-docs:request.p1')}></p>
+            <div class="p-4 bg-[#070a13] rounded-lg border border-[#1e293b]">
+              <p class="text-text-primary font-mono text-sm">
+                {t('api-docs:request.email_label')} <a href="mailto:support@nyx-app.my.id" class="text-[#06b6d4] hover:underline">support@nyx-app.my.id</a><br/>
+                {t('api-docs:request.subject_label')} <span class="text-text-secondary">{t('api-docs:request.subject_value')}</span>
+              </p>
+            </div>
+            <p class="text-sm text-text-secondary mt-4">
+              {t('api-docs:request.footer')}
+            </p>
+          </div>
+        </section>
+
+        <!-- Method A: Iframe -->
+        <section id="integration-a" class="scroll-mt-24">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 bg-[#0d1322] rounded-lg border border-[#1e293b] text-[#2563eb]">
+              <FiLayers size={24} />
+            </div>
+            <h2 class="text-2xl md:text-3xl font-bold">{t('api-docs:iframe.title')}</h2>
+          </div>
+          <div class="card-neumorphic space-y-4">
+            <p class="text-text-secondary leading-relaxed" set:html={t('api-docs:iframe.p1')}></p>
+            <div class="bg-[#070a13] rounded-lg overflow-hidden border border-[#1e293b]">
+              <div class="flex items-center px-4 py-2 bg-[#1e293b]/50 border-b border-[#1e293b] text-xs font-mono text-text-secondary">
+                <FiCode class="mr-2" /> EmbeddedChat.tsx
+              </div>
+              <pre class="p-4 overflow-x-auto text-sm font-mono text-gray-300">
+<code>export default function EmbeddedChat(&lcub; roomUrl &rcub;) &lcub;
+  return (
+    &lt;iframe 
+      src=&lcub;roomUrl&rcub;
+      allow="camera; microphone; clipboard-write"
+      sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+      className="w-full h-[600px] rounded-xl border border-slate-800"
+    /&gt;
+  );
+&rcub;</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- Method B: SDK -->
+        <section id="integration-b" class="scroll-mt-24">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 bg-[#0d1322] rounded-lg border border-[#1e293b] text-[#06b6d4]">
+              <FiTerminal size={24} />
+            </div>
+            <h2 class="text-2xl md:text-3xl font-bold">{t('api-docs:sdk.title')}</h2>
+          </div>
+          <div class="card-neumorphic space-y-4">
+            <p class="text-text-secondary leading-relaxed">{t('api-docs:sdk.p1')}</p>
+            <div class="bg-[#070a13] rounded-lg overflow-hidden border border-[#1e293b]">
+              <pre class="p-4 overflow-x-auto text-sm font-mono text-gray-300">
+<code>npm install nyx-engine-sdk-0.1.0.tgz</code></pre>
+            </div>
+            
+            <h4 class="text-lg font-semibold mt-6 mb-2">{t('api-docs:sdk.example_title')}</h4>
+            <div class="bg-[#070a13] rounded-lg overflow-hidden border border-[#1e293b]">
+              <pre class="p-4 overflow-x-auto text-sm font-mono text-gray-300">
+<code>import NyxClient from 'nyx-engine-sdk';
+
+// 1. Initialize Web Worker and Cryptography
+const nyx = new NyxClient(&lcub; apiKey: process.env.NYX_ENGINE_KEY &rcub;);
+await nyx.initialize();
+
+// 2. Connect user via token
+await nyx.connectUser(userToken);
+
+// 3. Listen for natively decrypted messages
+nyx.on('message.decrypted', (message) =&gt; &lcub;
+  console.log("New Secure Message:", message);
+&rcub;);
+
+// 4. Send encrypted message
+await nyx.sendMessage(roomId, "Hello from the custom integration!");</code></pre>
+            </div>
+          </div>
+        </section>
+
+        <!-- Troubleshooting -->
+        <section id="troubleshooting" class="scroll-mt-24">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="p-2 bg-[#0d1322] rounded-lg border border-red-500/30 text-red-500">
+              <FiAlertCircle size={24} />
+            </div>
+            <h2 class="text-2xl md:text-3xl font-bold">{t('api-docs:troubleshooting.title')}</h2>
+          </div>
+          
+          <div class="card-neumorphic overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+              <thead>
+                <tr class="border-b border-[#1e293b]">
+                  <th class="py-3 px-4 font-semibold">{t('api-docs:troubleshooting.headers.error')}</th>
+                  <th class="py-3 px-4 font-semibold">{t('api-docs:troubleshooting.headers.solution')}</th>
+                </tr>
+              </thead>
+              <tbody class="text-sm">
+                <tr class="border-b border-[#1e293b]/50">
+                  <td class="py-4 px-4 font-mono text-red-400">{t('api-docs:troubleshooting.errors.base64')}</td>
+                  <td class="py-4 px-4 text-text-secondary" set:html={t('api-docs:troubleshooting.errors.base64_sol')}></td>
+                </tr>
+                <tr class="border-b border-[#1e293b]/50">
+                  <td class="py-4 px-4 font-mono text-red-400">{t('api-docs:troubleshooting.errors.csp')}</td>
+                  <td class="py-4 px-4 text-text-secondary" set:html={t('api-docs:troubleshooting.errors.csp_sol')}></td>
+                </tr>
+                <tr class="border-b border-[#1e293b]/50">
+                  <td class="py-4 px-4 font-mono text-red-400">{t('api-docs:troubleshooting.errors.memory')}</td>
+                  <td class="py-4 px-4 text-text-secondary" set:html={t('api-docs:troubleshooting.errors.memory_sol')}></td>
+                </tr>
+                <tr>
+                  <td class="py-4 px-4 font-mono text-red-400">{t('api-docs:troubleshooting.errors.cors')}</td>
+                  <td class="py-4 px-4 text-text-secondary" set:html={t('api-docs:troubleshooting.errors.cors_sol')}></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <Footer lang={lang} />
+      </main>
+    </div>
+  </div>
+</MainLayout>

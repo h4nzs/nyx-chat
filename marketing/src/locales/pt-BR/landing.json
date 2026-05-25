@@ -60,6 +60,14 @@
     "tactile": {
       "title": "DESIGN TÁTIL",
       "desc": "Interface neumórfica com profundidade esculpida e textura granulada para uma sensação física premium."
+    },
+    "post_quantum": {
+      "title": "SEGURANÇA PÓS-QUÂNTICA",
+      "desc": "As sessões de bate-papo são protegidas por um esquema híbrido X25519 e ML-KEM-768 (X-Wing), imune à futura espionagem por computadores quânticos."
+    },
+    "burner_chat": {
+      "title": "SESSÕES DESCARTÁVEIS",
+      "desc": "Crie um gateway anônimo temporário. Compartilhe um link para conversar totalmente criptografado na memória sem se registrar. Autodestruição ao fechar."
     }
   },
   "how_it_works": {

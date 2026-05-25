@@ -1,5 +1,6 @@
 ---
 import MainLayout from '../layouts/MainLayout.astro';
+import Footer from '../components/Footer.astro';
 import '../index.css';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import { getLangFromUrl, useTranslations } from '../utils/i18n';
@@ -75,7 +76,7 @@ const landingSchema = JSON.stringify({
           <span class="text-2xl font-bold tracking-tighter">NYX</span>
         </div>
         <div class="flex items-center gap-4">
-          <a href={`${APP_URL}/login`} class="px-4 py-2 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] transition-all">
+          <a href={`${APP_URL}/login`} class="btn-secondary">
             {t('landing:header.login')}
           </a>
           <div class="relative z-[100]">
@@ -87,12 +88,12 @@ const landingSchema = JSON.stringify({
       <main class="max-w-6xl mx-auto px-4 py-16 md:py-24">
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
           <div class="lg:col-span-7 animate-in fade-in slide-in-from-bottom-8 duration-1000">
-            <div class="inline-block mb-4 px-4 py-1 rounded-full bg-bg-main shadow-[inset_2px_2px_5px_rgba(0,0,0,0.2),inset_-2px_-2px_5px_rgba(255,255,255,0.1)] text-accent text-xs md:text-sm font-bold tracking-wider uppercase">
+            <div class="inline-block mb-4 px-4 py-1 rounded-full bg-bg-main shadow-mutated-inset text-accent text-xs md:text-sm font-bold tracking-wider uppercase border border-[#1e293b]">
               {t('landing:hero.badge', { version: APP_VERSION })}
             </div>
             <h1 class="text-5xl md:text-7xl font-black tracking-tighter leading-none mb-6">
               {t('landing:hero.title_prefix')}<br />
-              <span class="text-accent" style="text-shadow: 2px 2px 4px rgba(255, 107, 53, 0.3);">{t('landing:hero.title_highlight')}</span><br />
+              <span class="text-accent" style="text-shadow: 0 0 20px rgba(6, 182, 212, 0.4);">{t('landing:hero.title_highlight')}</span><br />
               {t('landing:hero.title_suffix')}
             </h1>
             <p class="sr-only">
@@ -102,10 +103,10 @@ const landingSchema = JSON.stringify({
               {t('landing:hero.description')}
             </p>
             <div class="flex flex-col sm:flex-row justify-start items-start gap-4">
-              <a href={`${APP_URL}/register`} class="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] hover:-translate-y-1 transition-all flex items-center">
+              <a href={`${APP_URL}/register`} class="btn-primary px-8 py-4 text-lg">
                 {t('landing:hero.cta_start')} <FiArrowRight className="ml-2" />
               </a>
-              <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" class="px-8 py-4 rounded-lg bg-bg-surface text-text-primary shadow-[3px_3px_6px_rgba(0,0,0,0.2),-3px_-3px_6px_rgba(255,255,255,0.1)] hover:shadow-[inset_1px_1px_3px_rgba(0,0,0,0.2)] hover:-translate-y-1 transition-all flex items-center">
+              <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" class="btn-secondary px-8 py-4 text-lg">
                 <FiGithub className="mr-2" />
                 {t('landing:hero.cta_source')}
               </a>
@@ -114,11 +115,11 @@ const landingSchema = JSON.stringify({
 
           <div class="lg:col-span-5 flex justify-center lg:justify-end animate-in fade-in slide-in-from-right-8 duration-1000 delay-300">
             <div class="relative w-full max-w-[280px] md:max-w-[320px]">
-              <div class="relative mx-auto border-gray-900 bg-gray-900 border-[10px] rounded-[2.5rem] shadow-[20px_20px_40px_rgba(0,0,0,0.4),-10px_-10px_30px_rgba(255,255,255,0.05)] overflow-hidden">
-                <div class="h-[32px] w-[3px] bg-gray-800 absolute -left-[13px] top-[72px] rounded-l-lg"></div>
-                <div class="h-[46px] w-[3px] bg-gray-800 absolute -left-[13px] top-[124px] rounded-l-lg"></div>
-                <div class="h-[46px] w-[3px] bg-gray-800 absolute -left-[13px] top-[178px] rounded-l-lg"></div>
-                <div class="h-[64px] w-[3px] bg-gray-800 absolute -right-[13px] top-[142px] rounded-r-lg"></div>
+              <div class="relative mx-auto border-[#1e293b] bg-[#0d1322] border-[10px] rounded-[2.5rem] shadow-mutated-outset overflow-hidden">
+                <div class="h-[32px] w-[3px] bg-[#1e293b] absolute -left-[13px] top-[72px] rounded-l-lg"></div>
+                <div class="h-[46px] w-[3px] bg-[#1e293b] absolute -left-[13px] top-[124px] rounded-l-lg"></div>
+                <div class="h-[46px] w-[3px] bg-[#1e293b] absolute -left-[13px] top-[178px] rounded-l-lg"></div>
+                <div class="h-[64px] w-[3px] bg-[#1e293b] absolute -right-[13px] top-[142px] rounded-r-lg"></div>
                 <div class="rounded-[2rem] overflow-hidden w-full h-auto aspect-[9/19] bg-bg-main relative">
                   <Image 
                     src={mobileDarkImg} 
@@ -147,7 +148,7 @@ const landingSchema = JSON.stringify({
       <section class="py-16 md:py-24">
         <div class="max-w-5xl mx-auto px-4">
           <h2 class="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">{t('landing:comparison.title')}</h2>
-          <div class="bg-bg-surface rounded-3xl p-6 md:p-8 shadow-[inset_3px_3px_6px_rgba(0,0,0,0.2),inset_-3px_-3px_6px_rgba(255,255,255,0.05)] overflow-x-auto">
+          <div class="bg-bg-surface rounded-3xl p-6 md:p-8 shadow-mutated-outset overflow-x-auto border border-[#1e293b]">
             <table class="w-full min-w-[600px] border-separate border-spacing-y-4">
               <thead>
                 <tr class="text-text-secondary text-sm uppercase tracking-wider">
@@ -160,10 +161,10 @@ const landingSchema = JSON.stringify({
               <tbody>
                 {comparisonData.map((row) => (
                   <tr class="group hover:-translate-y-1 transition-transform">
-                    <td class="py-4 px-6 font-bold text-text-primary bg-bg-main rounded-l-xl shadow-[2px_2px_5px_rgba(0,0,0,0.1)] border-r border-transparent">
+                    <td class="py-4 px-6 font-bold text-text-primary bg-bg-main rounded-l-xl shadow-sm border border-[#1e293b] border-r-0">
                       {row.feature}
                     </td>
-                    <td class="py-4 px-4 text-center text-red-500 bg-bg-main/50">
+                    <td class="py-4 px-4 text-center text-red-500 bg-bg-main/50 border-y border-[#1e293b]">
                       <div class="flex items-center justify-center gap-2">
                         {row.wa === t('landing:comparison.values.yes') || row.wa === t('landing:comparison.values.required') 
                           ? <><FiX/><span class="sr-only">Not Supported / Required:</span></> 
@@ -171,13 +172,13 @@ const landingSchema = JSON.stringify({
                         {row.wa}
                       </div>
                     </td>
-                    <td class="py-4 px-4 text-center text-yellow-500 bg-bg-main/50">
+                    <td class="py-4 px-4 text-center text-yellow-500 bg-bg-main/50 border-y border-[#1e293b]">
                       {row.tg}
                     </td>
-                    <td class="py-4 px-6 text-center text-green-500 font-bold bg-bg-main rounded-r-xl shadow-[inset_-2px_2px_5px_rgba(0,0,0,0.1)]">
+                    <td class="py-4 px-6 text-center text-green-500 font-bold bg-bg-main rounded-r-xl shadow-sm border border-[#1e293b] border-l-0">
                       <div class="flex items-center justify-center gap-2">
                         <FiCheck className="text-xl" /> 
-                        <span class="sr-only">Supported by NYX:</span>
+                        <span class="sr-only">{t('landing:a11y.supported')}</span>
                         {row.nyx}
                       </div>
                     </td>
@@ -189,18 +190,18 @@ const landingSchema = JSON.stringify({
         </div>
       </section>
 
-      <section class="py-16 md:py-24 bg-[#222222]">
+      <section class="py-16 md:py-24 bg-[#070a13]">
         <div class="max-w-6xl mx-auto px-4">
           <h2 class="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">{t('landing:features.title')}</h2>
           <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
             {[
+              { icon: FiShield, title: t('landing:features.post_quantum.title'), desc: t('landing:features.post_quantum.desc') },
+              { icon: FiEyeOff, title: t('landing:features.burner_chat.title'), desc: t('landing:features.burner_chat.desc') },
               { icon: FiHash, title: t('landing:features.no_phone.title'), desc: t('landing:features.no_phone.desc') },
-              { icon: FiEyeOff, title: t('landing:features.ghost_app.title'), desc: t('landing:features.ghost_app.desc') },
-              { icon: FiCpu, title: t('landing:features.argon2.title'), desc: t('landing:features.argon2.desc') },
-              { icon: FiShield, title: t('landing:features.tactile.title'), desc: t('landing:features.tactile.desc') }
+              { icon: FiSun, title: t('landing:features.tactile.title'), desc: t('landing:features.tactile.desc') }
             ].map((Feature) => (
-              <div class="bg-bg-main p-8 rounded-2xl shadow-neu-flat-dark hover:shadow-neu-pressed-dark hover:scale-[0.98] transition-all duration-300 border border-white/5 text-center flex flex-col items-center">
-                <div class="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4 text-accent">
+              <div class="card-neumorphic text-center flex flex-col items-center">
+                <div class="inline-block p-4 bg-bg-main rounded-full shadow-mutated-inset mb-4 text-accent border border-[#1e293b]">
                   <Feature.icon size={24} />
                 </div>
                 <h3 class="text-xl font-bold text-text-primary mb-2">{Feature.title}</h3>
@@ -216,23 +217,23 @@ const landingSchema = JSON.stringify({
           <h2 class="text-3xl md:text-4xl font-black text-center mb-16 tracking-tighter">{t('landing:how_it_works.title')}</h2>
           <div class="relative grid md:grid-cols-3 gap-12">
             <div class="relative flex flex-col items-center text-center">
-              <div class="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4 z-10 text-accent">
+              <div class="inline-block p-4 bg-bg-main rounded-full shadow-mutated-inset mb-4 z-10 text-accent border border-[#1e293b]">
                 <FiUserPlus size={24} />
               </div>
               <h3 class="text-xl font-bold text-text-primary mb-2">{t('landing:how_it_works.step_1.title')}</h3>
               <p class="text-text-secondary max-w-xs">{t('landing:how_it_works.step_1.desc')}</p>
-              <div class="absolute top-9 left-1/2 w-full h-0.5 border-t border-dashed border-white/20 hidden md:block"></div>
+              <div class="absolute top-9 left-1/2 w-full h-0.5 border-t border-dashed border-[#1e293b] hidden md:block"></div>
             </div>
             <div class="relative flex flex-col items-center text-center">
-              <div class="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4 z-10 text-accent">
+              <div class="inline-block p-4 bg-bg-main rounded-full shadow-mutated-inset mb-4 z-10 text-accent border border-[#1e293b]">
                 <FiMessageSquare size={24} />
               </div>
               <h3 class="text-xl font-bold text-text-primary mb-2">{t('landing:how_it_works.step_2.title')}</h3>
               <p class="text-text-secondary max-w-xs">{t('landing:how_it_works.step_2.desc')}</p>
-              <div class="absolute top-9 left-1/2 w-full h-0.5 border-t border-dashed border-white/20 hidden md:block"></div>
+              <div class="absolute top-9 left-1/2 w-full h-0.5 border-t border-dashed border-[#1e293b] hidden md:block"></div>
             </div>
             <div class="relative flex flex-col items-center text-center">
-              <div class="inline-block p-4 bg-bg-main rounded-full shadow-[4px_4px_8px_rgba(0,0,0,0.2),-4px_-4px_8px_rgba(255,255,255,0.1)] mb-4 z-10 text-accent">
+              <div class="inline-block p-4 bg-bg-main rounded-full shadow-mutated-inset mb-4 z-10 text-accent border border-[#1e293b]">
                 <FiShield size={24} />
               </div>
               <h3 class="text-xl font-bold text-text-primary mb-2">{t('landing:how_it_works.step_3.title')}</h3>
@@ -242,18 +243,18 @@ const landingSchema = JSON.stringify({
         </div>
       </section>
 
-      <section class="py-16 md:py-24 bg-[#222222]">
+      <section class="py-16 md:py-24 bg-[#070a13]">
         <div class="max-w-4xl mx-auto px-4">
           <h2 class="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">{t('landing:testimonials.title')}</h2>
           <div class="grid md:grid-cols-2 gap-8">
-            <div class="bg-bg-surface p-8 rounded-lg shadow-[8px_8px_16px_rgba(0,0,0,0.2),-8px_-8px_16px_rgba(255,255,255,0.1)] border border-transparent hover:border-accent/30 transition-all duration-300" style="background-image: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.05) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(0,0,0,0.1) 0%, transparent 40%); background-blend-mode: overlay;">
+            <div class="card-neumorphic">
               <p class="text-lg italic text-text-primary mb-4">"{t('landing:testimonials.yosep')}"</p>
-              <p class="font-bold text-accent">Yosep.</p>
+              <p class="font-bold text-[#06b6d4]">Yosep.</p>
               <p class="text-sm text-text-secondary">{t('landing:testimonials.yosep_role')}</p>
             </div>
-            <div class="bg-bg-surface p-8 rounded-lg shadow-[8px_8px_16px_rgba(0,0,0,0.2),-8px_-8px_16px_rgba(255,255,255,0.1)] border border-transparent hover:border-accent/30 transition-all duration-300" style="background-image: radial-gradient(circle at 20% 20%, rgba(255,255,255,0.05) 0%, transparent 40%), radial-gradient(circle at 80% 80%, rgba(0,0,0,0.1) 0%, transparent 40%); background-blend-mode: overlay;">
+            <div class="card-neumorphic">
               <p class="text-lg italic text-text-primary mb-4">"{t('landing:testimonials.sarah')}"</p>
-              <p class="font-bold text-accent">Sarah T.</p>
+              <p class="font-bold text-[#06b6d4]">Sarah T.</p>
               <p class="text-sm text-text-secondary">{t('landing:testimonials.sarah_role')}</p>
             </div>
           </div>
@@ -265,7 +266,7 @@ const landingSchema = JSON.stringify({
           <h2 class="text-3xl md:text-4xl font-black text-center mb-12 tracking-tighter">{t('landing:faq.title')}</h2>
           <div class="space-y-4">
             {[1, 2, 3, 4].map((i) => (
-              <div class="bg-bg-surface rounded-lg shadow-[4px_4px_8px_rgba(0,0,0,0.1),-4px_-4px_8px_rgba(255,255,255,0.05)] overflow-hidden">
+              <div class="card-neumorphic p-0 overflow-hidden">
                 <details class="group">
                   <summary class="flex justify-between items-center font-bold cursor-pointer list-none p-6 text-text-primary hover:text-accent transition-colors">
                     <span>{t(`landing:faq.q${i}`)}</span>
@@ -287,49 +288,13 @@ const landingSchema = JSON.stringify({
         <div class="max-w-4xl mx-auto px-4 text-center">
           <h2 class="text-3xl md:text-4xl font-black mb-6 tracking-tighter">{t('landing:cta.title')}</h2>
           <p class="text-lg text-text-secondary mb-8 max-w-2xl mx-auto">{t('landing:cta.desc')}</p>
-          <a href={`${APP_URL}/register`} class="px-8 py-4 rounded-lg bg-accent text-white font-bold shadow-[5px_5px_10px_rgba(0,0,0,0.3),-5px_-5px_10px_rgba(255,255,255,0.1)] hover:shadow-[inset_2px_2px_5px_rgba(0,0,0,0.3)] hover:-translate-y-1 transition-all inline-flex items-center">
+          <a href={`${APP_URL}/register`} class="btn-primary px-8 py-4 text-lg inline-flex">
             {t('landing:cta.button')} <FiArrowRight className="ml-2" />
           </a>
         </div>
       </section>
 
-      <footer class="py-12 border-t border-white/5 bg-bg-main relative overflow-hidden">
-        <div class="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-md h-[1px] bg-gradient-to-r from-transparent via-accent/50 to-transparent"></div>
-        <div class="max-w-6xl mx-auto px-6 text-center text-text-secondary flex flex-col items-center">
-          <div class="flex items-center justify-center gap-3 mb-4">
-            <img src="/pwa-192x192.png" alt="NYX" class="w-6 h-6 grayscale hover:grayscale-0 transition-all duration-300" />
-            <span class="text-sm font-black tracking-[0.3em] text-text-primary uppercase">NYX</span>
-          </div>
-          <p class="text-sm font-medium mb-3">
-            {t('landing:footer.rights', { year: new Date().getFullYear().toString() })} <span class="font-bold text-white">AGPL-3.0</span>.
-          </p>
-          
-          <div class="flex flex-wrap justify-center items-center gap-3 text-xs font-bold mt-1 mb-8">
-            <a href={`${langPrefix}/privacy`} class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.legal')}</a>
-            <span class="text-white/10">•</span>
-            
-            <a href={`${langPrefix}/help`} class="hover:text-accent transition-colors tracking-wide">
-              {t('common:help') !== 'common:help' ? t('common:help') : 'Help Center'}
-            </a>
-            <span class="text-white/10">•</span>
-            
-            <a href={`${langPrefix}/security`} class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.security') || 'Security'}</a>
-            <span class="text-white/10">•</span>
-            
-            <a href={`${langPrefix}/hall-of-fame`} class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.hallOfFame') || 'Hall of Fame'}</a>
-            <span class="text-white/10">•</span>
-
-            <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" class="hover:text-accent transition-colors tracking-wide">{t('landing:footer.source')}</a>
-            <span class="text-white/10">•</span>
-            
-            <a href={`${langPrefix}/commercial`} class="text-accent hover:text-white transition-colors tracking-wide">{t('landing:footer.commercial')}</a>
-          </div>
-
-          <p class="text-[10px] text-text-secondary/40 max-w-3xl mx-auto leading-relaxed font-mono">
-            {t('landing:footer.disclaimer', { year: new Date().getFullYear().toString() })}
-          </p>
-        </div>
-      </footer>
+      <Footer lang={lang} />
     </div>
   </div>
 </MainLayout>

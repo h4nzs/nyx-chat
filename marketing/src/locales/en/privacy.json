@@ -16,8 +16,10 @@
     "intro": "Our core directive: If we don't have your data, no one can demand it from us.",
     "minimization_title": "1. Data Minimization & Cryptography",
     "minimization_1": "<strong>Blind Identity Protocol:</strong> We do not store your raw username, email, or phone number. We utilize client-side <a href=\"https://en.wikipedia.org/wiki/Argon2\" target=\"_blank\" class=\"text-accent underline\">Argon2id hashing</a>. The server only stores a cryptographic hash (`usernameHash`), rendering your identity mathematically irreversible to us.",
-    "minimization_2": "<0>Encrypted Metadata:</0> Your display name, bio, and avatar are symmetrically encrypted on your device. To our infrastructure, your profile is an opaque blob of ciphertext.",
-    "minimization_3": "<strong>E2EE Communication:</strong> All direct messages, voice notes, and file attachments are End-to-End Encrypted using the <a href=\"https://signal.org/docs/\" target=\"_blank\" class=\"text-accent underline\">Signal Protocol (Double Ratchet)</a>. We act solely as a blind relay network.",
+    "minimization_2": "<strong>Encrypted Metadata:</strong> Your display name, bio, and avatar are symmetrically encrypted on your device. To our infrastructure, your profile is an opaque blob of ciphertext.",
+    "minimization_3": "<strong>E2EE Communication:</strong> All direct messages, voice notes, and file attachments are End-to-End Encrypted using the <a href=\"https://signal.org/docs/\" target=\"_blank\" class=\"text-accent underline\">Signal Protocol (Double Ratchet)</a>.",
+    "minimization_4": "<strong>Zero-Knowledge Burner Sessions:</strong> These sessions operate exclusively within your browser's volatile memory (RAM). No account metadata is stored on disk or server; keys are cryptographically shredded the instant the tab is closed (Zero-Footprint).",
+    "minimization_5": "<strong>Secure Media Enclaves:</strong> Every image or file attachment is mutated into a randomized binary blob on your device using XChaCha20-Poly1305 symmetric encryption before cloud transmission. NYX servers act as blind storage enclaves and never possess the keys to decrypt your media.",
     "logging_title": "2. Ephemeral Network Logging",
     "logging_desc": "To maintain network integrity and prevent DDoS/Botnet attacks, we temporarily process:",
     "logging_1": "IP addresses (irreversibly hashed upon connection).",
@@ -27,15 +29,16 @@
   "terms": {
     "title": "Terms of Service",
     "liability_title": "Critical Disclaimer of Liability",
-    "liability_desc": "NYX is provided \"AS IS\", without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <0>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</0>",
-    "gating": "<0>Trust-Tier Gating:</0> To protect the network, unverified accounts are placed in a restricted \"Sandbox Mode\". Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.",
-    "abuse": "<0>Zero-Tolerance Abuse Policy:</0> You agree not to utilize the NYX network for illicit activities, automated API abuse (botting), or distributing malware. Violations will result in immediate network bans."
+    "liability_desc": "NYX is provided \"AS IS\", without warranty of any kind. The maintainers shall not be held liable for any data loss, compromised keys, or service interruptions. You are solely responsible for managing your cryptographic Recovery Phrase. <strong>If you lose your password and Recovery Phrase, your account and data are permanently inaccessible. We cannot bypass our own encryption.</strong>",
+    "help_guidance": "If you need guidance, consult our",
+    "gating": "<strong>Trust-Tier Gating:</strong> To protect the network, unverified accounts are placed in a restricted \"Sandbox Mode\". Full capabilities require biometric hardware verification or cryptographic Proof-of-Work.",
+    "abuse": "<strong>Zero-Tolerance Abuse Policy:</strong> You agree not to utilize the NYX network for illicit activities, automated API abuse (botting), or distributing malware. Violations will result in immediate network bans."
   },
   "licensing": {
     "title": "Software Licensing & Enterprise",
-    "intro": "The NYX source code is proudly open-source and fiercely protected under the <0>GNU Affero General Public License v3.0 (AGPL-3.0)</0>.",
+    "intro": "The NYX source code is proudly open-source and fiercely protected under the <strong>GNU Affero General Public License v3.0 (AGPL-3.0)</strong>.",
     "agpl_title": "The AGPL-3.0 Constraint",
-    "agpl_desc": "If you modify the NYX codebase and allow users to interact with it over a network (e.g., hosting it as a SaaS), you are legally obligated to release your modified source code to the public. <0>Closed-source SaaS deployments of NYX under this license are strictly prohibited and constitute copyright infringement.</0>",
+    "agpl_desc": "If you modify the NYX codebase and allow users to interact with it over a network (e.g., hosting it as a SaaS), you are legally obligated to release your modified source code to the public. <strong>Closed-source SaaS deployments of NYX under this license are strictly prohibited and constitute copyright infringement.</strong>",
     "commercial_title": "Commercial Dual-Licensing",
     "commercial_desc": "For corporations, enterprises, or startups wishing to integrate NYX into a proprietary, closed-source product without the AGPL obligations, we offer a Commercial License.",
     "contact_btn": "Contact Command for Enterprise Pricing"
@@ -52,9 +55,9 @@
   },
   "ai": {
     "title": "AI & Telemetry",
-    "intro": "NYX operates with <0>Zero Telemetry</0>. We do not track your clicks, screen time, or feature usage.",
+    "intro": "NYX operates with <strong>Zero Telemetry</strong>. We do not track your clicks, screen time, or feature usage.",
     "smart_reply_title": "Smart Reply (Optional AI)",
-    "smart_reply_desc": "We provide an experimental \"Smart Reply\" feature utilizing the Google Gemini API. This feature is <0>strictly Opt-In</0>.",
+    "smart_reply_desc": "We provide an experimental \"Smart Reply\" feature utilizing the Google Gemini API. This feature is <strong>strictly Opt-In</strong>.",
     "smart_reply_1": "Messages are decrypted locally before being sent to the AI.",
     "smart_reply_2": "The NYX Server acts as a blind proxy; it does not log the prompt or the AI's response.",
     "smart_reply_3": "Data processed by the Gemini API is ephemeral and is not used to train foundational AI models, per Google's enterprise API terms."

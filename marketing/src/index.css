@@ -10,8 +10,7 @@
   --breakpoint-xl: 1280px;
   --breakpoint-2xl: 1920px;
 
-  /* Colors - In v4, we reference the variables directly. 
-     Tailwind v4 handles opacity automatically when using variables that resolve to colors. */
+  /* Colors */
   --color-border: hsl(var(--border));
   --color-ring: hsl(var(--ring));
   --color-background: hsl(var(--bg-main));
@@ -31,41 +30,9 @@
   --color-text-primary: hsl(var(--text-primary));
   --color-text-secondary: hsl(var(--text-secondary));
 
-  --color-neu-base: #e0e5ec;
-  --color-neu-dark: #1a1b1e;
-  --color-neumorph-light: #e0e5ec;
-  --color-neumorph-dark: #1a1b1e;
-
-  /* Box Shadows */
-  --shadow-neu-flat: 6px 6px 12px #b8b9be, -6px -6px 12px #ffffff;
-  --shadow-neu-pressed: inset 6px 6px 10px #b8b9be, inset -6px -6px 10px #ffffff;
-  --shadow-neu-icon: 3px 3px 6px #b8b9be, -3px -3px 6px #ffffff;
-  
-  --shadow-neu-flat-dark: 5px 5px 10px #0b0c0e, -5px -5px 10px #292a2e;
-  --shadow-neu-pressed-dark: inset 5px 5px 10px #0b0c0e, inset -5px -5px 10px #292a2e;
-  --shadow-neu-icon-dark: 3px 3px 6px #0b0c0e, -3px -3px 6px #292a2e;
-
-  --shadow-neu-float: 20px 20px 60px #d1d9e6, -20px -20px 60px #ffffff;
-  --shadow-neu-float-dark: 20px 20px 60px #000000, -20px -20px 60px #292a2e;
-
-  --shadow-neumorphic-convex: 5px 5px 10px hsl(var(--shadow-dark)), -5px -5px 10px hsl(var(--shadow-light));
-  --shadow-neumorphic-convex-sm: 2px 2px 5px hsl(var(--shadow-dark)), -2px -2px 5px hsl(var(--shadow-light));
-  --shadow-neumorphic-concave: inset 5px 5px 10px hsl(var(--shadow-dark)), inset -5px -5px 10px hsl(var(--shadow-light));
-  --shadow-neumorphic-concave-sm: inset 2px 2px 5px hsl(var(--shadow-dark)), inset -2px -2px 5px hsl(var(--shadow-light));
-  --shadow-neumorphic-pressed: inset 2px 2px 5px hsl(var(--shadow-dark)), inset -2px -2px 5px hsl(var(--shadow-light));
-  --shadow-neumorphic-pressed-sm: inset 1px 1px 3px hsl(var(--shadow-dark)), inset -1px -1px 3px hsl(var(--shadow-light));
-  
-  --shadow-soft: 0 1px 3px 0 hsl(var(--shadow-color) / 0.1), 0 1px 2px 0 hsl(var(--shadow-color) / 0.06);
-  --shadow-card: 0 4px 12px hsl(var(--shadow-color) / 0.15);
-  
-  --shadow-neu-flat-light: 9px 9px 16px rgb(163,177,198,0.6), -9px -9px 16px rgba(255,255,255, 0.5);
-  --shadow-neu-pressed-light: inset 6px 6px 10px 0 rgba(163,177,198, 0.7), inset -6px -6px 10px 0 rgba(255,255,255, 0.8);
-  --shadow-neu-convex-light: 5px 5px 10px rgb(163,177,198,0.6), -5px -5px 10px rgba(255,255,255, 0.5);
-  
-  --shadow-neu-convex-dark: 3px 3px 6px #0b0c0e, -3px -3px 6px #292a2e;
-
-  /* Background Images */
-  --background-image-aurora-gradient: linear-gradient(to right, hsl(var(--grad-start)), hsl(var(--grad-end)));
+  /* Mutated Neumorphism Shadows */
+  --shadow-mutated-outset: 6px 6px 16px #04060b, -6px -6px 16px #162039;
+  --shadow-mutated-inset: inset 4px 4px 10px #04060b, inset -4px -4px 10px #162039;
 
   /* Fonts */
   --font-sans: 'Inter', sans-serif;
@@ -85,61 +52,64 @@
 }
 
 @utility btn {
-  @apply px-4 py-2 rounded-lg font-semibold shadow-sm transition-all duration-200 flex items-center justify-center;
+  @apply px-4 py-2 rounded-lg font-semibold transition-all duration-200 flex items-center justify-center border border-[#1e293b] hover:brightness-110;
   @apply disabled:opacity-50 disabled:cursor-not-allowed;
 }
 
 @utility btn-primary {
-  @apply btn text-accent-foreground hover:opacity-90;
-  background-image: linear-gradient(to right, hsl(var(--grad-start)), hsl(var(--grad-end)));
-  box-shadow: 5px 5px 10px hsl(var(--shadow-dark)), -5px -5px 10px hsl(var(--shadow-light));
+  @apply btn text-[#06b6d4] bg-[#0d1322];
+  box-shadow: var(--shadow-mutated-outset);
 }
 
 @utility btn-secondary {
-  @apply btn bg-bg-surface text-text-primary hover:bg-secondary/80;
-  box-shadow: 5px 5px 10px hsl(var(--shadow-dark)), -5px -5px 10px hsl(var(--shadow-light));
+  @apply btn bg-[#0d1322] text-[#2563eb] hover:bg-[#0d1322]/80;
+  box-shadow: var(--shadow-mutated-outset);
 }
 
 @utility btn-destructive {
-  @apply btn bg-destructive text-destructive-foreground hover:bg-destructive/90;
+  @apply btn bg-[#0d1322] text-red-500 hover:brightness-110;
+  box-shadow: var(--shadow-mutated-outset);
 }
 
 @utility btn-destructive-neumorphic {
-  @apply btn bg-destructive text-destructive-foreground hover:bg-destructive/90;
-  box-shadow: 5px 5px 10px hsl(var(--shadow-dark)), -5px -5px 10px hsl(var(--shadow-light));
+  @apply btn bg-[#0d1322] text-red-500 hover:brightness-110;
+  box-shadow: var(--shadow-mutated-outset);
 }
 
 @utility input-neumorphic {
-  @apply bg-bg-surface text-text-primary rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-accent shadow-neumorphic-concave transition-all duration-200;
+  @apply bg-[#0d1322] text-text-primary rounded-lg px-4 py-3 focus:outline-none focus:ring-1 focus:ring-[#06b6d4] transition-all duration-200 border border-[#1e293b];
+  box-shadow: var(--shadow-mutated-inset);
 }
 
 @utility card-neumorphic {
-  @apply bg-bg-surface rounded-xl p-6 shadow-neumorphic-convex transition-all duration-200;
+  @apply bg-[#0d1322] rounded-xl p-6 transition-all duration-200 border border-[#1e293b];
+  box-shadow: var(--shadow-mutated-outset);
 }
 
 @utility toggle-neumorphic {
-  @apply relative inline-flex items-center h-7 w-12 flex-shrink-0 rounded-full shadow-neumorphic-concave-sm transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-accent cursor-pointer;
+  @apply relative inline-flex items-center h-7 w-12 flex-shrink-0 rounded-full transition-all duration-200 ease-in-out focus:outline-none focus:ring-1 focus:ring-[#06b6d4] cursor-pointer border border-[#1e293b];
+  box-shadow: var(--shadow-mutated-inset);
 }
 
 @utility toggle-neumorphic-thumb {
-  @apply inline-block h-5 w-5 transform rounded-full shadow-neumorphic-convex-sm ring-0 transition duration-200 ease-in-out;
+  @apply inline-block h-5 w-5 transform rounded-full ring-0 transition duration-200 ease-in-out bg-[#06b6d4];
+  box-shadow: 2px 2px 4px #04060b, -2px -2px 4px #162039;
 }
 
 @layer base {
-  /* New Professional Color Palette (Dark Mode Default) */
   :root {
-    --bg-main: 0 0% 10%;          /* Neutral Dark Gray */
-    --bg-surface: 0 0% 13%;    /* Slightly Lighter Gray */
-    --border: 0 0% 20%;       /* Brighter Gray for borders */
-    --ring: 217 91% 60%;         /* Blue 500 */
+    --bg-main: 225 46% 5%;       /* #070a13 */
+    --bg-surface: 223 45% 9%;    /* #0d1322 */
+    --border: 217 33% 17%;       /* #1e293b */
+    --ring: 190 95% 43%;         /* Cyan #06b6d4 */
 
-    --text-primary: 210 40% 98%;   /* Slate 50 */
-    --text-secondary: 215 20% 70%; /* Slate 400 */
+    --text-primary: 210 40% 98%;   
+    --text-secondary: 215 20% 70%; 
 
     --primary: 210 40% 98%;
     --primary-foreground: 222 47% 11%;
 
-    --secondary: 0 0% 20%;       /* Match border color */
+    --secondary: 217 33% 17%;       
     --secondary-foreground: 210 40% 98%;
 
     --destructive: 0 72% 51%;
@@ -147,99 +117,34 @@
 
     --shadow-color: 222 47% 5%;
 
-    /* New Aurora Gradient */
-    --grad-start: 180 100% 33%; /* Teal */
-    --grad-end: 263 100% 37%;   /* Deep Indigo */
-
-    /* Neumorphism Shadows */
-    --shadow-light: 0 0% 25%; /* Subtle brighter gray for highlight */
-    --shadow-dark: 0 0% 4%;   /* Near-black for deep shadow */
+    --accent: 190 95% 43%;
+    --accent-foreground: 210 40% 98%;
   }
 
   .light {
-    --bg-main: 220 16% 90%;      /* Slate 200 - Softer Gray */
-    --bg-surface: 220 16% 90%;    /* Slate 200 - Same as main for soft UI */
-    --border: 215 20% 65%;       /* Slate 400 - Much darker for contrast */
-    --ring: 217 91% 60%;         /* Blue 500 */
+    --bg-main: 225 46% 5%;       /* Enforce Dark Theme exclusively for Marketing */
+    --bg-surface: 223 45% 9%;    
+    --border: 217 33% 17%;       
+    --ring: 190 95% 43%;         
 
-    --text-primary: 222 47% 11%;   /* Slate 900 */
-    --text-secondary: 215 25% 45%; /* Slate 500 - Darker for contrast (was 50%) */
+    --text-primary: 210 40% 98%;   
+    --text-secondary: 215 20% 70%; 
 
-    --primary: 222 47% 11%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222 47% 11%;
 
-    --secondary: 220 20% 96%;
-    --secondary-foreground: 222 47% 11%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 210 40% 98%;
 
-    --shadow-color: 220 20% 80%;
-
-    /* New Aurora Gradient */
-    --grad-start: 180 100% 33%; /* Teal */
-    --grad-end: 263 100% 37%;   /* Deep Indigo */
-
-    /* Neumorphism Shadows */
-    --shadow-light: 0 0% 100%;    /* White */
-    --shadow-dark: 220 10% 82%;   /* Darker gray for soft shadow */
-  }
-
-  /* Accent Color Themes */
-  /* Blue (Default) */
-  :root[data-accent='blue'] {
-    --accent: 217 91% 60%;
-    --accent-foreground: 210 40% 98%;
-  }
-  .light[data-accent='blue'] {
-    --accent: 217 91% 60%;
-    --accent-foreground: 222 47% 11%;
-  }
-
-  /* Green */
-  :root[data-accent='green'] {
-    --accent: 142 76% 36%;
-    --accent-foreground: 210 40% 98%;
-  }
-  .light[data-accent='green'] {
-    --accent: 142 76% 42%;
-    --accent-foreground: 210 40% 98%;
-  }
-
-  /* Purple */
-  :root[data-accent='purple'] {
-    --accent: 262 80% 58%;
-    --accent-foreground: 210 40% 98%;
-  }
-  .light[data-accent='purple'] {
-    --accent: 262 80% 64%;
-    --accent-foreground: 222 47% 11%;
-  }
-
-  /* Orange */
-  :root[data-accent='orange'] {
-    --accent: 25 95% 53%;
-    --accent-foreground: 210 40% 98%;
-  }
-  .light[data-accent='orange'] {
-    --accent: 25 95% 53%;
-    --accent-foreground: 222 47% 11%;
-  }
-
-  /* Red */
-  :root[data-accent='red'] {
-    --accent: 0 92% 29%;
-    --accent-foreground: 210 40% 98%;
-  }
-  .light[data-accent='red'] {
-    --accent: 0 92% 35%;
-    --accent-foreground: 210 40% 98%;
+    --shadow-color: 222 47% 5%;
   }
 
   html, body, #root {
     @apply h-dvh min-h-dvh text-text-primary;
     background-color: hsl(var(--bg-main));
-    /* Fallback for older browsers not supporting dvh */
     min-height: 100vh; 
   }
 
@@ -263,12 +168,10 @@
     background: hsl(var(--ring));
   }
 
-  /* Touch Target Improvements for PWA */
   .touch-target {
     @apply min-h-[44px] min-w-[44px] flex items-center justify-center;
   }
 
-  /* Enhanced Typography */
   .text-display {
     @apply text-4xl font-bold leading-tight;
   }
@@ -289,7 +192,6 @@
     @apply text-sm leading-relaxed text-text-secondary;
   }
 
-  /* Global Focus-Visible Styles for Accessibility */
   button,
   a,
   input[type="text"],
@@ -297,11 +199,10 @@
   input[type="email"],
   textarea {
     @apply transition-all duration-200 ease-in-out;
-    @apply focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-accent focus-visible:ring-offset-bg-surface;
+    @apply focus:outline-none focus-visible:ring-1 focus-visible:ring-offset-2 focus-visible:ring-[#06b6d4] focus-visible:ring-offset-bg-surface;
   }
 }
 
-/* Custom utility for user name colors */
 .user-color-name {
   color: var(--user-color);
 }
@@ -309,24 +210,24 @@
   filter: brightness(1.5);
 }
 
-/* Custom Toast Styling */
 .glass-toast {
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   outline: none !important;
-  box-shadow: 5px 5px 10px hsl(var(--shadow-dark)), -5px -5px 10px hsl(var(--shadow-light)) !important;
+  box-shadow: var(--shadow-mutated-outset) !important;
+  border: 1px solid #1e293b !important;
+  background-color: #0d1322 !important;
+  color: #fff !important;
 }
 
 /* Custom Neumorphic Shadow for small elements */
 .shadow-neumorphic-convex-sm {
-  box-shadow: 2px 2px 4px hsl(var(--shadow-dark));
+  box-shadow: 2px 2px 4px #04060b, -2px -2px 4px #162039;
 }
 .shadow-neumorphic-convex-sm:active {
-  box-shadow: inset 1px 1px 2px hsl(var(--shadow-dark));
+  box-shadow: inset 1px 1px 2px #04060b, inset -1px -1px 2px #162039;
 }
 
-/* Custom Neumorphic Shadow for message bubbles */
 .shadow-neumorphic-bubble {
-  box-shadow: 3px 3px 6px hsl(var(--shadow-dark)), -3px -3px 6px hsl(var(--shadow-light));
+  box-shadow: var(--shadow-mutated-outset);
 }
-@source ".";

@@ -9,7 +9,8 @@
   "hero": {
     "badge": "MODELO DE LICENÇA DUPLA",
     "title": "Criado para a Comunidade. Escalado para Empresas.",
-    "subtitle": "NYX é open-source e gratuito para sempre. No entanto, se você está construindo um SaaS de código fechado ou ferramenta interna, você precisa de uma Licença Comercial."
+    "subtitle": "NYX é open-source e gratuito para sempre. No entanto, se você está construindo um SaaS de código fechado ou ferramenta interna, você precisa de uma Licença Comercial.",
+    "enterprise": "Empresa e B2B"
   },
   "agpl": {
     "badge": "A REALIDADE AGPL-3.0",
@@ -33,7 +34,10 @@
     "f5": "Suporte Direto de Engenharia",
     "val_agpl_f2": "Deve ser Open-Source",
     "val_com_f2": "Pode ser Código Fechado",
-    "contact_sales": "Contatar Vendas"
+    "contact_sales": "Contatar Vendas",
+    "feature": "Recurso",
+    "val_agpl_f5": "Fóruns da Comunidade",
+    "val_com_f5": "Suporte Prioritário de Engenharia"
   },
   "usecases": {
     "badge": "CASOS DE USO EMPRESARIAIS",

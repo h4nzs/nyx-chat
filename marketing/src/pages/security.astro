@@ -1,5 +1,6 @@
 ---
 import MainLayout from '../layouts/MainLayout.astro';
+import Footer from '../components/Footer.astro';
 import '../index.css';
 import { getLangFromUrl, useTranslations } from '../utils/i18n';
 
@@ -233,6 +234,7 @@ const securitySchema = JSON.stringify({
       </div>
     </section>
     
+    <Footer lang={lang} />
   </main>
 </MainLayout>
 

@@ -1,0 +1,51 @@
+---
+// marketing/src/components/Footer.astro
+import { getLangFromUrl, useTranslations } from '../utils/i18n';
+
+const { lang: propLang } = Astro.props;
+const lang = propLang || Astro.currentLocale || getLangFromUrl(Astro.url);
+const langPrefix = lang === 'en' ? '' : `/${lang}`;
+const t = useTranslations(lang);
+---
+
+<footer class="py-12 border-t border-white/5 bg-bg-main relative overflow-hidden">
+  <div class="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-md h-[1px] bg-gradient-to-r from-transparent via-accent/50 to-transparent"></div>
+  <div class="max-w-6xl mx-auto px-6 text-center text-text-secondary flex flex-col items-center">
+    <div class="flex items-center justify-center gap-3 mb-4">
+      <img src="/pwa-192x192.png" alt="NYX" class="w-6 h-6 grayscale hover:grayscale-0 transition-all duration-300" />
+      <span class="text-sm font-black tracking-[0.3em] text-text-primary uppercase">NYX</span>
+    </div>
+    <p class="text-sm font-medium mb-3">
+      © {new Date().getFullYear()} NYX. {t('common:nav.terms') || 'All rights reserved'}. <span class="font-bold text-white">AGPL-3.0</span>.
+    </p>
+    
+    <div class="flex flex-wrap justify-center items-center gap-3 text-xs font-bold mt-1 mb-8">
+      <a href={`${langPrefix}/`} class="hover:text-accent transition-colors tracking-wide">{t('common:nav.home')}</a>
+      <span class="text-white/10">•</span>
+
+      <a href={`${langPrefix}/help`} class="hover:text-accent transition-colors tracking-wide">{t('common:nav.help')}</a>
+      <span class="text-white/10">•</span>
+
+      <a href={`${langPrefix}/commercial`} class="hover:text-accent transition-colors tracking-wide">{t('common:nav.commercial')}</a>
+      <span class="text-white/10">•</span>
+
+      <a href={`${langPrefix}/privacy`} class="hover:text-accent transition-colors tracking-wide">{t('common:nav.privacy')}</a>
+      <span class="text-white/10">•</span>
+      
+      <a href={`${langPrefix}/security`} class="hover:text-accent transition-colors tracking-wide">Security</a>
+      <span class="text-white/10">•</span>
+      
+      <a href={`${langPrefix}/hall-of-fame`} class="hover:text-accent transition-colors tracking-wide">{t('common:nav.hall_of_fame')}</a>
+      <span class="text-white/10">•</span>
+
+      <a href="https://github.com/h4nzs/nyx-chat" target="_blank" rel="noopener noreferrer" class="hover:text-accent transition-colors tracking-wide">{t('common:nav.source')}</a>
+      <span class="text-white/10">•</span>
+      
+      <a href={`${langPrefix}/api-docs`} class="text-accent hover:text-white transition-colors tracking-wide">{t('common:nav.api_docs')}</a>
+    </div>
+
+    <p class="text-[10px] text-text-secondary/40 max-w-3xl mx-auto leading-relaxed font-mono italic">
+      "In an era of total surveillance, obfuscation is the only true freedom."
+    </p>
+  </div>
+</footer>

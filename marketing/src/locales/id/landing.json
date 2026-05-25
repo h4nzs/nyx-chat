@@ -44,22 +44,22 @@
     }
   },
   "features": {
-    "title": "FITUR UNTUK PRIVASI",
+    "title": "FITUR UNTUK PRIVASI TINGKAT TINGGI",
+    "post_quantum": {
+      "title": "KEAMANAN PASCA-KUANTUM",
+      "desc": "Sesi obrolan dilindungi oleh skema hibrida X25519 dan ML-KEM-768 (X-Wing) yang kebal terhadap penyadapan komputer kuantum masa depan."
+    },
+    "burner_chat": {
+      "title": "SESI BURNER",
+      "desc": "Gerbang anonim sementara. Bagikan tautan ke pihak luar untuk chat terenkripsi murni di memori tab tanpa mendaftar. Otomatis hangus saat ditutup."
+    },
     "no_phone": {
-      "title": "TANPA NOMOR TELEPON DAN EMAIL",
+      "title": "TANPA NOMOR TELEPON",
       "desc": "Daftar hanya dengan Username. Identitas asli Anda tetap aman. Tidak ada yang bisa 'menyimpan kontak Anda' tanpa izin."
     },
-    "ghost_app": {
-      "title": "APLIKASI HANTU (PWA)",
-      "desc": "Tanpa instalasi. Buka di browser, chat, tutup tab, dan bersihkan data. Nol jejak forensik tertinggal di perangkat Anda."
-    },
-    "argon2": {
-      "title": "KEAMANAN ARGON2",
-      "desc": "Satu-satunya chat web yang mengubah password Anda menjadi kunci enkripsi tingkat militer menggunakan hashing memory-hardened."
-    },
     "tactile": {
-      "title": "DESAIN TAKTIL",
-      "desc": "Antarmuka neumorphic termutasi dengan kedalaman pahatan dan tekstur butiran untuk rasa fisik premium."
+      "title": "MUTATED NEUMORPHIC",
+      "desc": "Antarmuka neumorphic termutasi dengan kedalaman pahatan dan gradasi elegan untuk rasa fisik premium."
     }
   },
   "how_it_works": {
@@ -69,31 +69,31 @@
       "desc": "Daftar via username. Kami otomatis membuat 24-kata frasa pemulihan untuk enkripsi."
     },
     "step_2": {
-      "title": "2. MULAI CHATTING",
-      "desc": "Pesan Anda terenkripsi end-to-end sejak kata pertama menggunakan Protokol Signal."
+      "title": "2. MULAI CHAT AMAN",
+      "desc": "Pesan terenkripsi E2E sejak kata pertama. Buat chat standar atau Sesi Burner sementara."
     },
     "step_3": {
-      "title": "3. MENGHILANG",
-      "desc": "Selesai? Tutup browser. Kunci enkripsi dihapus dari memori. Tidak ada jejak tertinggal."
+      "title": "3. TANPA JEJAK",
+      "desc": "Selesai? Tutup browser. Kunci enkripsi untuk obrolan Burner langsung dihapus dari memori."
     }
   },
   "testimonials": {
-    "title": "DIPERCAYA OLEH PEJUANG PRIVASI",
-    "yosep": "Akhirnya, aplikasi chat yang menghargai privasi saya tanpa mengorbankan pengalaman pengguna yang indah. Fakta bahwa saya mengontrol kunci saya sendiri adalah game-changer.",
-    "yosep_role": "Advokat Privasi",
-    "sarah": "Nyx telah menjadi esensial bagi tim kami. Sederhana, aman, dan menyenangkan digunakan setiap hari.",
-    "sarah_role": "Ketua Tim Remote"
+    "title": "SKALABILITAS PREMIUM",
+    "yosep": "Implementasi kustom kami menggunakan infrastruktur enterprise NYX yang tangguh, beradaptasi mulus dengan lingkungan berpermintaan tinggi.",
+    "yosep_role": "Mitra Perusahaan",
+    "sarah": "Hubungi tim penjualan kami via email untuk mendiskusikan skalabilitas infrastruktur kustom dan integrasi B2B khusus.",
+    "sarah_role": "Tim Korporasi NYX"
   },
   "faq": {
     "title": "PERTANYAAN UMUM",
-    "q1": "Apakah NYX terenkripsi end-to-end?",
-    "a1": "Ya. Kami menggunakan Protokol Signal (X3DH + Double Ratchet Algorithm) untuk memastikan hanya Anda dan orang yang Anda ajak komunikasi yang bisa membaca pesan. Bahkan server tidak bisa mendekripsi pesan Anda.",
-    "q2": "Apakah saya perlu menginstal aplikasi?",
-    "a2": "Tidak. NYX adalah Progressive Web App (PWA). Anda bisa menggunakannya langsung di browser atau menginstalnya ke layar utama untuk pengalaman seperti aplikasi native tanpa kerumitan toko aplikasi.",
-    "q3": "Apakah ini sepenuhnya gratis?",
-    "a3": "Ya, NYX adalah open-source dan gratis untuk digunakan. Tidak ada biaya tersembunyi, iklan, atau pelacakan data.",
-    "q4": "Bagaimana cara memulihkan akun saya?",
-    "a4": "Saat mendaftar, Anda menerima 24-kata frasa pemulihan. Ini adalah SATU-SATUNYA cara untuk memulihkan akun Anda, tapi ingat bahwa Anda tidak bisa mengakses riwayat pesan. Dan kami tidak menyimpan frasa ini."
+    "q1": "Apa itu Sesi Burner Chat?",
+    "a1": "Fitur gerbang anonim sementara. Anda dapat membuat tautan unik untuk mengobrol dengan orang luar yang tidak memiliki akun NYX. Semuanya terjadi di memori tab dan otomatis hangus saat ditutup.",
+    "q2": "Bagaimana cara kerja enkripsi file Zero-Knowledge?",
+    "a2": "File lampiran dienkripsi di perangkat Anda menggunakan kunci simetris XChaCha20-Poly1305 acak yang unik sebelum diunggah ke awan. Server NYX hanya melihat blob biner dan tidak pernah memiliki kunci dekripsi.",
+    "q3": "Bagaimana cara mencadangkan identitas kriptografi saya?",
+    "a3": "Saat mendaftar, Anda diberikan 24 kata frasa pemulihan. Ini adalah satu-satunya cara untuk memulihkan identitas Anda. Simpan dengan aman secara offline. Kami tidak dapat memulihkannya untuk Anda.",
+    "q4": "Apakah NYX kebal terhadap komputer kuantum?",
+    "a4": "Ya, kami mengimplementasikan pendekatan hibrida yang menggabungkan X25519 klasik dan algoritma pasca-kuantum ML-KEM-768 (X-Wing) dalam Web Worker WebAssembly khusus."
   },
   "cta": {
     "title": "AMBIL KEMBALI PRIVASI ANDA.",

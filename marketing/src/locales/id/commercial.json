@@ -9,7 +9,8 @@
   "hero": {
     "badge": "MODEL LISENSI GANDA",
     "title": "Dibangun untuk Komunitas. Diskalakan untuk Enterprise.",
-    "subtitle": "NYX adalah open-source dan gratis selamanya. Namun, jika Anda membangun SaaS bersumber tertutup atau alat internal perusahaan, Anda memerlukan Lisensi Komersial."
+    "subtitle": "NYX adalah open-source dan gratis selamanya. Namun, jika Anda membangun SaaS bersumber tertutup atau alat internal perusahaan, Anda memerlukan Lisensi Komersial.",
+    "enterprise": "Enterprise & B2B"
   },
   "agpl": {
     "badge": "REALITAS AGPL-3.0",
@@ -33,7 +34,10 @@
     "f5": "Dukungan Teknis Langsung",
     "val_agpl_f2": "Wajib Open-Source",
     "val_com_f2": "Boleh Tetap Tertutup",
-    "contact_sales": "Hubungi Sales"
+    "contact_sales": "Hubungi Sales",
+    "feature": "Fitur",
+    "val_agpl_f5": "Forum Komunitas",
+    "val_com_f5": "Dukungan Prioritas"
   },
   "usecases": {
     "badge": "STUDI KASUS ENTERPRISE",
