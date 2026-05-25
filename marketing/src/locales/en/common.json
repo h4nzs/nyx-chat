@@ -53,7 +53,13 @@
     "login": "Login",
     "register": "Register",
     "privacy": "Privacy Policy",
-    "terms": "Terms of Service"
+    "terms": "Terms of Service",
+    "commercial": "Commercial",
+    "help": "Help Center",
+    "hall_of_fame": "Hall of Fame",
+    "api_docs": "API Docs",
+    "security": "Security",
+    "source": "Source"
   },
   "errors": {
     "unknown": "Unknown error occurred",
@@ -162,5 +168,6 @@
     "me": "Me",
     "someone": "Someone",
     "you": "YOU"
-  }
+  },
+  "quote": "\"In an era of total surveillance, obfuscation is the only true freedom.\""
 }

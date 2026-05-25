@@ -1,0 +1,51 @@
+{
+  "meta": {
+    "title": "Dokumentasi API & SDK",
+    "description": "Panduan integrasi untuk Mitra B2B untuk mengintegrasikan mesin pesan aman NYX."
+  },
+  "hero": {
+    "title": "Integrasi API & SDK",
+    "subtitle": "Panduan komprehensif bagi mitra perusahaan untuk menyematkan mesin pesan Zero-Knowledge NYX langsung ke dalam aplikasi Anda."
+  },
+  "toc": {
+    "title": "Daftar Isi",
+    "step1": "1. Minta Akses",
+    "step2": "2. Integrasi Iframe",
+    "step3": "3. SDK Native (NPM)",
+    "step4": "4. Troubleshooting"
+  },
+  "request": {
+    "title": "1. Minta Akses",
+    "p1": "Untuk menggunakan API atau SDK NYX Engine, pengembang harus terlebih dahulu mendapatkan <code class=\"bg-[#1e293b] text-[#06b6d4] px-2 py-1 rounded\">x-nyx-engine-key</code>. Saat ini kami memberlakukan proses vetting manual untuk semua integrasi pihak ketiga.",
+    "email_label": "Email:",
+    "subject_label": "Subjek:",
+    "subject_value": "Proposal Integrasi: [Nama Perusahaan]",
+    "footer": "Sertakan target penggunaan Anda, perkiraan pengguna aktif harian (DAU), dan apakah Anda memerlukan relai khusus di lokasi atau akan menggunakan relai cloud bersama."
+  },
+  "iframe": {
+    "title": "2. Metode A: Integrasi Iframe",
+    "p1": "Cara tercepat untuk menyematkan NYX adalah melalui Iframe yang terisolasi. Pertama, buat URL ruang yang aman dengan memanggil API S2S kami: <code class=\"bg-[#1e293b] px-2 py-1 rounded text-sm\">POST /api/engine/rooms</code>. Kemudian, sematkan URL respons tersebut di frontend Anda."
+  },
+  "sdk": {
+    "title": "3. Metode B: SDK Native",
+    "p1": "Untuk kontrol UI kustom yang mendalam, instal SDK lokal. Ini memberi Anda akses mentah ke bus pesan dan worker kriptografi lokal tanpa menggunakan UI kami.",
+    "example_title": "Contoh Implementasi"
+  },
+  "troubleshooting": {
+    "title": "4. Panduan Troubleshooting",
+    "headers": {
+      "error": "Galat Umum",
+      "solution": "Solusi"
+    },
+    "errors": {
+      "base64": "Kegagalan dekripsi unseal Base64",
+      "base64_sol": "Pastikan Anda menggunakan Base64 yang aman untuk URL (URL-Safe) tanpa padding sebelum memasukkan data ke <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">crypto_box_seal_open</code>.",
+      "csp": "Blokir frame-ancestors CSP Nginx",
+      "csp_sol": "Anda harus memberikan domain Anda kepada tim kami untuk dimasukkan ke dalam daftar putih (whitelist) di header <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">Content-Security-Policy</code> peladen relai.",
+      "memory": "Kebocoran Heap Memori / Crash",
+      "memory_sol": "Jika menggunakan Libsodium mentah, pastikan Anda secara eksplisit memanggil <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">sodium.memzero(key)</code> pada kunci simetris setelah siklus enkripsi/dekripsi untuk membebaskan memori.",
+      "cors": "CORS pada Unggahan Media Terenkripsi",
+      "cors_sol": "Unggahan media harus mencapai titik akhir proksi R2 <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">/api/engine/upload</code>, bukan bucket secara langsung, untuk menyelesaikan pemeriksaan preflight CORS yang ketat."
+    }
+  }
+}

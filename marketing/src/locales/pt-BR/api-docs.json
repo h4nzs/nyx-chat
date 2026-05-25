@@ -1,0 +1,51 @@
+{
+  "meta": {
+    "title": "Documentação de API e SDK",
+    "description": "Guia de integração para parceiros B2B para integrar o mecanismo de mensagens seguras do NYX."
+  },
+  "hero": {
+    "title": "Integração de API e SDK",
+    "subtitle": "Guia completo para parceiros corporativos incorporarem o mecanismo de mensagens Zero-Knowledge do NYX diretamente em suas aplicações."
+  },
+  "toc": {
+    "title": "Índice",
+    "step1": "1. Solicitar Acesso",
+    "step2": "2. Integração de Iframe",
+    "step3": "3. SDK Nativo (NPM)",
+    "step4": "4. Resolução de Problemas"
+  },
+  "request": {
+    "title": "1. Solicitar Acesso",
+    "p1": "Para utilizar as APIs ou SDKs do mecanismo NYX, os desenvolvedores devem primeiro obter uma <code class=\"bg-[#1e293b] text-[#06b6d4] px-2 py-1 rounded\">x-nyx-engine-key</code>. Atualmente aplicamos um processo de verificação manual para todas as integrações de terceiros.",
+    "email_label": "E-mail:",
+    "subject_label": "Assunto:",
+    "subject_value": "Proposta de Integração: [Nome da Empresa]",
+    "footer": "Inclua seu caso de uso, usuários ativos diários (DAU) esperados e se você precisa de um relay dedicado no local ou se usará o relay em nuvem compartilhado."
+  },
+  "iframe": {
+    "title": "2. Método A: Integração de Iframe",
+    "p1": "A maneira mais rápida de incorporar o NYX é através de um Iframe isolado. Primeiro, crie um URL de sala seguro chamando nossa API S2S: <code class=\"bg-[#1e293b] px-2 py-1 rounded text-sm\">POST /api/engine/rooms</code>. Em seguida, incorpore o URL de resposta em seu frontend."
+  },
+  "sdk": {
+    "title": "3. Método B: SDK Nativo",
+    "p1": "Para controle profundo da interface do usuário, instale o SDK local. Isso concede acesso bruto ao barramento de mensagens e ao worker de criptografia local sem usar nossa interface.",
+    "example_title": "Exemplo de Implementação"
+  },
+  "troubleshooting": {
+    "title": "4. Guia de Resolução de Problemas",
+    "headers": {
+      "error": "Erro Comum",
+      "solution": "Solução"
+    },
+    "errors": {
+      "base64": "Falha na decifragem de unseal Base64",
+      "base64_sol": "Certifique-se de usar Base64 seguro para URL (URL-Safe) SEM preenchimento (padding) antes de passar os dados para <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">crypto_box_seal_open</code>.",
+      "csp": "Bloqueio de frame-ancestors de CSP do Nginx",
+      "csp_sol": "Você deve fornecer seus domínios à nossa equipe para que eles sejam incluídos na lista branca nos cabeçalhos <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">Content-Security-Policy</code> do servidor relay.",
+      "memory": "Vazamento de memória (Heap Leak) / Travamento",
+      "memory_sol": "Se estiver usando Libsodium bruto, certifique-se de chamar explicitamente <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">sodium.memzero(key)</code> nas chaves simétricas após os ciclos de criptografia/decifragem para liberar memória.",
+      "cors": "CORS em uploads de mídia criptografada",
+      "cors_sol": "Os uploads de mídia devem atingir o endpoint de proxy R2 <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">/api/engine/upload</code>, não o bucket diretamente, para resolver as verificações preflight estritas do CORS."
+    }
+  }
+}

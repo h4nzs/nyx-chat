@@ -53,7 +53,13 @@
     "login": "Entrar",
     "register": "Registrarse",
     "privacy": "Privacidad",
-    "terms": "Términos de servicio"
+    "terms": "Términos de servicio",
+    "commercial": "Comercial",
+    "help": "Centro de Ayuda",
+    "hall_of_fame": "Salón de la Fama",
+    "api_docs": "Documentación API",
+    "security": "Seguridad",
+    "source": "Código Fuente"
   },
   "errors": {
     "unknown": "Ocurrió un error desconocido",
@@ -162,5 +168,6 @@
     "ago_s": "hace {{count}} s",
     "now": "AHORA",
     "yesterday": "Ayer"
-  }
+  },
+  "quote": "\"En una era de vigilancia total, la ofuscación es la única verdadera libertad.\""
 }

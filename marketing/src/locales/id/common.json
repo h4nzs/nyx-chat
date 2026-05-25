@@ -52,8 +52,14 @@
     "home": "Beranda",
     "login": "Masuk",
     "register": "Daftar",
-    "privacy": "Kebijakan Privasi",
-    "terms": "Ketentuan Layanan"
+    "privacy": "Privasi",
+    "terms": "Ketentuan",
+    "commercial": "Komersial",
+    "help": "Pusat Bantuan",
+    "hall_of_fame": "Hall of Fame",
+    "api_docs": "Dokumentasi API",
+    "security": "Keamanan",
+    "source": "Kode Sumber"
   },
   "errors": {
     "unknown": "Terjadi kesalahan yang tidak diketahui",
@@ -162,6 +168,6 @@
     "ago_s": "{{count}}dtk lalu",
     "now": "SEKARANG",
     "yesterday": "Kemarin"
-
-  }
+  },
+  "quote": "\"Di era pengawasan total, penyamaran adalah satu-satunya kebebasan sejati.\""
 }

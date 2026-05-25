@@ -52,8 +52,14 @@
     "home": "Início",
     "login": "Entrar",
     "register": "Cadastrar-se",
-    "privacy": "Política de Privacidade",
-    "terms": "Termos de Serviço"
+    "privacy": "Privacidade",
+    "terms": "Termos",
+    "commercial": "Comercial",
+    "help": "Central de Ajuda",
+    "hall_of_fame": "Hall da Fama",
+    "api_docs": "Docs da API",
+    "security": "Segurança",
+    "source": "Código Fonte"
   },
   "errors": {
     "unknown": "Ocorreu um erro desconhecido",
@@ -162,5 +168,6 @@
     "ago_s": "há {{count}} seg",
     "now": "AGORA",
     "yesterday": "Ontem"
-  }
+  },
+  "quote": "\"Em uma era de vigilância total, a ofuscação é a única verdadeira liberdade.\""
 }

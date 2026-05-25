@@ -9,7 +9,8 @@
   "hero": {
     "badge": "DUAL-LICENSE MODEL",
     "title": "Built for the Community. Scaled for Enterprise.",
-    "subtitle": "NYX is proudly open-source and free forever. However, if you are building a closed-source SaaS or internal corporate tool, you need a Commercial License."
+    "subtitle": "NYX is proudly open-source and free forever. However, if you are building a closed-source SaaS or internal corporate tool, you need a Commercial License.",
+    "enterprise": "Enterprise & B2B"
   },
   "agpl": {
     "badge": "THE AGPL-3.0 REALITY",
@@ -33,7 +34,10 @@
     "f5": "Direct Engineering Support",
     "val_agpl_f2": "Must be Open-Source",
     "val_com_f2": "Keep it Closed-Source",
-    "contact_sales": "Contact Sales"
+    "contact_sales": "Contact Sales",
+    "feature": "Feature",
+    "val_agpl_f5": "Community Forums",
+    "val_com_f5": "Priority Engineering Support"
   },
   "usecases": {
     "badge": "ENTERPRISE USE CASES",

@@ -1,38 +1,52 @@
 {
   "title": "Bantuan & FAQ",
   "back_settings": "Kembali ke Pengaturan",
+  "topics": "Topik",
   "move_account": {
     "title": "Bagaimana cara memindahkan akun ke perangkat baru?",
-    "desc": "Karena NYX menyimpan kunci dan riwayat secara lokal demi privasi maksimal, Anda tidak bisa begitu saja login untuk melihat pesan lama. Ada dua cara aman untuk pindah:",
-    "migration_label": "Migrasi Perangkat (Disarankan):",
-    "migration_text": "Buka <1>Pengaturan &gt; Transfer ke Perangkat Baru</1>. Ini membuat terowongan langsung yang aman ke ponsel baru Anda via kode QR.",
-    "backup_label": "Cadangan Brankas:",
-    "backup_text": "Buka <1>Pengaturan &gt; Ekspor Brankas</1>. Simpan file `.nyxvault` dan impor di layar login perangkat baru."
+    "desc": "Karena NYX menyimpan kunci dan riwayat Anda secara lokal untuk privasi maksimal, Anda tidak bisa hanya masuk untuk melihat pesan lama. Anda memiliki dua cara aman untuk pindah:",
+    "migration_label": "Migrasi Perangkat (Direkomendasikan):",
+    "migration_text": "Buka <span class=\"font-mono bg-black/30 p-1 rounded\">Pengaturan &gt; Transfer ke Perangkat Baru</span>. Ini membuat terowongan langsung yang aman ke ponsel baru Anda melalui kode QR.",
+    "backup_label": "Cadangan Vault:",
+    "backup_text": "Buka <span class=\"font-mono bg-black/30 p-1 rounded\">Pengaturan &gt; Ekspor Vault</span>. Simpan file <code>.nyxvault</code> dan impor di layar masuk perangkat baru Anda."
+  },
+  "burner": {
+    "title": "Apa itu Sesi Chat Burner?",
+    "desc": "Chat Burner adalah gerbang anonim sementara. Anda dapat membuat tautan unik untuk mengobrol dengan orang luar yang tidak memiliki akun NYX. Semuanya terjadi di memori dan hancur otomatis saat tab ditutup."
+  },
+  "zkfiles": {
+    "title": "Bagaimana enkripsi file Zero-Knowledge bekerja?",
+    "desc": "Lampiran file dienkripsi di perangkat Anda menggunakan kunci simetris XChaCha20-Poly1305 yang unik dan acak sebelum mencapai cloud. Server NYX hanya melihat blob biner dan tidak pernah memiliki kunci dekripsi."
+  },
+  "backup": {
+    "title": "Bagaimana cara mencadangkan identitas kriptografi saya?",
+    "desc": "Saat pendaftaran, Anda diberikan frasa pemulihan 24 kata. Frasa ini adalah satu-satunya cadangan kunci identitas Anda. Simpan dengan aman secara offline. Kami tidak dapat memulihkannya untuk Anda."
   },
   "sandbox_mode": {
-    "title": "Mengapa akun saya \"Sandboxed\"?",
-    "desc": "Untuk mencegah bot spam tanpa mengumpulkan data pribadi (seperti nomor telepon dan email), akun baru dimulai dalam <1>Mode Sandbox</1> dengan kuota pesan terbatas.",
-    "upgrade_text": "Anda dapat meningkatkan ke <1>Status VIP</1> secara instan dan gratis dengan memverifikasi bahwa Anda manusia. Buka <2>Pengaturan &gt; Tingkatkan ke VIP</2> dan pilih <3>Verifikasi Biometrik</3> (Sidik Jari/FaceID) atau <3>Proof of Work</3> (Penambangan CPU)."
+    "title": "Mengapa akun saya di \"Mode Sandbox\"?",
+    "desc": "Untuk mencegah bot spam tanpa mengumpulkan data pribadi (seperti nomor telepon), akun baru dimulai dalam <strong>Mode Sandbox</strong> dengan kuota pengiriman pesan terbatas.",
+    "upgrade_text": "Anda dapat meningkatkan ke <strong>Status VIP</strong> secara instan dan gratis dengan memverifikasi bahwa Anda adalah manusia. Buka <span class=\"font-mono bg-black/30 p-1 rounded\">Pengaturan &gt; Tingkatkan ke VIP</span> dan pilih antara <strong>Verifikasi Biometrik</strong> (Sidik Jari/FaceID) atau <strong>Proof of Work</strong> (CPU Mining)."
   },
   "forgot_password": {
     "title": "Saya lupa kata sandi. Apa yang harus saya lakukan?",
-    "desc": "Karena kami tidak memiliki email ataupun nomor Anda, kami tidak dapat mengirim tautan ataupun kode reset. Anda harus menggunakan <1>Frasa Pemulihan</1> Anda.",
-    "step1": "Di layar login, klik \"Pulihkan dari frasa\".",
-    "step2": "Masukkan 24-kata Frasa Pemulihan Anda untuk membuktikan identitas.",
+    "desc": "Karena kami tidak memiliki email Anda, kami tidak dapat mengirimkan tautan setel ulang. Anda harus menggunakan <strong>Frasa Pemulihan</strong> Anda.",
+    "step1": "Pada layar masuk, klik \"Pulihkan dari frasa\".",
+    "step2": "Masukkan 24 kata Frasa Pemulihan Anda untuk membuktikan identitas Anda.",
     "step3": "Atur kata sandi baru.",
-    "warning": "Catatan: Memulihkan dari frasa akan mereset kunci identitas Anda. Anda akan mendapatkan kembali akses ke ID akun Anda, tetapi <1>riwayat chat akan hilang</1> kecuali Anda memiliki Cadangan Brankas."
+    "warning": "Catatan: Memulihkan dari frasa akan menyetel ulang kunci identitas Anda. Anda akan mendapatkan kembali akses ke ID akun Anda, tetapi <strong>riwayat obrolan akan hilang</strong> kecuali Anda memiliki Cadangan Vault."
   },
   "sync_issues": {
-    "title": "Mengapa pesan saya tidak tersinkronisasi?",
-    "desc": "NYX bersifat <1>Local-First</1>. Pesan berada di perangkat Anda, bukan di cloud. Jika Anda menggunakan NYX di beberapa perangkat (misal: Ponsel + Laptop), mereka bertindak sebagai klien independen.",
-    "future_text": "Kami sedang mengerjakan \"Protokol Sinkronisasi\" aman untuk masa depan, tetapi saat ini, riwayat tidak tersinkronisasi otomatis antar perangkat demi menjamin privasi zero-knowledge."
+    "title": "Mengapa pesan saya tidak sinkron?",
+    "desc": "NYX adalah <strong>Local-First</strong>. Pesan ada di perangkat Anda, bukan di cloud. Jika Anda menggunakan NYX di beberapa perangkat (misal: Ponsel + Laptop), mereka bertindak sebagai klien independen.",
+    "future_text": "Kami sedang mengerjakan \"Protokol Sinkronisasi\" yang aman untuk masa depan, tetapi saat ini, riwayat tidak sinkron secara otomatis antar perangkat untuk menjamin privasi zero-knowledge."
   },
   "lost_phrase": {
     "title": "Bagaimana jika saya kehilangan Frasa Pemulihan?",
     "irrecoverable": "Akun Anda secara matematis tidak dapat dipulihkan.",
-    "desc": "Kami tidak menyimpan frasa atau kata sandi Anda. Jika Anda kehilangannya, tidak ada seorang pun di Bumi—termasuk kami—yang dapat mendekripsi data Anda. Harap tulis frasa Anda dan simpan dengan aman secara offline."
+    "desc": "Kami tidak menyimpan frasa atau kata sandi Anda. Jika Anda kehilangannya, tidak ada seorang pun di dunia ini—termasuk kami—yang dapat mendekripsi data Anda. Harap catat frasa Anda dan simpan dengan aman secara offline."
   },
+  "footer_tagline": "Pangkalan Intelijen NYX • Tingkat Keamanan 0",
   "seo": {
-    "description": "Dapatkan bantuan tentang obrolan E2EE NYX, pemulihan akun, dan fitur keamanan."
+    "description": "Dapatkan bantuan dengan chat terenkripsi NYX, pemulihan akun, dan fitur keamanan."
   }
 }

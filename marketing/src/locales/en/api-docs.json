@@ -1,0 +1,51 @@
+{
+  "meta": {
+    "title": "API & SDK Documentation",
+    "description": "Integration guide for B2B Partners to integrate NYX's secure messaging engine."
+  },
+  "hero": {
+    "title": "API & SDK Integration",
+    "subtitle": "Comprehensive guide for enterprise partners to embed NYX's Zero-Knowledge messaging engine directly into your applications."
+  },
+  "toc": {
+    "title": "Table of Contents",
+    "step1": "1. Request Access",
+    "step2": "2. Iframe Integration",
+    "step3": "3. Native SDK (NPM)",
+    "step4": "4. Troubleshooting"
+  },
+  "request": {
+    "title": "1. Request Access",
+    "p1": "To utilize the NYX Engine APIs or SDKs, developers must first obtain an <code class=\"bg-[#1e293b] text-[#06b6d4] px-2 py-1 rounded\">x-nyx-engine-key</code>. We currently enforce a manual vetting process for all third-party integrations.",
+    "email_label": "Email:",
+    "subject_label": "Subject:",
+    "subject_value": "Integration Proposal: [Company Name]",
+    "footer": "Include your target use case, expected daily active users (DAU), and whether you require an on-premise dedicated relay or will use the shared cloud relay."
+  },
+  "iframe": {
+    "title": "2. Method A: Iframe Integration",
+    "p1": "The fastest way to embed NYX is via an isolated Iframe. First, create a secure room URL by hitting our S2S API: <code class=\"bg-[#1e293b] px-2 py-1 rounded text-sm\">POST /api/engine/rooms</code>. Then, embed the response URL in your frontend."
+  },
+  "sdk": {
+    "title": "3. Method B: Native SDK",
+    "p1": "For deep custom UI control, install the local SDK. This grants you raw access to the messaging bus and local cryptography worker without using our UI.",
+    "example_title": "Implementation Example"
+  },
+  "troubleshooting": {
+    "title": "4. Troubleshooting Guide",
+    "headers": {
+      "error": "Common Error",
+      "solution": "Solution"
+    },
+    "errors": {
+      "base64": "Base64 unseal decryption failure",
+      "base64_sol": "Ensure you are using URL-Safe Base64 with NO padding before feeding data to <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">crypto_box_seal_open</code>.",
+      "csp": "Nginx CSP frame-ancestors block",
+      "csp_sol": "You must provide your domains to our team to whitelist them in the <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">Content-Security-Policy</code> headers of the relay server.",
+      "memory": "Memory Heap Leak / Crash",
+      "memory_sol": "If using raw Libsodium, ensure you explicitly call <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">sodium.memzero(key)</code> on symmetric keys after encryption/decryption cycles to free memory.",
+      "cors": "CORS on Encrypted Media Uploads",
+      "cors_sol": "Media uploads must hit the R2 proxy endpoint <code class=\"text-gray-300 bg-[#070a13] px-1 rounded\">/api/engine/upload</code>, not the bucket directly, to resolve strict CORS preflight checks."
+    }
+  }
+}

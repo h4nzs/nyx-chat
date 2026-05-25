@@ -60,6 +60,14 @@
     "tactile": {
       "title": "DISEÑO TÁCTIL",
       "desc": "Interfaz neumórfica con profundidad esculpida y textura granulada para una sensación física premium."
+    },
+    "post_quantum": {
+      "title": "SEGURIDAD POST-CUÁNTICA",
+      "desc": "Las sesiones de chat están protegidas por un esquema híbrido X25519 y ML-KEM-768 (X-Wing), inmune a futuras escuchas de computadoras cuánticas."
+    },
+    "burner_chat": {
+      "title": "SESIONES DESCARTABLES",
+      "desc": "Cree una puerta de enlace anónima temporal. Comparta un enlace para chatear completamente encriptado en memoria sin registrarse. Auto-destrucción al cerrar."
     }
   },
   "how_it_works": {
