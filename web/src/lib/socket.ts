@@ -181,8 +181,22 @@ export function getSocket() {
           await useConversationStore.getState().loadConversations();
           await useMessageStore.getState().processOfflineQueue();
           useMessageStore.getState().resendPendingMessages();
-        } catch (error) {
+        } catch (error: unknown) {
           console.error("socket connect sync failed", error);
+          const err = error as Record<string, unknown>;
+          if (err?.status === 401 || (typeof err?.message === 'string' && err.message.includes('401'))) {
+              try {
+                  console.warn("[Socket] Got 401 on reconnect, attempting silent refresh...");
+                  const ok = await useAuthStore.getState().silentRefresh();
+                  if (ok) {
+                      // Coba load ulang jika refresh berhasil
+                      await useConversationStore.getState().loadConversations();
+                      await useMessageStore.getState().processOfflineQueue();
+                  }
+              } catch (refreshErr) {
+                  console.error("[Socket] Silent refresh failed after 401 on connect:", refreshErr);
+              }
+          }
         }
       }
     });

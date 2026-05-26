@@ -807,18 +807,76 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                   if (authStore.user?.id === data.targetUserId) {
                       console.log(`[Offline Sync] Received persistent key request from ${decrypted.senderId}`);
                       import('@lib/socket').then(async ({ emitGroupKeyDistribution }) => {
-                           const { ensureGroupSession } = await import('@utils/crypto');
-                           const { useConversationStore } = await import('@store/conversation');
-                           const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-                           if (conversation) {
-                               // Gunakan forceRotate=false agar hanya mendistribusikan kunci yang ada, tanpa rotasi paksa
-                               const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, false);
-                               if (distributionKeys && distributionKeys.length > 0) {
+                           try {
+                               const { getMyEncryptionKeyPair, getSodiumLib, getWorkerProxy, fetchPreKeyBundles } = await import('@utils/crypto');
+                               const { getGroupSenderState } = await import('@lib/keychainDb');
+                               const existingSenderState = await getGroupSenderState(conversationId);
+                               
+                               if (!existingSenderState) {
+                                   console.warn("[System Key Request] No existing sender state found to share.");
+                                   return;
+                               }
+
+                               // AMBIL KUNCI PUBLIK TERBARU DARI SERVER (BYPASS CACHE)
+                               const requesterId = decrypted.senderId;
+                               const bundlesMap = await fetchPreKeyBundles([requesterId]);
+                               const bundles = bundlesMap[requesterId] || [];
+
+                               if (bundles.length === 0) {
+                                   console.warn(`[System Key Request] No public keys found for requester ${requesterId}`);
+                                   return;
+                               }
+
+                               const sodium = await getSodiumLib();
+                               const { worker_pq_box_seal } = await getWorkerProxy();
+                               const { publicKey: myPublicKey } = await getMyEncryptionKeyPair();
+                               const myIdentityKeyB64 = sodium.to_base64(myPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                               const myId = authStore.user!.id;
+                               
+                               const distributionKeys: Record<string, unknown>[] = [];
+                               
+                               // Convert existing CK string back to bytes
+                               const ckBytes = sodium.from_base64(existingSenderState.CK, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+                               // Construct the payload as: N (4 bytes) + CK (32 bytes)
+                               const senderKeyPayload = new Uint8Array(36);
+                               new DataView(senderKeyPayload.buffer).setUint32(0, existingSenderState.N, false);
+                               senderKeyPayload.set(ckBytes, 4);
+
+                               for (const bundle of bundles) {
+                                   const theirPublicKey = sodium.from_base64(bundle.identityKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                                   const theirPqPublicKey = bundle.pqIdentityKey ? sodium.from_base64(bundle.pqIdentityKey, sodium.base64_variants.URLSAFE_NO_PADDING) : null;
+                                   
+                                   if (!theirPqPublicKey) {
+                                       console.error(`Invalid PQ public key for device ${bundle.deviceId}`);
+                                       continue;
+                                   }
+
+                                   const encryptedKey = await worker_pq_box_seal(
+                                       senderKeyPayload,
+                                       theirPqPublicKey,
+                                       theirPublicKey
+                                   );
+
+                                   distributionKeys.push({
+                                       userId: requesterId,
+                                       targetDeviceId: bundle.deviceId,
+                                       key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+                                       type: 'GROUP_KEY',
+                                       senderId: myId,
+                                       senderDeviceKey: myIdentityKeyB64
+                                   });
+                               }
+
+                               if (distributionKeys.length > 0) {
                                    await emitGroupKeyDistribution(
                                      conversationId,
                                      distributionKeys as { userId: string; key: string }[]
                                    );
+                                   console.log(`[System Key Request] Successfully distributed keys to ${requesterId}`);
                                }
+                           } catch (err) {
+                               console.error("[System Key Request] Error distributing key", err);
                            }
                       });
                   }
@@ -1269,7 +1327,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const isGhostSync = silentPayload?.type === 'GHOST_SYNC';
     const isUnsend = silentPayload?.type === 'UNSEND';
     const isReactionRemove = silentPayload?.type === 'reaction_remove';
-    const isSystemKeyRequest = silentPayload?.type === 'SYSTEM_KEY_REQUEST';
+    const isSystemKeyRequest = silentPayload?.type === 'SYSTEM_KEY_REQUEST' || (typeof data.content === 'string' && data.content.includes('SYSTEM_KEY_REQUEST')) || (typeof data.content === 'string' && data.content.includes('GROUP_KEY_DISTRIBUTION'));
     const isProtocolUpgradeReq = silentPayload?.type === 'PROTOCOL_UPGRADE_REQ';
     const isProtocolUpgradeAck = silentPayload?.type === 'PROTOCOL_UPGRADE_ACK';
     const isProtocolDowngrade = silentPayload?.type === 'PROTOCOL_DOWNGRADE';
@@ -1721,11 +1779,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             const isGhostSync = silentPayload?.type === 'GHOST_SYNC';
             const isUnsend = silentPayload?.type === 'UNSEND';
             const isReactionRemove = silentPayload?.type === 'reaction_remove';
+            const isSystemKeyRequest = silentPayload?.type === 'SYSTEM_KEY_REQUEST' || (typeof payloadData.content === 'string' && payloadData.content.includes('SYSTEM_KEY_REQUEST')) || (typeof payloadData.content === 'string' && payloadData.content.includes('GROUP_KEY_DISTRIBUTION'));
             const isProtocolUpgradeReq = silentPayload?.type === 'PROTOCOL_UPGRADE_REQ';
             const isProtocolUpgradeAck = silentPayload?.type === 'PROTOCOL_UPGRADE_ACK';
             const isProtocolDowngrade = silentPayload?.type === 'PROTOCOL_DOWNGRADE';
             
-            const shouldBeSilent = payloadData.isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload || isProtocolUpgradeReq || isProtocolUpgradeAck || isProtocolDowngrade;
+            const shouldBeSilent = payloadData.isSilent || isCallInit || isGhostSync || isUnsend || isReactionRemove || isEditPayload || isReactionPayload || isProtocolUpgradeReq || isProtocolUpgradeAck || isProtocolDowngrade || isSystemKeyRequest;
 
             // 2. Tangani Reaksi (Tanpa Bubble)
             if (isReactionPayload) {
@@ -2247,6 +2306,19 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
   doAddIncomingMessage: async (conversationId, message) => {
       const currentUser = useAuthStore.getState().user;
+
+      // 0. PENCEGAHAN GHOST MESSAGE (Bypass UI/Storage untuk Pesan Kontrol)
+      if (typeof message.content === 'string' && (message.content.includes('SYSTEM_KEY_REQUEST') || message.content.includes('GROUP_KEY_DISTRIBUTION'))) {
+          // Hanya tangkap payload kontrol, jangan simpan / kembalikan objek pesannya ke UI
+          try {
+              let decryptedControl = await decryptMessageObject(message);
+              // Tetap proses secara internal, misal evaluateControlMessage
+              await evaluateControlMessage(decryptedControl, conversationId);
+          } catch (e) {
+              console.warn(`[Control Message] Failed to process ${message.type} silently.`, e);
+          }
+          return null; 
+      }
 
       // 1. ALWAYS decrypt to ensure cryptographic integrity
       let decrypted = await decryptMessageObject(message);
