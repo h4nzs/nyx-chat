@@ -4,12 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## 🔒 [2.6.3] - 2026-05-26
 
-This release addresses critical E2EE and infrastructure issues to improve reliability and security.
+This release introduces new monetization features, seamless integrations, and addresses critical E2EE and infrastructure stability issues.
+
+### ✨ New Features
+* **Subscriptions & Pro Tier:** Integrated a comprehensive subscription feature with the first implementation of the Pro tier. Added new crypto payment methods and corresponding localization updates.
+* **Integrations:** Introduced a new iframe integration and SDK initialization for embedded chat experiences.
 
 ### 🐛 Bug Fixes & Stability
-* **Cryptographic Key Fetching:** Forced a fresh HTTP fetch for target public keys when responding to `SYSTEM_KEY_REQUEST` messages. This prevents encryption failures ("Decryption Failed" ghost messages) caused by the use of stale cached keys during key distribution.
-* **Socket Reconnection Handling:** Wrapped the socket connect listener in a try-catch block and implemented a silent token refresh upon encountering 401 Unauthorized errors to maintain seamless connection states.
-* **Server Configuration:** Added `.mjs` MIME type mapping to the Nginx configuration to resolve warnings regarding `application/octet-stream` defaults.
+* **E2EE & Offline Sync:** Enforced a fresh public key fetch for system key requests and improved offline key catch-up robustness for the sender key protocol.
+* **Security & Type Safety:** Addressed essential bug and vulnerability findings, fixed CSRF vulnerabilities for Snap, tightened Auth SafeUser validation, and resolved leftover unsafe (`any`) types from previous implementations (e.g., Midtrans integration).
+* **General Fixes:** Fixed message ordering logic on the web, corrected link preview typos on the server, and applied minor stability improvements to the iframe and SDK.
+* **Infrastructure:** Wrapped the socket connect listener in a try-catch with silent token refresh on 401 Unauthorized errors, and added `.mjs` MIME type mapping to Nginx.
+
+### 🛠️ Maintenance & Testing
+* **Documentation & Policies:** Updated the refund policy and marketing page documentation.
+* **Dependencies & Tooling:** Updated minor version dependencies across the web, marketing, and server workspaces. Migrated marketing pages to PostCSS and implemented a new development runner (`tsx` watch).
 
 ## 🔒 [2.6.2] - 2026-05-01
 
