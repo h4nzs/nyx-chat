@@ -425,7 +425,7 @@ export async function decryptCallSignal(encryptedStr: string, base64Key: string)
 }
 
 // --- End E2EE WebRTC Signaling Helpers ---
-async function getWorkerProxy() {
+export async function getWorkerProxy() {
   return import('@lib/crypto-worker-proxy');
 }
 
