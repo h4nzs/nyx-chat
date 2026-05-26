@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔒 [2.6.3] - 2026-05-26
+
+This release addresses critical E2EE and infrastructure issues to improve reliability and security.
+
+### 🐛 Bug Fixes & Stability
+* **Cryptographic Key Fetching:** Forced a fresh HTTP fetch for target public keys when responding to `SYSTEM_KEY_REQUEST` messages. This prevents encryption failures ("Decryption Failed" ghost messages) caused by the use of stale cached keys during key distribution.
+* **Socket Reconnection Handling:** Wrapped the socket connect listener in a try-catch block and implemented a silent token refresh upon encountering 401 Unauthorized errors to maintain seamless connection states.
+* **Server Configuration:** Added `.mjs` MIME type mapping to the Nginx configuration to resolve warnings regarding `application/octet-stream` defaults.
+
 ## 🔒 [2.6.2] - 2026-05-01
 
 This update marks the completion of our transition to a fully Post-Quantum Hardened architecture. We have finalized the migration to `libsodium-wrappers` as our primary cryptographic provider and implemented rigorous security patches across the entire application layer.
