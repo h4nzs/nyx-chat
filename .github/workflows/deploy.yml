@@ -14,10 +14,8 @@ jobs:
         uses: actions/checkout@v4
 
       # --- SETUP PNPM ---
-      - name: 🦀 Setup pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 9
+      - name: Install pnpm manually (Bypass GitHub Outage)
+        run: npm install -g pnpm@11
 
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4
