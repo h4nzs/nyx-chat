@@ -1487,7 +1487,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
             import('@store/message').then(({ useMessageStore }) => {
                 const reqPayload = JSON.stringify({ type: 'SYSTEM_KEY_REQUEST', targetUserId: senderId });
                 console.log(`[Offline Sync] Sending persistent key request to ${senderId}`);
-                useMessageStore.getState().sendMessage(conversationId, { content: reqPayload }, undefined, true);
+                useMessageStore.getState().sendMessage(conversationId, { content: reqPayload, type: 'SYSTEM' }, undefined, true);
             });
         }
     }

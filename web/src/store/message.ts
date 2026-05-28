@@ -805,6 +805,14 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                   // dan secara diam-diam membagikan kembali kuncinya kepada peminta
                   const authStore = (await import('@store/auth')).useAuthStore.getState();
                   if (authStore.user?.id === data.targetUserId) {
+                      const rateLimitKey = `sys_key_req_reply_${conversationId}_${data.senderId}`;
+                      const lastReq = (window as any)[rateLimitKey] || 0;
+                      if (Date.now() - lastReq < 10000) {
+                          console.log(`[Shield] Mengabaikan duplikat permintaan kunci dari ${data.senderId} (Rate limited)`);
+                          return true;
+                      }
+                      (window as any)[rateLimitKey] = Date.now();
+
                       console.log(`[Offline Sync] Received persistent key request from ${decrypted.senderId}`);
                       import('@lib/socket').then(async ({ emitGroupKeyDistribution }) => {
                            try {
@@ -983,24 +991,49 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                   return true;
               }
 
-              if (data.type === 'GROUP_KEY_DISTRIBUTION' && data.encryptedKey) {
+              if (data.type === 'GROUP_KEY_DISTRIBUTION') {
                   try {
                       const { storeReceivedSessionKey } = await import('@utils/crypto');
-                      const senderDeviceId = data.senderDeviceKey; // Or appropriate field based on payload
-                      
-                      if (senderDeviceId) {
-                          await storeReceivedSessionKey({
+                      const authStore = (await import('@store/auth')).useAuthStore.getState();
+                      const myId = authStore.user?.id;
+                      const myDistributions = data.distributions?.filter((d: any) => d.targetUserId === myId || d.userId === myId) || [];
+                      let success = false;
+
+                      if (myDistributions.length > 0) {
+                          for (const dist of myDistributions) {
+                              const extractedKey = dist.encryptedKey || dist.key;
+                              if (!extractedKey) continue;
+                              try {
+                                  await storeReceivedSessionKey({
+                                      conversationId: data.conversationId || conversationId,
+                                      encryptedKey: extractedKey,
+                                      type: 'GROUP_KEY',
+                                      senderId: data.senderId,
+                                      senderDeviceKey: dist.senderDeviceKey || data.senderDeviceKey
+                                  });
+                                  success = true;
+                                  break; // Unseal sukses! Hentikan loop.
+                              } catch (e) {
+                                  // Gagal wajar jika paket ini ditujukan untuk device kita yang lain
+                              }
+                          }
+                      } else if (data.encryptedKey || data.key) {
+                           await storeReceivedSessionKey({
                               conversationId: data.conversationId || conversationId,
-                              encryptedKey: data.encryptedKey,
+                              encryptedKey: data.encryptedKey || data.key,
                               type: 'GROUP_KEY',
                               senderId: data.senderId,
-                              senderDeviceKey: senderDeviceId
-                          });
-                          console.log(`[Group Ratchet] Processed and stored real-time key distribution for ${conversationId}`);
+                              senderDeviceKey: data.senderDeviceKey
+                           });
+                           success = true;
+                      }
+
+                      if (success) {
+                          console.log(`[Group Ratchet] Berhasil mengekstrak & menyimpan real-time group key untuk ${conversationId}`);
                           useMessageStore.getState().reDecryptPendingMessages(data.conversationId || conversationId);
                       }
                   } catch (e) {
-                      console.error(`[Group Ratchet] Failed to store real-time group key`, e);
+                      console.error(`[Group Ratchet] Gagal memproses real-time group key`, e);
                   }
                   return true;
               }
@@ -2057,28 +2090,49 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                   console.log('[Offline Sync] Memproses GROUP_KEY_DISTRIBUTION untuk conversation:', msg.conversationId || payload.conversationId);
 
                   const myId = useAuthStore.getState().user?.id;
-                  const myDist = payload.distributions?.find((d: { targetUserId: string; encryptedKey: string }) => d.targetUserId === myId);
-                   const extractedKey = myDist?.encryptedKey || payload.encryptedKey;
+                  const myDistributions = payload.distributions?.filter((d: any) => d.targetUserId === myId || d.userId === myId) || [];
+                  let success = false;
 
-                   if (!extractedKey) {
-                       console.error('[Offline Sync] Encrypted Key is undefined for payload:', payload);
-                       continue;
-                   }
+                  if (myDistributions.length > 0) {
+                      for (const dist of myDistributions) {
+                          const extractedKey = dist.encryptedKey || dist.key;
+                          if (!extractedKey) continue;
+                          try {
+                              const { storeReceivedSessionKey } = await import('@utils/crypto');
+                              await storeReceivedSessionKey({
+                                  ...payload,
+                                  type: 'GROUP_KEY',
+                                  conversationId: msg.conversationId || payload.conversationId,
+                                  senderId: msg.senderId || payload.senderId,
+                                  encryptedKey: extractedKey,
+                                  senderDeviceKey: dist.senderDeviceKey || payload.senderDeviceKey
+                              });
+                              success = true;
+                              break; // Kunci valid untuk device ini
+                          } catch (e) {
+                              // Abaikan jika device salah
+                          }
+                      }
+                  } else if (payload.encryptedKey || payload.key) {
+                      try {
+                          const { storeReceivedSessionKey } = await import('@utils/crypto');
+                          await storeReceivedSessionKey({
+                              ...payload,
+                              type: 'GROUP_KEY',
+                              conversationId: msg.conversationId || payload.conversationId,
+                              senderId: msg.senderId || payload.senderId,
+                              encryptedKey: payload.encryptedKey || payload.key,
+                          });
+                          success = true;
+                      } catch(e) {}
+                  }
 
-                   // [BUGFIX: SENDER KEY OFFLINE SYNC]
-                   // Gunakan extractedKey (bukan payload.encryptedKey) yang ditujukan spesifik untuk user/device ini
-                   const { storeReceivedSessionKey } = await import('@utils/crypto');
-                   await storeReceivedSessionKey({
-                       ...payload,
-                       type: 'GROUP_KEY',
-                       conversationId: msg.conversationId || payload.conversationId,
-                       senderId: msg.senderId || payload.senderId,
-                       encryptedKey: extractedKey,
-                       senderDeviceKey: payload.senderDeviceKey
-                   });
-
-                   // Tanda bahwa key baru sudah dimuat
-                   useKeychainStore.getState().keysUpdated();                }
+                  if (success) {
+                      useKeychainStore.getState().keysUpdated();
+                  } else {
+                      console.warn(`[Offline Sync] Kunci tidak dapat di-unseal. Mungkin dienkripsi untuk device lain.`);
+                  }
+                }
              } catch (e) {
                 console.error("Failed to process control message", e);
              }
@@ -2151,6 +2205,18 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         // ✅ 3. AWAIT PENYIMPANAN LOKAL DULU (PENTING!)
         await shadowVault.upsertMessages(enrichedMessages);
 
+        const hasFailedDecryption = processedMessages.some(m => m.error || m.content === 'waiting_for_key' || m.content?.startsWith('['));
+        if (hasFailedDecryption) {
+            const now = Date.now();
+            const repairKey = `last_repair_history_${id}` as keyof Window;
+            const lastRepair = (window[repairKey] as number) || 0;
+            if (now - lastRepair > 15000) {
+                (window as any)[repairKey] = now;
+                console.warn(`[Offline Sync] Meminta pengiriman ulang kunci yang hilang secara diam-diam untuk ${id}...`);
+                import('@lib/socket').then(m => m.emitGroupKeyRequest(id));
+            }
+        }
+
         // ✅ 4. BARU TEMBAK KILL SWITCH SETELAH DATA AMAN
         const socket = getSocket();
         const { user } = useAuthStore.getState();
@@ -2163,9 +2229,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         }
 
         // 5. UPDATE UI
+        const visibleMessages = enrichedMessages.filter(m => m.type !== 'SYSTEM' && (m.type as string) !== 'SYSTEM_KEY_REQUEST');
         set(state => {
           return {
-            messages: { ...state.messages, [id]: enrichedMessages },
+            messages: { ...state.messages, [id]: visibleMessages },
             hasMore: { ...state.hasMore, [id]: enrichedMessages.length >= 50 },
             hasLoadedHistory: { ...state.hasLoadedHistory, [id]: true }
           };
@@ -2731,10 +2798,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       // Simpan pembaruan utuh ke IndexedDB
       shadowVault.upsertMessages([finalMessage]); 
 
+      const newMessages = [...filteredMessages, finalMessage]
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+          .filter(m => m.type !== 'SYSTEM' && (m.type as string) !== 'SYSTEM_KEY_REQUEST');
+
       return {
-        messages: { 
-            ...state.messages, 
-            [conversationId]: [...filteredMessages, finalMessage].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        messages: {
+            ...state.messages,
+            [conversationId]: newMessages
         }
       };
     })
