@@ -40,7 +40,6 @@
     "jsonwebtoken": "^9.0.3",
     "libsodium-wrappers": "^0.8.4",
     "link-preview-js": "^4.0.3",
-    "midtrans-client": "^1.4.3",
     "mime": "^4.1.0",
     "morgan": "^1.10.1",
     "nanoid": "^5.1.11",

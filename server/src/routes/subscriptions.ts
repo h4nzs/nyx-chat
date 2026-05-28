@@ -4,48 +4,16 @@ import { requireAuth } from '../middleware/auth.js';
 import { ApiError } from '../utils/errors.js';
 import { redisClient } from '../lib/redis.js';
 import crypto from 'crypto';
-import midtransClient from 'midtrans-client';
 import { getIo } from '../socket.js';
 import { SubscriptionTier } from '@nyx/shared';
 
 const router: Router = Router();
 
-const isProd = process.env.MIDTRANS_ENV === 'production';
-const serverKey = process.env.MIDTRANS_SERVER_KEY || 'SB-Mid-server-DUMMY';
-const clientKey = process.env.MIDTRANS_CLIENT_KEY || 'SB-Mid-client-DUMMY';
-
 const nowPaymentsApiKey = process.env.NOWPAYMENTS_API_KEY || '';
 const nowPaymentsIpnSecret = process.env.NOWPAYMENTS_IPN_SECRET || '';
 
-interface MidtransNotificationResponse {
-  order_id: string;
-  transaction_status: string;
-  fraud_status?: string;
-  signature_key: string;
-  status_code: string;
-  gross_amount: string;
-  [key: string]: unknown;
-}
-
-interface SnapWithTransaction extends midtransClient.Snap {
-  transaction: {
-    notification(notification: Record<string, unknown>): Promise<MidtransNotificationResponse>;
-  };
-}
-
-let snap: SnapWithTransaction | undefined;
-try {
-  snap = new midtransClient.Snap({
-    isProduction: isProd,
-    serverKey: serverKey,
-    clientKey: clientKey
-  }) as SnapWithTransaction;
-} catch (error) {
-  console.warn("Midtrans initialization failed. Payment features may not work:", error);
-}
-
-// 1. Create Transaction (Token Request)
-router.post('/create-transaction', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
+// 1. Create Transaction (Tripay Checkout)
+router.post('/create', requireAuth, async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.user) throw new ApiError(401, 'Unauthorized');
 
@@ -56,123 +24,122 @@ router.post('/create-transaction', requireAuth, async (req: Request, res: Respon
       return res.status(400).json({ error: 'Already a subscriber.' });
     }
 
-    // Create anonymous alias email
-    const aliasEmail = `nyx_pay_${user.id}@nyx.chat`;
-    const orderId = `NYX-PRO-${user.id}-${Date.now()}`;
+    const amount = 55000;
+    const merchantRef = `NYX-PRO-${user.id}-${Date.now()}`;
+    const privateKey = process.env.TRIPAY_PRIVATE_KEY || '';
+    const merchantCode = process.env.TRIPAY_MERCHANT_CODE || '';
+    const apiKey = process.env.TRIPAY_API_KEY || '';
 
-    const parameters = {
-      transaction_details: {
-        order_id: orderId,
-        gross_amount: 55000
-      },
-      customer_details: {
-        first_name: "NYX User",
-        email: aliasEmail
-      },
-      item_details: [
+    // Generate Signature Tripay
+    const signature = crypto.createHmac('sha256', privateKey)
+      .update(merchantCode + merchantRef + amount)
+      .digest('hex');
+
+    const payload = {
+      method: req.body.method || 'QRIS', // Method can be passed from frontend, default to QRIS
+      merchant_ref: merchantRef,
+      amount: amount,
+      customer_name: 'NYX User',
+      customer_email: `nyx_pay_${user.id}@nyx.chat`,
+      order_items: [
         {
-          id: 'NYX-PRO-1M',
-          price: 55000,
-          quantity: 1,
-          name: 'NYX PRO - 30 Days'
+          sku: 'NYX-PRO-1M',
+          name: 'NYX PRO - 30 Days',
+          price: amount,
+          quantity: 1
         }
-      ]
+      ],
+      return_url: process.env.APP_URL ? `${process.env.APP_URL}/settings` : 'https://nyx-app.my.id/settings',
+      expired_time: Math.floor(Date.now() / 1000) + (24 * 60 * 60),
+      signature: signature
     };
 
-    if (!snap) {
-       throw new ApiError(500, "Payment gateway not initialized.");
+    const tripayRes = await fetch('https://tripay.co.id/api/transaction/create', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await tripayRes.json();
+
+    if (!data.success) {
+       console.error('[Tripay] Error:', data);
+       throw new ApiError(500, data.message || 'Payment creation failed');
     }
 
-    const transaction = await snap.createTransaction(parameters);
-    
     res.json({
-      token: transaction.token,
-      redirect_url: transaction.redirect_url
+      checkout_url: data.data.checkout_url
     });
 
   } catch (error) {
-    console.error('[Midtrans] Create transaction error:', error);
+    console.error('[Tripay] Create transaction error:', error);
     next(error);
   }
 });
 
-// 2. Webhook Notification
+// 2. Webhook Notification (Tripay Callback)
 router.post('/webhook', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const notification = req.body;
-    
-    if (!snap) {
-        return res.status(500).json({ error: "Payment gateway not initialized." });
-    }
-    
-    const statusResponse = await snap.transaction.notification(notification);
-    
-    const orderId = statusResponse.order_id;
-    const transactionStatus = statusResponse.transaction_status;
-    const fraudStatus = statusResponse.fraud_status;
+    const signature = req.headers['x-callback-signature'];
+    const privateKey = process.env.TRIPAY_PRIVATE_KEY || '';
 
-    // Validate Signature Key
-    const signatureKey = statusResponse.signature_key;
-    const statusCode = statusResponse.status_code;
-    const grossAmount = statusResponse.gross_amount;
-    
-    const expectedHash = crypto.createHash('sha512').update(`${orderId}${statusCode}${grossAmount}${serverKey}`).digest('hex');
-    
-    if (signatureKey !== expectedHash) {
-      console.error("[Midtrans] Invalid signature key");
-      return res.status(403).json({ error: 'Invalid signature' });
+    // Verify signature
+    const expectedHash = crypto.createHmac('sha256', privateKey)
+      .update(JSON.stringify(req.body))
+      .digest('hex');
+
+    if (signature !== expectedHash) {
+      console.error("[Tripay] Invalid signature key");
+      return res.status(400).json({ error: 'Invalid signature' });
     }
 
-    // Extract user ID from orderId: NYX-PRO-<USER_ID>-<TIMESTAMP>
-    const orderIdParts = orderId.split('-');
-    if (orderIdParts.length < 4 || orderIdParts[0] !== 'NYX' || orderIdParts[1] !== 'PRO') {
-       return res.status(400).json({ error: "Invalid order ID format" });
-    }
-    
-    // Join the parts in case user ID contains hyphens
-    const userId = orderIdParts.slice(2, orderIdParts.length - 1).join('-');
+    const { status, merchant_ref } = req.body;
 
-    if (transactionStatus === 'capture' || transactionStatus === 'settlement') {
-      if (transactionStatus === 'capture' && fraudStatus === 'challenge') {
-        // Wait for manual approval
-        return res.status(200).json({ message: 'OK - Challenged' });
-      } else {
-        // Success
-        const expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + 30);
-
-        await prisma.user.update({
-          where: { id: userId },
-          data: { 
-            subscriptionTier: SubscriptionTier.SUBSCRIBER,
-            subscriptionExpiresAt: expiresAt
-          }
-        });
-
-        // Emit real-time update
-        getIo().to(userId).emit('subscription_updated', {
-          tier: SubscriptionTier.SUBSCRIBER,
-          expiresAt: expiresAt.toISOString()
-        });
-
-        // Clear rate limit keys from Redis
-        const key = `sandbox:msg:${userId}`;
-        try {
-          await redisClient.del(key);
-        } catch (e) {
-          console.error('[Redis] Failed to clear sandbox key', e);
-        }
-
-        console.log(`[Subscription] User ${userId} upgraded to SUBSCRIBER`);
+    if (status === 'PAID') {
+      // Extract user ID from orderId: NYX-PRO-<USER_ID>-<TIMESTAMP>
+      const orderIdParts = merchant_ref.split('-');
+      if (orderIdParts.length < 4 || orderIdParts[0] !== 'NYX' || orderIdParts[1] !== 'PRO') {
+         return res.status(400).json({ error: "Invalid order ID format" });
       }
-    } else if (transactionStatus === 'cancel' || transactionStatus === 'deny' || transactionStatus === 'expire') {
-      console.log(`[Subscription] Payment failed/cancelled for user ${userId}`);
+      
+      const userId = orderIdParts.slice(2, orderIdParts.length - 1).join('-');
+
+      // Update subscription status
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 30);
+
+      await prisma.user.update({
+        where: { id: userId },
+        data: { 
+          subscriptionTier: SubscriptionTier.SUBSCRIBER,
+          subscriptionExpiresAt: expiresAt
+        }
+      });
+
+      // Emit real-time update
+      getIo().to(userId).emit('subscription_updated', {
+        tier: SubscriptionTier.SUBSCRIBER,
+        expiresAt: expiresAt.toISOString()
+      });
+
+      // Clear rate limit keys from Redis
+      const key = `sandbox:msg:${userId}`;
+      try {
+        await redisClient.del(key);
+      } catch (e) {
+        console.error('[Redis] Failed to clear sandbox key', e);
+      }
+
+      console.log(`[Subscription] User ${userId} upgraded to SUBSCRIBER via Tripay`);
     }
 
-    res.status(200).json({ message: 'OK' });
+    res.status(200).json({ success: true });
   } catch (error) {
-    console.error('[Midtrans Webhook Error]:', error);
-    next(error); // Return 500
+    console.error('[Tripay Webhook Error]:', error);
+    next(error);
   }
 });
 
@@ -234,10 +201,6 @@ router.post('/nowpayments-webhook', async (req: Request, res: Response, next: Ne
       return res.status(403).json({ error: 'Missing signature' });
     }
 
-    // NOWPayments requires stringifying the body in a specific way, sorted by keys.
-    // Express already parsed JSON, so we need to reconstruct it securely or use raw body.
-    // Assuming standard JSON stringify of the parsed object works if keys are sorted,
-    // as per NOWPayments docs: sort keys alphabetically.
     const payload = req.body;
     const sortedKeys = Object.keys(payload).sort();
     const sortedPayload: Record<string, unknown> = {};

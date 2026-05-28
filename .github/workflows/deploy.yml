@@ -15,7 +15,7 @@ jobs:
 
       # --- SETUP PNPM ---
       - name: Install pnpm manually (Bypass GitHub Outage)
-        run: npm install -g pnpm@11
+        run: npm install -g pnpm
 
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4

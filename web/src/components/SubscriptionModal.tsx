@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import ModalBase from './ui/ModalBase';
 import { api } from '@lib/api';
 import toast from 'react-hot-toast';
@@ -6,87 +6,23 @@ import { useAuthStore } from '@store/auth';
 import { FiStar, FiShield, FiZap, FiUsers, FiFile, FiLock } from 'react-icons/fi';
 import { useTranslation, Trans } from 'react-i18next';
 
-// Add type for window.snap
-interface MidtransResult {
-  status_code: string;
-  transaction_id: string;
-  order_id: string;
-  gross_amount: string;
-  payment_type: string;
-  transaction_time: string;
-  transaction_status: string;
-  fraud_status?: string;
-  [key: string]: unknown;
-}
-
-interface MidtransOptions {
-  onSuccess?: (result: MidtransResult) => void;
-  onPending?: (result: MidtransResult) => void;
-  onError?: (result: MidtransResult) => void;
-  onClose?: () => void;
-}
-
-declare global {
-  interface Window {
-    snap: {
-      pay: (token: string, options: MidtransOptions) => void;
-    };
-  }
-}
-
 export default function SubscriptionModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation(['modals', 'common']);
   const [isLoading, setIsLoading] = useState(false);
   const [showPaymentSelector, setShowPaymentSelector] = useState(false);
   const user = useAuthStore(s => s.user);
 
-  // Load Midtrans Snap script dynamically
-  useEffect(() => {
-    const scriptSrc = import.meta.env.VITE_MIDTRANS_ENV === 'production'
-        ? 'https://app.midtrans.com/snap/snap.js' 
-        : 'https://app.sandbox.midtrans.com/snap/snap.js';
-        
-    // Use a placeholder client key for loading the script. 
-    // Actual payment uses the token from the backend.
-    const clientKey = import.meta.env.VITE_MIDTRANS_CLIENT_KEY || 'SB-Mid-client-DUMMY';
-
-    if (!document.querySelector(`script[src="${scriptSrc}"]`)) {
-      const script = document.createElement('script');
-      script.src = scriptSrc;
-      script.setAttribute('data-client-key', clientKey);
-      script.async = true;
-      document.body.appendChild(script);
-    }
-  }, []);
-
   const handleUpgrade = async () => {
     setIsLoading(true);
     try {
-      const res = await api<{ token: string, redirect_url: string }>('/api/subscriptions/create-transaction', {
+      const res = await api<{ checkout_url: string }>('/api/subscriptions/create', {
         method: 'POST'
       });
 
-      if (window.snap && res.token) {
-        window.snap.pay(res.token, {
-          onSuccess: function (_result: MidtransResult) {
-            toast.success("Payment successful! Your account will be upgraded momentarily.");
-            onClose();
-          },
-          onPending: function (_result: MidtransResult) {
-            toast.success("Payment pending. Please complete your payment.");
-            onClose();
-          },
-          onError: function (_result: MidtransResult) {
-            toast.error("Payment failed. Please try again.");
-            setIsLoading(false);
-          },
-          onClose: function () {
-            setIsLoading(false);
-          }
-        });
+      if (res.checkout_url) {
+        window.location.href = res.checkout_url;
       } else {
-        // Fallback to redirect if snap fails to load
-        window.location.href = res.redirect_url;
+        throw new Error('Failed to get checkout URL');
       }
     } catch (error: unknown) {
         setIsLoading(false);
