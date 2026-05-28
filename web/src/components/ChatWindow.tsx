@@ -248,7 +248,8 @@ const ChatSpinner = () => (
 export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClick: () => void }) {
   const { t } = useTranslation(['chat', 'common']);
   const meId = useAuthStore((s) => s.user?.id);
-  const { conversation, messages, isLoading, error, actions, isFetchingMore } = useConversation(id);
+  const { conversation, messages: rawMessages, isLoading, error, actions, isFetchingMore } = useConversation(id);
+  const messages = useMemo(() => rawMessages.filter(m => m.type !== 'SYSTEM' && (m.type as string) !== 'SYSTEM_KEY_REQUEST'), [rawMessages]);
   const { loadMessagesForConversation, selectedMessageIds, clearMessageSelection, removeMessages } = useMessageStore(useShallow(s => ({
       loadMessagesForConversation: s.loadMessagesForConversation,
       selectedMessageIds: s.selectedMessageIds,
