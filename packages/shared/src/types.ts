@@ -49,6 +49,36 @@ export type MessageStatus = {
   updatedAt: string;
 };
 
+export interface SystemMessagePayload {
+  type: string;
+  conversationId?: string;
+  senderId?: string;
+  senderDeviceKey?: string;
+  deviceId?: string;
+  hostClassicalPk?: string;
+  hostPqPk?: string;
+  savedCt?: string;
+  guestClassicalPk?: string;
+  distributions?: {
+    userId: string;
+    targetUserId?: string;
+    targetDeviceId?: string;
+    encryptedKey?: string;
+    key?: string;
+    senderDeviceKey?: string;
+  }[];
+  targetUserId?: string;
+  key?: string;
+  encryptedKey?: string;
+  storyId?: string;
+  [key: string]: unknown;
+}
+
+export type GroupKeyDistributionPayload = SystemMessagePayload & { type: 'GROUP_KEY_DISTRIBUTION' };
+export type SystemKeyRequestPayload = SystemMessagePayload & { type: 'SYSTEM_KEY_REQUEST' };
+export type ProtocolUpgradeReqPayload = SystemMessagePayload & { type: 'PROTOCOL_UPGRADE_REQ' };
+export type ProtocolUpgradeAckPayload = SystemMessagePayload & { type: 'PROTOCOL_UPGRADE_ACK' };
+
 export type Message = z.infer<typeof IncomingMessageSchema> & {
   tempId?: number;
   type?: 'USER' | 'SYSTEM';

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
-import type { UserId, ConversationId, MessageId, MessageSendPayload } from '@nyx/shared';
+import type { UserId, ConversationId, MessageId, MessageSendPayload, SystemMessagePayload, GroupKeyDistributionPayload, SystemKeyRequestPayload } from '@nyx/shared';
 import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api"; 
@@ -150,7 +150,7 @@ export async function decryptMessageObject(
             const unwrap = (str: string): string => {
                  if (str && typeof str === 'string' && str.trim().startsWith('{')) {
                      try {
-                         const p = JSON.parse(str);
+                         const p = JSON.parse(str) as { ciphertext?: string };
                          if (p.ciphertext) return unwrap(p.ciphertext as string);
                      } catch (_e) {}
                      }
@@ -169,7 +169,7 @@ export async function decryptMessageObject(
                     
                     if (plainText && plainText.trim().startsWith('{')) {
                         try {
-                            const parsed = JSON.parse(plainText);
+                            const parsed = JSON.parse(plainText) as { profileKey?: string, text?: string };
                             if (parsed.profileKey) {
                                 delete parsed.profileKey;
                                 if (parsed.text !== undefined && Object.keys(parsed).length === 1) {
@@ -185,7 +185,7 @@ export async function decryptMessageObject(
                     
                     if (finalMessage.content && finalMessage.content.startsWith('{') && finalMessage.content.includes('"type":"file"')) {
                         try {
-                            const metadata = JSON.parse(finalMessage.content);
+                            const metadata = JSON.parse(finalMessage.content) as { type?: string, url?: string, key?: string, name?: string, size?: number, mimeType?: string, text?: string, storyAuthorId?: string, isReply?: boolean, storyText?: string, hasMedia?: boolean };
                             if (metadata.type === 'file') {
                                 finalMessage = {
                                     ...finalMessage,
@@ -201,7 +201,7 @@ export async function decryptMessageObject(
                         } catch (_e) {}
                     } else if (finalMessage.content && finalMessage.content.startsWith('{') && finalMessage.content.includes('"type":"story_reply"')) {
                         try {
-                            const metadata = JSON.parse(finalMessage.content);
+                            const metadata = JSON.parse(finalMessage.content) as { type?: string, text?: string, storyAuthorId?: string, isReply?: boolean, storyText?: string, hasMedia?: boolean };
                             if (metadata.type === 'story_reply') {
                                 finalMessage = {
                                     ...finalMessage,
@@ -269,7 +269,7 @@ export async function decryptMessageObject(
 
     if (!isGroup && contentToDecrypt.startsWith('{') && contentToDecrypt.includes('"x3dh":')) {
        try {
-           const payload = JSON.parse(contentToDecrypt);
+           const payload = JSON.parse(contentToDecrypt) as { ciphertext?: string, x3dh?: { initiatorSigningKey: string, initiatorCiphertexts: string, otpkId: number } };
            const { retrieveMessageKeySecurely } = await import('@utils/crypto');
            const mk = await retrieveMessageKeySecurely(rawMsg.id);
            
@@ -298,7 +298,7 @@ export async function decryptMessageObject(
                let theirRatchetPublicKey: Uint8Array | undefined;
                
                try {
-                   const innerPayload = JSON.parse(ciphertext);
+                   const innerPayload = JSON.parse(ciphertext) as { dr?: { kemPk?: string } };
                    if (innerPayload.dr) {
                         const kemPk = innerPayload.dr.kemPk;
                         if (kemPk) {
@@ -361,7 +361,7 @@ export async function decryptMessageObject(
 
       if (plainText && plainText.trim().startsWith('{')) {
           try {
-              const parsed = JSON.parse(plainText);
+              const parsed = JSON.parse(plainText) as { profileKey?: string, text?: string };
               if (parsed.profileKey) {
                   const { saveProfileKey } = await import('@lib/keychainDb');
                   const { useProfileStore } = await import('@store/profile');
@@ -384,7 +384,7 @@ export async function decryptMessageObject(
 
       if (plainText.startsWith('{') && plainText.includes('"type":"file"')) {
         try {
-          const metadata = JSON.parse(plainText);
+          const metadata = JSON.parse(plainText) as { type?: string, url?: string, key?: string, name?: string, size?: number, mimeType?: string, text?: string, storyAuthorId?: string, isReply?: boolean, storyText?: string, hasMedia?: boolean };
           if (metadata.type === 'file') {
             finalMessage = {
                 ...finalMessage,
@@ -402,7 +402,7 @@ export async function decryptMessageObject(
 
       if (plainText.startsWith('{') && plainText.includes('"type":"story_reply"')) {
         try {
-          const metadata = JSON.parse(plainText);
+          const metadata = JSON.parse(plainText) as { type?: string, url?: string, key?: string, name?: string, size?: number, mimeType?: string, text?: string, storyAuthorId?: string, isReply?: boolean, storyText?: string, hasMedia?: boolean };
           if (metadata.type === 'story_reply') {
             finalMessage = {
                 ...finalMessage,
@@ -459,7 +459,7 @@ function parseReaction(content: string | null | undefined): { targetMessageId: s
     const trimmed = content.trim();
     if (!trimmed.startsWith('{') || !trimmed.includes('"type":"reaction"')) return null;
     
-    const payload = JSON.parse(trimmed);
+    const payload = JSON.parse(trimmed) as { type: string, targetMessageId: string, emoji: string, text: string, key?: string, url?: string };
     if (payload.type === 'reaction' && payload.targetMessageId && payload.emoji) {
       return payload;
     }
@@ -472,7 +472,7 @@ function parseEdit(content: string | null | undefined): { targetMessageId: strin
   try {
     const trimmed = content.trim();
     if (!trimmed.startsWith('{') || !trimmed.includes('"type":"edit"')) return null;
-    const payload = JSON.parse(trimmed);
+    const payload = JSON.parse(trimmed) as { type: string, targetMessageId: string, emoji: string, text: string, key?: string, url?: string };
     if (payload.type === 'edit' && payload.targetMessageId && payload.text) {
       return payload;
     }
@@ -488,7 +488,7 @@ function parseSilent(content: string | null | undefined): { text?: string, type?
         trimmed = trimmed.replace('STORY_KEY:', '');
     }
     if (!trimmed.startsWith('{')) return null;
-    const payload = JSON.parse(trimmed);
+    const payload = JSON.parse(trimmed) as { type: string, targetMessageId: string, emoji: string, text: string, key?: string, url?: string };
     
     if (payload.type === 'story_reply') {
       return null;
@@ -782,7 +782,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
       if ((decrypted as Record<string, unknown>).type === 'STORY_KEY' || (decrypted.content && decrypted.content.startsWith('STORY_KEY:'))) {
           try {
               const payloadStr = decrypted.content ? decrypted.content.replace('STORY_KEY:', '') : '';
-              const payload = JSON.parse(payloadStr);
+              const payload = JSON.parse(payloadStr) as { storyId?: string, key?: string };
               
               if (payload.storyId && payload.key) {
                   const { saveStoryKey } = await import('@lib/shadowVaultDb');
@@ -797,7 +797,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
 
       if (decrypted.content && decrypted.content.startsWith('{')) {
           try {
-              const data = JSON.parse(decrypted.content);
+              const data = JSON.parse(decrypted.content) as SystemMessagePayload;
               
               if (data.type === 'SYSTEM_KEY_REQUEST' && data.targetUserId) {
                   // [BUGFIX: PERSISTENT OFFLINE KEY REQUEST]
@@ -805,13 +805,13 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                   // dan secara diam-diam membagikan kembali kuncinya kepada peminta
                   const authStore = (await import('@store/auth')).useAuthStore.getState();
                   if (authStore.user?.id === data.targetUserId) {
-                      const rateLimitKey = `sys_key_req_reply_${conversationId}_${data.senderId}`;
-                      const lastReq = (window as any)[rateLimitKey] || 0;
+                      const rateLimitKey = `sys_key_req_reply_${conversationId}_${data.senderId}` as const;
+                      const lastReq = window[rateLimitKey as keyof Window] as number | undefined || 0;
                       if (Date.now() - lastReq < 10000) {
                           console.log(`[Shield] Mengabaikan duplikat permintaan kunci dari ${data.senderId} (Rate limited)`);
                           return true;
                       }
-                      (window as any)[rateLimitKey] = Date.now();
+                      window[rateLimitKey as keyof Window] = Date.now() as never;
 
                       console.log(`[Offline Sync] Received persistent key request from ${decrypted.senderId}`);
                       import('@lib/socket').then(async ({ emitGroupKeyDistribution }) => {
@@ -897,7 +897,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                   const myDevices = await authFetch<Device[]>('/api/users/me/devices');
                   const currentDevice = myDevices.find(d => d.isCurrent);
                   const myDeviceId = currentDevice?.id || '';
-                  const peerDeviceId = data.deviceId;
+                  const peerDeviceId = data.deviceId || "";
                   
                   type WindowWithPending = Window & typeof globalThis & Record<string, unknown>;
                   const isPending = (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`];
@@ -926,7 +926,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                   await shadowVault.savePqDrSession({
                       conversationId,
                       state: newState,
-                      peerClassicalPk: data.hostClassicalPk,
+                      peerClassicalPk: data.hostClassicalPk || "",
                       peerDeviceId: peerDeviceId,
                       version: 1,
                       negotiationStatus: 'ESTABLISHED',
@@ -996,7 +996,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                       const { storeReceivedSessionKey } = await import('@utils/crypto');
                       const authStore = (await import('@store/auth')).useAuthStore.getState();
                       const myId = authStore.user?.id;
-                      const myDistributions = data.distributions?.filter((d: any) => d.targetUserId === myId || d.userId === myId) || [];
+                      const myDistributions = data.distributions?.filter((d: { targetUserId?: string; userId: string; encryptedKey?: string; key?: string; senderDeviceKey?: string; }) => d.targetUserId === myId || d.userId === myId) || [];
                       let success = false;
 
                       if (myDistributions.length > 0) {
@@ -1005,10 +1005,10 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                               if (!extractedKey) continue;
                               try {
                                   await storeReceivedSessionKey({
-                                      conversationId: data.conversationId || conversationId,
+                                      conversationId: data.conversationId || conversationId || "",
                                       encryptedKey: extractedKey,
                                       type: 'GROUP_KEY',
-                                      senderId: data.senderId,
+                                      senderId: data.senderId || "",
                                       senderDeviceKey: dist.senderDeviceKey || data.senderDeviceKey
                                   });
                                   success = true;
@@ -1019,10 +1019,10 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                           }
                       } else if (data.encryptedKey || data.key) {
                            await storeReceivedSessionKey({
-                              conversationId: data.conversationId || conversationId,
-                              encryptedKey: data.encryptedKey || data.key,
+                              conversationId: data.conversationId || conversationId || "",
+                              encryptedKey: (data.encryptedKey || data.key || ""),
                               type: 'GROUP_KEY',
-                              senderId: data.senderId,
+                              senderId: data.senderId || "",
                               senderDeviceKey: data.senderDeviceKey
                            });
                            success = true;
@@ -1151,7 +1151,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             let targetUrl = message.fileUrl;
             try {
                 if (message.content && message.content.startsWith('{')) {
-                    const metadata = JSON.parse(message.content);
+                    const metadata = JSON.parse(message.content) as { url?: string };
                     if (metadata.url) targetUrl = metadata.url;
                 }
             } catch (_e) {}
@@ -1399,7 +1399,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         // Handle story_reply type - parse and set proper content + repliedTo
         if (optimisticContent && typeof optimisticContent === 'string' && optimisticContent.startsWith('{') && optimisticContent.includes('"type":"story_reply"')) {
             try {
-                const metadata = JSON.parse(optimisticContent);
+                const metadata = JSON.parse(optimisticContent) as { type?: string, text?: string, storyAuthorId?: string, storyText?: string, hasMedia?: boolean };
                 if (metadata.type === 'story_reply') {
                     optimisticMessage.content = metadata.text || 'Story reply';
                     optimisticMessage.repliedTo = {
@@ -1428,7 +1428,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
            if (lastMsgPreview?.startsWith('{') && lastMsgPreview.includes('"type":"file"')) {
                lastMsgPreview = '📎 Sent a file';
            } else if (lastMsgPreview?.startsWith('{') && lastMsgPreview.includes('"type":"story_reply"')) {
-               const meta = JSON.parse(lastMsgPreview);
+               const meta = JSON.parse(lastMsgPreview) as { text?: string };
                lastMsgPreview = `Replying to story: ${meta.text}`;
            }
         } catch {}
@@ -1447,7 +1447,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             if (profileKey) {
                 let parsedObj: Record<string, unknown> | null = null;
                 if (contentToEncrypt.trim().startsWith('{')) {
-                    try { parsedObj = JSON.parse(contentToEncrypt); } catch (e) {}
+                    try { parsedObj = JSON.parse(contentToEncrypt) as Record<string, unknown>; } catch (e) {}
                 }
                 
                 if (parsedObj && typeof parsedObj === 'object') {
@@ -1506,7 +1506,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             // Check for story_reply type and extract the text
             if (typeof data.content === 'string' && data.content.startsWith('{') && data.content.includes('"type":"story_reply"')) {
                 try {
-                    const metadata = JSON.parse(data.content);
+                    const metadata = JSON.parse(data.content) as { type?: string, text?: string };
                     if (metadata.type === 'story_reply' && metadata.text) {
                         pushBody = `📖 Story reply: ${metadata.text}`;
                     } else {
@@ -1660,7 +1660,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             let realFileKey = existingMsg?.fileKey;
             try {
                 if (data.content && typeof data.content === 'string' && data.content.startsWith('{')) {
-                    const meta = JSON.parse(data.content);
+                    const meta = JSON.parse(data.content) as { type?: string, url?: string, key?: string, name?: string, size?: number, mimeType?: string, text?: string, storyAuthorId?: string, isReply?: boolean, storyText?: string, hasMedia?: boolean };
                     if (meta.type === 'file' && meta.url) {
                         realFileUrl = meta.url;
                         realFileKey = meta.key;
@@ -1681,7 +1681,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                              const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
                              const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
                              
-                             const parsed = JSON.parse(res.msg!.content as string);
+                             const parsed = JSON.parse(res.msg!.content as string) as { ciphertext?: string };
                              const ciphertext = parsed.ciphertext;
                              if (ciphertext) {
                                  const combined = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -1848,7 +1848,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             let realFileKey = existingMsg?.fileKey;
             try {
                 if (payloadData.content && typeof payloadData.content === 'string' && payloadData.content.startsWith('{')) {
-                    const meta = JSON.parse(payloadData.content);
+                    const meta = JSON.parse(payloadData.content) as { type?: string, url?: string, key?: string, name?: string, size?: number, mimeType?: string, text?: string, storyAuthorId?: string, isReply?: boolean, storyText?: string, hasMedia?: boolean };
                     if (meta.type === 'file' && meta.url) {
                         realFileUrl = meta.url;
                         realFileKey = meta.key;
@@ -1867,7 +1867,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                              const { worker_crypto_secretbox_xchacha20poly1305_open_easy } = await import('@lib/crypto-worker-proxy');
                              const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
                              
-                             const parsed = JSON.parse(res.msg!.content as string);
+                             const parsed = JSON.parse(res.msg!.content as string) as { ciphertext?: string };
                              const ciphertext = parsed.ciphertext;
                              if (ciphertext) {
                                  const combined = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -2085,12 +2085,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         // 2. PROSES CONTROL MESSAGES LEBIH DULU (At-Least-Once Delivery untuk Key Distribution)
         for (const msg of controlMessages) {
              try {
-                const payload = JSON.parse(msg.content || '{}');
+                const payload = JSON.parse(msg.content || '{}') as SystemMessagePayload;
                 if (payload.type === 'GROUP_KEY_DISTRIBUTION') {
                   console.log('[Offline Sync] Memproses GROUP_KEY_DISTRIBUTION untuk conversation:', msg.conversationId || payload.conversationId);
 
                   const myId = useAuthStore.getState().user?.id;
-                  const myDistributions = payload.distributions?.filter((d: any) => d.targetUserId === myId || d.userId === myId) || [];
+                  const myDistributions = payload.distributions?.filter((d: { targetUserId?: string; userId: string; encryptedKey?: string; key?: string; senderDeviceKey?: string; }) => d.targetUserId === myId || d.userId === myId) || [];
                   let success = false;
 
                   if (myDistributions.length > 0) {
@@ -2102,8 +2102,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                               await storeReceivedSessionKey({
                                   ...payload,
                                   type: 'GROUP_KEY',
-                                  conversationId: msg.conversationId || payload.conversationId,
-                                  senderId: msg.senderId || payload.senderId,
+                                  conversationId: msg.conversationId || payload.conversationId || "",
+                                  senderId: msg.senderId || payload.senderId || "",
                                   encryptedKey: extractedKey,
                                   senderDeviceKey: dist.senderDeviceKey || payload.senderDeviceKey
                               });
@@ -2119,9 +2119,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                           await storeReceivedSessionKey({
                               ...payload,
                               type: 'GROUP_KEY',
-                              conversationId: msg.conversationId || payload.conversationId,
-                              senderId: msg.senderId || payload.senderId,
-                              encryptedKey: payload.encryptedKey || payload.key,
+                              conversationId: msg.conversationId || payload.conversationId || "",
+                              senderId: msg.senderId || payload.senderId || "",
+                              encryptedKey: (payload.encryptedKey || payload.key || ""),
                           });
                           success = true;
                       } catch(e) {}
@@ -2208,10 +2208,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const hasFailedDecryption = processedMessages.some(m => m.error || m.content === 'waiting_for_key' || m.content?.startsWith('['));
         if (hasFailedDecryption) {
             const now = Date.now();
-            const repairKey = `last_repair_history_${id}` as keyof Window;
-            const lastRepair = (window[repairKey] as number) || 0;
+            const repairKey = `last_repair_history_${id}` as const;
+            const lastRepair = window[repairKey as keyof Window] as number | undefined || 0;
             if (now - lastRepair > 15000) {
-                (window as any)[repairKey] = now;
+                window[repairKey as keyof Window] = now as never;
                 console.warn(`[Offline Sync] Meminta pengiriman ulang kunci yang hilang secara diam-diam untuk ${id}...`);
                 import('@lib/socket').then(m => m.emitGroupKeyRequest(id));
             }
@@ -2435,13 +2435,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           // ✅ FIX: Auto-Heal Terpadu untuk semua jenis Chat (Multi-Device)
           // Tidak perlu lagi mengecek isGroup, langsung minta GroupKeyRequest (Sender Key)
           const now = Date.now();
-          const repairKey = `last_repair_${conversationId}` as keyof Window;
-          const lastRepair = (window[repairKey] as number) || 0;
+          const repairKey = `last_repair_${conversationId}` as const;
+          const lastRepair = (window[repairKey as keyof Window] as number) || 0;
           
           const isTooOld = decrypted.content === '[Message too old to decrypt]';
           
           if (!isTooOld && now - lastRepair > 15000) { // Limit permintaan perbaikan agar tidak spam (15 detik)
-              (window as unknown as Record<string, number>)[repairKey] = now;
+              window[repairKey as keyof Window] = now as never;
               console.warn(`[Auto-Heal] Kunci tidak sinkron untuk percakapan ${conversationId}. Meminta kunci ulang secara diam-diam...`);
               
               // Minta pengirim mem-broadcast ulang kunci distribusinya

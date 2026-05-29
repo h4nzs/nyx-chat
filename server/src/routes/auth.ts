@@ -460,7 +460,7 @@ router.post('/pow/verify',
         throw new ApiError(400, 'Challenge expired or invalid. Please request a new one.');
       }
       
-      const { salt, difficulty } = JSON.parse(challengeData as string);
+      const { salt, difficulty } = JSON.parse(challengeData as string) as { salt: string, difficulty: number };
       const sodium = await getSodium();
       const input = Buffer.concat([
         Buffer.from(salt),

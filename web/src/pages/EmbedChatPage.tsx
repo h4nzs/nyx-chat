@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../store/auth';
-import { useConversationStore } from '../store/conversation';
+import { useConversationStore, type Conversation } from '../store/conversation';
 import { authFetch } from '../lib/api';
 import { setSecureCookie } from '../lib/tokenStorage';
 import { Spinner } from '../components/Spinner';
@@ -33,7 +33,7 @@ export default function EmbedChatPage() {
         const user = await authFetch<User>('/api/users/me');
         useAuthStore.getState().setUser(user);
         
-        const conversation = await authFetch<any>(`/api/conversations/${id}`);
+        const conversation = await authFetch<Conversation>(`/api/conversations/${id}`);
         useConversationStore.getState().addOrUpdateConversation(conversation);
         useConversationStore.getState().openConversation(conversation.id);
         

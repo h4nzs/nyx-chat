@@ -6,7 +6,7 @@ import { URL } from 'url';
 const requiredEnvVars = ['PORT', 'CORS_ORIGIN', 'JWT_SECRET'];
 const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
 const packageJsonPath = new URL('../package.json', import.meta.url);
-const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as { version: string };
 
 if (missingEnvVars.length > 0) {
   console.warn(`⚠️  Missing required environment variables: ${missingEnvVars.join(', ')}`);
