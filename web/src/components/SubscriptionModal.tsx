@@ -63,6 +63,8 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
             <h3 className="text-sm font-semibold text-white/70 uppercase tracking-wider mb-2 text-center">{t('modals:subscription.payment.select_method')}</h3>
             
+            {/* FIAT DISABLED TEMPORARILY DUE TO DOMAIN RESTRICTIONS */}
+            {false && (
             <button
               onClick={handleUpgrade}
               disabled={isLoading}
@@ -76,6 +78,7 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
                 <div className="text-xs text-text-secondary">{t('modals:subscription.payment.fiat_desc')}</div>
               </div>
             </button>
+            )}
 
             <button
               onClick={handleCryptoUpgrade}
@@ -153,24 +156,24 @@ export default function SubscriptionModal({ onClose }: { onClose: () => void }) 
               </div>
 
               <button
-                onClick={() => setShowPaymentSelector(true)}
+                onClick={handleCryptoUpgrade}
                 disabled={isLoading || user?.subscriptionTier === 'SUBSCRIBER'}
-                className="w-full py-3 px-4 bg-accent hover:bg-accent/80 disabled:opacity-50 text-bg-dark font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+                className="w-full py-3 px-4 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 text-bg-dark font-bold rounded-xl transition-all flex items-center justify-center gap-2"
               >
                 {isLoading ? (
                   <span className="animate-spin w-5 h-5 border-2 border-bg-dark border-t-transparent rounded-full" />
                 ) : user?.subscriptionTier === 'SUBSCRIBER' ? (
                   t('modals:subscription.buttons.already_subscribed')
                 ) : (
-                  <>{t('modals:subscription.buttons.upgrade')} <FiStar /></>
+                  <>{t('modals:subscription.buttons.upgrade')} (Crypto) <FiLock /></>
                 )}
               </button>
 
               <div className="flex items-start gap-2 text-sm text-text-secondary mt-3">
-                <FiShield className="shrink-0 mt-0.5 text-accent" />
+                <FiShield className="shrink-0 mt-0.5 text-yellow-500" />
                 <p className="text-left leading-relaxed">
-                  {t('modals:subscription.trust_guarantee')}{' '}
-                  <a href="https://nyx-app.my.id/refund" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+                  Payments are processed 100% anonymously via Cryptocurrency.{' '}
+                  <a href="https://nyx-app.my.id/refund" target="_blank" rel="noopener noreferrer" className="text-yellow-500 hover:underline">
                     {t('modals:subscription.refund_policy')}
                   </a>
                 </p>
