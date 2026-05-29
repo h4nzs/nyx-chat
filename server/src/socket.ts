@@ -176,6 +176,7 @@ export function registerSocket(httpServer: HttpServer) {
     });
 
     socket.on('burner:send', async (payload: { roomId: string, targetDeviceId: string, ciphertext: string, hostUserId: string }, callback) => {
+        if (!await checkRateLimit(socket.id, 'burner_send', 10, 60)) return callback?.({ ok: false, error: "Rate limit exceeded" });
         if (!payload.targetDeviceId || !payload.hostUserId) {
             return callback?.({ ok: false, error: "Invalid burner routing metadata" });
         }
@@ -418,6 +419,7 @@ export function registerSocket(httpServer: HttpServer) {
 
     socket.on('message:unsend', async ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
       if (!messageId || !socket.user) return;
+      if (!await checkRateLimit(userId, 'message_unsend', 10, 60)) return;
       const uid = socket.user.id;
 
       try {
@@ -435,6 +437,7 @@ export function registerSocket(httpServer: HttpServer) {
 
     socket.on('message:view_once_opened', async ({ messageId, conversationId }: { messageId: string, conversationId: string }) => {
         if (!messageId || !conversationId || !socket.user) return;
+        if (!await checkRateLimit(userId, 'message_view_once_opened', 10, 60)) return;
         const uid = socket.user.id;
 
         try {
@@ -453,6 +456,7 @@ export function registerSocket(httpServer: HttpServer) {
     socket.on("push:subscribe", async (data: PushSubscribePayload) => {
       // ✅ FIX: Ambil deviceId langsung dari session properties dengan aman
       if (!socket.user || !socket.user.deviceId) return;
+      if (!await checkRateLimit(userId, 'push_subscribe', 5, 60)) return;
       const deviceId = socket.user.deviceId;
 
       if (!data.endpoint || !data.keys?.p256dh || !data.keys?.auth) return;
@@ -469,6 +473,7 @@ export function registerSocket(httpServer: HttpServer) {
 
     socket.on('message:mark_as_read', async ({ messageId, conversationId }: MarkAsReadPayload) => {
       if (!messageId || !socket.user) return;
+      if (!await checkRateLimit(userId, 'message_mark_as_read', 30, 60)) return;
       const uid = socket.user.id;
 
       try {
@@ -506,6 +511,7 @@ export function registerSocket(httpServer: HttpServer) {
     
     socket.on('group:request_key', async ({ conversationId, targetSenderId, targetDeviceKey }: GroupKeyRequestPayload) => {
       if (!conversationId) return;
+      if (!await checkRateLimit(userId, 'group_request_key', 10, 60)) return;
       
       const isParticipant = await prisma.participant.findFirst({
         where: { conversationId, userId: socket.user!.id }
@@ -573,6 +579,7 @@ export function registerSocket(httpServer: HttpServer) {
     socket.on('group:fulfilled_key', async (payload: KeyFulfillmentPayload) => {
       const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey } = payload;
       if (!requesterId || !conversationId || !encryptedKey) return;
+      if (!await checkRateLimit(userId, 'group_fulfilled_key', 30, 60)) return;
       
       const emitPayload = { conversationId, encryptedKey, type: 'GROUP_KEY' as const, senderId: userId, senderDeviceKey };
       
@@ -605,6 +612,7 @@ export function registerSocket(httpServer: HttpServer) {
     socket.on('session:request_key', async (data: KeyRequestPayload) => {
       const { conversationId, sessionId, targetId } = data;
       if (!conversationId) return;
+      if (!await checkRateLimit(userId, 'session_request_key', 10, 60)) return;
 
       if (targetId) {
           try {
@@ -657,6 +665,7 @@ export function registerSocket(httpServer: HttpServer) {
     socket.on('session:fulfill_response', async (payload: KeyFulfillmentPayload) => {
       const { requesterId, conversationId, sessionId, encryptedKey, targetDeviceId } = payload;
       if (!requesterId || !encryptedKey) return;
+      if (!await checkRateLimit(userId, 'session_fulfill_response', 30, 60)) return;
       const emitPayload = { conversationId, sessionId, encryptedKey, type: 'SESSION_KEY' as const, senderId: userId };
       
       if (targetDeviceId) {
