@@ -805,15 +805,18 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                   // dan secara diam-diam membagikan kembali kuncinya kepada peminta
                   const authStore = (await import('@store/auth')).useAuthStore.getState();
                   if (authStore.user?.id === data.targetUserId) {
-                      const rateLimitKey = `sys_key_req_reply_${conversationId}_${data.senderId}` as const;
-                      const lastReq = window[rateLimitKey as keyof Window] as number | undefined || 0;
+                      const requestorId = decrypted.senderId || data.senderId;
+                      if (!requestorId) return true;
+                      
+                      const rateLimitKey = `sys_key_req_reply_${conversationId}_${requestorId}` as keyof Window;
+                      const lastReq = window[rateLimitKey] as number | undefined || 0;
                       if (Date.now() - lastReq < 10000) {
-                          console.log(`[Shield] Mengabaikan duplikat permintaan kunci dari ${data.senderId} (Rate limited)`);
+                          console.log(`[Shield] Mengabaikan duplikat permintaan kunci dari ${requestorId} (Rate limited)`);
                           return true;
                       }
-                      window[rateLimitKey as keyof Window] = Date.now() as never;
+                      window[rateLimitKey] = Date.now() as never;
 
-                      console.log(`[Offline Sync] Received persistent key request from ${decrypted.senderId}`);
+                      console.log(`[Offline Sync] Received persistent key request from ${requestorId}`);
                       import('@lib/socket').then(async ({ emitGroupKeyDistribution }) => {
                            try {
                                const { getMyEncryptionKeyPair, getSodiumLib, getWorkerProxy, fetchPreKeyBundles } = await import('@utils/crypto');
@@ -826,7 +829,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                                }
 
                                // AMBIL KUNCI PUBLIK TERBARU DARI SERVER (BYPASS CACHE)
-                               const requesterId = decrypted.senderId;
+                               const requesterId = requestorId;
                                const bundlesMap = await fetchPreKeyBundles([requesterId]);
                                const bundles = bundlesMap[requesterId] || [];
 
@@ -1008,7 +1011,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                                       conversationId: data.conversationId || conversationId || "",
                                       encryptedKey: extractedKey,
                                       type: 'GROUP_KEY',
-                                      senderId: data.senderId || "",
+                                      senderId: decrypted.senderId || data.senderId || "",
                                       senderDeviceKey: dist.senderDeviceKey || data.senderDeviceKey
                                   });
                                   success = true;
@@ -1022,7 +1025,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                               conversationId: data.conversationId || conversationId || "",
                               encryptedKey: (data.encryptedKey || data.key || ""),
                               type: 'GROUP_KEY',
-                              senderId: data.senderId || "",
+                              senderId: decrypted.senderId || data.senderId || "",
                               senderDeviceKey: data.senderDeviceKey
                            });
                            success = true;
@@ -2205,7 +2208,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         // ✅ 3. AWAIT PENYIMPANAN LOKAL DULU (PENTING!)
         await shadowVault.upsertMessages(enrichedMessages);
 
-        const hasFailedDecryption = processedMessages.some(m => m.error || m.content === 'waiting_for_key' || m.content?.startsWith('['));
+        const hasFailedDecryption = processedMessages.some(m => 
+            m.type !== 'SYSTEM' && 
+            (m.type as string) !== 'SYSTEM_KEY_REQUEST' && 
+            (m.error || m.content === 'waiting_for_key' || m.content?.startsWith('['))
+        );
         if (hasFailedDecryption) {
             const now = Date.now();
             const repairKey = `last_repair_history_${id}` as const;
@@ -2425,7 +2432,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           return null;
       }
 
-      if (decrypted.error || decrypted.content === 'waiting_for_key' || decrypted.content?.startsWith('[')) {
+      if (
+          decrypted.type !== 'SYSTEM' && 
+          (decrypted.type as string) !== 'SYSTEM_KEY_REQUEST' && 
+          (decrypted.error || decrypted.content === 'waiting_for_key' || decrypted.content?.startsWith('['))
+      ) {
           const existing = await shadowVault.getMessage(decrypted.id);
           if (existing && !existing.isDeletedLocal && existing.content && !existing.content.startsWith('[')) {
               console.warn(`[Shield] Prevented overwriting valid local message ${decrypted.id} with failure.`);
