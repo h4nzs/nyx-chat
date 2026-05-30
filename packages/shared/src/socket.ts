@@ -9,7 +9,7 @@ export interface TypingPayload {
 
 export interface DistributeKeysPayload {
   conversationId: string;
-  keys: { userId: string; targetDeviceId?: string; key: string; senderDeviceKey?: string }[];
+  keys: { userId: string; targetDeviceId?: string; targetDeviceKey?: string; key: string; senderDeviceKey?: string }[];
 }
 
 export interface MessageSendPayload {

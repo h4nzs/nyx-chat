@@ -63,11 +63,13 @@ export interface SystemMessagePayload {
     userId: string;
     targetUserId?: string;
     targetDeviceId?: string;
+    targetDeviceKey?: string;
     encryptedKey?: string;
     key?: string;
     senderDeviceKey?: string;
   }[];
   targetUserId?: string;
+  targetDeviceKey?: string;
   key?: string;
   encryptedKey?: string;
   storyId?: string;

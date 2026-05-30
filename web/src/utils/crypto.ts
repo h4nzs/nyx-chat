@@ -640,6 +640,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
               distributionKeys.push({
                   userId: uId,
                   targetDeviceId: bundle.deviceId, 
+                  targetDeviceKey: bundle.identityKey,
                   key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
                   type: 'GROUP_KEY',
                   senderId: myId,
