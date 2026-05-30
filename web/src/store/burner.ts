@@ -376,9 +376,8 @@ export async function generateBurnerLink(): Promise<string> {
   if (!myUserId) throw new Error("User not authenticated");
 
   // Fetch current device ID
-  const { authFetch } = await import('../lib/api');
-  interface Device { id: string; isCurrent: boolean; name: string; lastActiveAt: string; createdAt: string; }
-  const devices = await authFetch<Device[]>('/api/users/me/devices');
+  const { useConnectionStore } = await import('@store/connection');
+  const devices = await useConnectionStore.getState().fetchMyDevices();
   const currentDevice = devices.find(d => d.isCurrent);
   if (!currentDevice) throw new Error("Could not determine current device ID");
   const myDeviceId = currentDevice.id;

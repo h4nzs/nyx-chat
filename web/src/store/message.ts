@@ -898,9 +898,8 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
               }
               
               if (data.type === 'PROTOCOL_UPGRADE_REQ' && data.deviceId && data.hostClassicalPk && data.hostPqPk) {
-                  const { authFetch } = await import('@lib/api');
-                  interface Device { id: string; isCurrent: boolean; name: string; lastActiveAt: string; createdAt: string; }
-                  const myDevices = await authFetch<Device[]>('/api/users/me/devices');
+                  const { useConnectionStore } = await import('@store/connection');
+                  const myDevices = await useConnectionStore.getState().fetchMyDevices();
                   const currentDevice = myDevices.find(d => d.isCurrent);
                   const myDeviceId = currentDevice?.id || '';
                   const peerDeviceId = data.deviceId || "";

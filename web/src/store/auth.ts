@@ -42,9 +42,13 @@ const getDeviceName = () => {
  * Also checks and refills One-Time Pre-Keys (OTPK).
  */
 let isSettingUpKeys = false;
+let lastPrekeySetup = 0;
 
 export async function setupAndUploadPreKeyBundle() {
   if (isSettingUpKeys) return;
+  const now = Date.now();
+  if (now - lastPrekeySetup < 60000) return; // 1 minute cooldown
+
   isSettingUpKeys = true;
 
   try {
@@ -82,6 +86,7 @@ export async function setupAndUploadPreKeyBundle() {
       body: JSON.stringify(bundle),
     });
 
+    lastPrekeySetup = Date.now();
     await checkAndRefillOneTimePreKeys();
 
   } catch (e) {
