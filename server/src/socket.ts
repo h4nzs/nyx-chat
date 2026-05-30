@@ -318,6 +318,7 @@ export function registerSocket(httpServer: HttpServer) {
               conversationId,
               encryptedKey: keyPackage.key,
               targetDeviceId: keyPackage.targetDeviceId,
+              targetDeviceKey: keyPackage.targetDeviceKey,
               senderId: userId,
               senderDeviceKey: keyPackage.senderDeviceKey
             });

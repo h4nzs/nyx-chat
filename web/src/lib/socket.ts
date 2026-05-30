@@ -474,7 +474,7 @@ export function emitSessionKeyFulfillment(payload: { requesterId: string; conver
   getSocket()?.emit('session:fulfill_response', payload);
 }
 
-export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, senderDeviceKey?: string }[]): Promise<void> {
+export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string }[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const socket = getSocket();
     if (!socket?.connected) return reject(new Error('Socket not connected'));

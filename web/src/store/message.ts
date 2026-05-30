@@ -872,6 +872,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                                    distributionKeys.push({
                                        userId: requesterId,
                                        targetDeviceId: bundle.deviceId,
+                                       targetDeviceKey: bundle.identityKey,
                                        key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
                                        type: 'GROUP_KEY',
                                        senderId: myId,
@@ -996,12 +997,27 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
 
               if (data.type === 'GROUP_KEY_DISTRIBUTION') {
                   try {
-                      const { storeReceivedSessionKey } = await import('@utils/crypto');
+                      const { getMyEncryptionKeyPair, getSodiumLib, storeReceivedSessionKey } = await import('@utils/crypto');
+                      const sodium = await getSodiumLib();
+                      const { publicKey } = await getMyEncryptionKeyPair();
+                      const myIdentityKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+
+                      // Abaikan paket distribusi jika secara eksplisit ditujukan untuk perangkat lain
+                      if (data.targetDeviceKey && data.targetDeviceKey !== myIdentityKeyB64) {
+                          console.log(`[Shield] Mengabaikan GROUP_KEY_DISTRIBUTION untuk perangkat lain.`);
+                          return true;
+                      }
+
                       const authStore = (await import('@store/auth')).useAuthStore.getState();
                       const myId = authStore.user?.id;
-                      const myDistributions = data.distributions?.filter((d: { targetUserId?: string; userId: string; encryptedKey?: string; key?: string; senderDeviceKey?: string; }) => d.targetUserId === myId || d.userId === myId) || [];
-                      let success = false;
+                      
+                      // Filter aman untuk distribusi batch dengan strict check
+                      const myDistributions = data.distributions?.filter(d => 
+                          (d.targetUserId === myId || d.userId === myId) &&
+                          (!d.targetDeviceKey || d.targetDeviceKey === myIdentityKeyB64)
+                      ) || [];
 
+                      let success = false;
                       if (myDistributions.length > 0) {
                           for (const dist of myDistributions) {
                               const extractedKey = dist.encryptedKey || dist.key;
@@ -1015,9 +1031,9 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                                       senderDeviceKey: dist.senderDeviceKey || data.senderDeviceKey
                                   });
                                   success = true;
-                                  break; // Unseal sukses! Hentikan loop.
+                                  break;
                               } catch (e) {
-                                  // Gagal wajar jika paket ini ditujukan untuk device kita yang lain
+                                  // Fail over gracefully
                               }
                           }
                       } else if (data.encryptedKey || data.key) {
