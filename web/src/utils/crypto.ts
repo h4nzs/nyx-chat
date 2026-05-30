@@ -270,9 +270,13 @@ export const fetchPreKeyBundles = async (userIds: string[]): Promise<Record<stri
 };
 
 let isUploadingPrekeys = false;
+let lastPrekeyRefill = 0;
 
 export async function checkAndRefillOneTimePreKeys(): Promise<void> {
   if (isUploadingPrekeys) return;
+  const now = Date.now();
+  if (now - lastPrekeyRefill < 60000) return; // 1 minute cooldown
+
   isUploadingPrekeys = true;
   
   try {
@@ -308,6 +312,7 @@ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
         currentCount += batch.length;
         currentStartId += batch.length;
     }
+    lastPrekeyRefill = Date.now();
   } catch (error) {
     console.error("[Crypto] Failed to refill One-Time Pre-Keys:", error);
   } finally {

@@ -16,6 +16,7 @@ import i18n from '../i18n';
 
 type StoryState = {
   stories: Record<string, Story[]>;
+  lastFetched: Record<string, number>;
   isLoading: boolean;
   fetchActiveStories: (userId: UserId) => Promise<void>;
   postStory: (file: File | null, text: string, privacy: 'ALL' | 'EXCLUDE' | 'ONLY', selectedUserIds: UserId[]) => Promise<void>;
@@ -23,10 +24,25 @@ type StoryState = {
 
 export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
   stories: {},
+  lastFetched: {},
   isLoading: false,
 
   fetchActiveStories: async (userId) => {
-    set({ isLoading: true });
+    const now = Date.now();
+    const lastTime = get().lastFetched[userId] || 0;
+    
+    // Jangan fetch ulang jika usianya kurang dari 60 detik (60000 ms)
+    if (now - lastTime < 60000) {
+        return; 
+    }
+
+    // WAJIB: Set state fetched segera sebelum eksekusi pemanggilan API
+    // untuk mencegah race condition dari komponen lain yang merender secara paralel
+    set((state) => ({ 
+        lastFetched: { ...state.lastFetched, [userId]: now },
+        isLoading: true 
+    }));
+    
     try {
       const rawStories = await api<Story[]>(`/api/stories/user/${userId}`);
       const me = useAuthStore.getState().user;

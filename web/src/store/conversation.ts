@@ -168,8 +168,8 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const myClassicalKeys = await getMyEncryptionKeyPair();
       const myPqKeys = await authStore.getPqEncryptionKeyPair();
       
-      interface Device { id: string; isCurrent: boolean; name: string; lastActiveAt: string; createdAt: string; }
-      const myDevices = await authFetch<Device[]>('/api/users/me/devices');
+      const { useConnectionStore } = await import('@store/connection');
+      const myDevices = await useConnectionStore.getState().fetchMyDevices();
       const currentDevice = myDevices.find(d => d.isCurrent);
       if (!currentDevice?.id) {
           throw new Error('Current device ID not found');

@@ -192,7 +192,13 @@ export async function deletePendingHeader(conversationId: string): Promise<void>
 
 export async function storeOneTimePreKey(keyId: number, encryptedPrivateKey: Uint8Array): Promise<void> {
   return enqueueWrite(async () => {
-      await db.preKeys.put({ keyId, encryptedPrivateKey });
+      try {
+          // Explicit casting to number to prevent IndexedDB type mismatch
+          await db.preKeys.put({ keyId: Number(keyId), encryptedPrivateKey });
+      } catch (err) {
+          console.error(`[KeychainDB] CRITICAL: Failed to save OneTimePreKey ${keyId}`, err);
+          throw err;
+      }
   });
 }
 
