@@ -717,6 +717,7 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
 
 type State = {
   messages: Record<string, Message[]>;
+  pendingDecryptions: Message[];
   replyingTo: Message | null;
   isFetchingMore: Record<string, boolean>;
   hasMore: Record<string, boolean>;
@@ -766,6 +767,7 @@ const generateTempId = () => Date.now() * 1000 + (++tempIdCounter) + Math.floor(
 
 const initialState: State = {
   messages: {},
+  pendingDecryptions: [],
   isFetchingMore: {},
   hasMore: {},
   hasLoadedHistory: {},
@@ -2465,6 +2467,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               return existing;
           }
           
+          set(state => ({
+              pendingDecryptions: [...state.pendingDecryptions, decrypted]
+          }));
+          
           // ✅ FIX: Auto-Heal Terpadu untuk semua jenis Chat (Multi-Device)
           // Tidak perlu lagi mengecek isGroup, langsung minta GroupKeyRequest (Sender Key)
           const now = Date.now();
@@ -2478,6 +2484,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               console.warn(`[Auto-Heal] Kunci tidak sinkron untuk percakapan ${conversationId}. Meminta kunci ulang secara diam-diam...`);
               
               // Minta pengirim mem-broadcast ulang kunci distribusinya
+              // Delay is handled in crypto.ts or we can use 1.5s delay here if needed, but since crypto.ts does it, we just emit.
               const { emitGroupKeyRequest } = await import('@lib/socket');
               emitGroupKeyRequest(conversationId);
           }
@@ -3049,15 +3056,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             },
             
   reDecryptPendingMessages: async (conversationId: string) => {
-    await new Promise(r => setTimeout(r, 1000));
-
+    // Process without delay as we are called strictly after key is stored
     const state = get();
-    const conversationMessages = state.messages[conversationId];
-    if (!conversationMessages) return;
+    const conversationMessages = state.messages[conversationId] || [];
 
-    const pendingMessages = conversationMessages.filter(
+    const mainPending = conversationMessages.filter(
       m => m.content === 'waiting_for_key' || m.content === '[Requesting key to decrypt...]' || m.content === '<Decryption Failed>' || (m.content && m.content.includes('[Decryption Failed'))
     );
+
+    const queuePending = state.pendingDecryptions.filter(m => m.conversationId === conversationId);
+
+    const pendingMessages = [...mainPending, ...queuePending];
 
     if (pendingMessages.length === 0) {
       return;
@@ -3074,6 +3083,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             reDecryptedMessages.push(msg);
         }
     }
+
+    const processedIds = new Set(reDecryptedMessages.map(m => m.id));
+    set(state => ({
+        pendingDecryptions: state.pendingDecryptions.filter(m => m.conversationId !== conversationId || !processedIds.has(m.id))
+    }));
 
     const messageMap = new Map(conversationMessages.map(m => [m.id, m]));
     reDecryptedMessages.forEach(m => {

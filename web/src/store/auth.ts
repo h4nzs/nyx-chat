@@ -41,7 +41,12 @@ const getDeviceName = () => {
  * and uploads the bundle to the server.
  * Also checks and refills One-Time Pre-Keys (OTPK).
  */
+let isSettingUpKeys = false;
+
 export async function setupAndUploadPreKeyBundle() {
+  if (isSettingUpKeys) return;
+  isSettingUpKeys = true;
+
   try {
     const { getSodiumLib } = await import('@utils/crypto');
     
@@ -82,6 +87,8 @@ export async function setupAndUploadPreKeyBundle() {
   } catch (e) {
     console.error("Failed to set up and upload pre-key bundle:", e);
     throw e;
+  } finally {
+    isSettingUpKeys = false;
   }
 }
 

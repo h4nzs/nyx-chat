@@ -269,7 +269,12 @@ export const fetchPreKeyBundles = async (userIds: string[]): Promise<Record<stri
   }
 };
 
+let isUploadingPrekeys = false;
+
 export async function checkAndRefillOneTimePreKeys(): Promise<void> {
+  if (isUploadingPrekeys) return;
+  isUploadingPrekeys = true;
+  
   try {
     const { count } = await authFetch<{ count: number }>('/api/keys/count-otpk');
     const OTPK_THRESHOLD = 50;
@@ -289,11 +294,12 @@ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
 
         // Store private keys locally
         for (const key of batch) {
-          await storeOneTimePreKey(key.keyId, key.encryptedPrivateKey);
+          // Ensure keyId is treated as a number
+          await storeOneTimePreKey(Number(key.keyId), key.encryptedPrivateKey);
         }
 
         // Upload public keys
-        const publicKeys = batch.map(k => ({ keyId: k.keyId, publicKey: k.publicKey, pqPublicKey: k.pqPublicKey }));
+        const publicKeys = batch.map(k => ({ keyId: Number(k.keyId), publicKey: k.publicKey, pqPublicKey: k.pqPublicKey }));
         await authFetch('/api/keys/upload-otpk', {
           method: 'POST',
           body: JSON.stringify({ keys: publicKeys })
@@ -304,6 +310,8 @@ export async function checkAndRefillOneTimePreKeys(): Promise<void> {
     }
   } catch (error) {
     console.error("[Crypto] Failed to refill One-Time Pre-Keys:", error);
+  } finally {
+    isUploadingPrekeys = false;
   }
 }
 export async function resetOneTimePreKeys(): Promise<void> {
@@ -379,7 +387,7 @@ export type DecryptResult =
   | { status: 'error'; error: Error };
 
 // --- Module-level state for managing key requests ---
-const pendingGroupKeyRequests = new Map<string, { timerId: number }>();
+const pendingGroupKeyRequests = new Map<string, { attempt: number, timerId: number }>();
 const MAX_KEY_REQUEST_RETRIES = 2; // Total 3 attempts
 const KEY_REQUEST_TIMEOUT_MS = 15000; // 15 seconds
 
@@ -796,19 +804,25 @@ async function requestGroupKeyWithTimeout(conversationId: string, attempt = 0, t
   const reqKey = targetSenderId ? `${conversationId}_${targetSenderId}_${targetDeviceKey || ''}` : conversationId;
   if (pendingGroupKeyRequests.has(reqKey)) return;
 
-  emitGroupKeyRequest(conversationId, targetSenderId, targetDeviceKey);
-
   const timerId = window.setTimeout(async () => {
-    pendingGroupKeyRequests.delete(reqKey);
-    if (attempt < MAX_KEY_REQUEST_RETRIES) {
-      requestGroupKeyWithTimeout(conversationId, attempt + 1, targetSenderId, targetDeviceKey);
-    } else {
-      const { useMessageStore } = await import('@store/message');
-      useMessageStore.getState().failPendingMessages(conversationId, '[Key request timed out]');
-    }
-  }, KEY_REQUEST_TIMEOUT_MS);
+    // Fire request only after 1.5s delay to allow jitter buffer / inflight group key distribution to arrive
+    emitGroupKeyRequest(conversationId, targetSenderId, targetDeviceKey);
+    
+    // Set a new timer for the next retry
+    const retryTimerId = window.setTimeout(async () => {
+      pendingGroupKeyRequests.delete(reqKey);
+      if (attempt < MAX_KEY_REQUEST_RETRIES) {
+        requestGroupKeyWithTimeout(conversationId, attempt + 1, targetSenderId, targetDeviceKey);
+      } else {
+        const { useMessageStore } = await import('@store/message');
+        useMessageStore.getState().failPendingMessages(conversationId, '[Key request timed out]');
+      }
+    }, KEY_REQUEST_TIMEOUT_MS);
+    
+    pendingGroupKeyRequests.set(reqKey, { attempt, timerId: retryTimerId });
+  }, 1500);
 
-  pendingGroupKeyRequests.set(reqKey, { timerId });
+  pendingGroupKeyRequests.set(reqKey, { attempt, timerId });
 }
 
 // --- Message Encryption/Decryption ---
@@ -1160,7 +1174,14 @@ async function doDecryptMessage(
         if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt legacy message: Missing session ID.') };
         const key = await retrieveSessionKeySecurely(conversationId, sessionId);
         if (!key) {
-            emitSessionKeyRequest(conversationId, sessionId);
+            const reqKey = `${conversationId}_${sessionId}`;
+            if (!pendingGroupKeyRequests.has(reqKey)) {
+                const timerId = window.setTimeout(() => {
+                    pendingGroupKeyRequests.delete(reqKey);
+                    emitSessionKeyRequest(conversationId, sessionId);
+                }, 1500);
+                pendingGroupKeyRequests.set(reqKey, { attempt: 0, timerId });
+            }
             return { status: 'pending', reason: '[Requesting key to decrypt...]' };
         }
         const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -1174,7 +1195,14 @@ async function doDecryptMessage(
         if (!sessionId) return { status: 'error', error: new Error('Cannot decrypt legacy message: Missing session ID.') };
         const key = await retrieveSessionKeySecurely(conversationId, sessionId);
         if (!key) {
-            emitSessionKeyRequest(conversationId, sessionId);
+            const reqKey = `${conversationId}_${sessionId}`;
+            if (!pendingGroupKeyRequests.has(reqKey)) {
+                const timerId = window.setTimeout(() => {
+                    pendingGroupKeyRequests.delete(reqKey);
+                    emitSessionKeyRequest(conversationId, sessionId);
+                }, 1500);
+                pendingGroupKeyRequests.set(reqKey, { attempt: 0, timerId });
+            }
             return { status: 'pending', reason: '[Requesting key to decrypt...]' };
         }
         const combined = sodium.from_base64(cipher, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -1562,6 +1590,13 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
     if (newSessionKey) {
         await storeSessionKeySecurely(conversationId, sessionId, newSessionKey);
         
+        const reqKey = `${conversationId}_${sessionId}`;
+        const pendingRequest = pendingGroupKeyRequests.get(reqKey);
+        if (pendingRequest) {
+            clearTimeout(pendingRequest.timerId);
+            pendingGroupKeyRequests.delete(reqKey);
+        }
+
         import('@store/message').then(({ useMessageStore }) => {
             useMessageStore.getState().reDecryptPendingMessages(conversationId);
         });
