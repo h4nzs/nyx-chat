@@ -194,23 +194,35 @@ router.post('/login', authLimiter, zodValidate({
     const ok = await verifyPassword(password, user.passwordHash)
     if (!ok) throw new ApiError(401, 'Invalid credentials')
 
+    const explicitDeviceId = req.body.deviceId;
     let activeDeviceId = '';
     let activeEncryptedPrivateKey = '';
 
     if (publicKey && signingKey && encryptedPrivateKey) {
-      let device = await prisma.device.findFirst({
-        where: {
-          userId: user.id,
-          publicKey: Buffer.from(publicKey, 'base64url')
-        }
-      })
+      let device = null;
+      
+      if (explicitDeviceId) {
+        device = await prisma.device.findFirst({
+          where: { id: explicitDeviceId, userId: user.id }
+        });
+      }
+      
+      if (!device) {
+        device = await prisma.device.findFirst({
+          where: {
+            userId: user.id,
+            publicKey: Buffer.from(publicKey, 'base64url')
+          }
+        });
+      }
       
       if (device) {
           device = await prisma.device.update({
               where: { id: device.id },
               data: { 
                 lastActiveAt: new Date(), 
-                // FIX 2: Buffer conversion for updates
+                // Update keys in case they were regenerated locally
+                publicKey: Buffer.from(publicKey, 'base64url'),
                 pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : device.pqPublicKey,
                 signingKey: Buffer.from(signingKey, 'base64url'), 
                 encryptedPrivateKey: Buffer.from(encryptedPrivateKey, 'utf8'), 
@@ -221,7 +233,6 @@ router.post('/login', authLimiter, zodValidate({
           device = await prisma.device.create({
             data: {
               userId: user.id,
-              // FIX 3: Buffer conversion for creates
               publicKey: Buffer.from(publicKey, 'base64url'),
               pqPublicKey: pqPublicKey ? Buffer.from(pqPublicKey, 'base64url') : null,
               signingKey: Buffer.from(signingKey, 'base64url'),

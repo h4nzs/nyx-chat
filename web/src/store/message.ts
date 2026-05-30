@@ -2083,6 +2083,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
         // ✅ FIX: URUTKAN KRONOLOGIS SEBELUM DEKRIPSI (Gunakan ID sebagai tie-breaker untuk stabilitas)
         fetchedMessages.sort((a, b) => {
+            const aIsControl = a.type === 'SYSTEM' || (a.type as string) === 'GROUP_KEY_DISTRIBUTION';
+            const bIsControl = b.type === 'SYSTEM' || (b.type as string) === 'GROUP_KEY_DISTRIBUTION';
+            
+            if (aIsControl && !bIsControl) return -1;
+            if (!aIsControl && bIsControl) return 1;
+            
             const timeA = new Date(a.createdAt).getTime();
             const timeB = new Date(b.createdAt).getTime();
             if (timeA !== timeB) return timeA - timeB;
