@@ -356,12 +356,19 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
                 throw new Error("Invalid password for local keys. Please recover your account.");
             }
         } else if (!alreadyHasKeys && !restoredNotSynced) {
-            // Fresh login on a brand new linked device -> Do not generate new keys!
-            // We will fetch the existing encryptedPrivateKey from the server and decrypt it.
-            newPublicKey = undefined;
-            newPqPublicKey = undefined;
-            newSigningKey = undefined;
-            newEncryptedPrivateKey = undefined;
+            // Fresh login on a brand new linked device -> Database lokal kosong, regenerasi kunci baru
+            const { generateNewKeys } = await import('@lib/crypto-worker-proxy');
+            const { 
+              encryptionPublicKeyB64, 
+              pqEncryptionPublicKeyB64, 
+              signingPublicKeyB64, 
+              encryptedPrivateKeys 
+            } = await generateNewKeys(password);
+            
+            newPublicKey = encryptionPublicKeyB64;
+            newPqPublicKey = pqEncryptionPublicKeyB64;
+            newSigningKey = signingPublicKeyB64;
+            newEncryptedPrivateKey = encryptedPrivateKeys;
         } else if (restoredNotSynced) {
             // Restored from phrase, but not synced to server yet
             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
@@ -386,13 +393,16 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             }
         }
 
+        const existingDeviceId = localStorage.getItem('deviceId') || undefined;
+
         // Call API
-        const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string }>("/api/auth/login", {
+        const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string; deviceId?: string }>("/api/auth/login", {
           method: "POST",
           body: JSON.stringify({ 
               usernameHash, 
               password,
               deviceName: getDeviceName(),
+              deviceId: existingDeviceId,
               publicKey: newPublicKey,
               pqPublicKey: newPqPublicKey,
               signingKey: newSigningKey,
@@ -405,6 +415,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           await saveEncryptedKeys(res.encryptedPrivateKey);
           await saveDeviceAutoUnlockKey(password);
           await setDeviceAutoUnlockReady(true);
+        }
+        
+        if (res.deviceId) {
+           localStorage.setItem('deviceId', res.deviceId);
         }
 
         const hasKeysNow = await hasStoredKeys();

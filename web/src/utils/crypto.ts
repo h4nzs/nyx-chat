@@ -223,6 +223,22 @@ export interface PreKeyBundle {
   };
 }
 
+export const fetchPublicKeys = async (userIds: string[]): Promise<Record<string, PreKeyBundle[]>> => {
+  try {
+      if (!userIds || userIds.length === 0) return {};
+      
+      const response = await authFetch<Record<string, PreKeyBundle[]>>(`/api/keys/public-keys`, {
+          method: 'POST',
+          body: JSON.stringify({ userIds })
+      });
+      
+      return response || {};
+  } catch (error) {
+      console.error(`Failed to bulk fetch public keys:`, error);
+      throw error;
+  }
+};
+
 export const fetchPreKeyBundle = async (userId: string): Promise<PreKeyBundle[]> => {
   try {
       const bundles = await authFetch<PreKeyBundle[]>(`/api/keys/prekey-bundle/${userId}`);
@@ -1085,6 +1101,12 @@ async function doDecryptMessage(
             return { status: 'success', value: sodium.to_string(result.plaintext) };
         }
         
+        // Cek apakah Ratchet sudah terlewat (N > header.n) dan tidak ada di skippedKeys
+        if (receiverState.N > header.n) {
+            console.warn(`[Crypto] Ratchet Advanced! Cannot decrypt old message (header.n=${header.n}, state.N=${receiverState.N})`);
+            return { status: 'success', value: '[Message too old to decrypt]' };
+        }
+        
         // 2. NORMAL RATCHET DECRYPTION
         const { groupRatchetDecrypt } = await getWorkerProxy();
         const result = await groupRatchetDecrypt(
@@ -1373,10 +1395,10 @@ export async function fulfillGroupKeyRequest(payload: GroupFulfillRequestPayload
   const requester = conversation.participants.find(p => (p.userId || p.id) === requesterId);
   if (!requester) return;
 
-  const userObj = requester.user || requester;
-  const targetDevices = userObj.devices || requester.devices || [];
+  const bundlesMap = await fetchPublicKeys([requesterId]);
+  const targetDevices = bundlesMap[requesterId] || [];
 
-  const isMatched = targetDevices.some(d => d.publicKey === requesterPublicKeyB64 || d.publicKey === payload.requesterDeviceId);
+  const isMatched = targetDevices.some(d => d.identityKey === requesterPublicKeyB64 || d.identityKey === payload.requesterDeviceId);
   if (!isMatched && targetDevices.length > 0) {
       console.warn("Group key fulfillment: Provided keys do not perfectly match registered device keys. Bypassing strict validation as requester is a valid participant.");
   }

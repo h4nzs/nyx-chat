@@ -226,6 +226,52 @@ router.get(
   }
 )
 
+// === POST: Get ALL public keys for MULTIPLE users (Without consuming OTPK) ===
+router.post(
+  '/public-keys',
+  requireAuth,
+  generalLimiter,
+  zodValidate({ body: z.object({ userIds: z.array(z.string().min(1)).max(50) }) }),
+  async (req, res, next) => {
+    try {
+      const { userIds } = req.body;
+
+      if (!userIds || userIds.length === 0) {
+        return res.json({});
+      }
+
+      const devices = await prisma.device.findMany({
+        where: { userId: { in: userIds } },
+        select: { id: true, userId: true, publicKey: true, pqPublicKey: true, signingKey: true }
+      });
+
+      const responseMap = new Map<string, Record<string, unknown>[]>();
+      for (const uid of userIds) {
+          responseMap.set(uid, []);
+      }
+
+      for (const device of devices) {
+          if (!device.signingKey || !device.publicKey) continue;
+
+          const bundle: Record<string, unknown> = {
+            deviceId: device.id,
+            identityKey: Buffer.isBuffer(device.publicKey) || device.publicKey instanceof Uint8Array ? Buffer.from(device.publicKey).toString('base64url') : String(device.publicKey),
+            pqIdentityKey: device.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : null,
+            signingKey: Buffer.isBuffer(device.signingKey) || device.signingKey instanceof Uint8Array ? Buffer.from(device.signingKey).toString('base64url') : String(device.signingKey)
+          };
+
+          const arr = responseMap.get(device.userId) || [];
+          arr.push(bundle);
+          responseMap.set(device.userId, arr);
+      }
+
+      res.json(Object.fromEntries(responseMap));
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
 // === POST: Get ALL pre-key bundles for MULTIPLE users (Bulk Fetch) ===
 router.post(
   '/prekey-bundles',
