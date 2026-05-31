@@ -256,10 +256,13 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         let lastMessage = c.lastMessage || null;
         
         if (lastMessage) {
+            const originalLastMsg = lastMessage;
             try {
-              lastMessage = await decryptMessageObject(lastMessage);
+              const decryptedLastMsg = await decryptMessageObject(lastMessage);
+              lastMessage = decryptedLastMsg || c.lastMessage || null;
             } catch (_e) {
-              if (lastMessage.sessionId) emitSessionKeyRequest(lastMessage.conversationId, lastMessage.sessionId);
+              if (originalLastMsg.sessionId) emitSessionKeyRequest(originalLastMsg.conversationId, originalLastMsg.sessionId);
+              lastMessage = originalLastMsg;
               lastMessage.content = '[Requesting key to decrypt...]';
             }
         }
