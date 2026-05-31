@@ -92,7 +92,7 @@ export async function decryptMessageObject(
   seenIds = new Set<string>(),
   depth = 0,
   options: { skipRetries?: boolean } = {}
-): Promise<Message> {
+): Promise<Message | null> {
   const currentUser = useAuthStore.getState().user;
 
   // ✅ FIX: Parse tempId agar selalu menjadi number | undefined
@@ -220,7 +220,8 @@ export async function decryptMessageObject(
                         } catch (_e) {}
                     }
                     if (rawMsg.repliedTo) {
-                        finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
+                        const repl = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
+                        if (repl) finalMessage.repliedTo = repl;
                     } else if (rawMsg.repliedToId) {
                         try {
                             const { shadowVault } = await import('@lib/shadowVaultDb');
@@ -424,21 +425,28 @@ export async function decryptMessageObject(
       finalMessage.content = result.reason || 'waiting_for_key';
     } else {
       console.warn(`[Decrypt] Failed for msg ${rawMsg.id}:`, result?.error);
-      const errMsg = (result?.error as Error)?.message || '';
-      if (errMsg.includes('waiting for key') || errMsg.includes('Missing sender')) {
-          finalMessage.content = 'waiting_for_key';
-      } else if (errMsg.includes('older than current state')) {
-          finalMessage.content = '[Message too old to decrypt]';
-          finalMessage.error = true;
-      } else {
-          finalMessage.content = '[Decryption Failed: Key out of sync]';
-          finalMessage.error = true;
-      }
+        const errMsg = (result?.error as Error)?.message || '';
+        if (errMsg.includes('waiting for key') || errMsg.includes('Missing sender')) {
+            finalMessage.content = 'waiting_for_key';
+        } else if (errMsg.includes('older than current state')) {
+            if (rawMsg.type !== 'USER') {
+                return null as unknown as Message; // Drop system messages that are too old
+            }
+            finalMessage.content = '[Message too old to decrypt]';
+            finalMessage.error = true;
+        } else {
+            if (rawMsg.type !== 'USER') {
+                return null as unknown as Message; // Drop system messages that fail decryption
+            }
+            finalMessage.content = '[Decryption Failed: Key out of sync]';
+            finalMessage.error = true;
+        }
       finalMessage.type = 'SYSTEM';
     }
 
     if (rawMsg.repliedTo) {
-        finalMessage.repliedTo = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
+        const repl = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
+        if (repl) finalMessage.repliedTo = repl;
     } else if (rawMsg.repliedToId) {
         const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
         if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
@@ -2185,7 +2193,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
             // Dekripsi Hanya Pesan Baru
             const decrypted = await decryptMessageObject(message, undefined, 0, { skipRetries: true });
-            
+            if (!decrypted) continue;
+
             // Evaluasi in-line control message seperti PROTOCOL_UPGRADE_REQ setelah didekripsi
             if (await evaluateControlMessage(decrypted, id)) {
                 continue; // Jangan masukkan ke UI
@@ -2410,7 +2419,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           try {
               let decryptedControl = await decryptMessageObject(message);
               // Tetap proses secara internal, misal evaluateControlMessage
-              await evaluateControlMessage(decryptedControl, conversationId);
+              if (decryptedControl) {
+                  await evaluateControlMessage(decryptedControl, conversationId);
+              }
           } catch (e) {
               console.warn(`[Control Message] Failed to process ${message.type} silently.`, e);
           }
@@ -2419,6 +2430,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       // 1. ALWAYS decrypt to ensure cryptographic integrity
       let decrypted = await decryptMessageObject(message);
+      if (!decrypted) return null;
 
       if (currentUser && message.senderId === currentUser.id && message.tempId) {
           const optimistic = get().messages[conversationId]?.find(m => m.tempId && String(m.tempId) === String(message.tempId));
@@ -2437,7 +2449,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       if (decrypted.content === 'waiting_for_key' || decrypted.error) {
           console.log(`[Ratchet] Decryption failed for ${message.id}. Retrying once in 500ms...`);
           await new Promise(r => setTimeout(r, 500));
-          decrypted = await decryptMessageObject(message);
+          const retriedDecrypted = await decryptMessageObject(message);
+          if (!retriedDecrypted) return null;
+          decrypted = retriedDecrypted;
       }
 
       if (decrypted.repliedToId && !decrypted.repliedTo) {
@@ -3075,8 +3089,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     for (const msg of pendingMessages) {
         try {
             const decrypted = await decryptMessageObject(msg);
-            const [enriched] = enrichMessagesWithSenderProfile(conversationId, [decrypted]);
-            reDecryptedMessages.push(enriched);
+            if (decrypted) {
+                const [enriched] = enrichMessagesWithSenderProfile(conversationId, [decrypted]);
+                reDecryptedMessages.push(enriched);
+            }
         } catch (e) {
             console.error(`[Re-Decrypt] Failed for msg ${msg.id}:`, e);
             reDecryptedMessages.push(msg);
