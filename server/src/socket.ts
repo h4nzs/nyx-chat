@@ -44,6 +44,15 @@ export function getIo() {
   return io;
 }
 
+export async function checkRateLimit(userIdStr: string, event: string, limit: number, windowSeconds: number): Promise<boolean> {
+  const key = `rate_limit:socket:${event}:${userIdStr}`;
+  const current = await redisClient.incr(key);
+  if (current === 1) {
+    await redisClient.expire(key, windowSeconds);
+  }
+  return current <= limit;
+}
+
 export function registerSocket(httpServer: HttpServer) {
   io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer, {
     cors: {
