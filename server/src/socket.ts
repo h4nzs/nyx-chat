@@ -30,9 +30,14 @@ import type {
   RawServerMessage
 } from "@nyx/shared";
 
-// ✅ FIX: Tambahkan deviceId ke dalam interface
+// ✅ FIX: Gunakan SocketData standar Socket.IO agar survive Redis adapter (custom properties hilang saat fetchSockets)
+interface SocketData {
+  user?: AuthPayload & { publicKey?: string | null; pqPublicKey?: string | null; deviceId?: string };
+}
+
 interface AuthenticatedSocket extends Socket<ClientToServerEvents, ServerToClientEvents> {
-  user?: AuthPayload & { publicKey?: string | null, pqPublicKey?: string | null, deviceId?: string };
+  user?: AuthPayload & { publicKey?: string | null; pqPublicKey?: string | null; deviceId?: string };
+  data: SocketData;
 }
 
 export let io: Server<ClientToServerEvents, ServerToClientEvents>;
@@ -117,6 +122,7 @@ export function registerSocket(httpServer: HttpServer) {
 
       if (!token) {
         socket.user = undefined;
+        socket.data.user = undefined;
         return next(); 
       }
 
@@ -124,6 +130,7 @@ export function registerSocket(httpServer: HttpServer) {
       const payload = verifyJwt(token) as { id?: string; sub?: string; role?: string; deviceId?: string } | null | string;
       if (!payload || typeof payload === 'string') {
         socket.user = undefined;
+        socket.data.user = undefined;
         return next();
       }
 
@@ -132,6 +139,7 @@ export function registerSocket(httpServer: HttpServer) {
 
       if (!userId || !deviceId) {
         socket.user = undefined;
+        socket.data.user = undefined;
         return next();
       }
 
@@ -140,6 +148,7 @@ export function registerSocket(httpServer: HttpServer) {
         const isRevoked = await redisClient.get(`revoked:device:${deviceId}`);
         if (isRevoked === "1") {
           socket.user = undefined;
+          socket.data.user = undefined;
           return next();
         }
       } catch (err) {
@@ -147,24 +156,29 @@ export function registerSocket(httpServer: HttpServer) {
       }
 
       // ✅ FIX: Ambil publicKey dari relasi devices, bukan langsung dari user
-      const user = await prisma.user.findUnique({
+      const userData = await prisma.user.findUnique({
         where: { id: userId },
         select: { id: true, devices: { where: { id: deviceId }, select: { publicKey: true, pqPublicKey: true } } }
       });
-      if (!user || user.devices.length === 0) {
+      if (!userData || userData.devices.length === 0) {
         socket.user = undefined;
+        socket.data.user = undefined;
         return next();
       }
 
-      socket.user = {
-        id: user.id,
-        publicKey: Buffer.from(user.devices[0].publicKey).toString('base64url'),
-        pqPublicKey: user.devices[0].pqPublicKey ? Buffer.from(user.devices[0].pqPublicKey).toString('base64url') : null,
+      const userInfo = {
+        id: userData.id,
+        publicKey: Buffer.from(userData.devices[0].publicKey).toString('base64url'),
+        pqPublicKey: userData.devices[0].pqPublicKey ? Buffer.from(userData.devices[0].pqPublicKey).toString('base64url') : null,
         deviceId: deviceId
-      };      next();
+      };
+      socket.user = userInfo;
+      socket.data.user = userInfo;
+      next();
     } catch (err) {
       console.error("[Socket] Auth Middleware Error:", err);
       socket.user = undefined;
+      socket.data.user = undefined;
       next();
     }
   });
@@ -184,7 +198,10 @@ export function registerSocket(httpServer: HttpServer) {
       }
     });
 
-    socket.on('burner:send', async (payload: { roomId: string, targetDeviceId: string, ciphertext: string, hostUserId: string }, callback) => {
+    socket.on('burner:send', async (
+      payload: { roomId: string; targetDeviceId: string; ciphertext: string; hostUserId: string },
+      callback: (res: { ok: boolean; error?: string }) => void
+    ) => {
         if (!await checkRateLimit(socket.id, 'burner_send', 10, 60)) return callback?.({ ok: false, error: "Rate limit exceeded" });
         if (!payload.targetDeviceId || !payload.hostUserId) {
             return callback?.({ ok: false, error: "Invalid burner routing metadata" });
@@ -198,7 +215,7 @@ export function registerSocket(httpServer: HttpServer) {
             let delivered = false;
             for (const s of targetSockets) {
                 const authSocket = s as unknown as AuthenticatedSocket;
-                if (authSocket.user?.deviceId === payload.targetDeviceId) {
+                if (authSocket.data?.user?.deviceId === payload.targetDeviceId) {
                     authSocket.emit('burner:receive', {
                         roomId: payload.roomId,
                         ciphertext: payload.ciphertext
@@ -347,10 +364,10 @@ export function registerSocket(httpServer: HttpServer) {
             const safeMessage = toRawServerMessage(newMessageRaw);
             
             if (keyPackage.targetDeviceId) {
-               const targetSockets = await io.in(keyPackage.userId).fetchSockets();
+                const targetSockets = await io.in(keyPackage.userId).fetchSockets();
                for (const s of targetSockets) {
                   const authSocket = s as unknown as AuthenticatedSocket;
-                  if (authSocket.user?.deviceId === keyPackage.targetDeviceId) {
+                  if (authSocket.data?.user?.deviceId === keyPackage.targetDeviceId) {
                       authSocket.emit('message:new', safeMessage);
                   }
                }
@@ -534,9 +551,9 @@ export function registerSocket(httpServer: HttpServer) {
 
         // 1. Ask specific target if provided
         if (targetSenderId) {
-             const targetSockets = await io.in(targetSenderId).fetchSockets();
-             if (targetDeviceKey) {
-                 const matchingSocket = targetSockets.find(s => (s as unknown as AuthenticatedSocket).user?.publicKey === targetDeviceKey);
+              const targetSockets = await io.in(targetSenderId).fetchSockets();
+              if (targetDeviceKey) {
+                  const matchingSocket = targetSockets.find(s => (s as unknown as AuthenticatedSocket).data?.user?.publicKey === targetDeviceKey);
                  if (matchingSocket) {
                      fulfillerSocket = matchingSocket;
                      fulfillerId = targetSenderId;
@@ -596,8 +613,8 @@ export function registerSocket(httpServer: HttpServer) {
       if (targetDeviceId) {
          const targetSockets = await io.in(requesterId).fetchSockets();
          for (const s of targetSockets) {
-            const authSocket = s as unknown as AuthenticatedSocket;
-            if (authSocket.user?.deviceId === targetDeviceId) {
+             const authSocket = s as unknown as AuthenticatedSocket;
+             if (authSocket.data?.user?.deviceId === targetDeviceId) {
                 authSocket.emit('session:new_key', emitPayload);
             }
          }
@@ -681,8 +698,8 @@ export function registerSocket(httpServer: HttpServer) {
       if (targetDeviceId) {
          const targetSockets = await io.in(requesterId).fetchSockets();
          for (const s of targetSockets) {
-            const authSocket = s as unknown as AuthenticatedSocket;
-            if (authSocket.user?.deviceId === targetDeviceId) {
+             const authSocket = s as unknown as AuthenticatedSocket;
+             if (authSocket.data?.user?.deviceId === targetDeviceId) {
                 authSocket.emit('session:new_key', emitPayload);
             }
          }

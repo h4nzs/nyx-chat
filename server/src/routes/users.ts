@@ -149,7 +149,8 @@ router.delete('/me/devices/:deviceId', requireAuth, async (req, res, next) => {
       const io = getIo();
       const targetSockets = await io.in(authUser.id).fetchSockets();
       for (const socket of targetSockets) {
-        if ((socket as unknown as { user?: { deviceId?: string } }).user?.deviceId === targetDeviceId) {           socket.disconnect(true);
+        if ((socket as unknown as { data?: { user?: { deviceId?: string } } }).data?.user?.deviceId === targetDeviceId) {
+           socket.disconnect(true);
         }
       }
     } catch (err) {
