@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useBurnerStore } from '../store/burner';
+import { useAuthStore } from '../store/auth';
+import { useTranslation } from 'react-i18next';
 import { getSocket, connectSocket } from '../lib/socket';
 import { FiPaperclip, FiMic, FiSend } from 'react-icons/fi';
 import MessageBubble from '../components/MessageBubble';
@@ -9,12 +11,17 @@ import { api } from '../lib/api';
 import toast from 'react-hot-toast';
 
 export default function BurnerChat() {
+  const { t } = useTranslation(['chat']);
   const location = useLocation();
-  const { error, messages, isInitialized, initializeFromHash, sendMessage, activeSessions } = useBurnerStore();
+  const { error, messages, isInitialized, initializeFromHash, sendMessage, activeSessions, hostUserId } = useBurnerStore();
+  const currentUser = useAuthStore(state => state.user);
+  
   const [inputText, setInputText] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isHost = currentUser ? (hostUserId ? currentUser.id === hostUserId : true) : false;
 
   // Extract roomId from hash for reference
   const hashPart = location.hash.split('#')[1];
@@ -147,6 +154,20 @@ export default function BurnerChat() {
         </div>
       </header>
 
+      {!isHost && (
+        <div className="bg-yellow-500/10 text-yellow-500 p-3 mx-4 mt-4 rounded-lg border border-yellow-500/20 text-sm">
+          <p className="font-bold flex items-center gap-1">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            {t('chat:banners.burner_warning_title', 'Ephemeral Session Active')}
+          </p>
+          <p className="mt-1 opacity-90">
+            {t('chat:banners.burner_warning_desc', 'Do not refresh or close this page. All chat history is RAM-only and will be permanently lost.')}
+          </p>
+        </div>
+      )}
+
       <main className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-text-secondary space-y-2 opacity-50">
@@ -157,7 +178,7 @@ export default function BurnerChat() {
           </div>
         ) : (
           messages.map((msg, index) => {
-            const isMe = msg.senderId === 'guest';
+            const isMe = msg.senderId === (isHost ? 'host' : 'guest');
             
             const messageObj = {
               id: msg.id,
