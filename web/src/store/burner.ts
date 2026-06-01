@@ -258,7 +258,10 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
 
             const guestPkBytes = sodium.from_base64(guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
             const ctStr = (header as any).ct;
-            const savedCtBytes = ctStr ? sodium.from_base64(ctStr, sodium.base64_variants.URLSAFE_NO_PADDING) : new Uint8Array(0);
+            if (!ctStr) {
+                throw new Error('KEM Ciphertext missing');
+            }
+            const savedCtBytes = sodium.from_base64(ctStr, sodium.base64_variants.URLSAFE_NO_PADDING);
             
             const { worker_burner_dr_init_host } = await import('../lib/crypto-worker-proxy');
             const initRes = await worker_burner_dr_init_host({

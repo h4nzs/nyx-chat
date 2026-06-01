@@ -34,6 +34,9 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
   },
 
   fetchMyDevices: async (force = false) => {
+    const { useAuthStore } = await import('./auth');
+    if (!useAuthStore.getState().user) return [];
+
     const { hasFetchedDevices, myDevices } = get();
     if (!force && hasFetchedDevices) return myDevices;
     
