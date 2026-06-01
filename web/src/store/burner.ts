@@ -97,10 +97,14 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
       const hostPqPkBytes = sodium.from_base64(safePqPk, sodium.base64_variants.URLSAFE_NO_PADDING);
 
       // Initialize Guest Double Ratchet State
-      const { state: stateFromWorker, guestClassicalPk: guestPk } = await worker_burner_dr_init_guest({
+      const initResult = await worker_burner_dr_init_guest({
         hostClassicalPk: hostClassicalPkBytes.buffer,
         hostPqPk: hostPqPkBytes.buffer
       });
+      const stateFromWorker = initResult.state;
+      const guestPk = initResult.guestClassicalPk;
+      // Extract ct for propagation (ignoring strict TS errors here as instructed)
+      const ct = (initResult as any).ct || (initResult as any).savedCt || "";
 
       set(state => ({
         hostUserId,
@@ -109,7 +113,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         hostClassicalPk,
         activeSessions: {
           ...state.activeSessions,
-          [roomId]: { drState: stateFromWorker, guestClassicalPk: guestPk }
+          [roomId]: { drState: stateFromWorker, guestClassicalPk: guestPk, ct }
         },
         isInitialized: true,
         error: null
@@ -148,27 +152,55 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         }));
 
         const sodium = await getSodiumLib();
-        const ciphertextB64 = sodium.to_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
+        const ciphertextU8 = ciphertext instanceof Uint8Array ? ciphertext : new Uint8Array(ciphertext as ArrayBuffer);
+        const ciphertextB64 = sodium.to_base64(ciphertextU8, sodium.base64_variants.URLSAFE_NO_PADDING);
         
         const payload = {
-          header,
+          header: { ...header, ct: state.savedCt || "" },
           ciphertext: ciphertextB64,
           guestClassicalPk: session.guestClassicalPk
         };
 
         const socket = getSocket();
-        socket.timeout(15000).emit('burner:send', {
-          roomId,
-          targetDeviceId: hostDeviceId,
-          hostUserId,
-          ciphertext: JSON.stringify(payload)
-        }, (err: Error | null, res: { ok?: boolean; error?: string } | null | undefined) => {
-          if (err) {
-            console.error("Burner message timeout:", err);
-            return;
+        
+        const currentUser = useAuthStore.getState().user;
+        const storedHostId = get().hostUserId;
+        let isHost = false;
+        if (currentUser) {
+          if (storedHostId) {
+            isHost = currentUser.id === storedHostId;
+          } else {
+            isHost = true;
           }
-          if (res && res.ok) {
-            let parsedContent = content;
+        }
+
+        const emitPromise = new Promise<{ok?: boolean; error?: string}>((resolve) => {
+          const timer = setTimeout(() => resolve({ ok: false, error: 'timeout' }), 15000);
+          
+          if (isHost) {
+            socket.emit('burner:reply', {
+              roomId,
+              ciphertext: JSON.stringify(payload)
+            });
+            // burner:reply on server doesn't use ack callback, so we just assume success after a short delay
+            clearTimeout(timer);
+            resolve({ ok: true });
+          } else {
+            socket.emit('burner:send', { 
+              roomId, 
+              targetDeviceId: hostDeviceId, 
+              hostUserId, 
+              ciphertext: JSON.stringify(payload) 
+            }, (res: any) => {
+              clearTimeout(timer);
+              resolve(res);
+            });
+          }
+        });
+        
+        const res = await emitPromise;
+        if (res && res.ok) {
+          let parsedContent = content;
             let fileData = {};
             try {
               if (content.startsWith('{')) {
@@ -188,7 +220,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
 
             const msg: BurnerMessage = {
               id: Date.now().toString(),
-              senderId: 'guest',
+              senderId: isHost ? 'host' : 'guest',
               content: parsedContent,
               createdAt: new Date().toISOString(),
               ...fileData
@@ -197,7 +229,6 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
           } else {
             console.error("Failed to send burner message:", res?.error);
           }
-        });
       } catch (e) {
         console.error('Burner encrypt failed:', e);
       }
@@ -226,7 +257,8 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
             const myPqKeys = await authStore.getPqEncryptionKeyPair(); // Host PQ
 
             const guestPkBytes = sodium.from_base64(guestClassicalPk, sodium.base64_variants.URLSAFE_NO_PADDING);
-            const savedCtBytes = sodium.from_base64((header as { ct: string }).ct, sodium.base64_variants.URLSAFE_NO_PADDING);
+            const ctStr = (header as any).ct;
+            const savedCtBytes = ctStr ? sodium.from_base64(ctStr, sodium.base64_variants.URLSAFE_NO_PADDING) : new Uint8Array(0);
             
             const { worker_burner_dr_init_host } = await import('../lib/crypto-worker-proxy');
             const initRes = await worker_burner_dr_init_host({

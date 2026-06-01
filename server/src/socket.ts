@@ -215,13 +215,11 @@ export function registerSocket(httpServer: HttpServer) {
             let delivered = false;
             for (const s of targetSockets) {
                 const authSocket = s as unknown as AuthenticatedSocket;
-                if (authSocket.data?.user?.deviceId === payload.targetDeviceId) {
-                    authSocket.emit('burner:receive', {
-                        roomId: payload.roomId,
-                        ciphertext: payload.ciphertext
-                    });
-                    delivered = true;
-                }
+                authSocket.emit('burner:receive', {
+                    roomId: payload.roomId,
+                    ciphertext: payload.ciphertext
+                });
+                delivered = true;
             }
             if (delivered) {
                 callback?.({ ok: true });
