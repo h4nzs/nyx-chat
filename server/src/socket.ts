@@ -289,15 +289,6 @@ export function registerSocket(httpServer: HttpServer) {
         socket.emit("presence:init", onlineUserIds);
     }
 
-    const checkRateLimit = async (userIdStr: string, event: string, limit: number, windowSeconds: number): Promise<boolean> => {
-      const key = `rate_limit:socket:${event}:${userIdStr}`;
-      const current = await redisClient.incr(key);
-      if (current === 1) {
-        await redisClient.expire(key, windowSeconds);
-      }
-      return current <= limit;
-    };
-
     socket.on("conversation:join", async (conversationId: string) => {
       if (!await checkRateLimit(userId, 'join', 10, 60)) return socket.emit("error", { message: "Rate limit exceeded" });
       try {
