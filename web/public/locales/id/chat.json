@@ -71,7 +71,9 @@
     "key_rotation": "Peringatan Keamanan: Rotasi Kunci Diperlukan",
     "key_rotation_desc": "Kunci enkripsi tidak sinkron. Kirim pesan untuk membangun kembali handshake aman.",
     "encryption_recommendation": "Rekomendasi Protokol Enkripsi",
-    "encryption_desc": "Untuk handshake awal, pastikan kedua pihak ONLINE."
+    "encryption_desc": "Untuk handshake awal, pastikan kedua pihak ONLINE.",
+    "burner_warning_title": "Sesi Ephemeral Aktif",
+    "burner_warning_desc": "Jangan memuat ulang atau menutup halaman ini. Semua riwayat chat hanya tersimpan di RAM dan akan hilang secara permanen."
   },
   "status": {
     "signal_lost": "Sinyal Hilang",

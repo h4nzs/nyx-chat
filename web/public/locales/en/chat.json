@@ -71,7 +71,9 @@
     "key_rotation": "Security Alert: Key Rotation Required",
     "key_rotation_desc": "Encryption keys desynchronized. Transmit message to re-establish secure handshake.",
     "encryption_recommendation": "Encryption Protocol Recommendation",
-    "encryption_desc": "For the initial handshake, ensure both parties are ONLINE."
+    "encryption_desc": "For the initial handshake, ensure both parties are ONLINE.",
+    "burner_warning_title": "Ephemeral Session Active",
+    "burner_warning_desc": "Do not refresh or close this page. All chat history is RAM-only and will be permanently lost."
   },
   "status": {
     "signal_lost": "Signal Lost",

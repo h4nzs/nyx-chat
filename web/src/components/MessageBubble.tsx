@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Message, MessageStatus } from "@store/conversation";
 import { useAuthStore } from "@store/auth";
-import { FaCheck, FaCheckDouble } from "react-icons/fa";
 import { FiClock, FiEyeOff, FiCamera, FiVideo, FiMic, FiEye, FiVolumeX } from "react-icons/fi";
 import FileAttachment from "./FileAttachment";
 import LinkPreviewCard from "./LinkPreviewCard";
@@ -99,18 +98,6 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
     const interval = setInterval(checkExpiration, 30000); 
     return () => clearInterval(interval);
   }, [message.expiresAt, message.deletedAt, message.id, message.conversationId]);
-
-  const getStatusIcon = () => {
-    if (!isOwn) return null;
-    const statuses = message.statuses || [];
-    
-    const readCount = statuses.filter((s: MessageStatus) => s.status === 'READ' && s.userId !== myId).length;
-    const deliveredCount = statuses.filter((s: MessageStatus) => s.status === 'DELIVERED').length;
-
-    if (readCount > 0) return <FaCheckDouble size={14} className="text-green-400" />;
-    if (deliveredCount > 0) return <FaCheckDouble size={14} className="text-white/70" />;
-    return <FaCheck size={14} className="text-white/70" />;
-  };
 
   const isImage = message.fileType?.startsWith('image/');
   const isVoiceMessage = message.fileType?.startsWith('audio/webm');
@@ -251,7 +238,6 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
         )}
         <span className="text-[10px] font-medium tracking-wide opacity-90">{formatTime(message.createdAt)}</span>
         {message.isEdited && <span className="opacity-70 italic text-[10px]">{t('messages.edited', '(edited)')}</span>}
-        {isOwn && !isDeleted && getStatusIcon()}
       </div>
     </div>
   );
