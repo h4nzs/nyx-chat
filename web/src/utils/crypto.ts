@@ -12,7 +12,7 @@ import {
 
 const addSessionKey = KeychainRepository.saveSessionKey;
 const getKeyFromDb = KeychainRepository.getSessionKey;
-const getLatestSessionKey = async (_id: string) => null; // Stub
+const getLatestSessionKey = async (_id: string): Promise<{ sessionId: string; key: Uint8Array } | null> => null; // Stub
 const storeGroupKey = KeychainRepository.saveGroupKey;
 const getGroupKey = KeychainRepository.getGroupKey;
 const storeOneTimePreKey = KeychainRepository.savePreKey;

@@ -540,8 +540,8 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
           }),
         });
 
-        await saveEncryptedKeys(encryptedPrivateKeys);
         await saveDeviceAutoUnlockKey(password, res.user.id);
+        await saveEncryptedKeys(encryptedPrivateKeys);
         await setDeviceAutoUnlockReady(true);
         set({ hasRestoredKeys: true });
 

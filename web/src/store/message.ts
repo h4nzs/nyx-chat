@@ -705,7 +705,6 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
           target.reactions = [];
       } else if (!target) {
           // Jika pesan aslinya belum ter-load ke UI, suntikkan nisannya langsung ke DB
-          {
           MessageRepository.upsertMessages([{
               id: targetId,
               conversationId: asConversationId(un.conversationId),
@@ -3283,4 +3282,4 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     });
   },
 })
-)};
+);
