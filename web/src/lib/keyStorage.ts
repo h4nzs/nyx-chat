@@ -1,7 +1,6 @@
 // web/src/lib/keyStorage.ts
-import { db } from './db';
-// FIX 1: Perbaikan case-sensitivity nama file agar aman di build Linux/Vercel
-import { clearAllKeys as clearSessionKeys } from './keychainDb';
+import { KVRepository, clearLSK, setLSK } from './db/index';
+import { deriveLSK, getLocalSalt } from './db/localCrypto';
 import { sha256, argon2id } from 'hash-wasm';
 import { getSodium } from './sodiumInitializer';
 
@@ -12,18 +11,17 @@ const STORAGE_KEYS = {
   PANIC_HASH: 'nyx_panic_hash',
 };
 
-// Helper for KV operations
-const get = async <T>(key: string): Promise<T | undefined> => {
-  const item = await db.kvStore.get(key);
-  return item?.value as T | undefined;
+// Helper for KV operations - now using KVRepository
+const get = async <T>(key: string): Promise<T | null> => {
+  return KVRepository.get<T>(key);
 };
 
 const set = async (key: string, value: unknown) => {
-  await db.kvStore.put({ key, value });
+  await KVRepository.set(key, value);
 };
 
 const del = async (key: string) => {
-  await db.kvStore.delete(key);
+  await KVRepository.delete(key);
 };
 
 const arrayBufferToBase64 = (buffer: Uint8Array) => {
@@ -135,25 +133,26 @@ export const checkPanicPassword = async (password: string): Promise<boolean> => 
 };
 
 /**
- * Menyimpan Encrypted Private Keys ke IndexedDB
+ * Menyimpan Encrypted Private Keys ke PGlite
  */
 export const saveEncryptedKeys = async (keysData: string) => {
   try {
     await set(STORAGE_KEYS.ENCRYPTED_KEYS, keysData);
   } catch (error) {
-    console.error('Failed to save keys to IndexedDB:', error);
+    console.error('Failed to save keys to PGlite:', error);
     throw new Error('Storage failure');
   }
 };
 
 /**
- * Mengambil Encrypted Private Keys dari IndexedDB
+ * Mengambil Encrypted Private Keys dari PGlite
  */
 export const getEncryptedKeys = async (): Promise<string | undefined> => {
   try {
-    return await get<string>(STORAGE_KEYS.ENCRYPTED_KEYS);
+    const val = await get<string>(STORAGE_KEYS.ENCRYPTED_KEYS);
+    return val || undefined;
   } catch (error) {
-    console.error('Failed to retrieve keys from IndexedDB:', error);
+    console.error('Failed to retrieve keys from PGlite:', error);
     return undefined;
   }
 };
@@ -178,12 +177,20 @@ const deobfuscate = (b64: string): string => {
   }
 };
 
-export const saveDeviceAutoUnlockKey = async (key: string) => {
+export const saveDeviceAutoUnlockKey = async (password: string, userId?: string) => {
   try {
-    // lgtm [js/clear-text-storage-in-browser]
-    sessionStorage.setItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, obfuscate(key));
+    // 1. Persist password (obfuscated) for browser auto-unlock
+    sessionStorage.setItem(STORAGE_KEYS.DEVICE_AUTO_UNLOCK_KEY, obfuscate(password));
+
+    // 2. Derive and Inject LSK into DatabaseManager
+    if (userId) {
+       const salt = await getLocalSalt(userId);
+       const lsk = await deriveLSK(password, salt);
+       setLSK(lsk);
+       console.log('[keyStorage] LSK derived and injected.');
+    }
   } catch (error) {
-    console.error('Failed to save device auto unlock key');
+    console.error('Failed to save device auto unlock key/LSK');
     throw new Error('Storage failure');
   }
 };
@@ -229,12 +236,15 @@ export const getDeviceAutoUnlockReady = async (): Promise<boolean> => {
 
 /**
  * Menghapus Keys (Logout Biasa)
- * Hanya menghapus kunci dekripsi lokal, tapi mempertahankan database history (keychain-db)
+ * Hanya menghapus kunci dekripsi lokal, tapi mempertahankan database history
  * agar user tidak kehilangan chat saat login kembali.
  */
 export const clearKeys = async () => {
   try {
-    // Overwrite with empty data before deletion for security
+    // 1. Wipe LSK from memory
+    clearLSK();
+
+    // 2. Remove encrypted keys from DB
     await set(STORAGE_KEYS.ENCRYPTED_KEYS, null);
     await del(STORAGE_KEYS.ENCRYPTED_KEYS);
     
@@ -248,27 +258,27 @@ export const clearKeys = async () => {
 /**
  * NUCLEAR WIPE (Emergency Eject)
  * Menghapus SEMUA jejak data dari browser ini.
- * - Menghapus Session Keys & History (IndexedDB)
- * - Menghapus Master Keys (IDB-Keyval)
- * - Menghapus LocalStorage & SessionStorage
  */
 export const nuclearWipe = async () => {
   try {
     console.warn("INITIATING NUCLEAR WIPE...");
     
-    // 1. Hapus Kunci Master
+    // 1. Wipe memory & master keys
     await clearKeys();
     
-    // 2. Hapus History & Session Keys (The Vault)
-    await clearSessionKeys();
-    
-    // 3. Hapus Bio Vault (WebAuthn PRF Storage)
+    // 2. Bio Vault
     localStorage.removeItem('nyx_bio_vault');
     
-    // 4. Hapus sisa LocalStorage (User Profile, Settings, dll)
+    // 3. Clear everything else
     localStorage.clear();
     sessionStorage.clear();
     
+    // 4. Delete PGlite data from OPFS
+    if (navigator.storage && navigator.storage.getDirectory) {
+        const root = await navigator.storage.getDirectory();
+        await root.removeEntry('nyx-chat-pg', { recursive: true }).catch(() => {});
+    }
+
     console.warn("NUCLEAR WIPE COMPLETE.");
   } catch (error) {
     console.error('Nuclear wipe failed partially:', error);

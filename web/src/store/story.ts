@@ -1,7 +1,7 @@
 import { createWithEqualityFn } from 'zustand/traditional';
 import { api } from '@lib/api';
 import { generateStoryKey, encryptStoryPayload, decryptStoryPayload } from '@lib/storyCrypto';
-import { getStoryKey, saveStoryKey } from '@lib/shadowVaultDb';
+import { StoryRepository } from '@lib/db/index';
 import { useConversationStore } from './conversation';
 import { useMessageStore } from './message';
 import { encryptFile } from '@utils/crypto';
@@ -61,7 +61,7 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
 
         // For other users' stories, ONLY keep them if we actually received the key
         // (i.e., we were NOT excluded from viewing this story)
-        const key = await getStoryKey(story.id);
+        const key = await StoryRepository.getStoryKey(story.id);
         if (key) {
           validStories.push(story);
         }
@@ -70,7 +70,7 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       // Now decrypt the filtered stories
       const decryptedStories = await Promise.all(validStories.map(async (story) => {
         try {
-          const base64Key = await getStoryKey(story.id);
+          const base64Key = await StoryRepository.getStoryKey(story.id);
           if (base64Key) {
             const decryptedData = await decryptStoryPayload(story.encryptedPayload, base64Key);
             return { ...story, decryptedData: decryptedData as unknown as Record<string, unknown> };
@@ -139,7 +139,7 @@ export const useStoryStore = createWithEqualityFn<StoryState>((set, get) => ({
       });
 
       // Save our own key so we can view our own stories
-      await saveStoryKey(response.id, storyKey);
+      await StoryRepository.saveStoryKey(response.id, storyKey);
       
       // FAN-OUT TARGETING LOGIC
       const me = useAuthStore.getState().user;

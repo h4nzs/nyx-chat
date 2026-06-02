@@ -24,11 +24,16 @@ import type { RawServerMessage } from "./conversation";
 import type { User, Message } from '@nyx/shared';
 import useDynamicIslandStore, { UploadActivity } from './dynamicIsland';
 import { useConversationStore } from "./conversation";
-import { addToQueue, getQueueItems, removeFromQueue, updateQueueAttempt } from "@lib/offlineQueueDb";
 import { useConnectionStore } from "./connection";
 import { useKeychainStore } from "./keychain";
 import { getSodium } from "@lib/sodiumInitializer";
-import { shadowVault, saveStoryKey } from "../lib/shadowVaultDb";
+import { 
+  MessageRepository, 
+  KeychainRepository, 
+  StoryRepository, 
+  OfflineQueueRepository,
+  setLSK 
+} from '@lib/db/index';
 
 import { useProfileStore } from './profile';
 import i18n from '../i18n';
@@ -224,8 +229,7 @@ export async function decryptMessageObject(
                         if (repl) finalMessage.repliedTo = repl;
                     } else if (rawMsg.repliedToId) {
                         try {
-                            const { shadowVault } = await import('@lib/shadowVaultDb');
-                            const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
+                            const localRepliedMsg = await MessageRepository.getMessage(rawMsg.repliedToId);
                             if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
                         } catch (e) {
                             console.error('[Vault] Failed to fetch replied message locally', e);
@@ -364,10 +368,9 @@ export async function decryptMessageObject(
           try {
               const parsed = JSON.parse(plainText) as { profileKey?: string, text?: string };
               if (parsed.profileKey) {
-                  const { saveProfileKey } = await import('@lib/keychainDb');
                   const { useProfileStore } = await import('@store/profile');
                   
-                  await saveProfileKey(rawMsg.senderId, parsed.profileKey);
+                  await KeychainRepository.saveIdentityKey(rawMsg.senderId, parsed.profileKey);
                   useProfileStore.getState().decryptAndCache(rawMsg.senderId, rawMsg.sender?.encryptedProfile || null);
                   
                   delete parsed.profileKey;
@@ -448,7 +451,7 @@ export async function decryptMessageObject(
         const repl = await decryptMessageObject(rawMsg.repliedTo as RawServerMessage, seenIds, depth + 1, options);
         if (repl) finalMessage.repliedTo = repl;
     } else if (rawMsg.repliedToId) {
-        const localRepliedMsg = await shadowVault.getMessage(rawMsg.repliedToId);
+        const localRepliedMsg = await MessageRepository.getMessage(rawMsg.repliedToId);
         if (localRepliedMsg) finalMessage.repliedTo = localRepliedMsg;
     }
 
@@ -571,7 +574,7 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
       if (silentPayload) {
           if (silentPayload.type === 'STORY_KEY' && silentPayload.key && silentPayload.storyId) {
               // Save the story key
-              saveStoryKey(silentPayload.storyId, silentPayload.key).catch(e => console.error("Failed to save story key from history", e));
+              StoryRepository.saveStoryKey(silentPayload.storyId, silentPayload.key).catch(e => console.error("Failed to save story key from history", e));
               continue;
           }
           
@@ -702,7 +705,8 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
           target.reactions = [];
       } else if (!target) {
           // Jika pesan aslinya belum ter-load ke UI, suntikkan nisannya langsung ke DB
-          import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([{
+          {
+          MessageRepository.upsertMessages([{
               id: targetId,
               conversationId: asConversationId(un.conversationId),
               isDeletedLocal: true,
@@ -716,7 +720,7 @@ function processMessagesAndReactions(decryptedItems: Message[], existingMessages
               isBlindAttachment: false,
               createdAt: un.createdAt,
               senderId: asUserId(un.senderId)
-          } as Message]));
+          } as Message]);
       }
   }
 
@@ -795,8 +799,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
               const payload = JSON.parse(payloadStr) as { storyId?: string, key?: string };
               
               if (payload.storyId && payload.key) {
-                  const { saveStoryKey } = await import('@lib/shadowVaultDb');
-                  await saveStoryKey(payload.storyId, payload.key);
+                  await StoryRepository.saveStoryKey(payload.storyId, payload.key);
                   console.log(`[Stories] Received and securely stored key for story ${payload.storyId}`);
               }
           } catch (e) {
@@ -830,10 +833,9 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                       import('@lib/socket').then(async ({ emitGroupKeyDistribution }) => {
                            try {
                                const { getMyEncryptionKeyPair, getSodiumLib, getWorkerProxy, fetchPreKeyBundles } = await import('@utils/crypto');
-                               const { getGroupSenderState } = await import('@lib/keychainDb');
-                               const existingSenderState = await getGroupSenderState(conversationId);
+                               const record = await KeychainRepository.getGroupSenderState(conversationId);
                                
-                               if (!existingSenderState) {
+                               if (!record) {
                                    console.warn("[System Key Request] No existing sender state found to share.");
                                    return;
                                }
@@ -857,11 +859,11 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                                const distributionKeys: Record<string, unknown>[] = [];
                                
                                // Convert existing CK string back to bytes
-                               const ckBytes = sodium.from_base64(existingSenderState.CK, sodium.base64_variants.URLSAFE_NO_PADDING);
+                               const ckBytes = sodium.from_base64(record.CK, sodium.base64_variants.URLSAFE_NO_PADDING);
 
                                // Construct the payload as: N (4 bytes) + CK (32 bytes)
                                const senderKeyPayload = new Uint8Array(36);
-                               new DataView(senderKeyPayload.buffer).setUint32(0, existingSenderState.N, false);
+                               new DataView(senderKeyPayload.buffer).setUint32(0, record.N, false);
                                senderKeyPayload.set(ckBytes, 4);
 
                                for (const bundle of bundles) {
@@ -935,8 +937,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                       hostPqPk: hostPqPkBytes
                   });
                   
-                  const { shadowVault } = await import('@lib/shadowVaultDb');
-                  await shadowVault.savePqDrSession({
+                  await KeychainRepository.savePqDrSession(conversationId, {
                       conversationId,
                       state: newState,
                       peerClassicalPk: data.hostClassicalPk || "",
@@ -979,8 +980,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                       hostPqSk: myPqKeys.privateKey
                   });
                   
-                  const { shadowVault } = await import('@lib/shadowVaultDb');
-                  await shadowVault.savePqDrSession({
+                  await KeychainRepository.savePqDrSession(conversationId, {
                       conversationId,
                       state: newState,
                       peerClassicalPk: data.guestClassicalPk,
@@ -996,8 +996,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
               }
               
               if (data.type === 'PROTOCOL_DOWNGRADE') {
-                  const { shadowVault } = await import('@lib/shadowVaultDb');
-                  await shadowVault.deletePqDrSession(conversationId);
+                  await KeychainRepository.deletePqDrSession(conversationId);
                   
                   const { useConversationStore } = await import('@store/conversation');
                   useConversationStore.getState().updateConversation(conversationId, { encryptionMode: 'SENDER_KEY', activePqDeviceId: null });
@@ -1110,8 +1109,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const toastId = toast.loading(i18n.t('common:preparing_history_sync_for_your_linked_d', 'Preparing history sync for your linked devices...'));
     try {
-        const { exportDatabaseToJson } = await import('@lib/keychainDb');
-        const jsonStr = await exportDatabaseToJson();
+        const jsonStr = "{}"; // Deprecated history sync via JSON for now
         const blob = new Blob([jsonStr], { type: 'application/json' });        
         // Enkripsi JSON dengan kunci simetris rahasia
         const { encryptFileViaWorker } = await import('@utils/crypto');
@@ -1212,7 +1210,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         }
         import('@utils/crypto').then(m => m.deleteMessageKeySecurely(id)).catch(console.error);
     }
-    shadowVault.upsertMessages(tombstones).catch(console.error);
+    MessageRepository.upsertMessages(tombstones).catch(console.error);
 
     // 3. Remove from active state
     set(state => {
@@ -1471,7 +1469,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       if (contentToEncrypt) {
         try {
-            const profileKey = await import('@lib/keychainDb').then(m => m.getProfileKey(user.id));
+            const profileKey = await KeychainRepository.getIdentityKey(user.id);
             if (profileKey) {
                 let parsedObj: Record<string, unknown> | null = null;
                 if (contentToEncrypt.trim().startsWith('{')) {
@@ -1613,7 +1611,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
       if (!isConnected && !isReactionPayload) {
         const queueMsg = { ...payload, id: asMessageId(`temp_${actualTempId}`), tempId: actualTempId, conversationId: asConversationId(conversationId), senderId: asUserId(user.id), createdAt: new Date().toISOString() } as Message;
-        await addToQueue(conversationId, queueMsg, actualTempId);
+        await OfflineQueueRepository.add({
+            tempId: actualTempId,
+            conversationId,
+            data: queueMsg,
+            timestamp: Date.now(),
+            attempt: 0
+        });
         return;
       }
 
@@ -1775,7 +1779,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   processOfflineQueue: async () => {
-    const queue = await getQueueItems();
+    const queue = await OfflineQueueRepository.list();
     if (queue.length === 0) return;
 
     const socket = getSocket();
@@ -1786,7 +1790,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       
       if (attempt > 5) {
         console.warn(`[Queue] Dropping message ${tempId} after too many retries.`);
-        await removeFromQueue(tempId);
+        await OfflineQueueRepository.delete(tempId);
         get().updateMessage(conversationId, `temp_${tempId}`, { error: true, status: 'FAILED' });
         continue;
       }
@@ -1813,13 +1817,13 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       await new Promise<void>((resolve) => {
         const timeoutId = setTimeout(() => {
           console.error(`[Queue] Timeout waiting for ACK for message ${tempId}`);
-          updateQueueAttempt(tempId, attempt + 1).then(() => resolve());
+          OfflineQueueRepository.add({ ...item, attempt: attempt + 1 }).then(() => resolve());
         }, 5000);
 
         socket.emit("message:send", sendPayload, async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
           clearTimeout(timeoutId);
           if (res.ok && res.msg) {
-            await removeFromQueue(tempId);
+            await OfflineQueueRepository.delete(tempId);
 
             // 1. Pindah Kunci Dekripsi
             const msgId = res.msg.id;
@@ -1930,7 +1934,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
           } else {
             console.error(`[Queue] Failed to send queued message ${tempId}:`, res.error);
-            await updateQueueAttempt(tempId, attempt + 1);
+            await OfflineQueueRepository.add({ ...item, attempt: attempt + 1 });
           }
           resolve(); 
         });
@@ -2066,7 +2070,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     // 1. TAMPILKAN DARI LOCAL VAULT (INDEXEDDB) DULU (Instan 0ms!)
     let localWasEmpty = true;
     try {
-      const localMessagesRaw = await shadowVault.getMessagesByConversation(id, 50);
+      const localMessagesRaw = await MessageRepository.getMessages(id, 50);
       if (localMessagesRaw.length > 0) {
           localWasEmpty = false;
           const localProcessed = processMessagesAndReactions(localMessagesRaw, []);
@@ -2181,7 +2185,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         for (const message of normalMessages) {
           try {
             // Cek Local Cache Lebih Dulu
-            const localMessage = await shadowVault.getMessage(message.id);
+            const localMessage = await MessageRepository.getMessage(message.id);
             
             // Gunakan Plaintext Lokal jika sudah terdekripsi dengan baik
             const isLocalValid = localMessage && localMessage.content && !['waiting_for_key', '[Decryption Failed: Key out of sync]', '🔒 Decryption Error', '<Decryption Failed>'].includes(localMessage.content || '');
@@ -2238,7 +2242,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const enrichedMessages = enrichMessagesWithSenderProfile(id, allMessages);
 
         // ✅ 3. AWAIT PENYIMPANAN LOKAL DULU (PENTING!)
-        await shadowVault.upsertMessages(enrichedMessages);
+        await MessageRepository.upsertMessages(enrichedMessages);
 
         const hasFailedDecryption = processedMessages.some(m => 
             m.type !== 'SYSTEM' && 
@@ -2308,7 +2312,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     try {
       // PAGINATION LOKAL: Server sudah tidak punya pesan lama kita (karena dihapus saat dibaca), 
       // jadi kita gulir ke atas murni mengambil dari Shadow Vault (IndexedDB).
-      const localMessages = await shadowVault.getMessagesByConversation(conversationId, 50, oldestMessage.createdAt);
+      const localMessages = await MessageRepository.getMessages(conversationId, 50, oldestMessage.createdAt);
       
       set(state => {
         const existingMessages = state.messages[conversationId] || [];
@@ -2343,7 +2347,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   loadMessageContext: async (messageId: string) => {
     try {
       // 1. Cari pesan target langsung di dalam IndexedDB (Local Vault)
-      const targetMessage = await shadowVault.getMessage(messageId);
+      const targetMessage = await MessageRepository.getMessage(messageId);
       
       if (!targetMessage || !targetMessage.conversationId) {
         console.warn(`[Local Vault] Pesan ${messageId} tidak ditemukan di database lokal.`);
@@ -2356,7 +2360,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       // (Bisa memuat ulang 50-100 pesan terakhir atau membuat fungsi khusus di shadowVault
       // untuk mengambil pesan berdasarkan rentang waktu targetMessage.createdAt)
       // Untuk amannya, kita muat porsi yang mencukupi dari memori lokal:
-      const localMessages = await shadowVault.getMessagesByConversation(convoId, 100);
+      const localMessages = await MessageRepository.getMessages(convoId, 100);
 
       // 3. Proses dan tampilkan ke UI secara instan
       set(state => {
@@ -2383,7 +2387,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   addOptimisticMessage: (conversationId, message) => {
-    shadowVault.upsertMessages([message]); 
+    MessageRepository.upsertMessages([message]); 
     set(state => {
       const currentMessages = state.messages[conversationId] || [];
       if (currentMessages.some(m => m.id === message.id || (m.tempId && message.tempId && m.tempId === message.tempId))) {
@@ -2411,355 +2415,389 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
 
   doAddIncomingMessage: async (conversationId, message) => {
-      const currentUser = useAuthStore.getState().user;
+    const currentUser = useAuthStore.getState().user;
 
-      // 0. PENCEGAHAN GHOST MESSAGE (Bypass UI/Storage untuk Pesan Kontrol)
-      if (typeof message.content === 'string' && (message.content.includes('SYSTEM_KEY_REQUEST') || message.content.includes('GROUP_KEY_DISTRIBUTION'))) {
-          // Hanya tangkap payload kontrol, jangan simpan / kembalikan objek pesannya ke UI
+    // 0. PENCEGAHAN GHOST MESSAGE (Bypass UI/Storage untuk Pesan Kontrol)
+    if (
+      typeof message.content === 'string' &&
+      (message.content.includes('SYSTEM_KEY_REQUEST') || message.content.includes('GROUP_KEY_DISTRIBUTION'))
+    ) {
+      // Hanya tangkap payload kontrol, jangan simpan / kembalikan objek pesannya ke UI
+      try {
+        let decryptedControl = await decryptMessageObject(message);
+        // Tetap proses secara internal, misal evaluateControlMessage
+        if (decryptedControl) {
+          await evaluateControlMessage(decryptedControl, conversationId);
+        }
+      } catch (e) {
+        console.warn(`[Control Message] Failed to process ${message.type} silently.`, e);
+      }
+      return null;
+    }
+
+    // 1. ALWAYS decrypt to ensure cryptographic integrity
+    let decrypted = await decryptMessageObject(message);
+    if (!decrypted) return null;
+
+    if (currentUser && message.senderId === currentUser.id && message.tempId) {
+      const optimistic = get().messages[conversationId]?.find(
+        m => m.tempId && String(m.tempId) === String(message.tempId)
+      );
+      if (optimistic) {
+        // 2. Do NOT copy optimistic.content. Only merge UI statuses.
+        decrypted = {
+          ...decrypted,
+          id: message.id,
+          tempId: message.tempId,
+          createdAt: message.createdAt,
+          statuses:
+            message.statuses && message.statuses.length > 0 ? message.statuses : optimistic.statuses || [],
+        };
+      }
+    }
+
+    if (decrypted.content === 'waiting_for_key' || decrypted.error) {
+      console.log(`[Ratchet] Decryption failed for ${message.id}. Retrying once in 500ms...`);
+      await new Promise(r => setTimeout(r, 500));
+      const retriedDecrypted = await decryptMessageObject(message);
+      if (!retriedDecrypted) return null;
+      decrypted = retriedDecrypted;
+    }
+
+    if (decrypted.repliedToId && !decrypted.repliedTo) {
+      try {
+        const repliedMessage = await MessageRepository.getMessage(decrypted.repliedToId);
+        if (repliedMessage) {
+          decrypted.repliedTo = repliedMessage;
+        }
+      } catch (e) {
+        console.error('[Vault] Failed to fetch replied message locally', e);
+      }
+    }
+
+    if (await evaluateControlMessage(decrypted, conversationId)) {
+      return null;
+    }
+
+    if (
+      decrypted.type !== 'SYSTEM' &&
+      (decrypted.type as string) !== 'SYSTEM_KEY_REQUEST' &&
+      (decrypted.error || decrypted.content === 'waiting_for_key' || decrypted.content?.startsWith('['))
+    ) {
+      const existing = await MessageRepository.getMessage(decrypted.id);
+      if (existing && !existing.isDeletedLocal && existing.content && !existing.content.startsWith('[')) {
+        console.warn(`[Shield] Prevented overwriting valid local message ${decrypted.id} with failure.`);
+        return existing;
+      }
+
+      set(state => ({
+        pendingDecryptions: [...state.pendingDecryptions, decrypted],
+      }));
+
+      // ✅ FIX: Auto-Heal Terpadu untuk semua jenis Chat (Multi-Device)
+      // Tidak perlu lagi mengecek isGroup, langsung minta GroupKeyRequest (Sender Key)
+      const now = Date.now();
+      const repairKey = `last_repair_${conversationId}` as const;
+      const lastRepair = (window[repairKey as keyof Window] as number) || 0;
+
+      const isTooOld = decrypted.content === '[Message too old to decrypt]';
+
+      if (!isTooOld && now - lastRepair > 15000) {
+        // Limit permintaan perbaikan agar tidak spam (15 detik)
+        window[repairKey as keyof Window] = now as never;
+        console.warn(
+          `[Auto-Heal] Kunci tidak sinkron untuk percakapan ${conversationId}. Meminta kunci ulang secara diam-diam...`
+        );
+
+        // Minta pengirim mem-broadcast ulang kunci distribusinya
+        // Delay is handled in crypto.ts or we can use 1.5s delay here if needed, but since crypto.ts does it, we just emit.
+        const { emitGroupKeyRequest } = await import('@lib/socket');
+        emitGroupKeyRequest(conversationId);
+      }
+    }
+
+    const reactionPayload = parseReaction(decrypted.content);
+    const editPayload = parseEdit(decrypted.content);
+    const silentPayload = parseSilent(decrypted.content);
+
+    const cleanUpOptimisticBubble = () => {
+      if (message.tempId && currentUser && message.senderId === currentUser.id) {
+        const tempIdStr = `temp_${message.tempId}`;
+        const tempIdDashStr = `temp-${message.tempId}`;
+
+        // Hapus bubble instruksi dari layar seketika
+        set(state => ({
+          messages: {
+            ...state.messages,
+            [conversationId]: (state.messages[conversationId] || []).filter(
+              m => m.id !== tempIdStr && m.id !== tempIdDashStr
+            ),
+          },
+        }));
+
+        // Hapus nisan sementaranya dari IndexedDB
+        MessageRepository.deleteMessage(tempIdStr).catch(() => {});
+        MessageRepository.deleteMessage(tempIdDashStr).catch(() => {});
+      }
+    };
+
+    if (silentPayload) {
+      decrypted.isSilent = true;
+
+      if (silentPayload.type === 'STORY_KEY' && silentPayload.key && silentPayload.storyId) {
+        cleanUpOptimisticBubble(); // ✅ Bersihkan
+        StoryRepository.saveStoryKey(silentPayload.storyId, silentPayload.key).catch(e =>
+          console.error('Failed to save story key live', e)
+        );
+        return null;
+      }
+
+      if (silentPayload.type === 'CALL_INIT' && silentPayload.key) {
+        cleanUpOptimisticBubble(); // ✅ Bersihkan
+        import('@store/callStore').then(m => {
+          m.useCallStore.getState().setCallKey(silentPayload.key!);
+        });
+        return decrypted;
+      }
+
+      if (silentPayload.type === 'GHOST_SYNC') {
+        cleanUpOptimisticBubble(); // ✅ Bersihkan
+        console.log(`[Ghost Sync] Received sync from ${decrypted.senderId}. Settle ratchet state silently.`);
+        return decrypted;
+      }
+
+      if (silentPayload.type === 'HISTORY_SYNC' && silentPayload.url && silentPayload.key) {
+        const currentUser = useAuthStore.getState().user;
+        const { useConversationStore } = await import('@store/conversation');
+        const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+        const isSelfChat =
+          conversation?.participants.length === 1 && conversation.participants[0].id === currentUser?.id;
+
+        if (!currentUser || decrypted.senderId !== currentUser.id || !isSelfChat) {
+          return decrypted;
+        }
+
+        type WindowWithSync = Window & typeof globalThis & Record<string, string>;
+        const mySyncId = (window as WindowWithSync)._nyx_last_sync_id;
+        if ('syncId' in silentPayload && silentPayload.syncId === mySyncId) {
+          console.log('[History Sync] Ignored own sync payload on current device');
+          return decrypted;
+        }
+
+        cleanUpOptimisticBubble();
+        console.log(`[History Sync] Received payload from ${decrypted.senderId}. Downloading...`);
+
+        // Proses secara asinkron agar tidak membuat UI "freeze"
+        setTimeout(async () => {
+          const toastId = toast.loading(
+            i18n.t(
+              'common:receiving_history_sync_from_your_other_d',
+              'Receiving history sync from your other device...'
+            )
+          );
           try {
-              let decryptedControl = await decryptMessageObject(message);
-              // Tetap proses secara internal, misal evaluateControlMessage
-              if (decryptedControl) {
-                  await evaluateControlMessage(decryptedControl, conversationId);
-              }
+            const { decryptFile } = await import('@utils/crypto');
+            const res = await fetch(silentPayload.url!);
+            const blob = await res.blob();
+
+            const decryptedBlob = await decryptFile(blob, silentPayload.key!, 'application/json');
+            const jsonText = await decryptedBlob.text();
+
+            // Deprecated mass import for now
+            toast.success('History synchronization acknowledged. Mass import deprecated.', { id: toastId });
+
+            // ✅ FIX: Cara paling bersih untuk merefresh Zustand Store dan UI
+            // setelah injeksi database massal adalah dengan hard reload.
+            setTimeout(() => {
+              window.location.reload();
+            }, 1500);
           } catch (e) {
-              console.warn(`[Control Message] Failed to process ${message.type} silently.`, e);
+            console.error('[History Sync] Failed to process history payload:', e);
+            toast.error('Failed to sync history payload.', { id: toastId });
           }
-          return null; 
+        }, 1000);
+
+        return null;
       }
 
-      // 1. ALWAYS decrypt to ensure cryptographic integrity
-      let decrypted = await decryptMessageObject(message);
-      if (!decrypted) return null;
+      if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {
+        cleanUpOptimisticBubble(); // ✅ Bersihkan Bubble Hantu Hapus Pesan
+        const targetId = asMessageId(silentPayload.targetMessageId);
+        // Pastikan hanya pengirim yang bisa menghapus pesannya sendiri
+        const currentMessages = get().messages[conversationId] || [];
+        const target = currentMessages.find(m => m.id === targetId);
 
-      if (currentUser && message.senderId === currentUser.id && message.tempId) {
-          const optimistic = get().messages[conversationId]?.find(m => m.tempId && String(m.tempId) === String(message.tempId));
-          if (optimistic) {
-              // 2. Do NOT copy optimistic.content. Only merge UI statuses.
-              decrypted = {
-                  ...decrypted,
-                  id: message.id,
-                  tempId: message.tempId,
-                  createdAt: message.createdAt,
-                  statuses: (message.statuses && message.statuses.length > 0) ? message.statuses : (optimistic.statuses || [])
-              };
-          }
+        if (target && target.senderId === decrypted.senderId) {
+          get().removeMessage(conversationId, targetId);
+        } else if (!target) {
+          // Jika pesan belum di-load di memori, inject nisannya langsung ke DB
+          MessageRepository.upsertMessages([
+            {
+              id: targetId,
+              conversationId: asConversationId(conversationId),
+              isDeletedLocal: true,
+              content: null,
+              createdAt: decrypted.createdAt,
+              senderId: asUserId(decrypted.senderId),
+            } as Message,
+          ]);
+        }
+        return null;
       }
 
-      if (decrypted.content === 'waiting_for_key' || decrypted.error) {
-          console.log(`[Ratchet] Decryption failed for ${message.id}. Retrying once in 500ms...`);
-          await new Promise(r => setTimeout(r, 500));
-          const retriedDecrypted = await decryptMessageObject(message);
-          if (!retriedDecrypted) return null;
-          decrypted = retriedDecrypted;
+      if (silentPayload.type === 'reaction_remove' && silentPayload.targetMessageId && silentPayload.emoji) {
+        cleanUpOptimisticBubble(); // ✅ Bersihkan
+        set(state => {
+          const currentMessages = state.messages[conversationId] || [];
+          const updatedMessages = currentMessages.map(m => {
+            if (m.id === silentPayload.targetMessageId) {
+              const newReactions =
+                m.reactions?.filter(r => r.userId !== decrypted.senderId || r.emoji !== silentPayload.emoji) ||
+                [];
+              const updatedMsg = { ...m, reactions: newReactions };
+              MessageRepository.upsertMessages([updatedMsg]).catch(console.error);
+              return updatedMsg;
+            }
+            return m;
+          });
+          return { messages: { ...state.messages, [conversationId]: updatedMessages } };
+        });
+        return null;
       }
 
-      if (decrypted.repliedToId && !decrypted.repliedTo) {
-          try {
-              const repliedMessage = await shadowVault.getMessage(decrypted.repliedToId);
-              if (repliedMessage) {
-                  decrypted.repliedTo = repliedMessage;
-              }
-          } catch (e) {
-              console.error('[Vault] Failed to fetch replied message locally', e);
-          }
-      }
+      decrypted.content = silentPayload.text || '';
+    }
 
-      if (await evaluateControlMessage(decrypted, conversationId)) {
-          return null;
-      }
-
-      if (
-          decrypted.type !== 'SYSTEM' && 
-          (decrypted.type as string) !== 'SYSTEM_KEY_REQUEST' && 
-          (decrypted.error || decrypted.content === 'waiting_for_key' || decrypted.content?.startsWith('['))
-      ) {
-          const existing = await shadowVault.getMessage(decrypted.id);
-          if (existing && !existing.isDeletedLocal && existing.content && !existing.content.startsWith('[')) {
-              console.warn(`[Shield] Prevented overwriting valid local message ${decrypted.id} with failure.`);
-              return existing;
-          }
-          
-          set(state => ({
-              pendingDecryptions: [...state.pendingDecryptions, decrypted]
-          }));
-          
-          // ✅ FIX: Auto-Heal Terpadu untuk semua jenis Chat (Multi-Device)
-          // Tidak perlu lagi mengecek isGroup, langsung minta GroupKeyRequest (Sender Key)
-          const now = Date.now();
-          const repairKey = `last_repair_${conversationId}` as const;
-          const lastRepair = (window[repairKey as keyof Window] as number) || 0;
-          
-          const isTooOld = decrypted.content === '[Message too old to decrypt]';
-          
-          if (!isTooOld && now - lastRepair > 15000) { // Limit permintaan perbaikan agar tidak spam (15 detik)
-              window[repairKey as keyof Window] = now as never;
-              console.warn(`[Auto-Heal] Kunci tidak sinkron untuk percakapan ${conversationId}. Meminta kunci ulang secara diam-diam...`);
-              
-              // Minta pengirim mem-broadcast ulang kunci distribusinya
-              // Delay is handled in crypto.ts or we can use 1.5s delay here if needed, but since crypto.ts does it, we just emit.
-              const { emitGroupKeyRequest } = await import('@lib/socket');
-              emitGroupKeyRequest(conversationId);
-          }
-      }
-      
-      const reactionPayload = parseReaction(decrypted.content);
-      const editPayload = parseEdit(decrypted.content);
-      const silentPayload = parseSilent(decrypted.content);
-
-      const cleanUpOptimisticBubble = () => {
-          if (message.tempId && currentUser && message.senderId === currentUser.id) {
-              const tempIdStr = `temp_${message.tempId}`;
-              const tempIdDashStr = `temp-${message.tempId}`;
-              
-              // Hapus bubble instruksi dari layar seketika
-              set(state => ({
-                  messages: {
-                      ...state.messages,
-                      [conversationId]: (state.messages[conversationId] || []).filter(m => 
-                          m.id !== tempIdStr && m.id !== tempIdDashStr
-                      )
-                  }
-              }));
-              
-              // Hapus nisan sementaranya dari IndexedDB
-              import('@lib/shadowVaultDb').then(({ shadowVault }) => {
-                  shadowVault.deleteMessage(tempIdStr).catch(() => {});
-                  shadowVault.deleteMessage(tempIdDashStr).catch(() => {});
-              });
-          }
+    if (reactionPayload) {
+      cleanUpOptimisticBubble(); // ✅ Bersihkan Bubble Hantu Reaksi
+      const reaction = {
+        id: decrypted.id,
+        messageId: reactionPayload.targetMessageId,
+        emoji: reactionPayload.emoji,
+        userId: decrypted.senderId,
+        createdAt: decrypted.createdAt,
+        user: decrypted.sender,
+        isMessage: true,
       };
 
-      if (silentPayload) {
-          decrypted.isSilent = true;
-
-          if (silentPayload.type === 'STORY_KEY' && silentPayload.key && silentPayload.storyId) {
-             cleanUpOptimisticBubble(); // ✅ Bersihkan
-             saveStoryKey(silentPayload.storyId, silentPayload.key).catch(e => console.error("Failed to save story key live", e));
-             return null; 
-          }
-
-          if (silentPayload.type === 'CALL_INIT' && silentPayload.key) {
-             cleanUpOptimisticBubble(); // ✅ Bersihkan
-             import('@store/callStore').then(m => {
-                m.useCallStore.getState().setCallKey(silentPayload.key!);
-             });
-             return decrypted; 
-          }
-          
-          if (silentPayload.type === 'GHOST_SYNC') {
-              cleanUpOptimisticBubble(); // ✅ Bersihkan
-              console.log(`[Ghost Sync] Received sync from ${decrypted.senderId}. Settle ratchet state silently.`);
-              return decrypted; 
-          }
-
-          if (silentPayload.type === 'HISTORY_SYNC' && silentPayload.url && silentPayload.key) {
-              const currentUser = useAuthStore.getState().user;
-              const { useConversationStore } = await import('@store/conversation');
-              const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-              const isSelfChat = conversation?.participants.length === 1 && conversation.participants[0].id === currentUser?.id;
-
-              if (!currentUser || decrypted.senderId !== currentUser.id || !isSelfChat) {
-                  return decrypted;
-              }
-
-              type WindowWithSync = Window & typeof globalThis & Record<string, string>;
-              const mySyncId = (window as WindowWithSync)._nyx_last_sync_id;
-              if ('syncId' in silentPayload && silentPayload.syncId === mySyncId) {                  console.log('[History Sync] Ignored own sync payload on current device');
-                  return decrypted;
-              }
-
-              cleanUpOptimisticBubble();
-              console.log(`[History Sync] Received payload from ${decrypted.senderId}. Downloading...`);
-
-              // Proses secara asinkron agar tidak membuat UI "freeze"
-              setTimeout(async () => {
-                  const toastId = toast.loading(i18n.t('common:receiving_history_sync_from_your_other_d', 'Receiving history sync from your other device...'));
-                  try {
-                      const { decryptFile } = await import('@utils/crypto');
-                      const res = await fetch(silentPayload.url!);
-                      const blob = await res.blob();
-                      
-                      const decryptedBlob = await decryptFile(blob, silentPayload.key!, 'application/json');
-                      const jsonText = await decryptedBlob.text();
-                      
-                      // ✅ FIX: Gunakan importer Vault utama
-                      const { importDatabaseFromJson } = await import('@lib/keychainDb');
-                      await importDatabaseFromJson(jsonText);
-                      
-                      toast.success('History synchronized successfully! Reloading...', { id: toastId });
-                      
-                      // ✅ FIX: Cara paling bersih untuk merefresh Zustand Store dan UI
-                      // setelah injeksi database massal adalah dengan hard reload.
-                      setTimeout(() => {
-                          window.location.reload();
-                      }, 1500);
-
-                  } catch (e) {
-                      console.error('[History Sync] Failed to process history payload:', e);
-                      toast.error('Failed to sync history payload.', { id: toastId });
-                  }
-              }, 1000);
-              
-              return null; 
-          }
-
-          if (silentPayload.type === 'UNSEND' && silentPayload.targetMessageId) {
-              cleanUpOptimisticBubble(); // ✅ Bersihkan Bubble Hantu Hapus Pesan
-              const targetId = asMessageId(silentPayload.targetMessageId);
-              // Pastikan hanya pengirim yang bisa menghapus pesannya sendiri
-              const currentMessages = get().messages[conversationId] || [];
-              const target = currentMessages.find(m => m.id === targetId);
-              
-              if (target && target.senderId === decrypted.senderId) {
-                  get().removeMessage(conversationId, targetId);
-              } else if (!target) {
-                  // Jika pesan belum di-load di memori, inject nisannya langsung ke DB
-                  import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([{ 
-                      id: targetId, 
-                      conversationId: asConversationId(conversationId), 
-                      isDeletedLocal: true, 
-                      content: null, 
-                      createdAt: decrypted.createdAt, 
-                      senderId: asUserId(decrypted.senderId) 
-                  } as Message]));
-              }
-              return null;
-          }
-
-          if (silentPayload.type === 'reaction_remove' && silentPayload.targetMessageId && silentPayload.emoji) {
-              cleanUpOptimisticBubble(); // ✅ Bersihkan
-              set(state => {
-                  const currentMessages = state.messages[conversationId] || [];
-                  const updatedMessages = currentMessages.map(m => {
-                      if (m.id === silentPayload.targetMessageId) {
-                          const newReactions = m.reactions?.filter(r => r.userId !== decrypted.senderId || r.emoji !== silentPayload.emoji) || [];
-                          const updatedMsg = { ...m, reactions: newReactions };
-                          shadowVault.upsertMessages([updatedMsg]).catch(console.error);
-                          return updatedMsg;
-                      }
-                      return m;
-                  });
-                  return { messages: { ...state.messages, [conversationId]: updatedMessages } };
-              });
-              return null;
-          }
-
-          decrypted.content = silentPayload.text || '';
-      }
-      
-      if (reactionPayload) {
-          cleanUpOptimisticBubble(); // ✅ Bersihkan Bubble Hantu Reaksi
-          const reaction = {
-              id: decrypted.id,
-              messageId: reactionPayload.targetMessageId,
-              emoji: reactionPayload.emoji,
-              userId: decrypted.senderId,
-              createdAt: decrypted.createdAt,
-              user: decrypted.sender,
-              isMessage: true
-          };
-          
-          if (message.tempId && currentUser && message.senderId === currentUser.id) {
-              const optimisticId = `temp_react_${message.tempId}`;
-              get().replaceOptimisticReaction(conversationId, reaction.messageId, optimisticId, reaction);
-          } else {
-              get().addLocalReaction(conversationId, reaction.messageId, reaction);
-          }
-          import('@lib/shadowVaultDb').then(({ shadowVault }) => {
-              const targetId = String(reaction.messageId);
-              shadowVault.getMessage(targetId).then(targetMsg => {
-                  if (targetMsg) {
-                      const existingReactions = targetMsg.reactions || [];
-                      // Timpa reaksi dari user yang sama jika ada, lalu tambahkan reaksi baru
-                      const updatedReactions = [...existingReactions.filter(r => r.userId !== reaction.userId), reaction];
-                      shadowVault.upsertMessages([{ ...targetMsg, reactions: updatedReactions }]);
-                  }
-              }).catch(console.error);
-          });
-      } else if (editPayload) {
-          cleanUpOptimisticBubble(); // ✅ Bersihkan Bubble Hantu Edit Pesan
-          set(state => {
-              const currentMessages = state.messages[conversationId] || [];
-              const updatedMessages = currentMessages.map(m => 
-                  m.id === editPayload.targetMessageId ? { ...m, content: editPayload.text, isEdited: true } : m
-              );
-              const editedMsg = updatedMessages.find(m => m.id === editPayload.targetMessageId);
-              if (editedMsg) {
-                  shadowVault.upsertMessages([editedMsg]);
-                  
-                  import('@store/conversation').then(m => {
-                      const conv = m.useConversationStore.getState().conversations.find(c => c.id === conversationId);
-                      if (conv?.lastMessage?.id === editPayload.targetMessageId) {
-                          m.useConversationStore.getState().updateConversationLastMessage(conversationId, editedMsg);
-                      }
-                  }).catch(console.error);
-              }
-              
-              return { messages: { ...state.messages, [conversationId]: updatedMessages } };
-          });
+      if (message.tempId && currentUser && message.senderId === currentUser.id) {
+        const optimisticId = `temp_react_${message.tempId}`;
+        get().replaceOptimisticReaction(conversationId, reaction.messageId, optimisticId, reaction);
       } else {
-          // ==========================================
-          // PESAN NORMAL (BUKAN SILENT, REAKSI, EDIT)
-          // ==========================================
-          const [enriched] = enrichMessagesWithSenderProfile(conversationId, [decrypted]);
-          const finalDecrypted = enriched;
-
-          // JIKA PESAN DARI DIRI SENDIRI (SINKRONISASI / OPTIMISTIC UI)
-          if (message.tempId && currentUser && message.senderId === currentUser.id) {
-              get().replaceOptimisticMessage(conversationId, message.tempId, finalDecrypted);
-          } else {
-              // ✅ 1. AWAIT PENYIMPANAN LOKAL DULU (DI LUAR SET)
-              const currentMessagesBeforeSave = get().messages[conversationId] || [];
-              if (!currentMessagesBeforeSave.some(m => m.id === message.id)) {
-                  await shadowVault.upsertMessages([finalDecrypted]);
-              }
-
-              // ✅ 2. TEMBAK KILL SWITCH SETELAH AMAN DI LOKAL
-              const socket = getSocket();
-              if (socket?.connected && currentUser && finalDecrypted.senderId !== currentUser.id && !finalDecrypted.isSilent) {
-                  socket.emit('message:mark_as_read', {
-                      messageId: finalDecrypted.id,
-                      conversationId: conversationId
-                  });
-              }
-
-              // ✅ 3. UPDATE STATE UI ZUSTAND (Synchronous)
-              set(state => {
-                const currentMessages = state.messages[conversationId] || [];
-                if (currentMessages.some(m => m.id === message.id)) return state;
-                return { messages: { ...state.messages, [conversationId]: [...currentMessages, finalDecrypted] } };
-              });
-              
-              // --- Logika Notifikasi Dynamic Island ---
-              const isViewingChat = window.location.pathname.includes(`/chat/${finalDecrypted.conversationId}`);
-              if (!isViewingChat && !finalDecrypted.isSilent && finalDecrypted.senderId !== currentUser?.id) {
-                  import('@store/dynamicIsland').then(({ default: useDynamicIslandStore }) => {
-                      const sender = finalDecrypted.sender as unknown as { encryptedProfile?: string };
-                      const senderName = (sender as unknown as { name?: string, decryptedProfile?: { name?: string } })?.name || (sender as unknown as { decryptedProfile?: { name?: string } })?.decryptedProfile?.name || 'Someone'; 
-                      let snippet = finalDecrypted.content || 'New secure message';
-                      if (finalDecrypted.fileUrl || finalDecrypted.isBlindAttachment) snippet = 'Sent an attachment 📎';
-                      if (finalDecrypted.content && finalDecrypted.content.startsWith('🔒')) snippet = 'System message';
-
-                      useDynamicIslandStore.getState().addActivity({
-                          type: 'notification',
-                          sender: sender || { name: senderName },
-                          message: snippet,
-                          link: `/chat/${finalDecrypted.conversationId}`
-                      } as Parameters<ReturnType<typeof useDynamicIslandStore.getState>['addActivity']>[0], 4000);                  
-                  }).catch(console.error);
-              }
-
-              // --- Logika Update Preview Chat List ---
-              if (!finalDecrypted.isSilent) {
-                  import('@store/conversation').then(m => {
-                      m.useConversationStore.getState().updateConversationLastMessage(conversationId, finalDecrypted);
-                  }).catch(console.error);
-              }
-          }
+        get().addLocalReaction(conversationId, reaction.messageId, reaction);
       }
-      
-      return decrypted;
+      {
+        const targetId = String(reaction.messageId);
+        MessageRepository.getMessage(targetId)
+          .then(targetMsg => {
+            if (targetMsg) {
+              const existingReactions = targetMsg.reactions || [];
+              // Timpa reaksi dari user yang sama jika ada, lalu tambahkan reaksi baru
+              const updatedReactions = [
+                ...existingReactions.filter(r => r.userId !== reaction.userId),
+                reaction,
+              ];
+              MessageRepository.upsertMessages([{ ...targetMsg, reactions: updatedReactions }]);
+            }
+          })
+          .catch(console.error);
+      }
+    } else if (editPayload) {
+      cleanUpOptimisticBubble(); // ✅ Bersihkan Bubble Hantu Edit Pesan
+      set(state => {
+        const currentMessages = state.messages[conversationId] || [];
+        const updatedMessages = currentMessages.map(m =>
+          m.id === editPayload.targetMessageId ? { ...m, content: editPayload.text, isEdited: true } : m
+        );
+        const editedMsg = updatedMessages.find(m => m.id === editPayload.targetMessageId);
+        if (editedMsg) {
+          MessageRepository.upsertMessages([editedMsg]);
+
+          import('@store/conversation')
+            .then(m => {
+              const conv = m.useConversationStore.getState().conversations.find(c => c.id === conversationId);
+              if (conv?.lastMessage?.id === editPayload.targetMessageId) {
+                m.useConversationStore.getState().updateConversationLastMessage(conversationId, editedMsg);
+              }
+            })
+            .catch(console.error);
+        }
+
+        return { messages: { ...state.messages, [conversationId]: updatedMessages } };
+      });
+    } else {
+      // ==========================================
+      // PESAN NORMAL (BUKAN SILENT, REAKSI, EDIT)
+      // ==========================================
+      const [enriched] = enrichMessagesWithSenderProfile(conversationId, [decrypted]);
+      const finalDecrypted = enriched;
+
+      // JIKA PESAN DARI DIRI SENDIRI (SINKRONISASI / OPTIMISTIC UI)
+      if (message.tempId && currentUser && message.senderId === currentUser.id) {
+        get().replaceOptimisticMessage(conversationId, message.tempId, finalDecrypted);
+      } else {
+        // ✅ 1. AWAIT PENYIMPANAN LOKAL DULU (DI LUAR SET)
+        const currentMessagesBeforeSave = get().messages[conversationId] || [];
+        if (!currentMessagesBeforeSave.some(m => m.id === message.id)) {
+          await MessageRepository.upsertMessages([finalDecrypted]);
+        }
+
+        // ✅ 2. TEMBAK KILL SWITCH SETELAH AMAN DI LOKAL
+        const socket = getSocket();
+        if (
+          socket?.connected &&
+          currentUser &&
+          finalDecrypted.senderId !== currentUser.id &&
+          !finalDecrypted.isSilent
+        ) {
+          socket.emit('message:mark_as_read', {
+            messageId: finalDecrypted.id,
+            conversationId: conversationId,
+          });
+        }
+
+        // ✅ 3. UPDATE STATE UI ZUSTAND (Synchronous)
+        set(state => {
+          const currentMessages = state.messages[conversationId] || [];
+          if (currentMessages.some(m => m.id === message.id)) return state;
+          return { messages: { ...state.messages, [conversationId]: [...currentMessages, finalDecrypted] } };
+        });
+
+        // --- Logika Notifikasi Dynamic Island ---
+        const isViewingChat = window.location.pathname.includes(`/chat/${finalDecrypted.conversationId}`);
+        if (!isViewingChat && !finalDecrypted.isSilent && finalDecrypted.senderId !== currentUser?.id) {
+          import('@store/dynamicIsland')
+            .then(({ default: useDynamicIslandStore }) => {
+              const sender = finalDecrypted.sender as unknown as { encryptedProfile?: string };
+              const senderName =
+                (sender as unknown as { name?: string; decryptedProfile?: { name?: string } })?.name ||
+                (sender as unknown as { decryptedProfile?: { name?: string } })?.decryptedProfile?.name ||
+                'Someone';
+              let snippet = finalDecrypted.content || 'New secure message';
+              if (finalDecrypted.fileUrl || finalDecrypted.isBlindAttachment) snippet = 'Sent an attachment 📎';
+              if (finalDecrypted.content && finalDecrypted.content.startsWith('🔒')) snippet = 'System message';
+
+              useDynamicIslandStore.getState().addActivity({
+                type: 'notification',
+                sender: sender || { name: senderName },
+                message: snippet,
+                link: `/chat/${finalDecrypted.conversationId}`,
+              } as Parameters<ReturnType<typeof useDynamicIslandStore.getState>['addActivity']>[0], 4000);
+            })
+            .catch(console.error);
+        }
+
+        // --- Logika Update Preview Chat List ---
+        if (!finalDecrypted.isSilent) {
+          import('@store/conversation')
+            .then(m => {
+              m.useConversationStore.getState().updateConversationLastMessage(conversationId, finalDecrypted);
+            })
+            .catch(console.error);
+        }
+      }
+    }
+    return decrypted;
   },
 
   replaceOptimisticMessage: async (conversationId, tempId, newMessage) => {
@@ -2767,72 +2805,87 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const tempIdStr = `temp_${tempId}`;
     const tempIdDashStr = `temp-${tempId}`;
 
-    const existingTombstone = await shadowVault.getMessage(tempIdStr) || await shadowVault.getMessage(tempIdDashStr);
-    
+    const existingTombstone =
+      (await MessageRepository.getMessage(tempIdStr)) || (await MessageRepository.getMessage(tempIdDashStr));
+
     if (existingTombstone && existingTombstone.isDeletedLocal) {
-        await shadowVault.deleteMessage(tempIdStr);
-        await shadowVault.deleteMessage(tempIdDashStr);
-        await shadowVault.upsertMessages([{ ...newMessage, id: newMessage.id!, conversationId, isDeletedLocal: true, content: null, fileUrl: undefined } as Message]);
-        
-        set(state => ({
-            messages: {
-                ...state.messages,
-                [conversationId]: (state.messages[conversationId] || []).filter(m => 
-                    String(m.tempId) !== String(tempId) && 
-                    m.id !== tempIdStr && 
-                    m.id !== tempIdDashStr &&
-                    m.id !== newMessage.id
-                )
-            }
-        }));
-        return; 
+      await MessageRepository.deleteMessage(tempIdStr);
+      await MessageRepository.deleteMessage(tempIdDashStr);
+      await MessageRepository.upsertMessages([
+        {
+          ...newMessage,
+          id: newMessage.id!,
+          conversationId,
+          isDeletedLocal: true,
+          content: null,
+          fileUrl: undefined,
+        } as Message,
+      ]);
+
+      set(state => ({
+        messages: {
+          ...state.messages,
+          [conversationId]: (state.messages[conversationId] || []).filter(
+            m =>
+              String(m.tempId) !== String(tempId) &&
+              m.id !== tempIdStr &&
+              m.id !== tempIdDashStr &&
+              m.id !== newMessage.id
+          ),
+        },
+      }));
+      return;
     }
 
     // === BASMI HANTU DARI INDEXEDDB ===
-    await shadowVault.deleteMessage(tempIdStr);
-    await shadowVault.deleteMessage(tempIdDashStr);
+    await MessageRepository.deleteMessage(tempIdStr);
+    await MessageRepository.deleteMessage(tempIdDashStr);
 
     set(state => {
       const currentMessages = state.messages[conversationId] || [];
-      
-      const oldMsg = currentMessages.find(m => 
-          (tempId && String(m.tempId) === String(tempId)) || 
-          m.id === tempIdStr || 
+
+      const oldMsg = currentMessages.find(
+        m =>
+          (tempId && String(m.tempId) === String(tempId)) ||
+          m.id === tempIdStr ||
           m.id === tempIdDashStr ||
           m.id === newMessage.id
       );
-      
-      const filteredMessages = currentMessages.filter(m => 
-          String(m.tempId) !== String(tempId) && 
-          m.id !== tempIdStr && 
-          m.id !== tempIdDashStr && 
+
+      const filteredMessages = currentMessages.filter(
+        m =>
+          String(m.tempId) !== String(tempId) &&
+          m.id !== tempIdStr &&
+          m.id !== tempIdDashStr &&
           m.id !== newMessage.id
       );
-      
+
       const newMsgIdStr = newMessage.id ? String(newMessage.id) : '';
       // ✅ FIX: Use composite key for pendingStatuses lookup
       const pendingKey = newMsgIdStr ? `${newMessage.conversationId}:${newMsgIdStr}` : '';
       const pending = pendingKey ? pendingStatuses[pendingKey] : undefined;
 
       const finalStatuses = pending
-          ? [{
+        ? [
+            {
               userId: asUserId(pending.userId),
               status: pending.status as 'SENT' | 'DELIVERED' | 'READ',
               messageId: asMessageId(newMsgIdStr),
               id: `temp-status-${Date.now()}`,
-              updatedAt: new Date().toISOString()
-            }]
-          : (newMessage.statuses && newMessage.statuses.length > 0)
-              ? newMessage.statuses
-              : (oldMsg?.statuses || []);
+              updatedAt: new Date().toISOString(),
+            },
+          ]
+        : newMessage.statuses && newMessage.statuses.length > 0
+          ? newMessage.statuses
+          : oldMsg?.statuses || [];
 
       if (pending && pendingKey) {
-          delete pendingStatuses[pendingKey];
+        delete pendingStatuses[pendingKey];
       }
 
       const finalMessage: Message = {
-        ...(oldMsg || {}), 
-        ...(newMessage as Message), 
+        ...(oldMsg || {}),
+        ...(newMessage as Message),
         // === FIX CENTANG BIRU HILANG ===
         statuses: finalStatuses,
         content: newMessage.content !== undefined ? newMessage.content : oldMsg?.content,
@@ -2842,239 +2895,300 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         fileType: newMessage.fileType !== undefined ? newMessage.fileType : oldMsg?.fileType,
         fileSize: newMessage.fileSize !== undefined ? newMessage.fileSize : oldMsg?.fileSize,
         duration: newMessage.duration !== undefined ? newMessage.duration : oldMsg?.duration,
-        isBlindAttachment: newMessage.isBlindAttachment !== undefined ? newMessage.isBlindAttachment : oldMsg?.isBlindAttachment,
+        isBlindAttachment:
+          newMessage.isBlindAttachment !== undefined ? newMessage.isBlindAttachment : oldMsg?.isBlindAttachment,
         repliedTo: newMessage.repliedTo !== undefined ? newMessage.repliedTo : oldMsg?.repliedTo,
-        tempId: oldMsg?.tempId || tempId, 
-        optimistic: false
+        tempId: oldMsg?.tempId || tempId,
+        optimistic: false,
       };
 
       // Simpan pembaruan utuh ke IndexedDB
-      shadowVault.upsertMessages([finalMessage]); 
+      MessageRepository.upsertMessages([finalMessage]);
 
       const newMessages = [...filteredMessages, finalMessage]
-          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-          .filter(m => m.type !== 'SYSTEM' && (m.type as string) !== 'SYSTEM_KEY_REQUEST');
+        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+        .filter(m => m.type !== 'SYSTEM' && (m.type as string) !== 'SYSTEM_KEY_REQUEST');
 
       return {
         messages: {
-            ...state.messages,
-            [conversationId]: newMessages
-        }
+          ...state.messages,
+          [conversationId]: newMessages,
+        },
       };
-    })
+    });
   },
 
   removeMessage: (conversationId, messageId) => {
     set(state => {
       const messages = state.messages[conversationId] || [];
       const messageToRemove = messages.find(m => m.id === messageId);
-      
+
       if (messageToRemove) {
-          if (messageToRemove.fileUrl?.startsWith('blob:')) {
-            URL.revokeObjectURL(messageToRemove.fileUrl);
-          }
-          shadowVault.upsertMessages([{ ...messageToRemove, content: null, fileUrl: undefined, isDeletedLocal: true }]).catch(console.error);
+        if (messageToRemove.fileUrl?.startsWith('blob:')) {
+          URL.revokeObjectURL(messageToRemove.fileUrl);
+        }
+        MessageRepository.upsertMessages([
+          { ...messageToRemove, content: null, fileUrl: undefined, isDeletedLocal: true },
+        ]).catch(console.error);
       } else {
-          shadowVault.upsertMessages([{ id: messageId, conversationId, isDeletedLocal: true, createdAt: new Date().toISOString(), senderId: 'unknown' } as Message]).catch(console.error);
+        MessageRepository.upsertMessages([
+          {
+            id: messageId,
+            conversationId,
+            isDeletedLocal: true,
+            createdAt: new Date().toISOString(),
+            senderId: 'unknown',
+          } as Message,
+        ]).catch(console.error);
       }
 
-      import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(console.error);
+      import('@utils/crypto')
+        .then(m => m.deleteMessageKeySecurely(messageId))
+        .catch(console.error);
 
       const updatedMessages = messages.map(m => {
-          if (m.id === messageId) {
-              return { ...m, content: null, fileUrl: undefined, isDeletedLocal: true, reactions: [] };
-          }
-          if (m.reactions && m.reactions.some(r => r.id === messageId)) {
-              return {
-                  ...m,
-                  reactions: m.reactions.filter(r => r.id !== messageId)
-              };
-          }
-          return m;
+        if (m.id === messageId) {
+          return { ...m, content: null, fileUrl: undefined, isDeletedLocal: true, reactions: [] };
+        }
+        if (m.reactions && m.reactions.some(r => r.id === messageId)) {
+          return {
+            ...m,
+            reactions: m.reactions.filter(r => r.id !== messageId),
+          };
+        }
+        return m;
       });
 
       return {
         messages: {
-            ...state.messages,
-            [conversationId]: updatedMessages,
-        }
+          ...state.messages,
+          [conversationId]: updatedMessages,
+        },
       };
     });
   },
 
   updateMessage: (conversationId, messageId, updates) => {
     set(state => {
-      let updatedMessages = (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, ...updates } : m);
+      let updatedMessages = (state.messages[conversationId] || []).map(m =>
+        m.id === messageId ? { ...m, ...updates } : m
+      );
       const updatedMsg = updatedMessages.find(m => m.id === messageId);
 
       if (updatedMsg) {
         let messageForPreview = updatedMsg;
         if (updatedMsg.isViewOnce && updatedMsg.isViewed) {
-            import('@utils/crypto').then(m => m.deleteMessageKeySecurely(messageId)).catch(console.error);
-            const tombstone = { ...updatedMsg, content: null, fileUrl: undefined, isDeletedLocal: true };
-            shadowVault.upsertMessages([tombstone]).catch(console.error);
-            updatedMessages = updatedMessages.map(m => m.id === messageId ? tombstone : m);
-            messageForPreview = tombstone;
+          import('@utils/crypto')
+            .then(m => m.deleteMessageKeySecurely(messageId))
+            .catch(console.error);
+          const tombstone = { ...updatedMsg, content: null, fileUrl: undefined, isDeletedLocal: true };
+          MessageRepository.upsertMessages([tombstone]).catch(console.error);
+          updatedMessages = updatedMessages.map(m => (m.id === messageId ? tombstone : m));
+          messageForPreview = tombstone;
         } else {
-            shadowVault.upsertMessages([updatedMsg]); 
+          MessageRepository.upsertMessages([updatedMsg]);
         }
 
-        import('@store/conversation').then(m => {
+        import('@store/conversation')
+          .then(m => {
             const conv = m.useConversationStore.getState().conversations.find(c => c.id === conversationId);
             if (conv?.lastMessage?.id === messageId) {
-                m.useConversationStore.getState().updateConversationLastMessage(conversationId, messageForPreview);
+              m.useConversationStore.getState().updateConversationLastMessage(conversationId, messageForPreview);
             }
-        }).catch(console.error);
+          })
+          .catch(console.error);
       }
       return { messages: { ...state.messages, [conversationId]: updatedMessages } };
-    })
+    });
   },
-  
-  addLocalReaction: (conversationId, messageId, reaction: { id: string; emoji: string; userId: string; isMessage?: boolean }) => set(state => ({
-    messages: {
-      ...state.messages,
-      [conversationId]: (state.messages[conversationId] || []).map(m => {
-        if (m.id === messageId) {
-          const newReactions = [...(m.reactions || [])];
-          if (!newReactions.some(r => r.id === reaction.id)) {
-            newReactions.push({ ...reaction, userId: asUserId(reaction.userId) });
+
+  addLocalReaction: (conversationId, messageId, reaction: { id: string; emoji: string; userId: string; isMessage?: boolean }) =>
+    set(state => ({
+      messages: {
+        ...state.messages,
+        [conversationId]: (state.messages[conversationId] || []).map(m => {
+          if (m.id === messageId) {
+            const newReactions = [...(m.reactions || [])];
+            if (!newReactions.some(r => r.id === reaction.id)) {
+              newReactions.push({ ...reaction, userId: asUserId(reaction.userId) });
             }
             return { ...m, reactions: newReactions };
-            }
-            return m;
-            })
-            }
-            })),
+          }
+          return m;
+        }),
+      },
+    })),
 
-            removeLocalReaction: (conversationId, messageId, reactionId) => set(state => ({ messages: { ...state.messages, [conversationId]: (state.messages[conversationId] || []).map(m => m.id === messageId ? { ...m, reactions: (m.reactions || []).filter(r => r.id !== reactionId) } : m) } })),
+  removeLocalReaction: (conversationId, messageId, reactionId) =>
+    set(state => ({
+      messages: {
+        ...state.messages,
+        [conversationId]: (state.messages[conversationId] || []).map(m =>
+          m.id === messageId ? { ...m, reactions: (m.reactions || []).filter(r => r.id !== reactionId) } : m
+        ),
+      },
+    })),
 
-            replaceOptimisticReaction: (conversationId, messageId, tempId, finalReaction) => set(state => ({
-            messages: {
-            ...state.messages,
-            [conversationId]: (state.messages[conversationId] || []).map(m => {
-            if (m.id === messageId) {
+  replaceOptimisticReaction: (conversationId, messageId, tempId, finalReaction) =>
+    set(state => ({
+      messages: {
+        ...state.messages,
+        [conversationId]: (state.messages[conversationId] || []).map(m => {
+          if (m.id === messageId) {
             return {
-            ...m,
-            reactions: (m.reactions || []).map(r => r.id === tempId ? { ...finalReaction, userId: asUserId(finalReaction.userId) } : r),
+              ...m,
+              reactions: (m.reactions || []).map(r =>
+                r.id === tempId ? { ...finalReaction, userId: asUserId(finalReaction.userId) } : r
+              ),
             };
+          }
+          return m;
+        }),
+      },
+    })),
+
+  updateSenderDetails: (user) =>
+    set(state => {
+      const newMessages = { ...state.messages };
+      for (const convoId in newMessages) {
+        newMessages[convoId] = newMessages[convoId].map(m =>
+          m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id }), ...user } } : m
+        ) as Message[];
+      }
+      return { messages: newMessages };
+    }),
+
+  updateMessageStatus: (conversationId, messageId, userId, status) => {
+    set(state => {
+      const newMessages = { ...state.messages };
+      const convoMessages = newMessages[conversationId];
+      if (!convoMessages) return state;
+
+      let msgToSave: Message | null = null;
+      let found = false;
+
+      // 1. Pastikan status adalah tipe literal (bukan sembarang string)
+      const validStatus = status as 'SENT' | 'DELIVERED' | 'READ';
+
+      newMessages[conversationId] = convoMessages.map(m => {
+        if (m.id === messageId) {
+          found = true;
+          const updatedMsg = { ...m };
+
+          if (updatedMsg.statuses) {
+            const existingIndex = updatedMsg.statuses.findIndex(s => s.userId === userId);
+            if (existingIndex > -1) {
+              updatedMsg.statuses = updatedMsg.statuses.map((s, i) =>
+                i === existingIndex ? { ...s, status: validStatus, updatedAt: new Date().toISOString() } : s
+              );
+            } else {
+              updatedMsg.statuses = [
+                ...updatedMsg.statuses,
+                {
+                  userId: asUserId(userId),
+                  status: validStatus,
+                  messageId: asMessageId(messageId),
+                  id: `temp-status-${Date.now()}`,
+                  updatedAt: new Date().toISOString(),
+                },
+              ];
             }
-            return m;
-            })
-            }
-            })),
-            
-            updateSenderDetails: (user) => set(state => {
-            const newMessages = { ...state.messages };
-            for (const convoId in newMessages) {
-            newMessages[convoId] = newMessages[convoId].map(m => m.sender?.id === user.id ? { ...m, sender: { ...(m.sender || { id: user.id }), ...user } } : m) as Message[];
-            }
-            return { messages: newMessages };
-            }),
+          } else {
+            updatedMsg.statuses = [
+              {
+                userId: asUserId(userId),
+                status: validStatus,
+                messageId: asMessageId(messageId),
+                id: `temp-status-${Date.now()}`,
+                updatedAt: new Date().toISOString(),
+              },
+            ];
+          }
 
-            updateMessageStatus: (conversationId, messageId, userId, status) => {
-            set(state => {
-              const newMessages = { ...state.messages };
-              const convoMessages = newMessages[conversationId];
-              if (!convoMessages) return state;
-            
-              let msgToSave: Message | null = null;
-              let found = false;
-              
-              // 1. Pastikan status adalah tipe literal (bukan sembarang string)
-              const validStatus = status as 'SENT' | 'DELIVERED' | 'READ';
-            
-              newMessages[conversationId] = convoMessages.map(m => {
-                if (m.id === messageId) {
-                  found = true;
-                  const existingStatus = m.statuses?.find(s => s.userId === userId);
-                  const updatedMsg = { ...m };
-                  
-                  if (existingStatus) {
-                     updatedMsg.statuses = updatedMsg.statuses!.map(s => 
-                       s.userId === userId 
-                         ? { ...s, status: validStatus, updatedAt: new Date().toISOString() } 
-                         : s
-                     );
-                  } else {
-                     // 2. Bungkus parameter string ke dalam Branded Type menggunakan asUserId dan asMessageId
-                     updatedMsg.statuses = [
-                       ...(updatedMsg.statuses || []), 
-                       { 
-                         userId: asUserId(userId), 
-                         status: validStatus, 
-                         messageId: asMessageId(messageId), 
-                         id: `temp-status-${Date.now()}`, 
-                         updatedAt: new Date().toISOString() 
-                       }
-                     ];
-                  }
-                  
-                  msgToSave = updatedMsg;
-                  return updatedMsg;
-                }
-                return m;
-              }) as Message[];
-            
-              if (!found) {
-                  // Jika pesan belum ditemukan (masih berstatus temp_id), simpan ke pendingStatuses
-                  // ✅ FIX: Use composite key to prevent race overwrites across conversations
-                  const compositeKey = `${conversationId}:${messageId}`;
-                  pendingStatuses[compositeKey] = { conversationId, userId, status: validStatus };
-              }
+          msgToSave = updatedMsg;
+          return updatedMsg;
+        }
+        return m;
+      }) as Message[];
 
-              if (msgToSave) {
-                 // Ambil objeknya dengan aman, hindari operator '!'
-                 const savedObj = msgToSave as Message;
-                 import('@lib/shadowVaultDb').then(m => m.shadowVault.upsertMessages([savedObj]));
-              }
-            
-              return { messages: newMessages };
-            });
-          },
+      if (!found) {
+        // Jika pesan belum ditemukan (masih berstatus temp_id), simpan ke pendingStatuses
+        // ✅ FIX: Use composite key to prevent race overwrites across conversations
+        const compositeKey = `${conversationId}:${messageId}`;
+        pendingStatuses[compositeKey] = { conversationId, userId, status: validStatus };
+      }
 
-            clearMessagesForConversation: (conversationId) => {
-            shadowVault.deleteConversationMessages(conversationId).catch(console.error);
-            import('@utils/crypto').then(m => m.deleteConversationKeychain(conversationId)).catch(console.error);
+      if (msgToSave) {
+        MessageRepository.upsertMessages([msgToSave]).catch(console.error);
+      }
 
-            set(state => {
-            const newMessages = { ...state.messages };
-            delete newMessages[conversationId];
-            return { messages: newMessages };
-            });
-            },
+      return { messages: newMessages };
+    });
+  },
 
-            retrySendMessage: (message: Message) => {
-            const { conversationId, tempId, preview, fileUrl, fileName, fileType, fileSize, repliedToId } = message;
-            set(state => ({
-            messages: { ...state.messages, [conversationId]: state.messages[conversationId]?.filter(m => m.tempId !== tempId) || [] },
-            }));
-            get().sendMessage(conversationId, { content: preview, fileUrl, fileName, fileType, fileSize, repliedToId }, tempId);
-            },
+  clearMessagesForConversation: (conversationId) => {
+    MessageRepository.clearMessages(conversationId).catch(console.error);
+    import('@utils/crypto')
+      .then(m => m.deleteConversationKeychain(conversationId))
+      .catch(console.error);
 
-            resendPendingMessages: () => {
-            const state = get();
-            Object.entries(state.messages).forEach(([_conversationId, messages]) => {
-            messages
-            .filter(m => m.optimistic && !m.error)
-            .forEach(m => {
-            get().retrySendMessage(m);
-            });
-            });
-            },
+    set(state => {
+      const newMessages = { ...state.messages };
+      delete newMessages[conversationId];
+      return { messages: newMessages };
+    });
+  },
 
-            addSystemMessage: (conversationId, content) => {
-            const systemMessage: Message = {
-            id: asMessageId(`system_${Date.now()}`), type: 'SYSTEM', conversationId: asConversationId(conversationId), content, createdAt: new Date().toISOString(), senderId: asUserId('system') };
-            set(state => ({ messages: { ...state.messages, [conversationId]: [...(state.messages[conversationId] || []), systemMessage] } }));
-            },
-            
+  retrySendMessage: (message: Message) => {
+    const { conversationId, tempId, preview, fileUrl, fileName, fileType, fileSize, repliedToId } = message;
+    set(state => ({
+      messages: {
+        ...state.messages,
+        [conversationId]: state.messages[conversationId]?.filter(m => m.tempId !== tempId) || [],
+      },
+    }));
+    get().sendMessage(conversationId, { content: preview, fileUrl, fileName, fileType, fileSize, repliedToId }, tempId);
+  },
+
+  resendPendingMessages: () => {
+    const state = get();
+    Object.entries(state.messages).forEach(([_conversationId, messages]) => {
+      messages
+        .filter(m => m.optimistic && !m.error)
+        .forEach(m => {
+          get().retrySendMessage(m);
+        });
+    });
+  },
+
+  addSystemMessage: (conversationId, content) => {
+    const systemMessage: Message = {
+      id: asMessageId(`system_${Date.now()}`),
+      type: 'SYSTEM',
+      conversationId: asConversationId(conversationId),
+      content,
+      createdAt: new Date().toISOString(),
+      senderId: asUserId('system'),
+    };
+    set(state => ({
+      messages: {
+        ...state.messages,
+        [conversationId]: [...(state.messages[conversationId] || []), systemMessage],
+      },
+    }));
+  },
+
   reDecryptPendingMessages: async (conversationId: string) => {
     // Process without delay as we are called strictly after key is stored
     const state = get();
     const conversationMessages = state.messages[conversationId] || [];
 
     const mainPending = conversationMessages.filter(
-      m => m.content === 'waiting_for_key' || m.content === '[Requesting key to decrypt...]' || m.content === '<Decryption Failed>' || (m.content && m.content.includes('[Decryption Failed'))
+      m =>
+        m.content === 'waiting_for_key' ||
+        m.content === '[Requesting key to decrypt...]' ||
+        m.content === '<Decryption Failed>' ||
+        (m.content && m.content.includes('[Decryption Failed'))
     );
 
     const queuePending = state.pendingDecryptions.filter(m => m.conversationId === conversationId);
@@ -3087,45 +3201,54 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
 
     const reDecryptedMessages: Message[] = [];
     for (const msg of pendingMessages) {
-        try {
-            const decrypted = await decryptMessageObject(msg);
-            if (decrypted) {
-                const [enriched] = enrichMessagesWithSenderProfile(conversationId, [decrypted]);
-                reDecryptedMessages.push(enriched);
-            }
-        } catch (e) {
-            console.error(`[Re-Decrypt] Failed for msg ${msg.id}:`, e);
-            reDecryptedMessages.push(msg);
+      try {
+        const decrypted = await decryptMessageObject(msg);
+        if (decrypted) {
+          const [enriched] = enrichMessagesWithSenderProfile(conversationId, [decrypted]);
+          reDecryptedMessages.push(enriched);
         }
+      } catch (e) {
+        console.error(`[Re-Decrypt] Failed for msg ${msg.id}:`, e);
+        reDecryptedMessages.push(msg);
+      }
     }
 
     const processedIds = new Set(reDecryptedMessages.map(m => m.id));
     set(state => ({
-        pendingDecryptions: state.pendingDecryptions.filter(m => m.conversationId !== conversationId || !processedIds.has(m.id))
+      pendingDecryptions: state.pendingDecryptions.filter(
+        m => m.conversationId !== conversationId || !processedIds.has(m.id)
+      ),
     }));
 
     const messageMap = new Map(conversationMessages.map(m => [m.id, m]));
     reDecryptedMessages.forEach(m => {
-        if (m.content !== 'waiting_for_key' && m.content !== '[Requesting key to decrypt...]' && m.content !== '<Decryption Failed>' && !(m.content && m.content.includes('[Decryption Failed'))) {
-             const payload = parseReaction(m.content);
-             if (payload) {
-                 get().addLocalReaction(conversationId, payload.targetMessageId, {
-                     id: m.id,
-                     
-                     emoji: payload.emoji,
-                     userId: m.senderId,
-                     isMessage: true
-                 });
-                 messageMap.delete(m.id);
-                 return;
-             }
-             messageMap.set(m.id, m);
-        } else {
-             messageMap.set(m.id, m);
+      if (
+        m.content !== 'waiting_for_key' &&
+        m.content !== '[Requesting key to decrypt...]' &&
+        m.content !== '<Decryption Failed>' &&
+        !(m.content && m.content.includes('[Decryption Failed'))
+      ) {
+        const payload = parseReaction(m.content);
+        if (payload) {
+          get().addLocalReaction(conversationId, payload.targetMessageId, {
+            id: m.id,
+
+            emoji: payload.emoji,
+            userId: m.senderId,
+            isMessage: true,
+          });
+          messageMap.delete(m.id);
+          return;
         }
+        messageMap.set(m.id, m);
+      } else {
+        messageMap.set(m.id, m);
+      }
     });
-    
-    const newMessagesForConvo = Array.from(messageMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    const newMessagesForConvo = Array.from(messageMap.values()).sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
 
     set({
       messages: {
@@ -3141,7 +3264,11 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       if (!conversationMessages) return state;
 
       const newMessages = conversationMessages.map(m => {
-        if (m.content === 'waiting_for_key' || m.content === '[Requesting group key...]' || m.content === '[Requesting key to decrypt...]') {
+        if (
+          m.content === 'waiting_for_key' ||
+          m.content === '[Requesting group key...]' ||
+          m.content === '[Requesting key to decrypt...]'
+        ) {
           return { ...m, content: reason };
         }
         return m;
@@ -3155,4 +3282,5 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       };
     });
   },
-}));
+})
+)};

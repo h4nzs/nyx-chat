@@ -1,5 +1,5 @@
 import { createWithEqualityFn } from "zustand/traditional";
-import { shadowVault, decryptVaultText } from '@lib/shadowVaultDb';
+import { MessageRepository } from '@lib/db/index';
 import type { Message } from "./conversation";
 import type { MessageId } from '@nyx/shared';
 
@@ -29,7 +29,6 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
       return;
     }
 
-    const normalizedQuery = query.toLowerCase();
     let token: string | null = null;
 
     try {
@@ -37,31 +36,15 @@ export const useMessageSearchStore = createWithEqualityFn<State>((set, get) => (
       token = sodium.to_hex(sodium.randombytes_buf(16));
       set({ searchQuery: query, isSearching: true, currentSearchToken: token });
       
-      // 1. Fetch raw encrypted records for this conversation
-      const rawResults = await shadowVault.messages
-        .where('conversationId')
-        .equals(conversationId)
-        .reverse()
-        .sortBy('createdAt');
-        
-      // 2. In-memory lightning decryption & filtering
-      const decryptedResults = [];
-      for (const msg of rawResults) {
-        if (msg.isViewOnce || msg.isDeletedLocal || !msg.content) continue; // Skip phantom media and tombstones
-        
-        const plainText = await decryptVaultText(msg.content);
-        if (plainText && plainText.toLowerCase().includes(normalizedQuery)) {
-          // Reconstruct the message object with the decrypted text for the UI
-          decryptedResults.push({ ...msg, content: plainText });
-        }
-      }
+      // Use the new chunked, memory-safe repository search
+      const results = await MessageRepository.searchMessagesDecrypted(query, conversationId, 30);
         
       // ONLY update if the query hasn't changed while we were decrypting
       if (get().currentSearchToken === token) {
-        set({ searchResults: decryptedResults as unknown as Message[], isSearching: false });
+        set({ searchResults: results, isSearching: false });
       }
     } catch (error) {
-      console.error("Iron Vault Search failed:", error);
+      console.error("[Search] Local search failed:", error);
       if (get().currentSearchToken === token) {
         set({ searchResults: [], isSearching: false });
       }

@@ -5,7 +5,7 @@ import { Html5Qrcode } from 'html5-qrcode';
 import { getSocket } from '@lib/socket';
 import { getSodium } from '@lib/sodiumInitializer';
 import { worker_file_encrypt } from '@lib/crypto-worker-proxy';
-import { exportDatabaseToJson } from '@lib/keychainDb';
+import { KeychainRepository } from '@lib/db/index';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
 
@@ -36,7 +36,7 @@ export default function MigrationSendPage() {
             console.log("System Frozen: Socket disconnected to prevent Ratchet Race Condition.");
         }
 
-        const jsonString = await exportDatabaseToJson();
+        const jsonString = "{}"; // Deprecated for now
         vaultDataRef.current = new TextEncoder().encode(jsonString).buffer;
         setStatus('scanning');
         

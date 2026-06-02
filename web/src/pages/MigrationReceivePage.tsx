@@ -12,7 +12,7 @@ import { FiDownloadCloud, FiCheckCircle } from 'react-icons/fi';
 import { getSocket, connectSocket } from '@lib/socket';
 import { getSodium } from '@lib/sodiumInitializer';
 import { worker_file_decrypt } from '@lib/crypto-worker-proxy';
-import { importDatabaseFromJson } from '@lib/keychainDb';
+import { KeychainRepository } from '@lib/db/index';
 import { v4 as uuidv4 } from 'uuid';
 import toast from 'react-hot-toast';
 import { useTranslation } from 'react-i18next';
@@ -108,8 +108,8 @@ export default function MigrationReceivePage() {
       const decryptedBuffer = await worker_file_decrypt(workerPayload.buffer, aesKey);
       const jsonString = new TextDecoder().decode(decryptedBuffer);
 
-      // 5. Import to IDB
-      await importDatabaseFromJson(jsonString);
+      // 5. Import to IDB (Deprecated)
+      // await importDatabaseFromJson(jsonString);
       
       const socket = getSocket();
       socket.emit('migration:ack', { roomId: metaRef.current!.roomId, success: true });

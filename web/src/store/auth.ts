@@ -151,6 +151,7 @@ type Actions = {
 
 let privateKeysCache: RetrievedKeys | null = null;
 let refreshPromise: Promise<boolean> | null = null;
+let activePasswordPromptPromise: Promise<RetrievedKeys> | null = null;
 
 export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => {
   const savedUser = localStorage.getItem("user");
@@ -188,54 +189,85 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       console.error("Failed to read keys/auto-unlock info:", _e);
     }
 
-    // Attempt auto-unlock if both exist
+    // 1. Ghost Device Handling: If we have an active user session but no identity key in DB
+    const currentUser = get().user;
+    if (currentUser) {
+        const { KeychainRepository } = await import('@lib/db/index');
+        const identityKey = await KeychainRepository.getIdentityKey(currentUser.id);
+        if (!identityKey && !activePasswordPromptPromise) {
+            console.error('[auth] GHOST DEVICE DETECTED: Storage was reset but session is active. Logging out.');
+            get().logout();
+            throw new Error('LOCAL_KEYS_WIPED: Local encryption keys are permanently lost due to storage reset. You have been logged out.');
+        }
+    }
+
+    // 2. Attempt auto-unlock if both exist
     if (autoUnlockKey && encryptedKeys) {
       try {
         const result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
         if (result.success) {
           privateKeysCache = result.keys;
+          
+          // Inject LSK on auto-unlock
+          if (currentUser) {
+              await saveDeviceAutoUnlockKey(autoUnlockKey, currentUser.id);
+          }
+          
           return result.keys;
         }
       } catch (e) {}
     }
 
-    // Fallback: Prompt user for password manually
-    const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
-      return new Promise((resolve, reject) => {
-        const unsubscribe = useModalStore.subscribe((state) => {
-          if (!state.isPasswordPromptOpen) {
-            unsubscribe();
-            setTimeout(() => {
-               reject(new Error("Password prompt closed without input."));
-            }, 100);
-          }
-        });
+    // 3. Race Condition: Return existing prompt promise if active
+    if (activePasswordPromptPromise) return activePasswordPromptPromise;
 
-        const cleanup = () => unsubscribe();
-
-        useModalStore.getState().showPasswordPrompt(async (password) => {
-          cleanup();
-          if (!password) { reject(new Error("Password not provided.")); return; }
-
-          try {
-            const keysInner = await getEncryptedKeys();
-            if (!keysInner) { reject(new Error("Encrypted private keys not found.")); return; }
-
-            const result = await retrieveFn(keysInner, password);
-            if (!result.success) {
-              const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
-              reject(new Error(reason));
-              return;
+    // 4. Fallback: Prompt user for password manually
+    activePasswordPromptPromise = (async () => {
+      try {
+        return await new Promise<RetrievedKeys>((resolve, reject) => {
+          const unsubscribe = useModalStore.subscribe((state) => {
+            if (!state.isPasswordPromptOpen) {
+              unsubscribe();
+              setTimeout(() => {
+                 reject(new Error("Password prompt closed without input."));
+              }, 100);
             }
+          });
 
-            privateKeysCache = result.keys;
-            resolve(result.keys);
-          } catch (e) { reject(e); }
+          const cleanup = () => unsubscribe();
+
+          useModalStore.getState().showPasswordPrompt(async (password) => {
+            cleanup();
+            if (!password) { reject(new Error("Password not provided.")); return; }
+
+            try {
+              const keysInner = await getEncryptedKeys();
+              if (!keysInner) { reject(new Error("Encrypted private keys not found.")); return; }
+
+              const result = await retrievePrivateKeys(keysInner, password);
+              if (!result.success) {
+                const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
+                reject(new Error(reason));
+                return;
+              }
+
+              privateKeysCache = result.keys;
+              
+              // Inject LSK on manual unlock
+              if (currentUser) {
+                  await saveDeviceAutoUnlockKey(password, currentUser.id);
+              }
+              
+              resolve(result.keys);
+            } catch (e) { reject(e); }
+          });
         });
-      });
-    };
+      } finally {
+        activePasswordPromptPromise = null;
+      }
+    })();
 
-    return promptForPassword(retrievePrivateKeys);
+    return activePasswordPromptPromise;
   };
 
   return {
@@ -425,7 +457,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         // FIX 1: SIMPAN encryptedPrivateKey DARI SERVER DULU sebelum mencoba membukanya
         if (res.encryptedPrivateKey) {
           await saveEncryptedKeys(res.encryptedPrivateKey);
-          await saveDeviceAutoUnlockKey(password);
+          await saveDeviceAutoUnlockKey(password, res.user.id);
           await setDeviceAutoUnlockReady(true);
         }
         
@@ -448,7 +480,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
                 if (result.success) {
                   privateKeysCache = result.keys;
                   // Persist for auto-unlock
-                  await saveDeviceAutoUnlockKey(password);
+                  await saveDeviceAutoUnlockKey(password, res.user.id);
                   await setDeviceAutoUnlockReady(true);
                 } else {
                   throw new Error(`Login successful, but failed to decrypt keys: ${result.reason}`);
@@ -509,7 +541,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         });
 
         await saveEncryptedKeys(encryptedPrivateKeys);
-        await saveDeviceAutoUnlockKey(password);
+        await saveDeviceAutoUnlockKey(password, res.user.id);
         await setDeviceAutoUnlockReady(true);
         set({ hasRestoredKeys: true });
 

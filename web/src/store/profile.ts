@@ -1,6 +1,6 @@
 import { createWithEqualityFn } from 'zustand/traditional';
 import { decryptProfile } from '@lib/crypto-worker-proxy';
-import { getProfileKey } from '@lib/keychainDb';
+import { KeychainRepository } from '@lib/db/index';
 
 export type DecryptedProfile = {
   name: string;
@@ -29,8 +29,8 @@ export const useProfileStore = createWithEqualityFn<ProfileState>((set, get) => 
     if (!encryptedProfile) return fallback;
 
     try {
-      // 4. Cari ProfileKey di IndexedDB
-      const profileKey = await getProfileKey(userId);
+      // 4. Cari ProfileKey di Repository (Identity Keys)
+      const profileKey = await KeychainRepository.getIdentityKey(userId);
       if (!profileKey) return fallback;
 
       // 5. Decrypt via Worker

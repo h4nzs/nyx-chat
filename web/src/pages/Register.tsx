@@ -73,7 +73,7 @@ export default function Register() {
       
       // ✅ DYNAMIC IMPORT: Unduh mesin Kripto (libsodium) HANYA SAAT tombol daftar diklik!
       const { hashUsername, generateProfileKey, encryptProfile } = await import("@lib/crypto-worker-proxy");
-      const { saveProfileKey } = await import("@lib/keychainDb");
+      const { KeychainRepository } = await import("@lib/db/index");
 
       const usernameHash = await hashUsername(username);
       const profileKeyB64 = await generateProfileKey();
@@ -87,7 +87,7 @@ export default function Register() {
         turnstileToken 
       });
 
-      await saveProfileKey(result.userId, profileKeyB64);
+      await KeychainRepository.saveIdentityKey(result.userId, profileKeyB64);
       setRecoveryPhrase(result.phrase);
 
       // Mark that user just registered to prevent SystemInitModal from showing

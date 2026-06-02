@@ -12,6 +12,7 @@ import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage
 import toast from 'react-hot-toast';
 
 import { encryptGroupMetadata, decryptGroupMetadata, forceRotateGroupSenderKey, ensureGroupSession } from "@utils/crypto";
+import { MessageRepository, KeychainRepository } from "@lib/db/index";
 import i18n from '../i18n';
 export type { MessageStatus, RawServerMessage, Message, Participant, Conversation };
 
@@ -202,8 +203,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   },
 
   downgradeToSenderKey: async (conversationId: string, isFromPeer = false) => {
-    const { shadowVault } = await import('@lib/shadowVaultDb');
-    await shadowVault.deletePqDrSession(conversationId);
+   await KeychainRepository.deletePqDrSession(conversationId);
     
     await get().updateConversation(conversationId, { encryptionMode: 'SENDER_KEY', activePqDeviceId: null });
     
@@ -240,14 +240,12 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const rawConversations = await api<Conversation[]>("/api/conversations");
       if (!Array.isArray(rawConversations)) throw new Error('Invalid data from server.');
 
-      const { shadowVault } = await import('@lib/shadowVaultDb');
-
       const conversations = await Promise.all(rawConversations.map(async c => {
         const participants = c.participants;
 
         let localLastMessage: Message | null = null;
         try {
-            const localMsgs = await shadowVault.getMessagesByConversation(c.id, 1);
+            const localMsgs = await MessageRepository.getMessages(c.id, 1);
             if (localMsgs.length > 0) {
                 localLastMessage = localMsgs[0];
             }
@@ -304,7 +302,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const existingConversations = get().conversations;
       const reconciledConversations = await Promise.all(conversations.map(async fetched => {
           if (!fetched.isGroup) {
-              const hasPqSession = await shadowVault.hasPqDrSession(fetched.id);
+              const hasPqSession = await KeychainRepository.hasPqDrSession(fetched.id);
               if (hasPqSession) {
                   fetched.encryptionMode = 'PQ_DR';
               } else {
@@ -363,8 +361,10 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
         };
       });
       try {
-        const { shadowVault } = await import('@lib/shadowVaultDb');
-        await shadowVault.deleteConversation(id);
+        await KeychainRepository.deleteRatchetSession(id);
+        await KeychainRepository.deleteGroupSenderState(id);
+        await KeychainRepository.deleteGroupReceiverStates(id);
+        await MessageRepository.clearMessages(id);
       } catch (e) {
         console.error("Failed to delete burner conversation from local DB", e);
       }

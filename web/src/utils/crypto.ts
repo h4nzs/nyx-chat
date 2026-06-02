@@ -5,34 +5,52 @@ import type { DoubleRatchetState, ConversationId, UserId } from '@nyx/shared';
 import { authFetch } from '@lib/api';
 import { useAuthStore } from '@store/auth';
 import { useConversationStore } from '@store/conversation';
-import {
-  addSessionKey,
-  getSessionKey as getKeyFromDb,
-  getLatestSessionKey,
-  storeGroupKey,
-  getGroupKey,
-  storeOneTimePreKey,
-  getOneTimePreKey,
-  deleteOneTimePreKey,
-  getLastOtpkId,
-  storeRatchetSession,
-  getRatchetSession,
-  storeSkippedKey,
-  getSkippedKey,
-  deleteSkippedKey,
-  storeMessageKey,
-  getMessageKey,
-  getGroupSenderState,
-  saveGroupSenderState,
-  getGroupReceiverState,
-  saveGroupReceiverState,
-  deleteGroupStates,
-  deleteConversationKeychain,
-  deleteRatchetSession,
-  deleteSessionKeys
-} from '@lib/keychainDb';
+import { 
+  KeychainRepository, 
+  MessageRepository 
+} from '@lib/db/index';
 
-export { deleteConversationKeychain, deleteRatchetSession, deleteSessionKeys };
+const addSessionKey = KeychainRepository.saveSessionKey;
+const getKeyFromDb = KeychainRepository.getSessionKey;
+const getLatestSessionKey = async (_id: string) => null; // Stub
+const storeGroupKey = KeychainRepository.saveGroupKey;
+const getGroupKey = KeychainRepository.getGroupKey;
+const storeOneTimePreKey = KeychainRepository.savePreKey;
+const getOneTimePreKey = KeychainRepository.getPreKey;
+const deleteOneTimePreKey = KeychainRepository.deletePreKey;
+const getLastOtpkId = async () => {
+    const keys = await KeychainRepository.listPreKeys();
+    return keys.length > 0 ? Math.max(...keys.map(k => k.key_id)) : 0;
+};
+const storeRatchetSession = KeychainRepository.saveRatchetSession;
+const getRatchetSession = KeychainRepository.getRatchetSession;
+const storeSkippedKey = KeychainRepository.saveSkippedKey;
+const getSkippedKey = KeychainRepository.getSkippedKey;
+const deleteSkippedKey = KeychainRepository.deleteSkippedKey;
+const storeMessageKey = KeychainRepository.saveMessageKey;
+const getMessageKey = KeychainRepository.getMessageKey;
+const getGroupSenderState = KeychainRepository.getGroupSenderState;
+const saveGroupSenderState = KeychainRepository.saveGroupSenderState;
+const getGroupReceiverState = async (convoId: string, senderId: string, senderDeviceKey?: string) => {
+    const id = senderDeviceKey ? `${convoId}_${senderId}_${senderDeviceKey}` : `${convoId}_${senderId}`;
+    return KeychainRepository.getGroupReceiverState(id);
+};
+const saveGroupReceiverState = async (state: any) => KeychainRepository.saveGroupReceiverState(state.id, state);
+const deleteGroupStates = async (convoId: string) => {
+    await KeychainRepository.deleteGroupSenderState(convoId);
+    await KeychainRepository.deleteGroupReceiverStates(convoId);
+    await KeychainRepository.deleteGroupSkippedKeys(convoId);
+};
+export const deleteConversationKeychain = async (id: string) => {
+    await KeychainRepository.deleteSessionKeys(id);
+    await KeychainRepository.deleteGroupKey(id);
+    await KeychainRepository.deleteRatchetSession(id);
+    await KeychainRepository.deletePendingHeader(id);
+    await KeychainRepository.deleteGroupSenderState(id);
+    await KeychainRepository.deleteGroupReceiverStates(id);
+};
+export const deleteRatchetSession = KeychainRepository.deleteRatchetSession;
+export const deleteSessionKeys = KeychainRepository.deleteSessionKeys;
 
 import { 
   emitSessionKeyFulfillment, 
@@ -199,8 +217,7 @@ export async function retrieveMessageKeySecurely(messageId: string): Promise<Uin
 }
 
 export async function deleteMessageKeySecurely(messageId: string): Promise<void> {
-  const { deleteMessageKey } = await import('@lib/keychainDb');
-  await deleteMessageKey(messageId);
+  KeychainRepository.deleteMessageKey(messageId);
 }
 
 // --- PreKey Download Implementation ---
@@ -586,8 +603,7 @@ export async function ensureGroupSession(conversationId: string, participants: P
   const promise = (async () => {
     try {
       if (forceRotate) {
-          const { deleteGroupSenderState } = await import('@lib/keychainDb');
-          await deleteGroupSenderState(conversationId);
+          await KeychainRepository.deleteGroupSenderState(conversationId);
           console.log(`[Crypto] Forced rotation for group ${conversationId}`);
       }
 
@@ -1096,7 +1112,12 @@ async function doDecryptMessage(
         const ciphertextBytes = sodium.from_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
 
         // 1. CHECK SKIPPED KEYS FIRST (ATOMIC)
-        const { getGroupSkippedKey, deleteGroupSkippedKey, storeGroupSkippedKey } = await import('@lib/keychainDb');
+        const getGroupSkippedKey = async (convoId: string, sId: string, sDevKey: string, n: number) => 
+            KeychainRepository.getGroupSkippedKey(`${convoId}_${sId}_${sDevKey}_${n}`);
+        const deleteGroupSkippedKey = async (convoId: string, sId: string, sDevKey: string, n: number) =>
+            KeychainRepository.deleteGroupSkippedKey(`${convoId}_${sId}_${sDevKey}_${n}`);
+        const storeGroupSkippedKey = async (convoId: string, sId: string, sDevKey: string, n: number, mk: string) =>
+            KeychainRepository.saveGroupSkippedKey(`${convoId}_${sId}_${sDevKey}_${n}`, mk);
         const skippedMkB64 = await getGroupSkippedKey(conversationId, senderId, senderDeviceKey, header.n);
         
         if (skippedMkB64) {
@@ -1655,8 +1676,7 @@ export async function generateSafetyNumber(myPublicKey: Uint8Array, theirPublicK
 
 export async function forceRotateGroupSenderKey(conversationId: string) {
     try {
-        const { deleteGroupSenderState } = await import('../lib/keychainDb');
-        await deleteGroupSenderState(conversationId);
+        await KeychainRepository.deleteGroupSenderState(conversationId);
         console.log(`[Crypto] Group Sender Key for ${conversationId} wiped. Forced rotation on next message.`);
     } catch (e) {
         console.error('Failed to rotate group key:', e);

@@ -1,12 +1,12 @@
-import { closeDatabaseConnection } from './keychainDb';
+import { nuclearWipe } from './keyStorage';
 
 export const executeLocalWipe = async () => {
   try {
-    // 0. Close active connections to release the file lock
-    await closeDatabaseConnection();
+    // 0. Perform atomic nuclear wipe
+    await nuclearWipe();
 
-    // 1. Obliterate all known IndexedDB Vaults
-    let databases = ['nyx_offline_queue', 'nyx_shadow_vault'];
+    // 1. Obliterate any remaining IndexedDB Vaults (Legacy cleanup)
+    let databases = ['nyx_offline_queue', 'nyx_shadow_vault', 'NyxUnifiedDB', 'nyx_keychain'];
     
     // Get correct keychain DB name from local storage if available
     try {

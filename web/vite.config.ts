@@ -156,7 +156,7 @@ export default defineConfig(({ mode }) => {
             if (id.includes('react/') || id.includes('react-dom') || id.includes('react-router-dom')) {
               return 'core-react';
             }
-            if (id.includes('zustand') || id.includes('dexie') || id.includes('idb')) {
+            if (id.includes('zustand') || id.includes('idb')) {
               return 'core-data';
             }
             if (id.includes('i18next')) {

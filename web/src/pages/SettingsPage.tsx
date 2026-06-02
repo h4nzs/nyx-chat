@@ -20,7 +20,7 @@ import { IoFingerPrint } from 'react-icons/io5';
 import ReportBugModal from '../components/ReportBugModal';
 import { api } from '@lib/api';
 import { sanitizeErrorLog } from '../utils/sanitize';
-import { exportDatabaseToJson, importDatabaseFromJson, saveProfileKey } from '@lib/keychainDb';
+import { KeychainRepository } from '@lib/db/index';
 import { executeLocalWipe } from '@lib/nukeProtocol';
 import { useUserProfile } from '@hooks/useUserProfile';
 import { useProfileStore } from '@store/profile';
@@ -269,11 +269,11 @@ export default function SettingsPage() {
         currentAvatarUrl = await updateAvatar(avatarFile);
       }
       
-      const profileKeyB64 = await import('@lib/keychainDb').then(m => m.getProfileKey(user!.id));
+      const profileKeyB64 = await KeychainRepository.getIdentityKey(user!.id);
       let key = profileKeyB64;
       if (!key) {
          key = await generateProfileKey();
-         await saveProfileKey(user!.id, key);
+         await KeychainRepository.saveIdentityKey(user!.id, key);
       }
 
       const profileJson = JSON.stringify({ name, description, avatarUrl: currentAvatarUrl });
@@ -386,56 +386,11 @@ export default function SettingsPage() {
   };
 
   const handleExportVault = async () => {
-    try {
-      const json = await exportDatabaseToJson();
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `nyx_vault_backup_${new Date().toISOString().slice(0, 10)}.nyxvault`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success(t('settings:messages.export_success'));
-    } catch (error) {
-      console.error("Export failed:", sanitizeErrorLog(error));
-      toast.error(t('settings:messages.export_failed'));
-    }
+    toast.error('Local Backup Export is currently undergoing maintenance for PGlite architecture.');
   };
 
   const handleImportVault = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const json = event.target?.result as string;
-      try {
-         const parsed = JSON.parse(json);
-         if (parsed.encrypted) {
-             useModalStore.getState().showPasswordPrompt(async (password) => {
-                 if (!password) return;
-                 try {
-                     await importDatabaseFromJson(json, password);
-                     toast.success(t('settings:messages.import_success'));
-                     setTimeout(() => window.location.reload(), 1000);
-                 } catch (error) {
-                     console.error("Import failed:", sanitizeErrorLog(error));
-                     toast.error(t('settings:messages.import_failed'));
-                 }
-             });
-         } else {
-             await importDatabaseFromJson(json);
-             toast.success(t('settings:messages.import_success'));
-             setTimeout(() => window.location.reload(), 1000);
-         }
-      } catch (error) {
-         console.error("Import parsing failed:", sanitizeErrorLog(error));
-         toast.error(t('settings:messages.import_failed'));
-      }
-    };
-    reader.readAsText(file);
+    toast.error('Local Backup Import is currently undergoing maintenance for PGlite architecture.');
     e.target.value = '';
   };
 
