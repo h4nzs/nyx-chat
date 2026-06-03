@@ -121,8 +121,7 @@ router.post('/webhook', async (req: Request, res: Response, next: NextFunction) 
       });
 
       // Emit real-time update
-      await sendJsonToUser(userId, TransportOpCode.CHAT_MESSAGE, {
-        type: 'subscription_updated',
+      await emitEventToUser(userId, 'subscription_updated', {
         tier: SubscriptionTier.SUBSCRIBER,
         expiresAt: expiresAt.toISOString()
       });
@@ -250,8 +249,7 @@ router.post('/nowpayments-webhook', async (req: Request, res: Response, next: Ne
       });
 
       // Emit real-time update
-      await sendJsonToUser(userId, TransportOpCode.CHAT_MESSAGE, {
-        type: 'subscription_updated',
+      await emitEventToUser(userId, 'subscription_updated', {
         tier: SubscriptionTier.SUBSCRIBER,
         expiresAt: expiresAt.toISOString()
       });

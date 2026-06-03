@@ -269,6 +269,7 @@ async fn handle_connection(
     let c3 = conn.clone();
     let user_id3 = user_id.clone();
     let device_id3 = device_id.clone();
+    let mut p3 = pub_conn.clone();
     tokio::spawn(async move {
         loop {
             match c3.receive_datagram().await {
@@ -289,7 +290,7 @@ async fn handle_connection(
                             
                             if let Ok(json) = serde_json::to_string(&msg) {
                                 let channel = format!("nyx:upstream:{}", op_code);
-                                let _: Result<(), _> = pub_conn.publish(channel, json).await;
+                                let _: Result<(), _> = p3.publish(channel, json).await;
                             }
                         }
                     }
@@ -301,6 +302,18 @@ async fn handle_connection(
 
     conn.closed().await;
     sessions.remove(&session_key);
+
+    // Notify Node.js backend about disconnect (OpCode 99)
+    let disconnect_msg = UpstreamMessage {
+        user_id: user_id.clone(),
+        device_id: device_id.clone(),
+        op_code: 99,
+        payload: "".to_string(),
+    };
+    if let Ok(json) = serde_json::to_string(&disconnect_msg) {
+        let _: Result<(), _> = pub_conn.publish("nyx:upstream:99", json).await;
+    }
+
     info!("User {} (device {}) disconnected", user_id, device_id);
     Ok(())
 }

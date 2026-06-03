@@ -38,7 +38,7 @@ router.get('/', async (req, res, next) => {
       },
       include: {
         participants: {
-          select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true }
+          select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true, joinedAt: true }
         },
         creator: { select: userSelectWithKeys }
       },
@@ -47,10 +47,24 @@ router.get('/', async (req, res, next) => {
 
     const safeConversations = conversations.map(c => toConversation(hoistConvoKeys(c as unknown as RawConversationData)))
 
-    // Fetch unread counts from Redis (optional, but keep for now)
+    // RESTORE: Logika unread yang akurat
+    const joinedAtMap = new Map(conversations.map(c => [c.id, c.participants.find(p => p.userId === userId)?.joinedAt || new Date(0)]));
+    
     const itemsWithUnread = await Promise.all(safeConversations.map(async (c) => {
-        const count = await redisClient.get(`unread:${userId}:${c.id}`);
-        return { ...c, unreadCount: count ? parseInt(count, 10) : 0 };
+      const unreadCount = await prisma.message.count({
+        where: {
+          conversationId: c.id,
+          senderId: { not: userId },
+          createdAt: { gte: joinedAtMap.get(c.id) },
+          statuses: {
+            none: {
+              userId,
+              status: 'READ'
+            }
+          }
+        }
+      });
+      return { ...c, unreadCount };
     }));
 
     res.json(itemsWithUnread)
@@ -60,15 +74,22 @@ router.get('/', async (req, res, next) => {
 })
 
 // CREATE a new conversation
+const initialSessionSchema = z.object({
+  sessionId: z.string(),
+  initialKeysPerDevice: z.record(z.string(), z.string()), // deviceId -> encrypted key
+  initiatorCiphertextsPerDevice: z.record(z.string(), z.string()) // deviceId -> ciphertext
+});
+
 router.post('/', zodValidate({
   body: ConversationSchema.pick({ isGroup: true, encryptedMetadata: true }).extend({
-    userIds: z.array(z.string()).min(1)
+    userIds: z.array(z.string()).min(1),
+    initialSession: initialSessionSchema.optional()
   })
 }), async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const creatorId = req.user.id
-    const { userIds, isGroup, encryptedMetadata } = req.body
+    const { userIds, isGroup, encryptedMetadata, initialSession } = req.body
 
     const today = new Date().toISOString().split('T')[0];
     const sandboxCount = await redisClient.incr(`sandbox:newchat:${creatorId}:${today}`);
@@ -92,23 +113,47 @@ router.post('/', zodValidate({
 
     let newConversation;
     try {
-      newConversation = await prisma.conversation.create({
-        data: {
-          isGroup: isGroup === true,
-          creatorId,
-          encryptedMetadata: isGroup ? encryptedMetadata : null,
-          participants: {
-            create: allUserIds.map(uid => ({
-              userId: uid,
-              role: uid === creatorId ? 'ADMIN' : 'MEMBER',
-              joinedAt: new Date()
-            }))
+      newConversation = await prisma.$transaction(async (tx) => {
+        const convo = await tx.conversation.create({
+          data: {
+            isGroup: isGroup === true,
+            creatorId,
+            encryptedMetadata: isGroup ? encryptedMetadata : null,
+            participants: {
+              create: allUserIds.map(uid => ({
+                userId: uid,
+                role: uid === creatorId ? 'ADMIN' : 'MEMBER',
+                joinedAt: new Date()
+              }))
+            }
+          },
+          include: {
+            participants: { select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true } },
+            creator: { select: userSelectWithKeys }
           }
-        },
-        include: {
-          participants: { select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true } },
-          creator: { select: userSelectWithKeys }
+        });
+
+        // RESTORE: Simpan kunci awal E2EE
+        if (initialSession) {
+          const { sessionId, initialKeysPerDevice, initiatorCiphertextsPerDevice } = initialSession;
+          const keyRecords = [];
+          
+          for (const deviceId in initialKeysPerDevice) {
+            keyRecords.push({
+              conversationId: convo.id,
+              deviceId,
+              sessionId,
+              encryptedKey: initialKeysPerDevice[deviceId],
+              initiatorCiphertext: initiatorCiphertextsPerDevice[deviceId]
+            });
+          }
+
+          if (keyRecords.length > 0) {
+            await tx.sessionKey.createMany({ data: keyRecords });
+          }
         }
+
+        return convo;
       });
     } catch (dbError) {
       if (!creator?.isVerified) {
@@ -336,6 +381,35 @@ router.post('/:id/pin', async (req, res, next) => {
     })
 
     res.json({ isPinned: updated.isPinned })
+  } catch (error) { next(error) }
+})
+
+// ROTATE group key (Update updatedAt)
+router.post('/:id/key-rotation', async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const { id } = req.params
+    // Verify participant
+    const p = await prisma.participant.findFirst({ where: { conversationId: id, userId: req.user.id } });
+    if (!p) throw new ApiError(403, 'Forbidden');
+
+    const updatedConversation = await prisma.conversation.update({
+      where: { id },
+      data: { updatedAt: new Date() },
+      include: {
+        participants: {
+          select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true, joinedAt: true }
+        },
+        creator: { select: userSelectWithKeys }
+      }
+    })
+
+    const safeConv = toConversation(hoistConvoKeys(updatedConversation as unknown as RawConversationData));
+    res.json({ 
+        success: true, 
+        message: 'Key rotation recorded successfully', 
+        conversation: safeConv 
+    })
   } catch (error) { next(error) }
 })
 

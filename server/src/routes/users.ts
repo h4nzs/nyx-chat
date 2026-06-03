@@ -5,6 +5,7 @@ import { TransportOpCode } from '@nyx/shared';
 // For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router, CookieOptions } from 'express'
 import jwt from 'jsonwebtoken'
+import { hashPassword, verifyPassword } from '../utils/password.js'
 import { env } from '../config.js'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
@@ -20,13 +21,28 @@ router.use(requireAuth)
 // --- STATIC ROUTES (Must be before /:id) ---
 
 // GET authenticated user details (Me)
-router.get('/me/profile', async (req, res, next) => {
+router.get('/me', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true }
+    const userId = req.user.id
+    
+    let user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
     })
+
+    if (!user) throw new ApiError(404, 'User not found');
+
+    // RESTORE: Lazy Expiration Check
+    if (user.subscriptionTier === 'SUBSCRIBER' && user.subscriptionExpiresAt && new Date() > user.subscriptionExpiresAt) {
+        console.log(`[Auth] Subscription expired for user ${userId}. Downgrading to FREE.`);
+        user = await prisma.user.update({
+            where: { id: userId },
+            data: { subscriptionTier: 'FREE' },
+            select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
+        });
+    }
+
     res.json(user)
   } catch (error) { next(error) }
 })
@@ -72,7 +88,7 @@ router.get('/me/blocked', async (req, res, next) => {
 // --- MUTATION ROUTES (Me) ---
 
 // UPDATE user profile (Me)
-router.put('/me/profile', 
+router.put('/me', 
   zodValidate({
     body: z.object({
       encryptedProfile: z.string().optional(),
@@ -122,11 +138,11 @@ router.put('/me/profile',
 )
 
 // BLOCK a user
-router.post('/me/block/:userId', async (req, res, next) => {
+router.post('/:id/block', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const blockerId = req.user.id
-    const blockedId = req.params.userId
+    const blockedId = req.params.id
 
     if (blockerId === blockedId) throw new ApiError(400, 'You cannot block yourself.')
 
@@ -141,11 +157,11 @@ router.post('/me/block/:userId', async (req, res, next) => {
 })
 
 // UNBLOCK a user
-router.delete('/me/block/:userId', async (req, res, next) => {
+router.delete('/:id/block', async (req, res, next) => {
   try {
     if (!req.user) throw new ApiError(401, 'Authentication required.')
     const blockerId = req.user.id
-    const blockedId = req.params.userId
+    const blockedId = req.params.id
 
     await prisma.blockedUser.deleteMany({
       where: { blockerId, blockedId }
@@ -263,6 +279,58 @@ router.post('/me/complete-onboarding', async (req, res, next) => {
   } catch (error) { next(error) }
 })
 
+// DELETE account (Me)
+router.delete('/me', zodValidate({
+  body: z.object({
+    password: z.string(),
+    fileKeys: z.array(z.string()).optional()
+  })
+}), async (req, res, next) => {
+  try {
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
+    const userId = req.user.id
+    const { password, fileKeys } = req.body
+
+    const user = await prisma.user.findUnique({ where: { id: userId } })
+    if (!user) throw new ApiError(404, 'User not found')
+
+    const ok = await verifyPassword(password, user.passwordHash)
+    if (!ok) throw new ApiError(401, 'Invalid password')
+
+    // 1. Delete R2 files if any
+    if (fileKeys && fileKeys.length > 0) {
+      const { deleteR2Files } = await import('../utils/r2.js')
+      const userFileKeys = fileKeys.filter((k: string) => k.startsWith(`${userId}-`))
+      if (userFileKeys.length > 0) {
+        await deleteR2Files(userFileKeys).catch(err => console.error('[R2] Cleanup failed:', err))
+      }
+    }
+
+    // 2. Delete user
+    await prisma.user.delete({ where: { id: userId } })
+
+    // 3. Clear cookies
+    const options: CookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/'
+    }
+    res.clearCookie('at', options)
+    res.clearCookie('rt', options)
+
+    // 4. KICK WebTransport connections
+    try {
+      await emitEventToUser(userId, 'auth:banned', { reason: 'Account deleted' });
+      await sendJsonToUser(userId, TransportOpCode.KICK, { reason: 'Account deleted' });
+    } catch (err) {
+      console.error("[Users] Failed to send KICK on deletion:", err);
+    }
+
+    res.status(204).send()
+  } catch (error) { next(error) }
+})
+
 // LOGOUT (Me)
 router.post('/me/logout', async (req, res, next) => {
   try {
@@ -293,25 +361,50 @@ router.post('/me/logout', async (req, res, next) => {
 
 // --- PARAMETERIZED ROUTES (Must be last) ---
 
-// SEARCH users by ID (Blind Indexing)
-router.get('/search/:id', async (req, res, next) => {
+// SEARCH users (Blind Indexing)
+router.get('/search', async (req, res, next) => {
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.params.id },
-      select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, devices: { select: { publicKey: true, pqPublicKey: true } } }
-    })
-    if (!user) return res.status(404).json({ error: 'User not found' })
+    const { q } = req.query
+    if (!q || typeof q !== 'string') throw new ApiError(400, 'Search query is required.')
+
+    if (!req.user) throw new ApiError(401, 'Authentication required.')
     
-    // Map devices for classical/PQ public keys
-    const result = {
-      ...user,
-      devices: user.devices.map(d => ({
-        publicKey: Buffer.from(d.publicKey).toString('base64url'),
-        pqPublicKey: d.pqPublicKey ? Buffer.from(d.pqPublicKey).toString('base64url') : null
-      }))
+    // RESTORE: Sandbox Search Restriction
+    const requester = await prisma.user.findUnique({ where: { id: req.user.id }, select: { isVerified: true } });
+    if (!requester?.isVerified) {
+        throw new ApiError(403, 'SANDBOX_SEARCH_RESTRICTION: Unverified users can only find contacts by providing the exact Hash ID.');
     }
+
+    const users = await prisma.user.findMany({
+      where: { usernameHash: q },
+      take: 20,
+      select: { 
+        id: true, 
+        encryptedProfile: true, 
+        isVerified: true, 
+        hasCompletedOnboarding: true, 
+        devices: { 
+          orderBy: { lastActiveAt: 'desc' }, 
+          take: 1, 
+          select: { publicKey: true, pqPublicKey: true, signingKey: true } 
+        } 
+      }
+    })
     
-    res.json(result)
+    const mappedUsers = users.map(user => {
+      const latestDevice = user.devices[0];
+      return {
+        id: user.id,
+        encryptedProfile: user.encryptedProfile,
+        isVerified: user.isVerified,
+        hasCompletedOnboarding: user.hasCompletedOnboarding,
+        publicKey: latestDevice?.publicKey ? Buffer.from(latestDevice.publicKey).toString('base64url') : null,
+        pqPublicKey: latestDevice?.pqPublicKey ? Buffer.from(latestDevice.pqPublicKey).toString('base64url') : null,
+        signingKey: latestDevice?.signingKey ? Buffer.from(latestDevice.signingKey).toString('base64url') : null
+      }
+    });
+    
+    res.json(mappedUsers)
   } catch (error) { next(error) }
 })
 

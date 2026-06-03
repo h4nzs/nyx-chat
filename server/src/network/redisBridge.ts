@@ -1,6 +1,7 @@
 import { createClient, type RedisClientType } from 'redis';
 import { prisma } from '../lib/prisma.js';
 import { redisClient } from '../lib/redis.js';
+import { getSodium } from '../lib/sodium.js';
 import { toRawServerMessage } from '../utils/mappers.js';
 import { sendPushNotification } from '../utils/sendPushNotification.js';
 import { TransportOpCode } from '@nyx/shared';
@@ -143,10 +144,44 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
     case TransportOpCode.KEY_SYNC:
       await handleKeySync(userId, deviceId, payload, msgId);
       break;
+    case 99: // DISCONNECT
+      await handleDisconnect(userId);
+      break;
     default:
       console.warn(`⚠️ Unhandled OpCode: 0x${opCode.toString(16)} from user ${userId}`);
   }
-}
+  }
+
+  async function handleDisconnect(userId: string) {
+  await pubClient.sRem('online_users', userId);
+
+  // Cleanup presence and rooms
+  const onlineUsers = await pubClient.sMembers('online_users');
+  await broadcastToUsers(onlineUsers, TransportOpCode.PRESENCE, { event: 'leave', userId });
+
+  // Optional: Best-effort cleanup for burner/migration rooms
+  try {
+    let cursor = '0';
+    do {
+      const result = await pubClient.scan(cursor, { MATCH: 'burner:room:*', COUNT: 100 });
+      cursor = result.cursor;
+      for (const key of result.keys) {
+        await pubClient.sRem(key, userId);
+      }
+    } while (cursor !== '0');
+
+    cursor = '0';
+    do {
+      const result = await pubClient.scan(cursor, { MATCH: 'migration:room:*', COUNT: 100 });
+      cursor = result.cursor;
+      for (const key of result.keys) {
+        await pubClient.sRem(key, userId);
+      }
+    } while (cursor !== '0');
+  } catch (e) {
+    console.error('[RedisBridge] Room cleanup error:', e);
+  }
+  }
 
 async function handleChatMessage(userId: string, deviceId: string, payload: MessageSendPayload, msgId?: string) {
   const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId } = payload;
@@ -374,6 +409,18 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
 
          const emitPayload = { conversationId, encryptedKey, type: 'GROUP_KEY', senderId: userId, senderDeviceKey };
          await emitEventToUser(requesterId, 'session:new_key', emitPayload, targetDeviceId);
+         break;
+       }
+
+       case 'auth:request_linking_qr': {
+         if (!await checkRateLimit(userId, 'linking_qr', 5, 60)) return;
+         const sodium = await getSodium();
+         const linkingToken = sodium.to_hex(sodium.randombytes_buf(32));
+         
+         // Simpan di Redis: linkingToken -> { userId, deviceId }
+         await redisClient.setEx(`linking_token:${linkingToken}`, 300, JSON.stringify({ userId, deviceId }));
+         
+         await emitEventToUser(userId, 'auth:linking_qr_ready', { linkingToken }, deviceId);
          break;
        }
 

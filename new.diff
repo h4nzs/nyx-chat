@@ -1,49 +1,31 @@
-diff --git a/packages/shared/src/index.ts b/packages/shared/src/index.ts
-index d33eb1f79..458c6b24b 100644
---- a/packages/shared/src/index.ts
-+++ b/packages/shared/src/index.ts
-@@ -3,3 +3,4 @@ export * from './schemas.js';
- export * from './types.js';
- export * from './socket.js';
- export * from './constants.js';
-+export * from './transport.js';
-diff --git a/packages/shared/src/transport.ts b/packages/shared/src/transport.ts
+diff --git a/new.diff b/new.diff
 new file mode 100644
-index 000000000..d4d46f42b
---- /dev/null
+index 000000000..e69de29bb
+diff --git a/packages/shared/src/transport.ts b/packages/shared/src/transport.ts
+index 0d95db22a..d4d46f42b 100644
+--- a/packages/shared/src/transport.ts
 +++ b/packages/shared/src/transport.ts
-@@ -0,0 +1,29 @@
-+export enum TransportOpCode {
-+  CHAT_MESSAGE = 0x01,
-+  KEY_SYNC = 0x02,
-+  WEBRTC_SIGNAL = 0x03,
-+  WEBRTC_ICE = 0x04,
-+  PRESENCE = 0x05,
+@@ -4,7 +4,8 @@ export enum TransportOpCode {
+   WEBRTC_SIGNAL = 0x03,
+   WEBRTC_ICE = 0x04,
+   PRESENCE = 0x05,
+-  ACK = 0x06
 +  ACK = 0x06,
 +  KICK = 0x07
-+}
-+
-+export type BinaryPayload = Uint8Array;
-+
-+export interface WebRtcSignalPayload {
-+  to: string;
-+  type: 'request' | 'accept' | 'reject' | 'end' | 'offer' | 'answer' | 'ice-candidate';
-+  payload: BinaryPayload; 
-+}
-+
-+export type TransportWorkerToMain = 
-+  | { type: 'CONNECTED' }
-+  | { type: 'DISCONNECTED'; reason: string }
-+  | { type: 'ERROR'; error: string }
-+  | { type: 'DATA_RECEIVED'; opCode: TransportOpCode; payload: BinaryPayload };
-+
-+export type MainToTransportWorker =
+ }
+ 
+ export type BinaryPayload = Uint8Array;
+@@ -22,7 +23,7 @@ export type TransportWorkerToMain =
+   | { type: 'DATA_RECEIVED'; opCode: TransportOpCode; payload: BinaryPayload };
+ 
+ export type MainToTransportWorker =
+-  | { type: 'CONNECT'; url: string; token: string }
 +  | { type: 'CONNECT'; url: string; token: string; certificateHash?: string }
-+  | { type: 'DISCONNECT' }
-+  | { type: 'SEND_STREAM'; opCode: TransportOpCode; payload: BinaryPayload }
-+  | { type: 'SEND_DATAGRAM'; opCode: TransportOpCode; payload: BinaryPayload };
+   | { type: 'DISCONNECT' }
+   | { type: 'SEND_STREAM'; opCode: TransportOpCode; payload: BinaryPayload }
+   | { type: 'SEND_DATAGRAM'; opCode: TransportOpCode; payload: BinaryPayload };
 diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
-index 6c69ca5c0..2549e9b8c 100644
+index 485bb7657..2549e9b8c 100644
 --- a/pnpm-lock.yaml
 +++ b/pnpm-lock.yaml
 @@ -185,13 +185,10 @@ importers:
@@ -95,37 +77,6 @@ index 6c69ca5c0..2549e9b8c 100644
        supertest:
          specifier: ^7.2.2
          version: 7.2.2
-@@ -400,6 +394,9 @@ importers:
-       emoji-picker-react:
-         specifier: ^4.19.1
-         version: 4.19.1(react@19.2.6)
-+      eventemitter3:
-+        specifier: ^5.0.4
-+        version: 5.0.4
-       framer-motion:
-         specifier: ^12.40.0
-         version: 12.40.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-@@ -461,8 +458,8 @@ importers:
-         specifier: ^7.16.0
-         version: 7.16.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-       react-sketch-canvas:
--        specifier: ^6.2.0
--        version: 6.2.0(react@19.2.6)
-+        specifier: ^8.0.0
-+        version: 8.0.0(react@19.2.6)
-       react-virtualized-auto-sizer:
-         specifier: ^2.0.3
-         version: 2.0.3(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
-@@ -475,9 +472,6 @@ importers:
-       remark-gfm:
-         specifier: ^4.0.1
-         version: 4.0.1
--      socket.io-client:
--        specifier: ^4.8.3
--        version: 4.8.3
-       uuid:
-         specifier: ^14.0.0
-         version: 14.0.0
 @@ -3527,12 +3521,6 @@ packages:
    '@socket.io/component-emitter@3.1.2':
      resolution: {integrity: sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA==}
@@ -219,22 +170,6 @@ index 6c69ca5c0..2549e9b8c 100644
    npm-run-path@4.0.1:
      resolution: {integrity: sha512-S48WzZW777zhNIrn7gxOlISNAqi9ZC/uQFnRdbeIHhZhCA6UqpkOT8T1G7BvfdgP4Er8gF4sUbaS0i7QvIfCWw==}
      engines: {node: '>=8'}
-@@ -8039,11 +7996,11 @@ packages:
-       react-dom:
-         optional: true
- 
--  react-sketch-canvas@6.2.0:
--    resolution: {integrity: sha512-Z56RQN0viV9W3Y+DpZfQMi2lf3pO+UB4l+cMwnx7j7pQ9WHkQwN+qZKVFGANgpjXQMyY42NODF/DXjuKPCMf1w==}
--    engines: {node: '>=10'}
-+  react-sketch-canvas@8.0.0:
-+    resolution: {integrity: sha512-ijCcGxZsmHFfYMHVPoVj5tDvKCrjFihsjApxv+iaEnNbYneBT9nAKQaDEE8QUZb457DWO/AFx5i29HPt24R/PA==}
-+    engines: {node: '>=22.13.0'}
-     peerDependencies:
--      react: '>=16.8'
-+      react: '>=18.0.0'
- 
-   react-stately@3.47.0:
-     resolution: {integrity: sha512-H3ar+SOWP920EbVg7qWfP3fZjZiwhlEJAEJQqjt+w8oKijCwFgr0+R4941PIHscOXRNRvEOjvWilitImC0DdBg==}
 @@ -8412,9 +8369,6 @@ packages:
      resolution: {integrity: sha512-dWUG8F5sIIARXih1DTaQAX4SsiTXhInKf1buxdY9DIg4ZYPZK5nGM1VRIYmEbDbsHt7USo99xSLFu5Q1IqTmsg==}
      engines: {node: '>= 18'}
@@ -563,15 +498,6 @@ index 6c69ca5c0..2549e9b8c 100644
        mysql2: 3.15.3
        postgres: 3.4.7
      optionalDependencies:
-@@ -18207,7 +18110,7 @@ snapshots:
-     optionalDependencies:
-       react-dom: 19.2.6(react@19.2.6)
- 
--  react-sketch-canvas@6.2.0(react@19.2.6):
-+  react-sketch-canvas@8.0.0(react@19.2.6):
-     dependencies:
-       react: 19.2.6
- 
 @@ -18266,13 +18169,13 @@ snapshots:
        indent-string: 4.0.0
        strip-indent: 3.0.0
@@ -787,13 +713,14 @@ index 923940d89..017776775 100644
 -}
 diff --git a/server/src/network/redisBridge.ts b/server/src/network/redisBridge.ts
 new file mode 100644
-index 000000000..88a482faf
+index 000000000..95a415935
 --- /dev/null
 +++ b/server/src/network/redisBridge.ts
-@@ -0,0 +1,520 @@
+@@ -0,0 +1,567 @@
 +import { createClient, type RedisClientType } from 'redis';
 +import { prisma } from '../lib/prisma.js';
 +import { redisClient } from '../lib/redis.js';
++import { getSodium } from '../lib/sodium.js';
 +import { toRawServerMessage } from '../utils/mappers.js';
 +import { sendPushNotification } from '../utils/sendPushNotification.js';
 +import { TransportOpCode } from '@nyx/shared';
@@ -936,10 +863,44 @@ index 000000000..88a482faf
 +    case TransportOpCode.KEY_SYNC:
 +      await handleKeySync(userId, deviceId, payload, msgId);
 +      break;
++    case 99: // DISCONNECT
++      await handleDisconnect(userId);
++      break;
 +    default:
 +      console.warn(`⚠️ Unhandled OpCode: 0x${opCode.toString(16)} from user ${userId}`);
 +  }
-+}
++  }
++
++  async function handleDisconnect(userId: string) {
++  await pubClient.sRem('online_users', userId);
++
++  // Cleanup presence and rooms
++  const onlineUsers = await pubClient.sMembers('online_users');
++  await broadcastToUsers(onlineUsers, TransportOpCode.PRESENCE, { event: 'leave', userId });
++
++  // Optional: Best-effort cleanup for burner/migration rooms
++  try {
++    let cursor = '0';
++    do {
++      const result = await pubClient.scan(cursor, { MATCH: 'burner:room:*', COUNT: 100 });
++      cursor = result.cursor;
++      for (const key of result.keys) {
++        await pubClient.sRem(key, userId);
++      }
++    } while (cursor !== '0');
++
++    cursor = '0';
++    do {
++      const result = await pubClient.scan(cursor, { MATCH: 'migration:room:*', COUNT: 100 });
++      cursor = result.cursor;
++      for (const key of result.keys) {
++        await pubClient.sRem(key, userId);
++      }
++    } while (cursor !== '0');
++  } catch (e) {
++    console.error('[RedisBridge] Room cleanup error:', e);
++  }
++  }
 +
 +async function handleChatMessage(userId: string, deviceId: string, payload: MessageSendPayload, msgId?: string) {
 +  const { conversationId, content, sessionId, tempId, expiresAt, isViewOnce, pushPayloads, repliedToId } = payload;
@@ -1170,6 +1131,18 @@ index 000000000..88a482faf
 +         break;
 +       }
 +
++       case 'auth:request_linking_qr': {
++         if (!await checkRateLimit(userId, 'linking_qr', 5, 60)) return;
++         const sodium = await getSodium();
++         const linkingToken = sodium.to_hex(sodium.randombytes_buf(32));
++         
++         // Simpan di Redis: linkingToken -> { userId, deviceId }
++         await redisClient.setEx(`linking_token:${linkingToken}`, 300, JSON.stringify({ userId, deviceId }));
++         
++         await emitEventToUser(userId, 'auth:linking_qr_ready', { linkingToken }, deviceId);
++         break;
++       }
++
 +       case 'message:unsend': {
 +         const { messageId, conversationId } = data;
 +         if (!messageId || !conversationId) return;
@@ -1347,10 +1320,10 @@ index 7bcc0723e..5b0b93cac 100644
  
      res.json({ message: 'User banned successfully' });
 diff --git a/server/src/routes/conversations.ts b/server/src/routes/conversations.ts
-index 50c7d4561..aad098757 100644
+index 50c7d4561..6aadf9886 100644
 --- a/server/src/routes/conversations.ts
 +++ b/server/src/routes/conversations.ts
-@@ -5,267 +5,113 @@ import { Router } from 'express'
+@@ -5,267 +5,158 @@ import { Router } from 'express'
  import { prisma } from '../lib/prisma.js'
  import { DeliveryStatus } from '@prisma/client';
  import { requireAuth } from '../middleware/auth.js'
@@ -1469,7 +1442,7 @@ index 50c7d4561..aad098757 100644
 -          orderBy: { createdAt: 'desc' },
 -          take: 1,
 -          include: { sender: { select: userSelectWithKeys } }
-+          select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true }
++          select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true, joinedAt: true }
          },
          creator: { select: userSelectWithKeys }
        },
@@ -1496,8 +1469,22 @@ index 50c7d4561..aad098757 100644
 -          none: {
 -            userId: userId,
 -            status: DeliveryStatus.READ 
--          }
--        }
++    // RESTORE: Logika unread yang akurat
++    const joinedAtMap = new Map(conversations.map(c => [c.id, c.participants.find(p => p.userId === userId)?.joinedAt || new Date(0)]));
++    
++    const itemsWithUnread = await Promise.all(safeConversations.map(async (c) => {
++      const unreadCount = await prisma.message.count({
++        where: {
++          conversationId: c.id,
++          senderId: { not: userId },
++          createdAt: { gte: joinedAtMap.get(c.id) },
++          statuses: {
++            none: {
++              userId,
++              status: 'READ'
++            }
+           }
+         }
 -      }));
 -
 -    const unreadCountsData = unreadWhereClauses.length > 0
@@ -1515,10 +1502,8 @@ index 50c7d4561..aad098757 100644
 -      safeConv.unreadCount = unreadMap.get(convo.id) || 0;
 -      return ConversationSchema.parse(safeConv);
 -    })
-+    // Fetch unread counts from Redis (optional, but keep for now)
-+    const itemsWithUnread = await Promise.all(safeConversations.map(async (c) => {
-+        const count = await redisClient.get(`unread:${userId}:${c.id}`);
-+        return { ...c, unreadCount: count ? parseInt(count, 10) : 0 };
++      });
++      return { ...c, unreadCount };
 +    }));
  
 -    res.json(safeConversations)
@@ -1528,13 +1513,14 @@ index 50c7d4561..aad098757 100644
    }
  })
  
--const initialSessionSchema = z.object({
--  sessionId: z.string(),
++// CREATE a new conversation
+ const initialSessionSchema = z.object({
+   sessionId: z.string(),
 -  initialKeysPerDevice: z.record(z.string(), z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url')),
 -  initiatorCiphertextsPerDevice: z.record(z.string(), z.string().regex(/^[A-Za-z0-9_-]+$/, 'Must be base64url'))
 -}).optional()
 -
- // CREATE a new conversation
+-// CREATE a new conversation
 -router.post(
 -  '/', 
 -  zodValidate({
@@ -1546,16 +1532,21 @@ index 50c7d4561..aad098757 100644
 -    })
 -  }),
 -  async (req, res, next) => {
++  initialKeysPerDevice: z.record(z.string(), z.string()), // deviceId -> encrypted key
++  initiatorCiphertextsPerDevice: z.record(z.string(), z.string()) // deviceId -> ciphertext
++});
++
 +router.post('/', zodValidate({
 +  body: ConversationSchema.pick({ isGroup: true, encryptedMetadata: true }).extend({
-+    userIds: z.array(z.string()).min(1)
++    userIds: z.array(z.string()).min(1),
++    initialSession: initialSessionSchema.optional()
 +  })
 +}), async (req, res, next) => {
    try {
      if (!req.user) throw new ApiError(401, 'Authentication required.')
 -    const { encryptedMetadata, userIds, isGroup, initialSession } = req.body
      const creatorId = req.user.id
-+    const { userIds, isGroup, encryptedMetadata } = req.body
++    const { userIds, isGroup, encryptedMetadata, initialSession } = req.body
  
 -    if (!Array.isArray(userIds)) return res.status(400).json({ error: 'userIds must be an array.' })
 +    const today = new Date().toISOString().split('T')[0];
@@ -1613,28 +1604,42 @@ index 50c7d4561..aad098757 100644
 -    const allUserIds = Array.from(new Set([...userIds, creatorId]))
      let newConversation;
      try {
--      newConversation = await prisma.$transaction(async (tx) => {
+       newConversation = await prisma.$transaction(async (tx) => {
 -        const conversation = await tx.conversation.create({
--          data: {
--            encryptedMetadata: isGroup ? encryptedMetadata : null,
++        const convo = await tx.conversation.create({
+           data: {
++            isGroup: isGroup === true,
++            creatorId,
+             encryptedMetadata: isGroup ? encryptedMetadata : null,
 -            isGroup,
 -            creatorId: isGroup ? creatorId : null,
 -            participants: { create: allUserIds.map((userId: string) => ({ user: { connect: { id: userId } }, role: userId === creatorId ? 'ADMIN' : 'MEMBER' })) }
--          },
--          include: {
++            participants: {
++              create: allUserIds.map(uid => ({
++                userId: uid,
++                role: uid === creatorId ? 'ADMIN' : 'MEMBER',
++                joinedAt: new Date()
++              }))
++            }
+           },
+           include: {
 -            participants: { select: { id: true, userId: true, role: true, isPinned: true, user: { select: userSelectWithKeys } } },
--            creator: { select: userSelectWithKeys }
--          }
++            participants: { select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true } },
+             creator: { select: userSelectWithKeys }
+           }
 -        })
--
--        if (initialSession) {
++        });
+ 
++        // RESTORE: Simpan kunci awal E2EE
+         if (initialSession) {
 -          const { sessionId, initialKeysPerDevice, initiatorCiphertextsPerDevice } = initialSession
 -          if (!sessionId || !initialKeysPerDevice || !initiatorCiphertextsPerDevice) throw new Error('Incomplete initial session data provided.')
 -
 -          const targetDeviceIds = Object.keys(initialKeysPerDevice);
 -          const devices = await tx.device.findMany({ where: { id: { in: targetDeviceIds } }, select: { id: true, userId: true } });
 -
--          const keyRecords = [];
++          const { sessionId, initialKeysPerDevice, initiatorCiphertextsPerDevice } = initialSession;
+           const keyRecords = [];
 -          for (const d of devices) {
 -             const deviceKey = initialKeysPerDevice[d.id];
 -             const deviceCiphertext = initiatorCiphertextsPerDevice[d.id];
@@ -1650,28 +1655,28 @@ index 50c7d4561..aad098757 100644
 -                initiatorCiphertexts: Buffer.from(deviceCiphertext, 'base64url'),
 -                isInitiator: d.userId === creatorId
 -             });
-+      newConversation = await prisma.conversation.create({
-+        data: {
-+          isGroup: isGroup === true,
-+          creatorId,
-+          encryptedMetadata: isGroup ? encryptedMetadata : null,
-+          participants: {
-+            create: allUserIds.map(uid => ({
-+              userId: uid,
-+              role: uid === creatorId ? 'ADMIN' : 'MEMBER',
-+              joinedAt: new Date()
-+            }))
++          
++          for (const deviceId in initialKeysPerDevice) {
++            keyRecords.push({
++              conversationId: convo.id,
++              deviceId,
++              sessionId,
++              encryptedKey: initialKeysPerDevice[deviceId],
++              initiatorCiphertext: initiatorCiphertextsPerDevice[deviceId]
++            });
++          }
++
++          if (keyRecords.length > 0) {
++            await tx.sessionKey.createMany({ data: keyRecords });
            }
 -          await tx.sessionKey.createMany({ data: keyRecords })
 -        } else if (isGroup) {
 -          // No server-side key generation. Clients will rotate keys on membership change.
-+        },
-+        include: {
-+          participants: { select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true } },
-+          creator: { select: userSelectWithKeys }
          }
 -        return conversation
 -      })
++
++        return convo;
 +      });
      } catch (dbError) {
 -      if (!isVerified && !isGroup) {
@@ -1680,7 +1685,7 @@ index 50c7d4561..aad098757 100644
          try { await redisClient.decr(`sandbox:newchat:${creatorId}:${today}`); } catch (_e) { }
        }
        throw dbError;
-@@ -273,7 +119,7 @@ router.post(
+@@ -273,7 +164,7 @@ router.post(
  
      const safeConversation = toConversation(hoistConvoKeys(newConversation as unknown as RawConversationData));
      
@@ -1689,7 +1694,7 @@ index 50c7d4561..aad098757 100644
      res.status(201).json({ ...safeConversation, unreadCount: 0 })
    } catch (error) {
      next(error)
-@@ -309,7 +155,7 @@ router.put('/:id/details', async (req, res, next) => {
+@@ -309,7 +200,7 @@ router.put('/:id/details', async (req, res, next) => {
      if (!participant || participant.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden: You are not an admin of this group.' })
  
      const updatedConversation = await prisma.conversation.update({ where: { id }, data: { encryptedMetadata } })
@@ -1698,7 +1703,7 @@ index 50c7d4561..aad098757 100644
      res.json(updatedConversation)
    } catch (error) {
      next(error)
-@@ -348,19 +194,19 @@ router.post('/:id/participants', async (req, res, next) => {
+@@ -348,19 +239,19 @@ router.post('/:id/participants', async (req, res, next) => {
      
      const safeConversationId = asConversationId(conversationId);
  
@@ -1725,7 +1730,7 @@ index 50c7d4561..aad098757 100644
      }
      
      res.status(201).json(z.array(ParticipantSchema).parse(safeParticipants))
-@@ -384,7 +230,7 @@ router.put('/:id/participants/:userId/role', async (req, res, next) => {
+@@ -384,7 +275,7 @@ router.put('/:id/participants/:userId/role', async (req, res, next) => {
      const updatedParticipant = await prisma.participant.updateMany({ where: { conversationId, userId: userToModifyId }, data: { role } })
      if (updatedParticipant.count === 0) return res.status(404).json({ error: 'Participant not found.' })
  
@@ -1734,7 +1739,7 @@ index 50c7d4561..aad098757 100644
      res.json({ userId: userToModifyId, role })
    } catch (error) {
      next(error)
-@@ -412,9 +258,9 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
+@@ -412,9 +303,9 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
          // No server-side key generation. Remaining clients will rotate keys.
      });
      
@@ -1747,7 +1752,7 @@ index 50c7d4561..aad098757 100644
  
      res.status(204).send()  } catch (error) {
      next(error)
-@@ -435,13 +281,12 @@ router.delete('/:id/leave', async (req, res, next) => {
+@@ -435,13 +326,12 @@ router.delete('/:id/leave', async (req, res, next) => {
  
      await prisma.$transaction(async (tx) => {
          await tx.participant.delete({ where: { userId_conversationId: { userId, conversationId } } });
@@ -1764,7 +1769,7 @@ index 50c7d4561..aad098757 100644
      
      res.status(204).send()
    } catch (error) {
-@@ -461,10 +306,10 @@ router.delete('/:id', async (req, res, next) => {
+@@ -461,10 +351,10 @@ router.delete('/:id', async (req, res, next) => {
      if (conversation.isGroup) {
        if (conversation.creatorId !== userId) return res.status(403).json({ error: 'Only creator can delete.' })
        await prisma.conversation.delete({ where: { id } })
@@ -1777,7 +1782,7 @@ index 50c7d4561..aad098757 100644
      }
      res.status(204).send()
    } catch (error) {
-@@ -472,43 +317,26 @@ router.delete('/:id', async (req, res, next) => {
+@@ -472,43 +362,55 @@ router.delete('/:id', async (req, res, next) => {
    }
  })
  
@@ -1794,39 +1799,61 @@ index 50c7d4561..aad098757 100644
  
 -    const updatedParticipant = await prisma.participant.update({
 -      where: { userId_conversationId: { userId, conversationId } },
--      data: { isPinned: !participant.isPinned }
 +    const participant = await prisma.participant.findUnique({
 +      where: { userId_conversationId: { userId, conversationId } }
++    })
++
++    if (!participant) return res.status(404).json({ error: 'Participant not found' })
++
++    const updated = await prisma.participant.update({
++      where: { id: participant.id },
+       data: { isPinned: !participant.isPinned }
      })
 -    res.json({ isPinned: updatedParticipant.isPinned })
 -  } catch (error) {
 -    next(error)
 -  }
--})
++
++    res.json({ isPinned: updated.isPinned })
++  } catch (error) { next(error) }
+ })
  
 -// Record key rotation event
--router.post('/:id/key-rotation', async (req, res, next) => {
--  try {
--    if (!req.user) throw new ApiError(401, 'Authentication required.')
++// ROTATE group key (Update updatedAt)
+ router.post('/:id/key-rotation', async (req, res, next) => {
+   try {
+     if (!req.user) throw new ApiError(401, 'Authentication required.')
 -    const { id: conversationId } = req.params
 -    const participant = await prisma.participant.findFirst({ where: { conversationId, userId: req.user!.id } })
 -    if (!participant) return res.status(404).json({ error: "Not a participant" })
-+    if (!participant) return res.status(404).json({ error: 'Participant not found' })
++    const { id } = req.params
++    // Verify participant
++    const p = await prisma.participant.findFirst({ where: { conversationId: id, userId: req.user.id } });
++    if (!p) throw new ApiError(403, 'Forbidden');
  
--    const updatedConversation = await prisma.conversation.update({
+     const updatedConversation = await prisma.conversation.update({
 -      where: { id: conversationId },
 -      data: { updatedAt: new Date() }
-+    const updated = await prisma.participant.update({
-+      where: { id: participant.id },
-+      data: { isPinned: !participant.isPinned }
++      where: { id },
++      data: { updatedAt: new Date() },
++      include: {
++        participants: {
++          select: { id: true, userId: true, user: { select: userSelectWithKeys }, isPinned: true, role: true, joinedAt: true }
++        },
++        creator: { select: userSelectWithKeys }
++      }
      })
  
--    const safeConv = toConversation(hoistConvoKeys(updatedConversation as unknown as RawConversationData));
+     const safeConv = toConversation(hoistConvoKeys(updatedConversation as unknown as RawConversationData));
 -    res.json({ success: true, message: 'Key rotation recorded successfully', conversation: safeConv })
 -  } catch (error) {
 -    next(error)
 -  }
-+    res.json({ isPinned: updated.isPinned })
++    res.json({ 
++        success: true, 
++        message: 'Key rotation recorded successfully', 
++        conversation: safeConv 
++    })
 +  } catch (error) { next(error) }
  })
  
@@ -1981,7 +2008,7 @@ index 68f80eedc..40e03a9c3 100644
  
      res.status(204).send()
 diff --git a/server/src/routes/subscriptions.ts b/server/src/routes/subscriptions.ts
-index a79d18a95..b1f0d76dc 100644
+index a79d18a95..d4a8b6ed0 100644
 --- a/server/src/routes/subscriptions.ts
 +++ b/server/src/routes/subscriptions.ts
 @@ -4,7 +4,8 @@ import { requireAuth } from '../middleware/auth.js';
@@ -1994,31 +2021,29 @@ index a79d18a95..b1f0d76dc 100644
  import { SubscriptionTier } from '@nyx/shared';
  
  const router: Router = Router();
-@@ -120,7 +121,8 @@ router.post('/webhook', async (req: Request, res: Response, next: NextFunction)
+@@ -120,7 +121,7 @@ router.post('/webhook', async (req: Request, res: Response, next: NextFunction)
        });
  
        // Emit real-time update
 -      getIo().to(userId).emit('subscription_updated', {
-+      await sendJsonToUser(userId, TransportOpCode.CHAT_MESSAGE, {
-+        type: 'subscription_updated',
++      await emitEventToUser(userId, 'subscription_updated', {
          tier: SubscriptionTier.SUBSCRIBER,
          expiresAt: expiresAt.toISOString()
        });
-@@ -248,7 +250,8 @@ router.post('/nowpayments-webhook', async (req: Request, res: Response, next: Ne
+@@ -248,7 +249,7 @@ router.post('/nowpayments-webhook', async (req: Request, res: Response, next: Ne
        });
  
        // Emit real-time update
 -      getIo().to(userId).emit('subscription_updated', {
-+      await sendJsonToUser(userId, TransportOpCode.CHAT_MESSAGE, {
-+        type: 'subscription_updated',
++      await emitEventToUser(userId, 'subscription_updated', {
          tier: SubscriptionTier.SUBSCRIBER,
          expiresAt: expiresAt.toISOString()
        });
 diff --git a/server/src/routes/users.ts b/server/src/routes/users.ts
-index 82c774f73..dedc8147a 100644
+index 82c774f73..d1c87da1b 100644
 --- a/server/src/routes/users.ts
 +++ b/server/src/routes/users.ts
-@@ -1,185 +1,94 @@
+@@ -1,185 +1,110 @@
 -import { getIo } from "../socket.js";
 +import { sendJsonToUser, broadcastToUsers, emitEventToUser, emitEventToUsers } from '../network/redisBridge.js';
 +import { TransportOpCode } from '@nyx/shared';
@@ -2027,6 +2052,7 @@ index 82c774f73..dedc8147a 100644
  // For commercial licensing, contact [admin@nyx-app.my.id].
  import { Router, CookieOptions } from 'express'
 +import jwt from 'jsonwebtoken'
++import { hashPassword, verifyPassword } from '../utils/password.js'
 +import { env } from '../config.js'
  import { prisma } from '../lib/prisma.js'
  import { requireAuth } from '../middleware/auth.js'
@@ -2046,8 +2072,7 @@ index 82c774f73..dedc8147a 100644
 -// ========================================================
 -// 1. SPECIFIC ROUTES (Harus di atas agar tidak ditangkap /:id)
 -// ========================================================
-+// --- STATIC ROUTES (Must be before /:id) ---
- 
+-
 -// Cari User (Exact Match pada Blind Index)
 -router.get('/search', async (req, res, next) => {
 -  try {
@@ -2079,14 +2104,15 @@ index 82c774f73..dedc8147a 100644
 -
 -  } catch (e) { next(e) }
 -})
--
++// --- STATIC ROUTES (Must be before /:id) ---
+ 
 -// GET User Profile (Me)
--router.get('/me', async (req, res, next) => {
 +// GET authenticated user details (Me)
-+router.get('/me/profile', async (req, res, next) => {
+ router.get('/me', async (req, res, next) => {
    try {
      if (!req.user) throw new ApiError(401, 'Authentication required.')
--    
++    const userId = req.user.id
+     
 -    // First, fetch the current user to check subscription status
 -    const currentUser = await prisma.user.findUnique({
 -      where: { id: req.user.id },
@@ -2098,23 +2124,34 @@ index 82c774f73..dedc8147a 100644
 -      subscriptionTier?: 'FREE' | 'SUBSCRIBER';
 -      subscriptionExpiresAt?: Date | null;
 -    };
--
++    let user = await prisma.user.findUnique({
++      where: { id: userId },
++      select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
++    })
+ 
 -    const dataToUpdate: UserUpdateData = { lastActiveAt: new Date() };
--
++    if (!user) throw new ApiError(404, 'User not found');
+ 
 -    // Lazy Expiration Check
 -    if (currentUser?.subscriptionTier === 'SUBSCRIBER' && currentUser.subscriptionExpiresAt && new Date() > currentUser.subscriptionExpiresAt) {
 -      dataToUpdate.subscriptionTier = 'FREE';
 -      dataToUpdate.subscriptionExpiresAt = null;
 -      console.log(`[Lazy Expiry] User ${req.user.id} subscription expired. Downgraded to FREE.`);
--    }
--
++    // RESTORE: Lazy Expiration Check
++    if (user.subscriptionTier === 'SUBSCRIBER' && user.subscriptionExpiresAt && new Date() > user.subscriptionExpiresAt) {
++        console.log(`[Auth] Subscription expired for user ${userId}. Downgrading to FREE.`);
++        user = await prisma.user.update({
++            where: { id: userId },
++            data: { subscriptionTier: 'FREE' },
++            select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
++        });
+     }
+ 
 -    const user = await prisma.user.update({
-+    const user = await prisma.user.findUnique({
-       where: { id: req.user.id },
+-      where: { id: req.user.id },
 -      data: dataToUpdate,
 -      select: { id: true, usernameHash: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, role: true, autoDestructDays: true, subscriptionTier: true }
-+      select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true }
-     })
+-    })
      res.json(user)
    } catch (error) { next(error) }
  })
@@ -2221,13 +2258,13 @@ index 82c774f73..dedc8147a 100644
 +    res.json(blocked.map(b => b.blocked))
 +  } catch (error) { next(error) }
 +})
-+
-+// --- MUTATION ROUTES (Me) ---
  
 -// UPDATE User Profile (Me)
 -router.put('/me',
++// --- MUTATION ROUTES (Me) ---
++
 +// UPDATE user profile (Me)
-+router.put('/me/profile', 
++router.put('/me', 
    zodValidate({
      body: z.object({
 -      encryptedProfile: z.string().min(1).optional(),
@@ -2255,7 +2292,7 @@ index 82c774f73..dedc8147a 100644
  
        const updatedUser = await prisma.user.update({
          where: { id: userId },
-@@ -188,7 +97,7 @@ router.put('/me',
+@@ -188,7 +113,7 @@ router.put('/me',
        })
  
        if (encryptedProfile !== undefined && (!existingUser || encryptedProfile !== existingUser.encryptedProfile)) {
@@ -2264,7 +2301,7 @@ index 82c774f73..dedc8147a 100644
  
          const conversations = await prisma.conversation.findMany({
            where: { participants: { some: { userId } } },
-@@ -202,9 +111,9 @@ router.put('/me',
+@@ -202,9 +127,9 @@ router.put('/me',
            }
          }
  
@@ -2277,16 +2314,16 @@ index 82c774f73..dedc8147a 100644
        }
  
        res.json(updatedUser)
-@@ -212,6 +121,74 @@ router.put('/me',
+@@ -212,6 +137,74 @@ router.put('/me',
    }
  )
  
 +// BLOCK a user
-+router.post('/me/block/:userId', async (req, res, next) => {
++router.post('/:id/block', async (req, res, next) => {
 +  try {
 +    if (!req.user) throw new ApiError(401, 'Authentication required.')
 +    const blockerId = req.user.id
-+    const blockedId = req.params.userId
++    const blockedId = req.params.id
 +
 +    if (blockerId === blockedId) throw new ApiError(400, 'You cannot block yourself.')
 +
@@ -2301,11 +2338,11 @@ index 82c774f73..dedc8147a 100644
 +})
 +
 +// UNBLOCK a user
-+router.delete('/me/block/:userId', async (req, res, next) => {
++router.delete('/:id/block', async (req, res, next) => {
 +  try {
 +    if (!req.user) throw new ApiError(401, 'Authentication required.')
 +    const blockerId = req.user.id
-+    const blockedId = req.params.userId
++    const blockedId = req.params.id
 +
 +    await prisma.blockedUser.deleteMany({
 +      where: { blockerId, blockedId }
@@ -2352,7 +2389,7 @@ index 82c774f73..dedc8147a 100644
  // UPDATE Public Keys (Me)
  const isValidBase64Url = (str: string, expectedBytes?: number) => {
    if (!/^[A-Za-z0-9_-]+={0,2}$/.test(str)) return false;
-@@ -268,9 +245,9 @@ router.put('/me/keys',
+@@ -268,9 +261,9 @@ router.put('/me/keys',
          if (p.userId !== userId) recipients.add(p.userId)
        }))
  
@@ -2365,7 +2402,7 @@ index 82c774f73..dedc8147a 100644
  
        res.status(200).json({ message: 'Keys updated successfully.' })
      } catch (error) { next(error) }
-@@ -286,108 +263,68 @@ router.post('/me/complete-onboarding', async (req, res, next) => {
+@@ -286,108 +279,145 @@ router.post('/me/complete-onboarding', async (req, res, next) => {
    } catch (error) { next(error) }
  })
  
@@ -2382,16 +2419,17 @@ index 82c774f73..dedc8147a 100644
 -      if (!req.user) throw new ApiError(401, 'Authentication required.')
 -      const { password, fileKeys } = req.body
 -      const userId = req.user.id
-+// LOGOUT (Me)
-+router.post('/me/logout', async (req, res, next) => {
++// DELETE account (Me)
++router.delete('/me', zodValidate({
++  body: z.object({
++    password: z.string(),
++    fileKeys: z.array(z.string()).optional()
++  })
++}), async (req, res, next) => {
 +  try {
-+    const refreshToken = req.cookies?.rt
-+    const options: CookieOptions = {
-+        httpOnly: true,
-+        secure: process.env.NODE_ENV === 'production',
-+        sameSite: 'strict',
-+        path: '/'
-+    }
++    if (!req.user) throw new ApiError(401, 'Authentication required.')
++    const userId = req.user.id
++    const { password, fileKeys } = req.body
  
 -      const user = await prisma.user.findUnique({ where: { id: userId } })
 -      if (!user) throw new ApiError(404, 'User not found')
@@ -2413,6 +2451,78 @@ index 82c774f73..dedc8147a 100644
 -                 await deleteR2Files(validKeys)
 -             }
 -         } catch (e) { console.error("Failed to cleanup R2 files:", e) }
++    const user = await prisma.user.findUnique({ where: { id: userId } })
++    if (!user) throw new ApiError(404, 'User not found')
++
++    const ok = await verifyPassword(password, user.passwordHash)
++    if (!ok) throw new ApiError(401, 'Invalid password')
++
++    // 1. Delete R2 files if any
++    if (fileKeys && fileKeys.length > 0) {
++      const { deleteR2Files } = await import('../utils/r2.js')
++      const userFileKeys = fileKeys.filter((k: string) => k.startsWith(`${userId}-`))
++      if (userFileKeys.length > 0) {
++        await deleteR2Files(userFileKeys).catch(err => console.error('[R2] Cleanup failed:', err))
+       }
++    }
+ 
+-      await prisma.user.delete({ where: { id: userId } })
++    // 2. Delete user
++    await prisma.user.delete({ where: { id: userId } })
+ 
+-      const { env } = await import('../config.js')
+-      const isProd = env.nodeEnv === 'production'
+-      const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
+-      res.clearCookie('at', cookieOpts)
+-      res.clearCookie('rt', cookieOpts)
++    // 3. Clear cookies
++    const options: CookieOptions = {
++        httpOnly: true,
++        secure: process.env.NODE_ENV === 'production',
++        sameSite: 'strict',
++        path: '/'
++    }
++    res.clearCookie('at', options)
++    res.clearCookie('rt', options)
+ 
+-      res.json({ message: 'Account permanently deleted.' })
+-    } catch (error) { next(error) }
+-  }
+-)
++    // 4. KICK WebTransport connections
++    try {
++      await emitEventToUser(userId, 'auth:banned', { reason: 'Account deleted' });
++      await sendJsonToUser(userId, TransportOpCode.KICK, { reason: 'Account deleted' });
++    } catch (err) {
++      console.error("[Users] Failed to send KICK on deletion:", err);
++    }
+ 
+-// ========================================================
+-// 2. DYNAMIC ROUTES (Harus di bawah agar tidak menangkap /me)
+-// ========================================================
++    res.status(204).send()
++  } catch (error) { next(error) }
++})
+ 
+-// GET Other User Profile by ID
+-router.get('/:userId', async (req, res, next) => {
++// LOGOUT (Me)
++router.post('/me/logout', async (req, res, next) => {
+   try {
+-    const { userId } = req.params
+-    const user = await prisma.user.findUnique({
+-      where: { id: userId },
+-      select: { id: true, encryptedProfile: true, createdAt: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true, pqPublicKey: true, signingKey: true } } }
+-    })
++    const refreshToken = req.cookies?.rt
++    const options: CookieOptions = {
++        httpOnly: true,
++        secure: process.env.NODE_ENV === 'production',
++        sameSite: 'strict',
++        path: '/'
++    }
+ 
+-    if (!user) return res.status(404).json({ error: 'User not found' })
 +    if (refreshToken) {
 +      try {
 +        const payload = jwt.verify(refreshToken, env.jwtSecret) as { jti: string };
@@ -2421,74 +2531,77 @@ index 82c774f73..dedc8147a 100644
 +        }
 +      } catch (e) {
 +        // Token invalid or expired, just proceed
-       }
++      }
 +    }
- 
--      await prisma.user.delete({ where: { id: userId } })
--
--      const { env } = await import('../config.js')
--      const isProd = env.nodeEnv === 'production'
--      const cookieOpts: CookieOptions = { path: '/', httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax' }
--      res.clearCookie('at', cookieOpts)
--      res.clearCookie('rt', cookieOpts)
--
--      res.json({ message: 'Account permanently deleted.' })
--    } catch (error) { next(error) }
--  }
--)
++
 +    res.clearCookie('at', options)
 +    res.clearCookie('rt', options)
 +    res.status(200).json({ success: true })
 +  } catch (error) { next(error) }
 +})
- 
--// ========================================================
--// 2. DYNAMIC ROUTES (Harus di bawah agar tidak menangkap /me)
--// ========================================================
++
 +// --- PARAMETERIZED ROUTES (Must be last) ---
- 
--// GET Other User Profile by ID
--router.get('/:userId', async (req, res, next) => {
-+// SEARCH users by ID (Blind Indexing)
-+router.get('/search/:id', async (req, res, next) => {
-   try {
--    const { userId } = req.params
-     const user = await prisma.user.findUnique({
--      where: { id: userId },
--      select: { id: true, encryptedProfile: true, createdAt: true, isVerified: true, devices: { orderBy: { lastActiveAt: 'desc' }, take: 1, select: { publicKey: true, pqPublicKey: true, signingKey: true } } }
-+      where: { id: req.params.id },
-+      select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, devices: { select: { publicKey: true, pqPublicKey: true } } }
-     })
--
-     if (!user) return res.status(404).json({ error: 'User not found' })
++
++// SEARCH users (Blind Indexing)
++router.get('/search', async (req, res, next) => {
++  try {
++    const { q } = req.query
++    if (!q || typeof q !== 'string') throw new ApiError(400, 'Search query is required.')
++
++    if (!req.user) throw new ApiError(401, 'Authentication required.')
      
 -    const device = user.devices[0];
--    
++    // RESTORE: Sandbox Search Restriction
++    const requester = await prisma.user.findUnique({ where: { id: req.user.id }, select: { isVerified: true } });
++    if (!requester?.isVerified) {
++        throw new ApiError(403, 'SANDBOX_SEARCH_RESTRICTION: Unverified users can only find contacts by providing the exact Hash ID.');
++    }
++
++    const users = await prisma.user.findMany({
++      where: { usernameHash: q },
++      take: 20,
++      select: { 
++        id: true, 
++        encryptedProfile: true, 
++        isVerified: true, 
++        hasCompletedOnboarding: true, 
++        devices: { 
++          orderBy: { lastActiveAt: 'desc' }, 
++          take: 1, 
++          select: { publicKey: true, pqPublicKey: true, signingKey: true } 
++        } 
++      }
++    })
+     
 -    const mappedUser = {
--        id: user.id,
--        encryptedProfile: user.encryptedProfile,
++    const mappedUsers = users.map(user => {
++      const latestDevice = user.devices[0];
++      return {
+         id: user.id,
+         encryptedProfile: user.encryptedProfile,
 -        createdAt: user.createdAt,
--        isVerified: user.isVerified,
+         isVerified: user.isVerified,
 -        publicKey: device?.publicKey ? Buffer.from(device.publicKey).toString('base64url') : undefined,
 -        pqPublicKey: device?.pqPublicKey ? Buffer.from(device.pqPublicKey).toString('base64url') : undefined,
 -        signingKey: device?.signingKey ? Buffer.from(device.signingKey).toString('base64url') : undefined
-+    // Map devices for classical/PQ public keys
-+    const result = {
-+      ...user,
-+      devices: user.devices.map(d => ({
-+        publicKey: Buffer.from(d.publicKey).toString('base64url'),
-+        pqPublicKey: d.pqPublicKey ? Buffer.from(d.pqPublicKey).toString('base64url') : null
-+      }))
-     }
+-    }
++        hasCompletedOnboarding: user.hasCompletedOnboarding,
++        publicKey: latestDevice?.publicKey ? Buffer.from(latestDevice.publicKey).toString('base64url') : null,
++        pqPublicKey: latestDevice?.pqPublicKey ? Buffer.from(latestDevice.pqPublicKey).toString('base64url') : null,
++        signingKey: latestDevice?.signingKey ? Buffer.from(latestDevice.signingKey).toString('base64url') : null
++      }
++    });
      
 -    res.json(mappedUser)
-+    res.json(result)
++    res.json(mappedUsers)
    } catch (error) { next(error) }
  })
  
 -// BLOCK User
 -router.post('/:id/block', async (req, res, next) => {
--  try {
++// GET user by ID
++router.get('/:id', async (req, res, next) => {
+   try {
 -    const blockerId = req.user!.id
 -    const blockedId = req.params.id
 -    if (blockerId === blockedId) throw new ApiError(400, 'You cannot block yourself')
@@ -2502,9 +2615,7 @@ index 82c774f73..dedc8147a 100644
 -
 -// UNBLOCK User
 -router.delete('/:id/block', async (req, res, next) => {
-+// GET user by ID
-+router.get('/:id', async (req, res, next) => {
-   try {
+-  try {
 -    const blockerId = req.user!.id
 -    const blockedId = req.params.id
 -    await prisma.blockedUser.deleteMany({ where: { blockerId, blockedId } })
@@ -3358,130 +3469,53 @@ index 2c1175bcf..adc80d223 100644
  // --- 2. MAPPER FUNCTIONS ---
  
  export const toMinimalProfile = (user: PrismaUserProfileInput): MinimalProfile => ({
-diff --git a/server/transport-sidecar/Cargo.toml b/server/transport-sidecar/Cargo.toml
-new file mode 100644
-index 000000000..76ca9fefe
---- /dev/null
-+++ b/server/transport-sidecar/Cargo.toml
-@@ -0,0 +1,20 @@
-+[package]
-+name = "transport-sidecar"
-+version = "0.1.0"
-+edition = "2021"
-+
-+[dependencies]
-+wtransport = "0.7"
-+tokio = { version = "1.37", features = ["full"] }
-+redis = { version = "0.25.3", features = ["tokio-comp"] }
-+jsonwebtoken = "9.3"
-+serde = { version = "1.0", features = ["derive"] }
-+serde_json = "1.0"
-+dashmap = "5.5"
-+dotenvy = "0.15"
-+anyhow = "1.0"
-+bytes = "1.5"
-+futures-util = "0.3"
-+tracing = "0.1"
-+tracing-subscriber = "0.3"
-+data-encoding = "2.11.0"
 diff --git a/server/transport-sidecar/src/main.rs b/server/transport-sidecar/src/main.rs
-new file mode 100644
-index 000000000..400a42e1f
---- /dev/null
+index 1e27f8d99..87ce9b09b 100644
+--- a/server/transport-sidecar/src/main.rs
 +++ b/server/transport-sidecar/src/main.rs
-@@ -0,0 +1,306 @@
-+use anyhow::{Context, Result};
-+use dashmap::DashMap;
-+use dotenvy::dotenv;
-+use futures_util::StreamExt;
-+use jsonwebtoken::{decode, DecodingKey, Validation};
-+use redis::AsyncCommands;
-+use serde::{Deserialize, Serialize};
-+use std::sync::Arc;
-+use tracing::{error, info, warn};
-+use wtransport::{Connection, Endpoint, Identity, ServerConfig};
-+use bytes::{BufMut, BytesMut};
-+
-+#[derive(Debug, Deserialize)]
-+struct Claims {
-+    id: Option<String>,
-+    sub: Option<String>,
+@@ -14,11 +14,14 @@ use bytes::{BufMut, BytesMut};
+ struct Claims {
+     id: Option<String>,
+     sub: Option<String>,
 +    #[serde(rename = "deviceId")]
 +    device_id: Option<String>,
-+}
-+
-+#[derive(Serialize, Deserialize, Debug)]
-+struct UpstreamMessage {
-+    user_id: String,
+ }
+ 
+ #[derive(Serialize, Deserialize, Debug)]
+ struct UpstreamMessage {
+     user_id: String,
 +    device_id: String,
-+    op_code: u8,
-+    payload: String,
-+}
-+
-+#[derive(Serialize, Deserialize, Debug)]
-+struct DownstreamMessage {
-+    user_id: String,
+     op_code: u8,
+     payload: String,
+ }
+@@ -26,12 +29,13 @@ struct UpstreamMessage {
+ #[derive(Serialize, Deserialize, Debug)]
+ struct DownstreamMessage {
+     user_id: String,
 +    device_id: Option<String>,
-+    op_code: u8,
-+    is_datagram: bool,
-+    payload: String,
-+}
-+
+     op_code: u8,
+     is_datagram: bool,
+     payload: String,
+ }
+ 
+-type SessionMap = Arc<DashMap<String, Arc<Connection>>>;
 +type SessionMap = Arc<DashMap<String, Arc<Connection>>>; // Key: "user_id:device_id"
-+
-+#[tokio::main]
-+async fn main() -> Result<()> {
-+    tracing_subscriber::fmt::init();
-+    let _ = dotenv();
-+
-+    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string());
-+    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
-+
-+    let cert = Identity::self_signed(["localhost", "127.0.0.1"]).context("Failed to generate cert")?;
-+    info!("Server Certificate Hash (SHA-256): {}", cert.certificate_chain().as_slice()[0].hash().to_string());
-+
-+    let config = ServerConfig::builder()
-+        .with_bind_default(4433)
-+        .with_identity(cert)
-+        .build();
-+
-+    let server = Endpoint::server(config).context("Failed to create server")?;
-+    
-+    let sessions: SessionMap = Arc::new(DashMap::new());
-+
-+    // Redis
-+    let redis_client = redis::Client::open(redis_url)?;
-+    let pub_conn = redis_client.get_multiplexed_tokio_connection().await?;
-+    let mut pubsub = redis_client.get_async_pubsub().await?;
-+
-+    // Downstream subscriber
-+    let sessions_clone = sessions.clone();
-+    tokio::spawn(async move {
-+        if let Err(e) = pubsub.subscribe("nyx:downstream").await {
-+            error!("Failed to subscribe to nyx:downstream: {:?}", e);
-+            return;
-+        }
-+
-+        let mut stream = pubsub.on_message();
-+        while let Some(msg) = stream.next().await {
-+            let payload: String = match msg.get_payload() {
-+                Ok(p) => p,
-+                Err(_) => continue,
-+            };
-+
-+            let down_msg: DownstreamMessage = match serde_json::from_str(&payload) {
-+                Ok(m) => m,
-+                Err(_) => continue,
-+            };
-+
-+            let payload_bytes = match data_encoding::BASE64URL_NOPAD.decode(down_msg.payload.as_bytes()) {
-+                Ok(b) => b,
-+                Err(_) => match data_encoding::BASE64.decode(down_msg.payload.as_bytes()) {
-+                    Ok(b) => b,
-+                    Err(_) => continue,
-+                }
-+            };
-+
+ 
+ #[tokio::main]
+ async fn main() -> Result<()> {
+@@ -86,42 +90,68 @@ async fn main() -> Result<()> {
+                 }
+             };
+ 
+-            if let Some(conn) = sessions_clone.get(&down_msg.user_id) {
+-                let conn = conn.value().clone();
+-                let op_code = down_msg.op_code;
+-                
+-                tokio::spawn(async move {
+-                    let mut frame = BytesMut::with_capacity(5 + payload_bytes.len());
+-                    frame.put_u8(op_code);
+-                    frame.put_u32(payload_bytes.len() as u32);
+-                    frame.put_slice(&payload_bytes);
 +            if let Some(target_device) = down_msg.device_id {
 +                let key = format!("{}:{}", down_msg.user_id, target_device);
 +                if let Some(conn) = sessions_clone.get(&key) {
@@ -3492,7 +3526,24 @@ index 000000000..400a42e1f
 +                        conn.close(1000u32.into(), b"Kicked by server");
 +                        continue;
 +                    }
-+
+ 
+-                    if down_msg.is_datagram {
+-                        if let Err(e) = conn.send_datagram(frame.freeze()) {
+-                            error!("Failed to send datagram to {}: {:?}", down_msg.user_id, e);
+-                        }
+-                    } else {
+-                        match conn.open_uni().await {
+-                            Ok(opening) => {
+-                                tokio::spawn(async move {
+-                                    match opening.await {
+-                                        Ok(mut stream) => {
+-                                            if let Err(e) = stream.write_all(&frame).await {
+-                                                error!("Failed to write stream to {}: {:?}", down_msg.user_id, e);
+-                                            }
+-                                        }
+-                                        Err(e) => {
+-                                            error!("Failed to await OpeningUniStream to {}: {:?}", down_msg.user_id, e);
+-                                        }
 +                    tokio::spawn(async move {
 +                        let mut frame = BytesMut::with_capacity(5 + payload_bytes.len());
 +                        frame.put_u8(op_code);
@@ -3506,10 +3557,13 @@ index 000000000..400a42e1f
 +                                let _ = tokio::spawn(async move {
 +                                    if let Ok(mut stream) = opening.await {
 +                                        let _ = stream.write_all(&frame).await;
-+                                    }
-+                                });
-+                            }
-+                        }
+                                     }
+                                 });
+                             }
+-                            Err(e) => {
+-                                error!("Failed to open stream to {}: {:?}", down_msg.user_id, e);
+-                            }
+                         }
 +                    });
 +                }
 +            } else {
@@ -3523,7 +3577,8 @@ index 000000000..400a42e1f
 +                    if op_code == 0x07 { // KICK
 +                        conn.close(1000u32.into(), b"Kicked by server");
 +                        continue;
-+                    }
+                     }
+-                });
 +
 +                    tokio::spawn(async move {
 +                        let mut frame = BytesMut::with_capacity(5 + payload_clone.len());
@@ -3544,1251 +3599,114 @@ index 000000000..400a42e1f
 +                        }
 +                    });
 +                }
-+            }
-+        }
-+    });
-+
-+    info!("WebTransport Sidecar Listening on 4433");
-+
-+    let server = Arc::new(server);
-+
-+    loop {
-+        let incoming = server.accept().await;
-+        let sessions = sessions.clone();
-+        let pub_conn = pub_conn.clone();
-+        let jwt_secret = jwt_secret.clone();
-+        
-+        tokio::spawn(async move {
-+            match incoming.await {
-+                Ok(req) => {
-+                    match req.accept().await {
-+                        Ok(conn) => {
-+                            if let Err(e) = handle_connection(conn, sessions, pub_conn, jwt_secret).await {
-+                                warn!("Conn error: {:?}", e);
-+                            }
-+                        }
-+                        Err(e) => warn!("Accept conn error: {:?}", e)
-+                    }
-+                }
-+                Err(e) => warn!("Incoming error: {:?}", e)
-+            }
-+        });
-+    }
-+}
-+
-+async fn handle_connection(
-+    conn: Connection,
-+    sessions: SessionMap,
-+    mut pub_conn: redis::aio::MultiplexedConnection,
-+    jwt_secret: String,
-+) -> Result<()> {
-+    let (mut _send, mut recv) = conn.accept_bi().await.context("accept_bi")?;
-+    
-+    let mut header = [0u8; 5];
-+    let mut read_bytes = 0;
-+    while read_bytes < 5 {
-+        let n = recv.read(&mut header[read_bytes..]).await.context("header")?.unwrap_or(0);
-+        if n == 0 { break; }
-+        read_bytes += n;
-+    }
-+    
-+    let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
-+    let mut token_bytes = vec![0u8; length];
-+    read_bytes = 0;
-+    while read_bytes < length {
-+        let n = recv.read(&mut token_bytes[read_bytes..]).await.context("token")?.unwrap_or(0);
-+        if n == 0 { break; }
-+        read_bytes += n;
-+    }
-+    
-+    let token = String::from_utf8(token_bytes).unwrap_or_default();
+             }
+         }
+     });
+@@ -180,18 +210,20 @@ async fn handle_connection(
+     }
+     
+     let token = String::from_utf8(token_bytes).unwrap_or_default();
+-    let mut val = Validation::default();
+-    val.insecure_disable_signature_validation();
 +    let val = Validation::new(jsonwebtoken::Algorithm::HS256);
-+    let token_data = decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val)?;
-+    let user_id = token_data.claims.id.or(token_data.claims.sub).unwrap_or_else(|| "anon".to_string());
+     let token_data = decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val)?;
+     let user_id = token_data.claims.id.or(token_data.claims.sub).unwrap_or_else(|| "anon".to_string());
 +    let device_id = token_data.claims.device_id.unwrap_or_else(|| "unknown".to_string());
-+
+ 
+-    info!("User {} authenticated via WebTransport", user_id);
 +    info!("User {} (device {}) authenticated via WebTransport", user_id, device_id);
-+
+ 
 +    let session_key = format!("{}:{}", user_id, device_id);
-+    let conn = Arc::new(conn);
+     let conn = Arc::new(conn);
+-    sessions.insert(user_id.clone(), conn.clone());
 +    sessions.insert(session_key.clone(), conn.clone());
-+
-+    let c2 = conn.clone();
-+    let user_id2 = user_id.clone();
+ 
+     let c2 = conn.clone();
+     let user_id2 = user_id.clone();
 +    let device_id2 = device_id.clone();
-+    let p2 = pub_conn.clone();
-+    tokio::spawn(async move {
-+        loop {
-+            match c2.accept_uni().await {
-+                Ok(mut stream) => {
-+                    let mut p = p2.clone();
-+                    let uid = user_id2.clone();
+     let p2 = pub_conn.clone();
+     tokio::spawn(async move {
+         loop {
+@@ -199,6 +231,7 @@ async fn handle_connection(
+                 Ok(mut stream) => {
+                     let mut p = p2.clone();
+                     let uid = user_id2.clone();
 +                    let did = device_id2.clone();
-+                    tokio::spawn(async move {
-+                        let mut buffer = Vec::new();
-+                        let mut chunk = [0u8; 4096];
-+                        while let Ok(Some(n)) = stream.read(&mut chunk).await {
-+                            buffer.extend_from_slice(&chunk[..n]);
-+                        }
-+                        
-+                        if buffer.len() >= 5 {
-+                            let op_code = buffer[0];
-+                            let length = u32::from_be_bytes([buffer[1], buffer[2], buffer[3], buffer[4]]) as usize;
-+                            if buffer.len() >= 5 + length {
-+                                let payload = &buffer[5..5+length];
-+                                let b64_payload = data_encoding::BASE64URL_NOPAD.encode(payload);
-+                                
-+                                let msg = UpstreamMessage {
-+                                    user_id: uid,
+                     tokio::spawn(async move {
+                         let mut buffer = Vec::new();
+                         let mut chunk = [0u8; 4096];
+@@ -215,6 +248,7 @@ async fn handle_connection(
+                                 
+                                 let msg = UpstreamMessage {
+                                     user_id: uid,
 +                                    device_id: did,
-+                                    op_code,
-+                                    payload: b64_payload,
-+                                };
-+                                
-+                                if let Ok(json) = serde_json::to_string(&msg) {
-+                                    let channel = format!("nyx:upstream:{}", op_code);
-+                                    let _: Result<(), _> = p.publish(channel, json).await;
-+                                }
-+                            }
-+                        }
-+                    });
-+                }
-+                Err(_) => break,
-+            }
-+        }
-+    });
-+
-+    let c3 = conn.clone();
-+    let user_id3 = user_id.clone();
+                                     op_code,
+                                     payload: b64_payload,
+                                 };
+@@ -234,6 +268,8 @@ async fn handle_connection(
+ 
+     let c3 = conn.clone();
+     let user_id3 = user_id.clone();
 +    let device_id3 = device_id.clone();
-+    tokio::spawn(async move {
-+        loop {
-+            match c3.receive_datagram().await {
-+                Ok(datagram) => {
-+                    if datagram.len() >= 5 {
-+                        let op_code = datagram[0];
-+                        let length = u32::from_be_bytes([datagram[1], datagram[2], datagram[3], datagram[4]]) as usize;
-+                        if datagram.len() >= 5 + length {
-+                            let payload = &datagram[5..5+length];
-+                            let b64_payload = data_encoding::BASE64URL_NOPAD.encode(payload);
-+                            
-+                            let msg = UpstreamMessage {
-+                                user_id: user_id3.clone(),
++    let mut p3 = pub_conn.clone();
+     tokio::spawn(async move {
+         loop {
+             match c3.receive_datagram().await {
+@@ -247,13 +283,14 @@ async fn handle_connection(
+                             
+                             let msg = UpstreamMessage {
+                                 user_id: user_id3.clone(),
 +                                device_id: device_id3.clone(),
-+                                op_code,
-+                                payload: b64_payload,
-+                            };
-+                            
-+                            if let Ok(json) = serde_json::to_string(&msg) {
-+                                let channel = format!("nyx:upstream:{}", op_code);
-+                                let _: Result<(), _> = pub_conn.publish(channel, json).await;
-+                            }
-+                        }
-+                    }
-+                }
-+                Err(_) => break,
-+            }
-+        }
-+    });
-+
-+    conn.closed().await;
+                                 op_code,
+                                 payload: b64_payload,
+                             };
+                             
+                             if let Ok(json) = serde_json::to_string(&msg) {
+                                 let channel = format!("nyx:upstream:{}", op_code);
+-                                let _: Result<(), _> = pub_conn.publish(channel, json).await;
++                                let _: Result<(), _> = p3.publish(channel, json).await;
+                             }
+                         }
+                     }
+@@ -264,7 +301,19 @@ async fn handle_connection(
+     });
+ 
+     conn.closed().await;
+-    sessions.remove(&user_id);
+-    info!("User {} disconnected", user_id);
 +    sessions.remove(&session_key);
++
++    // Notify Node.js backend about disconnect (OpCode 99)
++    let disconnect_msg = UpstreamMessage {
++        user_id: user_id.clone(),
++        device_id: device_id.clone(),
++        op_code: 99,
++        payload: "".to_string(),
++    };
++    if let Ok(json) = serde_json::to_string(&disconnect_msg) {
++        let _: Result<(), _> = pub_conn.publish("nyx:upstream:99", json).await;
++    }
++
 +    info!("User {} (device {}) disconnected", user_id, device_id);
-+    Ok(())
-+}
-diff --git a/server/transport-sidecar/test.rs b/server/transport-sidecar/test.rs
-new file mode 100644
-index 000000000..70b4bf55b
---- /dev/null
-+++ b/server/transport-sidecar/test.rs
-@@ -0,0 +1,6 @@
-+use redis::AsyncCommands;
-+#[tokio::main]
-+async fn main() {
-+    let client = redis::Client::open("redis://127.0.0.1/").unwrap();
-+    let pubsub = client.get_async_pubsub().await.unwrap();
-+}
-diff --git a/web/fix-imports.cjs b/web/fix-imports.cjs
-new file mode 100644
-index 000000000..21ea9e89a
---- /dev/null
-+++ b/web/fix-imports.cjs
-@@ -0,0 +1,67 @@
-+const fs = require('fs');
-+const path = require('path');
-+
-+const walk = (dir) => {
-+  let results = [];
-+  const list = fs.readdirSync(dir);
-+  list.forEach((file) => {
-+    file = dir + '/' + file;
-+    const stat = fs.statSync(file);
-+    if (stat && stat.isDirectory()) {
-+      results = results.concat(walk(file));
-+    } else {
-+      if (file.endsWith('.ts') || file.endsWith('.tsx')) {
-+        results.push(file);
-+      }
-+    }
-+  });
-+  return results;
-+};
-+
-+const files = walk('web/src');
-+
-+files.forEach(file => {
-+  if (file.includes('webrtc.ts') || file.includes('transportClient.ts') || file.includes('transport.worker.ts')) return;
-+
-+  let content = fs.readFileSync(file, 'utf8');
-+  let changed = false;
-+
-+  if (content.includes('socket.io-client')) {
-+    content = content.replace(/import.*?from ['"]socket\.io-client['"];?/g, '');
-+    changed = true;
-+  }
-+
-+  if (content.includes('lib/socket') || content.includes('@lib/socket')) {
-+    content = content.replace(/['"]@lib\/socket['"]/g, "'@lib/transportClient'");
-+    content = content.replace(/['"]\.\/lib\/socket['"]/g, "'./lib/transportClient'");
-+    content = content.replace(/['"]\.\.\/lib\/socket['"]/g, "'../lib/transportClient'");
-+    content = content.replace(/getSocket,?/g, 'transportClient,');
-+    changed = true;
-+  }
-+
-+  if (content.includes('getSocket()')) {
-+    content = content.replace(/getSocket\(\)\?/g, 'transportClient');
-+    content = content.replace(/getSocket\(\)/g, 'transportClient');
-+    changed = true;
-+  }
-+
-+  if (content.includes('const socket =')) {
-+    content = content.replace(/const socket = transportClient;/g, '');
-+    content = content.replace(/const socket = await import.*?getSocket\(\);/g, '');
-+    changed = true;
-+  }
-+
-+  if (content.includes('socket.')) {
-+    content = content.replace(/socket\./g, 'transportClient.');
-+    changed = true;
-+  }
-+  
-+  if (content.includes('transportClient.transportClient.')) {
-+    content = content.replace(/transportClient\.transportClient\./g, 'transportClient.');
-+    changed = true;
-+  }
-+
-+  if (changed) {
-+    fs.writeFileSync(file, content, 'utf8');
-+  }
-+});
-diff --git a/web/fix-imports.js b/web/fix-imports.js
-new file mode 100644
-index 000000000..e28784d82
---- /dev/null
-+++ b/web/fix-imports.js
-@@ -0,0 +1,60 @@
-+const fs = require('fs');
-+const path = require('path');
-+
-+const walk = (dir) => {
-+  let results = [];
-+  const list = fs.readdirSync(dir);
-+  list.forEach((file) => {
-+    file = dir + '/' + file;
-+    const stat = fs.statSync(file);
-+    if (stat && stat.isDirectory()) {
-+      results = results.concat(walk(file));
-+    } else {
-+      if (file.endsWith('.ts') || file.endsWith('.tsx')) {
-+        results.push(file);
-+      }
-+    }
-+  });
-+  return results;
-+};
-+
-+const files = walk('./src');
-+
-+files.forEach(file => {
-+  let content = fs.readFileSync(file, 'utf8');
-+  let changed = false;
-+
-+  if (content.includes('socket.io-client')) {
-+    content = content.replace(/import.*?from ['"]socket\.io-client['"];?/g, '');
-+    changed = true;
-+  }
-+
-+  if (content.includes('lib/socket') || content.includes('@lib/socket')) {
-+    content = content.replace(/['"]@lib\/socket['"]/g, "'@lib/transportClient'");
-+    content = content.replace(/['"]\.\/lib\/socket['"]/g, "'./lib/transportClient'");
-+    content = content.replace(/['"]\.\.\/lib\/socket['"]/g, "'../lib/transportClient'");
-+    changed = true;
-+  }
-+
-+  if (content.includes('getSocket()')) {
-+    content = content.replace(/getSocket\(\)\?/g, 'transportClient');
-+    content = content.replace(/getSocket\(\)/g, 'transportClient');
-+    content = content.replace(/const socket = transportClient;/g, '');
-+    content = content.replace(/let socket = transportClient;/g, '');
-+    changed = true;
-+  }
-+
-+  if (content.includes('socket.')) {
-+    content = content.replace(/socket\./g, 'transportClient.');
-+    changed = true;
-+  }
-+  
-+  if (content.includes('transportClient.transportClient.')) {
-+    content = content.replace(/transportClient\.transportClient\./g, 'transportClient.');
-+    changed = true;
-+  }
-+
-+  if (changed) {
-+    fs.writeFileSync(file, content, 'utf8');
-+  }
-+});
-diff --git a/web/fix-syntax.cjs b/web/fix-syntax.cjs
-new file mode 100644
-index 000000000..61f8d2be1
---- /dev/null
-+++ b/web/fix-syntax.cjs
-@@ -0,0 +1,68 @@
-+const fs = require('fs');
-+const path = require('path');
-+
-+const walk = (dir) => {
-+  let results = [];
-+  const list = fs.readdirSync(dir);
-+  list.forEach((file) => {
-+    file = dir + '/' + file;
-+    const stat = fs.statSync(file);
-+    if (stat && stat.isDirectory()) {
-+      results = results.concat(walk(file));
-+    } else {
-+      if (file.endsWith('.ts') || file.endsWith('.tsx')) {
-+        results.push(file);
-+      }
-+    }
-+  });
-+  return results;
-+};
-+
-+const files = walk('web/src');
-+
-+files.forEach(file => {
-+  if (file.includes('webrtc.ts') || file.includes('transportClient.ts') || file.includes('transport.worker.ts')) return;
-+
-+  let content = fs.readFileSync(file, 'utf8');
-+  let changed = false;
-+
-+  if (content.includes('transportClient,()')) {
-+    content = content.replace(/transportClient,\(\)/g, 'transportClient');
-+    changed = true;
-+  }
-+  
-+  if (content.includes('transportClient()')) {
-+    content = content.replace(/transportClient\(\)/g, 'transportClient');
-+    changed = true;
-+  }
-+
-+  if (content.includes('transportClient.emit(')) {
-+    // Replace transportClient.emit('event', payload) with transportClient.sendEvent('event', payload)
-+    content = content.replace(/transportClient\.emit\(/g, 'transportClient.sendEvent(');
-+    changed = true;
-+  }
-+
-+  // Also replace socket.emit if some were missed
-+  if (content.includes('socket.emit(')) {
-+    content = content.replace(/socket\.emit\(/g, 'transportClient.sendEvent(');
-+    changed = true;
-+  }
-+  
-+  // also socket?.emit
-+  if (content.includes('socket?.emit(')) {
-+    content = content.replace(/socket\?\.emit\(/g, 'transportClient.sendEvent(');
-+    changed = true;
-+  }
-+  
-+  // transportClient?.emit
-+  if (content.includes('transportClient?.emit(')) {
-+    content = content.replace(/transportClient\?\.emit\(/g, 'transportClient.sendEvent(');
-+    changed = true;
-+  }
-+
-+  // transportClient.connected => we don't need to change if it's already connected
-+
-+  if (changed) {
-+    fs.writeFileSync(file, content, 'utf8');
-+  }
-+});
-diff --git a/web/package.json b/web/package.json
-index 4eae52d7d..e2c55c2f8 100644
---- a/web/package.json
-+++ b/web/package.json
-@@ -32,6 +32,7 @@
-     "dexie": "^4.4.3",
-     "dompurify": "^3.4.7",
-     "emoji-picker-react": "^4.19.1",
-+    "eventemitter3": "^5.0.4",
-     "framer-motion": "^12.40.0",
-     "hash-wasm": "^4.12.0",
-     "html5-qrcode": "^2.3.8",
-@@ -52,12 +53,11 @@
-     "react-pdf": "^10.4.1",
-     "react-qr-code": "^2.0.21",
-     "react-router-dom": "^7.16.0",
--    "react-sketch-canvas": "^6.2.0",
-+    "react-sketch-canvas": "^8.0.0",
-     "react-virtualized-auto-sizer": "^2.0.3",
-     "react-virtuoso": "^4.18.7",
-     "rehype-sanitize": "^6.0.0",
-     "remark-gfm": "^4.0.1",
--    "socket.io-client": "^4.8.3",
-     "uuid": "^14.0.0",
-     "wavesurfer.js": "^7.12.7",
-     "zod": "^4.4.3",
+     Ok(())
+ }
 diff --git a/web/src/App.tsx b/web/src/App.tsx
-index 0242f0fa5..4b00ccec8 100644
+index 6f62d1128..4b00ccec8 100644
 --- a/web/src/App.tsx
 +++ b/web/src/App.tsx
-@@ -47,11 +47,13 @@ import { useGlobalShortcut } from './hooks/useGlobalShortcut';
- import { useShallow } from 'zustand/react/shallow';
+@@ -48,10 +48,12 @@ import { useShallow } from 'zustand/react/shallow';
  
  // Libs & Utils
--import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
-+import { transportClient, connectSocket, disconnectSocket } from './lib/transportClient';
+ import { transportClient, connectSocket, disconnectSocket } from './lib/transportClient';
 +import { initSocketListeners } from './lib/socketListeners';
  import { initWebRTCListeners } from './lib/webrtc';
  
  // Initialize socket instance once
--getSocket();
-+transportClient;
+ transportClient;
 +initSocketListeners();
  
  // --- Components ---
  
-@@ -205,10 +207,10 @@ const AppContent = () => {
-       const token = useAuthStore.getState().accessToken;
-       if (token) {
-         connectSocket();
--        const socket = getSocket();
-+        const socket = transportClient;
-         // Safely attach WebRTC listeners immediately to the socket instance
-         import('./lib/webrtc').then(({ initWebRTCListeners }) => {
--          initWebRTCListeners(socket);
-+          initWebRTCListeners();
-         });
-       }
-     } else {
-@@ -236,7 +238,7 @@ const AppContent = () => {
-         return;
-       }
- 
--      const socket = getSocket();
-+      const socket = transportClient;
- 
-       if (document.visibilityState === 'visible') {
-         const { user, accessToken, silentRefresh } = useAuthStore.getState();
-@@ -255,7 +257,7 @@ const AppContent = () => {
-           }
-         } else {
-           // Kalo socket-nya ternyata ga diputus sama OS, kita tembak event active manual
--          socket.emit("user:active");
-+          transportClient.sendEvent("user:active");
-         }
- 
-         if (user) {
-@@ -267,7 +269,7 @@ const AppContent = () => {
-       else if (document.visibilityState === 'hidden') {
-         if (socket?.connected) {
-           // Kasih tau server kalau user lagi minimize app/pindah tab/kunci layar
--          socket.emit("user:away");
-+          transportClient.sendEvent("user:away");
-         }
- 
-         // --- AUTH LOCK (Cryptographic Wipe) ---
-diff --git a/web/src/components/ChatWindow.tsx b/web/src/components/ChatWindow.tsx
-index a0273e9fb..2c38e1c92 100644
---- a/web/src/components/ChatWindow.tsx
-+++ b/web/src/components/ChatWindow.tsx
-@@ -2,7 +2,7 @@ import DefaultAvatar from "@/components/ui/DefaultAvatar";
- import { useCallback, useRef, useState, useEffect, useMemo, lazy, Suspense } from "react";
- import { useAuthStore } from "@store/auth";
- import { useTranslation } from "react-i18next";
--import { getSocket } from "@lib/socket";
-+import { transportClient, } from '@lib/transportClient';
- import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
- import MessageItem from "@components/MessageItem";
- import { useConversation } from "@hooks/useConversation";
-@@ -311,7 +311,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
-          // Beri sedikit jeda agar pesan selesai di-render ke DOM (Virtuoso)
-          await new Promise(r => setTimeout(r, 300));
- 
--         const socket = getSocket();
-+         const socket = transportClient;
-          if (!socket?.connected) return;
- 
-          // Hanya ACK pesan yang terlihat di viewport DAN belum READ
-@@ -326,7 +326,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
-          const msgsToAck = unreadVisible.slice(-20);
- 
-          msgsToAck.forEach(msg => {
--             socket.emit('message:mark_as_read', {
-+             transportClient.sendEvent('message:mark_as_read', {
-                  messageId: msg.id,
-                  conversationId: id
-              });
-@@ -401,18 +401,18 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
-   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
- 
-   const handleTyping = useCallback(() => {
--    const socket = getSocket();
--    socket.emit("typing:start", { conversationId: id });
-+    const socket = transportClient;
-+    transportClient.sendEvent("typing:start", { conversationId: id });
-     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-     typingTimeoutRef.current = setTimeout(() => {
--      socket.emit("typing:stop", { conversationId: id });
-+      transportClient.sendEvent("typing:stop", { conversationId: id });
-     }, 1500);
-   }, [id]);
- 
-   const handleSendMessage = (data: { content: string }) => {
-     actions.sendMessage(data);
-     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
--    getSocket().emit("typing:stop", { conversationId: id });
-+    transportClient.sendEvent("typing:stop", { conversationId: id });
-     setTimeout(scrollToBottom, 100);
-   };
- 
-diff --git a/web/src/components/CreateGroupChat.tsx b/web/src/components/CreateGroupChat.tsx
-index 6664bdb76..ddd576821 100644
---- a/web/src/components/CreateGroupChat.tsx
-+++ b/web/src/components/CreateGroupChat.tsx
-@@ -5,7 +5,7 @@ import { useAuthStore } from '@store/auth';
- import { useShallow } from 'zustand/react/shallow';
- import { authFetch } from '@lib/api';
- import { toAbsoluteUrl } from '@utils/url';
--import { getSocket } from '@lib/socket';
-+import { transportClient, } from '@lib/transportClient';
- import { hashUsername } from '@lib/crypto-worker-proxy';
- import toast from 'react-hot-toast';
- import useDynamicIslandStore from '@store/dynamicIsland';
-@@ -91,7 +91,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
-       const conversationId = await createGroup(title.trim(), selectedUsers.map(u => u.id));
- 
-       // Join the socket room for real-time updates
--      getSocket().emit("conversation:join", conversationId);
-+      transportClient.sendEvent("conversation:join", conversationId);
- 
-       openConversation(conversationId);
- 
-diff --git a/web/src/components/EditGroupInfoModal.tsx b/web/src/components/EditGroupInfoModal.tsx
-index a6ceec5fd..763a818a0 100644
---- a/web/src/components/EditGroupInfoModal.tsx
-+++ b/web/src/components/EditGroupInfoModal.tsx
-@@ -25,7 +25,7 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
-     try {
-       const { encryptGroupMetadata, ensureGroupSession } = await import('@utils/crypto');
-       const { useConversationStore } = await import('@store/conversation');
--      const { emitGroupKeyDistribution } = await import('@lib/socket');
-+      const { emitGroupKeyDistribution } = await import('@lib/transportClient');
-       
-       const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
-       if (!conversation) throw new Error("Conversation not found");
-diff --git a/web/src/components/FileAttachment.tsx b/web/src/components/FileAttachment.tsx
-index 79bbf5348..5cdccf0c6 100644
---- a/web/src/components/FileAttachment.tsx
-+++ b/web/src/components/FileAttachment.tsx
-@@ -9,7 +9,7 @@ import { decryptFile, decryptMessage } from '@utils/crypto';
- import { useKeychainStore } from '@store/keychain';
- import { useConversationStore } from '@store/conversation';
- import { FiAlertTriangle, FiFile, FiDownload, FiMusic, FiVideo, FiImage, FiRefreshCw } from 'react-icons/fi';
--import { getSocket } from '@lib/socket';
-+import { transportClient, } from '@lib/transportClient';
- import { useTranslation } from 'react-i18next';
- 
- pdfjs.GlobalWorkerOptions.workerSrc = `${import.meta.env.BASE_URL}pdf.worker.min.mjs`;
-@@ -103,9 +103,9 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps)
-             if (keyResult.status === 'pending') {
-                 if (isMounted) {
-                     setStatus('waiting');
--                    const socket = getSocket();
-+                    const socket = transportClient;
-                     if (socket?.connected && targetSessionId) {
--                        socket.emit('session:request_key', {
-+                        transportClient.sendEvent('session:request_key', {
-                             conversationId: message.conversationId,
-                             sessionId: targetSessionId
-                         });
-diff --git a/web/src/components/GroupInfoPanel.tsx b/web/src/components/GroupInfoPanel.tsx
-index ad2b5555a..b0187298b 100644
---- a/web/src/components/GroupInfoPanel.tsx
-+++ b/web/src/components/GroupInfoPanel.tsx
-@@ -95,7 +95,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
-       
-       // [FIX] ZERO-KNOWLEDGE METADATA UPDATE
-       const { encryptGroupMetadata, ensureGroupSession } = await import('@utils/crypto');
--      const { emitGroupKeyDistribution } = await import('@lib/socket');
-+      const { emitGroupKeyDistribution } = await import('@lib/transportClient');
- 
-       // Ensure session exists
-       const distributionKeys = await ensureGroupSession(conversation.id, conversation.participants);
-@@ -126,7 +126,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
-     const toastId = toast.loading('Rotating encryption keys via ML-KEM...');
-     try {
-       const { forceRotateGroupSenderKey, ensureGroupSession } = await import('@utils/crypto');
--      const { emitGroupKeyDistribution } = await import('@lib/socket');
-+      const { emitGroupKeyDistribution } = await import('@lib/transportClient');
-       
-       await forceRotateGroupSenderKey(conversation.id);
-       
-diff --git a/web/src/components/LazyImage.tsx b/web/src/components/LazyImage.tsx
-index 333926461..91c947a65 100644
---- a/web/src/components/LazyImage.tsx
-+++ b/web/src/components/LazyImage.tsx
-@@ -6,7 +6,7 @@ import { useConversationStore } from '@store/conversation';
- import { toAbsoluteUrl } from '@utils/url';
- import { Spinner } from './Spinner';
- import { FiAlertTriangle, FiImage, FiRefreshCw } from 'react-icons/fi';
--import { getSocket } from '@lib/socket'; 
-+import { transportClient, } from '@lib/transportClient'; 
- import { useTranslation } from 'react-i18next';
- 
- interface LazyImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src'> {
-@@ -131,9 +131,9 @@ export default function LazyImage({
-                     setDecryptionStatus('waiting_for_key');
-                     setError(keyResult.reason || "Key not found yet");
-                     
--                    const socket = getSocket();
--                    if (socket && socket.connected && message.sessionId) {
--                        socket.emit('session:request_key', {
-+                    const socket = transportClient;
-+                    if (socket && transportClient.connected && message.sessionId) {
-+                        transportClient.sendEvent('session:request_key', {
-                             conversationId: message.conversationId,
-                             sessionId: message.sessionId
-                         });
-diff --git a/web/src/components/Lightbox.tsx b/web/src/components/Lightbox.tsx
-index e53d56dee..b3ad45f74 100644
---- a/web/src/components/Lightbox.tsx
-+++ b/web/src/components/Lightbox.tsx
-@@ -29,11 +29,11 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
-   const handleClose = useCallback(() => {
-     if (message.isViewOnce && !message.isViewed) {
-       useMessageStore.getState().updateMessage(message.conversationId, message.id, { isViewed: true });
--      import('@lib/socket').then(({ getSocket }) => {
--          const socket = getSocket();
-+      import('@lib/transportClient').then(({ transportClient, }) => {
-+          const socket = transportClient;
-           const emitViewedAck = () => {
-               if (isMountedRef.current) {
--                  socket?.emit('message:view_once_opened', { messageId: message.id, conversationId: message.conversationId });
-+                  transportClient.sendEvent('message:view_once_opened', { messageId: message.id, conversationId: message.conversationId });
-               }
-           };
-           if (socket?.connected) {
-diff --git a/web/src/components/MessageItem.tsx b/web/src/components/MessageItem.tsx
-index d294ba6b7..c0004e2ed 100644
---- a/web/src/components/MessageItem.tsx
-+++ b/web/src/components/MessageItem.tsx
-@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
- import type { Message, Conversation, Participant, MessageStatus } from "@store/conversation";
- import { useAuthStore } from "@store/auth";
- import { useMessageInputStore } from "@store/messageInput";
--import { getSocket } from "@lib/socket";
-+import { transportClient, } from '@lib/transportClient';
- import { api } from "@lib/api";
- import { toAbsoluteUrl } from "@utils/url";
- import { useModalStore } from '@store/modal';
-@@ -112,7 +112,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
-         onVisibilityChange?.(message.id, true);
-         const alreadyRead = message.statuses?.some((s: MessageStatus) => s.userId === meId && s.status === 'READ');
-         if (!alreadyRead) {
--          getSocket().emit('message:mark_as_read', { messageId: message.id, conversationId: message.conversationId });
-+          transportClient.sendEvent('message:mark_as_read', { messageId: message.id, conversationId: message.conversationId });
-         }
-         observer.disconnect();
-       }
-@@ -181,9 +181,9 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
-           });
- 
-           // 3. Beritahu Server untuk memusnahkannya (jika pesan masih nyangkut/belum dibaca) — hanya jika connected
--          const socket = getSocket();
-+          const socket = transportClient;
-           if (socket?.connected) {
--              socket.emit("message:unsend", { messageId: message.id, conversationId: message.conversationId });
-+              transportClient.sendEvent("message:unsend", { messageId: message.id, conversationId: message.conversationId });
-           }
-       }
- 
-diff --git a/web/src/hooks/usePushNotifications.ts b/web/src/hooks/usePushNotifications.ts
-index c66438026..28099949d 100644
---- a/web/src/hooks/usePushNotifications.ts
-+++ b/web/src/hooks/usePushNotifications.ts
-@@ -1,5 +1,5 @@
- import { useState, useEffect, useCallback, useRef } from 'react';
--import { getSocket } from '@lib/socket';
-+import { transportClient, } from '@lib/transportClient';
- import { urlBase64ToUint8Array } from '@utils/url';
- import toast from 'react-hot-toast';
- import i18n from '../i18n';
-@@ -30,12 +30,12 @@ export function usePushNotifications() {
- 
-   // Helper untuk kirim ke socket (memoized with useCallback)
-   const sendSubscriptionToSocket = useCallback((subscription: PushSubscription) => {
--    const socket = getSocket();
--    if (!socket || !socket.connected) {
-+    const socket = transportClient;
-+    if (!socket || !transportClient.connected) {
-        // Coba lagi sebentar jika socket belum connect
-        retryTimerRef.current = setTimeout(() => {
-            if (!mountedRef.current) return;
--           const retrySocket = getSocket();
-+           const retrySocket = transportClient;
-            if (retrySocket && retrySocket.connected) {
-                sendSubscriptionToSocket(subscription);
-            }
-@@ -45,7 +45,7 @@ export function usePushNotifications() {
- 
-     const subJSON = subscription.toJSON();
-     if (subJSON.endpoint && subJSON.keys?.p256dh && subJSON.keys?.auth) {
--      socket.emit('push:subscribe', {
-+      transportClient.sendEvent('push:subscribe', {
-         endpoint: subJSON.endpoint,
-         keys: {
-           p256dh: subJSON.keys.p256dh,
-@@ -143,9 +143,9 @@ export function usePushNotifications() {
-         setIsSubscribed(false);
-         localStorage.removeItem('nyx_push_enabled');
- 
--        const socket = getSocket();
--        if (socket && socket.connected) {
--          socket.emit('push:unsubscribe');
-+        const socket = transportClient;
-+        if (socket && transportClient.connected) {
-+          transportClient.sendEvent('push:unsubscribe');
-         }
- 
-         toast.success(i18n.t('common:notifications_disabled', 'Notifications disabled'));
-diff --git a/web/src/lib/socket.ts b/web/src/lib/socket.ts
-deleted file mode 100644
-index 79d3301b5..000000000
---- a/web/src/lib/socket.ts
-+++ /dev/null
-@@ -1,511 +0,0 @@
--// Copyright (c) 2026 [han]. All rights reserved.
--// This file is part of NYX, licensed under the AGPL-3.0.
--// For commercial licensing, contact [admin@nyx-app.my.id].
--import { z } from 'zod';
--import io from "socket.io-client";
--import type { Socket } from "socket.io-client";
--import toast from "react-hot-toast";
--import { useAuthStore } from "@store/auth";
--import { useConversationStore, type Message } from "@store/conversation";
--import { useMessageStore } from "@store/message";
--import { useConnectionStore } from "@store/connection";
--import { usePresenceStore } from "@store/presence";
--import { fulfillKeyRequest, storeReceivedSessionKey, rotateGroupKey, fulfillGroupKeyRequest, schedulePeriodicGroupKeyRotation } from "@utils/crypto";
--import { useKeychainStore } from "@store/keychain";
--import { asUserId } from '@nyx/shared';
--import { IncomingMessageSchema, RawServerMessageSchema } from '@nyx/shared';
--import type { ServerToClientEvents, ClientToServerEvents, SubscriptionTier } from "@nyx/shared";
--import { triggerReceiveFeedback } from "@utils/feedback";
--import i18n from '../i18n';
--
--const WS_URL = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL;
--let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
--
--// ✅ OPTIMASI: Mekanisme Batching untuk Mencegah "Socket Storm" (Offline Catch-up)
--// Keranjang untuk menampung pesan masuk yang bertubi-tubi
--const incomingMessageBuffer: Message[] = [];
--let isProcessingBuffer = false;
--let batchTimer: NodeJS.Timeout | null = null;
--
--const processMessageBuffer = async () => {
--    if (isProcessingBuffer || incomingMessageBuffer.length === 0) return;
--    
--    isProcessingBuffer = true;
--    
--    // Ambil isi keranjang dan kosongkan keranjangnya agar bisa menampung yang baru
--    const messagesToProcess = [...incomingMessageBuffer];
--    incomingMessageBuffer.length = 0;
--    
--    // ✅ FIX: Prioritaskan pesan SYSTEM (distribusi kunci) agar diproses sebelum pesan USER.
--    // Jika tidak, pesan USER mungkin gagal didekripsi karena kuncinya belum tersimpan.
--    messagesToProcess.sort((a, b) => {
--        type SortableMessage = { type?: string, content?: string, createdAt?: string | Date, id: string };
--        const msgA = a as SortableMessage;
--        const msgB = b as SortableMessage;
--        const isSystemA = msgA.type === 'SYSTEM' || msgA.content?.startsWith('{');
--        const isSystemB = msgB.type === 'SYSTEM' || msgB.content?.startsWith('{');
--        if (isSystemA && !isSystemB) return -1;
--        if (!isSystemA && isSystemB) return 1;
--        const timeA = new Date(msgA.createdAt || 0).getTime();
--        const timeB = new Date(msgB.createdAt || 0).getTime();
--        if (timeA !== timeB) return timeA - timeB;
--        return msgA.id.localeCompare(msgB.id);
--    });
--    
--    const { addIncomingMessage } = useMessageStore.getState();
--    const meId = useAuthStore.getState().user?.id;
--
--    // Proses semua pesan dalam keranjang secara teratur (sekuensial untuk menjaga Mutex & State)
--    for (const safeMessage of messagesToProcess) {
--        try {
--            // THE SHIELD: Intelligent Echo Cancellation
--            if (meId && safeMessage.senderId === meId) {
--                // 1. Blokir echo dari pesan normal
--                const isOptimisticEcho = useMessageStore.getState().messages[safeMessage.conversationId]?.some(
--                    m => m.id === safeMessage.id || (m.tempId && String(m.tempId) === String(safeMessage.tempId))
--                );
--                if (isOptimisticEcho) {
--                    continue; 
--                }
--
--                // 2. Blokir echo dari pesan SILENT (seperti Reaction/Edit/GhostSync yang kita kirim sendiri)
--                if (safeMessage.content && safeMessage.content.startsWith('{')) {
--                     try {
--                         const meta = JSON.parse(safeMessage.content);
--                         if (meta.type === 'reaction' || meta.type === 'edit' || meta.type === 'silent' || meta.type === 'GHOST_SYNC' || meta.type === 'SYSTEM_KEY_REQUEST') {
--                             continue;
--                         }
--                         // UNSEND tombstone TIDAK di-skip: perangkat sender juga perlu memprosesnya
--                     } catch (_e) {}
--                }
--            }
--
--            const decryptedMessage = await addIncomingMessage(safeMessage.conversationId, safeMessage);
--              
--            if (!decryptedMessage) continue; 
--
--            if (!decryptedMessage.isSilent) {
--               // Hanya putar notifikasi suara jika kita menerima kurang dari 3 pesan 
--               // (Mencegah suara notifikasi bertumpuk-tumpuk saat offline catchup)
--               if (messagesToProcess.length < 3) {
--                   triggerReceiveFeedback();
--               }
--            }
--            
--            // Jeda sejenak setiap 5 pesan untuk membiarkan UI bernapas (mencegah Freeze)
--            if (messagesToProcess.indexOf(safeMessage) % 5 === 0) {
--                await new Promise(r => setTimeout(r, 20));
--            }
--            
--        } catch (e: unknown) {
--            console.error(`Failed to process buffered message ${safeMessage.id}`, e);
--        }
--    }
--    
--    isProcessingBuffer = false;
--    
--    // Jika selama pemrosesan tadi ada pesan baru yang masuk ke keranjang, proses lagi
--    if (incomingMessageBuffer.length > 0) {
--        processMessageBuffer();
--    }
--};
--
--const handleKeyRotation = async (conversationId: string) => {
--  const MAX_RETRIES = 3;
--  let attempt = 0;
--
--  while (attempt < MAX_RETRIES) {
--    try {
--      await rotateGroupKey(conversationId);
--      useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: false });
--      return; 
--    } catch (err: unknown) {
--      attempt++;
--      console.error(`[socket] Key rotation attempt ${attempt} failed for ${conversationId}:`, err);
--      if (attempt >= MAX_RETRIES) {
--        console.error(`[socket] All key rotation retries failed for ${conversationId}. Marking as pending.`);
--        useConversationStore.getState().updateConversation(conversationId, { keyRotationPending: true });
--        toast.error(`CRITICAL: Failed to rotate keys for group. The chat is insecure.`, { duration: 10000 });
--      } else {
--        const delay = Math.pow(2, attempt) * 1000;
--        await new Promise(resolve => setTimeout(resolve, delay));
--      }
--    }
--  }
--};
--
--export const fireGhostSync = (conversationId: string, baseDelay: number = 1000) => {
--    const randomDelay = Math.floor(Math.random() * 2500) + baseDelay;
--    setTimeout(async () => {
--        try {
--            const messageStore = (await import('../store/message')).useMessageStore.getState();
--            await messageStore.sendMessage(conversationId, {
--                content: JSON.stringify({ type: 'GHOST_SYNC', ts: Date.now() }),
--                isSilent: true
--            });
--            console.log(`[Ghost Sync] Fired for group ${conversationId}`);
--        } catch (e) {
--            console.error('[Ghost Sync] Failed to send', e);
--        }
--    }, randomDelay);
--};
--
--export function getSocket() {
--  if (!socket) {
--    const token = useAuthStore.getState().accessToken;
--
--    socket = io(WS_URL, {
--      withCredentials: true,
--      transports: ['websocket', 'polling'],
--      autoConnect: false,
--      reconnection: true,
--      reconnectionAttempts: 20,
--      reconnectionDelay: 2000,
--      path: "/socket.io",
--      auth: { token }
--    });
--
--    const { setStatus } = useConnectionStore.getState();
--    const { addOrUpdate, setOnlineUsers, userJoined, userLeft } = usePresenceStore.getState();
--    const { updateMessage, removeLocalReaction, updateMessageStatus } = useMessageStore.getState();
--    const conversationStore = useConversationStore.getState();
--
--    // --- System Listeners ---
--    socket.on("connect", async () => {
--      setStatus('connected');
--      const user = useAuthStore.getState().user;
--      if (user) {
--        socket?.emit("presence:update", { userId: user.id, online: true });
--
--        try {
--          await useConversationStore.getState().loadConversations();
--          await useMessageStore.getState().processOfflineQueue();
--          useMessageStore.getState().resendPendingMessages();
--        } catch (error: unknown) {
--          console.error("socket connect sync failed", error);
--          const err = error as Record<string, unknown>;
--          if (err?.status === 401 || (typeof err?.message === 'string' && err.message.includes('401'))) {
--              try {
--                  console.warn("[Socket] Got 401 on reconnect, attempting silent refresh...");
--                  const ok = await useAuthStore.getState().silentRefresh();
--                  if (ok) {
--                      // Coba load ulang jika refresh berhasil
--                      await useConversationStore.getState().loadConversations();
--                      await useMessageStore.getState().processOfflineQueue();
--                  }
--              } catch (refreshErr) {
--                  console.error("[Socket] Silent refresh failed after 401 on connect:", refreshErr);
--              }
--          }
--        }
--      }
--    });
--
--    socket.on("disconnect", (reason) => {
--      setStatus('disconnected');
--      if (reason !== "io client disconnect") toast.error(i18n.t('errors:disconnected_reconnecting', 'Disconnected. Reconnecting...'));
--    });
--
--    socket.on("connect_error", (err) => {
--      setStatus('disconnected');
--      console.error("❌ Socket connection error:", err?.message ?? err);
--    });
--
--    // --- Application-specific Listeners ---
--    socket.on("message:new", (rawPayload: unknown) => {
--      // ✅ FIX 1: Gunakan RawServerMessageSchema karena ini adalah format pasti dari server sekarang
--      const parsed = RawServerMessageSchema.safeParse(rawPayload);
--
--      if (!parsed.success) {
--          const payloadSummary = typeof rawPayload === 'object' && rawPayload !== null ? Object.keys(rawPayload) : typeof rawPayload;
--          console.error("[Zod Shield] Dropping invalid incoming message:", JSON.stringify(parsed.error.format(), null, 2), "Raw Payload Keys:", payloadSummary);
--          return;
--      }
--      const safeMessage = parsed.data;
--
--      // ✅ FIX 2: Kirim ACK "Delivered" ke server segera setelah diterima dengan aman!
--      // Server butuh kepastian ini agar tidak menembakkan pesan yang sama berulang kali.
--      socket?.emit("message:ack_delivered", { 
--          messageId: safeMessage.id, 
--          conversationId: safeMessage.conversationId 
--      });
--
--      // ✅ FIX 3: Lempar ke keranjang Batching
--      incomingMessageBuffer.push(safeMessage as unknown as Message);
--      
--      // Reset timer. Kita tunggu "badai" reda selama 100ms. 
--      // Jika dalam 100ms tidak ada pesan baru lagi yang masuk, proses semua yang ada di keranjang.
--      if (batchTimer) clearTimeout(batchTimer);
--      batchTimer = setTimeout(() => {
--          processMessageBuffer();
--      }, 100);
--    });
--
--    socket.on("message:updated", (updatedMessage) => {
--      if (!updatedMessage.conversationId || !updatedMessage.id) return;
--
--      // FILTER KEAMANAN E2EE:
--      // Kita pisahkan (destructure) field yang berpotensi merusak plaintext lokal.
--      // 'content', 'ciphertext', dan 'fileKey' dari server adalah data mentah/terenkripsi, 
--      // jadi kita BUNGKAM dan tidak memasukkannya ke dalam safeUpdates.
--      const { 
--        content: _rawContent, 
--        ciphertext: _rawCiphertext, 
--        fileKey: _rawFileKey,
--        encryptedSessionKey: _rawSessionKey,
--        ...safeUpdates 
--      } = updatedMessage;
--
--      // Sekarang safeUpdates hanya berisi metadata yang aman (seperti status, isViewed, dll)
--      updateMessage(
--        updatedMessage.conversationId, 
--        updatedMessage.id, 
--        safeUpdates as Partial<Message>
--      );
--    });
--
--    socket.on("message:deleted", ({ conversationId, id }) => {
--      const { removeMessage } = useMessageStore.getState();
--      removeMessage(conversationId, id);
--    });
--
--    socket.on("burner:receive", async (payload: { roomId?: string, ciphertext: string }) => {
--      const { useBurnerStore } = await import('@store/burner');
--      const roomId = payload.roomId || Object.keys(useBurnerStore.getState().activeSessions)[0];
--      if (roomId) {
--        await useBurnerStore.getState().receiveMessage(roomId, payload.ciphertext);
--      }
--    });
--
--    socket.on("burner:terminated", async (payload: { roomId: string }) => {
--      const { useBurnerStore } = await import('@store/burner');
--      if (payload?.roomId) {
--        useBurnerStore.getState().terminateSession('This secure session has been terminated by the host.');
--        // Clean up the conversation list
--        const { useConversationStore } = await import('@store/conversation');
--        useConversationStore.getState().deleteConversation(payload.roomId);
--      }
--    });
--
--    socket.on("messages:expired", ({ messageIds }: { messageIds: string[] }) => {
--      const { messages, removeMessage } = useMessageStore.getState();
--      const expiredSet = new Set(messageIds);
--      
--      Object.keys(messages).forEach(conversationId => {
--        const conversationMessages = messages[conversationId] || [];
--        conversationMessages.forEach(msg => {
--          if (expiredSet.has(msg.id)) {
--            removeMessage(conversationId, msg.id);
--          }
--        });
--      });
--    });
--
--    socket.on("message:viewed", ({ messageId, conversationId }) => {
--      useMessageStore.getState().updateMessage(conversationId, messageId, { isViewed: true });
--    });
--
--    socket.on("presence:init", (onlineUserIds) => setOnlineUsers(onlineUserIds));
--    socket.on("presence:user_joined", (userId) => userJoined(userId));
--    socket.on("presence:user_left", (userId) => userLeft(userId));
--    socket.on("typing:update", ({ userId, conversationId, isTyping }) => addOrUpdate({ id: userId, conversationId, isTyping }));
--    socket.on("reaction:new", ({ conversationId, messageId, reaction }) => {
--      const { user: me } = useAuthStore.getState();
--      const { replaceOptimisticReaction, addLocalReaction } = useMessageStore.getState();
--
--      if (reaction.tempId && me && reaction.userId === me.id) {
--        replaceOptimisticReaction(conversationId, messageId, reaction.tempId, reaction);
--      } else {
--        addLocalReaction(conversationId, messageId, reaction);
--      }
--    });
--    socket.on("reaction:deleted", ({ conversationId, messageId, reactionId }) => removeLocalReaction(conversationId, messageId, reactionId));
--    
--    socket.on("conversation:new", (newConversation) => {
--      conversationStore.addOrUpdateConversation(newConversation);
--      socket?.emit("conversation:join", newConversation.id);
--
--      if (newConversation.isGroup) {
--        useConversationStore.getState().markKeyRotationNeeded(newConversation.id, true);
--        schedulePeriodicGroupKeyRotation(newConversation.id);
--        fireGhostSync(newConversation.id, 3000);
--      }
--
--      toast.success(i18n.t('common:added_to_group', `You've been added to "${newConversation.title || 'a new chat'}"`, { groupName: newConversation.title || 'a new chat' }));
--    });
--
--    socket.on("conversation:updated", (updates) => conversationStore.updateConversation(updates.id, updates));
--    socket.on("conversation:deleted", ({ id }) => conversationStore.removeConversation(id));
--    socket.on('group:participants_changed', (data: { conversationId: string }) => {
--        useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
--        import('@utils/crypto').then(m => m.forceRotateGroupSenderKey(data.conversationId).catch(console.error));
--        useConversationStore.getState().loadConversations();
--        fireGhostSync(data.conversationId, 1000);
--    });
--
--    socket.on('session:request_key', async (data: { conversationId: string, requesterId: string }) => {
--        useConversationStore.getState().markKeyRotationNeeded(data.conversationId, true);
--    });
--
--    socket.on("conversation:participants_added", ({ conversationId, newParticipants }) => {
--      useConversationStore.getState().addParticipants(conversationId, newParticipants.map(p => ({ ...p, id: asUserId(p.id) })));
--      useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
--      fireGhostSync(conversationId, 2000);
--    });
--
--    socket.on("conversation:participant_removed", ({ conversationId, userId }) => {
--      useConversationStore.getState().removeParticipant(conversationId, userId);
--      handleKeyRotation(conversationId);
--    });
--
--    socket.on('user:updated', (updatedUser) => {
--      const { user, setUser } = useAuthStore.getState();
--      if (user?.id === updatedUser.id) {
--        setUser({ ...user, ...updatedUser });
--      }
--      useConversationStore.getState().updateParticipantDetails(updatedUser);
--      useMessageStore.getState().updateSenderDetails(updatedUser);
--    });
--
--    socket.on('message:status_updated', (payload) => {
--      const { conversationId, messageId, deliveredTo, readBy, status } = payload;
--      const userId = deliveredTo || readBy;
--      if (userId) {
--        updateMessageStatus(conversationId, messageId, userId, status);
--      }
--    });
--    
--    socket.on('session:fulfill_request', (data) => fulfillKeyRequest(data).catch(console.error));
--    socket.on('group:fulfill_key_request', (data) => fulfillGroupKeyRequest(data).catch(console.error));
--    socket.on('session:new_key', (data) => {
--      storeReceivedSessionKey(data)
--        .then(() => {
--          useKeychainStore.getState().keysUpdated();
--          useMessageStore.getState().reDecryptPendingMessages(data.conversationId);
--        })
--        .catch(console.error);
--    });
--    socket.on('force_logout', (payload) => {
--      const currentToken = useAuthStore.getState().accessToken;
--      if (payload?.jti && currentToken) {
--         try {
--            const base64Url = currentToken.split('.')[1];
--            let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
--            while (base64.length % 4) {
--              base64 += '=';
--            }
--            const decoded = JSON.parse(atob(base64));
--            if (decoded.jti !== payload.jti) return;
--         } catch(e) {
--            console.error("Failed to decode token for force_logout", e);
--            return;
--         }
--      }
--
--      toast.error(i18n.t('errors:this_session_has_been_logged_out_remotel', 'This session has been logged out remotely.'));
--      useAuthStore.getState().logout();
--      disconnectSocket();
--    });
--
--    socket.on("message:deleted_remotely", async ({ conversationId, messageId }) => {
--      
--      const { removeMessage } = useMessageStore.getState();
--      // Ini akan langsung menghapus pesan dari UI dan mengubahnya menjadi Tombstone di IndexedDB lokal
--      removeMessage(conversationId, messageId);
--      
--      // Opsional: Berikan feedback visual kecil jika user sedang melihat chat
--      const isViewingChat = window.location.pathname.includes(`/chat/${conversationId}`);
--      if (isViewingChat) {
--          toast.success(i18n.t('chat:messages.message_retracted', 'A message has been retracted by the sender.'), {
--              icon: '🗑️',
--              duration: 3000,
--              position: 'bottom-center'
--          });
--      }
--    });
--
--    socket.on("user:identity_changed", (data) => {
--      const message = `The security key for ${data.name} has changed. You may want to verify their identity.`;
--      toast.success(message, { duration: 10000, icon: '🛡️' });
--      const { conversations } = useConversationStore.getState();
--      const { addSystemMessage } = useMessageStore.getState();
--      conversations.forEach(convo => {
--        if (convo.participants.some(p => p.id === data.userId)) {
--          addSystemMessage(convo.id, message);
--        }
--      });
--    });
--
--    socket.on('subscription_updated', (payload: { tier: SubscriptionTier, expiresAt: string }) => {
--      console.log('[Socket] Subscription updated:', payload);
--      useAuthStore.getState().updateSubscription(payload.tier);
--    });
--  }
--  return socket;
--}
--
--export function connectSocket() {
--  if (!socket) getSocket();
--  const token = useAuthStore.getState().accessToken;
--
--  if (socket) {
--    socket.auth = { token };
--    if (!socket.connected) {
--      socket.connect();
--    }
--  }
--}
--
--export function disconnectSocket() {
--  if (socket?.connected) socket.disconnect();
--}
--
--export function emitSessionKeyRequest(conversationId: string, sessionId: string, targetId?: string) {
--  const meId = useAuthStore.getState().user?.id;
--  getSocket()?.emit('session:request_key', { 
--      conversationId, 
--      sessionId, 
--      targetId,
--      requesterId: meId
--  });
--}
--
--export function emitSessionKeyFulfillment(payload: { requesterId: string; conversationId: string; sessionId: string; encryptedKey: string; }) {
--  getSocket()?.emit('session:fulfill_response', payload);
--}
--
--export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string }[]): Promise<void> {
--  return new Promise((resolve, reject) => {
--    const socket = getSocket();
--    if (!socket?.connected) return reject(new Error('Socket not connected'));
--    (socket as unknown as import('socket.io-client').Socket).emit('messages:distribute_keys', { conversationId, keys }, (res?: { ok: boolean }) => {
--      if (!res?.ok) return reject(new Error('Failed to distribute keys'));
--      resolve();
--    });
--  });
--}
--
--export async function emitGroupKeyRequest(conversationId: string, targetSenderId?: string, targetDeviceKey?: string) {
--  const { useAuthStore } = await import('@store/auth');
--  const state = useAuthStore.getState();
--  const myId = state.user?.id;
--  
--  const { getEncryptionKeyPair } = state;
--  const { publicKey } = await getEncryptionKeyPair();
--  const { getSodiumLib } = await import('@utils/crypto');
--  const sodium = await getSodiumLib();
--  const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
--  
--  getSocket()?.emit('group:request_key', { 
--      conversationId, 
--      targetSenderId, 
--      targetDeviceKey,
--      requesterId: myId,
--      requesterDeviceId: myPublicKeyB64,
--      requesterPublicKey: myPublicKeyB64
--  });
--}
--
--export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; targetDeviceId?: string; senderDeviceKey?: string; }) {
--  getSocket()?.emit('group:fulfilled_key', payload);
--}
-\ No newline at end of file
 diff --git a/web/src/lib/socketListeners.ts b/web/src/lib/socketListeners.ts
 new file mode 100644
 index 000000000..6050c849a
@@ -4934,143 +3852,27 @@ index 000000000..6050c849a
 +  });
 +}
 diff --git a/web/src/lib/transportClient.ts b/web/src/lib/transportClient.ts
-new file mode 100644
-index 000000000..81501700a
---- /dev/null
+index 7cf5c236a..81501700a 100644
+--- a/web/src/lib/transportClient.ts
 +++ b/web/src/lib/transportClient.ts
-@@ -0,0 +1,239 @@
-+import { EventEmitter } from 'eventemitter3';
-+import { TransportOpCode } from '@nyx/shared';
-+import type { MainToTransportWorker, TransportWorkerToMain, BinaryPayload } from '@nyx/shared';
-+import { useAuthStore } from '../store/auth';
-+
-+type TransportEvents = {
-+  'connect': [];
-+  'disconnect': [reason: string];
-+  'message:new': [payload: BinaryPayload];
-+  'webrtc:signal': [payload: BinaryPayload];
-+  'presence:update': [payload: BinaryPayload];
-+  // Allow arbitrary events for backward compatibility
-+  [event: string]: any[];
-+};
-+
-+export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
-+  private worker: Worker;
-+  public connected: boolean = false;
-+  private pendingAcks = new Map<string, { resolve: (val: any) => void, reject: (err: any) => void, timeoutId: any }>();
-+
-+  constructor() {
-+    super();
-+    this.worker = new Worker(new URL('../workers/transport.worker.ts', import.meta.url), {
-+      type: 'module'
-+    });
-+
-+    this.worker.onmessage = this.handleWorkerMessage.bind(this);
-+  }
-+
+@@ -27,9 +27,10 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
+     this.worker.onmessage = this.handleWorkerMessage.bind(this);
+   }
+ 
+-  public connect(url: string, token: string): void {
 +  public connect(url: string, token: string, certificateHash?: string): void {
-+    const defaultUrl = import.meta.env.VITE_TRANSPORT_URL || import.meta.env.VITE_API_URL?.replace('http', 'https') || 'https://api.nyx-app.my.id/transport';
+     const defaultUrl = import.meta.env.VITE_TRANSPORT_URL || import.meta.env.VITE_API_URL?.replace('http', 'https') || 'https://api.nyx-app.my.id/transport';
+-    this.worker.postMessage({ type: 'CONNECT', url: url || defaultUrl, token } satisfies MainToTransportWorker);
 +    const hash = certificateHash || import.meta.env.VITE_TRANSPORT_CERT_HASH;
 +    this.worker.postMessage({ type: 'CONNECT', url: url || defaultUrl, token, certificateHash: hash } satisfies MainToTransportWorker);
-+  }
-+
-+  public disconnect(): void {
-+    this.worker.postMessage({ type: 'DISCONNECT' } satisfies MainToTransportWorker);
-+  }
-+
-+  private handleWorkerMessage(event: MessageEvent<TransportWorkerToMain>): void {
-+    const data = event.data;
-+    switch (data.type) {
-+      case 'CONNECTED':
-+        this.connected = true;
-+        this.emit('connect');
-+        break;
-+      case 'DISCONNECTED':
-+        this.connected = false;
-+        this.emit('disconnect', data.reason);
-+        break;
-+      case 'ERROR':
-+        console.error("Transport Worker Error:", data.error);
-+        break;
-+      case 'DATA_RECEIVED':
-+        this.routeOpCode(data.opCode, data.payload);
-+        break;
-+    }
-+  }
-+
-+  private routeOpCode(opCode: TransportOpCode, payload: BinaryPayload): void {
-+    switch (opCode) {
-+      case TransportOpCode.CHAT_MESSAGE:
-+        this.emit('message:new', payload);
-+        break;
-+      case TransportOpCode.WEBRTC_SIGNAL:
-+      case TransportOpCode.WEBRTC_ICE:
-+        this.emit('webrtc:signal', payload);
-+        break;
-+      case TransportOpCode.PRESENCE:
-+        this.emit('presence:update', payload);
-+        break;
-+      case TransportOpCode.ACK:
-+        this.handleAck(payload);
-+        break;
-+      default:
-+        // Handle generic events
-+        try {
-+           const json = JSON.parse(new TextDecoder().decode(payload));
-+           if (json && json.event) {
-+              this.emit(json.event, json.data);
-+           }
-+        } catch (e) {}
-+        break;
-+    }
-+  }
-+
-+  private handleAck(payload: BinaryPayload) {
-+     try {
-+       const json = JSON.parse(new TextDecoder().decode(payload));
-+       if (json && json.msgId && this.pendingAcks.has(json.msgId)) {
-+          const p = this.pendingAcks.get(json.msgId)!;
-+          clearTimeout(p.timeoutId);
-+          p.resolve(json.data);
-+          this.pendingAcks.delete(json.msgId);
-+       }
-+     } catch (e) {}
-+  }
-+
-+  public sendStream(opCode: TransportOpCode, payload: BinaryPayload): void {
-+    const message: MainToTransportWorker = { type: 'SEND_STREAM', opCode, payload };
-+    this.worker.postMessage(message, [payload.buffer]);
-+  }
-+
-+  public sendDatagram(opCode: TransportOpCode, payload: BinaryPayload): void {
-+    const message: MainToTransportWorker = { type: 'SEND_DATAGRAM', opCode, payload };
-+    this.worker.postMessage(message, [payload.buffer]);
-+  }
-+
-+  public sendJsonStream(opCode: TransportOpCode, payload: any): void {
-+    const buffer = new TextEncoder().encode(JSON.stringify(payload));
-+    this.sendStream(opCode, buffer);
-+  }
-+
-+  public sendJsonDatagram(opCode: TransportOpCode, payload: any): void {
-+    const buffer = new TextEncoder().encode(JSON.stringify(payload));
-+    this.sendDatagram(opCode, buffer);
-+  }
-+  
-+  public sendEvent(event: string, data?: any, callback?: Function): void {
-+    const msgId = Math.random().toString(36).substring(7);
-+    
-+    if (callback) {
-+       this.pendingAcks.set(msgId, {
-+          resolve: (val) => callback(null, val),
-+          reject: (err) => callback(err, null),
-+          timeoutId: setTimeout(() => {
-+             this.pendingAcks.delete(msgId);
-+             callback(new Error('timeout'), null);
-+          }, 30000)
-+       });
-+    }
-+    
+   }
+ 
+   public disconnect(): void {
+@@ -129,7 +130,14 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
+        });
+     }
+     
+-    this.sendJsonStream(TransportOpCode.KEY_SYNC, { event, msgId, data });
 +    // Intelligent Routing
 +    if (event === 'message:send') {
 +        this.sendJsonStream(TransportOpCode.CHAT_MESSAGE, { ...data, msgId });
@@ -5079,649 +3881,19 @@ index 000000000..81501700a
 +    } else {
 +        this.sendJsonStream(TransportOpCode.KEY_SYNC, { event, msgId, data });
 +    }
-+  }
-+
-+  public timeout(ms: number) {
-+    return {
-+      emit: (event: string, data: any, callback: Function) => {
-+        const msgId = Math.random().toString(36).substring(7);
-+        this.pendingAcks.set(msgId, {
-+          resolve: (val) => callback(null, val),
-+          reject: (err) => callback(new Error('timeout'), null),
-+          timeoutId: setTimeout(() => {
-+             this.pendingAcks.delete(msgId);
-+             callback(new Error('timeout'), null);
-+          }, ms)
-+        });
-+        this.sendJsonStream(TransportOpCode.KEY_SYNC, { event, msgId, data });
-+      }
-+    };
-+  }
-+}
-+
-+export const transportClient = new NyxWebTransportClient();
-+
-+export function connectSocket() {
-+  if (transportClient.connected) return;
-+  const token = useAuthStore.getState().accessToken || '';
+   }
+ 
+   public timeout(ms: number) {
+@@ -155,7 +163,8 @@ export const transportClient = new NyxWebTransportClient();
+ export function connectSocket() {
+   if (transportClient.connected) return;
+   const token = useAuthStore.getState().accessToken || '';
+-  transportClient.connect('', token);
 +  const certHash = import.meta.env.VITE_TRANSPORT_CERT_HASH;
 +  transportClient.connect('', token, certHash);
-+}
-+
-+export function disconnectSocket() {
-+  if (transportClient.connected) {
-+    transportClient.disconnect();
-+  }
-+}
-+
-+export function emitSessionKeyRequest(conversationId: string, sessionId: string, targetId?: string) {
-+  const meId = useAuthStore.getState().user?.id;
-+  transportClient.sendEvent('session:request_key', { 
-+      conversationId, 
-+      sessionId, 
-+      targetId,
-+      requesterId: meId
-+  });
-+}
-+
-+export function emitSessionKeyFulfillment(payload: { requesterId: string; conversationId: string; sessionId: string; encryptedKey: string; }) {
-+  transportClient.sendEvent('session:fulfill_response', payload);
-+}
-+
-+export function emitGroupKeyDistribution(conversationId: string, keys: { userId: string; key: string, targetDeviceId?: string, targetDeviceKey?: string, senderDeviceKey?: string }[]): Promise<void> {
-+  return new Promise((resolve, reject) => {
-+    if (!transportClient.connected) return reject(new Error('Socket not connected'));
-+    transportClient.sendEvent('messages:distribute_keys', { conversationId, keys }, (err: any, res?: { ok: boolean }) => {
-+      if (err || !res?.ok) return reject(new Error('Failed to distribute keys'));
-+      resolve();
-+    });
-+  });
-+}
-+
-+export async function emitGroupKeyRequest(conversationId: string, targetSenderId?: string, targetDeviceKey?: string) {
-+  const { useAuthStore } = await import('../store/auth');
-+  const state = useAuthStore.getState();
-+  const myId = state.user?.id;
-+  
-+  const { getEncryptionKeyPair } = state;
-+  const { publicKey } = await getEncryptionKeyPair();
-+  const { getSodiumLib } = await import('../utils/crypto');
-+  const sodium = await getSodiumLib();
-+  const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-+  
-+  transportClient.sendEvent('group:request_key', { 
-+      conversationId, 
-+      targetSenderId, 
-+      targetDeviceKey,
-+      requesterId: myId,
-+      requesterDeviceId: myPublicKeyB64,
-+      requesterPublicKey: myPublicKeyB64
-+  });
-+}
-+
-+export function emitGroupKeyFulfillment(payload: { requesterId: string; conversationId: string; encryptedKey: string; targetDeviceId?: string; senderDeviceKey?: string; }) {
-+  transportClient.sendEvent('group:fulfilled_key', payload);
-+}
-+
-+export const fireGhostSync = (conversationId: string, baseDelay: number = 1000) => {
-+    const randomDelay = Math.floor(Math.random() * 2500) + baseDelay;
-+    setTimeout(async () => {
-+        try {
-+            const messageStore = (await import('../store/message')).useMessageStore.getState();
-+            await messageStore.sendMessage(conversationId, {
-+                content: JSON.stringify({ type: 'GHOST_SYNC', ts: Date.now() }),
-+                isSilent: true
-+            });
-+            console.log(`[Ghost Sync] Fired for group ${conversationId}`);
-+        } catch (e) {
-+            console.error('[Ghost Sync] Failed to send', e);
-+        }
-+    }, randomDelay);
-+};
-diff --git a/web/src/lib/webrtc.ts b/web/src/lib/webrtc.ts
-index afd1eeb6f..9e96b0df7 100644
---- a/web/src/lib/webrtc.ts
-+++ b/web/src/lib/webrtc.ts
-@@ -1,12 +1,13 @@
- // Copyright (c) 2026 [han]. All rights reserved.
- // This file is part of NYX, licensed under the AGPL-3.0.
- // For commercial licensing, contact [admin@nyx-app.my.id].
--import { getSocket } from './socket';
- import { useCallStore } from '../store/callStore';
- import { api } from './api';
- import { asUserId } from '@nyx/shared';
- import { WebRTCSignalingSchema } from '@nyx/shared';
- import i18n from '../i18n';
-+import { transportClient } from './transportClient';
-+import { TransportOpCode, BinaryPayload } from '@nyx/shared';
+ }
  
- let cachedIceServers: RTCIceServer[] | null = null;
- let turnCacheExp = 0;
-@@ -95,7 +96,14 @@ const sendSecureSignal = async (to: string, type: string, payload: object = {})
-   try {
-     const { encryptCallSignal } = await import('../utils/crypto');
-     const encryptedPayload = await encryptCallSignal(payload, callKey);
--    getSocket()?.emit('webrtc:secure_signal', { to, type, payload: encryptedPayload });
-+    const data = { to, type, payload: encryptedPayload };
-+    const buffer = new TextEncoder().encode(JSON.stringify(data));
-+    
-+    if (type === 'ice-candidate') {
-+      transportClient.sendDatagram(TransportOpCode.WEBRTC_ICE, buffer);
-+    } else {
-+      transportClient.sendStream(TransportOpCode.WEBRTC_SIGNAL, buffer);
-+    }
-   } catch (e) {
-     console.error(`Failed to encrypt signal ${type}`, e);
-   }
-@@ -206,7 +214,9 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
-                  // We can just send 'request' to notify them to ring.
-                  // Encrypt payload
-                  encryptCallSignal({ isVideo, callerProfile }, callKey).then(enc => {
--                     getSocket()?.emit('webrtc:secure_signal', { to: pid, type: 'request', payload: enc });
-+                     const data = { to: pid, type: 'request', payload: enc };
-+                     const buffer = new TextEncoder().encode(JSON.stringify(data));
-+                     transportClient.sendStream(TransportOpCode.WEBRTC_SIGNAL, buffer);
-                  });
-             }
-         });
-@@ -216,7 +226,9 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
-         // 2. Encrypt the signaling metadata and send via unified event
-         const payload = { isVideo, callerProfile };
-         const encryptedPayload = await encryptCallSignal(payload, callKey);
--        getSocket()?.emit('webrtc:secure_signal', { to, type: 'request', payload: encryptedPayload });
-+        const data = { to, type: 'request', payload: encryptedPayload };
-+        const buffer = new TextEncoder().encode(JSON.stringify(data));
-+        transportClient.sendStream(TransportOpCode.WEBRTC_SIGNAL, buffer);
-     }
- 
-   } catch (err) {
-@@ -267,8 +279,6 @@ export const hangup = () => {
-   cleanupCall();
- };
- 
--import type { Socket } from "socket.io-client";
--
- import type { MinimalProfile } from '../store/callStore';
- 
- type SignalingPayload = 
-@@ -279,13 +289,20 @@ type SignalingPayload =
-   | { type?: string; reason?: string; callerProfile?: MinimalProfile }
-   | Record<string, unknown>;
- 
--export const initWebRTCListeners = (socket: Socket | null) => {
--  if (!socket) return;
-+export const initWebRTCListeners = () => {
-+  if (transportClient.listenerCount('webrtc:signal') > 0) return;
- 
--  if (socket.listeners('webrtc:secure_signal').length > 0) return;
-+  transportClient.on('webrtc:signal', async (rawPayload: BinaryPayload) => {
-+    let rawJson: unknown;
-+    try {
-+        const decoded = new TextDecoder().decode(rawPayload);
-+        rawJson = JSON.parse(decoded);
-+    } catch (e) {
-+        console.error("Failed to decode and parse webrtc signal payload");
-+        return;
-+    }
- 
--  socket.on('webrtc:secure_signal', async (rawPayload: unknown) => {
--    const parsed = WebRTCSignalingSchema.safeParse(rawPayload);
-+    const parsed = WebRTCSignalingSchema.safeParse(rawJson);
- 
-     if (!parsed.success) {
-         console.error("[WebRTC Zod Shield] Dropping invalid signaling payload:", parsed.error.format());
-diff --git a/web/src/pages/BurnerChat.tsx b/web/src/pages/BurnerChat.tsx
-index f1bc5cc89..6eb7e38c1 100644
---- a/web/src/pages/BurnerChat.tsx
-+++ b/web/src/pages/BurnerChat.tsx
-@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
- import { useBurnerStore } from '../store/burner';
- import { useAuthStore } from '../store/auth';
- import { useTranslation } from 'react-i18next';
--import { getSocket, connectSocket } from '../lib/socket';
-+import { transportClient, connectSocket } from '../lib/transportClient';
- import { FiPaperclip, FiMic, FiSend } from 'react-icons/fi';
- import MessageBubble from '../components/MessageBubble';
- import type { Message } from '@nyx/shared';
-@@ -29,7 +29,7 @@ export default function BurnerChat() {
-   // Removed local isInitialized calculation as it's now handled by the store.
- 
-   useEffect(() => {
--    const socket = getSocket();
-+    const socket = transportClient;
-     if (!socket?.connected) {
-       connectSocket();
-     }
-@@ -41,12 +41,12 @@ export default function BurnerChat() {
-     }
-     
-     // Explicitly join the room for anonymous guest
--    const socket = getSocket();
-+    const socket = transportClient;
-     if (socket && location.hash) {
-        const hashPart = location.hash.split('#')[1];
-        if (hashPart) {
-           const [id] = hashPart.split(':');
--          socket.emit('burner:join', { roomId: id });
-+          transportClient.sendEvent('burner:join', { roomId: id });
-        }
-     }
-   }, [location.hash, initializeFromHash]);
-diff --git a/web/src/pages/EmbedChatPage.tsx b/web/src/pages/EmbedChatPage.tsx
-index b8cc02313..9f1e7d99e 100644
---- a/web/src/pages/EmbedChatPage.tsx
-+++ b/web/src/pages/EmbedChatPage.tsx
-@@ -37,7 +37,7 @@ export default function EmbedChatPage() {
-         useConversationStore.getState().addOrUpdateConversation(conversation);
-         useConversationStore.getState().openConversation(conversation.id);
-         
--        const { connectSocket } = await import('../lib/socket');
-+        const { connectSocket } = await import('../lib/transportClient');
-         connectSocket();
-       } catch (err: unknown) {
-         console.error('Embed initialization error:', err);
-diff --git a/web/src/pages/Login.tsx b/web/src/pages/Login.tsx
-index b5a36b39d..de3368e6e 100644
---- a/web/src/pages/Login.tsx
-+++ b/web/src/pages/Login.tsx
-@@ -9,7 +9,7 @@ import { IoFingerPrint } from "react-icons/io5";
- import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
- import { api } from "@lib/api";
- import { retrievePrivateKeys, restoreFromPhrase, hashUsername } from "@lib/crypto-worker-proxy";
--import { connectSocket } from "@lib/socket";
-+import { connectSocket } from '@lib/transportClient';
- import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, checkPanicPassword } from "@lib/keyStorage";
- import { unlockWithBiometric } from "@lib/biometricUnlock";
- import { executeLocalWipe } from "@lib/nukeProtocol";
-diff --git a/web/src/pages/MigrationReceivePage.tsx b/web/src/pages/MigrationReceivePage.tsx
-index 370fe8d1c..9321f683d 100644
---- a/web/src/pages/MigrationReceivePage.tsx
-+++ b/web/src/pages/MigrationReceivePage.tsx
-@@ -9,7 +9,7 @@ const QRCode = (
- ) as typeof QRCodeRaw;
- 
- import { FiDownloadCloud, FiCheckCircle } from 'react-icons/fi';
--import { getSocket, connectSocket } from '@lib/socket';
-+import { transportClient, connectSocket } from '@lib/transportClient';
- import { getSodium } from '@lib/sodiumInitializer';
- import { worker_file_decrypt } from '@lib/crypto-worker-proxy';
- import { importDatabaseFromJson } from '@lib/keychainDb';
-@@ -44,14 +44,14 @@ export default function MigrationReceivePage() {
-       const roomId = `mig_${uuidv4()}`;
-       const pubKeyB64 = sodium.to_base64(keypair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-       
--      const socket = getSocket();
--      if (!socket.connected) connectSocket();
-+      const socket = transportClient;
-+      if (!transportClient.connected) connectSocket();
-       
--      socket.emit('migration:join', roomId);
-+      transportClient.sendEvent('migration:join', roomId);
-       setQrData(JSON.stringify({ roomId, pubKey: pubKeyB64 }));
- 
-       // Listeners
--      socket.on('migration:start', (data) => {
-+      transportClient.on('migration:start', (data) => {
-         metaRef.current = data;
-         chunksRef.current = new Array(data.totalChunks);
-         migrationStartedRef.current = false;
-@@ -59,7 +59,7 @@ export default function MigrationReceivePage() {
-         toast.loading(tRef.current('common:migration.receiving_data', 'Menerima data...'), { id: 'mig' });
-       });
- 
--      socket.on('migration:chunk', async (data) => {
-+      transportClient.on('migration:chunk', async (data) => {
-         chunksRef.current[data.chunkIndex] = data.chunk;
-         const receivedCount = chunksRef.current.filter(Boolean).length;
-         const total = metaRef.current?.totalChunks || 1;
-@@ -77,9 +77,9 @@ export default function MigrationReceivePage() {
-     
-     return () => {
-       isMounted = false;
--      const socket = getSocket();
--      socket.off('migration:start');
--      socket.off('migration:chunk');
-+      const socket = transportClient;
-+      transportClient.off('migration:start');
-+      transportClient.off('migration:chunk');
-     };
-   }, []);
- 
-@@ -111,8 +111,8 @@ export default function MigrationReceivePage() {
-       // 5. Import to IDB
-       await importDatabaseFromJson(jsonString);
-       
--      const socket = getSocket();
--      socket.emit('migration:ack', { roomId: metaRef.current!.roomId, success: true });
-+      const socket = transportClient;
-+      transportClient.sendEvent('migration:ack', { roomId: metaRef.current!.roomId, success: true });
- 
-       setStatus('success');
-       toast.success(tRef.current('common:migration.complete', 'Migrasi Selesai!'), { id: 'mig' });
-@@ -121,9 +121,9 @@ export default function MigrationReceivePage() {
-       console.error(e);
-       toast.error(tRef.current('common:migration.decryption_failed', 'Gagal mendekripsi data.'), { id: 'mig' });
-       
--      const socket = getSocket();
-+      const socket = transportClient;
-       if (metaRef.current?.roomId) {
--         socket.emit('migration:ack', { roomId: metaRef.current.roomId, success: false });
-+         transportClient.sendEvent('migration:ack', { roomId: metaRef.current.roomId, success: false });
-       }
- 
-       setStatus('waiting');
-diff --git a/web/src/pages/MigrationSendPage.tsx b/web/src/pages/MigrationSendPage.tsx
-index 664346ad8..6ea7daeed 100644
---- a/web/src/pages/MigrationSendPage.tsx
-+++ b/web/src/pages/MigrationSendPage.tsx
-@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
- import { useNavigate, Link } from 'react-router-dom';
- import { FiUploadCloud } from 'react-icons/fi';
- import { Html5Qrcode } from 'html5-qrcode';
--import { getSocket } from '@lib/socket';
-+import { transportClient, connectSocket } from '@lib/transportClient';
- import { getSodium } from '@lib/sodiumInitializer';
- import { worker_file_encrypt } from '@lib/crypto-worker-proxy';
- import { exportDatabaseToJson } from '@lib/keychainDb';
-@@ -30,9 +30,9 @@ export default function MigrationSendPage() {
-   useEffect(() => {
-     const prefetch = async () => {
-       try {
--        const socket = getSocket();
-+        const socket = transportClient;
-         if (socket?.connected) {
--            socket.disconnect();
-+            transportClient.disconnect();
-             console.log("System Frozen: Socket disconnected to prevent Ratchet Race Condition.");
-         }
- 
-@@ -40,7 +40,7 @@ export default function MigrationSendPage() {
-         vaultDataRef.current = new TextEncoder().encode(jsonString).buffer;
-         setStatus('scanning');
-         
--        socket.connect();
-+        connectSocket();
-       } catch (e) {
-         toast.error(tRef.current('common:migration.read_vault_failed', 'Gagal membaca brankas data.'));
-       }
-@@ -48,8 +48,8 @@ export default function MigrationSendPage() {
-     prefetch();
- 
-     return () => {
--      if (getSocket()?.disconnected) {
--        getSocket().connect();
-+      if (!transportClient?.connected) {
-+        connectSocket();
-       }
-     };
-   }, []);
-@@ -102,18 +102,18 @@ export default function MigrationSendPage() {
-       toast.loading(t('common:migration.tunneling', 'Membangun terowongan aman...'), { id: 'send' });
- 
-       // 3. Chunking & Socket Emission
--      const socket = getSocket();
-+      const socket = transportClient;
-       const totalChunks = Math.ceil(combinedData.byteLength / CHUNK_SIZE);
- 
--// Hapus iv dari socket.emit
--      socket.emit('migration:start', { roomId, totalChunks, sealedKey });
-+// Hapus iv dari transportClient.emit
-+      transportClient.sendEvent('migration:start', { roomId, totalChunks, sealedKey });
- 
-       for (let i = 0; i < totalChunks; i++) {
-         const start = i * CHUNK_SIZE;
-         const end = Math.min(start + CHUNK_SIZE, combinedData.byteLength);
-         const chunk = combinedData.slice(start, end);
-         
--        socket.emit('migration:chunk', { roomId, chunkIndex: i, chunk });
-+        transportClient.sendEvent('migration:chunk', { roomId, chunkIndex: i, chunk });
-         setProgress(Math.round(((i + 1) / totalChunks) * 100));
-         
-         await new Promise(r => setTimeout(r, 50));
-@@ -124,7 +124,7 @@ export default function MigrationSendPage() {
-       // Wait for ACK
-       const ackResult = await new Promise((resolve) => {
-         const timeout = setTimeout(() => resolve(false), 30000); // 30s timeout
--        socket.once('migration:ack', (data: { roomId: string, success: boolean }) => {
-+        transportClient.once('migration:ack', (data: { roomId: string, success: boolean }) => {
-            if (data.roomId === roomId) {
-                clearTimeout(timeout);
-                resolve(data.success);
-diff --git a/web/src/store/auth.ts b/web/src/store/auth.ts
-index c9e335857..32c0e0cc1 100644
---- a/web/src/store/auth.ts
-+++ b/web/src/store/auth.ts
-@@ -4,7 +4,7 @@
- import { createWithEqualityFn } from "zustand/traditional";
- import { MinimalUserSchema } from '@nyx/shared';
- import { authFetch, api } from "@lib/api";
--import { disconnectSocket, connectSocket } from "@lib/socket";
-+import { disconnectSocket, connectSocket } from '@lib/transportClient';
- import { clearAuthCookies } from "@lib/tokenStorage";
- import { useModalStore } from "./modal";
- import { useConversationStore } from "./conversation";
-diff --git a/web/src/store/burner.ts b/web/src/store/burner.ts
-index 8abbf9040..b510ef4c0 100644
---- a/web/src/store/burner.ts
-+++ b/web/src/store/burner.ts
-@@ -1,6 +1,6 @@
- import { createWithEqualityFn } from 'zustand/traditional';
- import type { BurnerDoubleRatchetState, BurnerDoubleRatchetHeader } from '../workers/crypto.worker';
--import { getSocket } from '../lib/socket';
-+import { transportClient, } from '../lib/transportClient';
- import { worker_burner_dr_init_guest, worker_burner_dr_encrypt, worker_burner_dr_decrypt } from '../lib/crypto-worker-proxy';
- import { getSodiumLib } from '../utils/crypto';
- import { useAuthStore } from './auth';
-@@ -161,7 +161,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
-           guestClassicalPk: session.guestClassicalPk
-         };
- 
--        const socket = getSocket();
-+        const socket = transportClient;
-         
-         const currentUser = useAuthStore.getState().user;
-         const storedHostId = get().hostUserId;
-@@ -178,7 +178,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
-           const timer = setTimeout(() => resolve({ ok: false, error: 'timeout' }), 15000);
-           
-           if (isHost) {
--            socket.emit('burner:reply', {
-+            transportClient.sendEvent('burner:reply', {
-               roomId,
-               ciphertext: JSON.stringify(payload)
-             });
-@@ -186,7 +186,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
-             clearTimeout(timer);
-             resolve({ ok: true });
-           } else {
--            socket.emit('burner:send', { 
-+            transportClient.sendEvent('burner:send', { 
-               roomId, 
-               targetDeviceId: hostDeviceId, 
-               hostUserId, 
-@@ -385,10 +385,10 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
-     useMessageStore.getState().clearMessagesForConversation(roomId);
- 
-     // 4. Emit to server for blacklist reinforcement
--    const socket = getSocket();
-+    const socket = transportClient;
-     if (socket) {
-       const myUserId = useAuthStore.getState().user?.id;
--      socket.emit('burner:destroy', { roomId, hostUserId: myUserId });
-+      transportClient.sendEvent('burner:destroy', { roomId, hostUserId: myUserId });
-     }
- 
-     // 5. Atomic Redirection
-diff --git a/web/src/store/conversation.ts b/web/src/store/conversation.ts
-index bc9791a0c..468238245 100644
---- a/web/src/store/conversation.ts
-+++ b/web/src/store/conversation.ts
-@@ -4,7 +4,7 @@
- import { createWithEqualityFn } from "zustand/traditional";
- import { api, authFetch } from "@lib/api";
- import { useMessageStore, decryptMessageObject } from "./message";
--import { getSocket, emitSessionKeyRequest, fireGhostSync, emitGroupKeyDistribution } from "@lib/socket";
-+import { transportClient, emitSessionKeyRequest, fireGhostSync, emitGroupKeyDistribution } from '@lib/transportClient';
- import { useVerificationStore } from './verification';
- import { useAuthStore, User } from './auth';
- import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage, Message, Participant, ConversationUi as Conversation } from '@nyx/shared';
-@@ -328,8 +328,8 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
-       set({ conversations: sortConversations(reconciledConversations, useAuthStore.getState().user?.id) });
-       useVerificationStore.getState().loadInitialStatus(conversations);
- 
--      const socket = getSocket();
--      conversations.forEach(c => socket.emit("conversation:join", c.id));
-+      const socket = transportClient;
-+      conversations.forEach(c => transportClient.sendEvent("conversation:join", c.id));
-     } catch (error) {
-       console.error("Failed to load conversations", error);
-       set({ error: "Failed to load conversations." });
-@@ -427,7 +427,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
-           });
-       }
- 
--      getSocket().emit("conversation:join", conv.id);
-+      transportClient.sendEvent("conversation:join", conv.id);
-       get().addOrUpdateConversation(conv);
-       set({ activeId: conv.id, isSidebarOpen: false });
-       return conv.id;
-@@ -471,7 +471,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set,
-             encryptedMetadata
-         };
-         
--        getSocket().emit("conversation:join", conv.id);
-+        transportClient.sendEvent("conversation:join", conv.id);
-         get().addOrUpdateConversation(updatedConv);
-         set({ activeId: conv.id, isSidebarOpen: false });
-         
-diff --git a/web/src/store/message.ts b/web/src/store/message.ts
-index f0027c3e3..77d6fe947 100644
---- a/web/src/store/message.ts
-+++ b/web/src/store/message.ts
-@@ -5,7 +5,7 @@ import type { UserId, ConversationId, MessageId, MessageSendPayload, SystemMessa
- import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
- import { createWithEqualityFn } from "zustand/traditional";
- import { api, authFetch } from "@lib/api"; 
--import { getSocket, emitSessionKeyRequest, emitGroupKeyDistribution } from "@lib/socket";
-+import { transportClient, emitSessionKeyRequest, emitGroupKeyDistribution } from '@lib/transportClient';
- import { 
-   encryptMessage, 
-   decryptMessage, 
-@@ -827,7 +827,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
-                       window[rateLimitKey] = Date.now() as never;
- 
-                       console.log(`[Offline Sync] Received persistent key request from ${requestorId}`);
--                      import('@lib/socket').then(async ({ emitGroupKeyDistribution }) => {
-+                      import('@lib/transportClient').then(async ({ emitGroupKeyDistribution }) => {
-                            try {
-                                const { getMyEncryptionKeyPair, getSodiumLib, getWorkerProxy, fetchPreKeyBundles } = await import('@utils/crypto');
-                                const { getGroupSenderState } = await import('@lib/keychainDb');
-@@ -1320,8 +1320,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-         const ciphertextB64 = sodium.to_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
-         const payload = { header, ciphertext: ciphertextB64 };
-         
--        const socket = (await import('../lib/socket')).getSocket();
--        socket.emit('burner:reply', { roomId: conversationId, ciphertext: JSON.stringify(payload) });
-+        const socket = (await import('../lib/transportClient')).transportClient;
-+        transportClient.sendEvent('burner:reply', { roomId: conversationId, ciphertext: JSON.stringify(payload) });
-         
-         // Update local status to SENT
-         get().updateMessage(conversationId, `temp_${actualTempId}`, { status: 'SENT' });
-@@ -1608,7 +1608,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-           pushPayloads: Object.keys(pushPayloads).length > 0 ? pushPayloads : undefined
-       };
- 
--      const socket = getSocket();
-+      const socket = transportClient;
-       const isConnected = socket?.connected;
- 
-       if (!isConnected && !isReactionPayload) {
-@@ -1778,7 +1778,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-     const queue = await getQueueItems();
-     if (queue.length === 0) return;
- 
--    const socket = getSocket();
-+    const socket = transportClient;
-     if (!socket?.connected) return;
- 
-     for (const item of queue) {
-@@ -1816,7 +1816,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-           updateQueueAttempt(tempId, attempt + 1).then(() => resolve());
-         }, 5000);
- 
--        socket.emit("message:send", sendPayload, async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
-+        transportClient.sendEvent("message:send", sendPayload, async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
-           clearTimeout(timeoutId);
-           if (res.ok && res.msg) {
-             await removeFromQueue(tempId);
-@@ -2252,17 +2252,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-             if (now - lastRepair > 15000) {
-                 window[repairKey as keyof Window] = now as never;
-                 console.warn(`[Offline Sync] Meminta pengiriman ulang kunci yang hilang secara diam-diam untuk ${id}...`);
--                import('@lib/socket').then(m => m.emitGroupKeyRequest(id));
-+                import('@lib/transportClient').then(m => m.emitGroupKeyRequest(id));
-             }
-         }
- 
-         // ✅ 4. BARU TEMBAK KILL SWITCH SETELAH DATA AMAN
--        const socket = getSocket();
-+        const socket = transportClient;
-         const { user } = useAuthStore.getState();
-         if (socket?.connected && user) {
-           for (const msg of processedMessages) {
-             if (msg.senderId !== user.id) {
--              socket.emit('message:mark_as_read', { messageId: msg.id, conversationId: id });
-+              transportClient.sendEvent('message:mark_as_read', { messageId: msg.id, conversationId: id });
-             }
-           }
-         }
-@@ -2498,7 +2498,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-               
-               // Minta pengirim mem-broadcast ulang kunci distribusinya
-               // Delay is handled in crypto.ts or we can use 1.5s delay here if needed, but since crypto.ts does it, we just emit.
--              const { emitGroupKeyRequest } = await import('@lib/socket');
-+              const { emitGroupKeyRequest } = await import('@lib/transportClient');
-               emitGroupKeyRequest(conversationId);
-           }
-       }
-@@ -2716,9 +2716,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get)
-               }
- 
-               // ✅ 2. TEMBAK KILL SWITCH SETELAH AMAN DI LOKAL
--              const socket = getSocket();
-+              const socket = transportClient;
-               if (socket?.connected && currentUser && finalDecrypted.senderId !== currentUser.id && !finalDecrypted.isSilent) {
--                  socket.emit('message:mark_as_read', {
-+                  transportClient.sendEvent('message:mark_as_read', {
-                       messageId: finalDecrypted.id,
-                       conversationId: conversationId
-                   });
-diff --git a/web/src/store/messageInput.ts b/web/src/store/messageInput.ts
-index 447c7753c..12649d0c2 100644
---- a/web/src/store/messageInput.ts
-+++ b/web/src/store/messageInput.ts
-@@ -6,7 +6,7 @@ import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
- import { createWithEqualityFn } from "zustand/traditional";
- import { api, handleApiError } from "@lib/api";
- import { ensureGroupSession } from "@utils/crypto";
--import { emitGroupKeyDistribution } from "@lib/socket";
-+import { emitGroupKeyDistribution } from '@lib/transportClient';
- import toast from "react-hot-toast";
- import { useAuthStore } from "./auth";
- import { useMessageStore } from "./message";
-diff --git a/web/src/utils/crypto.ts b/web/src/utils/crypto.ts
-index 3f48df8d9..b3ca9131b 100644
---- a/web/src/utils/crypto.ts
-+++ b/web/src/utils/crypto.ts
-@@ -40,7 +40,7 @@ import {
-   emitGroupKeyDistribution, 
-   emitGroupKeyRequest, 
-   emitGroupKeyFulfillment 
--} from '@lib/socket';
-+} from '@lib/transportClient';
- import type { Participant } from '@store/conversation';
- 
- // --- Group Metadata Helpers ---
+ export function disconnectSocket() {
 diff --git a/web/src/vite-env.d.ts b/web/src/vite-env.d.ts
 index 145d97c61..bf1305c5a 100644
 --- a/web/src/vite-env.d.ts
@@ -5744,19 +3916,17 @@ index 145d97c61..bf1305c5a 100644
    [key: `sys_key_req_reply_${string}`]: number | undefined;
    [key: `last_repair_history_${string}`]: number | undefined;
 diff --git a/web/src/workers/transport.worker.ts b/web/src/workers/transport.worker.ts
-new file mode 100644
-index 000000000..541010838
---- /dev/null
+index 97924b1a5..541010838 100644
+--- a/web/src/workers/transport.worker.ts
 +++ b/web/src/workers/transport.worker.ts
-@@ -0,0 +1,174 @@
-+import { TransportOpCode, MainToTransportWorker, TransportWorkerToMain } from '@nyx/shared';
-+
-+let transport: WebTransport | null = null;
-+let controlStream: WebTransportBidirectionalStream | null = null;
-+let controlWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
-+
+@@ -4,9 +4,17 @@ let transport: WebTransport | null = null;
+ let controlStream: WebTransportBidirectionalStream | null = null;
+ let controlWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
+ 
+-async function initWebTransport(url: string, token: string) {
 +async function initWebTransport(url: string, token: string, certificateHash?: string) {
-+  try {
+   try {
+-    transport = new WebTransport(url);
 +    const options: WebTransportOptions = {};
 +    if (certificateHash) {
 +      // Remove colons if present and convert hex to Uint8Array
@@ -5766,64 +3936,29 @@ index 000000000..541010838
 +    }
 +
 +    transport = new WebTransport(url, options);
-+    await transport.ready;
-+    
-+    // Auth stream
-+    controlStream = await transport.createBidirectionalStream();
-+    controlWriter = controlStream.writable.getWriter();
-+    
-+    const tokenBytes = new TextEncoder().encode(token);
-+    // Simple framing: OP_CODE (0x00 for auth) + length + token
-+    const authFrame = new Uint8Array(1 + 4 + tokenBytes.length);
-+    authFrame[0] = 0x00;
-+    const view = new DataView(authFrame.buffer);
-+    view.setUint32(1, tokenBytes.length, false); // Big endian
-+    authFrame.set(tokenBytes, 5);
-+    
-+    await controlWriter.write(authFrame);
-+
-+    postMessage({ type: 'CONNECTED' } satisfies TransportWorkerToMain);
-+
-+    // Start reading streams
-+    readIncomingStreams(transport.incomingUnidirectionalStreams).catch(console.error);
-+    readIncomingDatagrams(transport.datagrams.readable).catch(console.error);
-+    
-+  } catch (error: any) {
-+    postMessage({ type: 'ERROR', error: error?.message || 'Connection failed' } satisfies TransportWorkerToMain);
-+  }
-+}
-+
-+async function readIncomingStreams(readable: ReadableStream<any>) {
-+  const reader = readable.getReader();
-+  try {
-+    while (true) {
-+      const { value, done } = await reader.read();
-+      if (done) break;
-+      if (value) {
-+        readSingleStream(value).catch(console.error);
-+      }
-+    }
-+  } finally {
-+    reader.releaseLock();
-+  }
-+}
-+
-+async function readSingleStream(stream: any) {
-+  const reader = stream.getReader();
+     await transport.ready;
+     
+     // Auth stream
+@@ -51,17 +59,29 @@ async function readIncomingStreams(readable: ReadableStream<any>) {
+ 
+ async function readSingleStream(stream: any) {
+   const reader = stream.getReader();
 +  const chunks: Uint8Array[] = [];
 +  let totalLength = 0;
-+  try {
-+    while (true) {
-+      const { value, done } = await reader.read();
-+      if (value) {
+   try {
+     while (true) {
+       const { value, done } = await reader.read();
+-      if (done) break;
+       if (value) {
+-        processChunk(value);
 +        chunks.push(value);
 +        totalLength += value.byteLength;
-+      }
+       }
 +      if (done) break;
-+    }
-+  } finally {
-+    reader.releaseLock();
-+  }
+     }
+   } finally {
+     reader.releaseLock();
+   }
 +  if (totalLength >= 5) {
 +    const fullBuffer = new Uint8Array(totalLength);
 +    let offset = 0;
@@ -5833,93 +3968,15 @@ index 000000000..541010838
 +    }
 +    processChunk(fullBuffer);
 +  }
-+}
-+
-+async function readIncomingDatagrams(readable: ReadableStream<Uint8Array>) {
-+  const reader = readable.getReader();
-+  try {
-+    while (true) {
-+      const { value, done } = await reader.read();
-+      if (done) break;
-+      if (value) {
-+        processChunk(value);
-+      }
-+    }
-+  } finally {
-+    reader.releaseLock();
-+  }
-+}
-+
-+function processChunk(chunk: Uint8Array) {
-+  if (chunk.length < 5) return;
-+  const opCode = chunk[0] as TransportOpCode;
-+  const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-+  const length = view.getUint32(1, false); // Big Endian
-+  
-+  if (chunk.length < 5 + length) {
-+    // Basic implementation: assuming frame isn't fragmented.
-+    // In production, we'd need a buffer to handle fragmented packets.
-+    return; 
-+  }
-+  
-+  const payload = chunk.subarray(5, 5 + length);
-+  const copiedPayload = new Uint8Array(payload); // copy to safely transfer
-+  
-+  postMessage({
-+    type: 'DATA_RECEIVED',
-+    opCode,
-+    payload: copiedPayload
-+  } satisfies TransportWorkerToMain, [copiedPayload.buffer]);
-+}
-+
-+self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
-+  const data = event.data;
-+  switch (data.type) {
-+    case 'CONNECT':
+ }
+ 
+ async function readIncomingDatagrams(readable: ReadableStream<Uint8Array>) {
+@@ -105,7 +125,7 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
+   const data = event.data;
+   switch (data.type) {
+     case 'CONNECT':
+-      await initWebTransport(data.url, data.token);
 +      await initWebTransport(data.url, data.token, data.certificateHash);
-+      break;
-+    case 'DISCONNECT':
-+      if (transport) {
-+        transport.close();
-+        transport = null;
-+        postMessage({ type: 'DISCONNECTED', reason: 'client closed' } satisfies TransportWorkerToMain);
-+      }
-+      break;
-+    case 'SEND_STREAM':
-+      if (transport) {
-+        try {
-+          const stream = await transport.createUnidirectionalStream();
-+          const writer = stream.getWriter();
-+          
-+          const frame = new Uint8Array(5 + data.payload.length);
-+          frame[0] = data.opCode;
-+          const view = new DataView(frame.buffer);
-+          view.setUint32(1, data.payload.length, false);
-+          frame.set(data.payload, 5);
-+          
-+          await writer.write(frame);
-+          await writer.close();
-+        } catch (e) {
-+          console.error("Failed to send stream", e);
-+        }
-+      }
-+      break;
-+    case 'SEND_DATAGRAM':
-+      if (transport) {
-+        try {
-+          const writer = transport.datagrams.writable.getWriter();
-+          const frame = new Uint8Array(5 + data.payload.length);
-+          frame[0] = data.opCode;
-+          const view = new DataView(frame.buffer);
-+          view.setUint32(1, data.payload.length, false);
-+          frame.set(data.payload, 5);
-+          
-+          await writer.write(frame);
-+          writer.releaseLock();
-+        } catch (e) {
-+          console.error("Failed to send datagram", e);
-+        }
-+      }
-+      break;
-+  }
-+};
+       break;
+     case 'DISCONNECT':
+       if (transport) {
