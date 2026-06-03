@@ -4,9 +4,17 @@ let transport: WebTransport | null = null;
 let controlStream: WebTransportBidirectionalStream | null = null;
 let controlWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
 
-async function initWebTransport(url: string, token: string) {
+async function initWebTransport(url: string, token: string, certificateHash?: string) {
   try {
-    transport = new WebTransport(url);
+    const options: WebTransportOptions = {};
+    if (certificateHash) {
+      // Remove colons if present and convert hex to Uint8Array
+      const hex = certificateHash.replace(/:/g, '');
+      const hashArray = new Uint8Array(hex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+      options.serverCertificateHashes = [{ algorithm: 'sha-256', value: hashArray }];
+    }
+
+    transport = new WebTransport(url, options);
     await transport.ready;
     
     // Auth stream
@@ -105,7 +113,7 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
   const data = event.data;
   switch (data.type) {
     case 'CONNECT':
-      await initWebTransport(data.url, data.token);
+      await initWebTransport(data.url, data.token, data.certificateHash);
       break;
     case 'DISCONNECT':
       if (transport) {

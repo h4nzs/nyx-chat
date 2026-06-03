@@ -4,7 +4,8 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
-import { getIo } from '../socket.js'
+import { sendJsonToUser, broadcastToConversation } from '../network/redisBridge.js';
+import { TransportOpCode } from '@nyx/shared';
 import { asConversationId, asMessageId } from '@nyx/shared'
 import { toRawServerMessage } from '../utils/mappers.js'
 import { ApiError } from '../utils/errors.js'
@@ -183,7 +184,7 @@ router.post('/', zodValidate({
     res.status(201).json(safeMessage)
 
     // EMIT & PUSH NOTIFICATION
-    getIo().to(conversationId).emit('message:new', safeMessage)
+    await broadcastToConversation(conversationId, TransportOpCode.CHAT_MESSAGE, safeMessage);
 
     const pushRecipients = participants.filter(p => p.userId !== senderId)
     if (pushRecipients.length > 0) {

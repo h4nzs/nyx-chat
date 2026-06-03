@@ -1,7 +1,11 @@
+// Copyright (c) 2026 [han]. All rights reserved.
+// This file is part of NYX, licensed under the AGPL-3.0.
+// For commercial licensing, contact [admin@nyx-app.my.id].
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
 import { requireAuth } from '../middleware/auth.js'
-import { getIo } from '../socket.js'
+import { emitEventToUser, sendJsonToUser } from '../network/redisBridge.js';
+import { TransportOpCode } from '@nyx/shared';
 import { ApiError } from '../utils/errors.js'
 import { UAParser } from 'ua-parser-js'
 import { verifyJwt } from '../utils/jwt.js'
@@ -48,33 +52,13 @@ router.get('/', requireAuth, async (req, res, next) => {
     const currentIpHash = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(rawIp), null)).substring(0, 16);
 
     const parsedSessions = sessions.map(s => {
-      const parser = new UAParser(s.userAgent || "")
-      const browser = parser.getBrowser()
-      const os = parser.getOS()
-      const parsedDevice = parser.getDevice()
-
-      const deviceInfo = [
-        parsedDevice.vendor,
-        parsedDevice.model,
-        os.name,
-        browser.name
-      ].filter(Boolean).join(' ') || 'Unknown Device'
-
-      let displayIp = s.ipAddress;
-      if (s.ipAddress === currentIpHash) {
-          displayIp = rawIp;
-          if (displayIp === '::1') displayIp = '127.0.0.1';
-          if (displayIp.startsWith('::ffff:')) displayIp = displayIp.replace('::ffff:', '');
-      } else {
-          if (s.ipAddress) {
-             displayIp = `HIDDEN (${s.ipAddress.substring(0, 6)}...)`;
-          } else {
-             displayIp = 'UNKNOWN';
-          }
-      }
-
-      // Ambil nama device dari database jika ada
       const dbDevice = userDevices.find(d => d.id === s.deviceId);
+      const ua = new UAParser(s.userAgent || '').getResult()
+      const deviceInfo = `${ua.browser.name || 'Unknown'} on ${ua.os.name || 'Unknown'}`
+      
+      // Masking IP (hanya tampilkan jika hash IP cocok dengan session atau jika admin)
+      const sessionIpHash = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(s.ipAddress || ''), null)).substring(0, 16);
+      const displayIp = (sessionIpHash === currentIpHash) ? s.ipAddress : 'Hidden for privacy';
 
       return {
         id: s.id, // Pastikan mengirim ID untuk keperluan key/revocation di frontend
@@ -102,49 +86,37 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
     const { jti } = req.params
     const userId = req.user.id
 
-    // FIX 2: Verifikasi kepemilikan melalui Device
-    const userDevices = await prisma.device.findMany({
-      where: { userId },
-      select: { id: true }
-    });
-    const deviceIds = userDevices.map(d => d.id);
-
-    const token = await prisma.refreshToken.findFirst({
-      where: { 
-        jti: jti as string, 
-        deviceId: { in: deviceIds } // Pastikan token milik salah satu device user
-      }
+    // Validasi kepemilikan session
+    const token = await prisma.refreshToken.findUnique({
+      where: { jti: String(jti) },
+      include: { device: { select: { userId: true } } }
     })
 
-    if (!token) {
-      return res.status(404).json({ error: 'Session not found or you do not have permission to revoke it.' })
+    if (!token || (token.device as any).userId !== userId) {
+      throw new ApiError(404, 'Session not found or unauthorized')
     }
 
+    // Mark as revoked in DB
     await prisma.refreshToken.update({
       where: { id: token.id },
       data: { revokedAt: new Date() }
     })
 
+    // Add to Redis blacklist (jti based)
+    const expiresIn = Math.floor((new Date(token.expiresAt).getTime() - Date.now()) / 1000)
     try {
-      await redisClient.setEx(`revoked:device:${token.deviceId}`, 900, "1")
+      if (expiresIn > 0) {
+        await redisClient.setEx(`revoked_jti:${String(jti)}`, expiresIn, '1')
+      }
     } catch (err) {
       console.error("[Session] Failed to set revoked flag in Redis:", err)
     }
 
-    const socketServer = getIo()
-    if (socketServer) {
-      socketServer.to(userId).emit('force_logout', { jti: jti as string })
-      
-      try {
-        const targetSockets = await socketServer.in(userId).fetchSockets();
-        for (const socket of targetSockets) {
-          if ((socket as unknown as { data?: { user?: { deviceId?: string } } }).data?.user?.deviceId === token.deviceId) {
-             socket.disconnect(true);
-          }
-        }
-      } catch (err) {
-        console.error("[Session] Failed to fetch sockets or disconnect:", err)
-      }
+    try {
+      await emitEventToUser(userId, 'force_logout', { jti });
+      await sendJsonToUser(userId, TransportOpCode.KICK, { deviceId: token.deviceId }, false, token.deviceId);
+    } catch (err) {
+      console.error("[Session] Failed to send KICK or force_logout:", err)
     }
 
     res.status(204).send()

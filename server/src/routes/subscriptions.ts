@@ -4,7 +4,8 @@ import { requireAuth } from '../middleware/auth.js';
 import { ApiError } from '../utils/errors.js';
 import { redisClient } from '../lib/redis.js';
 import crypto from 'crypto';
-import { getIo } from '../socket.js';
+import { sendJsonToUser, emitEventToUser } from '../network/redisBridge.js';
+import { TransportOpCode } from '@nyx/shared';
 import { SubscriptionTier } from '@nyx/shared';
 
 const router: Router = Router();
@@ -120,7 +121,8 @@ router.post('/webhook', async (req: Request, res: Response, next: NextFunction) 
       });
 
       // Emit real-time update
-      getIo().to(userId).emit('subscription_updated', {
+      await sendJsonToUser(userId, TransportOpCode.CHAT_MESSAGE, {
+        type: 'subscription_updated',
         tier: SubscriptionTier.SUBSCRIBER,
         expiresAt: expiresAt.toISOString()
       });
@@ -248,7 +250,8 @@ router.post('/nowpayments-webhook', async (req: Request, res: Response, next: Ne
       });
 
       // Emit real-time update
-      getIo().to(userId).emit('subscription_updated', {
+      await sendJsonToUser(userId, TransportOpCode.CHAT_MESSAGE, {
+        type: 'subscription_updated',
         tier: SubscriptionTier.SUBSCRIBER,
         expiresAt: expiresAt.toISOString()
       });

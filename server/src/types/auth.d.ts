@@ -3,4 +3,7 @@
 export interface AuthPayload {
   id: string;
   role?: string;
+  deviceId?: string;
 }
+
+export type AuthJwtPayload = AuthPayload;

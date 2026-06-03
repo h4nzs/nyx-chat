@@ -27,9 +27,10 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     this.worker.onmessage = this.handleWorkerMessage.bind(this);
   }
 
-  public connect(url: string, token: string): void {
+  public connect(url: string, token: string, certificateHash?: string): void {
     const defaultUrl = import.meta.env.VITE_TRANSPORT_URL || import.meta.env.VITE_API_URL?.replace('http', 'https') || 'https://api.nyx-app.my.id/transport';
-    this.worker.postMessage({ type: 'CONNECT', url: url || defaultUrl, token } satisfies MainToTransportWorker);
+    const hash = certificateHash || import.meta.env.VITE_TRANSPORT_CERT_HASH;
+    this.worker.postMessage({ type: 'CONNECT', url: url || defaultUrl, token, certificateHash: hash } satisfies MainToTransportWorker);
   }
 
   public disconnect(): void {
@@ -155,7 +156,8 @@ export const transportClient = new NyxWebTransportClient();
 export function connectSocket() {
   if (transportClient.connected) return;
   const token = useAuthStore.getState().accessToken || '';
-  transportClient.connect('', token);
+  const certHash = import.meta.env.VITE_TRANSPORT_CERT_HASH;
+  transportClient.connect('', token, certHash);
 }
 
 export function disconnectSocket() {

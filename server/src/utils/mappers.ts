@@ -57,6 +57,43 @@ export interface PrismaConversationInput {
   participants?: PrismaParticipantInput[]; 
 }
 
+export type RawConversationData = PrismaConversationInput;
+export type UserWithDevices = PrismaUserProfileInput;
+
+export const userSelectWithKeys = {
+  id: true,
+  usernameHash: true,
+  encryptedProfile: true,
+  devices: {
+    select: {
+      id: true,
+      publicKey: true,
+      pqPublicKey: true,
+      signingKey: true
+    }
+  }
+};
+
+export function hoistKeys(user: UserWithDevices): any {
+  if (!user.devices || user.devices.length === 0) return user;
+  return {
+    ...user,
+    publicKey: Buffer.from(user.devices[0].publicKey).toString('base64url'),
+    pqPublicKey: user.devices[0].pqPublicKey ? Buffer.from(user.devices[0].pqPublicKey).toString('base64url') : null,
+    signingKey: Buffer.from(user.devices[0].signingKey).toString('base64url')
+  };
+}
+
+export function hoistConvoKeys(convo: RawConversationData): any {
+  return {
+    ...convo,
+    participants: convo.participants?.map(p => ({
+      ...p,
+      user: p.user ? hoistKeys(p.user as UserWithDevices) : null
+    }))
+  };
+}
+
 // --- 2. MAPPER FUNCTIONS ---
 
 export const toMinimalProfile = (user: PrismaUserProfileInput): MinimalProfile => ({

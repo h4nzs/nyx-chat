@@ -6,7 +6,8 @@ import { prisma } from '../lib/prisma.js';
 import { s3Client } from '../utils/r2.js';
 import { ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { env } from '../config.js';
-import { getIo } from '../socket.js';
+import { emitEventToUser, sendJsonToUser } from '../network/redisBridge.js';
+import { TransportOpCode } from '@nyx/shared';
 
 const router = Router();
 
@@ -85,14 +86,12 @@ router.post('/ban', requireAuth, requireAdmin, async (req, res) => {
         data: { bannedAt: new Date(), banReason: reason || 'Violation of TOS' }
     });
 
-    // KICK USER DARI SOCKET
-    const io = getIo();
-    if (io) {
-        io.to(userId).emit('auth:banned', { reason }); 
-        // Force disconnect logic if socket tracking by user ID is implemented
-        // Note: Standard socket.io doesn't easily map userId -> socketId without an adapter/store.
-        // But we can try to broadcast to their room if they join 'user_{id}' room.
-        // Otherwise, rely on client receiving 'auth:banned' to logout.
+    // KICK USER DARI WEBTRANSPORT
+    try {
+      await emitEventToUser(userId, 'auth:banned', { reason });
+      await sendJsonToUser(userId, TransportOpCode.KICK, { reason });
+    } catch (err) {
+      console.error("[Admin] Failed to ban/kick user:", err);
     }
 
     res.json({ message: 'User banned successfully' });

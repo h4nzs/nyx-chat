@@ -14,11 +14,14 @@ use bytes::{BufMut, BytesMut};
 struct Claims {
     id: Option<String>,
     sub: Option<String>,
+    #[serde(rename = "deviceId")]
+    device_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct UpstreamMessage {
     user_id: String,
+    device_id: String,
     op_code: u8,
     payload: String,
 }
@@ -26,12 +29,13 @@ struct UpstreamMessage {
 #[derive(Serialize, Deserialize, Debug)]
 struct DownstreamMessage {
     user_id: String,
+    device_id: Option<String>,
     op_code: u8,
     is_datagram: bool,
     payload: String,
 }
 
-type SessionMap = Arc<DashMap<String, Arc<Connection>>>;
+type SessionMap = Arc<DashMap<String, Arc<Connection>>>; // Key: "user_id:device_id"
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -86,42 +90,68 @@ async fn main() -> Result<()> {
                 }
             };
 
-            if let Some(conn) = sessions_clone.get(&down_msg.user_id) {
-                let conn = conn.value().clone();
-                let op_code = down_msg.op_code;
-                
-                tokio::spawn(async move {
-                    let mut frame = BytesMut::with_capacity(5 + payload_bytes.len());
-                    frame.put_u8(op_code);
-                    frame.put_u32(payload_bytes.len() as u32);
-                    frame.put_slice(&payload_bytes);
+            if let Some(target_device) = down_msg.device_id {
+                let key = format!("{}:{}", down_msg.user_id, target_device);
+                if let Some(conn) = sessions_clone.get(&key) {
+                    let conn = conn.value().clone();
+                    let op_code = down_msg.op_code;
+                    
+                    if op_code == 0x07 { // KICK
+                        conn.close(1000u32.into(), b"Kicked by server");
+                        continue;
+                    }
 
-                    if down_msg.is_datagram {
-                        if let Err(e) = conn.send_datagram(frame.freeze()) {
-                            error!("Failed to send datagram to {}: {:?}", down_msg.user_id, e);
-                        }
-                    } else {
-                        match conn.open_uni().await {
-                            Ok(opening) => {
-                                tokio::spawn(async move {
-                                    match opening.await {
-                                        Ok(mut stream) => {
-                                            if let Err(e) = stream.write_all(&frame).await {
-                                                error!("Failed to write stream to {}: {:?}", down_msg.user_id, e);
-                                            }
-                                        }
-                                        Err(e) => {
-                                            error!("Failed to await OpeningUniStream to {}: {:?}", down_msg.user_id, e);
-                                        }
+                    tokio::spawn(async move {
+                        let mut frame = BytesMut::with_capacity(5 + payload_bytes.len());
+                        frame.put_u8(op_code);
+                        frame.put_u32(payload_bytes.len() as u32);
+                        frame.put_slice(&payload_bytes);
+
+                        if down_msg.is_datagram {
+                            let _ = conn.send_datagram(frame.freeze());
+                        } else {
+                            if let Ok(opening) = conn.open_uni().await {
+                                let _ = tokio::spawn(async move {
+                                    if let Ok(mut stream) = opening.await {
+                                        let _ = stream.write_all(&frame).await;
                                     }
                                 });
                             }
-                            Err(e) => {
-                                error!("Failed to open stream to {}: {:?}", down_msg.user_id, e);
+                        }
+                    });
+                }
+            } else {
+                // Broadcast to all devices of this user
+                let prefix = format!("{}:", down_msg.user_id);
+                for item in sessions_clone.iter().filter(|i| i.key().starts_with(&prefix)) {
+                    let conn = item.value().clone();
+                    let op_code = down_msg.op_code;
+                    let payload_clone = payload_bytes.clone();
+                    
+                    if op_code == 0x07 { // KICK
+                        conn.close(1000u32.into(), b"Kicked by server");
+                        continue;
+                    }
+
+                    tokio::spawn(async move {
+                        let mut frame = BytesMut::with_capacity(5 + payload_clone.len());
+                        frame.put_u8(op_code);
+                        frame.put_u32(payload_clone.len() as u32);
+                        frame.put_slice(&payload_clone);
+
+                        if down_msg.is_datagram {
+                            let _ = conn.send_datagram(frame.freeze());
+                        } else {
+                            if let Ok(opening) = conn.open_uni().await {
+                                let _ = tokio::spawn(async move {
+                                    if let Ok(mut stream) = opening.await {
+                                        let _ = stream.write_all(&frame).await;
+                                    }
+                                });
                             }
                         }
-                    }
-                });
+                    });
+                }
             }
         }
     });
@@ -184,14 +214,17 @@ async fn handle_connection(
     val.insecure_disable_signature_validation();
     let token_data = decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val)?;
     let user_id = token_data.claims.id.or(token_data.claims.sub).unwrap_or_else(|| "anon".to_string());
+    let device_id = token_data.claims.device_id.unwrap_or_else(|| "unknown".to_string());
 
-    info!("User {} authenticated via WebTransport", user_id);
+    info!("User {} (device {}) authenticated via WebTransport", user_id, device_id);
 
+    let session_key = format!("{}:{}", user_id, device_id);
     let conn = Arc::new(conn);
-    sessions.insert(user_id.clone(), conn.clone());
+    sessions.insert(session_key.clone(), conn.clone());
 
     let c2 = conn.clone();
     let user_id2 = user_id.clone();
+    let device_id2 = device_id.clone();
     let p2 = pub_conn.clone();
     tokio::spawn(async move {
         loop {
@@ -199,6 +232,7 @@ async fn handle_connection(
                 Ok(mut stream) => {
                     let mut p = p2.clone();
                     let uid = user_id2.clone();
+                    let did = device_id2.clone();
                     tokio::spawn(async move {
                         let mut buffer = Vec::new();
                         let mut chunk = [0u8; 4096];
@@ -215,6 +249,7 @@ async fn handle_connection(
                                 
                                 let msg = UpstreamMessage {
                                     user_id: uid,
+                                    device_id: did,
                                     op_code,
                                     payload: b64_payload,
                                 };
@@ -234,6 +269,7 @@ async fn handle_connection(
 
     let c3 = conn.clone();
     let user_id3 = user_id.clone();
+    let device_id3 = device_id.clone();
     tokio::spawn(async move {
         loop {
             match c3.receive_datagram().await {
@@ -247,6 +283,7 @@ async fn handle_connection(
                             
                             let msg = UpstreamMessage {
                                 user_id: user_id3.clone(),
+                                device_id: device_id3.clone(),
                                 op_code,
                                 payload: b64_payload,
                             };
@@ -264,7 +301,7 @@ async fn handle_connection(
     });
 
     conn.closed().await;
-    sessions.remove(&user_id);
-    info!("User {} disconnected", user_id);
+    sessions.remove(&session_key);
+    info!("User {} (device {}) disconnected", user_id, device_id);
     Ok(())
 }

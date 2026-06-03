@@ -48,10 +48,12 @@ import { useShallow } from 'zustand/react/shallow';
 
 // Libs & Utils
 import { transportClient, connectSocket, disconnectSocket } from './lib/transportClient';
+import { initSocketListeners } from './lib/socketListeners';
 import { initWebRTCListeners } from './lib/webrtc';
 
 // Initialize socket instance once
 transportClient;
+initSocketListeners();
 
 // --- Components ---
 

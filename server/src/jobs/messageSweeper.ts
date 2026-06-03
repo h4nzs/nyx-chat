@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
-import { getIo } from '../socket.js';
+import { emitEventToUser } from '../network/redisBridge.js';
+import { TransportOpCode } from '@nyx/shared';
 
 // Jalanin fungsi ini setiap 1 menit (* * * * *)
 export const startMessageSweeper = () => {
@@ -34,7 +35,7 @@ export const startMessageSweeper = () => {
                 }
               ]
             },
-            select: { id: true, conversationId: true },
+            select: { id: true, conversationId: true, conversation: { include: { participants: true } } },
             take: BATCH_SIZE
           });
 
@@ -49,21 +50,11 @@ export const startMessageSweeper = () => {
           where: { id: { in: messageIds } }
         });
 
-        // 4. Kasih tau Frontend lewat Socket.IO (Group by Conversation)
-        const io = getIo();
-        if (io) {
-          const messagesByConvo: Record<string, string[]> = {};
-
-          expiredMessages.forEach(m => {
-            if (!messagesByConvo[m.conversationId]) {
-              messagesByConvo[m.conversationId] = [];
+        // 4. Kasih tau Frontend lewat Redis Bridge
+        for (const m of expiredMessages) {
+            for (const p of m.conversation.participants) {
+                await emitEventToUser(p.userId, 'message:deleted_batch', { messageIds: [m.id], conversationId: m.conversationId });
             }
-            messagesByConvo[m.conversationId].push(m.id);
-          });
-
-          Object.entries(messagesByConvo).forEach(([convoId, ids]) => {
-            io.to(convoId).emit('messages:expired', { messageIds: ids });
-          });
         }
 
         processedCount += expiredMessages.length;
@@ -78,3 +69,4 @@ export const startMessageSweeper = () => {
     }
   }, { noOverlap: true });
 };
+
