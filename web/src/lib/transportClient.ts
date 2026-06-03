@@ -28,9 +28,18 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   }
 
   public connect(url: string, token: string, certificateHash?: string): void {
-    const defaultUrl = import.meta.env.VITE_TRANSPORT_URL || import.meta.env.VITE_API_URL?.replace('http', 'https') || 'https://api.nyx-app.my.id/transport';
+    const rawUrl = url || import.meta.env.VITE_TRANSPORT_URL || import.meta.env.VITE_API_URL?.replace('http', 'https') || 'https://api.nyx-app.my.id/transport';
+    
+    // Ensure URL has https:// scheme as required by WebTransport
+    let finalUrl = rawUrl;
+    if (!finalUrl.startsWith('https://') && !finalUrl.startsWith('http://')) {
+       finalUrl = 'https://' + finalUrl;
+    } else if (finalUrl.startsWith('http://')) {
+       finalUrl = finalUrl.replace('http://', 'https://');
+    }
+
     const hash = certificateHash || import.meta.env.VITE_TRANSPORT_CERT_HASH;
-    this.worker.postMessage({ type: 'CONNECT', url: url || defaultUrl, token, certificateHash: hash } satisfies MainToTransportWorker);
+    this.worker.postMessage({ type: 'CONNECT', url: finalUrl, token, certificateHash: hash } satisfies MainToTransportWorker);
   }
 
   public disconnect(): void {

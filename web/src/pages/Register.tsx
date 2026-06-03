@@ -50,7 +50,18 @@ export default function Register() {
     }
   }, [user, navigate]);
 
+  // ✅ FIX: Use testing sitekey on localhost to prevent origin mismatch errors
+  const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || 
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
+      ? '1x00000000000000000000AA' 
+      : '');
+
   async function handleRegister(data: { name?: string, d?: string, b?: string }) {
+    if (!TURNSTILE_SITE_KEY) {
+      toast.error(t('errors:turnstile_missing'));
+      return;
+    }
+
     if (!turnstileToken) {
       toast.error(t('auth:errors.wait_turnstile', 'Please wait for the security check to complete.'));
       return;
@@ -244,17 +255,17 @@ export default function Register() {
           {/* Modified AuthForm for Username Only */}
           <AuthForm
             onSubmit={handleRegister}
-            button={!import.meta.env.VITE_TURNSTILE_SITE_KEY ? 'Configuration Error' : (!turnstileToken ? t('auth:status.verifying_security', 'Checking Security...') : t('auth:buttons.register'))}
+            button={!TURNSTILE_SITE_KEY ? 'Configuration Error' : (!turnstileToken ? t('auth:status.verifying_security', 'Checking Security...') : t('auth:buttons.register'))}
             hideEmail={true} 
             isRegister={true}
-            disabled={!import.meta.env.VITE_TURNSTILE_SITE_KEY || !turnstileToken}
+            disabled={!TURNSTILE_SITE_KEY || !turnstileToken}
           />
 
           {/* Turnstile Widget */}
           <div className="mt-4 flex justify-center">
-            {import.meta.env.VITE_TURNSTILE_SITE_KEY ? (
+            {TURNSTILE_SITE_KEY ? (
               <Turnstile
-                siteKey={import.meta.env.VITE_TURNSTILE_SITE_KEY}
+                siteKey={TURNSTILE_SITE_KEY}
                 onSuccess={setTurnstileToken}
                 onError={() => toast.error(t('auth:errors.security_check_failed', 'Security check failed.'))}
                 onExpire={() => setTurnstileToken('')}

@@ -73,17 +73,29 @@ async function verifyTurnstileToken (token: string): Promise<boolean> {
   if (env.nodeEnv !== 'production' && !process.env.TURNSTILE_SECRET_KEY) return true
   if (!token) return false
 
-  const formData = new FormData()
-  formData.append('secret', process.env.TURNSTILE_SECRET_KEY || '')
-  formData.append('response', token)
-
-  try {
-    const result = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: formData })
-    const outcome = await result.json() as { success: boolean }
-    return outcome.success
-  } catch (e) {
-    return false
+  const verify = async (secret: string) => {
+    const formData = new FormData()
+    formData.append('secret', secret)
+    formData.append('response', token)
+    try {
+      const result = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', { method: 'POST', body: formData })
+      const outcome = await result.json() as { success: boolean }
+      return outcome.success
+    } catch (e) {
+      return false
+    }
   }
+
+  // 1. Try with configured secret
+  const ok = await verify(process.env.TURNSTILE_SECRET_KEY || '')
+  if (ok) return true
+
+  // 2. If dev, try with dummy secret (for localhost sitekey: 1x00000000000000000000AA)
+  if (env.nodeEnv !== 'production') {
+    return await verify('1x0000000000000000000000000000000AA')
+  }
+
+  return false
 }
 
 const isValidBase64Url = (str: string, expectedBytes?: number) => {

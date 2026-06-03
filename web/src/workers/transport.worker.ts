@@ -7,14 +7,27 @@ let controlWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
 async function initWebTransport(url: string, token: string, certificateHash?: string) {
   try {
     const options: WebTransportOptions = {};
-    if (certificateHash) {
-      // Remove colons if present and convert hex to Uint8Array
-      const hex = certificateHash.replace(/:/g, '');
-      const hashArray = new Uint8Array(hex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
-      options.serverCertificateHashes = [{ algorithm: 'sha-256', value: hashArray }];
+    if (certificateHash && certificateHash.trim()) {
+      // Robust hash parsing: Remove colons/spaces and verify length
+      const hex = certificateHash.replace(/[:\s]/g, '');
+      if (hex.length === 64) { // SHA-256 is 32 bytes = 64 hex chars
+        const match = hex.match(/.{1,2}/g);
+        if (match) {
+          const hashArray = new Uint8Array(match.map(byte => parseInt(byte, 16)));
+          options.serverCertificateHashes = [{ algorithm: 'sha-256', value: hashArray }];
+        }
+      }
     }
 
     transport = new WebTransport(url, options);
+    
+    // Prevent "Uncaught (in promise)" error when connection is rejected
+    transport.closed.then(() => {
+      postMessage({ type: 'DISCONNECTED', reason: 'connection closed' } satisfies TransportWorkerToMain);
+    }).catch(() => {
+      // Error is already handled via transport.ready catch block
+    });
+
     await transport.ready;
     
     // Auth stream
@@ -125,6 +138,11 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
   const data = event.data;
   switch (data.type) {
     case 'CONNECT':
+      // Cleanup previous connection if any
+      if (transport) {
+        try { transport.close(); } catch (e) {}
+        transport = null;
+      }
       await initWebTransport(data.url, data.token, data.certificateHash);
       break;
     case 'DISCONNECT':
