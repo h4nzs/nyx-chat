@@ -1,47 +1,34 @@
+// [Bypass] Mencegah PGlite mendeteksi environment Node.js palsu dari Polyfill Vite
+if (typeof process !== 'undefined' && process.versions) {
+    try {
+        Object.defineProperty(process.versions, 'node', { value: undefined, writable: true });
+    } catch (e) {}
+}
+
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle } from 'drizzle-orm/pglite';
 import * as schema from '../lib/db/schema';
 import { sql, eq, and, desc, inArray } from 'drizzle-orm';
 
 let pg: any;
 let db: any;
+let initError: Error | null = null;
 
 async function init() {
   try {
-    const { PGlite } = await import('@electric-sql/pglite');
-    const { drizzle } = await import('drizzle-orm/pglite');
-
-    // Destructive Dexie cleanup (Reset IndexedDB)
-    try {
-      if (typeof indexedDB !== 'undefined') {
+    if (typeof indexedDB !== 'undefined') {
+      try {
         console.warn('[pglite-worker] Purging legacy Dexie database...');
         indexedDB.deleteDatabase('NyxUnifiedDB');
-      }
-    } catch (e) {
-      console.warn('[pglite-worker] Failed to delete legacy Dexie database:', e);
-    }
-
-    // Helper for timeout
-    const withTimeout = (promise: Promise<any>, ms: number) => {
-      let timeoutId: any;
-      const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('Timeout')), ms);
-      });
-      return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
-    };
-
-    try {
-      pg = await withTimeout(PGlite.create('opfs://nyx-chat-pg'), 3000);
-    } catch (opfsErr) {
-      console.warn('[pglite-worker] OPFS failed or timed out. Falling back to idb://', opfsErr);
-      try {
-        pg = await withTimeout(PGlite.create('idb://nyx-chat-pg'), 3000);
-      } catch (idbErr) {
-        console.warn('[pglite-worker] IDB failed or timed out. Falling back to memory://', idbErr);
-        pg = await PGlite.create('memory://');
+      } catch (e) {
+        console.warn('[pglite-worker] Failed to delete legacy Dexie database:', e);
       }
     }
+
+    // STRICT OPFS - Tidak ada fallback!
+    pg = await PGlite.create('opfs://nyx-chat-pg');
     db = drizzle(pg, { schema });
 
-    // Initial schema creation
     await pg.exec(`
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
@@ -151,33 +138,39 @@ async function init() {
       );
     `);
 
-    console.log('[pglite-worker] PGlite initialized successfully.');
+    console.log('[pglite-worker] PGlite initialized successfully with OPFS.');
     self.postMessage({ type: 'READY' });
   } catch (err: any) {
     console.error('[pglite-worker] Initialization failed:', err);
-    self.postMessage({ type: 'ERROR', error: err instanceof Error ? err.message : String(err) });
+    initError = err instanceof Error ? err : new Error(String(err));
+    self.postMessage({ type: 'ERROR', error: initError.message });
   }
 }
 
 const initPromise = init();
 
 function getTablePrimaryKey(targetTable: any) {
-  // In Drizzle, table properties are the columns
   for (const key in targetTable) {
     const col = targetTable[key];
     if (col && typeof col === 'object' && col.primary) {
       return col;
     }
   }
-  // Fallback to common names
   return targetTable.id || targetTable.key || targetTable.keyId || targetTable.tempId || 
          targetTable.conversationId || targetTable.messageId || targetTable.storyId || 
          targetTable.userId || targetTable.storageKey || targetTable.headerKey;
 }
 
 self.onmessage = async (e) => {
-  await initPromise;
   const { id, type, table, payload } = e.data;
+  
+  await initPromise;
+  
+  if (initError) {
+    self.postMessage({ id, error: initError.message });
+    return;
+  }
+
   const targetTable = (schema as any)[table];
 
   if (!targetTable && type !== 'query_messages') {

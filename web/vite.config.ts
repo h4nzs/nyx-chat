@@ -9,11 +9,51 @@ import packageJson from './package.json';
 // Bikin fungsi 'require' palsu karena kita di environment Module (ESM)
 const require = createRequire(import.meta.url);
 
+// Plugin untuk mencegah Vite crash saat mengeksekusi modul Node.js milik PGlite di browser
+function nodePolyfillPlugin() {
+  return {
+    name: 'vite-plugin-node-stub',
+    resolveId(id) {
+      if (['path', 'fs', 'os', 'crypto', 'child_process'].includes(id)) {
+        return '\0node-stub-' + id;
+      }
+    },
+    load(id) {
+      if (id.startsWith('\0node-stub-')) {
+        const moduleName = id.replace('\0node-stub-', '');
+        if (moduleName === 'path') {
+          return `
+            const resolve = function() { return Array.from(arguments).join('/'); };
+            const join = function() { return Array.from(arguments).join('/'); };
+            const dirname = function() { return ''; };
+            const basename = function() { return ''; };
+            export { resolve, join, dirname, basename };
+            export default { resolve, join, dirname, basename };
+          `;
+        }
+        if (moduleName === 'fs') {
+          return `
+            export const promises = { 
+              mkdir: async function() {}, 
+              readFile: async function() { return ''; }, 
+              writeFile: async function() {} 
+            };
+            export const existsSync = function() { return false; };
+            export default { promises, existsSync };
+          `;
+        }
+        return `export default {};`;
+      }
+    }
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
 
   return {
   plugins: [
+    nodePolyfillPlugin(), // INJEKSI PLUGIN DI SINI
     tailwindcss(),
     react(),
     VitePWA({
@@ -96,7 +136,11 @@ export default defineConfig(({ mode }) => {
     exclude: ['@electric-sql/pglite', 'drizzle-orm']
   },
   worker: {
-    format: 'es'
+    format: 'es',
+    // INI WAJIB DITAMBAHKAN AGAR WORKER TIDAK MEM-BUNDLE PGLITE (Mencegah o.resolve error)
+    optimizeDeps: {
+      exclude: ['@electric-sql/pglite', 'drizzle-orm']
+    }
   },
   define: {
     // Only inject Buffer polyfill if NOT in test mode to avoid Vitest serialization crash
