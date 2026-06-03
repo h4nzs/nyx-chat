@@ -130,7 +130,14 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
        });
     }
     
-    this.sendJsonStream(TransportOpCode.KEY_SYNC, { event, msgId, data });
+    // Intelligent Routing
+    if (event === 'message:send') {
+        this.sendJsonStream(TransportOpCode.CHAT_MESSAGE, { ...data, msgId });
+    } else if (event.startsWith('user:') || event.startsWith('typing:')) {
+        this.sendJsonStream(TransportOpCode.PRESENCE, { event, ...data });
+    } else {
+        this.sendJsonStream(TransportOpCode.KEY_SYNC, { event, msgId, data });
+    }
   }
 
   public timeout(ms: number) {

@@ -59,16 +59,28 @@ async function readIncomingStreams(readable: ReadableStream<any>) {
 
 async function readSingleStream(stream: any) {
   const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalLength = 0;
   try {
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
       if (value) {
-        processChunk(value);
+        chunks.push(value);
+        totalLength += value.byteLength;
       }
+      if (done) break;
     }
   } finally {
     reader.releaseLock();
+  }
+  if (totalLength >= 5) {
+    const fullBuffer = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const c of chunks) {
+      fullBuffer.set(c, offset);
+      offset += c.byteLength;
+    }
+    processChunk(fullBuffer);
   }
 }
 

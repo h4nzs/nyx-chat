@@ -210,8 +210,7 @@ async fn handle_connection(
     }
     
     let token = String::from_utf8(token_bytes).unwrap_or_default();
-    let mut val = Validation::default();
-    val.insecure_disable_signature_validation();
+    let val = Validation::new(jsonwebtoken::Algorithm::HS256);
     let token_data = decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val)?;
     let user_id = token_data.claims.id.or(token_data.claims.sub).unwrap_or_else(|| "anon".to_string());
     let device_id = token_data.claims.device_id.unwrap_or_else(|| "unknown".to_string());

@@ -114,7 +114,7 @@ export async function broadcastToUsers(userIds: string[], opCode: TransportOpCod
   }
 }
 
-async function handleUpstreamMessage(userId: string, deviceId: string, opCode: number, base64Payload: string, msgId?: string) {
+async function handleUpstreamMessage(userId: string, deviceId: string, opCode: number, base64Payload: string, _msgIdFromWrapper?: string) {
   const buffer = Buffer.from(base64Payload, 'base64');
   const payloadStr = buffer.toString('utf-8');
   let payload: any;
@@ -124,6 +124,8 @@ async function handleUpstreamMessage(userId: string, deviceId: string, opCode: n
   } catch (e) {
     payload = payloadStr;
   }
+  
+  const msgId = payload?.msgId;
 
   switch (opCode) {
     case TransportOpCode.CHAT_MESSAGE:
@@ -372,6 +374,104 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
 
          const emitPayload = { conversationId, encryptedKey, type: 'GROUP_KEY', senderId: userId, senderDeviceKey };
          await emitEventToUser(requesterId, 'session:new_key', emitPayload, targetDeviceId);
+         break;
+       }
+
+       case 'message:unsend': {
+         const { messageId, conversationId } = data;
+         if (!messageId || !conversationId) return;
+         const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { senderId: true, conversationId: true } });
+         if (!msg || msg.conversationId !== conversationId || msg.senderId !== userId) return;
+         await prisma.message.deleteMany({ where: { id: messageId, senderId: userId } });
+         await emitEventToConversation(conversationId, 'message:deleted_remotely', { messageId, conversationId, deletedBy: userId }, userId);
+         break;
+       }
+
+       case 'message:view_once_opened': {
+         const { messageId, conversationId } = data;
+         if (!messageId || !conversationId) return;
+         const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { senderId: true, conversationId: true } });
+         if (!msg || msg.senderId === userId || msg.conversationId !== conversationId) return;
+         await emitEventToConversation(conversationId, 'message:viewed', { messageId, conversationId }, userId);
+         break;
+       }
+
+       case 'push:subscribe': {
+         const { endpoint, keys } = data;
+         if (!endpoint || !keys?.p256dh || !keys?.auth) return;
+         await prisma.pushSubscription.upsert({
+           where: { endpoint },
+           update: { p256dh: keys.p256dh, auth: keys.auth, deviceId },
+           create: { endpoint, p256dh: keys.p256dh, auth: keys.auth, deviceId }
+         });
+         break;
+       }
+
+       case 'push:unsubscribe': {
+         await prisma.pushSubscription.deleteMany({ where: { deviceId } });
+         break;
+       }
+
+       // --- BURNER CHAT EVENTS ---
+       case 'burner:join': {
+         if (data?.roomId) await pubClient.sAdd(`burner:room:${data.roomId}`, userId);
+         break;
+       }
+       case 'burner:send': {
+         const { roomId, targetDeviceId, hostUserId, ciphertext } = data;
+         if (await redisClient.exists(`burner:terminated:${roomId}`)) return;
+         await sendJsonToUser(hostUserId, TransportOpCode.KEY_SYNC, { event: 'burner:receive', data: { roomId, ciphertext } }, false, targetDeviceId);
+         if (msgId) await sendAck(userId, deviceId, msgId, { ok: true });
+         break;
+       }
+       case 'burner:reply': {
+         const { roomId, ciphertext } = data;
+         if (await redisClient.exists(`burner:terminated:${roomId}`)) return;
+         const members = await pubClient.sMembers(`burner:room:${roomId}`);
+         for (const memberId of members) {
+            if (memberId !== userId) await sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'burner:receive', data: { roomId, ciphertext } });
+         }
+         break;
+       }
+       case 'burner:destroy': {
+         const { roomId } = data;
+         await redisClient.set(`burner:terminated:${roomId}`, "1", { EX: 86400 });
+         const members = await pubClient.sMembers(`burner:room:${roomId}`);
+         for (const memberId of members) {
+            await sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'burner:terminated', data: { roomId } });
+         }
+         await pubClient.del(`burner:room:${roomId}`);
+         break;
+       }
+
+       // --- MIGRATION EVENTS ---
+       case 'migration:join': {
+         if (data) await pubClient.sAdd(`migration:room:${data}`, userId);
+         break;
+       }
+       case 'migration:start': {
+         const { roomId } = data;
+         await redisClient.set(`migration_owner:${roomId}`, userId, { EX: 3600 });
+         const members = await pubClient.sMembers(`migration:room:${roomId}`);
+         for (const memberId of members) {
+            if (memberId !== userId) await sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'migration:start', data });
+         }
+         break;
+       }
+       case 'migration:chunk': {
+         const { roomId } = data;
+         const ownerId = await redisClient.get(`migration_owner:${roomId}`);
+         if (ownerId !== userId) return;
+         const members = await pubClient.sMembers(`migration:room:${roomId}`);
+         for (const memberId of members) {
+            if (memberId !== userId) await sendJsonToUser(memberId, TransportOpCode.KEY_SYNC, { event: 'migration:chunk', data });
+         }
+         break;
+       }
+       case 'migration:ack': {
+         const { roomId } = data;
+         const ownerId = await redisClient.get(`migration_owner:${roomId}`);
+         if (ownerId) await sendJsonToUser(ownerId, TransportOpCode.KEY_SYNC, { event: 'migration:ack', data });
          break;
        }
 
