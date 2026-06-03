@@ -28,7 +28,7 @@ router.get('/me', async (req, res, next) => {
     
     let user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
+      select: { id: true, usernameHash: true, role: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
     })
 
     if (!user) throw new ApiError(404, 'User not found');
@@ -39,7 +39,7 @@ router.get('/me', async (req, res, next) => {
         user = await prisma.user.update({
             where: { id: userId },
             data: { subscriptionTier: 'FREE' },
-            select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
+            select: { id: true, usernameHash: true, role: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
         });
     }
 
@@ -56,6 +56,7 @@ router.get('/me/devices', async (req, res, next) => {
 
     const devices = await prisma.device.findMany({
       where: { userId },
+      orderBy: { lastActiveAt: 'desc' },
       select: { id: true, name: true, lastActiveAt: true, createdAt: true }
     })
 
@@ -137,39 +138,46 @@ router.put('/me',
   }
 )
 
-// BLOCK a user
+// BLOCK User
 router.post('/:id/block', async (req, res, next) => {
   try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const blockerId = req.user.id
-    const blockedId = req.params.id
-
-    if (blockerId === blockedId) throw new ApiError(400, 'You cannot block yourself.')
+    if (!req.user) throw new ApiError(401, 'Authentication required.');
+    const blockerId = req.user.id;
+    const blockedId = req.params.id;
+    
+    if (blockerId === blockedId) throw new ApiError(400, 'You cannot block yourself.');
+    
+    const targetUser = await prisma.user.findUnique({ where: { id: blockedId } });
+    if (!targetUser) throw new ApiError(404, 'User not found.');
 
     await prisma.blockedUser.upsert({
       where: { blockerId_blockedId: { blockerId, blockedId } },
       create: { blockerId, blockedId },
       update: {}
-    })
+    });
 
-    res.json({ success: true })
-  } catch (error) { next(error) }
-})
+    res.json({ message: 'User blocked successfully', blockedId });
+  } catch (error) {
+    next(error);
+  }
+});
 
-// UNBLOCK a user
+// UNBLOCK User
 router.delete('/:id/block', async (req, res, next) => {
   try {
-    if (!req.user) throw new ApiError(401, 'Authentication required.')
-    const blockerId = req.user.id
-    const blockedId = req.params.id
+    if (!req.user) throw new ApiError(401, 'Authentication required.');
+    const blockerId = req.user.id;
+    const blockedId = req.params.id;
 
     await prisma.blockedUser.deleteMany({
       where: { blockerId, blockedId }
-    })
+    });
 
-    res.json({ success: true })
-  } catch (error) { next(error) }
-})
+    res.json({ message: 'User unblocked successfully', blockedId });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // REMOVE device (Session Revocation)
 router.delete('/me/devices/:deviceId', async (req, res, next) => {
@@ -178,12 +186,12 @@ router.delete('/me/devices/:deviceId', async (req, res, next) => {
     const authUser = req.user as AuthJwtPayload;
     const targetDeviceId = req.params.deviceId;
 
-    // 1. Validasi kepemilikan perangkat
-    const device = await prisma.device.findFirst({
+    // 1. Validasi kepemilikan dan Hapus perangkat
+    const deletedInfo = await prisma.device.deleteMany({
         where: { id: targetDeviceId, userId: authUser.id }
     });
 
-    if (!device) {
+    if (deletedInfo.count === 0) {
         throw new ApiError(404, "Device not found or already removed.");
     }
 

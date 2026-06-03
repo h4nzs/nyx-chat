@@ -47,24 +47,30 @@ router.get('/', async (req, res, next) => {
 
     const safeConversations = conversations.map(c => toConversation(hoistConvoKeys(c as unknown as RawConversationData)))
 
-    // RESTORE: Logika unread yang akurat
-    const joinedAtMap = new Map(conversations.map(c => [c.id, c.participants.find(p => p.userId === userId)?.joinedAt || new Date(0)]));
-    
-    const itemsWithUnread = await Promise.all(safeConversations.map(async (c) => {
-      const unreadCount = await prisma.message.count({
-        where: {
-          conversationId: c.id,
-          senderId: { not: userId },
-          createdAt: { gte: joinedAtMap.get(c.id) },
-          statuses: {
-            none: {
-              userId,
-              status: 'READ'
-            }
-          }
-        }
-      });
-      return { ...c, unreadCount };
+    // RESTORE: Logika unread berperforma tinggi (Query Tunggal)
+    const unreadWhereClauses = conversations.map(c => {
+      const participant = c.participants.find(p => p.userId === userId);
+      return {
+        conversationId: c.id,
+        senderId: { not: userId },
+        createdAt: { gte: participant?.joinedAt || new Date(0) },
+        statuses: { none: { userId, status: DeliveryStatus.READ } }
+      };
+    });
+
+    const unreadCountsData = unreadWhereClauses.length > 0 
+      ? await prisma.message.groupBy({ 
+          by: ['conversationId'], 
+          where: { OR: unreadWhereClauses }, 
+          _count: { id: true } 
+        }) 
+      : [];
+
+    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, (item._count as any)?.id || 0]));
+
+    const itemsWithUnread = safeConversations.map(c => ({
+      ...c,
+      unreadCount: unreadMap.get(c.id) || 0
     }));
 
     res.json(itemsWithUnread)

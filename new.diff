@@ -1320,10 +1320,10 @@ index 7bcc0723e..5b0b93cac 100644
  
      res.json({ message: 'User banned successfully' });
 diff --git a/server/src/routes/conversations.ts b/server/src/routes/conversations.ts
-index 50c7d4561..6aadf9886 100644
+index 50c7d4561..e71552466 100644
 --- a/server/src/routes/conversations.ts
 +++ b/server/src/routes/conversations.ts
-@@ -5,267 +5,158 @@ import { Router } from 'express'
+@@ -5,267 +5,164 @@ import { Router } from 'express'
  import { prisma } from '../lib/prisma.js'
  import { DeliveryStatus } from '@prisma/client';
  import { requireAuth } from '../middleware/auth.js'
@@ -1462,29 +1462,19 @@ index 50c7d4561..6aadf9886 100644
 -    const unreadWhereClauses = conversationsData
 -      .filter(c => joinedAtMap.has(c.id))
 -      .map(c => ({
--        conversationId: c.id,
++    // RESTORE: Logika unread berperforma tinggi (Query Tunggal)
++    const unreadWhereClauses = conversations.map(c => {
++      const participant = c.participants.find(p => p.userId === userId);
++      return {
+         conversationId: c.id,
 -        createdAt: { gte: joinedAtMap.get(c.id)! },
--        senderId: { not: userId },
+         senderId: { not: userId },
 -        statuses: {
 -          none: {
 -            userId: userId,
 -            status: DeliveryStatus.READ 
-+    // RESTORE: Logika unread yang akurat
-+    const joinedAtMap = new Map(conversations.map(c => [c.id, c.participants.find(p => p.userId === userId)?.joinedAt || new Date(0)]));
-+    
-+    const itemsWithUnread = await Promise.all(safeConversations.map(async (c) => {
-+      const unreadCount = await prisma.message.count({
-+        where: {
-+          conversationId: c.id,
-+          senderId: { not: userId },
-+          createdAt: { gte: joinedAtMap.get(c.id) },
-+          statuses: {
-+            none: {
-+              userId,
-+              status: 'READ'
-+            }
-           }
-         }
+-          }
+-        }
 -      }));
 -
 -    const unreadCountsData = unreadWhereClauses.length > 0
@@ -1493,17 +1483,30 @@ index 50c7d4561..6aadf9886 100644
 -          where: { OR: unreadWhereClauses },
 -          _count: { id: true }
 -        })
--      : [];
--
++        createdAt: { gte: participant?.joinedAt || new Date(0) },
++        statuses: { none: { userId, status: DeliveryStatus.READ } }
++      };
++    });
++
++    const unreadCountsData = unreadWhereClauses.length > 0 
++      ? await prisma.message.groupBy({ 
++          by: ['conversationId'], 
++          where: { OR: unreadWhereClauses }, 
++          _count: { id: true } 
++        }) 
+       : [];
+ 
 -    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, item._count?.id || 0]));
--
++    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, (item._count as any)?.id || 0]));
+ 
 -    const safeConversations = conversationsData.map(convo => {
 -      const safeConv = toConversation(hoistConvoKeys(convo as unknown as RawConversationData));
 -      safeConv.unreadCount = unreadMap.get(convo.id) || 0;
 -      return ConversationSchema.parse(safeConv);
 -    })
-+      });
-+      return { ...c, unreadCount };
++    const itemsWithUnread = safeConversations.map(c => ({
++      ...c,
++      unreadCount: unreadMap.get(c.id) || 0
 +    }));
  
 -    res.json(safeConversations)
@@ -1685,7 +1688,7 @@ index 50c7d4561..6aadf9886 100644
          try { await redisClient.decr(`sandbox:newchat:${creatorId}:${today}`); } catch (_e) { }
        }
        throw dbError;
-@@ -273,7 +164,7 @@ router.post(
+@@ -273,7 +170,7 @@ router.post(
  
      const safeConversation = toConversation(hoistConvoKeys(newConversation as unknown as RawConversationData));
      
@@ -1694,7 +1697,7 @@ index 50c7d4561..6aadf9886 100644
      res.status(201).json({ ...safeConversation, unreadCount: 0 })
    } catch (error) {
      next(error)
-@@ -309,7 +200,7 @@ router.put('/:id/details', async (req, res, next) => {
+@@ -309,7 +206,7 @@ router.put('/:id/details', async (req, res, next) => {
      if (!participant || participant.role !== 'ADMIN') return res.status(403).json({ error: 'Forbidden: You are not an admin of this group.' })
  
      const updatedConversation = await prisma.conversation.update({ where: { id }, data: { encryptedMetadata } })
@@ -1703,7 +1706,7 @@ index 50c7d4561..6aadf9886 100644
      res.json(updatedConversation)
    } catch (error) {
      next(error)
-@@ -348,19 +239,19 @@ router.post('/:id/participants', async (req, res, next) => {
+@@ -348,19 +245,19 @@ router.post('/:id/participants', async (req, res, next) => {
      
      const safeConversationId = asConversationId(conversationId);
  
@@ -1730,7 +1733,7 @@ index 50c7d4561..6aadf9886 100644
      }
      
      res.status(201).json(z.array(ParticipantSchema).parse(safeParticipants))
-@@ -384,7 +275,7 @@ router.put('/:id/participants/:userId/role', async (req, res, next) => {
+@@ -384,7 +281,7 @@ router.put('/:id/participants/:userId/role', async (req, res, next) => {
      const updatedParticipant = await prisma.participant.updateMany({ where: { conversationId, userId: userToModifyId }, data: { role } })
      if (updatedParticipant.count === 0) return res.status(404).json({ error: 'Participant not found.' })
  
@@ -1739,7 +1742,7 @@ index 50c7d4561..6aadf9886 100644
      res.json({ userId: userToModifyId, role })
    } catch (error) {
      next(error)
-@@ -412,9 +303,9 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
+@@ -412,9 +309,9 @@ router.delete('/:id/participants/:userId', async (req, res, next) => {
          // No server-side key generation. Remaining clients will rotate keys.
      });
      
@@ -1752,7 +1755,7 @@ index 50c7d4561..6aadf9886 100644
  
      res.status(204).send()  } catch (error) {
      next(error)
-@@ -435,13 +326,12 @@ router.delete('/:id/leave', async (req, res, next) => {
+@@ -435,13 +332,12 @@ router.delete('/:id/leave', async (req, res, next) => {
  
      await prisma.$transaction(async (tx) => {
          await tx.participant.delete({ where: { userId_conversationId: { userId, conversationId } } });
@@ -1769,7 +1772,7 @@ index 50c7d4561..6aadf9886 100644
      
      res.status(204).send()
    } catch (error) {
-@@ -461,10 +351,10 @@ router.delete('/:id', async (req, res, next) => {
+@@ -461,10 +357,10 @@ router.delete('/:id', async (req, res, next) => {
      if (conversation.isGroup) {
        if (conversation.creatorId !== userId) return res.status(403).json({ error: 'Only creator can delete.' })
        await prisma.conversation.delete({ where: { id } })
@@ -1782,7 +1785,7 @@ index 50c7d4561..6aadf9886 100644
      }
      res.status(204).send()
    } catch (error) {
-@@ -472,43 +362,55 @@ router.delete('/:id', async (req, res, next) => {
+@@ -472,43 +368,55 @@ router.delete('/:id', async (req, res, next) => {
    }
  })
  
@@ -1796,15 +1799,15 @@ index 50c7d4561..6aadf9886 100644
 -    const participant = await prisma.participant.findUnique({ where: { userId_conversationId: { userId, conversationId } } })
 -    if (!participant) return res.status(404).json({ error: 'Not a participant.' })
 +    const { id: conversationId } = req.params
- 
--    const updatedParticipant = await prisma.participant.update({
--      where: { userId_conversationId: { userId, conversationId } },
++
 +    const participant = await prisma.participant.findUnique({
 +      where: { userId_conversationId: { userId, conversationId } }
 +    })
 +
 +    if (!participant) return res.status(404).json({ error: 'Participant not found' })
-+
+ 
+-    const updatedParticipant = await prisma.participant.update({
+-      where: { userId_conversationId: { userId, conversationId } },
 +    const updated = await prisma.participant.update({
 +      where: { id: participant.id },
        data: { isPinned: !participant.isPinned }
@@ -2040,10 +2043,10 @@ index a79d18a95..d4a8b6ed0 100644
          expiresAt: expiresAt.toISOString()
        });
 diff --git a/server/src/routes/users.ts b/server/src/routes/users.ts
-index 82c774f73..d1c87da1b 100644
+index 82c774f73..2a3df8729 100644
 --- a/server/src/routes/users.ts
 +++ b/server/src/routes/users.ts
-@@ -1,185 +1,110 @@
+@@ -1,185 +1,111 @@
 -import { getIo } from "../socket.js";
 +import { sendJsonToUser, broadcastToUsers, emitEventToUser, emitEventToUsers } from '../network/redisBridge.js';
 +import { TransportOpCode } from '@nyx/shared';
@@ -2126,7 +2129,7 @@ index 82c774f73..d1c87da1b 100644
 -    };
 +    let user = await prisma.user.findUnique({
 +      where: { id: userId },
-+      select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
++      select: { id: true, usernameHash: true, role: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
 +    })
  
 -    const dataToUpdate: UserUpdateData = { lastActiveAt: new Date() };
@@ -2143,7 +2146,7 @@ index 82c774f73..d1c87da1b 100644
 +        user = await prisma.user.update({
 +            where: { id: userId },
 +            data: { subscriptionTier: 'FREE' },
-+            select: { id: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
++            select: { id: true, usernameHash: true, role: true, encryptedProfile: true, isVerified: true, hasCompletedOnboarding: true, autoDestructDays: true, subscriptionTier: true, subscriptionExpiresAt: true }
 +        });
      }
  
@@ -2178,8 +2181,8 @@ index 82c774f73..d1c87da1b 100644
 +
      const devices = await prisma.device.findMany({
 -      where: { userId: authUser.id },
--      orderBy: { lastActiveAt: 'desc' },
 +      where: { userId },
+       orderBy: { lastActiveAt: 'desc' },
        select: { id: true, name: true, lastActiveAt: true, createdAt: true }
 -    });
 -    
@@ -2258,11 +2261,11 @@ index 82c774f73..d1c87da1b 100644
 +    res.json(blocked.map(b => b.blocked))
 +  } catch (error) { next(error) }
 +})
++
++// --- MUTATION ROUTES (Me) ---
  
 -// UPDATE User Profile (Me)
 -router.put('/me',
-+// --- MUTATION ROUTES (Me) ---
-+
 +// UPDATE user profile (Me)
 +router.put('/me', 
    zodValidate({
@@ -2292,7 +2295,7 @@ index 82c774f73..d1c87da1b 100644
  
        const updatedUser = await prisma.user.update({
          where: { id: userId },
-@@ -188,7 +113,7 @@ router.put('/me',
+@@ -188,7 +114,7 @@ router.put('/me',
        })
  
        if (encryptedProfile !== undefined && (!existingUser || encryptedProfile !== existingUser.encryptedProfile)) {
@@ -2301,7 +2304,7 @@ index 82c774f73..d1c87da1b 100644
  
          const conversations = await prisma.conversation.findMany({
            where: { participants: { some: { userId } } },
-@@ -202,9 +127,9 @@ router.put('/me',
+@@ -202,9 +128,9 @@ router.put('/me',
            }
          }
  
@@ -2314,43 +2317,50 @@ index 82c774f73..d1c87da1b 100644
        }
  
        res.json(updatedUser)
-@@ -212,6 +137,74 @@ router.put('/me',
+@@ -212,6 +138,81 @@ router.put('/me',
    }
  )
  
-+// BLOCK a user
++// BLOCK User
 +router.post('/:id/block', async (req, res, next) => {
 +  try {
-+    if (!req.user) throw new ApiError(401, 'Authentication required.')
-+    const blockerId = req.user.id
-+    const blockedId = req.params.id
-+
-+    if (blockerId === blockedId) throw new ApiError(400, 'You cannot block yourself.')
++    if (!req.user) throw new ApiError(401, 'Authentication required.');
++    const blockerId = req.user.id;
++    const blockedId = req.params.id;
++    
++    if (blockerId === blockedId) throw new ApiError(400, 'You cannot block yourself.');
++    
++    const targetUser = await prisma.user.findUnique({ where: { id: blockedId } });
++    if (!targetUser) throw new ApiError(404, 'User not found.');
 +
 +    await prisma.blockedUser.upsert({
 +      where: { blockerId_blockedId: { blockerId, blockedId } },
 +      create: { blockerId, blockedId },
 +      update: {}
-+    })
++    });
 +
-+    res.json({ success: true })
-+  } catch (error) { next(error) }
-+})
++    res.json({ message: 'User blocked successfully', blockedId });
++  } catch (error) {
++    next(error);
++  }
++});
 +
-+// UNBLOCK a user
++// UNBLOCK User
 +router.delete('/:id/block', async (req, res, next) => {
 +  try {
-+    if (!req.user) throw new ApiError(401, 'Authentication required.')
-+    const blockerId = req.user.id
-+    const blockedId = req.params.id
++    if (!req.user) throw new ApiError(401, 'Authentication required.');
++    const blockerId = req.user.id;
++    const blockedId = req.params.id;
 +
 +    await prisma.blockedUser.deleteMany({
 +      where: { blockerId, blockedId }
-+    })
++    });
 +
-+    res.json({ success: true })
-+  } catch (error) { next(error) }
-+})
++    res.json({ message: 'User unblocked successfully', blockedId });
++  } catch (error) {
++    next(error);
++  }
++});
 +
 +// REMOVE device (Session Revocation)
 +router.delete('/me/devices/:deviceId', async (req, res, next) => {
@@ -2359,12 +2369,12 @@ index 82c774f73..d1c87da1b 100644
 +    const authUser = req.user as AuthJwtPayload;
 +    const targetDeviceId = req.params.deviceId;
 +
-+    // 1. Validasi kepemilikan perangkat
-+    const device = await prisma.device.findFirst({
++    // 1. Validasi kepemilikan dan Hapus perangkat
++    const deletedInfo = await prisma.device.deleteMany({
 +        where: { id: targetDeviceId, userId: authUser.id }
 +    });
 +
-+    if (!device) {
++    if (deletedInfo.count === 0) {
 +        throw new ApiError(404, "Device not found or already removed.");
 +    }
 +
@@ -2389,7 +2399,7 @@ index 82c774f73..d1c87da1b 100644
  // UPDATE Public Keys (Me)
  const isValidBase64Url = (str: string, expectedBytes?: number) => {
    if (!/^[A-Za-z0-9_-]+={0,2}$/.test(str)) return false;
-@@ -268,9 +261,9 @@ router.put('/me/keys',
+@@ -268,9 +269,9 @@ router.put('/me/keys',
          if (p.userId !== userId) recipients.add(p.userId)
        }))
  
@@ -2402,7 +2412,7 @@ index 82c774f73..d1c87da1b 100644
  
        res.status(200).json({ message: 'Keys updated successfully.' })
      } catch (error) { next(error) }
-@@ -286,108 +279,145 @@ router.post('/me/complete-onboarding', async (req, res, next) => {
+@@ -286,108 +287,145 @@ router.post('/me/complete-onboarding', async (req, res, next) => {
    } catch (error) { next(error) }
  })
  
@@ -2430,6 +2440,9 @@ index 82c774f73..d1c87da1b 100644
 +    if (!req.user) throw new ApiError(401, 'Authentication required.')
 +    const userId = req.user.id
 +    const { password, fileKeys } = req.body
++
++    const user = await prisma.user.findUnique({ where: { id: userId } })
++    if (!user) throw new ApiError(404, 'User not found')
  
 -      const user = await prisma.user.findUnique({ where: { id: userId } })
 -      if (!user) throw new ApiError(404, 'User not found')
@@ -2451,9 +2464,6 @@ index 82c774f73..d1c87da1b 100644
 -                 await deleteR2Files(validKeys)
 -             }
 -         } catch (e) { console.error("Failed to cleanup R2 files:", e) }
-+    const user = await prisma.user.findUnique({ where: { id: userId } })
-+    if (!user) throw new ApiError(404, 'User not found')
-+
 +    const ok = await verifyPassword(password, user.passwordHash)
 +    if (!ok) throw new ApiError(401, 'Invalid password')
 +
