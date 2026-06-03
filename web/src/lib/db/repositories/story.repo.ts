@@ -4,7 +4,7 @@ import { encryptField, decryptField } from '../encryption';
 export class StoryRepository {
   static async saveStoryKey(storyId: string, base64Key: string): Promise<void> {
     const record = {
-      story_id: storyId,
+      storyId: storyId,
       key: await encryptField(base64Key)
     };
     await dbRequest('insert', 'storyKeys', record);

@@ -14,8 +14,8 @@ export class OfflineQueueRepository {
   static async add(item: QueueItem): Promise<void> {
     const encryptedData = await encryptField(JSON.stringify(item.data));
     const record = {
-      temp_id: item.tempId,
-      conversation_id: item.conversationId,
+      tempId: item.tempId,
+      conversationId: item.conversationId,
       data: encryptedData,
       timestamp: item.timestamp,
       attempt: item.attempt
@@ -31,8 +31,8 @@ export class OfflineQueueRepository {
         try {
             const decryptedData = await decryptField(r.data);
             results.push({
-              tempId: r.temp_id,
-              conversationId: r.conversation_id,
+              tempId: r.tempId,
+              conversationId: r.conversationId,
               data: JSON.parse(decryptedData as string),
               timestamp: r.timestamp,
               attempt: r.attempt

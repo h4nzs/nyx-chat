@@ -84,10 +84,10 @@ export default function Register() {
         usernameHash, 
         password, 
         encryptedProfile, 
-        turnstileToken 
+        turnstileToken,
+        profileKeyB64
       });
 
-      await KeychainRepository.saveIdentityKey(result.userId, profileKeyB64);
       setRecoveryPhrase(result.phrase);
 
       // Mark that user just registered to prevent SystemInitModal from showing

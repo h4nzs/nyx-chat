@@ -5,20 +5,20 @@ import type { MessageId, ConversationId, UserId } from '@nyx/shared';
 
 export interface MessageRecord {
   id: string;
-  conversation_id: string;
-  sender_id: string;
+  conversationId: string;
+  senderId: string;
   content: Uint8Array | null;
-  replied_to_id: string | null;
-  replied_to: Uint8Array | null;
-  created_at: string;
+  repliedToId: string | null;
+  repliedTo: Uint8Array | null;
+  createdAt: string;
   status: string;
-  sender_name: Uint8Array | null;
-  sender_username: Uint8Array | null;
-  sender_avatar_url: Uint8Array | null;
-  is_view_once: boolean;
-  is_deleted_local: boolean;
-  file_meta: Uint8Array | null;
-  expires_at: string | null;
+  senderName: Uint8Array | null;
+  senderUsername: Uint8Array | null;
+  senderAvatarUrl: Uint8Array | null;
+  isViewOnce: boolean;
+  isDeletedLocal: boolean;
+  fileMeta: Uint8Array | null;
+  expiresAt: string | null;
 }
 
 export class MessageRepository {
@@ -38,19 +38,19 @@ export class MessageRepository {
   private static async mapMessageToRecord(m: Message): Promise<MessageRecord> {
     return {
       id: m.id,
-      conversation_id: m.conversationId,
-      sender_id: m.senderId,
+      conversationId: m.conversationId,
+      senderId: m.senderId,
       content: m.content ? await encryptField(m.content) : null,
-      replied_to_id: m.repliedToId || null,
-      replied_to: m.repliedTo ? await encryptField(JSON.stringify(m.repliedTo)) : null,
-      created_at: typeof m.createdAt === 'string' ? m.createdAt : new Date(m.createdAt).toISOString(),
+      repliedToId: m.repliedToId || null,
+      repliedTo: m.repliedTo ? await encryptField(JSON.stringify(m.repliedTo)) : null,
+      createdAt: typeof m.createdAt === 'string' ? m.createdAt : new Date(m.createdAt).toISOString(),
       status: m.status?.toLowerCase() || 'sent',
-      sender_name: m.sender?.name ? await encryptField(m.sender.name) : null,
-      sender_username: m.sender?.username ? await encryptField(m.sender.username) : null,
-      sender_avatar_url: m.sender?.avatarUrl ? await encryptField(m.sender.avatarUrl) : null,
-      is_view_once: !!m.isViewOnce,
-      is_deleted_local: !!m.isDeletedLocal,
-      file_meta: (m.fileUrl || m.isBlindAttachment) ? await encryptField(JSON.stringify({
+      senderName: m.sender?.name ? await encryptField(m.sender.name) : null,
+      senderUsername: m.sender?.username ? await encryptField(m.sender.username) : null,
+      senderAvatarUrl: m.sender?.avatarUrl ? await encryptField(m.sender.avatarUrl) : null,
+      isViewOnce: !!m.isViewOnce,
+      isDeletedLocal: !!m.isDeletedLocal,
+      fileMeta: (m.fileUrl || m.isBlindAttachment) ? await encryptField(JSON.stringify({
         fileUrl: m.fileUrl,
         fileKey: m.fileKey,
         fileName: m.fileName,
@@ -59,7 +59,7 @@ export class MessageRepository {
         duration: m.duration,
         isBlindAttachment: m.isBlindAttachment
       })) : null,
-      expires_at: m.expiresAt || null
+      expiresAt: m.expiresAt || null
     };
   }
 
@@ -96,7 +96,7 @@ export class MessageRepository {
       if (chunk.length === 0) break;
 
       for (const record of chunk) {
-        if (record.is_view_once || record.is_deleted_local || !record.content) continue;
+        if (record.isViewOnce || record.isDeletedLocal || !record.content) continue;
 
         try {
             const decryptedContent = await decryptField(record.content);
@@ -110,7 +110,7 @@ export class MessageRepository {
       }
 
       // Update beforeDate for next chunk
-      beforeDate = chunk[chunk.length - 1].created_at;
+      beforeDate = chunk[chunk.length - 1].createdAt;
       if (chunk.length < CHUNK_SIZE) break;
     }
 
@@ -119,8 +119,8 @@ export class MessageRepository {
 
   private static async mapRecordToMessage(r: MessageRecord): Promise<Message> {
     const decryptedContent = r.content ? await decryptField(r.content) : null;
-    const decryptedRepliedTo = r.replied_to ? await decryptField(r.replied_to) : null;
-    const decryptedFileMeta = r.file_meta ? await decryptField(r.file_meta) : null;
+    const decryptedRepliedTo = r.repliedTo ? await decryptField(r.repliedTo) : null;
+    const decryptedFileMeta = r.fileMeta ? await decryptField(r.fileMeta) : null;
 
     let repliedToObj = null;
     if (decryptedRepliedTo && typeof decryptedRepliedTo === 'string') {
@@ -134,22 +134,22 @@ export class MessageRepository {
 
     return {
       id: r.id as MessageId,
-      conversationId: r.conversation_id as ConversationId,
+      conversationId: r.conversationId as ConversationId,
       content: typeof decryptedContent === 'string' ? decryptedContent : null,
-      senderId: r.sender_id as UserId,
+      senderId: r.senderId as UserId,
       sender: {
-          id: r.sender_id as UserId,
-          name: r.sender_name ? (await decryptField(r.sender_name) as string) : 'Unknown',
-          username: r.sender_username ? (await decryptField(r.sender_username) as string) : undefined,
-          avatarUrl: r.sender_avatar_url ? (await decryptField(r.sender_avatar_url) as string) : undefined,
+          id: r.senderId as UserId,
+          name: r.senderName ? (await decryptField(r.senderName) as string) : 'Unknown',
+          username: r.senderUsername ? (await decryptField(r.senderUsername) as string) : undefined,
+          avatarUrl: r.senderAvatarUrl ? (await decryptField(r.senderAvatarUrl) as string) : undefined,
       },
-      repliedToId: r.replied_to_id as MessageId | undefined,
+      repliedToId: r.repliedToId as MessageId | undefined,
       repliedTo: repliedToObj,
-      createdAt: r.created_at,
+      createdAt: r.createdAt,
       status: (r.status.toUpperCase() as 'SENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED') || 'SENT',
-      isViewOnce: r.is_view_once,
-      isDeletedLocal: r.is_deleted_local,
-      expiresAt: r.expires_at || undefined,
+      isViewOnce: r.isViewOnce,
+      isDeletedLocal: r.isDeletedLocal,
+      expiresAt: r.expiresAt || undefined,
       ...fileMetaObj
     };
   }

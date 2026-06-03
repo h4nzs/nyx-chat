@@ -125,6 +125,7 @@ type Actions = {
     usernameHash: string; // Blind Index
     password: string; 
     turnstileToken?: string; 
+    profileKeyB64: string;
   }) => Promise<RegisterResponse>;
   
   logout: () => Promise<void>;
@@ -513,7 +514,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       }
     },
 
-    registerAndGeneratePhrase: async ({ encryptedProfile, usernameHash, password, turnstileToken }) => {
+    registerAndGeneratePhrase: async ({ encryptedProfile, usernameHash, password, turnstileToken, profileKeyB64 }) => {
       set({ isInitializingCrypto: true });
       try {
         const { registerAndGenerateKeys, retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
@@ -542,6 +543,10 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
         await saveDeviceAutoUnlockKey(password, res.user.id);
         await saveEncryptedKeys(encryptedPrivateKeys);
+        
+        const { KeychainRepository } = await import('@lib/db/index');
+        await KeychainRepository.saveIdentityKey(res.user.id, profileKeyB64);
+        
         await setDeviceAutoUnlockReady(true);
         set({ hasRestoredKeys: true });
 

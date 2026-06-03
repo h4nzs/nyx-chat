@@ -275,8 +275,16 @@ export const nuclearWipe = async () => {
     
     // 4. Delete PGlite data from OPFS
     if (navigator.storage && navigator.storage.getDirectory) {
-        const root = await navigator.storage.getDirectory();
-        await root.removeEntry('nyx-chat-pg', { recursive: true }).catch(() => {});
+        try {
+            const root = await navigator.storage.getDirectory();
+            await root.removeEntry('nyx-chat-pg', { recursive: true }).catch(() => {});
+        } catch (e) {}
+    }
+    
+    // 5. Delete PGlite IDB fallback
+    if (typeof indexedDB !== 'undefined') {
+        indexedDB.deleteDatabase('/nyx-chat-pg'); // PGlite idb:// prefix usually creates this name or similar
+        indexedDB.deleteDatabase('nyx-chat-pg');
     }
 
     console.warn("NUCLEAR WIPE COMPLETE.");

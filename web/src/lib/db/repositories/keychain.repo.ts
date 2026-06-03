@@ -6,9 +6,9 @@ export class KeychainRepository {
   // --- One-Time Pre-Keys ---
   static async savePreKey(keyId: number, encryptedPrivateKey: Uint8Array, pqPublicKey?: string): Promise<void> {
     const record = {
-      key_id: keyId,
-      pq_public_key: pqPublicKey || null,
-      encrypted_private_key: await encryptField(encryptedPrivateKey)
+      keyId,
+      pqPublicKey: pqPublicKey || null,
+      encryptedPrivateKey: await encryptField(encryptedPrivateKey)
     };
     await dbRequest('insert', 'preKeys', record);
   }
@@ -16,7 +16,7 @@ export class KeychainRepository {
   static async getPreKey(keyId: number): Promise<Uint8Array | null> {
     const r = await dbRequest('get', 'preKeys', keyId);
     if (!r) return null;
-    const decrypted = await decryptField(r.encrypted_private_key);
+    const decrypted = await decryptField(r.encryptedPrivateKey);
     return decrypted as Uint8Array;
   }
 
@@ -36,9 +36,9 @@ export class KeychainRepository {
   static async saveSessionKey(conversationId: string, sessionId: string, key: Uint8Array): Promise<void> {
     const storageKey = `${conversationId}_${sessionId}`;
     const record = {
-      storage_key: storageKey,
-      conversation_id: conversationId,
-      session_id: sessionId,
+      storageKey,
+      conversationId,
+      sessionId,
       key: await encryptField(key)
     };
     await dbRequest('insert', 'sessionKeys', record);
@@ -60,7 +60,7 @@ export class KeychainRepository {
   // --- Ratchet Sessions ---
   static async saveRatchetSession(conversationId: string, state: Uint8Array): Promise<void> {
     const record = {
-      conversation_id: conversationId,
+      conversationId,
       state: await encryptField(state)
     };
     await dbRequest('insert', 'ratchetSessions', record);
@@ -80,7 +80,7 @@ export class KeychainRepository {
   // --- Identity Keys ---
   static async saveIdentityKey(userId: string, keyB64: string): Promise<void> {
     const record = {
-      user_id: userId,
+      userId,
       key: await encryptField(keyB64)
     };
     await dbRequest('insert', 'identityKeys', record);
@@ -96,7 +96,7 @@ export class KeychainRepository {
   // --- Group Keys ---
   static async saveGroupKey(conversationId: string, key: Uint8Array): Promise<void> {
       const record = {
-          conversation_id: conversationId,
+          conversationId,
           key: await encryptField(key)
       };
       await dbRequest('insert', 'groupKeys', record);
@@ -129,7 +129,7 @@ export class KeychainRepository {
       }
 
       const record = {
-          conversation_id: conversationId,
+          conversationId,
           state: await encryptField(JSON.stringify(state))
       };
       await dbRequest('insert', 'groupSenderStates', record);
@@ -168,7 +168,7 @@ export class KeychainRepository {
   // --- Skipped Keys ---
   static async saveSkippedKey(headerKey: string, key: Uint8Array): Promise<void> {
       const record = {
-          header_key: headerKey,
+          headerKey,
           key: await encryptField(key)
       };
       await dbRequest('insert', 'skippedKeys', record);
@@ -212,7 +212,7 @@ export class KeychainRepository {
   // --- Message Keys ---
   static async saveMessageKey(messageId: string, key: Uint8Array): Promise<void> {
       const record = {
-          message_id: messageId,
+          messageId,
           key: await encryptField(key)
       };
       await dbRequest('insert', 'messageKeys', record);
@@ -232,7 +232,7 @@ export class KeychainRepository {
   // --- Pending Headers ---
   static async savePendingHeader(conversationId: string, header: Record<string, unknown>): Promise<void> {
       const record = {
-          conversation_id: conversationId,
+          conversationId,
           header: await encryptField(JSON.stringify(header))
       };
       await dbRequest('insert', 'pendingHeaders', record);
@@ -252,13 +252,13 @@ export class KeychainRepository {
   // --- PQ Double Ratchet Sessions ---
   static async savePqDrSession(conversationId: string, state: any): Promise<void> {
       const record = {
-          conversation_id: conversationId,
+          conversationId,
           state: await encryptField(JSON.stringify(state.state)),
-          peer_classical_pk: state.peerClassicalPk,
-          peer_device_id: state.peerDeviceId,
+          peerClassicalPk: state.peerClassicalPk,
+          peerDeviceId: state.peerDeviceId,
           version: state.version,
-          negotiation_status: state.negotiationStatus,
-          last_activity: state.lastActivity
+          negotiationStatus: state.negotiationStatus,
+          lastActivity: state.lastActivity
       };
       await dbRequest('insert', 'pqDrSessions', record);
   }

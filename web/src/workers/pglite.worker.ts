@@ -1,24 +1,47 @@
-import { PGlite } from '@electric-sql/pglite';
-import { drizzle, PgliteDatabase } from 'drizzle-orm/pglite';
 import * as schema from '../lib/db/schema';
-import { sql, eq, and, desc } from 'drizzle-orm';
+import { sql, eq, and, desc, inArray } from 'drizzle-orm';
 
-let pg: PGlite;
-let db: PgliteDatabase<typeof schema>;
+let pg: any;
+let db: any;
 
 async function init() {
   try {
+    const { PGlite } = await import('@electric-sql/pglite');
+    const { drizzle } = await import('drizzle-orm/pglite');
+
     // Destructive Dexie cleanup (Reset IndexedDB)
-    if (typeof indexedDB !== 'undefined') {
-      console.warn('[pglite-worker] Purging legacy Dexie database...');
-      indexedDB.deleteDatabase('NyxUnifiedDB');
+    try {
+      if (typeof indexedDB !== 'undefined') {
+        console.warn('[pglite-worker] Purging legacy Dexie database...');
+        indexedDB.deleteDatabase('NyxUnifiedDB');
+      }
+    } catch (e) {
+      console.warn('[pglite-worker] Failed to delete legacy Dexie database:', e);
     }
 
-    pg = new PGlite('opfs://nyx-chat-pg');
+    // Helper for timeout
+    const withTimeout = (promise: Promise<any>, ms: number) => {
+      let timeoutId: any;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Timeout')), ms);
+      });
+      return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+    };
+
+    try {
+      pg = await withTimeout(PGlite.create('opfs://nyx-chat-pg'), 3000);
+    } catch (opfsErr) {
+      console.warn('[pglite-worker] OPFS failed or timed out. Falling back to idb://', opfsErr);
+      try {
+        pg = await withTimeout(PGlite.create('idb://nyx-chat-pg'), 3000);
+      } catch (idbErr) {
+        console.warn('[pglite-worker] IDB failed or timed out. Falling back to memory://', idbErr);
+        pg = await PGlite.create('memory://');
+      }
+    }
     db = drizzle(pg, { schema });
 
-    // Initial schema creation (Since we are in destructive migration mode)
-    // In production, we'd use migrations.
+    // Initial schema creation
     await pg.exec(`
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
@@ -128,32 +151,28 @@ async function init() {
       );
     `);
 
-    console.log('[pglite-worker] PGlite initialized successfully with OPFS.');
+    console.log('[pglite-worker] PGlite initialized successfully.');
     self.postMessage({ type: 'READY' });
   } catch (err: any) {
     console.error('[pglite-worker] Initialization failed:', err);
-    self.postMessage({ type: 'ERROR', error: err.message });
+    self.postMessage({ type: 'ERROR', error: err instanceof Error ? err.message : String(err) });
   }
 }
 
 const initPromise = init();
 
 function getTablePrimaryKey(targetTable: any) {
-  // Try to find the primary key column from the table metadata
-  // In Drizzle, we can look at the table object
-  const columns = (targetTable as any)[Symbol.for('drizzle:Columns')];
-  if (columns) {
-    for (const [name, col] of Object.entries(columns)) {
-      if ((col as any).primary) return col;
+  // In Drizzle, table properties are the columns
+  for (const key in targetTable) {
+    const col = targetTable[key];
+    if (col && typeof col === 'object' && col.primary) {
+      return col;
     }
   }
-  // Fallback to common names if metadata is tricky
+  // Fallback to common names
   return targetTable.id || targetTable.key || targetTable.keyId || targetTable.tempId || 
          targetTable.conversationId || targetTable.messageId || targetTable.storyId || 
-         targetTable.userId || targetTable.storageKey || targetTable.headerKey || 
-         targetTable.temp_id || targetTable.conversation_id || targetTable.message_id || 
-         targetTable.story_id || targetTable.user_id || targetTable.storage_key || 
-         targetTable.header_key;
+         targetTable.userId || targetTable.storageKey || targetTable.headerKey;
 }
 
 self.onmessage = async (e) => {
@@ -189,7 +208,7 @@ self.onmessage = async (e) => {
         break;
 
       case 'delete_by_conversation':
-        await db.delete(targetTable).where(eq(targetTable.conversation_id || targetTable.conversationId, payload));
+        await db.delete(targetTable).where(eq(targetTable.conversationId, payload));
         break;
 
       case 'delete_by_prefix':
@@ -216,15 +235,25 @@ self.onmessage = async (e) => {
         break;
 
       case 'bulk_insert':
+        if (!payload || payload.length === 0) {
+            result = [];
+            break;
+        }
         await db.insert(targetTable).values(payload).onConflictDoUpdate({
-            target: targetTable.id ?? targetTable.key ?? targetTable.keyId ?? targetTable.tempId ?? targetTable.conversationId ?? targetTable.messageId ?? targetTable.storyId ?? targetTable.userId ?? targetTable.storageKey ?? targetTable.headerKey,
-            set: Object.keys(payload[0]).reduce((acc: any, key) => ({ ...acc, [key]: sql`EXCLUDED.${sql.identifier(key)}` }), {})
+            target: getTablePrimaryKey(targetTable),
+            set: Object.keys(payload[0]).reduce((acc: any, key) => {
+                acc[key] = sql.raw(`EXCLUDED.${targetTable[key]?.name || key}`);
+                return acc;
+            }, {})
         });
         break;
 
       case 'bulk_delete':
         const bulkDelPk = getTablePrimaryKey(targetTable);
-        await db.delete(targetTable).where(sql`${bulkDelPk} IN ${payload}`);
+        if (!payload || payload.length === 0) {
+            break;
+        }
+        await db.delete(targetTable).where(inArray(bulkDelPk, payload));
         break;
 
       case 'clear_table':
@@ -237,6 +266,6 @@ self.onmessage = async (e) => {
 
     self.postMessage({ id, result });
   } catch (err: any) {
-    self.postMessage({ id, error: err.message });
+    self.postMessage({ id, error: err instanceof Error ? err.message : String(err) });
   }
 };

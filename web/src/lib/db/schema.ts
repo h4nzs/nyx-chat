@@ -7,9 +7,19 @@ const bytea = customType<{ data: Uint8Array }>({
   },
   fromDriver(value: unknown) {
     if (value instanceof Uint8Array) return value;
+    if (value && typeof (value as any).byteLength === 'number') {
+       const buffer = value as ArrayBuffer | SharedArrayBuffer | Uint8Array;
+       if (buffer instanceof SharedArrayBuffer) {
+           return new Uint8Array(buffer);
+       }
+       return new Uint8Array(buffer as ArrayBuffer | ArrayLike<number>);
+    }
     if (typeof value === 'string') {
-        // Handle hex string if driver returns it (though PGlite usually returns Uint8Array)
-        const match = value.match(/..|./g);
+        let hex = value;
+        if (hex.startsWith('\\x')) hex = hex.slice(2);
+        else if (hex.startsWith('0x')) hex = hex.slice(2);
+        
+        const match = hex.match(/.{1,2}/g);
         return new Uint8Array(match ? match.map(byte => parseInt(byte, 16)) : []);
     }
     return new Uint8Array();
