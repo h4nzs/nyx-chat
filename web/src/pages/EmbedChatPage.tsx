@@ -37,7 +37,7 @@ export default function EmbedChatPage() {
         useConversationStore.getState().addOrUpdateConversation(conversation);
         useConversationStore.getState().openConversation(conversation.id);
         
-        const { connectSocket } = await import('../lib/socket');
+        const { connectSocket } = await import('../lib/transportClient');
         connectSocket();
       } catch (err: unknown) {
         console.error('Embed initialization error:', err);

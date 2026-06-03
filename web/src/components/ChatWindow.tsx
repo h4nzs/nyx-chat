@@ -2,7 +2,7 @@ import DefaultAvatar from "@/components/ui/DefaultAvatar";
 import { useCallback, useRef, useState, useEffect, useMemo, lazy, Suspense } from "react";
 import { useAuthStore } from "@store/auth";
 import { useTranslation } from "react-i18next";
-import { getSocket } from "@lib/socket";
+import { transportClient, } from '@lib/transportClient';
 import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import MessageItem from "@components/MessageItem";
 import { useConversation } from "@hooks/useConversation";
@@ -311,7 +311,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
          // Beri sedikit jeda agar pesan selesai di-render ke DOM (Virtuoso)
          await new Promise(r => setTimeout(r, 300));
 
-         const socket = getSocket();
+         const socket = transportClient;
          if (!socket?.connected) return;
 
          // Hanya ACK pesan yang terlihat di viewport DAN belum READ
@@ -326,7 +326,7 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
          const msgsToAck = unreadVisible.slice(-20);
 
          msgsToAck.forEach(msg => {
-             socket.emit('message:mark_as_read', {
+             transportClient.sendEvent('message:mark_as_read', {
                  messageId: msg.id,
                  conversationId: id
              });
@@ -401,18 +401,18 @@ export default function ChatWindow({ id, onMenuClick }: { id: string, onMenuClic
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleTyping = useCallback(() => {
-    const socket = getSocket();
-    socket.emit("typing:start", { conversationId: id });
+    const socket = transportClient;
+    transportClient.sendEvent("typing:start", { conversationId: id });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
-      socket.emit("typing:stop", { conversationId: id });
+      transportClient.sendEvent("typing:stop", { conversationId: id });
     }, 1500);
   }, [id]);
 
   const handleSendMessage = (data: { content: string }) => {
     actions.sendMessage(data);
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    getSocket().emit("typing:stop", { conversationId: id });
+    transportClient.sendEvent("typing:stop", { conversationId: id });
     setTimeout(scrollToBottom, 100);
   };
 

@@ -47,11 +47,11 @@ import { useGlobalShortcut } from './hooks/useGlobalShortcut';
 import { useShallow } from 'zustand/react/shallow';
 
 // Libs & Utils
-import { getSocket, connectSocket, disconnectSocket } from './lib/socket';
+import { transportClient, connectSocket, disconnectSocket } from './lib/transportClient';
 import { initWebRTCListeners } from './lib/webrtc';
 
 // Initialize socket instance once
-getSocket();
+transportClient;
 
 // --- Components ---
 
@@ -205,10 +205,10 @@ const AppContent = () => {
       const token = useAuthStore.getState().accessToken;
       if (token) {
         connectSocket();
-        const socket = getSocket();
+        const socket = transportClient;
         // Safely attach WebRTC listeners immediately to the socket instance
         import('./lib/webrtc').then(({ initWebRTCListeners }) => {
-          initWebRTCListeners(socket);
+          initWebRTCListeners();
         });
       }
     } else {
@@ -236,7 +236,7 @@ const AppContent = () => {
         return;
       }
 
-      const socket = getSocket();
+      const socket = transportClient;
 
       if (document.visibilityState === 'visible') {
         const { user, accessToken, silentRefresh } = useAuthStore.getState();
@@ -255,7 +255,7 @@ const AppContent = () => {
           }
         } else {
           // Kalo socket-nya ternyata ga diputus sama OS, kita tembak event active manual
-          socket.emit("user:active");
+          transportClient.sendEvent("user:active");
         }
 
         if (user) {
@@ -267,7 +267,7 @@ const AppContent = () => {
       else if (document.visibilityState === 'hidden') {
         if (socket?.connected) {
           // Kasih tau server kalau user lagi minimize app/pindah tab/kunci layar
-          socket.emit("user:away");
+          transportClient.sendEvent("user:away");
         }
 
         // --- AUTH LOCK (Cryptographic Wipe) ---

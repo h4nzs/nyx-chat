@@ -29,11 +29,11 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
   const handleClose = useCallback(() => {
     if (message.isViewOnce && !message.isViewed) {
       useMessageStore.getState().updateMessage(message.conversationId, message.id, { isViewed: true });
-      import('@lib/socket').then(({ getSocket }) => {
-          const socket = getSocket();
+      import('@lib/transportClient').then(({ transportClient, }) => {
+          const socket = transportClient;
           const emitViewedAck = () => {
               if (isMountedRef.current) {
-                  socket?.emit('message:view_once_opened', { messageId: message.id, conversationId: message.conversationId });
+                  transportClient.sendEvent('message:view_once_opened', { messageId: message.id, conversationId: message.conversationId });
               }
           };
           if (socket?.connected) {

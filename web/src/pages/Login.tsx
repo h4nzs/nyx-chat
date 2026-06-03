@@ -9,7 +9,7 @@ import { IoFingerPrint } from "react-icons/io5";
 import { startAuthentication, platformAuthenticatorIsAvailable } from '@simplewebauthn/browser';
 import { api } from "@lib/api";
 import { retrievePrivateKeys, restoreFromPhrase, hashUsername } from "@lib/crypto-worker-proxy";
-import { connectSocket } from "@lib/socket";
+import { connectSocket } from '@lib/transportClient';
 import { getEncryptedKeys, saveEncryptedKeys, saveDeviceAutoUnlockKey, setDeviceAutoUnlockReady, checkPanicPassword } from "@lib/keyStorage";
 import { unlockWithBiometric } from "@lib/biometricUnlock";
 import { executeLocalWipe } from "@lib/nukeProtocol";

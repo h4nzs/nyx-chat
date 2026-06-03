@@ -95,7 +95,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
       
       // [FIX] ZERO-KNOWLEDGE METADATA UPDATE
       const { encryptGroupMetadata, ensureGroupSession } = await import('@utils/crypto');
-      const { emitGroupKeyDistribution } = await import('@lib/socket');
+      const { emitGroupKeyDistribution } = await import('@lib/transportClient');
 
       // Ensure session exists
       const distributionKeys = await ensureGroupSession(conversation.id, conversation.participants);
@@ -126,7 +126,7 @@ const GroupInfoPanel = ({ conversationId, onClose }: { conversationId: Conversat
     const toastId = toast.loading('Rotating encryption keys via ML-KEM...');
     try {
       const { forceRotateGroupSenderKey, ensureGroupSession } = await import('@utils/crypto');
-      const { emitGroupKeyDistribution } = await import('@lib/socket');
+      const { emitGroupKeyDistribution } = await import('@lib/transportClient');
       
       await forceRotateGroupSenderKey(conversation.id);
       

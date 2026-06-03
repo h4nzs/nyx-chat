@@ -1,0 +1,20 @@
+[package]
+name = "transport-sidecar"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+wtransport = "0.7"
+tokio = { version = "1.37", features = ["full"] }
+redis = { version = "0.25.3", features = ["tokio-comp"] }
+jsonwebtoken = "9.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dashmap = "5.5"
+dotenvy = "0.15"
+anyhow = "1.0"
+bytes = "1.5"
+futures-util = "0.3"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+data-encoding = "2.11.0"

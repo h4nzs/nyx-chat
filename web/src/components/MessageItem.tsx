@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import type { Message, Conversation, Participant, MessageStatus } from "@store/conversation";
 import { useAuthStore } from "@store/auth";
 import { useMessageInputStore } from "@store/messageInput";
-import { getSocket } from "@lib/socket";
+import { transportClient, } from '@lib/transportClient';
 import { api } from "@lib/api";
 import { toAbsoluteUrl } from "@utils/url";
 import { useModalStore } from '@store/modal';
@@ -112,7 +112,7 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
         onVisibilityChange?.(message.id, true);
         const alreadyRead = message.statuses?.some((s: MessageStatus) => s.userId === meId && s.status === 'READ');
         if (!alreadyRead) {
-          getSocket().emit('message:mark_as_read', { messageId: message.id, conversationId: message.conversationId });
+          transportClient.sendEvent('message:mark_as_read', { messageId: message.id, conversationId: message.conversationId });
         }
         observer.disconnect();
       }
@@ -181,9 +181,9 @@ const MessageItem = ({ message, isGroup, participants, isHighlighted, onImageCli
           });
 
           // 3. Beritahu Server untuk memusnahkannya (jika pesan masih nyangkut/belum dibaca) — hanya jika connected
-          const socket = getSocket();
+          const socket = transportClient;
           if (socket?.connected) {
-              socket.emit("message:unsend", { messageId: message.id, conversationId: message.conversationId });
+              transportClient.sendEvent("message:unsend", { messageId: message.id, conversationId: message.conversationId });
           }
       }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { getSocket } from '@lib/socket';
+import { transportClient, } from '@lib/transportClient';
 import { urlBase64ToUint8Array } from '@utils/url';
 import toast from 'react-hot-toast';
 import i18n from '../i18n';
@@ -30,12 +30,12 @@ export function usePushNotifications() {
 
   // Helper untuk kirim ke socket (memoized with useCallback)
   const sendSubscriptionToSocket = useCallback((subscription: PushSubscription) => {
-    const socket = getSocket();
-    if (!socket || !socket.connected) {
+    const socket = transportClient;
+    if (!socket || !transportClient.connected) {
        // Coba lagi sebentar jika socket belum connect
        retryTimerRef.current = setTimeout(() => {
            if (!mountedRef.current) return;
-           const retrySocket = getSocket();
+           const retrySocket = transportClient;
            if (retrySocket && retrySocket.connected) {
                sendSubscriptionToSocket(subscription);
            }
@@ -45,7 +45,7 @@ export function usePushNotifications() {
 
     const subJSON = subscription.toJSON();
     if (subJSON.endpoint && subJSON.keys?.p256dh && subJSON.keys?.auth) {
-      socket.emit('push:subscribe', {
+      transportClient.sendEvent('push:subscribe', {
         endpoint: subJSON.endpoint,
         keys: {
           p256dh: subJSON.keys.p256dh,
@@ -143,9 +143,9 @@ export function usePushNotifications() {
         setIsSubscribed(false);
         localStorage.removeItem('nyx_push_enabled');
 
-        const socket = getSocket();
-        if (socket && socket.connected) {
-          socket.emit('push:unsubscribe');
+        const socket = transportClient;
+        if (socket && transportClient.connected) {
+          transportClient.sendEvent('push:unsubscribe');
         }
 
         toast.success(i18n.t('common:notifications_disabled', 'Notifications disabled'));

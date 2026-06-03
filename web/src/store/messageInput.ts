@@ -6,7 +6,7 @@ import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, handleApiError } from "@lib/api";
 import { ensureGroupSession } from "@utils/crypto";
-import { emitGroupKeyDistribution } from "@lib/socket";
+import { emitGroupKeyDistribution } from '@lib/transportClient';
 import toast from "react-hot-toast";
 import { useAuthStore } from "./auth";
 import { useMessageStore } from "./message";

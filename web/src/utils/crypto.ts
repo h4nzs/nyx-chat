@@ -40,7 +40,7 @@ import {
   emitGroupKeyDistribution, 
   emitGroupKeyRequest, 
   emitGroupKeyFulfillment 
-} from '@lib/socket';
+} from '@lib/transportClient';
 import type { Participant } from '@store/conversation';
 
 // --- Group Metadata Helpers ---

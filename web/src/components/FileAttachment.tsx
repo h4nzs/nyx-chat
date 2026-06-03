@@ -9,7 +9,7 @@ import { decryptFile, decryptMessage } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
 import { useConversationStore } from '@store/conversation';
 import { FiAlertTriangle, FiFile, FiDownload, FiMusic, FiVideo, FiImage, FiRefreshCw } from 'react-icons/fi';
-import { getSocket } from '@lib/socket';
+import { transportClient, } from '@lib/transportClient';
 import { useTranslation } from 'react-i18next';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `${import.meta.env.BASE_URL}pdf.worker.min.mjs`;
@@ -103,9 +103,9 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             if (keyResult.status === 'pending') {
                 if (isMounted) {
                     setStatus('waiting');
-                    const socket = getSocket();
+                    const socket = transportClient;
                     if (socket?.connected && targetSessionId) {
-                        socket.emit('session:request_key', {
+                        transportClient.sendEvent('session:request_key', {
                             conversationId: message.conversationId,
                             sessionId: targetSessionId
                         });

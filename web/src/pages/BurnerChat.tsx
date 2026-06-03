@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useBurnerStore } from '../store/burner';
 import { useAuthStore } from '../store/auth';
 import { useTranslation } from 'react-i18next';
-import { getSocket, connectSocket } from '../lib/socket';
+import { transportClient, connectSocket } from '../lib/transportClient';
 import { FiPaperclip, FiMic, FiSend } from 'react-icons/fi';
 import MessageBubble from '../components/MessageBubble';
 import type { Message } from '@nyx/shared';
@@ -29,7 +29,7 @@ export default function BurnerChat() {
   // Removed local isInitialized calculation as it's now handled by the store.
 
   useEffect(() => {
-    const socket = getSocket();
+    const socket = transportClient;
     if (!socket?.connected) {
       connectSocket();
     }
@@ -41,12 +41,12 @@ export default function BurnerChat() {
     }
     
     // Explicitly join the room for anonymous guest
-    const socket = getSocket();
+    const socket = transportClient;
     if (socket && location.hash) {
        const hashPart = location.hash.split('#')[1];
        if (hashPart) {
           const [id] = hashPart.split(':');
-          socket.emit('burner:join', { roomId: id });
+          transportClient.sendEvent('burner:join', { roomId: id });
        }
     }
   }, [location.hash, initializeFromHash]);

@@ -5,7 +5,7 @@ import { useAuthStore } from '@store/auth';
 import { useShallow } from 'zustand/react/shallow';
 import { authFetch } from '@lib/api';
 import { toAbsoluteUrl } from '@utils/url';
-import { getSocket } from '@lib/socket';
+import { transportClient, } from '@lib/transportClient';
 import { hashUsername } from '@lib/crypto-worker-proxy';
 import toast from 'react-hot-toast';
 import useDynamicIslandStore from '@store/dynamicIsland';
@@ -91,7 +91,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
       const conversationId = await createGroup(title.trim(), selectedUsers.map(u => u.id));
 
       // Join the socket room for real-time updates
-      getSocket().emit("conversation:join", conversationId);
+      transportClient.sendEvent("conversation:join", conversationId);
 
       openConversation(conversationId);
 

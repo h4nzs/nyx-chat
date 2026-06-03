@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { FiUploadCloud } from 'react-icons/fi';
 import { Html5Qrcode } from 'html5-qrcode';
-import { getSocket } from '@lib/socket';
+import { transportClient, connectSocket } from '@lib/transportClient';
 import { getSodium } from '@lib/sodiumInitializer';
 import { worker_file_encrypt } from '@lib/crypto-worker-proxy';
 import { exportDatabaseToJson } from '@lib/keychainDb';
@@ -30,9 +30,9 @@ export default function MigrationSendPage() {
   useEffect(() => {
     const prefetch = async () => {
       try {
-        const socket = getSocket();
+        const socket = transportClient;
         if (socket?.connected) {
-            socket.disconnect();
+            transportClient.disconnect();
             console.log("System Frozen: Socket disconnected to prevent Ratchet Race Condition.");
         }
 
@@ -40,7 +40,7 @@ export default function MigrationSendPage() {
         vaultDataRef.current = new TextEncoder().encode(jsonString).buffer;
         setStatus('scanning');
         
-        socket.connect();
+        connectSocket();
       } catch (e) {
         toast.error(tRef.current('common:migration.read_vault_failed', 'Gagal membaca brankas data.'));
       }
@@ -48,8 +48,8 @@ export default function MigrationSendPage() {
     prefetch();
 
     return () => {
-      if (getSocket()?.disconnected) {
-        getSocket().connect();
+      if (!transportClient?.connected) {
+        connectSocket();
       }
     };
   }, []);
@@ -102,18 +102,18 @@ export default function MigrationSendPage() {
       toast.loading(t('common:migration.tunneling', 'Membangun terowongan aman...'), { id: 'send' });
 
       // 3. Chunking & Socket Emission
-      const socket = getSocket();
+      const socket = transportClient;
       const totalChunks = Math.ceil(combinedData.byteLength / CHUNK_SIZE);
 
-// Hapus iv dari socket.emit
-      socket.emit('migration:start', { roomId, totalChunks, sealedKey });
+// Hapus iv dari transportClient.emit
+      transportClient.sendEvent('migration:start', { roomId, totalChunks, sealedKey });
 
       for (let i = 0; i < totalChunks; i++) {
         const start = i * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, combinedData.byteLength);
         const chunk = combinedData.slice(start, end);
         
-        socket.emit('migration:chunk', { roomId, chunkIndex: i, chunk });
+        transportClient.sendEvent('migration:chunk', { roomId, chunkIndex: i, chunk });
         setProgress(Math.round(((i + 1) / totalChunks) * 100));
         
         await new Promise(r => setTimeout(r, 50));
@@ -124,7 +124,7 @@ export default function MigrationSendPage() {
       // Wait for ACK
       const ackResult = await new Promise((resolve) => {
         const timeout = setTimeout(() => resolve(false), 30000); // 30s timeout
-        socket.once('migration:ack', (data: { roomId: string, success: boolean }) => {
+        transportClient.once('migration:ack', (data: { roomId: string, success: boolean }) => {
            if (data.roomId === roomId) {
                clearTimeout(timeout);
                resolve(data.success);

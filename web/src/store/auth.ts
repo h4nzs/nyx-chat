@@ -4,7 +4,7 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { MinimalUserSchema } from '@nyx/shared';
 import { authFetch, api } from "@lib/api";
-import { disconnectSocket, connectSocket } from "@lib/socket";
+import { disconnectSocket, connectSocket } from '@lib/transportClient';
 import { clearAuthCookies } from "@lib/tokenStorage";
 import { useModalStore } from "./modal";
 import { useConversationStore } from "./conversation";

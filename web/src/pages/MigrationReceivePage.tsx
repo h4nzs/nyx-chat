@@ -9,7 +9,7 @@ const QRCode = (
 ) as typeof QRCodeRaw;
 
 import { FiDownloadCloud, FiCheckCircle } from 'react-icons/fi';
-import { getSocket, connectSocket } from '@lib/socket';
+import { transportClient, connectSocket } from '@lib/transportClient';
 import { getSodium } from '@lib/sodiumInitializer';
 import { worker_file_decrypt } from '@lib/crypto-worker-proxy';
 import { importDatabaseFromJson } from '@lib/keychainDb';
@@ -44,14 +44,14 @@ export default function MigrationReceivePage() {
       const roomId = `mig_${uuidv4()}`;
       const pubKeyB64 = sodium.to_base64(keypair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
       
-      const socket = getSocket();
-      if (!socket.connected) connectSocket();
+      const socket = transportClient;
+      if (!transportClient.connected) connectSocket();
       
-      socket.emit('migration:join', roomId);
+      transportClient.sendEvent('migration:join', roomId);
       setQrData(JSON.stringify({ roomId, pubKey: pubKeyB64 }));
 
       // Listeners
-      socket.on('migration:start', (data) => {
+      transportClient.on('migration:start', (data) => {
         metaRef.current = data;
         chunksRef.current = new Array(data.totalChunks);
         migrationStartedRef.current = false;
@@ -59,7 +59,7 @@ export default function MigrationReceivePage() {
         toast.loading(tRef.current('common:migration.receiving_data', 'Menerima data...'), { id: 'mig' });
       });
 
-      socket.on('migration:chunk', async (data) => {
+      transportClient.on('migration:chunk', async (data) => {
         chunksRef.current[data.chunkIndex] = data.chunk;
         const receivedCount = chunksRef.current.filter(Boolean).length;
         const total = metaRef.current?.totalChunks || 1;
@@ -77,9 +77,9 @@ export default function MigrationReceivePage() {
     
     return () => {
       isMounted = false;
-      const socket = getSocket();
-      socket.off('migration:start');
-      socket.off('migration:chunk');
+      const socket = transportClient;
+      transportClient.off('migration:start');
+      transportClient.off('migration:chunk');
     };
   }, []);
 
@@ -111,8 +111,8 @@ export default function MigrationReceivePage() {
       // 5. Import to IDB
       await importDatabaseFromJson(jsonString);
       
-      const socket = getSocket();
-      socket.emit('migration:ack', { roomId: metaRef.current!.roomId, success: true });
+      const socket = transportClient;
+      transportClient.sendEvent('migration:ack', { roomId: metaRef.current!.roomId, success: true });
 
       setStatus('success');
       toast.success(tRef.current('common:migration.complete', 'Migrasi Selesai!'), { id: 'mig' });
@@ -121,9 +121,9 @@ export default function MigrationReceivePage() {
       console.error(e);
       toast.error(tRef.current('common:migration.decryption_failed', 'Gagal mendekripsi data.'), { id: 'mig' });
       
-      const socket = getSocket();
+      const socket = transportClient;
       if (metaRef.current?.roomId) {
-         socket.emit('migration:ack', { roomId: metaRef.current.roomId, success: false });
+         transportClient.sendEvent('migration:ack', { roomId: metaRef.current.roomId, success: false });
       }
 
       setStatus('waiting');

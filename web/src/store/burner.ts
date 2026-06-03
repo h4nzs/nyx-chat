@@ -1,6 +1,6 @@
 import { createWithEqualityFn } from 'zustand/traditional';
 import type { BurnerDoubleRatchetState, BurnerDoubleRatchetHeader } from '../workers/crypto.worker';
-import { getSocket } from '../lib/socket';
+import { transportClient, } from '../lib/transportClient';
 import { worker_burner_dr_init_guest, worker_burner_dr_encrypt, worker_burner_dr_decrypt } from '../lib/crypto-worker-proxy';
 import { getSodiumLib } from '../utils/crypto';
 import { useAuthStore } from './auth';
@@ -161,7 +161,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
           guestClassicalPk: session.guestClassicalPk
         };
 
-        const socket = getSocket();
+        const socket = transportClient;
         
         const currentUser = useAuthStore.getState().user;
         const storedHostId = get().hostUserId;
@@ -178,7 +178,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
           const timer = setTimeout(() => resolve({ ok: false, error: 'timeout' }), 15000);
           
           if (isHost) {
-            socket.emit('burner:reply', {
+            transportClient.sendEvent('burner:reply', {
               roomId,
               ciphertext: JSON.stringify(payload)
             });
@@ -186,7 +186,7 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
             clearTimeout(timer);
             resolve({ ok: true });
           } else {
-            socket.emit('burner:send', { 
+            transportClient.sendEvent('burner:send', { 
               roomId, 
               targetDeviceId: hostDeviceId, 
               hostUserId, 
@@ -385,10 +385,10 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
     useMessageStore.getState().clearMessagesForConversation(roomId);
 
     // 4. Emit to server for blacklist reinforcement
-    const socket = getSocket();
+    const socket = transportClient;
     if (socket) {
       const myUserId = useAuthStore.getState().user?.id;
-      socket.emit('burner:destroy', { roomId, hostUserId: myUserId });
+      transportClient.sendEvent('burner:destroy', { roomId, hostUserId: myUserId });
     }
 
     // 5. Atomic Redirection

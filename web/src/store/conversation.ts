@@ -4,7 +4,7 @@
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api";
 import { useMessageStore, decryptMessageObject } from "./message";
-import { getSocket, emitSessionKeyRequest, fireGhostSync, emitGroupKeyDistribution } from "@lib/socket";
+import { transportClient, emitSessionKeyRequest, fireGhostSync, emitGroupKeyDistribution } from '@lib/transportClient';
 import { useVerificationStore } from './verification';
 import { useAuthStore, User } from './auth';
 import type { ConversationId, UserId, MessageId, MessageStatus, RawServerMessage, Message, Participant, ConversationUi as Conversation } from '@nyx/shared';
@@ -328,8 +328,8 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       set({ conversations: sortConversations(reconciledConversations, useAuthStore.getState().user?.id) });
       useVerificationStore.getState().loadInitialStatus(conversations);
 
-      const socket = getSocket();
-      conversations.forEach(c => socket.emit("conversation:join", c.id));
+      const socket = transportClient;
+      conversations.forEach(c => transportClient.sendEvent("conversation:join", c.id));
     } catch (error) {
       console.error("Failed to load conversations", error);
       set({ error: "Failed to load conversations." });
@@ -427,7 +427,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           });
       }
 
-      getSocket().emit("conversation:join", conv.id);
+      transportClient.sendEvent("conversation:join", conv.id);
       get().addOrUpdateConversation(conv);
       set({ activeId: conv.id, isSidebarOpen: false });
       return conv.id;
@@ -471,7 +471,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             encryptedMetadata
         };
         
-        getSocket().emit("conversation:join", conv.id);
+        transportClient.sendEvent("conversation:join", conv.id);
         get().addOrUpdateConversation(updatedConv);
         set({ activeId: conv.id, isSidebarOpen: false });
         

@@ -6,7 +6,7 @@ import { useConversationStore } from '@store/conversation';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
 import { FiAlertTriangle, FiImage, FiRefreshCw } from 'react-icons/fi';
-import { getSocket } from '@lib/socket'; 
+import { transportClient, } from '@lib/transportClient'; 
 import { useTranslation } from 'react-i18next';
 
 interface LazyImageProps extends Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src'> {
@@ -131,9 +131,9 @@ export default function LazyImage({
                     setDecryptionStatus('waiting_for_key');
                     setError(keyResult.reason || "Key not found yet");
                     
-                    const socket = getSocket();
-                    if (socket && socket.connected && message.sessionId) {
-                        socket.emit('session:request_key', {
+                    const socket = transportClient;
+                    if (socket && transportClient.connected && message.sessionId) {
+                        transportClient.sendEvent('session:request_key', {
                             conversationId: message.conversationId,
                             sessionId: message.sessionId
                         });

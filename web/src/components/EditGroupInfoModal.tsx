@@ -25,7 +25,7 @@ export default function EditGroupInfoModal({ conversationId, currentTitle, curre
     try {
       const { encryptGroupMetadata, ensureGroupSession } = await import('@utils/crypto');
       const { useConversationStore } = await import('@store/conversation');
-      const { emitGroupKeyDistribution } = await import('@lib/socket');
+      const { emitGroupKeyDistribution } = await import('@lib/transportClient');
       
       const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
       if (!conversation) throw new Error("Conversation not found");

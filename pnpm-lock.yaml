@@ -400,6 +400,9 @@ importers:
       emoji-picker-react:
         specifier: ^4.19.1
         version: 4.19.1(react@19.2.6)
+      eventemitter3:
+        specifier: ^5.0.4
+        version: 5.0.4
       framer-motion:
         specifier: ^12.40.0
         version: 12.40.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -461,8 +464,8 @@ importers:
         specifier: ^7.16.0
         version: 7.16.0(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       react-sketch-canvas:
-        specifier: ^6.2.0
-        version: 6.2.0(react@19.2.6)
+        specifier: ^8.0.0
+        version: 8.0.0(react@19.2.6)
       react-virtualized-auto-sizer:
         specifier: ^2.0.3
         version: 2.0.3(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
@@ -475,9 +478,6 @@ importers:
       remark-gfm:
         specifier: ^4.0.1
         version: 4.0.1
-      socket.io-client:
-        specifier: ^4.8.3
-        version: 4.8.3
       uuid:
         specifier: ^14.0.0
         version: 14.0.0
@@ -8039,11 +8039,11 @@ packages:
       react-dom:
         optional: true
 
-  react-sketch-canvas@6.2.0:
-    resolution: {integrity: sha512-Z56RQN0viV9W3Y+DpZfQMi2lf3pO+UB4l+cMwnx7j7pQ9WHkQwN+qZKVFGANgpjXQMyY42NODF/DXjuKPCMf1w==}
-    engines: {node: '>=10'}
+  react-sketch-canvas@8.0.0:
+    resolution: {integrity: sha512-ijCcGxZsmHFfYMHVPoVj5tDvKCrjFihsjApxv+iaEnNbYneBT9nAKQaDEE8QUZb457DWO/AFx5i29HPt24R/PA==}
+    engines: {node: '>=22.13.0'}
     peerDependencies:
-      react: '>=16.8'
+      react: '>=18.0.0'
 
   react-stately@3.47.0:
     resolution: {integrity: sha512-H3ar+SOWP920EbVg7qWfP3fZjZiwhlEJAEJQqjt+w8oKijCwFgr0+R4941PIHscOXRNRvEOjvWilitImC0DdBg==}
@@ -18207,7 +18207,7 @@ snapshots:
     optionalDependencies:
       react-dom: 19.2.6(react@19.2.6)
 
-  react-sketch-canvas@6.2.0(react@19.2.6):
+  react-sketch-canvas@8.0.0(react@19.2.6):
     dependencies:
       react: 19.2.6
 

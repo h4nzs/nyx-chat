@@ -1,12 +1,13 @@
 // Copyright (c) 2026 [han]. All rights reserved.
 // This file is part of NYX, licensed under the AGPL-3.0.
 // For commercial licensing, contact [admin@nyx-app.my.id].
-import { getSocket } from './socket';
 import { useCallStore } from '../store/callStore';
 import { api } from './api';
 import { asUserId } from '@nyx/shared';
 import { WebRTCSignalingSchema } from '@nyx/shared';
 import i18n from '../i18n';
+import { transportClient } from './transportClient';
+import { TransportOpCode, BinaryPayload } from '@nyx/shared';
 
 let cachedIceServers: RTCIceServer[] | null = null;
 let turnCacheExp = 0;
@@ -95,7 +96,14 @@ const sendSecureSignal = async (to: string, type: string, payload: object = {}) 
   try {
     const { encryptCallSignal } = await import('../utils/crypto');
     const encryptedPayload = await encryptCallSignal(payload, callKey);
-    getSocket()?.emit('webrtc:secure_signal', { to, type, payload: encryptedPayload });
+    const data = { to, type, payload: encryptedPayload };
+    const buffer = new TextEncoder().encode(JSON.stringify(data));
+    
+    if (type === 'ice-candidate') {
+      transportClient.sendDatagram(TransportOpCode.WEBRTC_ICE, buffer);
+    } else {
+      transportClient.sendStream(TransportOpCode.WEBRTC_SIGNAL, buffer);
+    }
   } catch (e) {
     console.error(`Failed to encrypt signal ${type}`, e);
   }
@@ -206,7 +214,9 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
                  // We can just send 'request' to notify them to ring.
                  // Encrypt payload
                  encryptCallSignal({ isVideo, callerProfile }, callKey).then(enc => {
-                     getSocket()?.emit('webrtc:secure_signal', { to: pid, type: 'request', payload: enc });
+                     const data = { to: pid, type: 'request', payload: enc };
+                     const buffer = new TextEncoder().encode(JSON.stringify(data));
+                     transportClient.sendStream(TransportOpCode.WEBRTC_SIGNAL, buffer);
                  });
             }
         });
@@ -216,7 +226,9 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
         // 2. Encrypt the signaling metadata and send via unified event
         const payload = { isVideo, callerProfile };
         const encryptedPayload = await encryptCallSignal(payload, callKey);
-        getSocket()?.emit('webrtc:secure_signal', { to, type: 'request', payload: encryptedPayload });
+        const data = { to, type: 'request', payload: encryptedPayload };
+        const buffer = new TextEncoder().encode(JSON.stringify(data));
+        transportClient.sendStream(TransportOpCode.WEBRTC_SIGNAL, buffer);
     }
 
   } catch (err) {
@@ -267,8 +279,6 @@ export const hangup = () => {
   cleanupCall();
 };
 
-import type { Socket } from "socket.io-client";
-
 import type { MinimalProfile } from '../store/callStore';
 
 type SignalingPayload = 
@@ -279,13 +289,20 @@ type SignalingPayload =
   | { type?: string; reason?: string; callerProfile?: MinimalProfile }
   | Record<string, unknown>;
 
-export const initWebRTCListeners = (socket: Socket | null) => {
-  if (!socket) return;
+export const initWebRTCListeners = () => {
+  if (transportClient.listenerCount('webrtc:signal') > 0) return;
 
-  if (socket.listeners('webrtc:secure_signal').length > 0) return;
+  transportClient.on('webrtc:signal', async (rawPayload: BinaryPayload) => {
+    let rawJson: unknown;
+    try {
+        const decoded = new TextDecoder().decode(rawPayload);
+        rawJson = JSON.parse(decoded);
+    } catch (e) {
+        console.error("Failed to decode and parse webrtc signal payload");
+        return;
+    }
 
-  socket.on('webrtc:secure_signal', async (rawPayload: unknown) => {
-    const parsed = WebRTCSignalingSchema.safeParse(rawPayload);
+    const parsed = WebRTCSignalingSchema.safeParse(rawJson);
 
     if (!parsed.success) {
         console.error("[WebRTC Zod Shield] Dropping invalid signaling payload:", parsed.error.format());

@@ -5,7 +5,7 @@ import type { UserId, ConversationId, MessageId, MessageSendPayload, SystemMessa
 import { asUserId, asConversationId, asMessageId } from '@nyx/shared';
 import { createWithEqualityFn } from "zustand/traditional";
 import { api, authFetch } from "@lib/api"; 
-import { getSocket, emitSessionKeyRequest, emitGroupKeyDistribution } from "@lib/socket";
+import { transportClient, emitSessionKeyRequest, emitGroupKeyDistribution } from '@lib/transportClient';
 import { 
   encryptMessage, 
   decryptMessage, 
@@ -827,7 +827,7 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                       window[rateLimitKey] = Date.now() as never;
 
                       console.log(`[Offline Sync] Received persistent key request from ${requestorId}`);
-                      import('@lib/socket').then(async ({ emitGroupKeyDistribution }) => {
+                      import('@lib/transportClient').then(async ({ emitGroupKeyDistribution }) => {
                            try {
                                const { getMyEncryptionKeyPair, getSodiumLib, getWorkerProxy, fetchPreKeyBundles } = await import('@utils/crypto');
                                const { getGroupSenderState } = await import('@lib/keychainDb');
@@ -1320,8 +1320,8 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
         const ciphertextB64 = sodium.to_base64(ciphertext, sodium.base64_variants.URLSAFE_NO_PADDING);
         const payload = { header, ciphertext: ciphertextB64 };
         
-        const socket = (await import('../lib/socket')).getSocket();
-        socket.emit('burner:reply', { roomId: conversationId, ciphertext: JSON.stringify(payload) });
+        const socket = (await import('../lib/transportClient')).transportClient;
+        transportClient.sendEvent('burner:reply', { roomId: conversationId, ciphertext: JSON.stringify(payload) });
         
         // Update local status to SENT
         get().updateMessage(conversationId, `temp_${actualTempId}`, { status: 'SENT' });
@@ -1608,7 +1608,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           pushPayloads: Object.keys(pushPayloads).length > 0 ? pushPayloads : undefined
       };
 
-      const socket = getSocket();
+      const socket = transportClient;
       const isConnected = socket?.connected;
 
       if (!isConnected && !isReactionPayload) {
@@ -1778,7 +1778,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
     const queue = await getQueueItems();
     if (queue.length === 0) return;
 
-    const socket = getSocket();
+    const socket = transportClient;
     if (!socket?.connected) return;
 
     for (const item of queue) {
@@ -1816,7 +1816,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           updateQueueAttempt(tempId, attempt + 1).then(() => resolve());
         }, 5000);
 
-        socket.emit("message:send", sendPayload, async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
+        transportClient.sendEvent("message:send", sendPayload, async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
           clearTimeout(timeoutId);
           if (res.ok && res.msg) {
             await removeFromQueue(tempId);
@@ -2252,17 +2252,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             if (now - lastRepair > 15000) {
                 window[repairKey as keyof Window] = now as never;
                 console.warn(`[Offline Sync] Meminta pengiriman ulang kunci yang hilang secara diam-diam untuk ${id}...`);
-                import('@lib/socket').then(m => m.emitGroupKeyRequest(id));
+                import('@lib/transportClient').then(m => m.emitGroupKeyRequest(id));
             }
         }
 
         // ✅ 4. BARU TEMBAK KILL SWITCH SETELAH DATA AMAN
-        const socket = getSocket();
+        const socket = transportClient;
         const { user } = useAuthStore.getState();
         if (socket?.connected && user) {
           for (const msg of processedMessages) {
             if (msg.senderId !== user.id) {
-              socket.emit('message:mark_as_read', { messageId: msg.id, conversationId: id });
+              transportClient.sendEvent('message:mark_as_read', { messageId: msg.id, conversationId: id });
             }
           }
         }
@@ -2498,7 +2498,7 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               
               // Minta pengirim mem-broadcast ulang kunci distribusinya
               // Delay is handled in crypto.ts or we can use 1.5s delay here if needed, but since crypto.ts does it, we just emit.
-              const { emitGroupKeyRequest } = await import('@lib/socket');
+              const { emitGroupKeyRequest } = await import('@lib/transportClient');
               emitGroupKeyRequest(conversationId);
           }
       }
@@ -2716,9 +2716,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
               }
 
               // ✅ 2. TEMBAK KILL SWITCH SETELAH AMAN DI LOKAL
-              const socket = getSocket();
+              const socket = transportClient;
               if (socket?.connected && currentUser && finalDecrypted.senderId !== currentUser.id && !finalDecrypted.isSilent) {
-                  socket.emit('message:mark_as_read', {
+                  transportClient.sendEvent('message:mark_as_read', {
                       messageId: finalDecrypted.id,
                       conversationId: conversationId
                   });
