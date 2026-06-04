@@ -5,7 +5,7 @@ import { getSodium } from '../lib/sodium.js';
 import { toRawServerMessage } from '../utils/mappers.js';
 import { sendPushNotification } from '../utils/sendPushNotification.js';
 import { TransportOpCode } from '@nyx/shared';
-import type { MessageSendPayload } from '@nyx/shared';
+import type { MessageSendPayload, ServerToClientEvents, ClientToServerEvents, RawServerMessage, KeyRequestPayload, KeyFulfillmentPayload, GroupKeyRequestPayload, DistributeKeysPayload, PushSubscribePayload } from '@nyx/shared';
 
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -92,7 +92,7 @@ export async function sendJsonToUser(targetUserId: string, opCode: TransportOpCo
 /**
  * Broadcasts a message to all participants of a conversation.
  */
-export async function broadcastToConversation(conversationId: string, opCode: TransportOpCode, data: any, excludeUserId?: string) {
+export async function broadcastToConversation(conversationId: string, opCode: TransportOpCode, data: unknown, excludeUserId?: string) {
   const conversation = await prisma.conversation.findUnique({
     where: { id: conversationId },
     select: { participants: { select: { userId: true } } }
@@ -109,7 +109,7 @@ export async function broadcastToConversation(conversationId: string, opCode: Tr
 /**
  * Broadcasts a message to multiple users.
  */
-export async function broadcastToUsers(userIds: string[], opCode: TransportOpCode, data: any) {
+export async function broadcastToUsers(userIds: string[], opCode: TransportOpCode, data: unknown) {
   for (const userId of userIds) {
     await sendJsonToUser(userId, opCode, data);
   }
@@ -118,31 +118,31 @@ export async function broadcastToUsers(userIds: string[], opCode: TransportOpCod
 async function handleUpstreamMessage(userId: string, deviceId: string, opCode: number, base64Payload: string, _msgIdFromWrapper?: string) {
   const buffer = Buffer.from(base64Payload, 'base64');
   const payloadStr = buffer.toString('utf-8');
-  let payload: any;
+  let payload: Record<string, unknown>;
   
   try {
-    payload = JSON.parse(payloadStr);
+    payload = JSON.parse(payloadStr) as Record<string, unknown>;
   } catch (e) {
-    payload = payloadStr;
+    payload = { raw: payloadStr };
   }
   
-  const msgId = payload?.msgId;
+  const msgId = typeof payload?.msgId === 'string' ? payload.msgId : undefined;
 
   switch (opCode) {
     case TransportOpCode.CHAT_MESSAGE:
-      await handleChatMessage(userId, deviceId, payload, msgId);
+      await handleChatMessage(userId, deviceId, payload as unknown as MessageSendPayload, msgId);
       break;
     case TransportOpCode.WEBRTC_SIGNAL:
-      await handleWebRtcRelay(userId, payload, TransportOpCode.WEBRTC_SIGNAL);
+      await handleWebRtcRelay(userId, payload as { to: string, type: string, payload: string }, TransportOpCode.WEBRTC_SIGNAL);
       break;
     case TransportOpCode.WEBRTC_ICE:
-      await handleWebRtcRelay(userId, payload, TransportOpCode.WEBRTC_ICE);
+      await handleWebRtcRelay(userId, payload as { to: string, type: string, payload: string }, TransportOpCode.WEBRTC_ICE);
       break;
     case TransportOpCode.PRESENCE:
-      await handlePresence(userId, payload);
+      await handlePresence(userId, payload as { event: 'active' | 'away' | 'typing:start' | 'typing:stop', conversationId?: string });
       break;
     case TransportOpCode.KEY_SYNC:
-      await handleKeySync(userId, deviceId, payload, msgId);
+      await handleKeySync(userId, deviceId, payload as { event: string, msgId: string, data: Record<string, unknown> }, msgId);
       break;
     case 99: // DISCONNECT
       await handleDisconnect(userId);
@@ -205,7 +205,7 @@ async function handleChatMessage(userId: string, deviceId: string, payload: Mess
       include: { sender: { select: { id: true, encryptedProfile: true } } }
     });
     
-    const safeMessage = (toRawServerMessage(newMessageRaw) as any);
+    const safeMessage = toRawServerMessage(newMessageRaw) as RawServerMessage;
     if (tempId !== undefined) safeMessage.tempId = typeof tempId === 'string' ? parseInt(tempId, 10) : tempId;
 
     // Acknowledge the sender
@@ -266,13 +266,13 @@ export async function checkRateLimit(userId: string, event: string, limit: numbe
     return current <= limit;
 }
 
-async function handleKeySync(userId: string, deviceId: string, payload: { event: string, msgId: string, data: any }, msgIdFromRust?: string) {
+async function handleKeySync(userId: string, deviceId: string, payload: { event: string, msgId: string, data: unknown }, msgIdFromRust?: string) {
    const { event, msgId, data } = payload;
 
    try {
      switch (event) {
        case 'session:request_key': {
-         const { conversationId, sessionId, targetId } = data;
+         const { conversationId, sessionId, targetId } = data as any;
          if (!conversationId) return;
          if (!await checkRateLimit(userId, 'session_request_key', 20, 60)) return;
 
@@ -328,7 +328,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'session:fulfill_response': {
-         const { requesterId, conversationId, sessionId, encryptedKey, targetDeviceId } = data;
+         const { requesterId, conversationId, sessionId, encryptedKey, targetDeviceId } = data as KeyFulfillmentPayload;
          if (!requesterId || !encryptedKey) return;
          if (!await checkRateLimit(userId, 'session_fulfill_response', 60, 60)) return;
 
@@ -338,7 +338,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'messages:distribute_keys': {
-         const { conversationId, keys } = data;
+         const { conversationId, keys } = data as DistributeKeysPayload;
          if (!conversationId || !Array.isArray(keys)) {
             if (msgId) await sendAck(userId, deviceId, msgId, { ok: false, error: 'Invalid payload' });
             return;
@@ -363,7 +363,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'group:request_key': {
-         const { conversationId, targetSenderId, targetDeviceKey } = data;
+         const { conversationId, targetSenderId, targetDeviceKey } = data as GroupKeyRequestPayload;
          if (!conversationId) return;
          if (!await checkRateLimit(userId, 'group_request_key', 20, 60)) return;
 
@@ -403,7 +403,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'group:fulfilled_key': {
-         const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey } = data;
+         const { requesterId, conversationId, encryptedKey, targetDeviceId, senderDeviceKey } = data as any;
          if (!requesterId || !conversationId || !encryptedKey) return;
          if (!await checkRateLimit(userId, 'group_fulfilled_key', 60, 60)) return;
 
@@ -425,7 +425,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'message:unsend': {
-         const { messageId, conversationId } = data;
+         const { messageId, conversationId } = data as any;
          if (!messageId || !conversationId) return;
          const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { senderId: true, conversationId: true } });
          if (!msg || msg.conversationId !== conversationId || msg.senderId !== userId) return;
@@ -435,7 +435,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'message:view_once_opened': {
-         const { messageId, conversationId } = data;
+         const { messageId, conversationId } = data as any;
          if (!messageId || !conversationId) return;
          const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { senderId: true, conversationId: true } });
          if (!msg || msg.senderId === userId || msg.conversationId !== conversationId) return;
@@ -444,7 +444,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'push:subscribe': {
-         const { endpoint, keys } = data;
+         const { endpoint, keys } = data as PushSubscribePayload;
          if (!endpoint || !keys?.p256dh || !keys?.auth) return;
          await prisma.pushSubscription.upsert({
            where: { endpoint },
@@ -461,18 +461,19 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
 
        // --- BURNER CHAT EVENTS ---
        case 'burner:join': {
-         if (data?.roomId) await pubClient.sAdd(`burner:room:${data.roomId}`, userId);
+         const { roomId } = data as { roomId?: string };
+         if (roomId) await pubClient.sAdd(`burner:room:${roomId}`, userId);
          break;
        }
        case 'burner:send': {
-         const { roomId, targetDeviceId, hostUserId, ciphertext } = data;
+         const { roomId, targetDeviceId, hostUserId, ciphertext } = data as any;
          if (await redisClient.exists(`burner:terminated:${roomId}`)) return;
          await sendJsonToUser(hostUserId, TransportOpCode.KEY_SYNC, { event: 'burner:receive', data: { roomId, ciphertext } }, false, targetDeviceId);
          if (msgId) await sendAck(userId, deviceId, msgId, { ok: true });
          break;
        }
        case 'burner:reply': {
-         const { roomId, ciphertext } = data;
+         const { roomId, ciphertext } = data as { roomId: string, ciphertext: string };
          if (await redisClient.exists(`burner:terminated:${roomId}`)) return;
          const members = await pubClient.sMembers(`burner:room:${roomId}`);
          for (const memberId of members) {
@@ -481,7 +482,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          break;
        }
        case 'burner:destroy': {
-         const { roomId } = data;
+         const { roomId } = data as any;
          await redisClient.set(`burner:terminated:${roomId}`, "1", { EX: 86400 });
          const members = await pubClient.sMembers(`burner:room:${roomId}`);
          for (const memberId of members) {
@@ -497,7 +498,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          break;
        }
        case 'migration:start': {
-         const { roomId } = data;
+         const { roomId } = data as any;
          await redisClient.set(`migration_owner:${roomId}`, userId, { EX: 3600 });
          const members = await pubClient.sMembers(`migration:room:${roomId}`);
          for (const memberId of members) {
@@ -506,7 +507,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          break;
        }
        case 'migration:chunk': {
-         const { roomId } = data;
+         const { roomId } = data as any;
          const ownerId = await redisClient.get(`migration_owner:${roomId}`);
          if (ownerId !== userId) return;
          const members = await pubClient.sMembers(`migration:room:${roomId}`);
@@ -516,7 +517,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          break;
        }
        case 'migration:ack': {
-         const { roomId } = data;
+         const { roomId } = data as any;
          const ownerId = await redisClient.get(`migration_owner:${roomId}`);
          if (ownerId) await sendJsonToUser(ownerId, TransportOpCode.KEY_SYNC, { event: 'migration:ack', data });
          break;
@@ -524,7 +525,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
 
        case 'messages:mark_read':
        case 'messages:mark_delivered': {
-         const { conversationId, messageIds } = data;
+         const { conversationId, messageIds } = data as any;
          const status = event === 'messages:mark_read' ? 'READ' : 'DELIVERED';
          if (!conversationId || !Array.isArray(messageIds)) return;
          
@@ -543,7 +544,7 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        }
 
        case 'message:deleted': {
-         const { conversationId, id: messageId } = data;
+         const { conversationId, id: messageId } = data as any;
          if (!conversationId || !messageId) return;
 
          const message = await prisma.message.findUnique({ where: { id: messageId } });
@@ -562,6 +563,6 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
    }
 }
 
-async function sendAck(userId: string, deviceId: string, msgId: string, data: any) {
+async function sendAck(userId: string, deviceId: string, msgId: string, data: Record<string, unknown>) {
   await sendJsonToUser(userId, TransportOpCode.ACK, { msgId, data }, false, deviceId);
 }

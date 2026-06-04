@@ -201,4 +201,3 @@ Apakah Anda ingin saya buatkan cuplikan kode sederhana tentang cara mengecek duk
 
 ### payment gateway
 - BTCpay server
-- req midtrans international payment

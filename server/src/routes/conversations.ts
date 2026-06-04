@@ -66,7 +66,7 @@ router.get('/', async (req, res, next) => {
         }) 
       : [];
 
-    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, (item._count as any)?.id || 0]));
+    const unreadMap = new Map(unreadCountsData.map(item => [item.conversationId, (item._count as { id: number }).id || 0]));
 
     const itemsWithUnread = safeConversations.map(c => ({
       ...c,

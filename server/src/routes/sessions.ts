@@ -92,7 +92,7 @@ router.delete('/:jti', requireAuth, async (req, res, next) => {
       include: { device: { select: { userId: true } } }
     })
 
-    if (!token || (token.device as any).userId !== userId) {
+    if (!token || token.device?.userId !== userId) {
       throw new ApiError(404, 'Session not found or unauthorized')
     }
 

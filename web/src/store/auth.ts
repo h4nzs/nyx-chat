@@ -202,35 +202,60 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
     // Fallback: Prompt user for password manually
     const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
       return new Promise((resolve, reject) => {
+        let isSubmissionStarted = false;
+        let isResolvedOrRejected = false;
+
         const unsubscribe = useModalStore.subscribe((state) => {
-          if (!state.isPasswordPromptOpen) {
+          // If the modal is closed and we haven't started a submission or already resolved/rejected
+          if (!state.isPasswordPromptOpen && !isSubmissionStarted && !isResolvedOrRejected) {
+            isResolvedOrRejected = true;
             unsubscribe();
+            // Short delay to ensure no race with a very fast cancel callback
             setTimeout(() => {
                reject(new Error("Password prompt closed without input."));
             }, 100);
           }
         });
 
-        const cleanup = () => unsubscribe();
+        const cleanup = () => {
+          isResolvedOrRejected = true;
+          unsubscribe();
+        };
 
         useModalStore.getState().showPasswordPrompt(async (password) => {
-          cleanup();
-          if (!password) { reject(new Error("Password not provided.")); return; }
+          if (isResolvedOrRejected) return;
+
+          if (!password) { 
+            cleanup();
+            reject(new Error("Password not provided.")); 
+            return; 
+          }
+
+          isSubmissionStarted = true;
 
           try {
             const keysInner = await getEncryptedKeys();
-            if (!keysInner) { reject(new Error("Encrypted private keys not found.")); return; }
+            if (!keysInner) { 
+              cleanup();
+              reject(new Error("Encrypted private keys not found.")); 
+              return; 
+            }
 
             const result = await retrieveFn(keysInner, password);
             if (!result.success) {
               const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
+              cleanup();
               reject(new Error(reason));
               return;
             }
 
+            cleanup();
             privateKeysCache = result.keys;
             resolve(result.keys);
-          } catch (e) { reject(e); }
+          } catch (e) {
+            cleanup();
+            reject(e);
+          }
         });
       });
     };

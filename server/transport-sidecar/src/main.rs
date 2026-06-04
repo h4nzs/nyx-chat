@@ -95,11 +95,6 @@ async fn main() -> Result<()> {
                 if let Some(conn) = sessions_clone.get(&key) {
                     let conn = conn.value().clone();
                     let op_code = down_msg.op_code;
-                    
-                    if op_code == 0x07 { // KICK
-                        conn.close(1000u32.into(), b"Kicked by server");
-                        continue;
-                    }
 
                     tokio::spawn(async move {
                         let mut frame = BytesMut::with_capacity(5 + payload_bytes.len());

@@ -202,11 +202,38 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
       const parts = encryptedDataWithSaltStr.split('.');
       if (parts.length !== 2) return { success: false, reason: 'decryption_failed' };
 
-      const salt = sodium.from_base64(parts[0], sodium.base64_variants[B64_VARIANT]);
+      const saltStr = parts[0];
       const encryptedString = parts[1];
+
+      // Try multiple B64 variants for the salt to handle legacy encodings
+      let salt: Uint8Array;
+      try {
+        salt = sodium.from_base64(saltStr, sodium.base64_variants[B64_VARIANT]);
+      } catch (e) {
+        try {
+          salt = sodium.from_base64(saltStr, sodium.base64_variants.ORIGINAL);
+        } catch (e2) {
+          try {
+            salt = sodium.from_base64(saltStr, sodium.base64_variants.URLSAFE);
+          } catch (e3) {
+            return { success: false, reason: 'decryption_failed' };
+          }
+        }
+      }
       
       kek = await _deriveKey(password, salt);
-      const privateKeysRaw = await _decryptData(kek, encryptedString);
+      
+      let privateKeysRaw: any;
+      try {
+        privateKeysRaw = await _decryptData(kek, encryptedString);
+      } catch (decryptErr: any) {
+        const errMsg = _sanitizeError(decryptErr);
+        if (errMsg.includes('decrypted')) {
+            // This is the classic "incorrect password" signal from libsodium
+            return { success: false, reason: 'incorrect_password' };
+        }
+        throw decryptErr; // Re-throw other errors (e.g. JSON parse)
+      }
 
       const privateKeysObj = typeof privateKeysRaw === 'string' 
         ? JSON.parse(privateKeysRaw) 
@@ -215,21 +242,34 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
       const keys = privateKeysObj as { encryption: string; pqEncryption?: string; signing: string; signedPreKey: string; pqSignedPreKey?: string; masterSeed?: string };
       if (!keys.signedPreKey || !keys.pqEncryption || !keys.pqSignedPreKey) return { success: false, reason: 'legacy_bundle' };
 
+      const b64_v = sodium.base64_variants[B64_VARIANT];
+      const b64_fallback = sodium.base64_variants.ORIGINAL;
+
+      const safeFromB64 = (str: string | undefined) => {
+          if (!str) return undefined;
+          try {
+              return sodium.from_base64(str, b64_v);
+          } catch (e) {
+              return sodium.from_base64(str, b64_fallback);
+          }
+      };
+
       return {
         success: true,
         keys: {
-          encryption: sodium.from_base64(keys.encryption, sodium.base64_variants[B64_VARIANT]),
-          pqEncryption: sodium.from_base64(keys.pqEncryption, sodium.base64_variants[B64_VARIANT]),
-          signing: sodium.from_base64(keys.signing, sodium.base64_variants[B64_VARIANT]),
-          signedPreKey: sodium.from_base64(keys.signedPreKey, sodium.base64_variants[B64_VARIANT]),
-          pqSignedPreKey: sodium.from_base64(keys.pqSignedPreKey, sodium.base64_variants[B64_VARIANT]),
-          masterSeed: keys.masterSeed ? sodium.from_base64(keys.masterSeed, sodium.base64_variants[B64_VARIANT]) : undefined,
+          encryption: safeFromB64(keys.encryption)!,
+          pqEncryption: safeFromB64(keys.pqEncryption),
+          signing: safeFromB64(keys.signing)!,
+          signedPreKey: safeFromB64(keys.signedPreKey)!,
+          pqSignedPreKey: safeFromB64(keys.pqSignedPreKey),
+          masterSeed: safeFromB64(keys.masterSeed),
         }
       };
     } catch (error: unknown) {
       console.error("Failed to retrieve private keys:", _sanitizeError(error));
-      return { success: false, reason: 'incorrect_password' };
-    } finally {      if (kek) {
+      return { success: false, reason: 'decryption_failed' };
+    } finally {
+      if (kek) {
         try { sodium.memzero(kek); } catch { kek.fill(0); }
       }
     }

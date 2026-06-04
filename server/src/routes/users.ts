@@ -103,7 +103,7 @@ router.put('/me',
       const { encryptedProfile, autoDestructDays } = req.body
 
       const existingUser = await prisma.user.findUnique({ where: { id: userId } })
-      const dataToUpdate: any = {}
+      const dataToUpdate: { encryptedProfile?: string, autoDestructDays?: number } = {}
       if (encryptedProfile !== undefined) dataToUpdate.encryptedProfile = encryptedProfile
       if (autoDestructDays !== undefined) dataToUpdate.autoDestructDays = autoDestructDays
 

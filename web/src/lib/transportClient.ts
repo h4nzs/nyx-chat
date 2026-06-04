@@ -81,6 +81,15 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       case TransportOpCode.ACK:
         this.handleAck(payload);
         break;
+      case TransportOpCode.KICK:
+        try {
+           const json = JSON.parse(new TextDecoder().decode(payload));
+           this.emit('auth:banned', json);
+        } catch (e) {
+           this.emit('auth:banned', { reason: 'Kicked by server' });
+        }
+        this.disconnect();
+        break;
       default:
         // Handle generic events
         try {

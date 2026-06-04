@@ -179,7 +179,7 @@ The AGPL-3.0 license grants you the freedom to use, modify, and distribute the s
 
 If you fork this repository to create your own SaaS, enterprise tool, or public deployment, you must:
 
-1.  **Change the visual identity:** Replace all official logos, icons, and specific graphic assets found in `web/public/`.
+1.  **Change the visual identity:** Replace all official logos, icons, and specific graphic assets found in `web/public/` and `marketing/public` or `marketing/src/assets`.
 2.  **Prevent confusion:** Clearly state that your deployment is a modified fork and is *not* affiliated with or officially endorsed by the original NYX Command repository.
 
 ---
