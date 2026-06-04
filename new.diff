@@ -4329,10 +4329,10 @@ index 79d3301b..00000000
 \ No newline at end of file
 diff --git a/web/src/lib/socketListeners.ts b/web/src/lib/socketListeners.ts
 new file mode 100644
-index 00000000..8341155a
+index 00000000..ecd3dcf7
 --- /dev/null
 +++ b/web/src/lib/socketListeners.ts
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,181 @@
 +// Copyright (c) 2026 [han]. All rights reserved.
 +// This file is part of NYX, licensed under the AGPL-3.0.
 +// For commercial licensing, contact [admin@nyx-app.my.id].
@@ -4469,6 +4469,48 @@ index 00000000..8341155a
 +  // 6. KEY MANAGEMENT
 +  transportClient.on('session:request_key_fulfillment', (data: unknown) => {
 +    // This is handled in transportClient helpers usually, but we can hook it here if needed
++  });
++
++  transportClient.on('session:new_key', (data: { conversationId: string; sessionId?: string; encryptedKey: string; type?: 'GROUP_KEY' | 'SESSION_KEY'; senderId?: string; senderDeviceKey?: string }) => {
++    import('../utils/crypto').then(m => m.storeReceivedSessionKey(data))
++      .then(() => {
++        import('../store/keychain').then(m => m.useKeychainStore.getState().keysUpdated());
++        useMessageStore.getState().reDecryptPendingMessages(data.conversationId);
++      })
++      .catch(console.error);
++  });
++  
++  transportClient.on('session:fulfill_request', (data: { conversationId: string; sessionId: string; requesterId: string; requesterPublicKey: string; requesterPqPublicKey: string }) => {
++    import('../utils/crypto').then(m => m.fulfillKeyRequest(data).catch(console.error));
++  });
++
++  transportClient.on('group:fulfill_key_request', (data: { conversationId: string; requesterId: string; requesterPublicKey: string; requesterPqPublicKey: string; requesterDeviceId?: string }) => {
++    import('../utils/crypto').then(m => m.fulfillGroupKeyRequest(data).catch(console.error));
++  });
++
++  transportClient.on('group:key_request_failed', (data: { conversationId: string; reason: string }) => {
++    console.error(`Group Key Request Failed for ${data.conversationId}:`, data.reason);
++  });
++
++  transportClient.on('session:request_key_failed', (data: { sessionId: string; targetId: string; reason: string }) => {
++    console.error(`Session Key Request Failed for ${data.sessionId}:`, data.reason);
++  });
++
++  // 7. BURNER CHATS
++  transportClient.on("burner:receive", async (payload: { roomId?: string, ciphertext: string }) => {
++    const { useBurnerStore } = await import('../store/burner');
++    const roomId = payload.roomId || Object.keys(useBurnerStore.getState().activeSessions)[0];
++    if (roomId) {
++      await useBurnerStore.getState().receiveMessage(roomId, payload.ciphertext);
++    }
++  });
++
++  transportClient.on("burner:terminated", async (payload: { roomId: string }) => {
++    const { useBurnerStore } = await import('../store/burner');
++    if (payload?.roomId) {
++      useBurnerStore.getState().terminateSession('This secure session has been terminated by the host.');
++      useConversationStore.getState().removeConversation(payload.roomId);
++    }
 +  });
 +}
 +

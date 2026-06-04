@@ -35,17 +35,21 @@ export default function PasswordPromptModal() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!password) return;
+    
     setIsLoading(true);
     setError('');
     try {
-      onPasswordSubmit(password);
+      // Tunggu hingga proses validasi/dekripsi di authStore selesai
+      await (onPasswordSubmit(password) as unknown as Promise<void>);
       setPassword('');
       hidePasswordPrompt();
-    } catch (e) {
-      setError(t('modals:password_prompt.error'));
+    } catch (err: unknown) {
+      console.error("Password submission error:", err);
+      const msg = err instanceof Error ? err.message : t('modals:password_prompt.error');
+      setError(msg);
     } finally {
       setIsLoading(false);
-      setPassword('');
     }
   };
 
@@ -69,13 +73,21 @@ export default function PasswordPromptModal() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {error && (
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-bold text-center animate-shake">
+              {error}
+            </div>
+          )}
+          
           <div className="relative">
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-[#111827] border-2 border-gray-700 rounded-lg py-4 px-4 pr-12 text-white focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/30 transition-all duration-300"
+              disabled={isLoading}
+              className="w-full bg-[#111827] border-2 border-gray-700 rounded-lg py-4 px-4 pr-12 text-white focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/30 transition-all duration-300 disabled:opacity-50"
               placeholder={t('modals:password_prompt.placeholder')}
+              autoFocus
             />
             <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
@@ -88,15 +100,24 @@ export default function PasswordPromptModal() {
             <button
               type="button"
               onClick={handleCancel}
-              className="py-3 px-4 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 transition-all duration-300"
+              disabled={isLoading}
+              className="py-3 px-4 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 transition-all duration-300 disabled:opacity-50"
             >
               {t('common:actions.abort')}
             </button>
             <button
               type="submit"
-              className="py-3 px-4 rounded-lg bg-orange-600 text-white hover:bg-orange-700 shadow-[0_0_15px_rgba(249,115,22,0.4)] transition-all duration-300"
+              disabled={isLoading}
+              className="py-3 px-4 rounded-lg bg-orange-600 text-white hover:bg-orange-700 shadow-[0_0_15px_rgba(249,115,22,0.4)] transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {t('common:actions.unlock')}
+              {isLoading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <span>{t('common:status.decrypting', 'Decrypting...')}</span>
+                </>
+              ) : (
+                t('common:actions.unlock')
+              )}
             </button>
           </div>
         </form>

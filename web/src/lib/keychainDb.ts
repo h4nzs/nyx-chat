@@ -372,6 +372,10 @@ export async function getProfileKey(userId: string): Promise<string | undefined>
 export async function clearAllKeys(): Promise<void> {
   return enqueueWrite(async () => {
       await Promise.all([
+          db.messages.clear(),
+          db.storyKeys.clear(),
+          db.offlineQueue.clear(),
+          db.kvStore.clear(),
           db.sessionKeys.clear(),
           db.groupKeys.clear(),
           db.preKeys.clear(),
@@ -382,7 +386,8 @@ export async function clearAllKeys(): Promise<void> {
           db.skippedKeys.clear(),
           db.messageKeys.clear(),
           db.pendingHeaders.clear(),
-          db.groupSkippedKeys.clear()
+          db.groupSkippedKeys.clear(),
+          db.pqDrSessions.clear()
       ]);
   });
 }

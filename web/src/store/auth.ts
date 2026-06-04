@@ -151,6 +151,7 @@ type Actions = {
 
 let privateKeysCache: RetrievedKeys | null = null;
 let refreshPromise: Promise<boolean> | null = null;
+let keysRetrievalPromise: Promise<RetrievedKeys> | null = null;
 
 export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => {
   const savedUser = localStorage.getItem("user");
@@ -175,92 +176,101 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
   const retrieveAndCacheKeys = async (): Promise<RetrievedKeys> => {
     if (privateKeysCache) return privateKeysCache;
+    if (keysRetrievalPromise) return keysRetrievalPromise;
 
-    const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
-
-    let autoUnlockKey: string | undefined | null = null;
-    let encryptedKeys: string | undefined | null = null;
-
-    try {
-      autoUnlockKey = await getDeviceAutoUnlockKey();
-      encryptedKeys = await getEncryptedKeys();
-    } catch (_e) {
-      console.error("Failed to read keys/auto-unlock info:", _e);
-    }
-
-    // Attempt auto-unlock if both exist
-    if (autoUnlockKey && encryptedKeys) {
+    keysRetrievalPromise = (async () => {
       try {
-        const result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
-        if (result.success) {
-          privateKeysCache = result.keys;
-          return result.keys;
+        const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+
+        let autoUnlockKey: string | undefined | null = null;
+        let encryptedKeys: string | undefined | null = null;
+
+        try {
+          autoUnlockKey = await getDeviceAutoUnlockKey();
+          encryptedKeys = await getEncryptedKeys();
+        } catch (_e) {
+          console.error("Failed to read keys/auto-unlock info:", _e);
         }
-      } catch (e) {}
-    }
 
-    // Fallback: Prompt user for password manually
-    const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
-      return new Promise((resolve, reject) => {
-        let isSubmissionStarted = false;
-        let isResolvedOrRejected = false;
+        // Attempt auto-unlock if both exist
+        if (autoUnlockKey && encryptedKeys) {
+          try {
+            const result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
+            if (result.success) {
+              privateKeysCache = result.keys;
+              return result.keys;
+            }
+          } catch (e) {}
+        }
 
-        const unsubscribe = useModalStore.subscribe((state) => {
-          // If the modal is closed and we haven't started a submission or already resolved/rejected
-          if (!state.isPasswordPromptOpen && !isSubmissionStarted && !isResolvedOrRejected) {
-            isResolvedOrRejected = true;
-            unsubscribe();
-            // Short delay to ensure no race with a very fast cancel callback
-            setTimeout(() => {
-               reject(new Error("Password prompt closed without input."));
-            }, 100);
-          }
-        });
+        // Fallback: Prompt user for password manually
+        const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
+          return new Promise((resolve, reject) => {
+            let isSubmissionStarted = false;
+            let isResolvedOrRejected = false;
 
-        const cleanup = () => {
-          isResolvedOrRejected = true;
-          unsubscribe();
+            const unsubscribe = useModalStore.subscribe((state) => {
+              // If the modal is closed and we haven't started a submission or already resolved/rejected
+              if (!state.isPasswordPromptOpen && !isSubmissionStarted && !isResolvedOrRejected) {
+                isResolvedOrRejected = true;
+                unsubscribe();
+                // Short delay to ensure no race with a very fast cancel callback
+                setTimeout(() => {
+                   reject(new Error("Password prompt closed without input."));
+                }, 100);
+              }
+            });
+
+            const cleanup = () => {
+              isResolvedOrRejected = true;
+              unsubscribe();
+            };
+
+            useModalStore.getState().showPasswordPrompt(async (password) => {
+              if (isResolvedOrRejected) return;
+
+              if (!password) { 
+                cleanup();
+                reject(new Error("Password not provided.")); 
+                return; 
+              }
+
+              isSubmissionStarted = true;
+
+              try {
+                const keysInner = await getEncryptedKeys();
+                if (!keysInner) { 
+                  cleanup();
+                  reject(new Error("Encrypted private keys not found.")); 
+                  return; 
+                }
+
+                const result = await retrieveFn(keysInner, password);
+                if (!result.success) {
+                  const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
+                  cleanup();
+                  reject(new Error(reason));
+                  return;
+                }
+
+                cleanup();
+                privateKeysCache = result.keys;
+                resolve(result.keys);
+              } catch (e) {
+                cleanup();
+                reject(e);
+              }
+            });
+          });
         };
 
-        useModalStore.getState().showPasswordPrompt(async (password) => {
-          if (isResolvedOrRejected) return;
+        return await promptForPassword(retrievePrivateKeys);
+      } finally {
+        keysRetrievalPromise = null;
+      }
+    })();
 
-          if (!password) { 
-            cleanup();
-            reject(new Error("Password not provided.")); 
-            return; 
-          }
-
-          isSubmissionStarted = true;
-
-          try {
-            const keysInner = await getEncryptedKeys();
-            if (!keysInner) { 
-              cleanup();
-              reject(new Error("Encrypted private keys not found.")); 
-              return; 
-            }
-
-            const result = await retrieveFn(keysInner, password);
-            if (!result.success) {
-              const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
-              cleanup();
-              reject(new Error(reason));
-              return;
-            }
-
-            cleanup();
-            privateKeysCache = result.keys;
-            resolve(result.keys);
-          } catch (e) {
-            cleanup();
-            reject(e);
-          }
-        });
-      });
-    };
-
-    return promptForPassword(retrievePrivateKeys);
+    return keysRetrievalPromise;
   };
 
   return {
@@ -369,6 +379,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
 
         // Cek apakah user sudah punya kunci lokal (misal: Device lama tapi sesi expired)
         const alreadyHasKeys = await hasStoredKeys();
+        const existingDeviceId = localStorage.getItem('deviceId') || undefined;
         
         if (alreadyHasKeys && !restoredNotSynced) {
             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
@@ -392,7 +403,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             } else {
                 throw new Error("Invalid password for local keys. Please recover your account.");
             }
-        } else if (!alreadyHasKeys && !restoredNotSynced) {
+        } else if (!alreadyHasKeys && !restoredNotSynced && !existingDeviceId) {
             // Fresh login on a brand new linked device -> Database lokal kosong, regenerasi kunci baru
             const { generateNewKeys } = await import('@lib/crypto-worker-proxy');
             const { 
@@ -430,8 +441,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             }
         }
 
-        const existingDeviceId = localStorage.getItem('deviceId') || undefined;
-
         // Call API
         const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string; deviceId?: string }>("/api/auth/login", {
           method: "POST",
@@ -459,9 +468,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
         }
 
         const hasKeysNow = await hasStoredKeys();
-        set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeysNow, blockedUserIds: [] });
-        localStorage.setItem("user", JSON.stringify(res.user));
-
+        
         // FIX 2: Buka kunci MENGGUNAKAN data yang baru saja disave
         if (hasKeysNow) {
           try {
@@ -484,6 +491,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
             toast.error(i18n.t('errors:could_not_decrypt_your_stored_keys_pleas', 'Could not decrypt your stored keys. Please restore your account if the password has changed.'));
           }
         }
+
+        set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeysNow, blockedUserIds: [] });
+        localStorage.setItem("user", JSON.stringify(res.user));
 
         get().loadBlockedUsers();
 
@@ -573,9 +583,13 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => 
       } catch (e) { console.error("Logout error", e); } finally {
         clearAuthCookies();
         privateKeysCache = null;
-        await clearKeys(); 
+        
+        // Pembersihan Sesi (Soft Logout) - Tetap pertahankan data terenkripsi di IDB (Local-First)
+        sessionStorage.removeItem('nyx_device_auto_unlock_key');
+        sessionStorage.removeItem('nyx_device_auto_unlock_ready');
         localStorage.removeItem('user');
-        set({ user: null, accessToken: null });
+        
+        set({ user: null, accessToken: null, hasRestoredKeys: false });
         disconnectSocket();
         useConversationStore.getState().reset();
         useMessageStore.getState().reset();

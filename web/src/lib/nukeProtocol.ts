@@ -6,7 +6,7 @@ export const executeLocalWipe = async () => {
     await closeDatabaseConnection();
 
     // 1. Obliterate all known IndexedDB Vaults
-    let databases = ['nyx_offline_queue', 'nyx_shadow_vault'];
+    let databases = ['nyx_offline_queue', 'nyx_shadow_vault', 'NyxUnifiedDB'];
     
     // Get correct keychain DB name from local storage if available
     try {
@@ -19,8 +19,9 @@ export const executeLocalWipe = async () => {
         }
     } catch (_e) {}
 
-    // Fallback: Hardcoded legacy name just in case
+    // Fallback: Hardcoded legacy names just in case
     databases.push('nyx_keychain');
+    databases.push('NyxDB');
     
     // Try to get dynamic list if supported by browser
     if (window.indexedDB && window.indexedDB.databases) {
