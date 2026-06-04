@@ -35,6 +35,8 @@ pids
 *.pid
 *.seed
 *.pid.lock
+*.der
+*/*/*.der
 
 # Cakupan Kode & Artefak Build
 coverage
