@@ -1560,7 +1560,17 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             const pushDataBytes = new TextEncoder().encode(pushData);
 
             // Encrypt for each recipient using Web Worker
-            type ParticipantData = { id: string, userId?: string, user?: { devices?: {id: string, publicKey: string}[], publicKey?: string }, devices?: {id: string, publicKey: string}[], publicKey?: string };
+            type PublicKeyInput = string | Uint8Array | { type: 'Buffer'; data: number[] } | ArrayBufferView;
+            type ParticipantData = { 
+                id: string, 
+                userId?: string, 
+                user?: { 
+                    devices?: {id: string, publicKey: PublicKeyInput}[], 
+                    publicKey?: PublicKeyInput 
+                }, 
+                devices?: {id: string, publicKey: PublicKeyInput}[], 
+                publicKey?: PublicKeyInput 
+            };
             for (const p of conversation.participants as unknown as ParticipantData[]) {
                const targetUserId = p.userId || p.id;
                const userObj = p.user || p;

@@ -1,0 +1,189 @@
+name: Deploy NYX to VPS (PNPM Monorepo)
+
+on:
+  push:
+    branches:
+      - main # ⚠️ Pastikan ini sesuai nama branch kamu! (misal: 'main' atau 'setup-deploy')
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+
+      # --- SETUP PNPM ---
+      - name: Install pnpm manually (Bypass GitHub Outage)
+        run: npm install -g pnpm
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: 'pnpm-lock.yaml'
+
+      # --- PHASE 1: INSTALL SEMUA (ROOT) ---
+      - name: 📦 Install Dependencies (Root)
+        run: pnpm install --no-frozen-lockfile
+
+      # --- PHASE 2: BUILD SHARED PACKAGE (Krusial buat Node.js VPS) ---
+      - name: 🏗️ Build Shared Package
+        run: pnpm --filter @nyx/shared run build
+
+      - name: 🔐 Assert Turnstile Site Key
+        env:
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
+        run: |
+          if [ -z "$VITE_TURNSTILE_SITE_KEY" ]; then
+            echo "::error::VITE_TURNSTILE_SITE_KEY secret is missing or empty!"
+            exit 1
+          fi
+
+      # --- PHASE 3: BUILD WEB ---
+      - name: 🎨 Build Web (Frontend)
+        env:
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_WS_URL: ${{ secrets.VITE_WS_URL }}
+          VITE_APP_SECRET: ${{ secrets.VITE_APP_SECRET }}
+          VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
+          INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
+        run: pnpm --filter nyx-web run build
+
+      - name: 🚀 Build Marketing (Sisi Publik)
+        run: pnpm --filter ./marketing run build
+
+      # --- PHASE 4: BUILD SERVER ---
+      - name: ⚙️ Build Server (Backend)
+        run: |
+          pnpm --filter nyx-server exec prisma generate
+          pnpm --filter nyx-server run build
+
+      # --- PHASE 5: PACKAGING ---
+      - name: 🗜️ Prepare Artifacts for Deploy
+        run: |
+          mkdir deploy_package
+
+          cp package.json pnpm-workspace.yaml pnpm-lock.yaml deploy_package/
+          mkdir -p deploy_package/packages/shared
+          cp packages/shared/package.json deploy_package/packages/shared/
+          cp -r packages/shared/dist deploy_package/packages/shared/
+          
+          # Copy Frontend Build
+          mkdir -p deploy_package/web
+          cp -r web/dist deploy_package/web/
+
+          mkdir -p deploy_package/marketing
+          cp -r marketing/dist deploy_package/marketing/
+          
+          # Copy Backend (Bawa Prisma hasil generate dari GitHub, TAPI TINGGALKAN node_modules)
+          mkdir -p deploy_package/server
+          cp -r server/src deploy_package/server/
+          cp server/tsconfig.json deploy_package/server/
+          cp -r server/dist deploy_package/server/
+          cp server/package.json deploy_package/server/
+          cp -r server/prisma deploy_package/server/
+          
+          cd deploy_package
+          zip -r ../nyx-deploy.zip .
+
+      # --- PHASE 5: SHIP TO VPS ---
+      - name: 🚀 Upload to VPS via SCP
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          source: "nyx-deploy.zip"
+          target: "/root/"
+
+      # --- PHASE 6: EXECUTE ON VPS (PNPM NATIVE INSTALL) ---
+      - name: 🔧 Unzip & Restart on VPS
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: |
+            set -e  # Exit on error
+            echo "🚧 Starting Deployment (Barbaric Direct Overwrite Mode)..."
+            
+            # 1. Pastikan PNPM terinstall di VPS
+            if ! command -v pnpm &> /dev/null; then
+                npm install -g pnpm
+            fi
+            npm install -g tsx
+            
+            pm2 stop nyx-api || true
+
+            
+            # 2. Siapkan direktori utama (Jika belum ada)
+            TARGET_DIR="/root/nyx-app"
+            mkdir -p $TARGET_DIR
+            rm -rf $TARGET_DIR/node_modules
+            rm -rf $TARGET_DIR/server
+            rm -rf $TARGET_DIR/web
+            rm -rf $TARGET_DIR/marketing
+
+            
+            # 3. Unzip dan TIMPA LANGSUNG ke direktori utama
+            echo "📦 Unzipping artifact directly to $TARGET_DIR..."
+            unzip -q -o /root/nyx-deploy.zip -d $TARGET_DIR/
+            rm /root/nyx-deploy.zip
+            
+            # 4. INSTALL DI VPS PAKAI PNPM (Di Root Monorepo)
+            echo "📦 Installing backend dependencies with PNPM..."
+            if [ ! -f "$TARGET_DIR/server/.env" ]; then
+                cp $TARGET_DIR/.env.example $TARGET_DIR/server/.env || true
+            fi
+            if [ ! -f "$TARGET_DIR/server/ca.pem" ]; then
+                cp $TARGET_DIR/ca.pem $TARGET_DIR/server/ca.pem || true
+            fi
+            cd $TARGET_DIR
+            CI=true NODE_OPTIONS="--max-old-space-size=512" pnpm install --no-frozen-lockfile
+            
+            # 5. GENERATE PRISMA ENGINE (Wajib di dalam server/)
+            echo "⚙️ Generating Prisma Engine..."
+            cd $TARGET_DIR/server
+            pnpm exec prisma generate
+            
+            # 6. DEPLOY FRONTEND
+            echo "🌐 Deploying Frontend..."
+            sudo mkdir -p /var/www/nyx-web
+            # Hapus isi lama, copy yang baru
+            sudo rm -rf /var/www/nyx-web/*
+            sudo cp -r $TARGET_DIR/web/dist/* /var/www/nyx-web/
+
+            echo "🌐 Deploying Marketing Frontend..."
+            sudo mkdir -p /var/www/nyx-marketing
+            sudo rm -rf /var/www/nyx-marketing/*
+            sudo cp -r $TARGET_DIR/marketing/dist/* /var/www/nyx-marketing/
+            
+            sudo systemctl reload nginx || true
+            
+            # 7. RESTART PM2 (Bersih dan Langsung)
+            echo "🚀 Restarting API..."
+            
+            # Hapus proses lama biar memori PM2 benar-benar bersih
+            pm2 delete nyx-api || true
+            
+            # Start ulang dengan path absolute yang statis
+            pm2 start $TARGET_DIR/server/src/index.ts \
+              --name "nyx-api" \
+              --interpreter tsx \
+              -i max \
+              --node-args="--max-old-space-size=768" \
+              --cwd $TARGET_DIR/server
+              
+            pm2 save --force
+
+            # 8. BERSIH-BERSIH DISK (Hapus folder rilis lama dari eksperimen sebelumnya)
+            echo "🧹 Cleaning up old symlink releases (if any)..."
+            rm -rf /root/nyx-releases || true
+            rm -f /root/nyx-app_tmp_link || true
+            
+            echo "✅ Barbaric Deployment Success!"

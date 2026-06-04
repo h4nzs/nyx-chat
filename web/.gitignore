@@ -1,0 +1,50 @@
+# Dependensi
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+/dist
+/dist-ssr
+/build
+/out
+
+# File Environment (Simpan kunci rahasia lokal)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Log
+npm-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+package-lock.json.lock
+pnpm-lock.yaml
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Editor & OS (Bisa dihapus jika tim Anda menggunakan editor yang sama)
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/*
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Laporan tes & coverage
+/coverage
+/.nyc_output
+
+# Cache
+.eslintcache
+.stylelintcache
+.turbo
+.vercel

@@ -1,0 +1,34 @@
+node_modules/
+server/node_modules/
+web/node_modules/
+**/node_modules
+**/*/node_modules
+server/prisma/migrations
+
+dist
+**/dist
+build
+coverage
+server/dist
+web/dist
+**/dev-dist
+# Keep environment variables out of version control
+.env
+**/.env
+*.log
+**/.env.local
+**/*/.env
+.env.local
+
+/generated/prisma
+server/uploads/
+vspostgre.session.sql
+# Exclude TypeScript build info files
+*.tsbuildinfo
+*.sql
+**/*.sql
+
+.gemini/
+gha-creds-*.json
+test-results/
+*.tgz

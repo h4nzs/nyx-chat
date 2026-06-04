@@ -1,0 +1,21 @@
+# Output biner dan build
+/target
+/debug
+/release
+
+# Berkas cache Cargo
+**/*.rs.bk
+Cargo.lock
+
+# Berkas lingkungan dan konfigurasi lokal
+.env
+config.toml
+
+# Berkas sistem operasi (opsional)
+.DS_Store
+Thumbs.db
+
+# Berkas IDE dan editor
+.vscode/
+.idea/
+*.rs.user
