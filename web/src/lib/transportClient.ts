@@ -125,6 +125,16 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
     this.sendDatagram(opCode, buffer);
   }
   
+  private routeAndSend(event: string, data: any, msgId?: string): void {
+    if (event === 'message:send') {
+        this.sendJsonStream(TransportOpCode.CHAT_MESSAGE, { ...data, msgId });
+    } else if (event.startsWith('user:') || event.startsWith('typing:')) {
+        this.sendJsonStream(TransportOpCode.PRESENCE, { event, ...data });
+    } else {
+        this.sendJsonStream(TransportOpCode.KEY_SYNC, { event, msgId, data });
+    }
+  }
+
   public sendEvent(event: string, data?: any, callback?: Function): void {
     const msgId = Math.random().toString(36).substring(7);
     
@@ -139,14 +149,7 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
        });
     }
     
-    // Intelligent Routing
-    if (event === 'message:send') {
-        this.sendJsonStream(TransportOpCode.CHAT_MESSAGE, { ...data, msgId });
-    } else if (event.startsWith('user:') || event.startsWith('typing:')) {
-        this.sendJsonStream(TransportOpCode.PRESENCE, { event, ...data });
-    } else {
-        this.sendJsonStream(TransportOpCode.KEY_SYNC, { event, msgId, data });
-    }
+    this.routeAndSend(event, data, msgId);
   }
 
   public timeout(ms: number) {
@@ -161,7 +164,7 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
              callback(new Error('timeout'), null);
           }, ms)
         });
-        this.sendJsonStream(TransportOpCode.KEY_SYNC, { event, msgId, data });
+        this.routeAndSend(event, data, msgId);
       }
     };
   }
