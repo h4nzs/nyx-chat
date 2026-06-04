@@ -35,5 +35,6 @@
   "unblock_failed": "Unblock failed: {{error}}",
   "failed_to_delete_conversation": "Failed to delete conversation.",
   "failed_to_delete_group": "Failed to delete group.",
-  "failed_to_toggle_pinned_conversation": "Failed to toggle pinned conversation."
+  "failed_to_toggle_pinned_conversation": "Failed to toggle pinned conversation.",
+  "failed_to_send_message_timeout": "Failed to send message (Timeout)."
 }

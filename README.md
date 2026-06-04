@@ -68,14 +68,16 @@ We recently underwent a dependency upgrade to ensure NYX is future-proofed for t
 * **Framework:** React 19 Ready + Vite 8 (TypeScript)
 * **State Management:** Zustand v5 (Strict Mode + Persist middleware)
 * **Styling:** Tailwind CSS v4 (Rust-powered Lightning CSS engine)
+* **Real-time:** Native **WebTransport** (via dedicated Web Worker)
 * **Crypto Engine:** `libsodium-wrappers` (Pinned at v0.8.3+ for Native X-Wing/PQC Support)
 * **Storage:** IndexedDB (`dexie`) for "The Unified Shadow Vault"
 
 ### Backend (Server)
 
-* **Runtime:** Node.js (Express)
+* **Runtime:** Node.js (Express) + **Rust (Transport Sidecar)**
+* **Real-time Engine:** `wtransport` (Rust) handling high-performance WebTransport streams
+* **Communication:** Redis Pub/Sub for Node-to-Rust bridge
 * **Database:** PostgreSQL via **Prisma ORM v7** (Rust-free, Native ESM with `@prisma/adapter-pg`)
-* **Real-time:** Socket.IO v4.8+ (Redis Adapter for clustering)
 * **Object Storage:** Cloudflare R2 (Encrypted binary blobs only)
 
 ---

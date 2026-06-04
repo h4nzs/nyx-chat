@@ -36,5 +36,6 @@
   "unblock_failed": "Falha ao desbloquear: {{error}}",
   "failed_to_delete_conversation": "Falha ao excluir conversa.",
   "failed_to_delete_group": "Falha ao excluir grupo.",
-  "failed_to_toggle_pinned_conversation": "Falha ao fixar/desafixar conversa."
+  "failed_to_toggle_pinned_conversation": "Falha ao fixar/desafixar conversa.",
+  "failed_to_send_message_timeout": "Falha ao enviar mensagem: tempo limite atingido."
 }

@@ -36,5 +36,6 @@
   "unblock_failed": "Error al desbloquear: {{error}}",
   "failed_to_delete_conversation": "Error al eliminar la conversación.",
   "failed_to_delete_group": "Error al eliminar el grupo.",
-  "failed_to_toggle_pinned_conversation": "Error al fijar/desfijar la conversación."
+  "failed_to_toggle_pinned_conversation": "Error al fijar/desfijar la conversación.",
+  "failed_to_send_message_timeout": "Error al enviar el mensaje (Tiempo de espera agotado)."
 }

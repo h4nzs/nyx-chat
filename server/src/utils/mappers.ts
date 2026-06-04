@@ -76,11 +76,20 @@ export const userSelectWithKeys = {
 
 export function hoistKeys(user: UserWithDevices): any {
   if (!user.devices || user.devices.length === 0) return user;
+  
+  const mappedDevices = user.devices.map(d => ({
+    ...d,
+    publicKey: Buffer.from(d.publicKey).toString('base64url'),
+    pqPublicKey: d.pqPublicKey ? Buffer.from(d.pqPublicKey).toString('base64url') : null,
+    signingKey: Buffer.from(d.signingKey).toString('base64url')
+  }));
+
   return {
     ...user,
-    publicKey: Buffer.from(user.devices[0].publicKey).toString('base64url'),
-    pqPublicKey: user.devices[0].pqPublicKey ? Buffer.from(user.devices[0].pqPublicKey).toString('base64url') : null,
-    signingKey: Buffer.from(user.devices[0].signingKey).toString('base64url')
+    devices: mappedDevices,
+    publicKey: mappedDevices[0].publicKey,
+    pqPublicKey: mappedDevices[0].pqPublicKey,
+    signingKey: mappedDevices[0].signingKey
   };
 }
 

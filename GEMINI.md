@@ -1,51 +1,82 @@
-# NYX Project Context (GEMINI.md)
+# NYX Chat Project Context
 
-## Project Overview
-**NYX** is a "Zero-Knowledge Post-Quantum Hardened Messenger". It is a fullstack Node.js monorepo focusing on extreme privacy and security, operating under a strict "Trust No One" (TNO) model. 
+NYX is a Zero-Knowledge Post-Quantum Hardened Messenger designed for pure anonymity and high-security communication. It operates on a "Trust No One" (TNO) model, ensuring that the server is incapable of reading messages or identifying users.
 
-### Key Features
-- **Pure Anonymity:** No PII collection (no email, phone, IP). Uses blind indexing.
-- **Post-Quantum Security:** Implements WebAuthn PRF, ML-KEM-768, XChaCha20-Poly1305, and Argon2id inside a dedicated WebAssembly Web Worker.
-- **Local-First:** Chat history is stored entirely client-side using IndexedDB. Server acts as a blind relay.
+## 🚀 Project Overview
 
-### Architecture & Tech Stack
-The project is structured as a **pnpm workspace** monorepo with the following main directories:
-- **`web/`** (Frontend): React 19, Vite 8, Zustand v5, Tailwind CSS v4, Socket.IO Client, `dexie` (IndexedDB).
-- **`server/`** (Backend): Node.js (Express), PostgreSQL via Prisma ORM v7, Socket.IO with Redis Adapter, Cloudflare R2 (for binary blobs).
-- **`packages/shared/`**: Contains shared types and utilities between web and server.
+- **Core Technologies**: React 19, Vite 8, Node.js, Express, Prisma 7, PostgreSQL, Redis, WebTransport (Rust), Libsodium (X-Wing PQC).
+- **Architecture**: Monorepo using `pnpm` workspaces.
+  - `web/`: React frontend (PWA). Real-time communication is handled by `NyxWebTransportClient` using a **Web Worker** (`transport.worker.ts`).
+  - `server/`: Express backend with Prisma ORM.
+  - `server/transport-sidecar/`: A **Rust-based WebTransport server** that handles persistent connections and low-latency messaging.
+  - `marketing/`: Astro-based marketing website.
+  - `packages/shared/`: Shared Zod schemas, types, and constants.
+  - `packages/nyx-sdk/`: SDK for interacting with the NYX cryptographic engine.
+- **Real-time Pipeline**: 
+  - Clients connect via **WebTransport** to the Rust sidecar.
+  - The Node.js server and Rust sidecar communicate asynchronously via **Redis Pub/Sub** (`nyx:upstream` and `nyx:downstream`).
+- **Key Features**:
+  - **Zero PII**: No phone numbers or emails required.
+  - **Post-Quantum Security**: ML-KEM-768 (X-Wing) for key exchange.
+  - **Local-First**: Chat history is stored only on the device via IndexedDB (`dexie`).
+  - **Blind Relay**: The server only routes encrypted blobs without access to keys.
 
-## Building and Running
+## 🛠️ Building and Running
 
 ### Prerequisites
 - Node.js 22+
 - `pnpm`
-- PostgreSQL & Redis running locally.
+- PostgreSQL
+- Redis
+- **Rust toolchain** (for the transport sidecar)
 
-### Setup & Commands
+### Setup Commands
+1.  **Install Dependencies**:
+    ```bash
+    pnpm install
+    ```
+2.  **Build Shared Package**:
+    ```bash
+    cd packages/shared && pnpm build
+    ```
+3.  **Sync Database Schema**:
+    ```bash
+    cd server && npx prisma db push
+    ```
+
+### Development
+- **Root (Parallel Dev)**: `pnpm dev`
+- **Frontend**: `cd web && pnpm dev` (Runs at port 3000)
+- **Backend**: `cd server && pnpm dev` (Runs at port 4000)
+- **Transport Sidecar**: `cd server/transport-sidecar && cargo run`
+- **Marketing**: `cd marketing && pnpm dev`
+
+### Production Build
 ```bash
-# Install dependencies across the workspace
-pnpm install
-
-# Database setup
-cd server && npx prisma db push
-
-# Start the development server (runs web and server, but requires shared package to be built first)
-pnpm dev
-
-# Build the project
-pnpm run build
-
-# Run linter
-pnpm run lint
-
-# Run tests
-pnpm run test
+pnpm build
 ```
 
-## Development Conventions & Rules
-1. **Package Manager:** Exclusively use `pnpm`. Do NOT use `npm` or `yarn`.
-2. **Crypto Core is Sacred:** Do **NOT** bump, update, or modify `libsodium-wrappers` or its type definitions. Backward cryptographic compatibility is paramount.
-3. **Zustand State:** When using Zustand v5, **do not return objects in selectors without `useShallow`** to prevent infinite render loops.
-4. **Linting & Formatting:** The project strictly enforces ESLint v10 (Flat Config). Code must pass `pnpm run lint` with zero warnings before committing (except `unused-var` can be ignored per README).
-5. **Commits:** Follow **Conventional Commits** (e.g., `feat: add markdown support`, `fix: memory leak`). Keep commits atomic.
-6. **Licensing:** Dual-licensed under AGPL-3.0-or-later and Commercial. Code contributions require signing a CLA.
+## 📜 Development Conventions
+
+### Coding Standards
+- **Strict Linting**: ESLint v10 (Flat Config) is enforced. Run `pnpm lint` to verify.
+- **Type Safety**: TypeScript is used everywhere. Ensure `tsc` passes before committing.
+- **ES Modules**: The project uses Native ESM (`"type": "module"`).
+
+### Cryptography Rules
+- **libsodium-wrappers**: DO NOT update or modify the crypto engine in `web/` or `server/` without explicit PQC upgrade intent. Backward compatibility is mission-critical.
+- **Client-Side Encryption**: All sensitive data must be encrypted client-side before reaching the server.
+
+### Real-time & Networking
+- **WebTransport**: The primary transport protocol. Do not fallback to classical WebSockets unless explicitly requested.
+- **Binary Protocols**: Messaging often uses binary payloads with custom OpCodes (`TransportOpCode`).
+
+### Testing
+- **E2E Testing**: Playwright is used for web client testing. Run `cd web && pnpm test:e2e`.
+- **Unit Testing**: Vitest (web) and Jest (server).
+
+## 📂 Key Files
+- `server/prisma/schema.prisma`: Database source of truth.
+- `server/src/network/redisBridge.ts`: Bridge between Node.js and Rust sidecar.
+- `web/src/lib/transportClient.ts`: Client-side WebTransport implementation.
+- `web/src/workers/transport.worker.ts`: Low-level WebTransport handling in a worker.

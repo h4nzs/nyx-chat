@@ -114,6 +114,7 @@ async fn main() -> Result<()> {
                                 let _ = tokio::spawn(async move {
                                     if let Ok(mut stream) = opening.await {
                                         let _ = stream.write_all(&frame).await;
+                                        let _ = stream.finish().await;
                                     }
                                 });
                             }
@@ -146,6 +147,7 @@ async fn main() -> Result<()> {
                                 let _ = tokio::spawn(async move {
                                     if let Ok(mut stream) = opening.await {
                                         let _ = stream.write_all(&frame).await;
+                                        let _ = stream.finish().await;
                                     }
                                 });
                             }

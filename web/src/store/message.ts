@@ -1576,16 +1576,28 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
                        const targetPublicKey = device.publicKey;
                        if (targetPublicKey) {
                            try {
-                               let recipientPubBytes;
-                               try {
-                                   recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-                               } catch (e1) {
+                               let recipientPubBytes: Uint8Array;
+                               
+                               if (typeof targetPublicKey !== 'string') {
+                                   if ((targetPublicKey as any).type === 'Buffer' && Array.isArray((targetPublicKey as any).data)) {
+                                       recipientPubBytes = new Uint8Array((targetPublicKey as any).data);
+                                   } else if (targetPublicKey instanceof Uint8Array || ArrayBuffer.isView(targetPublicKey)) {
+                                       recipientPubBytes = new Uint8Array(targetPublicKey as any);
+                                   } else {
+                                       throw new Error("Invalid public key type: " + typeof targetPublicKey);
+                                   }
+                               } else {
                                    try {
-                                       recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.ORIGINAL);
-                                   } catch (e2) {
-                                       recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE);
+                                       recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+                                   } catch (e1) {
+                                       try {
+                                           recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.ORIGINAL);
+                                       } catch (e2) {
+                                           recipientPubBytes = sodium.from_base64(targetPublicKey, sodium.base64_variants.URLSAFE);
+                                       }
                                    }
                                }
+
                                const sealed = await worker_crypto_box_seal(pushDataBytes, recipientPubBytes);
                                pushPayloads[device.id] = sodium.to_base64(sealed, sodium.base64_variants.URLSAFE_NO_PADDING);
                            } catch (e) {
