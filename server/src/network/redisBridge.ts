@@ -523,10 +523,24 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          break;
        }
 
+       case 'message:mark_read':
+       case 'message:mark_as_read': {
+         const { conversationId, messageId } = data as { conversationId: string, messageId: string };
+         await handleMessageStatusUpdate(userId, conversationId, messageId, 'READ');
+         break;
+       }
+
+       case 'message:ack_delivered': {
+         const { conversationId, messageId } = data as { conversationId: string, messageId: string };
+         await handleMessageStatusUpdate(userId, conversationId, messageId, 'DELIVERED');
+         break;
+       }
+
+       case 'messages:mark_as_read':
        case 'messages:mark_read':
        case 'messages:mark_delivered': {
          const { conversationId, messageIds } = data as any;
-         const status = event === 'messages:mark_read' ? 'READ' : 'DELIVERED';
+         const status = (event === 'messages:mark_read' || event === 'messages:mark_as_read') ? 'READ' : 'DELIVERED';
          if (!conversationId || !Array.isArray(messageIds)) return;
          
          await prisma.messageStatus.updateMany({
@@ -565,4 +579,23 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
 
 async function sendAck(userId: string, deviceId: string, msgId: string, data: Record<string, unknown>) {
   await sendJsonToUser(userId, TransportOpCode.ACK, { msgId, data }, false, deviceId);
+}
+
+async function handleMessageStatusUpdate(userId: string, conversationId: string, messageId: string, status: 'READ' | 'DELIVERED') {
+  if (!conversationId || !messageId) return;
+
+  await prisma.messageStatus.upsert({
+    where: {
+      messageId_userId: { messageId, userId }
+    },
+    update: { status },
+    create: { messageId, userId, status }
+  });
+
+  await emitEventToConversation(conversationId, 'message:status_updated', {
+    conversationId,
+    messageId,
+    userId,
+    status
+  }, userId);
 }
