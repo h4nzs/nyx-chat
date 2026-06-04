@@ -38,7 +38,7 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
        finalUrl = finalUrl.replace('http://', 'https://');
     }
 
-    const hash = certificateHash || import.meta.env.VITE_TRANSPORT_CERT_HASH;
+    const hash = certificateHash || (import.meta.env.PROD ? undefined : import.meta.env.VITE_TRANSPORT_CERT_HASH);
     this.worker.postMessage({ type: 'CONNECT', url: finalUrl, token, certificateHash: hash } satisfies MainToTransportWorker);
   }
 
@@ -184,7 +184,7 @@ export const transportClient = new NyxWebTransportClient();
 export function connectSocket() {
   if (transportClient.connected) return;
   const token = useAuthStore.getState().accessToken || '';
-  const certHash = import.meta.env.VITE_TRANSPORT_CERT_HASH;
+  const certHash = import.meta.env.PROD ? undefined : import.meta.env.VITE_TRANSPORT_CERT_HASH;
   transportClient.connect('', token, certHash);
 }
 

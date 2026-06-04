@@ -45,12 +45,53 @@ async fn main() -> Result<()> {
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string());
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
 
-    let cert = Identity::self_signed(["localhost", "127.0.0.1"]).context("Failed to generate cert")?;
-    info!("Server Certificate Hash (SHA-256): {}", cert.certificate_chain().as_slice()[0].hash().to_string());
+    let prod_cert_path = std::env::var("PROD_CERT_PATH").unwrap_or_default();
+    let prod_key_path = std::env::var("PROD_KEY_PATH").unwrap_or_default();
+
+    let identity = if !prod_cert_path.is_empty() && !prod_key_path.is_empty() {
+        info!("[PRODUCTION] Loading CA-signed PEM certificates from {}...", prod_cert_path);
+        Identity::load_pemfiles(&prod_cert_path, &prod_key_path).await.context("Failed to load production PEM certificates")?
+    } else {
+        info!("[LOCAL] Loading/Generating persistent self-signed DER certificates...");
+        let cert_path = "transport_cert.der";
+        let key_path = "transport_key.der";
+
+        let (cert_der, key_der) = if std::path::Path::new(cert_path).exists() && std::path::Path::new(key_path).exists() {
+            info!("Loading existing certificate from files...");
+            (std::fs::read(cert_path)?, std::fs::read(key_path)?)
+        } else {
+            info!("Generating new self-signed certificate...");
+            let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
+            let certified_key = rcgen::generate_simple_self_signed(subject_alt_names).context("Failed to generate rcgen cert")?;
+            let cert_der = certified_key.cert.der().to_vec();
+            let key_der = certified_key.signing_key.serialize_der();
+            std::fs::write(cert_path, &cert_der)?;
+            std::fs::write(key_path, &key_der)?;
+            (cert_der, key_der)
+        };
+
+        use wtransport::tls::{CertificateChain, PrivateKey, Certificate};
+        let chain = CertificateChain::single(Certificate::from_der(cert_der).context("Failed to parse cert DER")?);
+        let key = PrivateKey::from_der_pkcs8(key_der);
+        Identity::new(chain, key)
+    };
+
+    info!("Server Certificate Hash (SHA-256): {}", identity.certificate_chain().as_slice()[0].hash().to_string());
+
+    let port: u16 = std::env::var("TRANSPORT_PORT")
+        .unwrap_or_else(|_| "33333".to_string())
+        .parse()
+        .expect("TRANSPORT_PORT harus berupa angka port yang valid");
+
+    let bind_addr: std::net::SocketAddr = format!("0.0.0.0:{}", port)
+        .parse()
+        .expect("Gagal mem-parsing bind address");
+
+    info!("🚀 WebTransport Sidecar bersiap di {}", bind_addr);
 
     let config = ServerConfig::builder()
-        .with_bind_default(4433)
-        .with_identity(cert)
+        .with_bind_address(bind_addr)
+        .with_identity(identity)
         .build();
 
     let server = Endpoint::server(config).context("Failed to create server")?;
@@ -153,7 +194,7 @@ async fn main() -> Result<()> {
         }
     });
 
-    info!("WebTransport Sidecar Listening on 4433");
+    info!("WebTransport Sidecar Listening on 33333");
 
     let server = Arc::new(server);
 

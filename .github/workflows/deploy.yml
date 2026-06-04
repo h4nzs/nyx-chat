@@ -24,11 +24,14 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: 'pnpm-lock.yaml'
 
+      - name: 🦀 Setup Rust (Untuk WebTransport Sidecar)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
       # --- PHASE 1: INSTALL SEMUA (ROOT) ---
       - name: 📦 Install Dependencies (Root)
         run: pnpm install --no-frozen-lockfile
 
-      # --- PHASE 2: BUILD SHARED PACKAGE (Krusial buat Node.js VPS) ---
+      # --- PHASE 2: BUILD SHARED PACKAGE ---
       - name: 🏗️ Build Shared Package
         run: pnpm --filter @nyx/shared run build
 
@@ -46,6 +49,7 @@ jobs:
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
           VITE_WS_URL: ${{ secrets.VITE_WS_URL }}
+          VITE_TRANSPORT_URL: ${{ secrets.VITE_TRANSPORT_URL }}
           VITE_APP_SECRET: ${{ secrets.VITE_APP_SECRET }}
           VITE_VAPID_PUBLIC_KEY: ${{ secrets.VITE_VAPID_PUBLIC_KEY }}
           INDEXNOW_API_KEY: ${{ secrets.INDEXNOW_API_KEY }}
@@ -60,6 +64,11 @@ jobs:
         run: |
           pnpm --filter nyx-server exec prisma generate
           pnpm --filter nyx-server run build
+
+      - name: 🦀 Build Rust WebTransport Sidecar
+        run: |
+          cd server/transport-sidecar
+          cargo build --release
 
       # --- PHASE 5: PACKAGING ---
       - name: 🗜️ Prepare Artifacts for Deploy
@@ -85,6 +94,10 @@ jobs:
           cp -r server/dist deploy_package/server/
           cp server/package.json deploy_package/server/
           cp -r server/prisma deploy_package/server/
+
+          # Bawa binary Rust
+          mkdir -p deploy_package/server/transport-sidecar/target/release
+          cp server/transport-sidecar/target/release/transport-sidecar deploy_package/server/transport-sidecar/target/release/
           
           cd deploy_package
           zip -r ../nyx-deploy.zip .
@@ -116,16 +129,15 @@ jobs:
             if ! command -v pnpm &> /dev/null; then
                 npm install -g pnpm
             fi
-            npm install -g tsx
             
-            pm2 stop nyx-api || true
+            pm2 stop nyx-api nyx-sidecar || true
 
             
             # 2. Siapkan direktori utama (Jika belum ada)
             TARGET_DIR="/root/nyx-app"
             mkdir -p $TARGET_DIR
-            rm -rf $TARGET_DIR/node_modules
-            rm -rf $TARGET_DIR/server
+            rm -rf $TARGET_DIR/server/dist
+            rm -rf $TARGET_DIR/server/src
             rm -rf $TARGET_DIR/web
             rm -rf $TARGET_DIR/marketing
 
@@ -144,7 +156,14 @@ jobs:
                 cp $TARGET_DIR/ca.pem $TARGET_DIR/server/ca.pem || true
             fi
             cd $TARGET_DIR
-            CI=true NODE_OPTIONS="--max-old-space-size=512" pnpm install --no-frozen-lockfile
+            CI=true pnpm install --prod --no-frozen-lockfile
+
+            # Pastikan file rahasia diamankan (Diasumsikan Anda menaruh .env asli di /root/nyx-app/.env)
+            if [ -f "$TARGET_DIR/.env" ]; then
+                cp $TARGET_DIR/.env $TARGET_DIR/server/.env
+            else
+                echo "⚠️ WARNING: File .env server Production tidak ditemukan di root aplikasi!"
+            fi
             
             # 5. GENERATE PRISMA ENGINE (Wajib di dalam server/)
             echo "⚙️ Generating Prisma Engine..."
@@ -162,28 +181,26 @@ jobs:
             sudo mkdir -p /var/www/nyx-marketing
             sudo rm -rf /var/www/nyx-marketing/*
             sudo cp -r $TARGET_DIR/marketing/dist/* /var/www/nyx-marketing/
-            
             sudo systemctl reload nginx || true
             
             # 7. RESTART PM2 (Bersih dan Langsung)
             echo "🚀 Restarting API..."
             
             # Hapus proses lama biar memori PM2 benar-benar bersih
-            pm2 delete nyx-api || true
+            pm2 delete nyx-api nyx-sidecar || true
             
-            # Start ulang dengan path absolute yang statis
-            pm2 start $TARGET_DIR/server/src/index.ts \
+            echo "🚀 Starting Node.js API..."
+            pm2 start $TARGET_DIR/server/dist/index.js \
               --name "nyx-api" \
-              --interpreter tsx \
               -i max \
               --node-args="--max-old-space-size=768" \
               --cwd $TARGET_DIR/server
+
+            echo "🦀 Starting Rust WebTransport Sidecar..."
+            chmod +x $TARGET_DIR/server/transport-sidecar/target/release/transport-sidecar
+            pm2 start $TARGET_DIR/server/transport-sidecar/target/release/transport-sidecar \
+              --name "nyx-sidecar" \
+              --cwd $TARGET_DIR/server
               
             pm2 save --force
-
-            # 8. BERSIH-BERSIH DISK (Hapus folder rilis lama dari eksperimen sebelumnya)
-            echo "🧹 Cleaning up old symlink releases (if any)..."
-            rm -rf /root/nyx-releases || true
-            rm -f /root/nyx-app_tmp_link || true
-            
-            echo "✅ Barbaric Deployment Success!"
+            echo "✅ Deployment Success!"
