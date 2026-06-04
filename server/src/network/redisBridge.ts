@@ -439,7 +439,10 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          if (!messageId || !conversationId) return;
          const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { senderId: true, conversationId: true } });
          if (!msg || msg.senderId === userId || msg.conversationId !== conversationId) return;
+         
+         // Emit viewed event then OBLITERATE from server
          await emitEventToConversation(conversationId, 'message:viewed', { messageId, conversationId }, userId);
+         await prisma.message.delete({ where: { id: messageId } }).catch(() => {});
          break;
        }
 
@@ -543,17 +546,11 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          const status = (event === 'messages:mark_read' || event === 'messages:mark_as_read') ? 'READ' : 'DELIVERED';
          if (!conversationId || !Array.isArray(messageIds)) return;
          
-         await prisma.messageStatus.updateMany({
-           where: { messageId: { in: messageIds }, userId },
-           data: { status }
-         });
-
-         await emitEventToConversation(conversationId, 'message:status_updated', {
-           conversationId,
-           messageIds,
-           userId,
-           status
-         }, userId);
+         // 1. Lakukan update status secara batch
+         for (const messageId of messageIds) {
+             // Re-use logic penghapusan yang sudah matang di handleMessageStatusUpdate
+             await handleMessageStatusUpdate(userId, conversationId, messageId, status);
+         }
          break;
        }
 
@@ -584,18 +581,51 @@ async function sendAck(userId: string, deviceId: string, msgId: string, data: Re
 async function handleMessageStatusUpdate(userId: string, conversationId: string, messageId: string, status: 'READ' | 'DELIVERED') {
   if (!conversationId || !messageId) return;
 
-  await prisma.messageStatus.upsert({
-    where: {
-      messageId_userId: { messageId, userId }
-    },
-    update: { status },
-    create: { messageId, userId, status }
-  });
+  try {
+    // 1. Cek keberadaan pesan & info grup (karena pesan ephemeral/cepat dihapus)
+    const msg = await prisma.message.findUnique({ 
+      where: { id: messageId }, 
+      select: { id: true, senderId: true, conversation: { select: { isGroup: true } } } 
+    });
+    if (!msg) return;
 
-  await emitEventToConversation(conversationId, 'message:status_updated', {
-    conversationId,
-    messageId,
-    userId,
-    status
-  }, userId);
+    // Jangan update status jika pengirim sedang membaca pesan sendiri
+    if (msg.senderId === userId) return;
+
+    await prisma.messageStatus.upsert({
+      where: {
+        messageId_userId: { messageId, userId }
+      },
+      update: { status },
+      create: { messageId, userId, status }
+    });
+
+    await emitEventToConversation(conversationId, 'message:status_updated', {
+      conversationId,
+      messageId,
+      userId,
+      status
+    }, userId);
+
+    // 2. LOGIKA PENGHAPUSAN OTOMATIS (Store-and-Forward Ephemerality)
+    if (status === 'READ') {
+        if (!msg.conversation.isGroup) {
+            // Dalam chat 1:1, jika penerima sudah baca, hapus dari server.
+            await prisma.message.delete({ where: { id: messageId } }).catch(() => {});
+        } else {
+            // Dalam grup, hapus jika SEMUA partisipan sudah baca
+            const participants = await prisma.participant.count({ where: { conversationId } });
+            const readCount = await prisma.messageStatus.count({ where: { messageId, status: 'READ' } });
+            
+            // participants - 1 (pengirim tidak dihitung status bacanya di DB)
+            if (readCount >= (participants - 1)) {
+                await prisma.message.delete({ where: { id: messageId } }).catch(() => {});
+            }
+        }
+    }
+  } catch (e: any) {
+    // Tangani P2003 (FK Violation) jika pesan dihapus tepat saat kueri berjalan
+    if (e.code === 'P2003') return;
+    console.error(`[RedisBridge] Failed to update message status:`, e);
+  }
 }
