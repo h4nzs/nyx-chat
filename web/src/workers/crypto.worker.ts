@@ -1848,7 +1848,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
            CKBytes = nextCK;
            currentN++;
         } else if (currentN > header.n) {
-           const skipKeyId = `${header.n}`;
+           // [DIPERBAIKI] Tambahkan prefix "group_" untuk isolasi identitas kunci
+           const skipKeyId = `group_${header.n}`;
            if (serializedState.skippedKeys && serializedState.skippedKeys[skipKeyId]) {
               const skippedMkBase64 = serializedState.skippedKeys[skipKeyId];
               mk = b64ToBytes(skippedMkBase64);
@@ -1870,7 +1871,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
         if (!serializedState.skippedKeys) serializedState.skippedKeys = {};
         for (const sk of skippedKeys) {
-           serializedState.skippedKeys[`${sk.n}`] = sk.mk;
+           // [DIPERBAIKI] Tambahkan prefix "group_" saat menyimpan skipped keys baru
+           serializedState.skippedKeys[`group_${sk.n}`] = sk.mk;
         }
 
         result = {

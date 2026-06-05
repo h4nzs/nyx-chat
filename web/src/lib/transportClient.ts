@@ -18,13 +18,23 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   public connected: boolean = false;
   private pendingAcks = new Map<string, { resolve: (val: any) => void, reject: (err: any) => void, timeoutId: any }>();
 
+  private offlineQueue: MainToTransportWorker[] = [];
+
   constructor() {
     super();
-    this.worker = new Worker(new URL('../workers/transport.worker.ts', import.meta.url), {
-      type: 'module'
-    });
-
+    this.worker = new Worker(new URL('../workers/transport.worker.ts', import.meta.url), { type: 'module' });
     this.worker.onmessage = this.handleWorkerMessage.bind(this);
+    
+    // [+] FLUSH ANTRIAN SAAT KONEK
+    this.on('connect', () => {
+      while (this.offlineQueue.length > 0) {
+        const msg = this.offlineQueue.shift();
+        if (msg) {
+           const transferables = ('payload' in msg && msg.payload instanceof Uint8Array) ? [msg.payload.buffer] : [];
+           this.worker.postMessage(msg, transferables);
+        }
+      }
+    });
   }
 
   public connect(url: string, token: string, certificateHash?: string): void {
@@ -84,11 +94,20 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       case TransportOpCode.KICK:
         try {
            const json = JSON.parse(new TextDecoder().decode(payload));
-           this.emit('auth:banned', json);
+           // [+] AMBIL DARI OBJECT USER
+           const userJson = localStorage.getItem('user');
+           const currentDeviceId = userJson ? JSON.parse(userJson).deviceId : localStorage.getItem('deviceId');
+           
+           if (json.reason === 'Account deleted' || json.deviceId === currentDeviceId) {
+               this.emit('auth:banned', json);
+               this.disconnect();
+           } else {
+               console.log("Ignored kick for different device ID:", json.deviceId);
+           }
         } catch (e) {
            this.emit('auth:banned', { reason: 'Kicked by server' });
+           this.disconnect();
         }
-        this.disconnect();
         break;
       default:
         // Handle generic events
@@ -116,12 +135,22 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
 
   public sendStream(opCode: TransportOpCode, payload: BinaryPayload): void {
     const message: MainToTransportWorker = { type: 'SEND_STREAM', opCode, payload };
-    this.worker.postMessage(message, [payload.buffer]);
+    // [+] CEK KONEKSI
+    if (!this.connected) {
+      this.offlineQueue.push(message);
+    } else {
+      this.worker.postMessage(message, [payload.buffer]);
+    }
   }
 
   public sendDatagram(opCode: TransportOpCode, payload: BinaryPayload): void {
     const message: MainToTransportWorker = { type: 'SEND_DATAGRAM', opCode, payload };
-    this.worker.postMessage(message, [payload.buffer]);
+    // [+] CEK KONEKSI
+    if (!this.connected) {
+      this.offlineQueue.push(message);
+    } else {
+      this.worker.postMessage(message, [payload.buffer]);
+    }
   }
 
   public sendJsonStream(opCode: TransportOpCode, payload: any): void {

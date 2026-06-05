@@ -19,3 +19,4 @@ futures-util = "0.3"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 data-encoding = "2.11.0"
+uuid = { version = "1.23.2", features = ["v4"] }

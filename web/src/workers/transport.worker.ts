@@ -34,6 +34,7 @@ async function initWebTransport(url: string, token: string, certificateHash?: st
     // Auth stream
     controlStream = await transport.createBidirectionalStream();
     controlWriter = controlStream.writable.getWriter();
+    datagramWriter = transport.datagrams.writable.getWriter();
     
     const tokenBytes = new TextEncoder().encode(token);
     // Simple framing: OP_CODE (0x00 for auth) + length + token

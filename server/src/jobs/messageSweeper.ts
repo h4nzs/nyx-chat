@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import { prisma } from '../lib/prisma.js';
-import { emitEventToUser } from '../network/redisBridge.js';
+import { emitEventToConversation } from '../network/redisBridge.js';
 import { TransportOpCode } from '@nyx/shared';
 
 // Jalanin fungsi ini setiap 1 menit (* * * * *)
@@ -51,10 +51,15 @@ export const startMessageSweeper = () => {
         });
 
         // 4. Kasih tau Frontend lewat Redis Bridge
+        const deletedByConversation = new Map<string, string[]>();
         for (const m of expiredMessages) {
-            for (const p of m.conversation.participants) {
-                await emitEventToUser(p.userId, 'message:deleted_batch', { messageIds: [m.id], conversationId: m.conversationId });
-            }
+            const arr = deletedByConversation.get(m.conversationId) || [];
+            arr.push(m.id);
+            deletedByConversation.set(m.conversationId, arr);
+        }
+
+        for (const [conversationId, msgIds] of deletedByConversation.entries()) {
+            await emitEventToConversation(conversationId, 'message:deleted_batch', { messageIds: msgIds, conversationId });
         }
 
         processedCount += expiredMessages.length;

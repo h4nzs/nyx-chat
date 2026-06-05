@@ -1,3 +1,83 @@
+diff --git a/packages/nyx-sdk/src/crypto/ratchet.ts b/packages/nyx-sdk/src/crypto/ratchet.ts
+index 6eb7ac87..427d2bd2 100644
+--- a/packages/nyx-sdk/src/crypto/ratchet.ts
++++ b/packages/nyx-sdk/src/crypto/ratchet.ts
+@@ -114,7 +114,8 @@ export async function drInitAlice(sk: CryptoBuffer, theirPqSignedPreKeyPublic: C
+       CKr: null,
+       Ns: 0,
+       Nr: 0,
+-      PN: 0
++      PN: 0,
++      skippedKeys: {}
+     };
+ 
+     const serialized = await serializeState(state);
+@@ -455,8 +456,19 @@ export async function groupRatchetDecrypt(
+       sodium.memzero(CKBytes);
+       CKBytes = nextCK;
+       currentN++;
++  } else if (currentN > header.n) {
++      const skipKeyId = `${header.n}`;
++      if (serializedState.skippedKeys && serializedState.skippedKeys[skipKeyId]) {
++         const skippedMkBase64 = serializedState.skippedKeys[skipKeyId];
++         const mkBytes = await b64ToBytes(skippedMkBase64);
++         if (!mkBytes) throw new Error("Invalid skipped message key");
++         mk = mkBytes;
++         delete serializedState.skippedKeys[skipKeyId];
++      } else {
++         throw new Error(`Ratchet Advanced! Cannot decrypt old message (header.n=${header.n}, state.N=${currentN})`);
++      }
+   } else {
+-      throw new Error("Message N is older than current state. Possibly replayed or already decrypted.");
++      throw new Error("Message N is older than current state. Possibly replayed or already decrypted."); // Should be impossible
+   }
+ 
+   const nonce = ciphertextBytes.slice(0, 24);
+@@ -464,6 +476,12 @@ export async function groupRatchetDecrypt(
+   const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+       null, ctext, null, nonce, mk
+   );
++  if (!plaintext) throw new Error("Decryption failed");
++
++  if (!serializedState.skippedKeys) serializedState.skippedKeys = {};
++  for (const sk of skippedKeys) {
++      serializedState.skippedKeys[`${sk.n}`] = sk.mk;
++  }
+ 
+   const resState = { ...serializedState, CK: (await bytesToB64(CKBytes)) || '', N: currentN };
+   
+@@ -512,3 +530,11 @@ export async function groupDecryptSkipped(
+     sodium.memzero(mkBytes);
+   }
+ }
++xt, null, nonce, mkBytes
++    );
++
++    return { plaintext };
++  } finally {
++    sodium.memzero(mkBytes);
++  }
++}
+diff --git a/packages/nyx-sdk/src/crypto/types.ts b/packages/nyx-sdk/src/crypto/types.ts
+index 65fc287a..95ce0cf8 100644
+--- a/packages/nyx-sdk/src/crypto/types.ts
++++ b/packages/nyx-sdk/src/crypto/types.ts
+@@ -8,6 +8,7 @@ export interface SodiumKeyPair {
+ export interface GroupRatchetState {
+   CK: string;
+   N: number;
++  skippedKeys?: Record<string, string>;
+   createdAt?: number;
+   messageCount?: number;
+   lastActivityTime?: number;
+@@ -34,6 +35,7 @@ export interface DoubleRatchetState {
+   Ns: number;
+   Nr: number;
+   PN: number;
++  skippedKeys?: Record<string, string>;
+   messageCount?: number;
+   lastActivityTime?: number;
+ }
 diff --git a/packages/shared/src/index.ts b/packages/shared/src/index.ts
 index d33eb1f7..458c6b24 100644
 --- a/packages/shared/src/index.ts
@@ -95,14 +175,14 @@ index bed97563..540b87c1 100644
    startSystemSweeper()
  
 diff --git a/server/src/jobs/messageSweeper.ts b/server/src/jobs/messageSweeper.ts
-index d709ec8b..bf0cb179 100644
+index d709ec8b..f636b939 100644
 --- a/server/src/jobs/messageSweeper.ts
 +++ b/server/src/jobs/messageSweeper.ts
 @@ -1,6 +1,7 @@
  import cron from 'node-cron';
  import { prisma } from '../lib/prisma.js';
 -import { getIo } from '../socket.js';
-+import { emitEventToUser } from '../network/redisBridge.js';
++import { emitEventToConversation } from '../network/redisBridge.js';
 +import { TransportOpCode } from '@nyx/shared';
  
  // Jalanin fungsi ini setiap 1 menit (* * * * *)
@@ -116,7 +196,7 @@ index d709ec8b..bf0cb179 100644
              take: BATCH_SIZE
            });
  
-@@ -49,21 +50,11 @@ export const startMessageSweeper = () => {
+@@ -49,21 +50,16 @@ export const startMessageSweeper = () => {
            where: { id: { in: messageIds } }
          });
  
@@ -128,21 +208,26 @@ index d709ec8b..bf0cb179 100644
 -          expiredMessages.forEach(m => {
 -            if (!messagesByConvo[m.conversationId]) {
 -              messagesByConvo[m.conversationId] = [];
-+        // 4. Kasih tau Frontend lewat Redis Bridge
-+        for (const m of expiredMessages) {
-+            for (const p of m.conversation.participants) {
-+                await emitEventToUser(p.userId, 'message:deleted_batch', { messageIds: [m.id], conversationId: m.conversationId });
-             }
+-            }
 -            messagesByConvo[m.conversationId].push(m.id);
 -          });
--
++        // 4. Kasih tau Frontend lewat Redis Bridge
++        const deletedByConversation = new Map<string, string[]>();
++        for (const m of expiredMessages) {
++            const arr = deletedByConversation.get(m.conversationId) || [];
++            arr.push(m.id);
++            deletedByConversation.set(m.conversationId, arr);
++        }
+ 
 -          Object.entries(messagesByConvo).forEach(([convoId, ids]) => {
 -            io.to(convoId).emit('messages:expired', { messageIds: ids });
 -          });
++        for (const [conversationId, msgIds] of deletedByConversation.entries()) {
++            await emitEventToConversation(conversationId, 'message:deleted_batch', { messageIds: msgIds, conversationId });
          }
  
          processedCount += expiredMessages.length;
-@@ -78,3 +69,4 @@ export const startMessageSweeper = () => {
+@@ -78,3 +74,4 @@ export const startMessageSweeper = () => {
      }
    }, { noOverlap: true });
  };
@@ -216,10 +301,10 @@ index 923940d8..01777677 100644
 -}
 diff --git a/server/src/network/redisBridge.ts b/server/src/network/redisBridge.ts
 new file mode 100644
-index 00000000..ebb859f8
+index 00000000..2a1fc8f3
 --- /dev/null
 +++ b/server/src/network/redisBridge.ts
-@@ -0,0 +1,643 @@
+@@ -0,0 +1,675 @@
 +import { createClient, type RedisClientType } from 'redis';
 +import { prisma } from '../lib/prisma.js';
 +import { redisClient } from '../lib/redis.js';
@@ -571,6 +656,18 @@ index 00000000..ebb859f8
 +         break;
 +       }
 +
++       case 'session:request_missing': {
++         const { conversationId, targetId } = data as any;
++         if (conversationId && targetId) {
++           await emitEventToUser(targetId, 'session:key_requested', {
++              conversationId,
++              requesterId: userId,
++              deviceId
++           });
++         }
++         break;
++       }
++
 +       case 'messages:distribute_keys': {
 +         const { conversationId, keys } = data as DistributeKeysPayload;
 +         if (!conversationId || !Array.isArray(keys)) {
@@ -590,6 +687,20 @@ index 00000000..ebb859f8
 +         for (const k of keys) {
 +             const { userId: targetId, key, targetDeviceId, senderDeviceKey } = k;
 +             const emitPayload = { conversationId, encryptedKey: key, type: 'GROUP_KEY', senderId: userId, senderDeviceKey };
++             
++             // Restore offline catchup: persist distributed keys to the database
++             await prisma.message.create({
++                 data: {
++                     id: `msg_sys_key_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
++                     conversationId,
++                     senderId: userId,
++                     type: 'SYSTEM',
++                     content: JSON.stringify(emitPayload),
++                     isViewOnce: false,
++                     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
++                 }
++             });
++
 +             await emitEventToUser(targetId, 'session:new_key', emitPayload, targetDeviceId);
 +         }
 +         if (msgId) await sendAck(userId, deviceId, msgId, { ok: true });
@@ -827,12 +938,18 @@ index 00000000..ebb859f8
 +    if (msg.senderId === userId) return;
 +
 +    await prisma.messageStatus.upsert({
-+      where: {
-+        messageId_userId: { messageId, userId }
-+      },
++      where: { messageId_userId: { messageId, userId } },
 +      update: { status },
 +      create: { messageId, userId, status }
 +    });
++
++    // [+] RESTORE: UPDATE BATAS BACA PARTICIPANT
++    if (status === 'READ') {
++       await prisma.participant.updateMany({
++           where: { userId, conversationId },
++           data: { lastReadMsgId: messageId }
++       });
++    }
 +
 +    await emitEventToConversation(conversationId, 'message:status_updated', {
 +      conversationId,
@@ -3139,10 +3256,10 @@ index 00000000..e455c801
 +*.rs.user
 diff --git a/server/transport-sidecar/Cargo.toml b/server/transport-sidecar/Cargo.toml
 new file mode 100644
-index 00000000..36dfa664
+index 00000000..cfcda515
 --- /dev/null
 +++ b/server/transport-sidecar/Cargo.toml
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,22 @@
 +[package]
 +name = "transport-sidecar"
 +version = "0.1.0"
@@ -3164,12 +3281,13 @@ index 00000000..36dfa664
 +tracing = "0.1"
 +tracing-subscriber = "0.3"
 +data-encoding = "2.11.0"
++uuid = { version = "1.23.2", features = ["v4"] }
 diff --git a/server/transport-sidecar/src/main.rs b/server/transport-sidecar/src/main.rs
 new file mode 100644
-index 00000000..af78e2ec
+index 00000000..142e8877
 --- /dev/null
 +++ b/server/transport-sidecar/src/main.rs
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,378 @@
 +use anyhow::{Context, Result};
 +use dashmap::DashMap;
 +use dotenvy::dotenv;
@@ -3304,16 +3422,22 @@ index 00000000..af78e2ec
 +            };
 +
 +            if let Some(target_device) = down_msg.device_id {
-+                let key = format!("{}:{}", down_msg.user_id, target_device);
-+                if let Some(conn) = sessions_clone.get(&key) {
-+                    let conn = conn.value().clone();
++                let prefix = format!("{}:{}:", down_msg.user_id, target_device);
++                for item in sessions_clone.iter().filter(|i| i.key().starts_with(&prefix)) {
++                    let conn = item.value().clone();
 +                    let op_code = down_msg.op_code;
++                    let payload_clone = payload_bytes.clone();
++
++                    if op_code == 0x07 { // KICK
++                        conn.close(1000u32.into(), b"Kicked by server");
++                        continue;
++                    }
 +
 +                    tokio::spawn(async move {
-+                        let mut frame = BytesMut::with_capacity(5 + payload_bytes.len());
++                        let mut frame = BytesMut::with_capacity(5 + payload_clone.len());
 +                        frame.put_u8(op_code);
-+                        frame.put_u32(payload_bytes.len() as u32);
-+                        frame.put_slice(&payload_bytes);
++                        frame.put_u32(payload_clone.len() as u32);
++                        frame.put_slice(&payload_clone);
 +
 +                        if down_msg.is_datagram {
 +                            let _ = conn.send_datagram(frame.freeze());
@@ -3421,13 +3545,28 @@ index 00000000..af78e2ec
 +    
 +    let token = String::from_utf8(token_bytes).unwrap_or_default();
 +    let val = Validation::new(jsonwebtoken::Algorithm::HS256);
-+    let token_data = decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val)?;
-+    let user_id = token_data.claims.id.or(token_data.claims.sub).unwrap_or_else(|| "anon".to_string());
++    let token_data = match decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val) {
++        Ok(data) => data,
++        Err(e) => {
++            warn!("JWT Decode failed: {}", e);
++            return Err(anyhow::anyhow!("Unauthorized"));
++        }
++    };
++    
++    let user_id = match token_data.claims.id.or(token_data.claims.sub) {
++        Some(id) => id,
++        None => {
++            warn!("JWT missing id/sub claim");
++            return Err(anyhow::anyhow!("Unauthorized: Missing ID"));
++        }
++    };
 +    let device_id = token_data.claims.device_id.unwrap_or_else(|| "unknown".to_string());
 +
 +    info!("User {} (device {}) authenticated via WebTransport", user_id, device_id);
 +
-+    let session_key = format!("{}:{}", user_id, device_id);
++    let session_uuid = uuid::Uuid::new_v4().to_string();
++    let session_key = format!("{}:{}:{}", user_id, device_id, session_uuid);
++    
 +    let conn = Arc::new(conn);
 +    sessions.insert(session_key.clone(), conn.clone());
 +
@@ -3548,6 +3687,46 @@ index 8d14efa4..7815a419 100644
  ### payment gateway
  - BTCpay server
 -- req midtrans international payment
+\ No newline at end of file
+diff --git a/web/nginx.conf b/web/nginx.conf
+index 814e8812..c36ca3a6 100644
+--- a/web/nginx.conf
++++ b/web/nginx.conf
+@@ -26,7 +26,7 @@ server {
+     gzip_min_length 256;
+     gzip_types application/javascript text/css text/plain image/svg+xml text/xml;
+ 
+-    set $marketing_csp "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://*.r2.dev https://*.cloudflarestorage.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
++    set $marketing_csp "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://*.cloudflarestorage.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
+ 
+     location / {
+         try_files $uri $uri.html $uri/ =404;
+@@ -85,7 +85,7 @@ server {
+     gzip_min_length 256;
+     gzip_types application/javascript text/css text/plain image/svg+xml text/xml application/json;
+ 
+-    set $app_csp "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://cloudflareinsights.com https://*.cloudflare.com https://cdn.jsdelivr.net https://api.nyx-app.my.id https://snap-assets.al-pc-id-b.cdn.gtflabs.io https://api.sandbox.midtrans.com https://app.sandbox.midtrans.com https://app.midtrans.com https://pay.google.com https://gwk.gopayapi.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.r2.dev https://cdn.jsdelivr.net https://*.cloudflarestorage.com https://*.nyx-app.my.id; media-src 'self' data: blob: https://*.r2.dev https://*.cloudflarestorage.com https://*.nyx-app.my.id; font-src 'self' https://fonts.gstatic.com; connect-src 'self' blob: https://api.nyx-app.my.id wss://api.nyx-app.my.id https://nyx-app.my.id wss://nyx-app.my.id https://*.cloudflareinsights.com https://cloudflareinsights.com https://*.r2.dev https://*.cloudflarestorage.com https://app.nyx-app.my.id https://*.nyx-app.my.id wss://*.nyx-app.my.id; frame-src 'self' https://challenges.cloudflare.com https://app.sandbox.midtrans.com https://app.midtrans.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
++    set $app_csp "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://*.cloudflare.com https://cdn.jsdelivr.net https://api.nyx-app.my.id; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://cdn.jsdelivr.net https://*.cloudflarestorage.com https://*.nyx-app.my.id; media-src 'self' data: blob: https://*.cloudflarestorage.com https://*.nyx-app.my.id; font-src 'self' https://fonts.gstatic.com; connect-src 'self' blob: https://api.nyx-app.my.id https://rt.nyx-app.my.id:33333 https://rt.nyx-app.my.id wss://api.nyx-app.my.id https://nyx-app.my.id wss://nyx-app.my.id https://*.cloudflarestorage.com https://storage.nyx-app.my.id https://app.nyx-app.my.id; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
+ 
+     # 🚀 SPA ROUTING (REACT ROUTER)
+     location / {
+@@ -158,16 +158,4 @@ server {
+         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+         proxy_set_header X-Forwarded-Proto $scheme;
+     }
+-
+-    # 🔗 REVERSE PROXY UNTUK SOCKET.IO
+-    location /socket.io/ {
+-        proxy_pass http://server:4000;
+-        proxy_http_version 1.1;
+-        proxy_set_header Upgrade $http_upgrade;
+-        proxy_set_header Connection "upgrade";
+-        proxy_set_header Host $host;
+-        proxy_set_header X-Real-IP $remote_addr;
+-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+-        proxy_set_header X-Forwarded-Proto $scheme;
+-    }
+ }
 \ No newline at end of file
 diff --git a/web/package.json b/web/package.json
 index 4eae52d7..e2c55c2f 100644
@@ -4788,10 +4967,10 @@ index 00000000..ecd3dcf7
 +
 diff --git a/web/src/lib/transportClient.ts b/web/src/lib/transportClient.ts
 new file mode 100644
-index 00000000..4d76a067
+index 00000000..645c40c3
 --- /dev/null
 +++ b/web/src/lib/transportClient.ts
-@@ -0,0 +1,260 @@
+@@ -0,0 +1,289 @@
 +import { EventEmitter } from 'eventemitter3';
 +import { TransportOpCode } from '@nyx/shared';
 +import type { MainToTransportWorker, TransportWorkerToMain, BinaryPayload } from '@nyx/shared';
@@ -4812,13 +4991,23 @@ index 00000000..4d76a067
 +  public connected: boolean = false;
 +  private pendingAcks = new Map<string, { resolve: (val: any) => void, reject: (err: any) => void, timeoutId: any }>();
 +
++  private offlineQueue: MainToTransportWorker[] = [];
++
 +  constructor() {
 +    super();
-+    this.worker = new Worker(new URL('../workers/transport.worker.ts', import.meta.url), {
-+      type: 'module'
-+    });
-+
++    this.worker = new Worker(new URL('../workers/transport.worker.ts', import.meta.url), { type: 'module' });
 +    this.worker.onmessage = this.handleWorkerMessage.bind(this);
++    
++    // [+] FLUSH ANTRIAN SAAT KONEK
++    this.on('connect', () => {
++      while (this.offlineQueue.length > 0) {
++        const msg = this.offlineQueue.shift();
++        if (msg) {
++           const transferables = ('payload' in msg && msg.payload instanceof Uint8Array) ? [msg.payload.buffer] : [];
++           this.worker.postMessage(msg, transferables);
++        }
++      }
++    });
 +  }
 +
 +  public connect(url: string, token: string, certificateHash?: string): void {
@@ -4878,11 +5067,20 @@ index 00000000..4d76a067
 +      case TransportOpCode.KICK:
 +        try {
 +           const json = JSON.parse(new TextDecoder().decode(payload));
-+           this.emit('auth:banned', json);
++           // [+] AMBIL DARI OBJECT USER
++           const userJson = localStorage.getItem('user');
++           const currentDeviceId = userJson ? JSON.parse(userJson).deviceId : localStorage.getItem('deviceId');
++           
++           if (json.reason === 'Account deleted' || json.deviceId === currentDeviceId) {
++               this.emit('auth:banned', json);
++               this.disconnect();
++           } else {
++               console.log("Ignored kick for different device ID:", json.deviceId);
++           }
 +        } catch (e) {
 +           this.emit('auth:banned', { reason: 'Kicked by server' });
++           this.disconnect();
 +        }
-+        this.disconnect();
 +        break;
 +      default:
 +        // Handle generic events
@@ -4910,12 +5108,22 @@ index 00000000..4d76a067
 +
 +  public sendStream(opCode: TransportOpCode, payload: BinaryPayload): void {
 +    const message: MainToTransportWorker = { type: 'SEND_STREAM', opCode, payload };
-+    this.worker.postMessage(message, [payload.buffer]);
++    // [+] CEK KONEKSI
++    if (!this.connected) {
++      this.offlineQueue.push(message);
++    } else {
++      this.worker.postMessage(message, [payload.buffer]);
++    }
 +  }
 +
 +  public sendDatagram(opCode: TransportOpCode, payload: BinaryPayload): void {
 +    const message: MainToTransportWorker = { type: 'SEND_DATAGRAM', opCode, payload };
-+    this.worker.postMessage(message, [payload.buffer]);
++    // [+] CEK KONEKSI
++    if (!this.connected) {
++      this.offlineQueue.push(message);
++    } else {
++      this.worker.postMessage(message, [payload.buffer]);
++    }
 +  }
 +
 +  public sendJsonStream(opCode: TransportOpCode, payload: any): void {
@@ -6036,7 +6244,7 @@ index 145d97c6..bf1305c5 100644
    [key: `sys_key_req_reply_${string}`]: number | undefined;
    [key: `last_repair_history_${string}`]: number | undefined;
 diff --git a/web/src/workers/crypto.worker.ts b/web/src/workers/crypto.worker.ts
-index f2f9912a..2ada8f8c 100644
+index f2f9912a..bf3450c5 100644
 --- a/web/src/workers/crypto.worker.ts
 +++ b/web/src/workers/crypto.worker.ts
 @@ -202,11 +202,38 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
@@ -6169,12 +6377,13 @@ index f2f9912a..2ada8f8c 100644
            };
  
            result = serializeState(state);
-@@ -1800,8 +1847,18 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+@@ -1800,8 +1847,19 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             sodium.memzero(CKBytes);
             CKBytes = nextCK;
             currentN++;
 +        } else if (currentN > header.n) {
-+           const skipKeyId = `${header.n}`;
++           // [DIPERBAIKI] Tambahkan prefix "group_" untuk isolasi identitas kunci
++           const skipKeyId = `group_${header.n}`;
 +           if (serializedState.skippedKeys && serializedState.skippedKeys[skipKeyId]) {
 +              const skippedMkBase64 = serializedState.skippedKeys[skipKeyId];
 +              mk = b64ToBytes(skippedMkBase64);
@@ -6189,7 +6398,7 @@ index f2f9912a..2ada8f8c 100644
          }
  
          const nonce = ciphertextBytes.slice(0, 24);
-@@ -1809,9 +1866,15 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+@@ -1809,9 +1867,16 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
          const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
              null, ctext, null, nonce, mk
          );
@@ -6197,7 +6406,8 @@ index f2f9912a..2ada8f8c 100644
 +
 +        if (!serializedState.skippedKeys) serializedState.skippedKeys = {};
 +        for (const sk of skippedKeys) {
-+           serializedState.skippedKeys[`${sk.n}`] = sk.mk;
++           // [DIPERBAIKI] Tambahkan prefix "group_" saat menyimpan skipped keys baru
++           serializedState.skippedKeys[`group_${sk.n}`] = sk.mk;
 +        }
  
          result = {
@@ -6206,7 +6416,7 @@ index f2f9912a..2ada8f8c 100644
             plaintext,
             skippedKeys,
             mk: Array.from(mk)
-@@ -1939,7 +2002,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+@@ -1939,7 +2004,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
              KEMs_priv: null,
              KEMr: bytesToB64(gCPK) || null, // Not strictly correct, KEMr should be guest PQ PK if they ever sent one, but guest sent ct and generated ephemeral KEM
              savedCt: null,
@@ -6216,7 +6426,7 @@ index f2f9912a..2ada8f8c 100644
            };
  
            result = { state };
-@@ -2122,16 +2186,31 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+@@ -2122,16 +2188,31 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
              sodium.memzero(ckrBytes);
              ckrBytes = nextCKr;
              state.Nr++;

@@ -349,6 +349,18 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          break;
        }
 
+       case 'session:request_missing': {
+         const { conversationId, targetId } = data as any;
+         if (conversationId && targetId) {
+           await emitEventToUser(targetId, 'session:key_requested', {
+              conversationId,
+              requesterId: userId,
+              deviceId
+           });
+         }
+         break;
+       }
+
        case 'messages:distribute_keys': {
          const { conversationId, keys } = data as DistributeKeysPayload;
          if (!conversationId || !Array.isArray(keys)) {
@@ -368,6 +380,20 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
          for (const k of keys) {
              const { userId: targetId, key, targetDeviceId, senderDeviceKey } = k;
              const emitPayload = { conversationId, encryptedKey: key, type: 'GROUP_KEY', senderId: userId, senderDeviceKey };
+             
+             // Restore offline catchup: persist distributed keys to the database
+             await prisma.message.create({
+                 data: {
+                     id: `msg_sys_key_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                     conversationId,
+                     senderId: userId,
+                     type: 'SYSTEM',
+                     content: JSON.stringify(emitPayload),
+                     isViewOnce: false,
+                     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+                 }
+             });
+
              await emitEventToUser(targetId, 'session:new_key', emitPayload, targetDeviceId);
          }
          if (msgId) await sendAck(userId, deviceId, msgId, { ok: true });
@@ -605,12 +631,18 @@ async function handleMessageStatusUpdate(userId: string, conversationId: string,
     if (msg.senderId === userId) return;
 
     await prisma.messageStatus.upsert({
-      where: {
-        messageId_userId: { messageId, userId }
-      },
+      where: { messageId_userId: { messageId, userId } },
       update: { status },
       create: { messageId, userId, status }
     });
+
+    // [+] RESTORE: UPDATE BATAS BACA PARTICIPANT
+    if (status === 'READ') {
+       await prisma.participant.updateMany({
+           where: { userId, conversationId },
+           data: { lastReadMsgId: messageId }
+       });
+    }
 
     await emitEventToConversation(conversationId, 'message:status_updated', {
       conversationId,

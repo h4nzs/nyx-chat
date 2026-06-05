@@ -132,16 +132,22 @@ async fn main() -> Result<()> {
             };
 
             if let Some(target_device) = down_msg.device_id {
-                let key = format!("{}:{}", down_msg.user_id, target_device);
-                if let Some(conn) = sessions_clone.get(&key) {
-                    let conn = conn.value().clone();
+                let prefix = format!("{}:{}:", down_msg.user_id, target_device);
+                for item in sessions_clone.iter().filter(|i| i.key().starts_with(&prefix)) {
+                    let conn = item.value().clone();
                     let op_code = down_msg.op_code;
+                    let payload_clone = payload_bytes.clone();
+
+                    if op_code == 0x07 { // KICK
+                        conn.close(1000u32.into(), b"Kicked by server");
+                        continue;
+                    }
 
                     tokio::spawn(async move {
-                        let mut frame = BytesMut::with_capacity(5 + payload_bytes.len());
+                        let mut frame = BytesMut::with_capacity(5 + payload_clone.len());
                         frame.put_u8(op_code);
-                        frame.put_u32(payload_bytes.len() as u32);
-                        frame.put_slice(&payload_bytes);
+                        frame.put_u32(payload_clone.len() as u32);
+                        frame.put_slice(&payload_clone);
 
                         if down_msg.is_datagram {
                             let _ = conn.send_datagram(frame.freeze());
@@ -249,13 +255,28 @@ async fn handle_connection(
     
     let token = String::from_utf8(token_bytes).unwrap_or_default();
     let val = Validation::new(jsonwebtoken::Algorithm::HS256);
-    let token_data = decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val)?;
-    let user_id = token_data.claims.id.or(token_data.claims.sub).unwrap_or_else(|| "anon".to_string());
+    let token_data = match decode::<Claims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &val) {
+        Ok(data) => data,
+        Err(e) => {
+            warn!("JWT Decode failed: {}", e);
+            return Err(anyhow::anyhow!("Unauthorized"));
+        }
+    };
+    
+    let user_id = match token_data.claims.id.or(token_data.claims.sub) {
+        Some(id) => id,
+        None => {
+            warn!("JWT missing id/sub claim");
+            return Err(anyhow::anyhow!("Unauthorized: Missing ID"));
+        }
+    };
     let device_id = token_data.claims.device_id.unwrap_or_else(|| "unknown".to_string());
 
     info!("User {} (device {}) authenticated via WebTransport", user_id, device_id);
 
-    let session_key = format!("{}:{}", user_id, device_id);
+    let session_uuid = uuid::Uuid::new_v4().to_string();
+    let session_key = format!("{}:{}:{}", user_id, device_id, session_uuid);
+    
     let conn = Arc::new(conn);
     sessions.insert(session_key.clone(), conn.clone());
 
