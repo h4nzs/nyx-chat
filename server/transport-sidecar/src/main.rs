@@ -58,13 +58,24 @@ async fn main() -> Result<()> {
 
         let (cert_der, key_der) = if std::path::Path::new(cert_path).exists() && std::path::Path::new(key_path).exists() {
             info!("Loading existing certificate from files...");
+            // WebTransport requires local certs to be valid for <= 14 days. 
+            // Rather than trying to parse expiration here, we'll just use it,
+            // but if it fails to connect, users can delete the .der files.
             (std::fs::read(cert_path)?, std::fs::read(key_path)?)
         } else {
-            info!("Generating new self-signed certificate...");
+            info!("Generating new self-signed certificate (valid for 10 days for WebTransport)...");
             let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
-            let certified_key = rcgen::generate_simple_self_signed(subject_alt_names).context("Failed to generate rcgen cert")?;
-            let cert_der = certified_key.cert.der().to_vec();
-            let key_der = certified_key.signing_key.serialize_der();
+            
+            let mut params = rcgen::CertificateParams::new(subject_alt_names).context("Failed to create cert params")?;
+            let now = time::OffsetDateTime::now_utc();
+            params.not_before = now - time::Duration::days(1);
+            params.not_after = now + time::Duration::days(10);
+            
+            let key_pair = rcgen::KeyPair::generate().context("Failed to generate keypair")?;
+            let cert = params.self_signed(&key_pair).context("Failed to create cert")?;
+            let cert_der = cert.der().to_vec();
+            let key_der = key_pair.serialize_der();
+            
             std::fs::write(cert_path, &cert_der)?;
             std::fs::write(key_path, &key_der)?;
             (cert_der, key_der)
@@ -76,7 +87,15 @@ async fn main() -> Result<()> {
         Identity::new(chain, key)
     };
 
-    info!("Server Certificate Hash (SHA-256): {}", identity.certificate_chain().as_slice()[0].hash().to_string());
+    let cert_hash = identity.certificate_chain().as_slice()[0].hash();
+    info!("╔══════════════════════════════════════════════════════════════════════════════╗");
+    info!("║ WEBTRANSPORT LOCALHOST CONFIGURATION                                         ║");
+    info!("╠══════════════════════════════════════════════════════════════════════════════╣");
+    info!("║ SHA-256 Hash: {} ║", cert_hash.to_string());
+    info!("║                                                                              ║");
+    info!("║ Add this to your web/.env file:                                              ║");
+    info!("║ VITE_TRANSPORT_CERT_HASH={} ║", cert_hash.to_string());
+    info!("╚══════════════════════════════════════════════════════════════════════════════╝");
 
     let port: u16 = std::env::var("TRANSPORT_PORT")
         .unwrap_or_else(|_| "33333".to_string())
