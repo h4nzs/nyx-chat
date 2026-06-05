@@ -22,7 +22,31 @@ export const usePresenceStore = create<State>((set) => ({
 
   setOnlineUsers: (userIds) => set({ onlineUsers: new Set(userIds) }),
 
-  userJoined: (userId) => set(state => ({ onlineUsers: new Set(state.onlineUsers).add(userId) })),
+  userJoined: (userId) => {
+    // FIX: Offline Sync Trigger
+    import('./message').then(({ useMessageStore }) => {
+       const messageStore = useMessageStore.getState();
+       // Check in-memory pending decryptions
+       const pendingFromUser = messageStore.pendingDecryptions.filter(m => m.senderId === userId);
+       const convIdsToRetry = new Set(pendingFromUser.map(m => m.conversationId));
+       
+       // Also check active conversations in memory for any waiting_for_key messages from this user
+       Object.entries(messageStore.messages).forEach(([cid, msgs]) => {
+           if (msgs.some(m => m.senderId === userId && (m.content === 'waiting_for_key' || m.content === '[Requesting key to decrypt...]'))) {
+               import('@nyx/shared').then(({ asConversationId }) => {
+                   convIdsToRetry.add(asConversationId(cid));
+               });
+           }
+       });
+
+       convIdsToRetry.forEach(cid => {
+           console.log(`[Offline Sync] User ${userId} came online. Retrying decryptions for ${cid}...`);
+           messageStore.reDecryptPendingMessages(cid);
+       });
+    });
+
+    return set(state => ({ onlineUsers: new Set(state.onlineUsers).add(userId) }));
+  },
 
   userLeft: (userId) => set(state => {
     const newOnlineUsers = new Set(state.onlineUsers);

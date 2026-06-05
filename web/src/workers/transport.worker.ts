@@ -3,6 +3,7 @@ import { TransportOpCode, MainToTransportWorker, TransportWorkerToMain } from '@
 let transport: WebTransport | null = null;
 let controlStream: WebTransportBidirectionalStream | null = null;
 let controlWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
+let datagramWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
 
 async function initWebTransport(url: string, token: string, certificateHash?: string) {
   try {
@@ -147,6 +148,10 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
       break;
     case 'DISCONNECT':
       if (transport) {
+        if (datagramWriter) {
+          try { datagramWriter.releaseLock(); } catch (e) {}
+          datagramWriter = null;
+        }
         transport.close();
         transport = null;
         postMessage({ type: 'DISCONNECTED', reason: 'client closed' } satisfies TransportWorkerToMain);
@@ -172,17 +177,15 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
       }
       break;
     case 'SEND_DATAGRAM':
-      if (transport) {
+      if (transport && datagramWriter) {
         try {
-          const writer = transport.datagrams.writable.getWriter();
           const frame = new Uint8Array(5 + data.payload.length);
           frame[0] = data.opCode;
           const view = new DataView(frame.buffer);
           view.setUint32(1, data.payload.length, false);
           frame.set(data.payload, 5);
           
-          await writer.write(frame);
-          writer.releaseLock();
+          await datagramWriter.write(frame);
         } catch (e) {
           console.error("Failed to send datagram", e);
         }

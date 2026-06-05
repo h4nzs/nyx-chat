@@ -235,19 +235,31 @@ async function handleWebRtcRelay(fromUserId: string, payload: { to: string, type
 
 async function handlePresence(userId: string, payload: { event: 'active' | 'away' | 'typing:start' | 'typing:stop', conversationId?: string }) {
   if (payload.event === 'active') {
-    await pubClient.sAdd('online_users', userId);
+    const added = await pubClient.sAdd('online_users', userId);
+    const onlineUsers = await pubClient.sMembers('online_users');
+    
+    // Send the current list of online users to this user
+    await sendJsonToUser(userId, TransportOpCode.PRESENCE, { type: 'bulk', userIds: onlineUsers });
+
+    if (added === 1) {
+      await broadcastToUsers(onlineUsers, TransportOpCode.PRESENCE, { type: 'join', userId });
+    }
   } else if (payload.event === 'away') {
-    await pubClient.sRem('online_users', userId);
+    const removed = await pubClient.sRem('online_users', userId);
+    if (removed === 1) {
+      const onlineUsers = await pubClient.sMembers('online_users');
+      await broadcastToUsers(onlineUsers, TransportOpCode.PRESENCE, { type: 'leave', userId });
+    }
   }
-  
+
   if (payload.conversationId && (payload.event === 'typing:start' || payload.event === 'typing:stop')) {
      const conversation = await prisma.conversation.findUnique({
        where: { id: payload.conversationId },
        include: { participants: { select: { userId: true } } }
      });
-     
+
      if (conversation) {
-       const typingData = { userId, conversationId: payload.conversationId, isTyping: payload.event === 'typing:start' };
+       const typingData = { type: 'typing', userId, conversationId: payload.conversationId, isTyping: payload.event === 'typing:start' };
        for (const p of conversation.participants) {
          if (p.userId !== userId) {
            await sendJsonToUser(p.userId, TransportOpCode.PRESENCE, typingData);

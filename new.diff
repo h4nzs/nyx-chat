@@ -42,6 +42,18 @@ index 00000000..d4d46f42
 +  | { type: 'DISCONNECT' }
 +  | { type: 'SEND_STREAM'; opCode: TransportOpCode; payload: BinaryPayload }
 +  | { type: 'SEND_DATAGRAM'; opCode: TransportOpCode; payload: BinaryPayload };
+diff --git a/packages/shared/src/types.ts b/packages/shared/src/types.ts
+index d2a13e8f..063d404e 100644
+--- a/packages/shared/src/types.ts
++++ b/packages/shared/src/types.ts
+@@ -191,6 +191,7 @@ export interface DoubleRatchetState {
+   Ns: number;
+   Nr: number;
+   PN: number;
++  skippedKeys?: Record<string, string>;
+   messageCount?: number;
+   lastActivityTime?: number;
+ }
 diff --git a/server/package.json b/server/package.json
 index 9c17ff6e..a041f992 100644
 --- a/server/package.json
@@ -135,6 +147,19 @@ index d709ec8b..bf0cb179 100644
    }, { noOverlap: true });
  };
 +
+diff --git a/server/src/jobs/systemSweeper.ts b/server/src/jobs/systemSweeper.ts
+index 60d82121..a4306044 100644
+--- a/server/src/jobs/systemSweeper.ts
++++ b/server/src/jobs/systemSweeper.ts
+@@ -56,7 +56,7 @@ export const startSystemSweeper = () => {
+         if (now > deadline) {
+            console.log(`[Cron] 💀 DEAD MAN'S SWITCH TRIGGERED for User ${u.id}. Erasing all traces...`);
+            try {
+-             await prisma.user.delete({ where: { id: u.id } }); // Cascade deletes messages, conversations, keys.
++             await prisma.user.deleteMany({ where: { id: u.id } }); // Cascade deletes messages, conversations, keys.
+              nukedCount++;
+            } catch (err) {
+              console.error('[Cron] Failed to execute Dead Man Switch for user:', u.id, err);
 diff --git a/server/src/middleware/auth.ts b/server/src/middleware/auth.ts
 index 923940d8..01777677 100644
 --- a/server/src/middleware/auth.ts
@@ -191,10 +216,10 @@ index 923940d8..01777677 100644
 -}
 diff --git a/server/src/network/redisBridge.ts b/server/src/network/redisBridge.ts
 new file mode 100644
-index 00000000..d39a29a7
+index 00000000..ebb859f8
 --- /dev/null
 +++ b/server/src/network/redisBridge.ts
-@@ -0,0 +1,568 @@
+@@ -0,0 +1,643 @@
 +import { createClient, type RedisClientType } from 'redis';
 +import { prisma } from '../lib/prisma.js';
 +import { redisClient } from '../lib/redis.js';
@@ -432,19 +457,31 @@ index 00000000..d39a29a7
 +
 +async function handlePresence(userId: string, payload: { event: 'active' | 'away' | 'typing:start' | 'typing:stop', conversationId?: string }) {
 +  if (payload.event === 'active') {
-+    await pubClient.sAdd('online_users', userId);
++    const added = await pubClient.sAdd('online_users', userId);
++    const onlineUsers = await pubClient.sMembers('online_users');
++    
++    // Send the current list of online users to this user
++    await sendJsonToUser(userId, TransportOpCode.PRESENCE, { type: 'bulk', userIds: onlineUsers });
++
++    if (added === 1) {
++      await broadcastToUsers(onlineUsers, TransportOpCode.PRESENCE, { type: 'join', userId });
++    }
 +  } else if (payload.event === 'away') {
-+    await pubClient.sRem('online_users', userId);
++    const removed = await pubClient.sRem('online_users', userId);
++    if (removed === 1) {
++      const onlineUsers = await pubClient.sMembers('online_users');
++      await broadcastToUsers(onlineUsers, TransportOpCode.PRESENCE, { type: 'leave', userId });
++    }
 +  }
-+  
++
 +  if (payload.conversationId && (payload.event === 'typing:start' || payload.event === 'typing:stop')) {
 +     const conversation = await prisma.conversation.findUnique({
 +       where: { id: payload.conversationId },
 +       include: { participants: { select: { userId: true } } }
 +     });
-+     
++
 +     if (conversation) {
-+       const typingData = { userId, conversationId: payload.conversationId, isTyping: payload.event === 'typing:start' };
++       const typingData = { type: 'typing', userId, conversationId: payload.conversationId, isTyping: payload.event === 'typing:start' };
 +       for (const p of conversation.participants) {
 +         if (p.userId !== userId) {
 +           await sendJsonToUser(p.userId, TransportOpCode.PRESENCE, typingData);
@@ -636,7 +673,10 @@ index 00000000..d39a29a7
 +         if (!messageId || !conversationId) return;
 +         const msg = await prisma.message.findUnique({ where: { id: messageId }, select: { senderId: true, conversationId: true } });
 +         if (!msg || msg.senderId === userId || msg.conversationId !== conversationId) return;
++         
++         // Emit viewed event then OBLITERATE from server
 +         await emitEventToConversation(conversationId, 'message:viewed', { messageId, conversationId }, userId);
++         await prisma.message.delete({ where: { id: messageId } }).catch(() => {});
 +         break;
 +       }
 +
@@ -720,23 +760,31 @@ index 00000000..d39a29a7
 +         break;
 +       }
 +
++       case 'message:mark_read':
++       case 'message:mark_as_read': {
++         const { conversationId, messageId } = data as { conversationId: string, messageId: string };
++         await handleMessageStatusUpdate(userId, conversationId, messageId, 'READ');
++         break;
++       }
++
++       case 'message:ack_delivered': {
++         const { conversationId, messageId } = data as { conversationId: string, messageId: string };
++         await handleMessageStatusUpdate(userId, conversationId, messageId, 'DELIVERED');
++         break;
++       }
++
++       case 'messages:mark_as_read':
 +       case 'messages:mark_read':
 +       case 'messages:mark_delivered': {
 +         const { conversationId, messageIds } = data as any;
-+         const status = event === 'messages:mark_read' ? 'READ' : 'DELIVERED';
++         const status = (event === 'messages:mark_read' || event === 'messages:mark_as_read') ? 'READ' : 'DELIVERED';
 +         if (!conversationId || !Array.isArray(messageIds)) return;
 +         
-+         await prisma.messageStatus.updateMany({
-+           where: { messageId: { in: messageIds }, userId },
-+           data: { status }
-+         });
-+
-+         await emitEventToConversation(conversationId, 'message:status_updated', {
-+           conversationId,
-+           messageIds,
-+           userId,
-+           status
-+         }, userId);
++         // 1. Lakukan update status secara batch
++         for (const messageId of messageIds) {
++             // Re-use logic penghapusan yang sudah matang di handleMessageStatusUpdate
++             await handleMessageStatusUpdate(userId, conversationId, messageId, status);
++         }
 +         break;
 +       }
 +
@@ -762,6 +810,58 @@ index 00000000..d39a29a7
 +
 +async function sendAck(userId: string, deviceId: string, msgId: string, data: Record<string, unknown>) {
 +  await sendJsonToUser(userId, TransportOpCode.ACK, { msgId, data }, false, deviceId);
++}
++
++async function handleMessageStatusUpdate(userId: string, conversationId: string, messageId: string, status: 'READ' | 'DELIVERED') {
++  if (!conversationId || !messageId) return;
++
++  try {
++    // 1. Cek keberadaan pesan & info grup (karena pesan ephemeral/cepat dihapus)
++    const msg = await prisma.message.findUnique({ 
++      where: { id: messageId }, 
++      select: { id: true, senderId: true, conversation: { select: { isGroup: true } } } 
++    });
++    if (!msg) return;
++
++    // Jangan update status jika pengirim sedang membaca pesan sendiri
++    if (msg.senderId === userId) return;
++
++    await prisma.messageStatus.upsert({
++      where: {
++        messageId_userId: { messageId, userId }
++      },
++      update: { status },
++      create: { messageId, userId, status }
++    });
++
++    await emitEventToConversation(conversationId, 'message:status_updated', {
++      conversationId,
++      messageId,
++      userId,
++      status
++    }, userId);
++
++    // 2. LOGIKA PENGHAPUSAN OTOMATIS (Store-and-Forward Ephemerality)
++    if (status === 'READ') {
++        if (!msg.conversation.isGroup) {
++            // Dalam chat 1:1, jika penerima sudah baca, hapus dari server.
++            await prisma.message.delete({ where: { id: messageId } }).catch(() => {});
++        } else {
++            // Dalam grup, hapus jika SEMUA partisipan sudah baca
++            const participants = await prisma.participant.count({ where: { conversationId } });
++            const readCount = await prisma.messageStatus.count({ where: { messageId, status: 'READ' } });
++            
++            // participants - 1 (pengirim tidak dihitung status bacanya di DB)
++            if (readCount >= (participants - 1)) {
++                await prisma.message.delete({ where: { id: messageId } }).catch(() => {});
++            }
++        }
++    }
++  } catch (e: any) {
++    // Tangani P2003 (FK Violation) jika pesan dihapus tepat saat kueri berjalan
++    if (e.code === 'P2003') return;
++    console.error(`[RedisBridge] Failed to update message status:`, e);
++  }
 +}
 diff --git a/server/src/routes/admin.ts b/server/src/routes/admin.ts
 index 7bcc0723..5b0b93ca 100644
@@ -3039,10 +3139,10 @@ index 00000000..e455c801
 +*.rs.user
 diff --git a/server/transport-sidecar/Cargo.toml b/server/transport-sidecar/Cargo.toml
 new file mode 100644
-index 00000000..76ca9fef
+index 00000000..36dfa664
 --- /dev/null
 +++ b/server/transport-sidecar/Cargo.toml
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,21 @@
 +[package]
 +name = "transport-sidecar"
 +version = "0.1.0"
@@ -3050,6 +3150,7 @@ index 00000000..76ca9fef
 +
 +[dependencies]
 +wtransport = "0.7"
++rcgen = "0.14"
 +tokio = { version = "1.37", features = ["full"] }
 +redis = { version = "0.25.3", features = ["tokio-comp"] }
 +jsonwebtoken = "9.3"
@@ -3065,10 +3166,10 @@ index 00000000..76ca9fef
 +data-encoding = "2.11.0"
 diff --git a/server/transport-sidecar/src/main.rs b/server/transport-sidecar/src/main.rs
 new file mode 100644
-index 00000000..87950a70
+index 00000000..af78e2ec
 --- /dev/null
 +++ b/server/transport-sidecar/src/main.rs
-@@ -0,0 +1,316 @@
+@@ -0,0 +1,357 @@
 +use anyhow::{Context, Result};
 +use dashmap::DashMap;
 +use dotenvy::dotenv;
@@ -3116,12 +3217,53 @@ index 00000000..87950a70
 +    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string());
 +    let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string());
 +
-+    let cert = Identity::self_signed(["localhost", "127.0.0.1"]).context("Failed to generate cert")?;
-+    info!("Server Certificate Hash (SHA-256): {}", cert.certificate_chain().as_slice()[0].hash().to_string());
++    let prod_cert_path = std::env::var("PROD_CERT_PATH").unwrap_or_default();
++    let prod_key_path = std::env::var("PROD_KEY_PATH").unwrap_or_default();
++
++    let identity = if !prod_cert_path.is_empty() && !prod_key_path.is_empty() {
++        info!("[PRODUCTION] Loading CA-signed PEM certificates from {}...", prod_cert_path);
++        Identity::load_pemfiles(&prod_cert_path, &prod_key_path).await.context("Failed to load production PEM certificates")?
++    } else {
++        info!("[LOCAL] Loading/Generating persistent self-signed DER certificates...");
++        let cert_path = "transport_cert.der";
++        let key_path = "transport_key.der";
++
++        let (cert_der, key_der) = if std::path::Path::new(cert_path).exists() && std::path::Path::new(key_path).exists() {
++            info!("Loading existing certificate from files...");
++            (std::fs::read(cert_path)?, std::fs::read(key_path)?)
++        } else {
++            info!("Generating new self-signed certificate...");
++            let subject_alt_names = vec!["localhost".to_string(), "127.0.0.1".to_string()];
++            let certified_key = rcgen::generate_simple_self_signed(subject_alt_names).context("Failed to generate rcgen cert")?;
++            let cert_der = certified_key.cert.der().to_vec();
++            let key_der = certified_key.signing_key.serialize_der();
++            std::fs::write(cert_path, &cert_der)?;
++            std::fs::write(key_path, &key_der)?;
++            (cert_der, key_der)
++        };
++
++        use wtransport::tls::{CertificateChain, PrivateKey, Certificate};
++        let chain = CertificateChain::single(Certificate::from_der(cert_der).context("Failed to parse cert DER")?);
++        let key = PrivateKey::from_der_pkcs8(key_der);
++        Identity::new(chain, key)
++    };
++
++    info!("Server Certificate Hash (SHA-256): {}", identity.certificate_chain().as_slice()[0].hash().to_string());
++
++    let port: u16 = std::env::var("TRANSPORT_PORT")
++        .unwrap_or_else(|_| "33333".to_string())
++        .parse()
++        .expect("TRANSPORT_PORT harus berupa angka port yang valid");
++
++    let bind_addr: std::net::SocketAddr = format!("0.0.0.0:{}", port)
++        .parse()
++        .expect("Gagal mem-parsing bind address");
++
++    info!("🚀 WebTransport Sidecar bersiap di {}", bind_addr);
 +
 +    let config = ServerConfig::builder()
-+        .with_bind_default(4433)
-+        .with_identity(cert)
++        .with_bind_address(bind_addr)
++        .with_identity(identity)
 +        .build();
 +
 +    let server = Endpoint::server(config).context("Failed to create server")?;
@@ -3224,7 +3366,7 @@ index 00000000..87950a70
 +        }
 +    });
 +
-+    info!("WebTransport Sidecar Listening on 4433");
++    info!("WebTransport Sidecar Listening on 33333");
 +
 +    let server = Arc::new(server);
 +
@@ -3760,6 +3902,87 @@ index d294ba6b..c0004e2e 100644
            }
        }
  
+diff --git a/web/src/components/PasswordPromptModal.tsx b/web/src/components/PasswordPromptModal.tsx
+index 8a8136a0..ff730e08 100644
+--- a/web/src/components/PasswordPromptModal.tsx
++++ b/web/src/components/PasswordPromptModal.tsx
+@@ -35,17 +35,21 @@ export default function PasswordPromptModal() {
+ 
+   const handleSubmit = async (e: React.FormEvent) => {
+     e.preventDefault();
++    if (!password) return;
++    
+     setIsLoading(true);
+     setError('');
+     try {
+-      onPasswordSubmit(password);
++      // Tunggu hingga proses validasi/dekripsi di authStore selesai
++      await (onPasswordSubmit(password) as unknown as Promise<void>);
+       setPassword('');
+       hidePasswordPrompt();
+-    } catch (e) {
+-      setError(t('modals:password_prompt.error'));
++    } catch (err: unknown) {
++      console.error("Password submission error:", err);
++      const msg = err instanceof Error ? err.message : t('modals:password_prompt.error');
++      setError(msg);
+     } finally {
+       setIsLoading(false);
+-      setPassword('');
+     }
+   };
+ 
+@@ -69,13 +73,21 @@ export default function PasswordPromptModal() {
+         </div>
+ 
+         <form onSubmit={handleSubmit} className="space-y-6">
++          {error && (
++            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-bold text-center animate-shake">
++              {error}
++            </div>
++          )}
++          
+           <div className="relative">
+             <input
+               type="password"
+               value={password}
+               onChange={(e) => setPassword(e.target.value)}
+-              className="w-full bg-[#111827] border-2 border-gray-700 rounded-lg py-4 px-4 pr-12 text-white focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/30 transition-all duration-300"
++              disabled={isLoading}
++              className="w-full bg-[#111827] border-2 border-gray-700 rounded-lg py-4 px-4 pr-12 text-white focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/30 transition-all duration-300 disabled:opacity-50"
+               placeholder={t('modals:password_prompt.placeholder')}
++              autoFocus
+             />
+             <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
+               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500" viewBox="0 0 20 20" fill="currentColor">
+@@ -88,15 +100,24 @@ export default function PasswordPromptModal() {
+             <button
+               type="button"
+               onClick={handleCancel}
+-              className="py-3 px-4 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 transition-all duration-300"
++              disabled={isLoading}
++              className="py-3 px-4 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 transition-all duration-300 disabled:opacity-50"
+             >
+               {t('common:actions.abort')}
+             </button>
+             <button
+               type="submit"
+-              className="py-3 px-4 rounded-lg bg-orange-600 text-white hover:bg-orange-700 shadow-[0_0_15px_rgba(249,115,22,0.4)] transition-all duration-300"
++              disabled={isLoading}
++              className="py-3 px-4 rounded-lg bg-orange-600 text-white hover:bg-orange-700 shadow-[0_0_15px_rgba(249,115,22,0.4)] transition-all duration-300 disabled:opacity-50 flex items-center justify-center gap-2"
+             >
+-              {t('common:actions.unlock')}
++              {isLoading ? (
++                <>
++                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
++                  <span>{t('common:status.decrypting', 'Decrypting...')}</span>
++                </>
++              ) : (
++                t('common:actions.unlock')
++              )}
+             </button>
+           </div>
+         </form>
 diff --git a/web/src/hooks/usePushNotifications.ts b/web/src/hooks/usePushNotifications.ts
 index c6643802..28099949 100644
 --- a/web/src/hooks/usePushNotifications.ts
@@ -3809,6 +4032,55 @@ index c6643802..28099949 100644
          }
  
          toast.success(i18n.t('common:notifications_disabled', 'Notifications disabled'));
+diff --git a/web/src/lib/keychainDb.ts b/web/src/lib/keychainDb.ts
+index 6c1e3af9..931eddf5 100644
+--- a/web/src/lib/keychainDb.ts
++++ b/web/src/lib/keychainDb.ts
+@@ -372,6 +372,10 @@ export async function getProfileKey(userId: string): Promise<string | undefined>
+ export async function clearAllKeys(): Promise<void> {
+   return enqueueWrite(async () => {
+       await Promise.all([
++          db.messages.clear(),
++          db.storyKeys.clear(),
++          db.offlineQueue.clear(),
++          db.kvStore.clear(),
+           db.sessionKeys.clear(),
+           db.groupKeys.clear(),
+           db.preKeys.clear(),
+@@ -382,7 +386,8 @@ export async function clearAllKeys(): Promise<void> {
+           db.skippedKeys.clear(),
+           db.messageKeys.clear(),
+           db.pendingHeaders.clear(),
+-          db.groupSkippedKeys.clear()
++          db.groupSkippedKeys.clear(),
++          db.pqDrSessions.clear()
+       ]);
+   });
+ }
+diff --git a/web/src/lib/nukeProtocol.ts b/web/src/lib/nukeProtocol.ts
+index 663f94a5..5959ce45 100644
+--- a/web/src/lib/nukeProtocol.ts
++++ b/web/src/lib/nukeProtocol.ts
+@@ -6,7 +6,7 @@ export const executeLocalWipe = async () => {
+     await closeDatabaseConnection();
+ 
+     // 1. Obliterate all known IndexedDB Vaults
+-    let databases = ['nyx_offline_queue', 'nyx_shadow_vault'];
++    let databases = ['nyx_offline_queue', 'nyx_shadow_vault', 'NyxUnifiedDB'];
+     
+     // Get correct keychain DB name from local storage if available
+     try {
+@@ -19,8 +19,9 @@ export const executeLocalWipe = async () => {
+         }
+     } catch (_e) {}
+ 
+-    // Fallback: Hardcoded legacy name just in case
++    // Fallback: Hardcoded legacy names just in case
+     databases.push('nyx_keychain');
++    databases.push('NyxDB');
+     
+     // Try to get dynamic list if supported by browser
+     if (window.indexedDB && window.indexedDB.databases) {
 diff --git a/web/src/lib/socket.ts b/web/src/lib/socket.ts
 deleted file mode 100644
 index 79d3301b..00000000
@@ -4516,7 +4788,7 @@ index 00000000..ecd3dcf7
 +
 diff --git a/web/src/lib/transportClient.ts b/web/src/lib/transportClient.ts
 new file mode 100644
-index 00000000..97c623f4
+index 00000000..4d76a067
 --- /dev/null
 +++ b/web/src/lib/transportClient.ts
 @@ -0,0 +1,260 @@
@@ -4560,7 +4832,7 @@ index 00000000..97c623f4
 +       finalUrl = finalUrl.replace('http://', 'https://');
 +    }
 +
-+    const hash = certificateHash || import.meta.env.VITE_TRANSPORT_CERT_HASH;
++    const hash = certificateHash || (import.meta.env.PROD ? undefined : import.meta.env.VITE_TRANSPORT_CERT_HASH);
 +    this.worker.postMessage({ type: 'CONNECT', url: finalUrl, token, certificateHash: hash } satisfies MainToTransportWorker);
 +  }
 +
@@ -4706,7 +4978,7 @@ index 00000000..97c623f4
 +export function connectSocket() {
 +  if (transportClient.connected) return;
 +  const token = useAuthStore.getState().accessToken || '';
-+  const certHash = import.meta.env.VITE_TRANSPORT_CERT_HASH;
++  const certHash = import.meta.env.PROD ? undefined : import.meta.env.VITE_TRANSPORT_CERT_HASH;
 +  transportClient.connect('', token, certHash);
 +}
 +
@@ -4781,7 +5053,7 @@ index 00000000..97c623f4
 +    }, randomDelay);
 +};
 diff --git a/web/src/lib/webrtc.ts b/web/src/lib/webrtc.ts
-index afd1eeb6..9e96b0df 100644
+index afd1eeb6..a6383a4c 100644
 --- a/web/src/lib/webrtc.ts
 +++ b/web/src/lib/webrtc.ts
 @@ -1,12 +1,13 @@
@@ -4799,7 +5071,15 @@ index afd1eeb6..9e96b0df 100644
  
  let cachedIceServers: RTCIceServer[] | null = null;
  let turnCacheExp = 0;
-@@ -95,7 +96,14 @@ const sendSecureSignal = async (to: string, type: string, payload: object = {})
+@@ -30,6 +31,7 @@ const getDynamicIceServers = async (): Promise<RTCIceServer[]> => {
+ };
+ 
+ const peerConnections = new Map<string, RTCPeerConnection>();
++const candidateQueues = new Map<string, RTCIceCandidateInit[]>();
+ let localMediaStream: MediaStream | null = null;
+ 
+ export const replaceVideoTrack = async (newVideoTrack: MediaStreamTrack) => {
+@@ -95,7 +97,14 @@ const sendSecureSignal = async (to: string, type: string, payload: object = {})
    try {
      const { encryptCallSignal } = await import('../utils/crypto');
      const encryptedPayload = await encryptCallSignal(payload, callKey);
@@ -4815,7 +5095,7 @@ index afd1eeb6..9e96b0df 100644
    } catch (e) {
      console.error(`Failed to encrypt signal ${type}`, e);
    }
-@@ -206,7 +214,9 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
+@@ -206,7 +215,9 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
                   // We can just send 'request' to notify them to ring.
                   // Encrypt payload
                   encryptCallSignal({ isVideo, callerProfile }, callKey).then(enc => {
@@ -4826,7 +5106,7 @@ index afd1eeb6..9e96b0df 100644
                   });
              }
          });
-@@ -216,7 +226,9 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
+@@ -216,7 +227,9 @@ export const startCall = async (to: string, isVideo: boolean, callerProfile: Min
          // 2. Encrypt the signaling metadata and send via unified event
          const payload = { isVideo, callerProfile };
          const encryptedPayload = await encryptCallSignal(payload, callKey);
@@ -4837,7 +5117,7 @@ index afd1eeb6..9e96b0df 100644
      }
  
    } catch (err) {
-@@ -267,8 +279,6 @@ export const hangup = () => {
+@@ -267,8 +280,6 @@ export const hangup = () => {
    cleanupCall();
  };
  
@@ -4846,7 +5126,7 @@ index afd1eeb6..9e96b0df 100644
  import type { MinimalProfile } from '../store/callStore';
  
  type SignalingPayload = 
-@@ -279,13 +289,20 @@ type SignalingPayload =
+@@ -279,13 +290,20 @@ type SignalingPayload =
    | { type?: string; reason?: string; callerProfile?: MinimalProfile }
    | Record<string, unknown>;
  
@@ -4872,6 +5152,29 @@ index afd1eeb6..9e96b0df 100644
  
      if (!parsed.success) {
          console.error("[WebRTC Zod Shield] Dropping invalid signaling payload:", parsed.error.format());
+@@ -419,6 +437,14 @@ export const initWebRTCListeners = (socket: Socket | null) => {
+                 if (!pc) return;
+                 try {
+                   await pc.setRemoteDescription(new RTCSessionDescription((decryptedPayload as { answer: RTCSessionDescriptionInit }).answer));
++                  
++                  const queue = candidateQueues.get(data.from as string);
++                  if (queue) {
++                      for (const c of queue) {
++                          await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => console.error('Failed to add queued ice candidate', e));
++                      }
++                      candidateQueues.delete(data.from as string);
++                  }
+                 } catch (e) {
+                   console.error('Failed to handle answer', e);
+                 }
+@@ -453,4 +479,4 @@ export const initWebRTCListeners = (socket: Socket | null) => {
+         }
+     }
+   });
+-};
+\ No newline at end of file
++};;
+\ No newline at end of file
 diff --git a/web/src/pages/BurnerChat.tsx b/web/src/pages/BurnerChat.tsx
 index f1bc5cc8..6eb7e38c 100644
 --- a/web/src/pages/BurnerChat.tsx
@@ -5135,7 +5438,7 @@ index 5bcb24b0..62cc0980 100644
                  onError={() => toast.error(t('auth:errors.security_check_failed', 'Security check failed.'))}
                  onExpire={() => setTurnstileToken('')}
 diff --git a/web/src/store/auth.ts b/web/src/store/auth.ts
-index c9e33585..7571b5ba 100644
+index c9e33585..c38ff9e5 100644
 --- a/web/src/store/auth.ts
 +++ b/web/src/store/auth.ts
 @@ -4,7 +4,7 @@
@@ -5147,73 +5450,229 @@ index c9e33585..7571b5ba 100644
  import { clearAuthCookies } from "@lib/tokenStorage";
  import { useModalStore } from "./modal";
  import { useConversationStore } from "./conversation";
-@@ -202,35 +202,60 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
-     // Fallback: Prompt user for password manually
-     const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
-       return new Promise((resolve, reject) => {
-+        let isSubmissionStarted = false;
-+        let isResolvedOrRejected = false;
-+
-         const unsubscribe = useModalStore.subscribe((state) => {
+@@ -151,6 +151,7 @@ type Actions = {
+ 
+ let privateKeysCache: RetrievedKeys | null = null;
+ let refreshPromise: Promise<boolean> | null = null;
++let keysRetrievalPromise: Promise<RetrievedKeys> | null = null;
+ 
+ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) => {
+   const savedUser = localStorage.getItem("user");
+@@ -175,67 +176,101 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+ 
+   const retrieveAndCacheKeys = async (): Promise<RetrievedKeys> => {
+     if (privateKeysCache) return privateKeysCache;
++    if (keysRetrievalPromise) return keysRetrievalPromise;
+ 
+-    const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
++    keysRetrievalPromise = (async () => {
++      try {
++        const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+ 
+-    let autoUnlockKey: string | undefined | null = null;
+-    let encryptedKeys: string | undefined | null = null;
++        let autoUnlockKey: string | undefined | null = null;
++        let encryptedKeys: string | undefined | null = null;
+ 
+-    try {
+-      autoUnlockKey = await getDeviceAutoUnlockKey();
+-      encryptedKeys = await getEncryptedKeys();
+-    } catch (_e) {
+-      console.error("Failed to read keys/auto-unlock info:", _e);
+-    }
++        try {
++          autoUnlockKey = await getDeviceAutoUnlockKey();
++          encryptedKeys = await getEncryptedKeys();
++        } catch (_e) {
++          console.error("Failed to read keys/auto-unlock info:", _e);
++        }
+ 
+-    // Attempt auto-unlock if both exist
+-    if (autoUnlockKey && encryptedKeys) {
+-      try {
+-        const result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
+-        if (result.success) {
+-          privateKeysCache = result.keys;
+-          return result.keys;
++        // Attempt auto-unlock if both exist
++        if (autoUnlockKey && encryptedKeys) {
++          try {
++            const result = await retrievePrivateKeys(encryptedKeys, autoUnlockKey);
++            if (result.success) {
++              privateKeysCache = result.keys;
++              return result.keys;
++            }
++          } catch (e) {}
+         }
+-      } catch (e) {}
+-    }
+ 
+-    // Fallback: Prompt user for password manually
+-    const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
+-      return new Promise((resolve, reject) => {
+-        const unsubscribe = useModalStore.subscribe((state) => {
 -          if (!state.isPasswordPromptOpen) {
-+          // If the modal is closed and we haven't started a submission or already resolved/rejected
-+          if (!state.isPasswordPromptOpen && !isSubmissionStarted && !isResolvedOrRejected) {
-+            isResolvedOrRejected = true;
-             unsubscribe();
-+            // Short delay to ensure no race with a very fast cancel callback
-             setTimeout(() => {
-                reject(new Error("Password prompt closed without input."));
-             }, 100);
-           }
-         });
+-            unsubscribe();
+-            setTimeout(() => {
+-               reject(new Error("Password prompt closed without input."));
+-            }, 100);
+-          }
+-        });
++        // Fallback: Prompt user for password manually
++        const promptForPassword = async (retrieveFn: typeof retrievePrivateKeys): Promise<RetrievedKeys> => {
++          return new Promise((resolve, reject) => {
++            let isSubmissionStarted = false;
++            let isResolvedOrRejected = false;
++
++            const unsubscribe = useModalStore.subscribe((state) => {
++              // If the modal is closed and we haven't started a submission or already resolved/rejected
++              if (!state.isPasswordPromptOpen && !isSubmissionStarted && !isResolvedOrRejected) {
++                isResolvedOrRejected = true;
++                unsubscribe();
++                // Short delay to ensure no race with a very fast cancel callback
++                setTimeout(() => {
++                   reject(new Error("Password prompt closed without input."));
++                }, 100);
++              }
++            });
  
 -        const cleanup = () => unsubscribe();
-+        const cleanup = () => {
-+          isResolvedOrRejected = true;
-+          unsubscribe();
-+        };
++            const cleanup = () => {
++              isResolvedOrRejected = true;
++              unsubscribe();
++            };
  
-         useModalStore.getState().showPasswordPrompt(async (password) => {
+-        useModalStore.getState().showPasswordPrompt(async (password) => {
 -          cleanup();
 -          if (!password) { reject(new Error("Password not provided.")); return; }
-+          if (isResolvedOrRejected) return;
-+
-+          if (!password) { 
-+            cleanup();
-+            reject(new Error("Password not provided.")); 
-+            return; 
-+          }
-+
-+          isSubmissionStarted = true;
++            useModalStore.getState().showPasswordPrompt(async (password) => {
++              if (isResolvedOrRejected) return;
  
-           try {
-             const keysInner = await getEncryptedKeys();
+-          try {
+-            const keysInner = await getEncryptedKeys();
 -            if (!keysInner) { reject(new Error("Encrypted private keys not found.")); return; }
-+            if (!keysInner) { 
-+              cleanup();
-+              reject(new Error("Encrypted private keys not found.")); 
-+              return; 
-+            }
+-
+-            const result = await retrieveFn(keysInner, password);
+-            if (!result.success) {
+-              const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
+-              reject(new Error(reason));
+-              return;
+-            }
++              if (!password) { 
++                cleanup();
++                reject(new Error("Password not provided.")); 
++                return; 
++              }
  
-             const result = await retrieveFn(keysInner, password);
-             if (!result.success) {
-               const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
-+              cleanup();
-               reject(new Error(reason));
-               return;
-             }
- 
-+            cleanup();
-             privateKeysCache = result.keys;
-             resolve(result.keys);
+-            privateKeysCache = result.keys;
+-            resolve(result.keys);
 -          } catch (e) { reject(e); }
-+          } catch (e) {
-+            cleanup();
-+            reject(e);
-+          }
-         });
-       });
-     };
+-        });
+-      });
+-    };
++              isSubmissionStarted = true;
+ 
+-    return promptForPassword(retrievePrivateKeys);
++              try {
++                const keysInner = await getEncryptedKeys();
++                if (!keysInner) { 
++                  cleanup();
++                  reject(new Error("Encrypted private keys not found.")); 
++                  return; 
++                }
++
++                const result = await retrieveFn(keysInner, password);
++                if (!result.success) {
++                  const reason = result.reason === 'incorrect_password' ? "Incorrect password." : `Failed to retrieve keys: ${result.reason}`;
++                  cleanup();
++                  reject(new Error(reason));
++                  return;
++                }
++
++                cleanup();
++                privateKeysCache = result.keys;
++                resolve(result.keys);
++              } catch (e) {
++                cleanup();
++                reject(e);
++              }
++            });
++          });
++        };
++
++        return await promptForPassword(retrievePrivateKeys);
++      } finally {
++        keysRetrievalPromise = null;
++      }
++    })();
++
++    return keysRetrievalPromise;
+   };
+ 
+   return {
+@@ -344,6 +379,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+ 
+         // Cek apakah user sudah punya kunci lokal (misal: Device lama tapi sesi expired)
+         const alreadyHasKeys = await hasStoredKeys();
++        const existingDeviceId = localStorage.getItem('deviceId') || undefined;
+         
+         if (alreadyHasKeys && !restoredNotSynced) {
+             const { retrievePrivateKeys } = await import('@lib/crypto-worker-proxy');
+@@ -367,7 +403,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+             } else {
+                 throw new Error("Invalid password for local keys. Please recover your account.");
+             }
+-        } else if (!alreadyHasKeys && !restoredNotSynced) {
++        } else if (!alreadyHasKeys && !restoredNotSynced && !existingDeviceId) {
+             // Fresh login on a brand new linked device -> Database lokal kosong, regenerasi kunci baru
+             const { generateNewKeys } = await import('@lib/crypto-worker-proxy');
+             const { 
+@@ -405,8 +441,6 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+             }
+         }
+ 
+-        const existingDeviceId = localStorage.getItem('deviceId') || undefined;
+-
+         // Call API
+         const res = await api<{ user: User; accessToken: string; encryptedPrivateKey?: string; deviceId?: string }>("/api/auth/login", {
+           method: "POST",
+@@ -434,9 +468,7 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+         }
+ 
+         const hasKeysNow = await hasStoredKeys();
+-        set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeysNow, blockedUserIds: [] });
+-        localStorage.setItem("user", JSON.stringify(res.user));
+-
++        
+         // FIX 2: Buka kunci MENGGUNAKAN data yang baru saja disave
+         if (hasKeysNow) {
+           try {
+@@ -460,6 +492,9 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+           }
+         }
+ 
++        set({ user: res.user, accessToken: res.accessToken, hasRestoredKeys: hasKeysNow, blockedUserIds: [] });
++        localStorage.setItem("user", JSON.stringify(res.user));
++
+         get().loadBlockedUsers();
+ 
+         if (restoredNotSynced) {
+@@ -548,9 +583,13 @@ export const useAuthStore = createWithEqualityFn<State & Actions>((set, get) =>
+       } catch (e) { console.error("Logout error", e); } finally {
+         clearAuthCookies();
+         privateKeysCache = null;
+-        await clearKeys(); 
++        
++        // Pembersihan Sesi (Soft Logout) - Tetap pertahankan data terenkripsi di IDB (Local-First)
++        sessionStorage.removeItem('nyx_device_auto_unlock_key');
++        sessionStorage.removeItem('nyx_device_auto_unlock_ready');
+         localStorage.removeItem('user');
+-        set({ user: null, accessToken: null });
++        
++        set({ user: null, accessToken: null, hasRestoredKeys: false });
+         disconnectSocket();
+         useConversationStore.getState().reset();
+         useMessageStore.getState().reset();
 diff --git a/web/src/store/burner.ts b/web/src/store/burner.ts
 index 8abbf904..b510ef4c 100644
 --- a/web/src/store/burner.ts
@@ -5478,8 +5937,57 @@ index 447c7753..12649d0c 100644
  import toast from "react-hot-toast";
  import { useAuthStore } from "./auth";
  import { useMessageStore } from "./message";
+diff --git a/web/src/store/presence.ts b/web/src/store/presence.ts
+index 44b6d923..bf5e8415 100644
+--- a/web/src/store/presence.ts
++++ b/web/src/store/presence.ts
+@@ -22,7 +22,31 @@ export const usePresenceStore = create<State>((set) => ({
+ 
+   setOnlineUsers: (userIds) => set({ onlineUsers: new Set(userIds) }),
+ 
+-  userJoined: (userId) => set(state => ({ onlineUsers: new Set(state.onlineUsers).add(userId) })),
++  userJoined: (userId) => {
++    // FIX: Offline Sync Trigger
++    import('./message').then(({ useMessageStore }) => {
++       const messageStore = useMessageStore.getState();
++       // Check in-memory pending decryptions
++       const pendingFromUser = messageStore.pendingDecryptions.filter(m => m.senderId === userId);
++       const convIdsToRetry = new Set(pendingFromUser.map(m => m.conversationId));
++       
++       // Also check active conversations in memory for any waiting_for_key messages from this user
++       Object.entries(messageStore.messages).forEach(([cid, msgs]) => {
++           if (msgs.some(m => m.senderId === userId && (m.content === 'waiting_for_key' || m.content === '[Requesting key to decrypt...]'))) {
++               import('@nyx/shared').then(({ asConversationId }) => {
++                   convIdsToRetry.add(asConversationId(cid));
++               });
++           }
++       });
++
++       convIdsToRetry.forEach(cid => {
++           console.log(`[Offline Sync] User ${userId} came online. Retrying decryptions for ${cid}...`);
++           messageStore.reDecryptPendingMessages(cid);
++       });
++    });
++
++    return set(state => ({ onlineUsers: new Set(state.onlineUsers).add(userId) }));
++  },
+ 
+   userLeft: (userId) => set(state => {
+     const newOnlineUsers = new Set(state.onlineUsers);
+diff --git a/web/src/types/crypto-common.ts b/web/src/types/crypto-common.ts
+index 42c8df49..ee91d505 100644
+--- a/web/src/types/crypto-common.ts
++++ b/web/src/types/crypto-common.ts
+@@ -12,6 +12,7 @@ export interface SodiumKeyPair {
+ export interface GroupRatchetState {
+   CK: string;
+   N: number;
++  skippedKeys?: Record<string, string>;
+   createdAt?: number;
+   messageCount?: number;
+   lastActivityTime?: number;
 diff --git a/web/src/utils/crypto.ts b/web/src/utils/crypto.ts
-index 3f48df8d..b3ca9131 100644
+index 3f48df8d..27f1ee8c 100644
 --- a/web/src/utils/crypto.ts
 +++ b/web/src/utils/crypto.ts
 @@ -40,7 +40,7 @@ import {
@@ -5491,6 +5999,21 @@ index 3f48df8d..b3ca9131 100644
  import type { Participant } from '@store/conversation';
  
  // --- Group Metadata Helpers ---
+@@ -1120,13 +1120,7 @@ async function doDecryptMessage(
+             return { status: 'success', value: sodium.to_string(result.plaintext) };
+         }
+         
+-        // Cek apakah Ratchet sudah terlewat (N > header.n) dan tidak ada di skippedKeys
+-        if (receiverState.N > header.n) {
+-            console.warn(`[Crypto] Ratchet Advanced! Cannot decrypt old message (header.n=${header.n}, state.N=${receiverState.N})`);
+-            return { status: 'success', value: '[Message too old to decrypt]' };
+-        }
+-        
+-        // 2. NORMAL RATCHET DECRYPTION
++        // 2. NORMAL RATCHET DECRYPTION (Handles out-of-order internally now)
+         const { groupRatchetDecrypt } = await getWorkerProxy();
+         const result = await groupRatchetDecrypt(
+             { CK: receiverState.CK, N: receiverState.N },
 diff --git a/web/src/vite-env.d.ts b/web/src/vite-env.d.ts
 index 145d97c6..bf1305c5 100644
 --- a/web/src/vite-env.d.ts
@@ -5513,7 +6036,7 @@ index 145d97c6..bf1305c5 100644
    [key: `sys_key_req_reply_${string}`]: number | undefined;
    [key: `last_repair_history_${string}`]: number | undefined;
 diff --git a/web/src/workers/crypto.worker.ts b/web/src/workers/crypto.worker.ts
-index f2f9912a..bd6df15b 100644
+index f2f9912a..2ada8f8c 100644
 --- a/web/src/workers/crypto.worker.ts
 +++ b/web/src/workers/crypto.worker.ts
 @@ -202,11 +202,38 @@ async function retrievePrivateKeys(encryptedDataWithSaltStr: string, password: s
@@ -5600,17 +6123,145 @@ index f2f9912a..bd6df15b 100644
          try { sodium.memzero(kek); } catch { kek.fill(0); }
        }
      }
+@@ -278,6 +318,7 @@ interface RuntimeDoubleRatchetState {
+   Ns: number;
+   Nr: number;
+   PN: number;
++  skippedKeys?: Record<string, string>;
+   messageCount?: number;
+   lastActivityTime?: number;
+ }
+@@ -295,7 +336,10 @@ function deserializeState(serialized: DoubleRatchetState): RuntimeDoubleRatchetS
+     CKr: b64ToBytes(serialized.CKr),
+     Ns: serialized.Ns,
+     Nr: serialized.Nr,
+-    PN: serialized.PN
++    PN: serialized.PN,
++    skippedKeys: serialized.skippedKeys || {},
++    messageCount: serialized.messageCount,
++    lastActivityTime: serialized.lastActivityTime
+   };
+ }
+ 
+@@ -313,6 +357,7 @@ function serializeState(runtime: RuntimeDoubleRatchetState): DoubleRatchetState
+     Ns: runtime.Ns,
+     Nr: runtime.Nr,
+     PN: runtime.PN,
++    skippedKeys: runtime.skippedKeys || {},
+     messageCount: runtime.messageCount,
+     lastActivityTime: runtime.lastActivityTime
+   };
+@@ -331,6 +376,7 @@ export interface BurnerDoubleRatchetState {
+   Ns: number;
+   Nr: number;
+   PN: number;
++  skippedKeys?: Record<string, string>;
+ }
+ 
+ export interface BurnerDoubleRatchetHeader {
+@@ -1470,7 +1516,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+             CKr: null,
+             Ns: 0,
+             Nr: 0,
+-            PN: 0
++            PN: 0,
++            skippedKeys: {}
+           };
+ 
+           result = serializeState(state);
+@@ -1800,8 +1847,18 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+            sodium.memzero(CKBytes);
+            CKBytes = nextCK;
+            currentN++;
++        } else if (currentN > header.n) {
++           const skipKeyId = `${header.n}`;
++           if (serializedState.skippedKeys && serializedState.skippedKeys[skipKeyId]) {
++              const skippedMkBase64 = serializedState.skippedKeys[skipKeyId];
++              mk = b64ToBytes(skippedMkBase64);
++              if (!mk) throw new Error("Invalid skipped message key");
++              delete serializedState.skippedKeys[skipKeyId];
++           } else {
++              throw new Error(`Ratchet Advanced! Cannot decrypt old message (header.n=${header.n}, state.N=${currentN})`);
++           }
+         } else {
+-           throw new Error("Message N is older than current state. Possibly replayed or already decrypted.");
++           throw new Error("Message N is older than current state. Possibly replayed or already decrypted."); // Should be impossible
+         }
+ 
+         const nonce = ciphertextBytes.slice(0, 24);
+@@ -1809,9 +1866,15 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+         const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+             null, ctext, null, nonce, mk
+         );
++        if (!plaintext) throw new Error("Decryption failed");
++
++        if (!serializedState.skippedKeys) serializedState.skippedKeys = {};
++        for (const sk of skippedKeys) {
++           serializedState.skippedKeys[`${sk.n}`] = sk.mk;
++        }
+ 
+         result = {
+-           state: { CK: bytesToB64(CKBytes) || '', N: currentN },
++           state: { ...serializedState, CK: bytesToB64(CKBytes) || '', N: currentN },
+            plaintext,
+            skippedKeys,
+            mk: Array.from(mk)
+@@ -1939,7 +2002,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+             KEMs_priv: null,
+             KEMr: bytesToB64(gCPK) || null, // Not strictly correct, KEMr should be guest PQ PK if they ever sent one, but guest sent ct and generated ephemeral KEM
+             savedCt: null,
+-            Ns: 0, Nr: 0, PN: 0
++            Ns: 0, Nr: 0, PN: 0,
++            skippedKeys: {}
+           };
+ 
+           result = { state };
+@@ -2122,16 +2186,31 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+             sodium.memzero(ckrBytes);
+             ckrBytes = nextCKr;
+             state.Nr++;
++          } else if (state.Nr > header.n) {
++            const skipKeyId = `${header.kemPk}_${header.n}`;
++            if (state.skippedKeys && state.skippedKeys[skipKeyId]) {
++               const skippedMkBase64 = state.skippedKeys[skipKeyId];
++               mk = b64ToBytes(skippedMkBase64);
++               if (!mk) throw new Error("Invalid skipped message key");
++               delete state.skippedKeys[skipKeyId];
++            } else {
++               throw new Error(`Ratchet Advanced! Cannot decrypt old message (header.n=${header.n}, state.Nr=${state.Nr})`);
++            }
+           } else {
+-            throw new Error("Message N is older than current state");
++            throw new Error("Message N is older than current state"); // Should be impossible because we looped above
+           }
+-          state.CKr = bytesToB64(ckrBytes) || null;
++          state.CKr = ckrBytes ? bytesToB64(ckrBytes) || null : null;
+ 
+           const nonce = ciphertextBytes.slice(0, 24);
+           const ctext = ciphertextBytes.slice(24);
+           plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
+           if (!plaintext) throw new Error("Decryption failed");
+ 
++          if (!state.skippedKeys) state.skippedKeys = {};
++          for (const sk of skippedKeys) {
++             state.skippedKeys[`${sk.kemPk}_${sk.n}`] = sk.mk;
++          }
++
+           result = {
+             state,
+             plaintext: Array.from(plaintext),
 diff --git a/web/src/workers/transport.worker.ts b/web/src/workers/transport.worker.ts
 new file mode 100644
-index 00000000..435b6ebc
+index 00000000..0236cecf
 --- /dev/null
 +++ b/web/src/workers/transport.worker.ts
-@@ -0,0 +1,192 @@
+@@ -0,0 +1,195 @@
 +import { TransportOpCode, MainToTransportWorker, TransportWorkerToMain } from '@nyx/shared';
 +
 +let transport: WebTransport | null = null;
 +let controlStream: WebTransportBidirectionalStream | null = null;
 +let controlWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
++let datagramWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
 +
 +async function initWebTransport(url: string, token: string, certificateHash?: string) {
 +  try {
@@ -5755,6 +6406,10 @@ index 00000000..435b6ebc
 +      break;
 +    case 'DISCONNECT':
 +      if (transport) {
++        if (datagramWriter) {
++          try { datagramWriter.releaseLock(); } catch (e) {}
++          datagramWriter = null;
++        }
 +        transport.close();
 +        transport = null;
 +        postMessage({ type: 'DISCONNECTED', reason: 'client closed' } satisfies TransportWorkerToMain);
@@ -5780,17 +6435,15 @@ index 00000000..435b6ebc
 +      }
 +      break;
 +    case 'SEND_DATAGRAM':
-+      if (transport) {
++      if (transport && datagramWriter) {
 +        try {
-+          const writer = transport.datagrams.writable.getWriter();
 +          const frame = new Uint8Array(5 + data.payload.length);
 +          frame[0] = data.opCode;
 +          const view = new DataView(frame.buffer);
 +          view.setUint32(1, data.payload.length, false);
 +          frame.set(data.payload, 5);
 +          
-+          await writer.write(frame);
-+          writer.releaseLock();
++          await datagramWriter.write(frame);
 +        } catch (e) {
 +          console.error("Failed to send datagram", e);
 +        }

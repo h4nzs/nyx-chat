@@ -318,6 +318,7 @@ interface RuntimeDoubleRatchetState {
   Ns: number;
   Nr: number;
   PN: number;
+  skippedKeys?: Record<string, string>;
   messageCount?: number;
   lastActivityTime?: number;
 }
@@ -335,7 +336,10 @@ function deserializeState(serialized: DoubleRatchetState): RuntimeDoubleRatchetS
     CKr: b64ToBytes(serialized.CKr),
     Ns: serialized.Ns,
     Nr: serialized.Nr,
-    PN: serialized.PN
+    PN: serialized.PN,
+    skippedKeys: serialized.skippedKeys || {},
+    messageCount: serialized.messageCount,
+    lastActivityTime: serialized.lastActivityTime
   };
 }
 
@@ -353,6 +357,7 @@ function serializeState(runtime: RuntimeDoubleRatchetState): DoubleRatchetState 
     Ns: runtime.Ns,
     Nr: runtime.Nr,
     PN: runtime.PN,
+    skippedKeys: runtime.skippedKeys || {},
     messageCount: runtime.messageCount,
     lastActivityTime: runtime.lastActivityTime
   };
@@ -371,6 +376,7 @@ export interface BurnerDoubleRatchetState {
   Ns: number;
   Nr: number;
   PN: number;
+  skippedKeys?: Record<string, string>;
 }
 
 export interface BurnerDoubleRatchetHeader {
@@ -1510,7 +1516,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             CKr: null,
             Ns: 0,
             Nr: 0,
-            PN: 0
+            PN: 0,
+            skippedKeys: {}
           };
 
           result = serializeState(state);
@@ -1840,8 +1847,18 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
            sodium.memzero(CKBytes);
            CKBytes = nextCK;
            currentN++;
+        } else if (currentN > header.n) {
+           const skipKeyId = `${header.n}`;
+           if (serializedState.skippedKeys && serializedState.skippedKeys[skipKeyId]) {
+              const skippedMkBase64 = serializedState.skippedKeys[skipKeyId];
+              mk = b64ToBytes(skippedMkBase64);
+              if (!mk) throw new Error("Invalid skipped message key");
+              delete serializedState.skippedKeys[skipKeyId];
+           } else {
+              throw new Error(`Ratchet Advanced! Cannot decrypt old message (header.n=${header.n}, state.N=${currentN})`);
+           }
         } else {
-           throw new Error("Message N is older than current state. Possibly replayed or already decrypted.");
+           throw new Error("Message N is older than current state. Possibly replayed or already decrypted."); // Should be impossible
         }
 
         const nonce = ciphertextBytes.slice(0, 24);
@@ -1849,9 +1866,15 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
             null, ctext, null, nonce, mk
         );
+        if (!plaintext) throw new Error("Decryption failed");
+
+        if (!serializedState.skippedKeys) serializedState.skippedKeys = {};
+        for (const sk of skippedKeys) {
+           serializedState.skippedKeys[`${sk.n}`] = sk.mk;
+        }
 
         result = {
-           state: { CK: bytesToB64(CKBytes) || '', N: currentN },
+           state: { ...serializedState, CK: bytesToB64(CKBytes) || '', N: currentN },
            plaintext,
            skippedKeys,
            mk: Array.from(mk)
@@ -1979,7 +2002,8 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             KEMs_priv: null,
             KEMr: bytesToB64(gCPK) || null, // Not strictly correct, KEMr should be guest PQ PK if they ever sent one, but guest sent ct and generated ephemeral KEM
             savedCt: null,
-            Ns: 0, Nr: 0, PN: 0
+            Ns: 0, Nr: 0, PN: 0,
+            skippedKeys: {}
           };
 
           result = { state };
@@ -2162,15 +2186,30 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
             sodium.memzero(ckrBytes);
             ckrBytes = nextCKr;
             state.Nr++;
+          } else if (state.Nr > header.n) {
+            const skipKeyId = `${header.kemPk}_${header.n}`;
+            if (state.skippedKeys && state.skippedKeys[skipKeyId]) {
+               const skippedMkBase64 = state.skippedKeys[skipKeyId];
+               mk = b64ToBytes(skippedMkBase64);
+               if (!mk) throw new Error("Invalid skipped message key");
+               delete state.skippedKeys[skipKeyId];
+            } else {
+               throw new Error(`Ratchet Advanced! Cannot decrypt old message (header.n=${header.n}, state.Nr=${state.Nr})`);
+            }
           } else {
-            throw new Error("Message N is older than current state");
+            throw new Error("Message N is older than current state"); // Should be impossible because we looped above
           }
-          state.CKr = bytesToB64(ckrBytes) || null;
+          state.CKr = ckrBytes ? bytesToB64(ckrBytes) || null : null;
 
           const nonce = ciphertextBytes.slice(0, 24);
           const ctext = ciphertextBytes.slice(24);
           plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(null, ctext, null, nonce, mk);
           if (!plaintext) throw new Error("Decryption failed");
+
+          if (!state.skippedKeys) state.skippedKeys = {};
+          for (const sk of skippedKeys) {
+             state.skippedKeys[`${sk.kemPk}_${sk.n}`] = sk.mk;
+          }
 
           result = {
             state,

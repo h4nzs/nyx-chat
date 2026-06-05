@@ -1120,13 +1120,7 @@ async function doDecryptMessage(
             return { status: 'success', value: sodium.to_string(result.plaintext) };
         }
         
-        // Cek apakah Ratchet sudah terlewat (N > header.n) dan tidak ada di skippedKeys
-        if (receiverState.N > header.n) {
-            console.warn(`[Crypto] Ratchet Advanced! Cannot decrypt old message (header.n=${header.n}, state.N=${receiverState.N})`);
-            return { status: 'success', value: '[Message too old to decrypt]' };
-        }
-        
-        // 2. NORMAL RATCHET DECRYPTION
+        // 2. NORMAL RATCHET DECRYPTION (Handles out-of-order internally now)
         const { groupRatchetDecrypt } = await getWorkerProxy();
         const result = await groupRatchetDecrypt(
             { CK: receiverState.CK, N: receiverState.N },

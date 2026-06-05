@@ -114,7 +114,8 @@ export async function drInitAlice(sk: CryptoBuffer, theirPqSignedPreKeyPublic: C
       CKr: null,
       Ns: 0,
       Nr: 0,
-      PN: 0
+      PN: 0,
+      skippedKeys: {}
     };
 
     const serialized = await serializeState(state);
@@ -455,8 +456,19 @@ export async function groupRatchetDecrypt(
       sodium.memzero(CKBytes);
       CKBytes = nextCK;
       currentN++;
+  } else if (currentN > header.n) {
+      const skipKeyId = `${header.n}`;
+      if (serializedState.skippedKeys && serializedState.skippedKeys[skipKeyId]) {
+         const skippedMkBase64 = serializedState.skippedKeys[skipKeyId];
+         const mkBytes = await b64ToBytes(skippedMkBase64);
+         if (!mkBytes) throw new Error("Invalid skipped message key");
+         mk = mkBytes;
+         delete serializedState.skippedKeys[skipKeyId];
+      } else {
+         throw new Error(`Ratchet Advanced! Cannot decrypt old message (header.n=${header.n}, state.N=${currentN})`);
+      }
   } else {
-      throw new Error("Message N is older than current state. Possibly replayed or already decrypted.");
+      throw new Error("Message N is older than current state. Possibly replayed or already decrypted."); // Should be impossible
   }
 
   const nonce = ciphertextBytes.slice(0, 24);
@@ -464,6 +476,12 @@ export async function groupRatchetDecrypt(
   const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
       null, ctext, null, nonce, mk
   );
+  if (!plaintext) throw new Error("Decryption failed");
+
+  if (!serializedState.skippedKeys) serializedState.skippedKeys = {};
+  for (const sk of skippedKeys) {
+      serializedState.skippedKeys[`${sk.n}`] = sk.mk;
+  }
 
   const resState = { ...serializedState, CK: (await bytesToB64(CKBytes)) || '', N: currentN };
   
@@ -505,6 +523,14 @@ export async function groupDecryptSkipped(
     const ctext = ciphertextBytes.slice(24);
     const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
         null, ctext, null, nonce, mkBytes
+    );
+
+    return { plaintext };
+  } finally {
+    sodium.memzero(mkBytes);
+  }
+}
+xt, null, nonce, mkBytes
     );
 
     return { plaintext };

@@ -8,6 +8,7 @@ export interface SodiumKeyPair {
 export interface GroupRatchetState {
   CK: string;
   N: number;
+  skippedKeys?: Record<string, string>;
   createdAt?: number;
   messageCount?: number;
   lastActivityTime?: number;
@@ -34,6 +35,7 @@ export interface DoubleRatchetState {
   Ns: number;
   Nr: number;
   PN: number;
+  skippedKeys?: Record<string, string>;
   messageCount?: number;
   lastActivityTime?: number;
 }

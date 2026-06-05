@@ -191,6 +191,7 @@ export interface DoubleRatchetState {
   Ns: number;
   Nr: number;
   PN: number;
+  skippedKeys?: Record<string, string>;
   messageCount?: number;
   lastActivityTime?: number;
 }

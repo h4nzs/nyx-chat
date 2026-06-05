@@ -31,6 +31,7 @@ const getDynamicIceServers = async (): Promise<RTCIceServer[]> => {
 };
 
 const peerConnections = new Map<string, RTCPeerConnection>();
+const candidateQueues = new Map<string, RTCIceCandidateInit[]>();
 let localMediaStream: MediaStream | null = null;
 
 export const replaceVideoTrack = async (newVideoTrack: MediaStreamTrack) => {
@@ -436,6 +437,14 @@ export const initWebRTCListeners = () => {
                 if (!pc) return;
                 try {
                   await pc.setRemoteDescription(new RTCSessionDescription((decryptedPayload as { answer: RTCSessionDescriptionInit }).answer));
+                  
+                  const queue = candidateQueues.get(data.from as string);
+                  if (queue) {
+                      for (const c of queue) {
+                          await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => console.error('Failed to add queued ice candidate', e));
+                      }
+                      candidateQueues.delete(data.from as string);
+                  }
                 } catch (e) {
                   console.error('Failed to handle answer', e);
                 }
@@ -470,4 +479,4 @@ export const initWebRTCListeners = () => {
         }
     }
   });
-};
+};;
