@@ -37,19 +37,21 @@ import CallOverlay from '@components/CallOverlay';
 import SystemInitModal from '@components/SystemInitModal';
 import PrivacyCloak from './components/PrivacyCloak';
 import { Spinner } from './components/Spinner';
+import { SystemBanner } from './components/SystemBanner';
+import { MaintenancePage } from './pages/MaintenancePage';
 
 // Stores & Hooks
 import { useAuthStore } from './store/auth';
 import { useThemeStore } from './store/theme';
 import { useCommandPaletteStore } from './store/commandPalette';
 import { useConversationStore } from './store/conversation';
+import { useSystemStore } from './store/systemStore';
 import { useGlobalShortcut } from './hooks/useGlobalShortcut';
 import { useShallow } from 'zustand/react/shallow';
 
 // Libs & Utils
 import { transportClient, connectSocket, disconnectSocket } from './lib/transportClient';
 import { initSocketListeners } from './lib/socketListeners';
-import { initWebRTCListeners } from './lib/webrtc';
 
 // Initialize socket instance once
 transportClient;
@@ -104,6 +106,19 @@ const AppContent = () => {
   })));
   const navigate = useNavigate();
   const location = useLocation();
+
+  // --- System Status (Banner & Maintenance) ---
+  const { maintenance, checkStatus } = useSystemStore(useShallow(s => ({
+    maintenance: s.maintenance,
+    checkStatus: s.checkStatus
+  })));
+
+  useEffect(() => {
+    checkStatus();
+    // Polling setiap 60 detik
+    const interval = setInterval(checkStatus, 60000);
+    return () => clearInterval(interval);
+  }, [checkStatus]);
 
   // --- Service Worker SPA Routing ---
   useEffect(() => {
@@ -221,9 +236,7 @@ const AppContent = () => {
     }
   }, [user, location.pathname, isDeviceFlow]);
 
-  // 3. (Reserved for future use)
-
-  // 4. Apply Theme
+  // 3. Apply Theme
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
@@ -231,7 +244,7 @@ const AppContent = () => {
     root.dataset.accent = accent;
   }, [theme, accent]);
 
-  // 5. Visibility Change Handler
+  // 4. Visibility Change Handler
   useEffect(() => {
     const handleVisibilityChange = async () => {
       if (isDeviceFlow(location.pathname)) {
@@ -292,6 +305,11 @@ const AppContent = () => {
     };
   }, [user, location.pathname, isDeviceFlow]);
 
+  // --- CEGAT RENDER JIKA MODE MAINTENANCE AKTIF ---
+  if (maintenance) {
+    return <MaintenancePage onRetry={checkStatus} />;
+  }
+
   return (
     <>
       <Toaster
@@ -337,52 +355,57 @@ const AppContent = () => {
         <CallOverlay />
         <SystemInitModal />
 
-        <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main">
-          <Routes>
-            {/* Public/Auth Routes */}
-            {/* UBAH: Rute root "/" kini langsung melempar user ke /login jika belum auth */}
-            <Route path="/" element={
-              isBootstrapping ? <LoadingScreen /> : 
-              user ? <Navigate to="/chat" replace /> :
-              <Navigate to="/login" replace />
-              }
-            />
-            <Route path="/login" element={
-              isBootstrapping ? <LoadingScreen /> : 
-              user ? <Navigate to="/chat" replace /> :
-              <PageWrapper><Login /></PageWrapper>
-              }
-            />
-            <Route path="/register" element={
-              isBootstrapping ? <LoadingScreen /> :
-              <PageWrapper><Register /></PageWrapper>
-              }
-            />
-            <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
-            <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
-            <Route path="/drop" element={<PageWrapper noScroll={true}><BurnerChat /></PageWrapper>} />
+        <div className="w-full h-dvh max-w-[1920px] mx-auto relative shadow-2xl overflow-hidden bg-bg-main flex flex-col">
+          {/* Banner Status Sistem */}
+          <SystemBanner />
 
-            {/* Protected Routes */}
-            <Route element={<ProtectedRoute />}>
-              <Route path="/chat" element={<PageWrapper noScroll={true}><Home /></PageWrapper>} />
-              <Route path="/chat/:conversationId" element={<PageWrapper noScroll={true}><Chat /></PageWrapper>} />
+          {/* Area Konten Aplikasi Utama */}
+          <div className="flex-1 w-full h-full overflow-hidden relative">
+            <Routes>
+              {/* Public/Auth Routes */}
+              <Route path="/" element={
+                isBootstrapping ? <LoadingScreen /> : 
+                user ? <Navigate to="/chat" replace /> :
+                <Navigate to="/login" replace />
+                }
+              />
+              <Route path="/login" element={
+                isBootstrapping ? <LoadingScreen /> : 
+                user ? <Navigate to="/chat" replace /> :
+                <PageWrapper><Login /></PageWrapper>
+                }
+              />
+              <Route path="/register" element={
+                isBootstrapping ? <LoadingScreen /> :
+                <PageWrapper><Register /></PageWrapper>
+                }
+              />
+              <Route path="/restore" element={<PageWrapper><Restore /></PageWrapper>} />
+              <Route path="/migrate-receive" element={<PageWrapper><MigrationReceivePage /></PageWrapper>} />
+              <Route path="/drop" element={<PageWrapper noScroll={true}><BurnerChat /></PageWrapper>} />
 
-              <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />
-              <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
-              <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
-              <Route path="/settings/migrate-send" element={<PageWrapper><MigrationSendPage /></PageWrapper>} />
-              <Route path="/admin-console" element={<PageWrapper><AdminDashboard /></PageWrapper>} />
+              {/* Protected Routes */}
+              <Route element={<ProtectedRoute />}>
+                <Route path="/chat" element={<PageWrapper noScroll={true}><Home /></PageWrapper>} />
+                <Route path="/chat/:conversationId" element={<PageWrapper noScroll={true}><Chat /></PageWrapper>} />
 
-              <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
-              <Route path="/connect" element={<PageWrapper><ConnectPage /></PageWrapper>} />
-            </Route>
+                <Route path="/settings" element={<PageWrapper><SettingsPage /></PageWrapper>} />
+                <Route path="/settings/keys" element={<PageWrapper><KeyManagementPage /></PageWrapper>} />
+                <Route path="/settings/sessions" element={<PageWrapper><SessionManagerPage /></PageWrapper>} />
+                <Route path="/settings/migrate-send" element={<PageWrapper><MigrationSendPage /></PageWrapper>} />
+                <Route path="/admin-console" element={<PageWrapper><AdminDashboard /></PageWrapper>} />
 
-            {/* Embed Route (No Layout/Sidebar) */}
-            <Route path="/embed/chat/:id" element={<EmbedChatPage />} />
+                <Route path="/profile/:userId" element={<PageWrapper><ProfilePage /></PageWrapper>} />
+                <Route path="/connect" element={<PageWrapper><ConnectPage /></PageWrapper>} />
+              </Route>
 
-            {/* Fallback */}
-            <Route path="*" element={<PageWrapper><NotFoundPage /></PageWrapper>} />
-          </Routes>
+              {/* Embed Route (No Layout/Sidebar) */}
+              <Route path="/embed/chat/:id" element={<EmbedChatPage />} />
+
+              {/* Fallback */}
+              <Route path="*" element={<PageWrapper><NotFoundPage /></PageWrapper>} />
+            </Routes>
+          </div>
         </div>
       </Suspense>
     </>
