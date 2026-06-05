@@ -509,7 +509,10 @@ async function handleKeySync(userId: string, deviceId: string, payload: { event:
        case 'burner:send': {
          const { roomId, targetDeviceId, hostUserId, ciphertext } = data as any;
          if (await redisClient.exists(`burner:terminated:${roomId}`)) return;
+         
+         // Broadcast to all active sessions of the host if specific device ID fails or isn't strictly required
          await sendJsonToUser(hostUserId, TransportOpCode.KEY_SYNC, { event: 'burner:receive', data: { roomId, ciphertext } }, false, targetDeviceId);
+         
          if (msgId) await sendAck(userId, deviceId, msgId, { ok: true });
          break;
        }

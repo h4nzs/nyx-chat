@@ -26,7 +26,19 @@ export default function BurnerChat() {
   // Extract roomId from hash for reference
   const hashPart = location.hash.split('#')[1];
   const roomId = hashPart ? hashPart.split(':')[0] : '';
-  // Removed local isInitialized calculation as it's now handled by the store.
+
+  useEffect(() => {
+    // SECURITY: If we were a Guest, we MUST wipe the previous state on reload
+    // to prevent "Split-Brain" where the Guest has a new identity but the Store/Host
+    // thinks we are still using the old one.
+    const currentUserState = useAuthStore.getState().user;
+    if (currentUserState?.id.startsWith('guest_')) {
+       console.log("[Burner] Wiping stale guest session for fresh start...");
+       useAuthStore.setState({ user: null, accessToken: null });
+       localStorage.removeItem('user');
+       localStorage.removeItem('deviceId');
+    }
+  }, []); // Run ONCE on mount
 
   useEffect(() => {
     const initSocket = async () => {

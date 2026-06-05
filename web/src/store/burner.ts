@@ -251,10 +251,33 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
         const payload = JSON.parse(cipherString);
         const { header, ciphertext: ciphertextB64, guestClassicalPk } = payload;
 
-        // Host initialization on first message from Guest
+        const sodium = await getSodiumLib();
+
+        // Host initialization on first message OR recovery if decryption fails
+        const tryDecrypt = async (currentState: BurnerDoubleRatchetState | null): Promise<{ state: BurnerDoubleRatchetState; plaintext: Uint8Array }> => {
+          if (!currentState) throw new Error("No state");
+          const ciphertext = sodium.from_base64(ciphertextB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+          const result = await worker_burner_dr_decrypt({
+            state: currentState,
+            header: header as BurnerDoubleRatchetHeader,
+            ciphertext: ciphertext.buffer
+          });
+          return { state: result.state, plaintext: result.plaintext };
+        };
+
+        let decryptionResult: { state: BurnerDoubleRatchetState; plaintext: Uint8Array } | null = null;
+
+        if (state) {
+          try {
+            decryptionResult = await tryDecrypt(state);
+          } catch (e) {
+            console.warn("[Burner] Decryption failed with existing state, attempting recovery...", e);
+            state = null; // Force re-init below
+          }
+        }
+
         if (!state) {
           if (guestClassicalPk) {
-            const sodium = await getSodiumLib();
             const { getMyEncryptionKeyPair } = await import('../utils/crypto');
             const myDeviceKeys = await getMyEncryptionKeyPair(); // Host classical
             const authStore = useAuthStore.getState();
@@ -277,19 +300,18 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
             
             state = initRes.state;
             guestPkState = guestClassicalPk;
+            
+            // Try decrypting again with new state
+            decryptionResult = await tryDecrypt(state);
           } else {
-             return; // Cannot decrypt without drState or guestPk
+             console.error("[Burner] Cannot recover session: Missing guest public key.");
+             return; 
           }
         }
 
-        const sodium = await getSodiumLib();
-        const ciphertext = sodium.from_base64(ciphertextB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+        if (!decryptionResult) return;
 
-        const { state: newState, plaintext } = await worker_burner_dr_decrypt({
-          state,
-          header: header as BurnerDoubleRatchetHeader,
-          ciphertext: ciphertext.buffer
-        });
+        const { state: newState, plaintext } = decryptionResult;
 
         set(s => ({
           activeSessions: {
