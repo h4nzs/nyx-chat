@@ -1,7 +1,11 @@
 import React from 'react';
 import { FiShield, FiRefreshCw } from 'react-icons/fi';
+import { useTranslation } from 'react-i18next';
 
 export const MaintenancePage: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
+  // Gunakan namespace 'common' (sesuaikan jika Anda ingin menaruhnya di file json lain)
+  const { t } = useTranslation('common');
+
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#0B0F19] text-slate-200 p-4">
       {/* Background Glow */}
@@ -16,11 +20,11 @@ export const MaintenancePage: React.FC<{ onRetry: () => void }> = ({ onRetry }) 
         </div>
 
         <h1 className="text-2xl font-bold mb-2 bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-          Sistem Sedang Diperbarui
+          {t('maintenance.title')}
         </h1>
         
         <p className="text-sm text-slate-400 mb-8 leading-relaxed">
-          Arsitektur Nyx Core sedang mengalami peningkatan keamanan dan stabilitas. Kami akan segera kembali dalam beberapa saat.
+          {t('maintenance.description')}
         </p>
 
         {/* Neumorphic Button */}
@@ -29,7 +33,7 @@ export const MaintenancePage: React.FC<{ onRetry: () => void }> = ({ onRetry }) 
           className="group flex items-center justify-center w-full py-3 px-4 rounded-xl bg-[#0F1423] text-cyan-400 font-semibold shadow-[4px_4px_8px_#060911,-4px_-4px_8px_#182035] active:shadow-[inset_4px_4px_8px_#060911,inset_-4px_-4px_8px_#182035] transition-all"
         >
           <FiRefreshCw className="w-4 h-4 mr-2 group-hover:rotate-180 transition-transform duration-500" />
-          Cek Status Sekarang
+          {t('maintenance.retryButton')}
         </button>
       </div>
     </div>

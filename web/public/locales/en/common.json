@@ -171,6 +171,11 @@
     "now": "NOW",
     "yesterday": "Yesterday"
   },
+  "maintenance": {
+    "title": "System Under Maintenance",
+    "description": "Nyx Core architecture is currently undergoing security and stability upgrades. We will be right back shortly.",
+    "retryButton": "Check Status Now"
+  },
   "device_revoked_successfully": "Device revoked successfully",
   "history_sync_payload_broadcasted_success": "History sync payload broadcasted successfully.",
   "notifications_enabled": "Notifications enabled!",

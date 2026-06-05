@@ -171,6 +171,11 @@
     "now": "SEKARANG",
     "yesterday": "Kemarin"
   },
+  "maintenance": {
+    "title": "Sistem Sedang Diperbarui",
+    "description": "Arsitektur Nyx Core sedang mengalami peningkatan keamanan dan stabilitas. Kami akan segera kembali dalam beberapa saat.",
+    "retryButton": "Cek Status Sekarang"
+  },
   "device_revoked_successfully": "Perangkat berhasil dicabut",
   "history_sync_payload_broadcasted_success": "Payload sinkronisasi riwayat berhasil disiarkan.",
   "notifications_enabled": "Notifikasi diaktifkan!",

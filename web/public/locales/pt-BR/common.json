@@ -35,6 +35,11 @@
     "logout": "Sair",
     "more_reactions": "Mais reações"
   },
+  "maintenance": {
+    "title": "Sistema em Manutenção",
+    "description": "A arquitetura Nyx Core está passando por atualizações de segurança e estabilidade. Voltaremos em breve.",
+    "retryButton": "Verificar Status Agora"
+  },
   "action": {
     "abort": "ABORTAR",
     "unlock": "DESBLOQUEAR",
