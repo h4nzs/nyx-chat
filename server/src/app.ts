@@ -30,6 +30,7 @@ import subscriptionsRouter from "./routes/subscriptions.js";
 import webpush from "web-push";
 import { generalLimiter } from "./middleware/rateLimiter.js";
 import { reportRoutes } from "./routes/reports.js";
+import systemRouter from "./routes/system.js";
 
 // Set VAPID keys for web-push notifications
 if (process.env.VAPID_SUBJECT && process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
@@ -323,6 +324,7 @@ app.use("/api/sessions", sessionsRouter);
 app.use("/api/subscriptions", subscriptionsRouter);
 app.use("/api/ai", aiRoutes);
 app.use("/api/stories", storiesRoutes);
+app.use("/api/system", systemRouter);
 
 // === HEALTH CHECK ===
 app.get("/health", (_req: Request, res: Response) => {
