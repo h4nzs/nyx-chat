@@ -150,7 +150,7 @@ jobs:
             # 4. INSTALL DI VPS PAKAI PNPM (Di Root Monorepo)
             echo "📦 Installing backend dependencies with PNPM..."
             if [ ! -f "$TARGET_DIR/server/.env" ]; then
-                cp $TARGET_DIR/.env.example $TARGET_DIR/server/.env || true
+                cp $TARGET_DIR/.env $TARGET_DIR/server/.env || true
             fi
             if [ ! -f "$TARGET_DIR/server/ca.pem" ]; then
                 cp $TARGET_DIR/ca.pem $TARGET_DIR/server/ca.pem || true
