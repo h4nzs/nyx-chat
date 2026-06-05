@@ -86,7 +86,6 @@ app.use(helmet({
         "'self'",
         "data:",
         "blob:",
-        "https://*.r2.dev",
         "https://cdn.jsdelivr.net",
         "https://*.cloudflarestorage.com",
         "https://nyx-app.my.id",
@@ -96,7 +95,6 @@ app.use(helmet({
         "'self'",
         "data:",
         "blob:",
-        "https://*.r2.dev",
         "https://*.cloudflarestorage.com",
         "https://*.nyx-app.my.id"
       ],
@@ -114,7 +112,6 @@ app.use(helmet({
         "https://*.nyx-app.my.id",
         "https://*.cloudflareinsights.com",
         "https://cloudflareinsights.com",
-        "https://*.r2.dev",
         "https://*.cloudflarestorage.com"
       ],
       fontSrc: [
@@ -135,7 +132,7 @@ app.use(helmet({
 app.disable('x-powered-by');
 
 app.use((req, res, next) => {
-  res.setHeader('X-Edge-Relay', 'nyx-enigma-v2.3.0');
+  res.setHeader('X-Edge-Relay', 'nyx-enigma');
   res.setHeader('X-Sec-Protocol', 'Double-Ratchet-Core');
   res.setHeader('X-Powered-By', 'NYX-Engine');
   next();

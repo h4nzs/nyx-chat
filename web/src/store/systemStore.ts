@@ -21,7 +21,7 @@ export const useSystemStore = create<SystemState>((set) => ({
   checkStatus: async () => {
     try {
       // Panggil fungsi api() secara langsung dan gunakan Generic untuk strict type
-      const data = await api<SystemStatusResponse>('/system/status');
+      const data = await api<SystemStatusResponse>('/api/system/status');
       
       // Jika custom fetch Anda MENGEMBALIKAN object { data: ... }, 
       // gunakan: const { data } = await api<{data: SystemStatusResponse}>('/system/status');
