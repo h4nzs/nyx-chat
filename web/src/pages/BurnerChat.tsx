@@ -9,6 +9,7 @@ import MessageBubble from '../components/MessageBubble';
 import type { Message } from '@nyx/shared';
 import { api } from '../lib/api';
 import toast from 'react-hot-toast';
+import clsx from 'clsx';
 
 export default function BurnerChat() {
   const { t } = useTranslation(['chat']);
@@ -251,12 +252,19 @@ export default function BurnerChat() {
             } as unknown as Message;
 
             return (
-              <MessageBubble 
+              <div 
                 key={msg.id} 
-                message={messageObj} 
-                isOwn={isMe} 
-                isLastInSequence={index === messages.length - 1}
-              />
+                className={clsx("flex w-full", {
+                  "justify-end": isMe,
+                  "justify-start": !isMe
+                })}
+              >
+                <MessageBubble 
+                  message={messageObj} 
+                  isOwn={isMe} 
+                  isLastInSequence={index === messages.length - 1}
+                />
+              </div>
             );
           })
         )}
