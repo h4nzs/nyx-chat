@@ -191,9 +191,13 @@ export const useBurnerStore = createWithEqualityFn<BurnerState & BurnerActions>(
               targetDeviceId: hostDeviceId, 
               hostUserId, 
               ciphertext: JSON.stringify(payload) 
-            }, (res: any) => {
+            }, (err: any, res: any) => {
               clearTimeout(timer);
-              resolve(res);
+              if (err) {
+                resolve({ ok: false, error: err.message || String(err) });
+              } else {
+                resolve(res || { ok: true });
+              }
             });
           }
         });

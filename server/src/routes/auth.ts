@@ -63,9 +63,14 @@ async function issueTokens (user: { id: string, role?: string }, deviceId: strin
   const ipAddress = sodium.to_hex(sodium.crypto_generichash(32, Buffer.from(rawIp), null)).substring(0, 16);
   const userAgent = req.headers['user-agent']
 
-  await prisma.refreshToken.create({
-    data: { jti, deviceId, expiresAt: refreshExpiryDate(), ipAddress, userAgent }
-  })
+  // GUEST users (Burner Chat) are ephemeral and don't exist in the User/Device tables.
+  // We skip DB persistence for their refresh tokens to avoid FK constraint violations.
+  if (user.role !== 'GUEST') {
+    await prisma.refreshToken.create({
+      data: { jti, deviceId, expiresAt: refreshExpiryDate(), ipAddress, userAgent }
+    })
+  }
+  
   return { access, refresh }
 }
 
@@ -284,6 +289,31 @@ router.post('/login', authLimiter, zodValidate({
   } catch (e) {
     next(e)
   }
+})
+
+/**
+ * Endpoint khusus untuk memberikan JWT sementara kepada Guest (Burner Chat).
+ * Tanpa password, tanpa registrasi permanen.
+ */
+router.post('/burner', async (req, res, next) => {
+  try {
+    const guestId = `guest_${crypto.randomUUID().substring(0, 8)}`;
+    const guestDeviceId = `burner_${crypto.randomUUID().substring(0, 8)}`;
+    
+    // Kita berikan token dengan role GUEST
+    const tokens = await issueTokens({ id: guestId, role: 'GUEST' }, guestDeviceId, req);
+    setAuthCookies(res, tokens);
+    
+    res.json({
+      accessToken: tokens.access,
+      user: {
+        id: guestId,
+        role: 'GUEST',
+        usernameHash: 'anonymous_guest'
+      },
+      deviceId: guestDeviceId
+    });
+  } catch (e) { next(e) }
 })
 
 router.post('/refresh', async (req, res, next) => {

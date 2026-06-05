@@ -29,11 +29,50 @@ export default function BurnerChat() {
   // Removed local isInitialized calculation as it's now handled by the store.
 
   useEffect(() => {
-    const socket = transportClient;
-    if (!socket?.connected) {
-      connectSocket();
-    }
-  }, []);
+    const initSocket = async () => {
+      const socket = transportClient;
+      
+      // Jika Guest (tidak ada user login), minta token sementara
+      if (!currentUser && !socket.connected) {
+         try {
+            const res = await api<{ accessToken: string; user: any; deviceId: string }>('/api/auth/burner', {
+              method: 'POST'
+            });
+            
+            // Simpan token sementara di Auth Store
+            useAuthStore.getState().setAccessToken(res.accessToken);
+            useAuthStore.getState().setUser(res.user);
+            localStorage.setItem('deviceId', res.deviceId);
+            
+            connectSocket();
+         } catch (e) {
+            console.error("Failed to get guest token:", e);
+            toast.error("Failed to initialize guest session. Please try again.");
+         }
+      } else if (!socket.connected) {
+        connectSocket();
+      }
+    };
+    
+    initSocket();
+
+    // Reconnect handler for Guests
+    const handleDisconnect = () => {
+      if (!useAuthStore.getState().user?.id.startsWith('guest_')) return;
+      
+      // Auto-reconnect guest after a short delay
+      setTimeout(() => {
+        if (!transportClient.connected) {
+          initSocket();
+        }
+      }, 2000);
+    };
+
+    transportClient.on('disconnect', handleDisconnect);
+    return () => {
+      transportClient.off('disconnect', handleDisconnect);
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     if (location.hash) {

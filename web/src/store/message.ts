@@ -1838,9 +1838,9 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           updateQueueAttempt(tempId, attempt + 1).then(() => resolve());
         }, 5000);
 
-        transportClient.sendEvent("message:send", sendPayload, async (res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
+        transportClient.sendEvent("message:send", sendPayload, async (err: any, res: { ok: boolean, msg?: RawServerMessage, error?: string }) => {
           clearTimeout(timeoutId);
-          if (res.ok && res.msg) {
+          if (!err && res && res.ok && res.msg) {
             await removeFromQueue(tempId);
 
             // 1. Pindah Kunci Dekripsi

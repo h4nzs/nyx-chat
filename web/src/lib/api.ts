@@ -135,8 +135,16 @@ export async function authFetch<T>(
     return await api<T>(url, options);
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
+      const { useAuthStore } = await import('@store/auth');
+      const user = useAuthStore.getState().user;
+      
+      // GUEST users are ephemeral and don't support refresh tokens.
+      // We should not trigger global logout logic for them.
+      if (user?.role === 'GUEST' || user?.id.startsWith('guest_')) {
+        throw err;
+      }
+
       try {
-        const { useAuthStore } = await import('@store/auth');
         const success = await useAuthStore.getState().silentRefresh();
 
         if (success) {

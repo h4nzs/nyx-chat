@@ -35,7 +35,11 @@ export const useConnectionStore = create<ConnectionState>((set, get) => ({
 
   fetchMyDevices: async (force = false) => {
     const { useAuthStore } = await import('./auth');
-    if (!useAuthStore.getState().user) return [];
+    const user = useAuthStore.getState().user;
+    
+    // GUEST users (Burner Chat) are ephemeral and don't exist in the Device table.
+    // They also lack persistent refresh tokens, so this call would trigger an auth loop.
+    if (!user || user.role === 'GUEST' || user.id.startsWith('guest_')) return [];
 
     const { hasFetchedDevices, myDevices } = get();
     if (!force && hasFetchedDevices) return myDevices;
