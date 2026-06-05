@@ -7,20 +7,28 @@ export const SystemBanner: React.FC = () => {
 
   if (!banner.active || !banner.message) return null;
 
+  // Palet warna Neumorphism/Glassmorphism khas Nyx dengan shadow memendarkan cahaya
   const colors = {
-    info: 'bg-cyan-900/50 border-cyan-500/50 text-cyan-100',
-    warning: 'bg-amber-900/50 border-amber-500/50 text-amber-100',
-    error: 'bg-rose-900/50 border-rose-500/50 text-rose-100'
+    info: 'bg-[#0B0F19]/80 border-cyan-500/30 text-cyan-400 shadow-[0_8px_32px_rgba(8,145,178,0.25)]',
+    warning: 'bg-[#0B0F19]/80 border-amber-500/30 text-amber-400 shadow-[0_8px_32px_rgba(217,119,6,0.25)]',
+    error: 'bg-[#0B0F19]/80 border-rose-500/30 text-rose-400 shadow-[0_8px_32px_rgba(225,29,72,0.25)]'
   };
 
   const Icon = banner.type === 'error' ? FiAlertCircle : banner.type === 'warning' ? FiAlertTriangle : FiInfo;
 
   return (
-    <div className={`relative flex items-center justify-center px-4 py-2 border-b backdrop-blur-md shadow-lg z-50 transition-all duration-500 ${colors[banner.type]}`}>
-      <Icon className="w-4 h-4 mr-2 flex-shrink-0 animate-pulse" />
-      <span className="text-sm font-medium tracking-wide text-center">
-        {banner.message}
-      </span>
+    /* Wrapper absolute dengan pointer-events-none agar klik bisa tembus ke UI di bawahnya */
+    <div className="absolute top-4 left-1/2 -translate-x-1/2 w-[95%] max-w-fit z-[100] pointer-events-none flex justify-center">
+      
+      <div 
+        className={`pointer-events-auto flex items-center justify-center px-5 py-2.5 rounded-full border backdrop-blur-xl transition-all duration-500 ease-out animate-in slide-in-from-top-4 fade-in-0 ${colors[banner.type]}`}
+      >
+        <Icon className="w-4 h-4 mr-2.5 flex-shrink-0 animate-pulse" />
+        <span className="text-sm font-medium tracking-wide text-center">
+          {banner.message}
+        </span>
+      </div>
+      
     </div>
   );
 };
