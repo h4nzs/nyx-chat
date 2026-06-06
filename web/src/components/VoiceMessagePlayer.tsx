@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, memo } from 'react';
 import WaveSurfer from 'wavesurfer.js';
-import { FiPlay, FiPause, FiAlertTriangle } from 'react-icons/fi';
+import { FiPlay, FiPause, FiAlertTriangle, FiDownload } from 'react-icons/fi';
 import { Message } from '@store/conversation';
 import { decryptFile } from '@utils/crypto';
 import { toAbsoluteUrl } from '@utils/url';
@@ -215,7 +215,7 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
   }
 
   return (
-    <div className="flex items-center gap-3 w-[240px] sm:w-[280px] bg-bg-main/50 p-2 rounded-2xl border border-white/5 shadow-inner">
+    <div className="flex items-center gap-3 w-full bg-bg-main/50 p-2 rounded-2xl border border-white/5 shadow-inner">
       <button 
         onClick={togglePlay} 
         disabled={!isReady}
@@ -224,14 +224,29 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
         {isPlaying ? <FiPause size={18} /> : <FiPlay size={18} className="ml-1" />}
       </button>
       
-      <div className="flex-1 flex flex-col justify-center overflow-hidden cursor-pointer">
+      <div className="flex-1 flex flex-col justify-center min-w-0 overflow-hidden cursor-pointer">
         {/* Waveform Container */}
         <div ref={containerRef} className="w-full relative z-10" />
         
-        {/* Timers */}
-        <div className="text-[10px] text-text-secondary mt-1 flex justify-between font-mono font-medium">
-          <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(message.duration || duration)}</span>
+        {/* Timers & Actions */}
+        <div className="text-[10px] text-text-secondary mt-1 flex justify-between items-center font-mono font-medium">
+          <div className="flex gap-1.5">
+            <span>{formatTime(currentTime)}</span>
+            <span className="opacity-40">/</span>
+            <span>{formatTime(message.duration || duration)}</span>
+          </div>
+
+          {audioSrc && (
+             <a 
+               href={audioSrc} 
+               download={message.fileName || `voice-note-${Date.now()}.webm`}
+               className="hover:text-accent transition-all p-0.5 active:scale-90"
+               onClick={(e) => e.stopPropagation()}
+               title={t('media.download', 'Download')}
+             >
+               <FiDownload size={14} />
+             </a>
+          )}
         </div>
       </div>
     </div>

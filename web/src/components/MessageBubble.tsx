@@ -153,7 +153,7 @@ export default function MessageBubble({ message, isOwn, onImageClick, isLastInSe
               <>
                 {/* Rendering Konten Biasa */}
                 {isVoiceMessage && message.fileUrl && (
-                  <div className="p-2 w-[250px]">
+                  <div className="p-2 w-full max-w-[280px]">
                     <VoiceMessagePlayer message={message} />
                   </div>
                 )}

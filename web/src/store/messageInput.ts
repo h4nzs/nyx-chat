@@ -210,6 +210,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       
       updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
       
+      // Save encrypted blob to OPFS cache so the sender doesn't have to download it later
+      import('@lib/opfsStorage').then(m => m.saveEncryptedToOPFS(rawFileKey, encryptedBlob));
+      
       const fileRetention = expiresIn ? expiresIn : (isViewOnce ? 1209600 : 0);
       const endpoint = conversationId.startsWith('burner_') ? '/api/uploads/burner-presigned' : '/api/uploads/presigned';
 
@@ -337,6 +340,9 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       const rawFileKey = encryptRes.key;
 
       updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
+      
+      // Save encrypted blob to OPFS cache so the sender doesn't have to download it later
+      import('@lib/opfsStorage').then(m => m.saveEncryptedToOPFS(rawFileKey, encryptedBlob));
       
       const fileRetention = expiresIn ? expiresIn : (isViewOnce ? 1209600 : 0);
       const endpoint = conversationId.startsWith('burner_') ? '/api/uploads/burner-presigned' : '/api/uploads/presigned';

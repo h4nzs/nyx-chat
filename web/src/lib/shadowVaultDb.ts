@@ -134,8 +134,20 @@ class NyxShadowVaultProxy {
   }
 
   async upsertMessages(messages: Message[]) {
-    // Filter messages: Allow if it has content OR it is a tombstone
-    const validMessages = messages.filter(m => (m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('[')) || m.isDeletedLocal || m.fileUrl || m.isBlindAttachment);
+    // Filter messages: Allow if it's a chat-relevant type (TEXT/FILE) OR it is a tombstone.
+    // Exclude internal system control payloads like GROUP_KEY which should only live in the keychain.
+    const validMessages = messages.filter(m => {
+      // 1. Check for system control types (strictly exclude from UI vault)
+      if ((m as any).type === 'GROUP_KEY' || (m as any).type === 'KEY_SYNC') return false;
+
+      // 2. Check for valid chat content or state
+      const hasContent = m.content && m.content !== 'waiting_for_key' && !m.content.startsWith('[') && !m.content.startsWith('{');
+      const isFile = !!(m.fileUrl || m.isBlindAttachment);
+      const isTombstone = !!m.isDeletedLocal;
+
+      return hasContent || isFile || isTombstone;
+    });
+
     if (validMessages.length === 0) return;
 
     try {

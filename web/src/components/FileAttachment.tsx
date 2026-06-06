@@ -127,13 +127,22 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
              return;
         }
 
-        // 3. Kunci sudah di tangan! Unduh file terenkripsi dari server R2
-        const absoluteUrl = toAbsoluteUrl(message.fileUrl);
-        if (!absoluteUrl) throw new Error("Invalid file URL");
-        
-        const response = await fetch(absoluteUrl);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const encryptedBlob = await response.blob();
+        // 3. Check OPFS Cache first!
+        const { getEncryptedFromOPFS, saveEncryptedToOPFS } = await import('@lib/opfsStorage');
+        let encryptedBlob = await getEncryptedFromOPFS(rawFileKey);
+
+        if (!encryptedBlob) {
+            // Not in cache, download from server R2
+            const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+            if (!absoluteUrl) throw new Error("Invalid file URL");
+            
+            const response = await fetch(absoluteUrl);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            encryptedBlob = await response.blob();
+            
+            // Save ciphertext to OPFS for future reads
+            saveEncryptedToOPFS(rawFileKey, encryptedBlob).catch(console.warn);
+        }
 
         // 4. Dekripsi file dengan kunci yang valid
         const originalType = getFileType(); // Fungsi getFileType() yang sudah kita buat sebelumnya
@@ -196,6 +205,30 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
     isOwn ? 'bg-primary-dark/20' : 'bg-gray-100 dark:bg-gray-800'
   }`;
 
+  const renderHeader = (icon: React.ReactNode, colorClass: string, label: string) => (
+    <div className="flex items-center gap-2 mb-1">
+      <div className={`${colorClass} p-1.5 rounded-lg bg-current/10`}>
+        {icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-sm truncate">{message.fileName || label}</p>
+        <p className="text-[10px] opacity-60 uppercase font-bold tracking-tight">
+            {message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}
+        </p>
+      </div>
+      {decryptedUrl && (
+        <a
+          href={decryptedUrl}
+          download={message.fileName || 'file'}
+          className="p-1.5 bg-accent/10 hover:bg-accent/20 text-accent rounded-full transition-all active:scale-90"
+          title={t('chat:media.download', 'Download')}
+        >
+          <FiDownload size={16} />
+        </a>
+      )}
+    </div>
+  );
+
   if (status === 'decrypting') {
     return <div className={containerClass}><Spinner size="sm" /><span className="text-sm">{t('chat:media.decrypting')}</span></div>;
   }
@@ -229,14 +262,8 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   if (isPdf) {
     return (
       <div className={containerClass}>
-        <div className="flex items-center gap-2">
-          <FiFile className="text-red-500" size={20} />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm truncate">{message.fileName || t('chat:media.document_placeholder', 'Document.pdf')}</p>
-            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}</p>
-          </div>
-        </div>
-        <div className="mt-2 border rounded overflow-hidden">
+        {renderHeader(<FiFile size={18} />, "text-red-500", t('chat:media.document_placeholder', 'Document.pdf'))}
+        <div className="mt-1 border rounded overflow-hidden">
           <Document
             file={decryptedUrl}
             onLoadSuccess={({ numPages }) => setNumPages(numPages)}
@@ -246,19 +273,11 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             <Page pageNumber={1} width={300} renderTextLayer={false} renderAnnotationLayer={false} />
           </Document>
           {numPages && numPages > 1 && (
-            <div className="p-2 text-center text-xs text-gray-500">
+            <div className="p-2 text-center text-[10px] text-text-secondary uppercase font-bold tracking-widest bg-black/5 dark:bg-white/5">
               {numPages} {t('chat:media.pages', 'pages')}
             </div>
           )}
         </div>
-        <a 
-          href={decryptedUrl} 
-          download={message.fileName || 'document.pdf'} 
-          className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
-        >
-          <FiDownload size={16} />
-          {t('chat:media.download_x', { type: 'PDF' })}
-        </a>
       </div>
     );
   }
@@ -266,14 +285,8 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   if (isImage) {
     return (
       <div className={containerClass}>
-        <div className="flex items-center gap-2">
-          <FiImage className="text-blue-500" size={20} />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm truncate">{message.fileName || t('chat:media.image_placeholder', 'Image')}</p>
-            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}</p>
-          </div>
-        </div>
-        <div className="mt-2 border rounded overflow-hidden max-h-64">
+        {renderHeader(<FiImage size={18} />, "text-blue-500", t('chat:media.image_placeholder', 'Image'))}
+        <div className="mt-1 border rounded overflow-hidden max-h-64">
           <img 
             src={decryptedUrl} 
             alt={message.fileName || t('chat:media.image_alt', 'Image attachment')} 
@@ -285,14 +298,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             }}
           />
         </div>
-        <a 
-          href={decryptedUrl} 
-          download={message.fileName || 'image'} 
-          className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
-        >
-          <FiDownload size={16} />
-          {t('chat:media.download_x', { type: 'Image' })}
-        </a>
       </div>
     );
   }
@@ -300,14 +305,8 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   if (isVideo) {
     return (
       <div className={containerClass}>
-        <div className="flex items-center gap-2">
-          <FiVideo className="text-purple-500" size={20} />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm truncate">{message.fileName || t('chat:media.video_placeholder', 'Video')}</p>
-            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}</p>
-          </div>
-        </div>
-        <div className="mt-2 border rounded overflow-hidden">
+        {renderHeader(<FiVideo size={18} />, "text-purple-500", t('chat:media.video_placeholder', 'Video'))}
+        <div className="mt-1 border rounded overflow-hidden">
           <video 
             src={decryptedUrl} 
             controls 
@@ -321,14 +320,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             {t('chat:media.browser_unsupported', { type: 'video' })}
           </video>
         </div>
-        <a 
-          href={decryptedUrl} 
-          download={message.fileName || 'video'} 
-          className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
-        >
-          <FiDownload size={16} />
-          {t('chat:media.download_x', { type: 'Video' })}
-        </a>
       </div>
     );
   }
@@ -336,14 +327,8 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   if (isAudio) {
     return (
       <div className={containerClass}>
-        <div className="flex items-center gap-2">
-          <FiMusic className="text-green-500" size={20} />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-sm truncate">{message.fileName || t('chat:media.audio_placeholder', 'Audio')}</p>
-            <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}</p>
-          </div>
-        </div>
-        <div className="mt-2">
+        {renderHeader(<FiMusic size={18} />, "text-green-500", t('chat:media.audio_placeholder', 'Audio'))}
+        <div className="mt-1">
           <audio 
             src={decryptedUrl} 
             controls 
@@ -357,34 +342,13 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
             {t('chat:media.browser_unsupported', { type: 'audio' })}
           </audio>
         </div>
-        <a 
-          href={decryptedUrl} 
-          download={message.fileName || 'audio'} 
-          className="flex items-center gap-2 text-sm text-blue-500 hover:underline mt-2"
-        >
-          <FiDownload size={16} />
-          {t('chat:media.download_x', { type: 'Audio' })}
-        </a>
       </div>
     );
   }
 
   return (
-    <a 
-      href={decryptedUrl} 
-      download={message.fileName || 'download'} 
-      className={`${containerClass} flex items-center gap-3`}
-    >
-      <div className="p-3 bg-gray-200 dark:bg-gray-700 rounded-full text-gray-500 dark:text-gray-300">
-        <FiFile size={20} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="font-medium text-sm truncate">{message.fileName || t('chat:media.file_placeholder', 'File')}</p>
-        <p className="text-xs opacity-60">{message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}</p>
-      </div>
-      <div className="p-2 rounded-full hover:bg-black/10 dark:hover:bg-white/10">
-        <FiDownload size={18} />
-      </div>
-    </a>
+    <div className={containerClass}>
+       {renderHeader(<FiFile size={18} />, "text-gray-500", t('chat:media.file_placeholder', 'File'))}
+    </div>
   );
 }

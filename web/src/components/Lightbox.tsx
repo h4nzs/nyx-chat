@@ -7,6 +7,7 @@ import { useMessageStore } from '@store/message';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
 import { useTranslation } from 'react-i18next';
+import { FiDownload, FiX } from 'react-icons/fi';
 
 interface LightboxProps {
   message: Message;
@@ -93,15 +94,24 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
       }
 
       try {
-        const absoluteUrl = toAbsoluteUrl(message.fileUrl);
-        if (!absoluteUrl) throw new Error(t('media.invalid_url'));
+        // OPFS Caching
+        const { getEncryptedFromOPFS, saveEncryptedToOPFS } = await import('@lib/opfsStorage');
+        let encryptedBlob = await getEncryptedFromOPFS(rawFileKey);
 
-        const response = await fetch(absoluteUrl);
-        if (!response.ok) {
-          if (response.status === 404) throw new Error(t('media.not_found'));
-          throw new Error(`HTTP error! status: ${response.status}`);
+        if (!encryptedBlob) {
+            const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+            if (!absoluteUrl) throw new Error(t('media.invalid_url'));
+
+            const response = await fetch(absoluteUrl);
+            if (!response.ok) {
+              if (response.status === 404) throw new Error(t('media.not_found'));
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            encryptedBlob = await response.blob();
+            
+            // Save to OPFS for future reads
+            saveEncryptedToOPFS(rawFileKey, encryptedBlob).catch(console.warn);
         }
-        const encryptedBlob = await response.blob();
 
         let originalType = message.fileType?.split(';')[0] || 'application/octet-stream';
         if (message.fileName?.toLowerCase().endsWith('.svg')) {
@@ -146,12 +156,25 @@ export default function Lightbox({ message, onClose }: LightboxProps) {
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 backdrop-blur-xl animate-fade-in p-4 md:p-8"
       onClick={handleClose}
     >
-      <button
-        className="absolute top-4 right-4 text-white text-3xl hover:opacity-80 transition-opacity z-10"
-        onClick={handleClose}
-      >
-        &times;
-      </button>
+      <div className="absolute top-4 right-4 flex items-center gap-4 z-10">
+        {!isLoading && decryptedUrl && (
+          <a
+            href={decryptedUrl}
+            download={message.fileName || 'download'}
+            className="text-white/80 hover:text-white transition-all p-2 bg-white/5 hover:bg-white/10 rounded-full active:scale-95"
+            onClick={(e) => e.stopPropagation()}
+            title={t('media.download', 'Download')}
+          >
+            <FiDownload size={24} />
+          </a>
+        )}
+        <button
+          className="text-white/80 hover:text-white transition-all p-2 bg-white/5 hover:bg-white/10 rounded-full active:scale-95"
+          onClick={handleClose}
+        >
+          <FiX size={24} />
+        </button>
+      </div>
       <div className="relative max-w-[90vw] max-h-[90vh] flex items-center justify-center" onClick={(e) => e.stopPropagation()}>
         {isLoading && <Spinner size="lg" />}
         {error && !isLoading && (

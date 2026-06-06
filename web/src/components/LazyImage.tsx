@@ -5,7 +5,7 @@ import { useKeychainStore } from '@store/keychain';
 import { useConversationStore } from '@store/conversation';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
-import { FiAlertTriangle, FiImage, FiRefreshCw } from 'react-icons/fi';
+import { FiAlertTriangle, FiImage, FiRefreshCw, FiDownload } from 'react-icons/fi';
 import { transportClient, } from '@lib/transportClient'; 
 import { useTranslation } from 'react-i18next';
 
@@ -153,12 +153,22 @@ export default function LazyImage({
         }
 
         // DEKRIPSI FILE BLOB
-        const absoluteUrl = toAbsoluteUrl(message.fileUrl);
-        if (!absoluteUrl) throw new Error("Invalid URL");
+        // 1. Check OPFS cache
+        const { getEncryptedFromOPFS, saveEncryptedToOPFS } = await import('@lib/opfsStorage');
+        let encryptedBlob = await getEncryptedFromOPFS(rawFileKey);
 
-        const response = await fetch(absoluteUrl);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const encryptedBlob = await response.blob();
+        if (!encryptedBlob) {
+            // Not in cache, fetch from R2
+            const absoluteUrl = toAbsoluteUrl(message.fileUrl);
+            if (!absoluteUrl) throw new Error("Invalid URL");
+
+            const response = await fetch(absoluteUrl);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            encryptedBlob = await response.blob();
+
+            // Save to OPFS
+            saveEncryptedToOPFS(rawFileKey, encryptedBlob).catch(console.warn);
+        }
 
         const originalType = message.fileType?.split(';')[0] || 'image/jpeg';
         let decryptedBlob = await decryptFile(encryptedBlob, rawFileKey, originalType);
@@ -245,16 +255,29 @@ export default function LazyImage({
   };
 
   return (
-    <div className={`relative overflow-hidden bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center min-w-[200px] min-h-[150px] ${className || ''}`}>
+    <div className={`group relative overflow-hidden bg-gray-100 dark:bg-gray-800 rounded-lg flex items-center justify-center min-w-[200px] min-h-[150px] ${className || ''}`}>
       {renderOverlay()}
       {imageUrl ? (
-        <img
-          ref={imgRef}
-          src={imageUrl}
-          alt={alt || "Message attachment"}
-          className={`w-full h-full transition-opacity duration-300 ${decryptionStatus === 'succeeded' ? 'opacity-100' : 'opacity-0'} ${message.fileType === 'image/svg+xml' ? 'object-contain bg-white/5 p-2' : 'object-cover'}`}
-          {...props}
-        />
+        <>
+          <img
+            ref={imgRef}
+            src={imageUrl}
+            alt={alt || "Message attachment"}
+            className={`w-full h-full transition-opacity duration-300 ${decryptionStatus === 'succeeded' ? 'opacity-100' : 'opacity-0'} ${message.fileType === 'image/svg+xml' ? 'object-contain bg-white/5 p-2' : 'object-cover'}`}
+            {...props}
+          />
+          {decryptionStatus === 'succeeded' && (
+             <a
+                href={imageUrl}
+                download={message.fileName || 'image'}
+                className="absolute top-2 right-2 p-1.5 bg-black/40 hover:bg-black/60 text-white/80 hover:text-white rounded-full backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all z-20 active:scale-95"
+                onClick={(e) => e.stopPropagation()}
+                title={t('media.download', 'Download')}
+             >
+                <FiDownload size={16} />
+             </a>
+          )}
+        </>
       ) : (
         <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600 min-h-[150px]">
            <FiImage size={48} />
