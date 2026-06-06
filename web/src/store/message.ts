@@ -117,6 +117,13 @@ export async function decryptMessageObject(
     } : undefined,
     createdAt: rawMsg.createdAt,
     content: rawMsg.content,
+    fileUrl: rawMsg.fileUrl,
+    fileKey: rawMsg.fileKey,
+    fileName: rawMsg.fileName,
+    fileType: rawMsg.fileType,
+    fileSize: rawMsg.fileSize,
+    sessionId: rawMsg.sessionId,
+    isBlindAttachment: rawMsg.isBlindAttachment,
     repliedToId: rawMsg.repliedToId ? asMessageId(rawMsg.repliedToId) : undefined,
     linkPreview: rawMsg.linkPreview,
     expiresAt: rawMsg.expiresAt,
@@ -395,7 +402,7 @@ export async function decryptMessageObject(
                 fileSize: metadata.size,
                 fileType: metadata.mimeType,
                 content: null,
-                isBlindAttachment: true
+                isBlindAttachment: metadata.type === 'file' ? (metadata as any).isBlindAttachment ?? finalMessage.isBlindAttachment : finalMessage.isBlindAttachment
             };
           }
         } catch (_e) { }

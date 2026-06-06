@@ -3,6 +3,7 @@ import type { Message } from '@store/conversation';
 import { decryptFile, decryptMessage } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
 import { useConversationStore } from '@store/conversation';
+import { useAuthStore } from '@store/auth';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
 import { FiAlertTriangle, FiImage, FiRefreshCw, FiDownload } from 'react-icons/fi';
@@ -117,17 +118,23 @@ export default function LazyImage({
         let rawFileKey: string;
 
         // CHECK BLIND ATTACHMENT (Raw Key)
-        if (message.isBlindAttachment) {
-             rawFileKey = encryptedFileKey; // Untuk V2 blind attachment
+        const myId = useAuthStore.getState().user?.id;
+        const isMe = String(message.senderId) === String(myId) || (message.sender && String(message.sender.id) === String(myId));
+
+        if (message.isBlindAttachment || isMe) {
+             rawFileKey = encryptedFileKey; // Untuk V2 blind attachment atau jika kita adalah pengirim (kunci sudah plaintext)
         } else {
             // DEKRIPSI KUNCI (DENGAN AUTO-RETRY LOGIC)
             const MAX_KEY_RETRIES = 5;
+            
+            // Fallback for 1:1 chats where sessionId might be missing from the store
+            const finalSessionId = message.sessionId || (isGroup ? '' : message.conversationId);
 
             const keyResult = await decryptMessage(
                 encryptedFileKey,
                 message.conversationId,
                 isGroup,
-                message.sessionId || ''
+                finalSessionId
             );
 
             if (keyResult.status === 'pending') {

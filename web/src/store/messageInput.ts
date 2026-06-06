@@ -184,6 +184,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         fileName: file.name,
         fileType: file.type,
         fileSize: file.size,
+        sessionId: conversationId.startsWith('group_') ? null : conversationId, // Recipient ID for 1:1
         expiresAt,
         repliedTo: replyingTo || undefined,
         isViewOnce,
@@ -326,6 +327,7 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
         fileType: "audio/webm",
         fileSize: blob.size,
         duration,
+        sessionId: conversationId.startsWith('group_') ? null : conversationId, // Recipient ID for 1:1
         expiresAt,
         repliedTo: replyingTo || undefined,
         isViewOnce,
