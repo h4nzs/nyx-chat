@@ -2,11 +2,10 @@ import { useEffect, useRef, useState, memo } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import { FiPlay, FiPause, FiAlertTriangle, FiDownload } from 'react-icons/fi';
 import { Message } from '@store/conversation';
-import { decryptFile, decryptMessage } from '@utils/crypto';
+import { decryptFile } from '@utils/crypto';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
 import { useKeychainStore } from '@store/keychain';
-import { useAuthStore } from '@store/auth';
 import { useTranslation } from 'react-i18next';
 
 interface VoiceMessagePlayerProps {
@@ -57,39 +56,6 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
         return;
       }
 
-      // Check if we need to decrypt the key first
-      const myId = useAuthStore.getState().user?.id;
-      const isMe = String(message.senderId) === String(myId) || (message.sender && String(message.sender.id) === String(myId));
-      const isGroup = message.conversationId.startsWith('group_');
-
-      if (rawFileKey && !isMe && !message.isBlindAttachment) {
-          try {
-              if (isMounted) setIsLoading(true);
-              // Fallback for 1:1 chats where sessionId might be missing from the store
-              const finalSessionId = message.sessionId || (isGroup ? '' : message.conversationId);
-              const keyResult = await decryptMessage(rawFileKey, message.conversationId, isGroup, finalSessionId);
-              
-              if (keyResult.status === 'success') {
-                  rawFileKey = keyResult.value;
-              } else if (keyResult.status === 'pending') {
-                  if (isMounted) {
-                      setError(keyResult.reason || t('media.waiting_key'));
-                      setIsLoading(false);
-                  }
-                  return;
-              } else {
-                  throw keyResult.error || new Error("Failed to decrypt voice key");
-              }
-          } catch (e) {
-              console.error("Failed to decrypt voice key:", e);
-              if (isMounted) {
-                  setError(t('media.decrypt_failed'));
-                  setIsLoading(false);
-              }
-              return;
-          }
-      }
-      
       // If we don't have the key yet, check if we need to wait or decrypt the message first
       if (!rawFileKey) {
          if (message.content === 'waiting_for_key' || message.content?.startsWith('[')) {

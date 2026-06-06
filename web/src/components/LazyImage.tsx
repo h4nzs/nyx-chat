@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import type { Message } from '@store/conversation';
-import { decryptFile, decryptMessage } from '@utils/crypto';
+import { decryptFile } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
 import { useConversationStore } from '@store/conversation';
-import { useAuthStore } from '@store/auth';
 import { toAbsoluteUrl } from '@utils/url';
 import { Spinner } from './Spinner';
 import { FiAlertTriangle, FiImage, FiRefreshCw, FiDownload } from 'react-icons/fi';
@@ -68,7 +67,6 @@ export default function LazyImage({
 
     let objectUrl: string | null = null;
     let isMounted = true;
-    let retryTimeout: ReturnType<typeof setTimeout>;
 
     const handleImageLoad = async () => {
       // 1. Validasi URL
@@ -115,58 +113,13 @@ export default function LazyImage({
       }
 
       try {
-        let rawFileKey: string;
+        // No need to decrypt fileKey here because the store (decryptMessageObject) 
+        // already decrypted the message content and extracted the plaintext key.
+        const rawFileKey = encryptedFileKey;
 
-        // CHECK BLIND ATTACHMENT (Raw Key)
-        const myId = useAuthStore.getState().user?.id;
-        const isMe = String(message.senderId) === String(myId) || (message.sender && String(message.sender.id) === String(myId));
-
-        if (message.isBlindAttachment || isMe) {
-             rawFileKey = encryptedFileKey; // Untuk V2 blind attachment atau jika kita adalah pengirim (kunci sudah plaintext)
-        } else {
-            // DEKRIPSI KUNCI (DENGAN AUTO-RETRY LOGIC)
-            const MAX_KEY_RETRIES = 5;
-            
-            // Fallback for 1:1 chats where sessionId might be missing from the store
-            const finalSessionId = message.sessionId || (isGroup ? '' : message.conversationId);
-
-            const keyResult = await decryptMessage(
-                encryptedFileKey,
-                message.conversationId,
-                isGroup,
-                finalSessionId
-            );
-
-            if (keyResult.status === 'pending') {
-                if (isMounted) {
-                    if (retryCount >= MAX_KEY_RETRIES) {
-                        setDecryptionStatus('failed');
-                        setError("Key not received after retries");
-                        return; // Stop retrying
-                    }
-
-                    setDecryptionStatus('waiting_for_key');
-                    setError(keyResult.reason || "Key not found yet");
-                    
-                    const socket = transportClient;
-                    if (socket && transportClient.connected && message.sessionId) {
-                        transportClient.sendEvent('session:request_key', {
-                            conversationId: message.conversationId,
-                            sessionId: message.sessionId
-                        });
-                    }
-
-                    retryTimeout = setTimeout(() => {
-                        if (isMounted) setRetryCount(c => c + 1);
-                    }, 3000);
-                }
-                return;
-            }
-
-            if (keyResult.status === 'error') {
-                throw keyResult.error || new Error("Failed to decrypt file key");
-            }
-            rawFileKey = keyResult.value;
+        if (!rawFileKey) {
+            if (isMounted) { setDecryptionStatus('waiting_for_key'); setError("Waiting for key..."); }
+            return;
         }
 
         // DEKRIPSI FILE BLOB
@@ -221,7 +174,6 @@ export default function LazyImage({
       if (objectUrl && !hasDecryptedSuccessfully.current) {
           URL.revokeObjectURL(objectUrl);
       }
-      clearTimeout(retryTimeout);
     };
   // ✅ OPTIMASI 3: Bersihkan dependency array
   }, [message.fileUrl, message.fileType, message.fileKey, message.sessionId, lastKeychainUpdate, retryCount, message.conversationId, message.isBlindAttachment, isGroup]);

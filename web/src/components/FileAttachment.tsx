@@ -8,7 +8,6 @@ import { Spinner } from "./Spinner";
 import { decryptFile, decryptMessage } from '@utils/crypto';
 import { useKeychainStore } from '@store/keychain';
 import { useConversationStore } from '@store/conversation';
-import { useAuthStore } from '@store/auth';
 import { FiAlertTriangle, FiFile, FiDownload, FiMusic, FiVideo, FiImage, FiRefreshCw } from 'react-icons/fi';
 import { transportClient, } from '@lib/transportClient';
 import { useTranslation } from 'react-i18next';
@@ -105,37 +104,6 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
 
       try {
         let rawFileKey: string | undefined = message.fileKey || undefined;
-
-        const myId = useAuthStore.getState().user?.id;
-        const isMe = String(message.senderId) === String(myId) || (message.sender && String(message.sender.id) === String(myId));
-
-        // Decrypt key if from someone else and not already plaintext (sender side)
-        if (rawFileKey && !isMe && !message.isBlindAttachment) {
-            const finalSessionId = message.sessionId || (isGroup ? '' : message.conversationId);
-            const targetSessionId = isGroup ? message.senderId : finalSessionId;
-            const keyResult = await decryptMessage(rawFileKey, message.conversationId, isGroup, targetSessionId);
-            
-            if (keyResult.status === 'success') {
-                rawFileKey = keyResult.value;
-            } else if (keyResult.status === 'pending') {
-                if (isMounted) {
-                    setStatus('waiting');
-                    const socket = transportClient;
-                    if (socket?.connected && targetSessionId) {
-                        transportClient.sendEvent('session:request_key', {
-                            conversationId: message.conversationId,
-                            sessionId: targetSessionId
-                        });
-                    }
-                    retryTimeout = setTimeout(() => {
-                        if (isMounted) setRetryCount(c => c + 1);
-                    }, 3000);
-                }
-                return;
-            } else if (keyResult.status === 'error') {
-                throw keyResult.error;
-            }
-        }
 
         // 2. Fallback: Jika tidak ada fileKey tapi ini adalah Blind Attachment, coba minta dari sesi ratchet
         if (!rawFileKey && message.isBlindAttachment) {
