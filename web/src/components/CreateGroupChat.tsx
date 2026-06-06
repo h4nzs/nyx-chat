@@ -90,8 +90,7 @@ export default function CreateGroupChat({ onClose }: { onClose: () => void }) {
         try {
       const conversationId = await createGroup(title.trim(), selectedUsers.map(u => u.id));
 
-      // Join the socket room for real-time updates
-      transportClient.sendEvent("conversation:join", conversationId);
+
 
       openConversation(conversationId);
 

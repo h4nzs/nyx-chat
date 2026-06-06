@@ -585,14 +585,11 @@ export async function ensureGroupSession(conversationId: string, participants: P
 
   const promise = (async () => {
     try {
-      if (forceRotate) {
-          const { deleteGroupSenderState } = await import('@lib/keychainDb');
-          await deleteGroupSenderState(conversationId);
-          console.log(`[Crypto] Forced rotation for group ${conversationId}`);
+      // If not forceRotate, check if we already have a key
+      if (!forceRotate) {
+          const existingSenderState = await getGroupSenderState(conversationId);
+          if (existingSenderState) return null; // We already have a sender key for this group
       }
-
-      const existingSenderState = await getGroupSenderState(conversationId);
-      if (existingSenderState) return null; // We already have a sender key for this group
 
       const sodium = await getSodiumLib();
       const { groupInitSenderKey, worker_pq_box_seal } = await getWorkerProxy();

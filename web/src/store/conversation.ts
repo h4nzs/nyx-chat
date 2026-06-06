@@ -329,7 +329,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       useVerificationStore.getState().loadInitialStatus(conversations);
 
       const socket = transportClient;
-      conversations.forEach(c => transportClient.sendEvent("conversation:join", c.id));
+
     } catch (error) {
       console.error("Failed to load conversations", error);
       set({ error: "Failed to load conversations." });
@@ -427,7 +427,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
           });
       }
 
-      transportClient.sendEvent("conversation:join", conv.id);
+
       get().addOrUpdateConversation(conv);
       set({ activeId: conv.id, isSidebarOpen: false });
       return conv.id;
@@ -471,7 +471,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
             encryptedMetadata
         };
         
-        transportClient.sendEvent("conversation:join", conv.id);
+  
         get().addOrUpdateConversation(updatedConv);
         set({ activeId: conv.id, isSidebarOpen: false });
         

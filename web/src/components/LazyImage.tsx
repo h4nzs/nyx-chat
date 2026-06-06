@@ -76,8 +76,8 @@ export default function LazyImage({
         return;
       }
 
-      // 2. Cek Enkripsi
-      const isEncrypted = message.fileType?.includes('encrypted') || message.isBlindAttachment || !message.fileUrl;
+      // 2. Cek Enkripsi (All NYX media with a fileKey is E2EE encrypted)
+      const isEncrypted = !!message.fileKey || message.fileType?.includes('encrypted') || message.isBlindAttachment || !message.fileUrl;
 
       if (!isEncrypted) {
         if (isMounted) {

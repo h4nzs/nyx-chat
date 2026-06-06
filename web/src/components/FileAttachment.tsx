@@ -347,8 +347,23 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
   }
 
   return (
-    <div className={containerClass}>
-       {renderHeader(<FiFile size={18} />, "text-gray-500", t('chat:media.file_placeholder', 'File'))}
-    </div>
+    <a 
+      href={decryptedUrl} 
+      download={message.fileName || 'download'} 
+      className={`${containerClass} flex items-center gap-3 cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 active:scale-[0.98] transition-all`}
+    >
+      <div className="p-3 bg-gray-200 dark:bg-gray-700 rounded-full text-gray-500 dark:text-gray-300">
+        <FiFile size={20} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-sm truncate">{message.fileName || t('chat:media.file_placeholder', 'File')}</p>
+        <p className="text-[10px] opacity-60 uppercase font-bold tracking-tight">
+          {message.fileSize ? formatBytes(message.fileSize) : t('common:defaults.unknown', 'Unknown')}
+        </p>
+      </div>
+      <div className="p-2 rounded-full bg-accent/10 text-accent">
+        <FiDownload size={18} />
+      </div>
+    </a>
   );
 }

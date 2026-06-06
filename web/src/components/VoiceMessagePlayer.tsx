@@ -97,7 +97,8 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
       }
     };
 
-    if (message.fileType?.includes('encrypted=true') || message.isBlindAttachment || !message.fileUrl) {
+    // ALWAYS decrypt if we have a fileKey, because all NYX media is E2EE encrypted.
+    if (message.fileKey || message.isBlindAttachment || !message.fileUrl) {
       handleDecryption();
     } else if (message.fileUrl) {
       const absoluteUrl = toAbsoluteUrl(message.fileUrl);
