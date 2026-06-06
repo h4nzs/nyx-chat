@@ -76,6 +76,16 @@ export default function LazyImage({
         return;
       }
 
+      // Local optimistic preview bypass (do not decrypt unencrypted local blob URLs)
+      if (message.optimistic && message.fileUrl.startsWith('blob:')) {
+          if (isMounted) {
+              setImageUrl(message.fileUrl);
+              setDecryptionStatus('succeeded');
+              hasDecryptedSuccessfully.current = true;
+          }
+          return;
+      }
+
       // 2. Cek Enkripsi (All NYX media with a fileKey is E2EE encrypted)
       const isEncrypted = !!message.fileKey || message.fileType?.includes('encrypted') || message.isBlindAttachment || !message.fileUrl;
 

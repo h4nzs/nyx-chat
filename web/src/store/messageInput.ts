@@ -207,6 +207,10 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       const encryptRes = await encryptFileViaWorker(fileToProcess);
       const encryptedBlob = encryptRes.encryptedBlob;
       const rawFileKey = encryptRes.key;
+
+      if (!isGuestBurner) {
+          updateMessage(conversationId, `temp_${tempId}`, { fileKey: rawFileKey });
+      }
       
       updateActivity(activityId, { progress: 30, fileName: `Uploading ${file.name}...` });
       
@@ -338,6 +342,10 @@ export const useMessageInputStore = createWithEqualityFn<State>((set, get) => ({
       const encryptRes = await encryptFileViaWorker(blob);
       const encryptedBlob = encryptRes.encryptedBlob;
       const rawFileKey = encryptRes.key;
+
+      if (!isGuestBurner) {
+          updateMessage(conversationId, `temp_${tempId}`, { fileKey: rawFileKey });
+      }
 
       updateActivity(activityId, { progress: 40, fileName: 'Uploading voice...' });
       

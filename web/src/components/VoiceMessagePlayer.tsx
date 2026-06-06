@@ -39,6 +39,16 @@ const VoiceMessagePlayer = ({ message }: VoiceMessagePlayerProps) => {
     let isMounted = true;
 
     const handleDecryption = async () => {
+      // Local optimistic preview bypass (do not decrypt unencrypted local blob URLs)
+      if (message.optimistic && message.fileUrl?.startsWith('blob:')) {
+           if (isMounted) {
+               setAudioSrc(message.fileUrl);
+               hasDecryptedSuccessfully.current = true;
+               setIsLoading(false);
+           }
+           return;
+      }
+
       const rawFileKey = message.fileKey || '';
 
       if (!message.fileUrl) {

@@ -72,6 +72,16 @@ export default function FileAttachment({ message, isOwn }: FileAttachmentProps) 
         return;
       }
 
+      // Local optimistic preview bypass (do not decrypt unencrypted local blob URLs)
+      if (message.optimistic && message.fileUrl.startsWith('blob:')) {
+          if (isMounted) {
+              setDecryptedUrl(message.fileUrl);
+              setStatus('success');
+              hasDecryptedSuccessfully.current = true;
+          }
+          return;
+      }
+
       // 1. Cek apakah ini file terenkripsi (E2EE)
       const isEncrypted = !!message.fileKey || message.fileType?.includes('encrypted=true') || message.isBlindAttachment || !message.fileUrl;
       
