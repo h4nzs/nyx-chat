@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## 🔒 [2.6.4] - 2026-06-06
+
+This major update introduces a high-performance networking architecture using WebTransport (HTTP/3), a secure hybrid storage system for attachments, and significant hardening of the anonymous Burner Chat experience.
+
+### 🚀 Core Architecture
+* **WebTransport & Rust Sidecar:** Migrated the real-time communication pipeline to WebTransport (HTTP/3 QUIC) powered by a dedicated Rust sidecar server. This provides lower latency, improved reliability in unstable networks, and better CPU efficiency.
+* **Hybrid OPFS Storage:** Implemented a new secure storage system using the Origin Private File System (OPFS). Encrypted ciphertext blobs are now cached locally, drastically reducing bandwidth consumption and improving media load times while maintaining a Zero Trace model.
+
+### 🔥 Burner Chat (Guest Mode) Enhancements
+* **Anonymous Authentication:** Introduced a new anonymous guest authentication flow specifically for Burner Chat, providing temporary JWTs and seamless WebTransport token integration.
+* **Encryption State Sync:** Resolved "Split-Brain" scenarios in guest sessions, ensuring both sides maintain consistent cryptographic states even after browser reloads.
+* **Session Hardening:** Fixed several critical bugs in the burner flow, including socket crashes, Redis adapter leaks, and incorrect device fetching logic for ephemeral users.
+
+### 🐛 Bug Fixes & Stability
+* **E2EE Key Management:** Optimized key transaction queues and fixed multi-device key request loops. Corrected target device selection for system key requests and restored missing socket events.
+* **UI Clean-up:** Fixed a regression where system control messages (like `GROUP_KEY`) were leaking into the chat UI.
+* **API Optimization:** Prevented API call spamming on the frontend and fixed unsafe type assertions in the core message processor.
+* **Message Logic:** Improved message deletion consistency and sender key distribution reliability for offline participants.
+
+### 🎨 UI/UX Improvements
+* **Media Interaction:** Added discreet download buttons to image bubbles, file attachments, and the voice message player. Redesigned the Lightbox with integrated download actions.
+* **System Health:** Introduced a new System Status UI with a modern banner look and full internationalization (i18n) support.
+* **Responsiveness:** Fixed layout overflow issues in the Voice Message Player and improved image rendering consistency.
+
+### 🛠️ Infrastructure & CI
+* **VPS Migration:** Successfully migrated production services to a new VPS infrastructure.
+* **Deployment Pipeline:** Prepared new CI/CD workflows and enforced stricter git commit rules for codebase integrity.
+* **Cleanup:** Standardized `.gitignore` rules and removed legacy untracked artifacts.
+
 ## 🔒 [2.6.3] - 2026-05-26
 
 This release introduces new monetization features, seamless integrations, and addresses critical E2EE and infrastructure stability issues.
