@@ -130,21 +130,41 @@ export async function storeGroupSkippedKey(conversationId: string, senderId: str
 /**
  * Retrieves a group skipped message key without deleting it.
  */
-export async function getGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string, n: number): Promise<string | null> {
+export async function getGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string | undefined, n: number): Promise<string | null> {
     return enqueueWrite(async () => {
-        const key = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
-        const record = await db.groupSkippedKeys.get(key);
-        return record ? record.mk : null;
+        if (senderDeviceKey && senderDeviceKey !== 'undefined') {
+            const key = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
+            const record = await db.groupSkippedKeys.get(key);
+            if (record) return record.mk;
+        }
+        
+        // Fallback for older messages that didn't include senderDeviceKey
+        const prefix = `${conversationId}_${senderId}_`;
+        const suffix = `_${n}`;
+        const records = await db.groupSkippedKeys.toArray();
+        const found = records.find(r => r.key.startsWith(prefix) && r.key.endsWith(suffix));
+        return found ? found.mk : null;
     });
 }
 
 /**
  * Deletes a group skipped message key.
  */
-export async function deleteGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string, n: number): Promise<void> {
+export async function deleteGroupSkippedKey(conversationId: string, senderId: string, senderDeviceKey: string | undefined, n: number): Promise<void> {
     return enqueueWrite(async () => {
-        const key = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
-        await db.groupSkippedKeys.delete(key);
+        if (senderDeviceKey && senderDeviceKey !== 'undefined') {
+            const key = `${conversationId}_${senderId}_${senderDeviceKey}_${n}`;
+            await db.groupSkippedKeys.delete(key);
+            return;
+        }
+        
+        const prefix = `${conversationId}_${senderId}_`;
+        const suffix = `_${n}`;
+        const records = await db.groupSkippedKeys.toArray();
+        const found = records.find(r => r.key.startsWith(prefix) && r.key.endsWith(suffix));
+        if (found) {
+            await db.groupSkippedKeys.delete(found.key);
+        }
     });
 }
 
