@@ -59,24 +59,43 @@ class NyxShadowVaultProxy {
     return db.storyKeys;
   }
 
-  async savePqDrSession(record: PqDrSessionRecord): Promise<void> {
+  async savePqDrSession(record: Omit<PqDrSessionRecord, 'id'> & { id?: string }): Promise<void> {
     try {
       const encryptedState = await encryptVaultText(JSON.stringify(record.state));
-      await db.pqDrSessions.put({
+      const id = record.id || `${record.conversationId}_${record.peerDeviceId || 'unknown'}`;
+      await db.pqDrSessionsV2.put({
         ...record,
-        state: encryptedState as unknown as PqDrSessionRecord['state'] // Stored encrypted but typed appropriately for Dexie
+        id,
+        state: encryptedState as unknown as PqDrSessionRecord['state'] 
       });
     } catch (e) {
       console.error("Failed to save PQ-DR session:", e);
     }
   }
 
-  async getPqDrSession(conversationId: string): Promise<PqDrSessionRecord | undefined> {
+  async getPqDrSession(conversationId: string, peerDeviceId?: string): Promise<PqDrSessionRecord | undefined> {
     try {
-      const record = await db.pqDrSessions.get(conversationId);
-      if (!record) return undefined;
-      
-      // Attempt decryption
+      // If we have a specific device, fetch that exact session
+      if (peerDeviceId) {
+          const id = `${conversationId}_${peerDeviceId}`;
+          const record = await db.pqDrSessionsV2.get(id);
+          if (!record) return undefined;
+          return this.decryptPqDrSession(record);
+      }
+
+      // Fallback: Get the most recently active session for this conversation
+      const records = await db.pqDrSessionsV2.where('conversationId').equals(conversationId).toArray();
+      if (records.length === 0) return undefined;
+
+      records.sort((a, b) => b.lastActivity - a.lastActivity);
+      return this.decryptPqDrSession(records[0]);
+    } catch (e) {
+      console.error("Failed to get PQ-DR session:", e);
+      return undefined;
+    }
+  }
+
+  private async decryptPqDrSession(record: PqDrSessionRecord): Promise<PqDrSessionRecord | undefined> {
       if (typeof record.state === 'string') {
         const decryptedStateStr = await decryptVaultText(record.state);
         if (decryptedStateStr) {
@@ -87,15 +106,11 @@ class NyxShadowVaultProxy {
         }
       }
       return undefined;
-    } catch (e) {
-      console.error("Failed to get PQ-DR session:", e);
-      return undefined;
-    }
   }
 
   async hasPqDrSession(conversationId: string): Promise<boolean> {
     try {
-      const count = await db.pqDrSessions.where('conversationId').equals(conversationId).count();
+      const count = await db.pqDrSessionsV2.where('conversationId').equals(conversationId).count();
       return count > 0;
     } catch (e) {
       console.error("Failed to check PQ-DR session:", e);
@@ -103,9 +118,14 @@ class NyxShadowVaultProxy {
     }
   }
 
-  async deletePqDrSession(conversationId: string): Promise<void> {
+  async deletePqDrSession(conversationId: string, peerDeviceId?: string): Promise<void> {
     try {
-      await db.pqDrSessions.delete(conversationId);
+      if (peerDeviceId) {
+         await db.pqDrSessionsV2.delete(`${conversationId}_${peerDeviceId}`);
+      } else {
+         const records = await db.pqDrSessionsV2.where('conversationId').equals(conversationId).primaryKeys();
+         await db.pqDrSessionsV2.bulkDelete(records);
+      }
     } catch (e) {
       console.error("Failed to delete PQ-DR session:", e);
     }

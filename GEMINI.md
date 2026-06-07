@@ -24,7 +24,7 @@ NYX is a Zero-Knowledge Post-Quantum Hardened Messenger designed for pure anonym
 ## 🛠️ Building and Running
 
 ### Prerequisites
-- Node.js 22+
+- Node.js 24+
 - `pnpm`
 - PostgreSQL
 - Redis

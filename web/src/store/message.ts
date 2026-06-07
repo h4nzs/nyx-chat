@@ -912,6 +912,29 @@ const evaluateControlMessage = async (decrypted: Message, conversationId: string
                   return true; // Cegah pesan ini masuk ke UI
               }
               
+              if (data.type === 'PROTOCOL_RESET') {
+                  console.warn(`[Protocol Reset] Received reset request for conversation ${conversationId}. Forcing key rotation...`);
+                  const { useConversationStore } = await import('@store/conversation');
+                  useConversationStore.getState().markKeyRotationNeeded(conversationId, true);
+                  
+                  // Also clear local receiver state for this sender to ensure fresh keys are requested if needed
+                  const senderId = decrypted.senderId || data.senderId;
+                  if (senderId) {
+                      const { getGroupReceiverState, saveGroupReceiverState } = await import('@lib/keychainDb');
+                      // Force local deletion of receiver state (effectively deleting current chain)
+                      try {
+                          const rxState = await getGroupReceiverState(conversationId, senderId);
+                          if (rxState) {
+                              // Setting N to a very high number forces DoS protection to throw or state reset
+                              // Or better yet, we can emit a group key distribution immediately.
+                              const { emitGroupKeyRequest } = await import('@lib/transportClient');
+                              emitGroupKeyRequest(conversationId);
+                          }
+                      } catch (e) {}
+                  }
+                  return true;
+              }
+
               if (data.type === 'PROTOCOL_UPGRADE_REQ' && data.deviceId && data.hostClassicalPk && data.hostPqPk) {
                   const { useConnectionStore } = await import('@store/connection');
                   const myDevices = await useConnectionStore.getState().fetchMyDevices();
@@ -2517,22 +2540,39 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
           // Tidak perlu lagi mengecek isGroup, langsung minta GroupKeyRequest (Sender Key)
           const now = Date.now();
           const repairKey = `last_repair_${conversationId}` as const;
+          const failCountKey = `fail_count_${conversationId}`;
           const lastRepair = (window[repairKey as keyof Window] as number) || 0;
-          
+          const currentFailCount = parseInt(sessionStorage.getItem(failCountKey) || '0', 10);
+
           const isTooOld = decrypted.content === '[Message too old to decrypt]';
-          
+
           if (!isTooOld && now - lastRepair > 15000) { // Limit permintaan perbaikan agar tidak spam (15 detik)
               window[repairKey as keyof Window] = now as never;
-              console.warn(`[Auto-Heal] Kunci tidak sinkron untuk percakapan ${conversationId}. Meminta kunci ulang secara diam-diam...`);
-              
-              // Minta pengirim mem-broadcast ulang kunci distribusinya
-              // Delay is handled in crypto.ts or we can use 1.5s delay here if needed, but since crypto.ts does it, we just emit.
-              const { emitGroupKeyRequest } = await import('@lib/transportClient');
-              emitGroupKeyRequest(conversationId);
+              const newFailCount = currentFailCount + 1;
+              sessionStorage.setItem(failCountKey, newFailCount.toString());
+
+              if (newFailCount > 3) {
+                  console.error(`[Auto-Heal] Kritis! Dekripsi gagal >3x untuk percakapan ${conversationId}. Memicu PROTOCOL_RESET penuh...`);
+                  sessionStorage.setItem(failCountKey, '0');
+
+                  // Force a hard rotation of keys and trigger an upgrade/reset
+                  get().sendMessage(conversationId, {
+                      content: JSON.stringify({ type: "PROTOCOL_RESET" }),
+                      isSilent: true
+                  });
+              } else {
+                  console.warn(`[Auto-Heal] Kunci tidak sinkron untuk percakapan ${conversationId} (Gagal ${newFailCount}x). Meminta kunci ulang secara diam-diam...`);
+                  // Minta pengirim mem-broadcast ulang kunci distribusinya
+                  const { emitGroupKeyRequest } = await import('@lib/transportClient');
+                  emitGroupKeyRequest(conversationId);
+              }
           }
-      }
-      
-      const reactionPayload = parseReaction(decrypted.content);
+          } else {
+          // Reset fail count on successful decryption
+          sessionStorage.setItem(`fail_count_${conversationId}`, '0');
+          }
+
+          const reactionPayload = parseReaction(decrypted.content);
       const editPayload = parseEdit(decrypted.content);
       const silentPayload = parseSilent(decrypted.content);
 

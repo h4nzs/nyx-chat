@@ -840,25 +840,7 @@ export interface DrHeader {
 
 // --- Unified Ratchet Mutex ---
 // Ensures that only one operation (Encrypt OR Decrypt) can modify 
-// the ratchet state of a conversation at any given time.
-const ratchetLocks = new Map<string, Promise<void>>();
-
-async function acquireRatchetLock(conversationId: string): Promise<() => void> {
-    const previousLock = ratchetLocks.get(conversationId) || Promise.resolve();
-    let release: () => void;
-    const currentLock = new Promise<void>(resolve => { release = resolve; });
-    ratchetLocks.set(conversationId, currentLock);
-    
-    // Wait for the previous lock to release
-    await previousLock;
-    
-    return () => {
-        release();
-        if (ratchetLocks.get(conversationId) === currentLock) {
-            ratchetLocks.delete(conversationId);
-        }
-    };
-}
+// the ratchet state of a conversation at any given time across all tabs.
 
 export async function encryptMessage(
   text: string,
@@ -867,12 +849,9 @@ export async function encryptMessage(
   existingSession?: { sessionId: string; key: Uint8Array },
   messageId?: string
 ): Promise<{ ciphertext: string; sessionId?: string; drHeader?: DrHeader; mk?: Uint8Array }> {
-  const release = await acquireRatchetLock(conversationId);
-  try {
+  return navigator.locks.request(`ratchet_${conversationId}`, async () => {
     return await doEncryptMessage(text, conversationId, isGroup, existingSession, messageId);
-  } finally {
-    release();
-  }
+  });
 }
 
 async function doEncryptMessage(
@@ -941,16 +920,6 @@ async function doEncryptMessage(
       await storeMessageKeySecurely(messageId, result.mk);
   }
 
-  // Update State (messageCount only increments for sent messages)
-  await saveGroupSenderState({
-      conversationId: conversationId as ConversationId,
-      CK: result.state.CK,
-      N: result.state.N,
-      createdAt: senderState.createdAt || Date.now(),
-      messageCount: (senderState.messageCount || 0) + 1,
-      lastActivityTime: Date.now()
-  });
-  
   const myId = useAuthStore.getState().user?.id;
   const { publicKey } = await getMyEncryptionKeyPair();
   const myPublicKeyB64 = sodium.to_base64(publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
@@ -964,6 +933,16 @@ async function doEncryptMessage(
       senderDeviceKey: myPublicKeyB64
   });
   
+  // ✅ FIX: Atomic Persistence - Update state only after everything else succeeds
+  await saveGroupSenderState({
+      conversationId: conversationId as ConversationId,
+      CK: result.state.CK,
+      N: result.state.N,
+      createdAt: senderState.createdAt || Date.now(),
+      messageCount: (senderState.messageCount || 0) + 1,
+      lastActivityTime: Date.now()
+  });
+
   return { ciphertext: payload, mk: result.mk };
 }
 
@@ -974,12 +953,9 @@ export async function decryptMessage(
   sessionId: string | null | undefined, // In group, this might be senderId
   messageId?: string
 ): Promise<DecryptResult> {
-  const release = await acquireRatchetLock(conversationId);
-  try {
+  return navigator.locks.request(`ratchet_${conversationId}`, async () => {
     return await doDecryptMessage(cipher, conversationId, isGroup, sessionId, messageId);
-  } finally {
-    release();
-  }
+  });
 }
 
 async function doDecryptMessage(

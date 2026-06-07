@@ -212,14 +212,19 @@ async function handleChatMessage(userId: string, deviceId: string, payload: Mess
     if (msgId) await sendAck(userId, deviceId, msgId, { ok: true, msg: safeMessage });
 
     // Relay to all participants
+    // ✅ FIX: Enable Self-Relay. Do not skip `userId`.
+    // This allows other devices logged into the same account to receive the message.
     for (const participant of conversation.participants) {
-      if (participant.userId === userId) continue; 
+      // Broadcast to the user's devices via Redis PubSub
       await sendJsonToUser(participant.userId, TransportOpCode.CHAT_MESSAGE, safeMessage);
       
-      sendPushNotification(participant.userId, {
-          type: pushPayloads ? 'ENCRYPTED_MESSAGE' : 'GENERIC_MESSAGE',
-          data: { conversationId, messageId: safeMessage.id, pushPayloadMap: pushPayloads || undefined }
-      }).catch(console.error);
+      // Do not send push notifications to ourselves
+      if (participant.userId !== userId) {
+        sendPushNotification(participant.userId, {
+            type: pushPayloads ? 'ENCRYPTED_MESSAGE' : 'GENERIC_MESSAGE',
+            data: { conversationId, messageId: safeMessage.id, pushPayloadMap: pushPayloads || undefined }
+        }).catch(console.error);
+      }
     }
   } catch (error) {
     console.error('Failed to handle chat message:', error);

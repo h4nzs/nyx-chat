@@ -24,6 +24,7 @@ export interface DecryptedMessageRecord {
 }
 
 export interface PqDrSessionRecord {
+  id: string; // Composite key: conversationId_deviceId
   conversationId: string;
   state: BurnerDoubleRatchetState;
   peerClassicalPk: string | null;
@@ -132,7 +133,8 @@ export class NyxDatabase extends Dexie {
   messageKeys!: Table<MessageKey, string>;
   pendingHeaders!: Table<PendingHeader, string>;
   groupSkippedKeys!: Table<{ key: string; mk: string }, string>;
-  pqDrSessions!: Table<PqDrSessionRecord, string>;
+  pqDrSessions!: Table<any, string>; // Legacy
+  pqDrSessionsV2!: Table<PqDrSessionRecord, string>;
 
   constructor() {
     super('NyxUnifiedDB');
@@ -174,6 +176,18 @@ export class NyxDatabase extends Dexie {
 
     this.version(3).stores({
       pqDrSessions: 'conversationId'
+    });
+
+    this.version(4).stores({
+      pqDrSessionsV2: 'id, conversationId'
+    }).upgrade(async trans => {
+      // Migrate existing sessions to V2
+      const oldSessions = await trans.table('pqDrSessions').toArray();
+      const newSessions = oldSessions.map(session => ({
+        ...session,
+        id: `${session.conversationId}_${session.peerDeviceId || 'unknown'}`
+      }));
+      await trans.table('pqDrSessionsV2').bulkAdd(newSessions);
     });
   }
 }
