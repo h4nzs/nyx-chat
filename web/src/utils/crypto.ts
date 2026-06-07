@@ -1269,7 +1269,7 @@ async function doDecryptMessage(
 export async function establishSessionFromPreKeyBundle(
   mySigningKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   preKeyBundle: PreKeyBundle
-): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: string, otpkId?: number }> {
+): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: Uint8Array, otpkId?: number }> {
   const sodium = await getSodiumLib();
   const { worker_x3dh_initiator } = await getWorkerProxy();
 
@@ -1311,7 +1311,7 @@ export async function establishSessionFromPreKeyBundle(
 
   return {
     sessionKey: result.sessionKey,
-    initiatorCiphertexts: result.initiatorCiphertexts, // Pastikan ini namanya initiatorCiphertexts, bukan ephemeralPublicKey
+    initiatorCiphertexts: result.initiatorCiphertexts,
     otpkId: preKeyBundle.oneTimePreKey?.keyId
   };
 }
@@ -1321,16 +1321,19 @@ export async function deriveSessionKeyAsRecipient(
   mySignedPreKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   myPqIdentityKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
   myPqSignedPreKeyPair: { publicKey: Uint8Array, privateKey: Uint8Array },
-  initiatorSigningKeyStr: string,      // Harus string
-  initiatorCiphertextsStr: string,     // Harus string
+  initiatorSigningKeyStr: string,
+  initiatorCiphertextsInput: string | Uint8Array,
   otpkId?: number
 ): Promise<Uint8Array> {
   const sodium = await getSodiumLib();
   const { worker_x3dh_recipient, worker_decrypt_session_key } = await getWorkerProxy();
 
-  // ERROR KEMUNGKINAN TERJADI DI SINI
   const theirSigningKey = sodium.from_base64(initiatorSigningKeyStr, sodium.base64_variants.URLSAFE_NO_PADDING);
-  const initiatorCiphertexts = initiatorCiphertextsStr;
+  
+  // Handle both string (Base64) and binary input for backward compatibility
+  const initiatorCiphertexts = typeof initiatorCiphertextsInput === 'string' 
+    ? sodium.from_base64(initiatorCiphertextsInput, sodium.base64_variants.URLSAFE_NO_PADDING)
+    : initiatorCiphertextsInput;
   
   let myOneTimePreKey: { privateKey: Uint8Array } | undefined;
 

@@ -183,6 +183,32 @@ export function handleApiError(e: unknown): string {
   return "An unexpected error occurred";
 }
 
+export interface PreKeyBundle {
+  deviceId: string;
+  identityKey: string;
+  pqIdentityKey?: string;
+  signingKey: string;
+  signedPreKey: {
+    key: string;
+    pqKey?: string;
+    signature: string;
+    pqSignature?: string;
+  };
+  oneTimePreKey?: {
+    keyId: number;
+    key: string;
+    pqKey?: string;
+  };
+}
+
+export async function getPreKeyBundle(userId: string): Promise<PreKeyBundle> {
+  // NOTE: This returns the first device's bundle for simplicity in this version
+  const bundles = await authFetch<Record<string, PreKeyBundle[]>>(`/api/keys/prekey-bundle/${userId}`);
+  const userBundles = bundles[userId];
+  if (!userBundles || userBundles.length === 0) throw new Error("User has no active devices");
+  return userBundles[0];
+}
+
 // Upload menggunakan Axios (untuk Progress Bar)
 export async function apiUpload<T = unknown>({
   path,

@@ -45,6 +45,95 @@ async function ensureSodiumReady() {
   isReady = true;
 }
 
+// --- BINARY HANDSHAKE HELPERS ---
+
+const HANDSHAKE_MAGIC = 0x4E; // 'N'
+const HANDSHAKE_VERSION = 0x01;
+const X_WING_CT_SIZE = 1120;
+const X25519_PK_SIZE = 32;
+
+function serializeHandshake(
+    ephemeralPublicKey: Uint8Array,
+    ctId: Uint8Array,
+    ctSpk: Uint8Array,
+    ctOtpk?: Uint8Array
+): Uint8Array {
+    const hasOtpk = !!ctOtpk;
+    const flags = hasOtpk ? 0x01 : 0x00;
+    
+    const size = 4 + X25519_PK_SIZE + (X_WING_CT_SIZE * 2) + (hasOtpk ? X_WING_CT_SIZE : 0);
+    const buffer = new Uint8Array(size);
+    const view = new DataView(buffer.buffer);
+    
+    // Header (4 bytes)
+    view.setUint8(0, HANDSHAKE_MAGIC);
+    view.setUint8(1, HANDSHAKE_VERSION);
+    view.setUint8(2, flags);
+    view.setUint8(3, 0x00); // Reserved
+    
+    let offset = 4;
+    
+    // Ephemeral Key (32 bytes)
+    buffer.set(ephemeralPublicKey, offset);
+    offset += X25519_PK_SIZE;
+    
+    // CT_ID (1120 bytes)
+    buffer.set(ctId, offset);
+    offset += X_WING_CT_SIZE;
+    
+    // CT_SPK (1120 bytes)
+    buffer.set(ctSpk, offset);
+    offset += X_WING_CT_SIZE;
+    
+    // CT_OTPK (1120 bytes - optional)
+    if (ctOtpk) {
+        buffer.set(ctOtpk, offset);
+    }
+    
+    return buffer;
+}
+
+function deserializeHandshake(buffer: Uint8Array): {
+    ephemeralPublicKey: Uint8Array,
+    ctId: Uint8Array,
+    ctSpk: Uint8Array,
+    ctOtpk?: Uint8Array
+} {
+    if (buffer.length < 4 + X25519_PK_SIZE + (X_WING_CT_SIZE * 2)) {
+        throw new Error("Invalid handshake buffer: too short");
+    }
+    
+    const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+    const magic = view.getUint8(0);
+    const version = view.getUint8(1);
+    const flags = view.getUint8(2);
+    
+    if (magic !== HANDSHAKE_MAGIC) throw new Error("Invalid handshake magic byte");
+    if (version !== HANDSHAKE_VERSION) throw new Error("Unsupported handshake version");
+    
+    const hasOtpk = (flags & 0x01) !== 0;
+    
+    let offset = 4;
+    const ephemeralPublicKey = buffer.slice(offset, offset + X25519_PK_SIZE);
+    offset += X25519_PK_SIZE;
+    
+    const ctId = buffer.slice(offset, offset + X_WING_CT_SIZE);
+    offset += X_WING_CT_SIZE;
+    
+    const ctSpk = buffer.slice(offset, offset + X_WING_CT_SIZE);
+    offset += X_WING_CT_SIZE;
+    
+    let ctOtpk: Uint8Array | undefined = undefined;
+    if (hasOtpk) {
+        if (buffer.length < offset + X_WING_CT_SIZE) {
+            throw new Error("Invalid handshake buffer: missing OTPK ciphertext");
+        }
+        ctOtpk = buffer.slice(offset, offset + X_WING_CT_SIZE);
+    }
+    
+    return { ephemeralPublicKey, ctId, ctSpk, ctOtpk };
+}
+
 // --- INTERNAL HELPER FUNCTIONS FOR CORE CRYPTO LOGIC ---
 
 function _sanitizeError(error: unknown): string {
@@ -399,7 +488,7 @@ export type WorkerMessage =
   | { type: 'pq_box_seal'; payload: { message: CryptoBuffer | string; pqPublicKey: CryptoBuffer; classicalPublicKey: CryptoBuffer }; id: string }
   | { type: 'pq_box_seal_open'; payload: { combinedPayload: CryptoBuffer; pqPrivateKey: CryptoBuffer; classicalPrivateKey: CryptoBuffer }; id: string }
   | { type: 'x3dh_initiator'; payload: { mySigningKey: SodiumKeyPair; theirIdentityKey: CryptoBuffer; theirPqIdentityKey: CryptoBuffer; theirSignedPreKey: CryptoBuffer; theirPqSignedPreKey: CryptoBuffer; theirSigningKey: CryptoBuffer; signature: CryptoBuffer; pqSignature: CryptoBuffer; theirOneTimePreKey?: CryptoBuffer; theirPqOneTimePreKey?: CryptoBuffer }; id: string }
-  | { type: 'x3dh_recipient'; payload: { myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; myPqIdentityKey: SodiumKeyPair; myPqSignedPreKey: SodiumKeyPair; theirSigningKey: CryptoBuffer; initiatorCiphertexts: string; myOneTimePreKey?: { privateKey: CryptoBuffer } }; id: string }
+  | { type: 'x3dh_recipient'; payload: { myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; myPqIdentityKey: SodiumKeyPair; myPqSignedPreKey: SodiumKeyPair; theirSigningKey: CryptoBuffer; initiatorCiphertexts: CryptoBuffer; myOneTimePreKey?: { privateKey: CryptoBuffer } }; id: string }
   | { type: 'crypto_box_seal'; payload: { message: CryptoBuffer; publicKey: CryptoBuffer }; id: string }
   | { type: 'file_encrypt'; payload: { fileBuffer: ArrayBuffer | Uint8Array }; id: string }
   | { type: 'file_decrypt'; payload: { combinedData: ArrayBuffer | Uint8Array; keyBytes: CryptoBuffer }; id: string }
@@ -416,7 +505,7 @@ export type WorkerMessage =
   | { type: 'encrypt_session_key'; payload: { sessionKey: CryptoBuffer; masterSeed: CryptoBuffer }; id: string }
   | { type: 'decrypt_session_key'; payload: { encryptedKey: CryptoBuffer; masterSeed: CryptoBuffer }; id: string }
   | { type: 'generate_otpk_batch'; payload: { count: number; startId: number; masterSeed: CryptoBuffer }; id: string }
-  | { type: 'x3dh_recipient_regenerate'; payload: { keyId: number; masterSeed: CryptoBuffer; myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; myPqIdentityKey: SodiumKeyPair; myPqSignedPreKey: SodiumKeyPair; theirSigningKey: CryptoBuffer; initiatorCiphertexts: string }; id: string }
+  | { type: 'x3dh_recipient_regenerate'; payload: { keyId: number; masterSeed: CryptoBuffer; myIdentityKey: SodiumKeyPair; mySignedPreKey: SodiumKeyPair; myPqIdentityKey: SodiumKeyPair; myPqSignedPreKey: SodiumKeyPair; theirSigningKey: CryptoBuffer; initiatorCiphertexts: CryptoBuffer }; id: string }
   | { type: 'dr_init_alice'; payload: { sk: CryptoBuffer; theirPqSignedPreKeyPublic: CryptoBuffer }; id: string }
   | { type: 'dr_init_bob'; payload: { sk: CryptoBuffer; myPqSignedPreKey: SodiumKeyPair }; id: string }
   | { type: 'dr_ratchet_encrypt'; payload: { serializedState: DoubleRatchetState; plaintext: string | CryptoBuffer }; id: string }
@@ -755,16 +844,11 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           
           const sessionKey = sodium.crypto_generichash(32, sharedSecret, null);
 
-          const ciphertextsObj: Record<string, string | undefined> = {
-             ek: sodium.to_base64(ephemeralKeyPair.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING)
-          };
-          if (ct_id) ciphertextsObj.ct_id = sodium.to_base64(ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
-          if (ct_spk) ciphertextsObj.ct_spk = sodium.to_base64(ct_spk, sodium.base64_variants.URLSAFE_NO_PADDING);
-          if (ct_otpk) ciphertextsObj.ct_otpk = sodium.to_base64(ct_otpk, sodium.base64_variants.URLSAFE_NO_PADDING);
-
-          const initiatorCiphertexts = sodium.to_base64(
-             new TextEncoder().encode(JSON.stringify(ciphertextsObj)),
-             sodium.base64_variants.URLSAFE_NO_PADDING
+          const initiatorCiphertexts = serializeHandshake(
+             ephemeralKeyPair.publicKey,
+             ct_id!,
+             ct_spk!,
+             ct_otpk
           );
 
           result = {
@@ -790,31 +874,22 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const theirSigningKeyBytes = new Uint8Array(theirSigningKey);
         const theirIdentityKeyBytes = sodium.crypto_sign_ed25519_pk_to_curve25519(theirSigningKeyBytes);
 
-        const ciphertextsStr = new TextDecoder().decode(sodium.from_base64(initiatorCiphertexts as string, sodium.base64_variants.URLSAFE_NO_PADDING));
-        const ciphertexts = JSON.parse(ciphertextsStr);
-
-        const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
-        
-        if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
-            throw new Error("Post-Quantum Handshake Mandatory");
-        }
-
-        const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const ct_spk = sodium.from_base64(ciphertexts.ct_spk, sodium.base64_variants.URLSAFE_NO_PADDING);
+        // Parse Binary Handshake
+        const { ephemeralPublicKey, ctId, ctSpk, ctOtpk } = deserializeHandshake(new Uint8Array(initiatorCiphertexts as any));
 
         let sharedSecret: Uint8Array | null = null;
 
         try {
           const dh1 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirIdentityKeyBytes);
-          const dh2 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirEphemeralKeyBytes);
-          const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirEphemeralKeyBytes);
+          const dh2 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, ephemeralPublicKey);
+          const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, ephemeralPublicKey);
           
-          const ss_id = sodium.crypto_kem_xwing_dec(ct_id, myPqIdentityKeyPrivateBytes);
-          const ss_spk = sodium.crypto_kem_xwing_dec(ct_spk, myPqSignedPreKeyPrivateBytes);
+          const ss_id = sodium.crypto_kem_xwing_dec(ctId, myPqIdentityKeyPrivateBytes);
+          const ss_spk = sodium.crypto_kem_xwing_dec(ctSpk, myPqSignedPreKeyPrivateBytes);
 
           const secrets = [dh1, dh2, dh3, ss_id, ss_spk];
 
-          if (ciphertexts.ct_otpk) {
+          if (ctOtpk) {
              if (!myOneTimePreKey) {
                  throw new Error("Sender used One-Time Pre-Key but local device is missing the key.");
              }
@@ -823,11 +898,10 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
              const classicalKey = new Uint8Array(parsedKeys.classical);
              const pqKey = new Uint8Array(parsedKeys.pq);
 
-             const dh4 = sodium.crypto_scalarmult(classicalKey, theirEphemeralKeyBytes);
+             const dh4 = sodium.crypto_scalarmult(classicalKey, ephemeralPublicKey);
              secrets.push(dh4);
 
-             const ct_otpk = sodium.from_base64(ciphertexts.ct_otpk, sodium.base64_variants.URLSAFE_NO_PADDING);
-             const ss_otpk = sodium.crypto_kem_xwing_dec(ct_otpk, pqKey);
+             const ss_otpk = sodium.crypto_kem_xwing_dec(ctOtpk, pqKey);
              secrets.push(ss_otpk);
 
              sodium.memzero(classicalKey);
@@ -1420,36 +1494,26 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
         const theirSigningKeyBytes = new Uint8Array(theirSigningKey);
         const theirIdentityKeyBytes = sodium.crypto_sign_ed25519_pk_to_curve25519(theirSigningKeyBytes);
 
-        const ciphertextsStr = new TextDecoder().decode(sodium.from_base64(initiatorCiphertexts as string, sodium.base64_variants.URLSAFE_NO_PADDING));
-        const ciphertexts = JSON.parse(ciphertextsStr);
-
-        const theirEphemeralKeyBytes = sodium.from_base64(ciphertexts.ek, sodium.base64_variants.URLSAFE_NO_PADDING);
-        
-        if (!ciphertexts.ct_id || !ciphertexts.ct_spk) {
-            throw new Error("Post-Quantum Handshake Mandatory");
-        }
-
-        const ct_id = sodium.from_base64(ciphertexts.ct_id, sodium.base64_variants.URLSAFE_NO_PADDING);
-        const ct_spk = sodium.from_base64(ciphertexts.ct_spk, sodium.base64_variants.URLSAFE_NO_PADDING);
+        // Parse Binary Handshake
+        const { ephemeralPublicKey, ctId, ctSpk, ctOtpk } = deserializeHandshake(new Uint8Array(initiatorCiphertexts as any));
 
         let sharedSecret: Uint8Array | null = null;
 
         try {
           const dh1 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirIdentityKeyBytes);
-          const dh2 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, theirEphemeralKeyBytes);
-          const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, theirEphemeralKeyBytes);
+          const dh2 = sodium.crypto_scalarmult(myIdentityKeyPrivateBytes, ephemeralPublicKey);
+          const dh3 = sodium.crypto_scalarmult(mySignedPreKeyPrivateBytes, ephemeralPublicKey);
           
-          const ss_id = sodium.crypto_kem_xwing_dec(ct_id, myPqIdentityKeyPrivateBytes);
-          const ss_spk = sodium.crypto_kem_xwing_dec(ct_spk, myPqSignedPreKeyPrivateBytes);
+          const ss_id = sodium.crypto_kem_xwing_dec(ctId, myPqIdentityKeyPrivateBytes);
+          const ss_spk = sodium.crypto_kem_xwing_dec(ctSpk, myPqSignedPreKeyPrivateBytes);
 
           const secrets = [dh1, dh2, dh3, ss_id, ss_spk];
 
-          if (ciphertexts.ct_otpk) {
-             const dh4 = sodium.crypto_scalarmult(otpkKeyPair.privateKey, theirEphemeralKeyBytes); 
+          if (ctOtpk) {
+             const dh4 = sodium.crypto_scalarmult(otpkKeyPair.privateKey, ephemeralPublicKey); 
              secrets.push(dh4);
 
-             const ct_otpk = sodium.from_base64(ciphertexts.ct_otpk, sodium.base64_variants.URLSAFE_NO_PADDING);
-             const ss_otpk = sodium.crypto_kem_xwing_dec(ct_otpk, pqOtpkKeyPair.privateKey);
+             const ss_otpk = sodium.crypto_kem_xwing_dec(ctOtpk, pqOtpkKeyPair.privateKey);
              secrets.push(ss_otpk);
           }
 

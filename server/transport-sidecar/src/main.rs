@@ -253,21 +253,24 @@ async fn handle_connection(
     mut pub_conn: redis::aio::MultiplexedConnection,
     jwt_secret: String,
 ) -> Result<()> {
-    let (mut _send, mut recv) = conn.accept_bi().await.context("accept_bi")?;
+    // 1. First bidirectional stream is ALWAYS for Authentication
+    let (mut _auth_send, mut auth_recv) = conn.accept_bi().await.context("auth_accept_bi")?;
     
-    let mut header = [0u8; 5];
+    let mut auth_header = [0u8; 5];
     let mut read_bytes = 0;
     while read_bytes < 5 {
-        let n = recv.read(&mut header[read_bytes..]).await.context("header")?.unwrap_or(0);
+        let n = auth_recv.read(&mut auth_header[read_bytes..]).await.context("auth_header")?.unwrap_or(0);
         if n == 0 { break; }
         read_bytes += n;
     }
     
-    let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
-    let mut token_bytes = vec![0u8; length];
+    let auth_length = u32::from_be_bytes([auth_header[1], auth_header[2], auth_header[3], auth_header[4]]) as usize;
+    if auth_length > 4096 { return Err(anyhow::anyhow!("Token too large")); }
+
+    let mut token_bytes = vec![0u8; auth_length];
     read_bytes = 0;
-    while read_bytes < length {
-        let n = recv.read(&mut token_bytes[read_bytes..]).await.context("token")?.unwrap_or(0);
+    while read_bytes < auth_length {
+        let n = auth_recv.read(&mut token_bytes[read_bytes..]).await.context("auth_token")?.unwrap_or(0);
         if n == 0 { break; }
         read_bytes += n;
     }
@@ -299,6 +302,74 @@ async fn handle_connection(
     let conn = Arc::new(conn);
     sessions.insert(session_key.clone(), conn.clone());
 
+    // 2. Continuous Bidirectional Stream Loop (for Handshakes, etc.)
+    let c_bi = conn.clone();
+    let user_id_bi = user_id.clone();
+    let device_id_bi = device_id.clone();
+    let p_bi = pub_conn.clone();
+    tokio::spawn(async move {
+        loop {
+            match c_bi.accept_bi().await {
+                Ok((mut send, mut recv)) => {
+                    let mut p = p_bi.clone();
+                    let uid = user_id_bi.clone();
+                    let did = device_id_bi.clone();
+                    tokio::spawn(async move {
+                        let mut header = [0u8; 5];
+                        let mut head_read = 0;
+                        while head_read < 5 {
+                            match recv.read(&mut header[head_read..]).await {
+                                Ok(Some(n)) if n > 0 => head_read += n,
+                                _ => return, // Stream closed or error
+                            }
+                        }
+
+                        let op_code = header[0];
+                        let length = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
+                        
+                        // MAX 32KB for Handshake/Bi-stream payloads
+                        if length > 32768 {
+                            warn!("Payload too large: {} bytes", length);
+                            return;
+                        }
+
+                        let mut payload = vec![0u8; length];
+                        let mut read = 0;
+                        while read < length {
+                            match recv.read(&mut payload[read..]).await {
+                                Ok(Some(n)) if n > 0 => read += n,
+                                _ => break,
+                            }
+                        }
+
+                        if read == length {
+                            let b64_payload = data_encoding::BASE64URL_NOPAD.encode(&payload);
+                            let msg = UpstreamMessage {
+                                user_id: uid,
+                                device_id: did,
+                                op_code,
+                                payload: b64_payload,
+                            };
+                            
+                            if let Ok(json) = serde_json::to_string(&msg) {
+                                let channel = format!("nyx:upstream:{}", op_code);
+                                let _: Result<(), _> = p.publish(channel, json).await;
+
+                                // For HANDSHAKE (0x0A), send back immediate ACK to client
+                                if op_code == 0x0A {
+                                    let ack_frame = [0x06, 0, 0, 0, 0]; // ACK OpCode + 0 length
+                                    let _ = send.write_all(&ack_frame).await;
+                                }
+                            }
+                        }
+                    });
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // 3. Unidirectional Stream Loop (for legacy/bulk data)
     let c2 = conn.clone();
     let user_id2 = user_id.clone();
     let device_id2 = device_id.clone();

@@ -50,6 +50,7 @@ async function initWebTransport(url: string, token: string, certificateHash?: st
 
     // Start reading streams
     readIncomingStreams(transport.incomingUnidirectionalStreams).catch(console.error);
+    readIncomingBidirectionalStreams(transport.incomingBidirectionalStreams).catch(console.error);
     readIncomingDatagrams(transport.datagrams.readable).catch(console.error);
     
   } catch (error: any) {
@@ -68,6 +69,46 @@ async function readIncomingStreams(readable: ReadableStream<any>) {
       }
     }
   } finally {
+    reader.releaseLock();
+  }
+}
+
+async function readIncomingBidirectionalStreams(readable: ReadableStream<WebTransportBidirectionalStream>) {
+  const reader = readable.getReader();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) {
+        handleBidirectionalStream(value).catch(console.error);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function handleBidirectionalStream(stream: WebTransportBidirectionalStream) {
+  const reader = stream.readable.getReader();
+  const writer = stream.writable.getWriter();
+  
+  try {
+    const { value, done } = await reader.read();
+    if (done || !value) return;
+    
+    const opCode = value[0];
+    if (opCode === TransportOpCode.HANDSHAKE) {
+      // Process Handshake
+      processChunk(value);
+      
+      // Send back ACK on same stream
+      const ackFrame = new Uint8Array([TransportOpCode.ACK, 0, 0, 0, 0]);
+      await writer.write(ackFrame);
+    } else {
+      processChunk(value);
+    }
+  } finally {
+    await writer.close();
     reader.releaseLock();
   }
 }
@@ -189,6 +230,55 @@ self.onmessage = async (event: MessageEvent<MainToTransportWorker>) => {
           await datagramWriter.write(frame);
         } catch (e) {
           console.error("Failed to send datagram", e);
+        }
+      }
+      break;
+    case 'START_HANDSHAKE':
+      if (transport) {
+        let stream: WebTransportBidirectionalStream | null = null;
+        try {
+          stream = await transport.createBidirectionalStream();
+          const writer = stream.writable.getWriter();
+          const reader = stream.readable.getReader();
+          
+          const frame = new Uint8Array(5 + data.payload.length);
+          frame[0] = TransportOpCode.HANDSHAKE;
+          const view = new DataView(frame.buffer);
+          view.setUint32(1, data.payload.length, false);
+          frame.set(data.payload, 5);
+          
+          await writer.write(frame);
+          await writer.close();
+          
+          // Timeout & Retry Logic (5 seconds)
+          const timeoutPromise = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Handshake timeout')), 5000)
+          );
+          
+          const readPromise = (async () => {
+            const { value, done } = await reader.read();
+            if (done || !value) throw new Error('Stream closed prematurely');
+            
+            // Check for ACK OpCode
+            if (value[0] === TransportOpCode.ACK || value[0] === TransportOpCode.HANDSHAKE) {
+                return true;
+            }
+            throw new Error('Invalid handshake response');
+          })();
+          
+          await Promise.race([readPromise, timeoutPromise]);
+          
+          postMessage({ type: 'HANDSHAKE_COMPLETED', success: true } satisfies TransportWorkerToMain);
+          
+        } catch (e: any) {
+          console.error("Handshake failed:", e);
+          postMessage({ 
+            type: 'HANDSHAKE_COMPLETED', 
+            success: false, 
+            error: e?.message || 'Handshake failed' 
+          } satisfies TransportWorkerToMain);
+        } finally {
+            // Reader cleanup is handled by GC or explicit release if needed
         }
       }
       break;

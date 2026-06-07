@@ -201,3 +201,118 @@ Apakah Anda ingin saya buatkan cuplikan kode sederhana tentang cara mengecek duk
 
 ### payment gateway
 - BTCpay server
+
+   3. Potential Weakness (OTPK Indexing): Di web/src/utils/crypto.ts, jika OTPK tidak ditemukan, sistem mencoba melakukan regenerasi
+      menggunakan worker_x3dh_recipient_regenerate. Meskipun ini membantu ketersediaan pesan, mekanisme identifikasi keyId harus
+      dipastikan tidak bocor atau dapat dimanipulasi untuk melacak pola aktivitas user.
+   4. Ephemeral Overhead: initiatorCiphertexts dikirimkan dalam bentuk JSON string terenkapsulasi di pesan pertama. Hal ini aman
+      secara kriptografi, namun menambah payload size pada jabat tangan awal. Namun, mengingat ini hanya terjadi di pesan pertama per
+      sesi, dampaknya minimal.
+
+Berdasarkan analisis mendalam terhadap arsitektur NYX Messenger, berikut adalah Blueprint Strategis untuk mengintegrasikan
+  WebTransport ke dalam alur handshake PQX3DH, mengubah format data menjadi biner, dan mengoordinasikan penyimpanan serta status UI.
+
+  ---
+
+  STRATEGIC BLUEPRINT: BINARY WEBTRANSPORT HANDSHAKE (NYX-BWH-V1)
+
+  1. Transformasi Data: Dari JSON ke Raw Binary
+  Saat ini, initiatorCiphertexts dibungkus sebagai objek JSON yang di-encode ke Base64, yang tidak efisien untuk aliran data
+  berkelanjutan (streaming).
+
+  Rencana Perubahan Skema:
+  Kita akan menggunakan format Packed Binary Buffer dengan struktur tetap (Fixed-Length) atau TLV (Type-Length-Value) untuk
+  fleksibilitas. Mengingat ukuran kunci X-Wing (ML-KEM-768 hybrid) bersifat konstan, format berikut diusulkan:
+
+   * Header (4 bytes): [Magic Byte: 0x4E (N)] [Version: 0x01] [Flags: 0x01 (Has OTPK)] [Reserved: 0x00]
+   * Ephemeral Key (32 bytes): Raw bytes dari X25519 public key.
+   * Ciphertext ID (1120 bytes): Output biner mentah dari crypto_kem_xwing_enc untuk Identity Key.
+   * Ciphertext SPK (1120 bytes): Output biner mentah dari crypto_kem_xwing_enc untuk Signed Pre-Key.
+   * Ciphertext OTPK (1120 bytes - Opsional): Hanya ada jika Flags menginstruksikan.
+
+  Total Payload: ~2.3 KB hingga ~3.4 KB (Tanpa overhead Base64/JSON).
+
+  ---
+
+  2. Manajemen Arus Kerja: WebWorker & WebTransport Streams
+  WebTransport memungkinkan kita membuka bidirectional stream yang independen dari aliran pesan utama untuk melakukan jabat tangan
+  tanpa menghalangi antrean pesan lainnya.
+
+  Alur Koordinasi WebWorker:
+   1. Initiator Side (transport.worker.ts):
+       * Membuka stream baru menggunakan connection.createBidirectionalStream().
+       * Mengirimkan HandshakeOpCode (misal: 0x0A) sebagai byte pertama stream.
+   2. Processing (crypto.worker.ts):
+       * Menerima Pre-Key Bundle dalam format biner (didapat dari stream atau API).
+       * Menghasilkan sessionKey dan melakukan enkapsulasi rahasia ke dalam Uint8Array.
+       * Menggunakan Transferable Objects untuk memindahkan buffer biner ke transport.worker.ts tanpa penyalinan memori (zero-copy).
+   3. Relay Logic:
+       * Server Rust Sidecar akan menerima stream ini, membaca Header, dan merutekan stream biner ke Client B melalui Redis
+         nyx:downstream.
+
+  ---
+
+  3. Koordinasi State & Storage (Zustand & Dexie)
+  Handshake harus tersinkronisasi sempurna dengan UI agar user tidak mengirim pesan sebelum kunci simetris terbentuk.
+
+  Alur Sinkronisasi:
+   * Zustand (conversation.ts): 
+       * Saat stream dibuka, state konversasi diubah menjadi status: 'handshaking'.
+       * Status ini akan memicu komponen UI untuk menampilkan animasi "Establishing Secure Link".
+       * Setelah crypto.worker.ts mengonfirmasi keberhasilan handshake, state berubah menjadi status: 'secure'.
+   * Dexie (db.ts):
+       * Atomic Write: Begitu sessionKey dihasilkan di Worker, kunci tersebut dikirim ke Main Thread untuk disimpan di tabel
+         conversations (field ratchetState).
+       * Pesan-pesan yang tertunda di offlineQueue akan mulai didekripsi/dienkripsi menggunakan kunci baru ini segera setelah
+         transaksi database selesai.
+
+  ---
+
+  IDENTIFIKASI FILE TERDAMPAK
+
+  ┌─────────────────────┬────────────────────────────────────────────────────────────────────────────────────────────────┐
+  │ Nama File           │ Peran dalam Rencana                                                                            │
+  ├─────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+  │ crypto.worker.ts    │ Mengganti JSON.stringify dengan new Uint8Array dan implementasi serialisasi biner.             │
+  │ transport.worker.ts │ Penambahan logika createBidirectionalStream khusus untuk TransportOpCode.HANDSHAKE.            │
+  │ transportClient.ts  │ Integrasi fungsi untuk memulai stream biner dari Main Thread ke Worker.                        │
+  │ db.ts               │ Penyesuaian skema ratchetState untuk menerima buffer biner mentah jika sebelumnya ada konversi │
+  │                     │ string.                                                                                        │
+  │ conversation.ts     │ Penambahan status HandshakeProgress untuk feedback UI real-time.                               │
+  │ (Store)             │                                                                                                │
+  └─────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────┘
+  ---
+
+  VISUALISASI ALUR DATA BINER (NEW)
+
+    1 sequenceDiagram
+    2     participant A as Client A (Worker)
+    3     participant S as Server (Rust Sidecar)
+    4     participant B as Client B (Worker)
+    5
+    6     Note over A: Generate SessionKey & Binary Handshake Buffer
+    7     A->>S: Open WebTransport Bidirectional Stream
+    8     A->>S: Send [Header][EK][CT_ID][CT_SPK] (Raw Bytes)
+    9     Note over S: Relay Stream via Redis Pub/Sub
+   10     S->>B: Stream Binary Handshake
+   11     Note over B: crypto_kem_xwing_dec (Decapsulate)
+   12     B-->>S: Send Handshake Acknowledge (Binary)
+   13     S-->>A: Relay ACK
+   14     Note over A,B: Handshake Complete -> Status: 'SECURE'
+
+  ---
+
+  ANALISIS KELAYAKAN & RISIKO (SECURITY & TECH)
+
+   1. Efisiensi (Feasible): Penghematan bandwidth mencapai ~40% dibandingkan format JSON/Base64 saat ini karena penghapusan metadata
+      overhead dan inflation dari Base64.
+   2. Backpressure (Feasible): WebTransport stream menangani backpressure secara native, sangat cocok untuk pengiriman buffer biner
+      besar seperti ciphertext PQC.
+   3. Risiko Identifikasi Stream: Tanpa enkripsi stream-level (hanya payload-level), server bisa mengidentifikasi bahwa sebuah stream
+      adalah "Handshake". Namun, karena server NYX adalah Blind Relay, ia tetap tidak bisa membaca isi rahasia di dalam ciphertext
+      X-Wing.
+   4. Sinkronisasi Worker: Risiko terbesar adalah race condition antara transport.worker dan crypto.worker. Solusi yang direncanakan
+      adalah menggunakan MessagePort untuk komunikasi langsung antar-worker (Direct Worker-to-Worker Communication).
+
+  Kesimpulan Rencana: Integrasi WebTransport biner sangat layak dan akan secara signifikan meningkatkan performa awal koneksi (TTFC -
+  Time To First Chat). Rencana ini siap untuk tahap implementasi teknis.

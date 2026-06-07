@@ -33,11 +33,11 @@ worker.onmessage = (e) => {
   }
 };
 
-function sendToWorker<T>(type: string, payload: unknown): Promise<T> {
+function sendToWorker<T>(type: string, payload: unknown, transfer?: Transferable[]): Promise<T> {
   return new Promise((resolve, reject) => {
     const id = uuidv4();
     pendingRequests.set(id, { resolve: resolve as (val: unknown) => void, reject });
-    worker.postMessage({ id, type, payload });
+    worker.postMessage({ id, type, payload }, transfer || []);
   });
 }
 
@@ -237,8 +237,8 @@ export function worker_x3dh_initiator(payload: {
     pqSignature: CryptoBuffer,
     theirOneTimePreKey?: CryptoBuffer,
     theirPqOneTimePreKey?: CryptoBuffer
-}): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: string }> {
-    return sendToWorker('x3dh_initiator', {
+}): Promise<{ sessionKey: Uint8Array, initiatorCiphertexts: Uint8Array }> {
+    return sendToWorker<{ sessionKey: ArrayBuffer, initiatorCiphertexts: ArrayBuffer }>('x3dh_initiator', {
       mySigningKey: { privateKey: toArray(payload.mySigningKey.privateKey) },
       theirIdentityKey: toArray(payload.theirIdentityKey),
       theirPqIdentityKey: payload.theirPqIdentityKey ? toArray(payload.theirPqIdentityKey) : undefined,
@@ -249,7 +249,10 @@ export function worker_x3dh_initiator(payload: {
       pqSignature: payload.pqSignature ? toArray(payload.pqSignature) : undefined,
       theirOneTimePreKey: payload.theirOneTimePreKey ? toArray(payload.theirOneTimePreKey) : undefined,
       theirPqOneTimePreKey: payload.theirPqOneTimePreKey ? toArray(payload.theirPqOneTimePreKey) : undefined
-    });
+    }).then(res => ({
+        sessionKey: new Uint8Array(res.sessionKey),
+        initiatorCiphertexts: new Uint8Array(res.initiatorCiphertexts)
+    }));
 }
 
 export function worker_x3dh_recipient(payload: {
@@ -258,10 +261,12 @@ export function worker_x3dh_recipient(payload: {
     myPqIdentityKey: SodiumKeyPair,
     myPqSignedPreKey: SodiumKeyPair,
     theirSigningKey: CryptoBuffer,
-    initiatorCiphertexts: string,
+    initiatorCiphertexts: Uint8Array,
     myOneTimePreKey?: { privateKey: CryptoBuffer }
 }): Promise<Uint8Array> {
-    return sendToWorker('x3dh_recipient', {
+    const transfer: Transferable[] = [payload.initiatorCiphertexts.buffer];
+    
+    return sendToWorker<ArrayBuffer>('x3dh_recipient', {
       myIdentityKey: { privateKey: toArray(payload.myIdentityKey.privateKey) },
       mySignedPreKey: { privateKey: toArray(payload.mySignedPreKey.privateKey) },
       myPqIdentityKey: { privateKey: toArray(payload.myPqIdentityKey.privateKey) },
@@ -269,7 +274,7 @@ export function worker_x3dh_recipient(payload: {
       theirSigningKey: toArray(payload.theirSigningKey),
       initiatorCiphertexts: payload.initiatorCiphertexts,
       myOneTimePreKey: payload.myOneTimePreKey ? { privateKey: toArray(payload.myOneTimePreKey.privateKey) } : undefined
-    });
+    }, transfer).then(res => new Uint8Array(res));
 }
 
 export function worker_x3dh_recipient_regenerate(payload: {
@@ -280,9 +285,11 @@ export function worker_x3dh_recipient_regenerate(payload: {
     myPqIdentityKey: { privateKey: Uint8Array },
     myPqSignedPreKey: { privateKey: Uint8Array },
     theirSigningKey: CryptoBuffer,
-    initiatorCiphertexts: string
+    initiatorCiphertexts: Uint8Array
 }): Promise<Uint8Array> {
-    return sendToWorker('x3dh_recipient_regenerate', { 
+    const transfer: Transferable[] = [payload.initiatorCiphertexts.buffer];
+
+    return sendToWorker<ArrayBuffer>('x3dh_recipient_regenerate', { 
         keyId: payload.keyId, 
         masterSeed: toArray(payload.masterSeed),
         myIdentityKey: { privateKey: toArray(payload.myIdentityKey.privateKey) },
@@ -291,7 +298,7 @@ export function worker_x3dh_recipient_regenerate(payload: {
         myPqSignedPreKey: { privateKey: toArray(payload.myPqSignedPreKey.privateKey) },
         theirSigningKey: toArray(payload.theirSigningKey),
         initiatorCiphertexts: payload.initiatorCiphertexts
-    });
+    }, transfer).then(res => new Uint8Array(res));
 }
 
 // --- LARGE FILE STREAMING PROXY FUNCTIONS ---

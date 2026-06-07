@@ -98,6 +98,7 @@ type Actions = {
   removeParticipant: (conversationId: string, userId: string) => void;
   updateParticipantRole: (conversationId: string, userId: string, role: "ADMIN" | "MEMBER") => void;
   updateConversationLastMessage: (conversationId: string, message: Message) => void;
+  performHandshake: (conversationId: string) => Promise<void>;
   markKeyRotationNeeded: (conversationId: string, needed: boolean) => void;
   togglePinConversation: (conversationId: string) => Promise<void>;
   upgradeToPqDr: (conversationId: string) => Promise<void>;
@@ -703,6 +704,101 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
       const otherConversations = state.conversations.filter(c => c.id !== conversationId);
       return { conversations: sortConversations([updatedConversation, ...otherConversations], meId) };
     });
+  },
+
+  performHandshake: async (conversationId: string) => {
+    const { conversations } = get();
+    const conv = conversations.find(c => c.id === conversationId);
+    if (!conv || conv.isGroup) return;
+
+    // Set status to handshaking
+    set(state => ({
+        conversations: state.conversations.map(c => 
+            c.id === conversationId ? { ...c, handshakeStatus: 'handshaking' } : c
+        )
+    }));
+
+    try {
+        const { getPreKeyBundle } = await import('@lib/api');
+        const { establishSessionFromPreKeyBundle } = await import('@utils/crypto');
+        const { shadowVault } = await import('@lib/shadowVaultDb');
+        const { useAuthStore } = await import('./auth');
+        
+        const peerId = conv.participants.find(p => p.id !== useAuthStore.getState().user?.id)?.id;
+        if (!peerId) throw new Error("Peer not found");
+
+        const bundle = await getPreKeyBundle(peerId);
+        const { getSodiumLib } = await import('@utils/crypto');
+        const sodium = await getSodiumLib();
+        
+        const signingPrivateKey = await useAuthStore.getState().getSigningPrivateKey();
+        if (!signingPrivateKey) throw new Error("My signing key missing");
+        
+        const mySigningKey = {
+            publicKey: signingPrivateKey.slice(32),
+            privateKey: signingPrivateKey
+        };
+
+        const { sessionKey, initiatorCiphertexts } = await establishSessionFromPreKeyBundle(mySigningKey, bundle);
+        
+        // Start Binary Handshake over WebTransport
+        return new Promise<void>((resolve, reject) => {
+            const handler = (success: boolean, error?: string) => {
+                clearTimeout(timeoutId);
+                transportClient.off('handshake:completed', handler);
+                if (success) {
+                    // Store Session Key
+                    shadowVault.savePqDrSession({
+                        conversationId,
+                        peerClassicalPk: bundle.identityKey,
+                        peerDeviceId: bundle.deviceId,
+                        version: 1,
+                        negotiationStatus: 'ESTABLISHED',
+                        lastActivity: Date.now(),
+                        state: {
+                            RK: sodium.to_base64(sessionKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+                            CKs: null,
+                            CKr: null,
+                            KEMs_pub: null,
+                            KEMs_priv: null,
+                            KEMr: null,
+                            savedCt: null,
+                            Ns: 0,
+                            Nr: 0,
+                            PN: 0
+                        }
+                    }).then(() => {
+                        set(state => ({
+                            conversations: state.conversations.map(c => 
+                                c.id === conversationId ? { ...c, handshakeStatus: 'secure', encryptionMode: 'PQ_DR' } : c
+                            )
+                        }));
+                        resolve();
+                    }).catch(reject);
+                } else {
+                    reject(new Error(error || "Handshake failed"));
+                }
+            };
+
+            const timeoutId = setTimeout(() => {
+                transportClient.off('handshake:completed', handler);
+                reject(new Error("Handshake timed out"));
+            }, 5000);
+
+            transportClient.on('handshake:completed', handler);
+            transportClient.startHandshake(initiatorCiphertexts);
+        });
+
+    } catch (e: any) {
+        console.error("Handshake failed action:", e);
+        set(state => ({
+            conversations: state.conversations.map(c => 
+                c.id === conversationId ? { ...c, handshakeStatus: 'failed' } : c
+            )
+        }));
+        toast.error(`Handshake failed: ${e.message}`);
+        throw e;
+    }
   },
 
   togglePinConversation: async (conversationId) => {

@@ -73,6 +73,9 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
       case 'DATA_RECEIVED':
         this.routeOpCode(data.opCode, data.payload);
         break;
+      case 'HANDSHAKE_COMPLETED':
+        this.emit('handshake:completed', data.success, data.error);
+        break;
     }
   }
 
@@ -146,6 +149,15 @@ export class NyxWebTransportClient extends EventEmitter<TransportEvents> {
   public sendDatagram(opCode: TransportOpCode, payload: BinaryPayload): void {
     const message: MainToTransportWorker = { type: 'SEND_DATAGRAM', opCode, payload };
     // [+] CEK KONEKSI
+    if (!this.connected) {
+      this.offlineQueue.push(message);
+    } else {
+      this.worker.postMessage(message, [payload.buffer]);
+    }
+  }
+
+  public startHandshake(payload: BinaryPayload): void {
+    const message: MainToTransportWorker = { type: 'START_HANDSHAKE', payload };
     if (!this.connected) {
       this.offlineQueue.push(message);
     } else {

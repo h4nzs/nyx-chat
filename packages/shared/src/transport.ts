@@ -5,7 +5,8 @@ export enum TransportOpCode {
   WEBRTC_ICE = 0x04,
   PRESENCE = 0x05,
   ACK = 0x06,
-  KICK = 0x07
+  KICK = 0x07,
+  HANDSHAKE = 0x0A
 }
 
 export type BinaryPayload = Uint8Array;
@@ -20,10 +21,12 @@ export type TransportWorkerToMain =
   | { type: 'CONNECTED' }
   | { type: 'DISCONNECTED'; reason: string }
   | { type: 'ERROR'; error: string }
-  | { type: 'DATA_RECEIVED'; opCode: TransportOpCode; payload: BinaryPayload };
+  | { type: 'DATA_RECEIVED'; opCode: TransportOpCode; payload: BinaryPayload }
+  | { type: 'HANDSHAKE_COMPLETED'; success: boolean; error?: string };
 
 export type MainToTransportWorker =
   | { type: 'CONNECT'; url: string; token: string; certificateHash?: string }
   | { type: 'DISCONNECT' }
   | { type: 'SEND_STREAM'; opCode: TransportOpCode; payload: BinaryPayload }
-  | { type: 'SEND_DATAGRAM'; opCode: TransportOpCode; payload: BinaryPayload };
+  | { type: 'SEND_DATAGRAM'; opCode: TransportOpCode; payload: BinaryPayload }
+  | { type: 'START_HANDSHAKE'; payload: BinaryPayload };
