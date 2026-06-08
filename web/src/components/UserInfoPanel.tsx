@@ -21,11 +21,9 @@ import { useShallow } from 'zustand/react/shallow';
 export default function UserInfoPanel({ userId }: { userId: UserId }) {
   // Tambahkan namespace 'common' untuk menangkap pesan error global
   const { t } = useTranslation(['modals', 'common']);
-  const { activeId, conversations, upgradeToPqDr, downgradeToSenderKey } = useConversationStore(useShallow(s => ({
+  const { activeId, conversations } = useConversationStore(useShallow(s => ({
     activeId: s.activeId,
-    conversations: s.conversations,
-    upgradeToPqDr: s.upgradeToPqDr,
-    downgradeToSenderKey: s.downgradeToSenderKey
+    conversations: s.conversations
   })));
   const { verifiedStatus, setVerified } = useVerificationStore();
   const navigate = useNavigate();
@@ -138,18 +136,13 @@ export default function UserInfoPanel({ userId }: { userId: UserId }) {
           </div>
           <div className="bg-bg-surface rounded-xl shadow-neumorphic-convex p-4 space-y-2">
             <div className="flex items-center justify-between p-3 rounded-lg bg-bg-surface shadow-neumorphic-pressed">
-              <span className="font-semibold text-text-primary">Paranoid Mode (PQ-DR)</span>
-              <button
-                onClick={() => {
-                  if (activeId) {
-                    if (isPqDr) downgradeToSenderKey(activeId, false);
-                    else upgradeToPqDr(activeId);
-                  }
-                }}
-                className={`w-12 h-6 rounded-full transition-colors relative ${isPqDr ? 'bg-accent' : 'bg-border'}`}
-              >
-                <div className={`absolute top-1 left-1 w-4 h-4 rounded-full bg-white transition-transform ${isPqDr ? 'translate-x-6' : ''}`} />
-              </button>
+              <div className="flex flex-col gap-0.5">
+                <span className="font-semibold text-text-primary">X-Wing Post-Quantum</span>
+                <span className="text-[10px] text-text-secondary opacity-60">Multi-Device Forward Secrecy Enabled</span>
+              </div>
+              <div className="p-1.5 rounded-full bg-green-500/20 text-green-500">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              </div>
             </div>
             <button
               onClick={handleViewProfile}

@@ -657,17 +657,31 @@ export async function ensureGroupSession(conversationId: string, participants: P
                   continue;
               }
 
-              const encryptedKey = await worker_pq_box_seal(
-                  sodium.from_base64(senderKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING), 
-                  theirPqPublicKey,
-                  theirPublicKey
-              );
+              // Always use static PQC (X-Wing) for fan-out key distribution
+              let finalEncryptedKeyStr = '';
+
+              try {
+                  const ckBytes = sodium.from_base64(senderKeyB64, sodium.base64_variants.URLSAFE_NO_PADDING);
+                  const packed = new Uint8Array(4 + ckBytes.length);
+                  new DataView(packed.buffer).setUint32(0, 0, false); // Starting N is always 0 for new sessions
+                  packed.set(ckBytes, 4);
+
+                  const encryptedKey = await worker_pq_box_seal(
+                      packed, 
+                      theirPqPublicKey,
+                      theirPublicKey
+                  );
+                  finalEncryptedKeyStr = sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING);
+              } catch (e) {
+                  console.error(`[Crypto] Gagal mengenkripsi Sender Key untuk user ${uId} device ${bundle.deviceId}:`, e);
+                  continue;
+              }
               
               distributionKeys.push({
                   userId: uId,
                   targetDeviceId: bundle.deviceId, 
                   targetDeviceKey: bundle.identityKey,
-                  key: sodium.to_base64(encryptedKey, sodium.base64_variants.URLSAFE_NO_PADDING),
+                  key: finalEncryptedKeyStr,
                   type: 'GROUP_KEY',
                   senderId: myId,
                   senderDeviceKey: myIdentityKeyB64
@@ -714,7 +728,8 @@ export async function handleGroupKeyDistribution(
   const { worker_pq_box_seal_open } = await getWorkerProxy();
 
   // 1. Decrypt the Sender Key (Chain Key)
-  let senderKeyBytes: Uint8Array;
+  let senderKeyBytes: Uint8Array | null = null;
+  
   try {
       // [BUGFIX: SENDER KEY OFFLINE SYNC] - Graceful Base64 decoding fallback
       let encryptedKeyBytes: Uint8Array;
@@ -733,11 +748,15 @@ export async function handleGroupKeyDistribution(
       throw new Error('DECRYPTION_FAILED'); // Propagate to let caller know
   }
   
+  if (!senderKeyBytes) {
+      throw new Error('DECRYPTION_FAILED');
+  }
+
   let currentN = 0;
   let finalCKBytes = senderKeyBytes;
 
   if (senderKeyBytes.length === 36) {
-      // Format baru: N (4 bytes) + CK (32 bytes)
+      // Format: N (4 bytes) + CK (32 bytes)
       currentN = new DataView(senderKeyBytes.buffer, senderKeyBytes.byteOffset, senderKeyBytes.byteLength).getUint32(0, false);
       finalCKBytes = senderKeyBytes.slice(4);
   }
@@ -869,28 +888,30 @@ async function doEncryptMessage(
   
   // --- SMART KEY ROTATION (PCS) ---
   if (senderState) {
-      const MAX_MESSAGES = isGroup ? 50 : 5;
-      const MAX_AGE_MS = isGroup ? 24 * 60 * 60 * 1000 : 5 * 60 * 1000;
+      const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
+
+      const MAX_MESSAGES = isGroup ? 20 : 3;
+      const MAX_AGE_MS = isGroup ? (60 * 60 * 1000) : (2 * 60 * 1000);
+      
       const now = Date.now();
       const count = senderState.messageCount || 0;
       
       let needsRotation = false;
       if (count >= MAX_MESSAGES) {
           needsRotation = true;
-      } else if (isGroup) {
-          const age = senderState.createdAt ? now - senderState.createdAt : 0;
-          if (senderState.createdAt && age >= MAX_AGE_MS) needsRotation = true;
       } else {
+          const age = senderState.createdAt ? now - senderState.createdAt : 0;
           const idleTime = senderState.lastActivityTime ? now - senderState.lastActivityTime : 0;
-          if (senderState.lastActivityTime && idleTime >= MAX_AGE_MS) needsRotation = true;
+          if ((senderState.createdAt && age >= MAX_AGE_MS) || (senderState.lastActivityTime && idleTime >= MAX_AGE_MS)) {
+              needsRotation = true;
+          }
       }
       
       if (needsRotation) {
-          console.log(`[Smart Key Rotation] Triggered for ${conversationId}. Count: ${count}, isGroup: ${isGroup}`);
+          console.debug(`[NYX-Shield] Rotating session keys for ${conversationId}...`);
           // Don't block UI with pq_box_seal, let ensureGroupSession run in background via worker proxy
           await forceRotateGroupSenderKey(conversationId);
           
-          const conversation = useConversationStore.getState().conversations.find(c => c.id === conversationId);
           if (conversation) {
              const distributionKeys = await ensureGroupSession(conversationId, conversation.participants, true);
              if (distributionKeys) {
@@ -1627,7 +1648,6 @@ export async function forceRotateGroupSenderKey(conversationId: string) {
     try {
         const { deleteGroupSenderState } = await import('../lib/keychainDb');
         await deleteGroupSenderState(conversationId);
-        console.log(`[Crypto] Group Sender Key for ${conversationId} wiped. Forced rotation on next message.`);
     } catch (e) {
         console.error('Failed to rotate group key:', e);
     }

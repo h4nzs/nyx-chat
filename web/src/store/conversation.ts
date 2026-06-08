@@ -101,8 +101,6 @@ type Actions = {
   performHandshake: (conversationId: string) => Promise<void>;
   markKeyRotationNeeded: (conversationId: string, needed: boolean) => void;
   togglePinConversation: (conversationId: string) => Promise<void>;
-  upgradeToPqDr: (conversationId: string) => Promise<void>;
-  downgradeToSenderKey: (conversationId: string, isFromPeer?: boolean) => Promise<void>;
   resyncState: () => Promise<void>;
   clearError: () => void;
   reset: () => void;
@@ -155,65 +153,6 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
   resyncState: async () => {
     if (!get().initialLoadCompleted) {
       await get().loadConversations();
-    }
-  },
-
-  upgradeToPqDr: async (conversationId: string) => {
-    type WindowWithPending = Window & typeof globalThis & Record<string, unknown>;
-    (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`] = true;
-    
-    try {
-      const { authFetch } = await import('@lib/api');
-      const { getSodiumLib, getMyEncryptionKeyPair } = await import('@utils/crypto');
-      const authStore = (await import('./auth')).useAuthStore.getState();
-      const myClassicalKeys = await getMyEncryptionKeyPair();
-      const myPqKeys = await authStore.getPqEncryptionKeyPair();
-      
-      const { useConnectionStore } = await import('@store/connection');
-      const myDevices = await useConnectionStore.getState().fetchMyDevices();
-      const currentDevice = myDevices.find(d => d.isCurrent);
-      if (!currentDevice?.id) {
-          throw new Error('Current device ID not found');
-      }
-      const myDeviceId = currentDevice.id;
-
-      const sodium = await getSodiumLib();
-      const hostClassicalPk = sodium.to_base64(myClassicalKeys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-      const hostPqPk = sodium.to_base64(myPqKeys.publicKey, sodium.base64_variants.URLSAFE_NO_PADDING);
-
-      const { useMessageStore } = await import('./message');
-      await useMessageStore.getState().sendMessage(conversationId, {
-        content: JSON.stringify({ 
-            type: 'PROTOCOL_UPGRADE_REQ',
-            deviceId: myDeviceId,
-            hostClassicalPk,
-            hostPqPk
-        }),
-        isSilent: true
-      });
-
-      // Auto-clear after a short TTL
-      setTimeout(() => {
-        delete (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`];
-      }, 30000);
-    } catch (error) {
-      delete (window as WindowWithPending)[`pendingPqUpgrade_${conversationId}`];
-      throw error;
-    }
-  },
-
-  downgradeToSenderKey: async (conversationId: string, isFromPeer = false) => {
-    const { shadowVault } = await import('@lib/shadowVaultDb');
-    await shadowVault.deletePqDrSession(conversationId);
-    
-    await get().updateConversation(conversationId, { encryptionMode: 'SENDER_KEY', activePqDeviceId: null });
-    
-    if (!isFromPeer) {
-      const { useMessageStore } = await import('./message');
-      await useMessageStore.getState().sendMessage(conversationId, {
-        content: JSON.stringify({ type: 'PROTOCOL_DOWNGRADE' }),
-        isSilent: true
-      });
     }
   },
 
@@ -304,14 +243,7 @@ export const useConversationStore = createWithEqualityFn<State & Actions>((set, 
 
       const existingConversations = get().conversations;
       const reconciledConversations = await Promise.all(conversations.map(async fetched => {
-          if (!fetched.isGroup) {
-              const hasPqSession = await shadowVault.hasPqDrSession(fetched.id);
-              if (hasPqSession) {
-                  fetched.encryptionMode = 'PQ_DR';
-              } else {
-                  fetched.encryptionMode = 'SENDER_KEY';
-              }
-          }
+          fetched.encryptionMode = 'SENDER_KEY';
           if (fetched.isGroup) {
               const existing = existingConversations.find(e => e.id === fetched.id);
               if (existing) {

@@ -26,11 +26,9 @@ export default function UserInfoModal() {
   const { isProfileModalOpen, profileUserId, closeProfileModal } = useModalStore(useShallow(s => ({
     isProfileModalOpen: s.isProfileModalOpen, profileUserId: s.profileUserId, closeProfileModal: s.closeProfileModal
   })));
-  const { activeId, conversations, upgradeToPqDr, downgradeToSenderKey } = useConversationStore(useShallow(s => ({ 
+  const { activeId, conversations } = useConversationStore(useShallow(s => ({ 
     activeId: s.activeId, 
-    conversations: s.conversations,
-    upgradeToPqDr: s.upgradeToPqDr,
-    downgradeToSenderKey: s.downgradeToSenderKey
+    conversations: s.conversations
   })));
   
   const activeConversation = conversations.find(c => c.id === activeId);
@@ -197,18 +195,13 @@ export default function UserInfoModal() {
           
           <div className="w-full">
             <div className="flex items-center justify-between p-4 rounded-xl bg-bg-main shadow-neu-pressed dark:shadow-neu-pressed-dark border border-white/5">
-              <span className="font-bold text-sm uppercase tracking-wider text-text-primary">Paranoid Mode (PQ-DR)</span>
-              <button
-                onClick={() => {
-                  if (activeId) {
-                    if (isPqDr) downgradeToSenderKey(activeId, false);
-                    else upgradeToPqDr(activeId);
-                  }
-                }}
-                className={`w-14 h-7 rounded-full transition-colors relative shadow-neu-flat dark:shadow-neu-flat-dark ${isPqDr ? 'bg-accent' : 'bg-bg-main'}`}
-              >
-                <div className={`absolute top-1 left-1 w-5 h-5 rounded-full bg-white transition-transform ${isPqDr ? 'translate-x-7 shadow-[0_0_10px_rgba(255,255,255,0.5)]' : 'bg-text-secondary opacity-50'}`} />
-              </button>
+              <div className="flex flex-col gap-0.5">
+                <span className="font-bold text-sm uppercase tracking-wider text-text-primary">X-Wing Post-Quantum</span>
+                <span className="text-[10px] text-text-secondary opacity-60">Multi-Device Forward Secrecy Enabled</span>
+              </div>
+              <div className="p-2 rounded-full bg-green-500/20 text-green-500">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              </div>
             </div>
           </div>
         </div>
