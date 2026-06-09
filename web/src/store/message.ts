@@ -2057,6 +2057,14 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
             if (aIsControl && !bIsControl) return -1;
             if (!aIsControl && bIsControl) return 1;
 
+            if (a.tempId && b.tempId) {
+                const tempA = Number(a.tempId);
+                const tempB = Number(b.tempId);
+                if (!isNaN(tempA) && !isNaN(tempB) && tempA !== tempB) {
+                    return tempA - tempB;
+                }
+            }
+
             return a.id.localeCompare(b.id);
         });
 
@@ -2346,6 +2354,10 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
   },
   
   addIncomingMessage: async (conversationId, message) => {
+      while (get().isFetchingMore[conversationId]) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
       const previousLock = incomingMessageLocks.get(conversationId) || Promise.resolve();
       let release: () => void;
       const currentLock = new Promise<void>(resolve => { release = resolve; });

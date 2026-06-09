@@ -22,6 +22,7 @@ export interface GroupReceiverState {
   senderId: UserId;
   CK: string;
   N: number;
+  skippedKeys?: Record<string, string>;
 }
 
 // --- GLOBAL WRITE QUEUE ---
@@ -115,7 +116,7 @@ export async function saveGroupReceiverState(state: GroupReceiverState): Promise
   return enqueueWrite(async () => {
       await db.groupReceiverStates.put({
           id: state.id,
-          state: { CK: state.CK, N: state.N }
+          state: { CK: state.CK, N: state.N, skippedKeys: state.skippedKeys }
       });
   });
 }
