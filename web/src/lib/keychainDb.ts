@@ -13,6 +13,7 @@ export interface GroupSenderState {
   createdAt?: number;
   messageCount?: number;
   lastActivityTime?: number;
+  requiresImmediateRotation?: boolean;
 }
 
 export interface GroupReceiverState {
@@ -66,7 +67,8 @@ export async function getGroupSenderState(conversationId: string): Promise<Group
       N: record.state.N,
       createdAt: record.state.createdAt,
       messageCount: record.state.messageCount,
-      lastActivityTime: record.state.lastActivityTime
+      lastActivityTime: record.state.lastActivityTime,
+      requiresImmediateRotation: record.state.requiresImmediateRotation
   } : null;
 }
 
@@ -80,7 +82,8 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
             N: state.N,
             createdAt: state.createdAt,
             messageCount: state.messageCount,
-            lastActivityTime: state.lastActivityTime
+            lastActivityTime: state.lastActivityTime,
+            requiresImmediateRotation: state.requiresImmediateRotation
           }
       });  });
 }

@@ -16,6 +16,7 @@ export interface GroupRatchetState {
   createdAt?: number;
   messageCount?: number;
   lastActivityTime?: number;
+  requiresImmediateRotation?: boolean;
 }
 
 export interface GroupRatchetHeader {

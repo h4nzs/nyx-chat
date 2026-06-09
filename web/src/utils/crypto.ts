@@ -698,7 +698,9 @@ export async function ensureGroupSession(conversationId: string, participants: P
       await saveGroupSenderState({
           conversationId: conversationId as ConversationId,
           CK: senderKeyB64,
-          N: 0
+          N: 0,
+          messageCount: 0,
+          requiresImmediateRotation: false
       });
 
       return distributionKeys.filter(Boolean);
@@ -897,7 +899,9 @@ async function doEncryptMessage(
       const count = senderState.messageCount || 0;
       
       let needsRotation = false;
-      if (count >= MAX_MESSAGES) {
+      // [HYBRID OPPORTUNISTIC PCS]
+      // Rotasi jika: N >= limit ATAU ada balasan masuk (1-on-1)
+      if (count >= MAX_MESSAGES || (!isGroup && senderState.requiresImmediateRotation)) {
           needsRotation = true;
       } else {
           const age = senderState.createdAt ? now - senderState.createdAt : 0;
@@ -961,7 +965,8 @@ async function doEncryptMessage(
       N: result.state.N,
       createdAt: senderState.createdAt || Date.now(),
       messageCount: (senderState.messageCount || 0) + 1,
-      lastActivityTime: Date.now()
+      lastActivityTime: Date.now(),
+      requiresImmediateRotation: senderState.requiresImmediateRotation // Preserve flag if not rotating now
   });
 
   return { ciphertext: payload, mk: result.mk };
@@ -1537,6 +1542,7 @@ export async function storeReceivedSessionKey(payload: ReceiveKeyPayload): Promi
                 useMessageStore.getState().sendMessage(conversationId, { content: reqPayload, type: 'SYSTEM' }, undefined, true);
             });
         }
+        throw e; // Rethrow agar caller (misal offline sync loop) tahu bahwa ini gagal
     }
 
   } else if (sessionId) {    let newSessionKey: Uint8Array | undefined;
