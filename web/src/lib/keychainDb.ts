@@ -49,28 +49,30 @@ export async function closeDatabaseConnection() {
 // ... existing helpers ...
 
 export async function getGroupSenderState(conversationId: string): Promise<GroupSenderState | null> {
-  const record = await db.groupSenderStates.get(conversationId);
-  // Di GroupRatchetState yang baru, CK sudah berupa string. 
-  // Jika di runtime dia berupa Uint8Array (dari legacy code), kita konversi.
-  let ckString = '';
-  if (record) {
-      if (typeof record.state.CK === 'string') {
-          ckString = record.state.CK;
-      } else if ((record.state.CK as unknown) instanceof Uint8Array) {
-          const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
-          ckString = sodium.to_base64(record.state.CK as unknown as Uint8Array, sodium.base64_variants.URLSAFE_NO_PADDING);
-      }
-  }
-  
-  return record ? {
-      conversationId: asConversationId(record.conversationId),
-      CK: ckString,
-      N: record.state.N,
-      createdAt: record.state.createdAt,
-      messageCount: record.state.messageCount,
-      lastActivityTime: record.state.lastActivityTime,
-      requiresImmediateRotation: record.state.requiresImmediateRotation
-  } : null;
+  return enqueueWrite(async () => {
+    const record = await db.groupSenderStates.get(conversationId);
+    // Di GroupRatchetState yang baru, CK sudah berupa string. 
+    // Jika di runtime dia berupa Uint8Array (dari legacy code), kita konversi.
+    let ckString = '';
+    if (record) {
+        if (typeof record.state.CK === 'string') {
+            ckString = record.state.CK;
+        } else if ((record.state.CK as unknown) instanceof Uint8Array) {
+            const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+            ckString = sodium.to_base64(record.state.CK as unknown as Uint8Array, sodium.base64_variants.URLSAFE_NO_PADDING);
+        }
+    }
+    
+    return record ? {
+        conversationId: asConversationId(record.conversationId),
+        CK: ckString,
+        N: record.state.N,
+        createdAt: record.state.createdAt,
+        messageCount: record.state.messageCount,
+        lastActivityTime: record.state.lastActivityTime,
+        requiresImmediateRotation: record.state.requiresImmediateRotation
+    } : null;
+  });
 }
 
 export async function saveGroupSenderState(state: GroupSenderState): Promise<void> {
@@ -90,26 +92,29 @@ export async function saveGroupSenderState(state: GroupSenderState): Promise<voi
 }
 
 export async function getGroupReceiverState(conversationId: string, senderId: string, senderDeviceKey?: string): Promise<GroupReceiverState | null> {
-  const id = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
-  const record = await db.groupReceiverStates.get(id);
-  
-  let ckString = '';
-  if (record) {
-      if (typeof record.state.CK === 'string') {
-          ckString = record.state.CK;
-      } else if ((record.state.CK as unknown) instanceof Uint8Array) {
-          const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
-          ckString = sodium.to_base64(record.state.CK as unknown as Uint8Array, sodium.base64_variants.URLSAFE_NO_PADDING);
-      }
-  }
+  return enqueueWrite(async () => {
+    const id = senderDeviceKey ? `${conversationId}_${senderId}_${senderDeviceKey}` : `${conversationId}_${senderId}`;
+    const record = await db.groupReceiverStates.get(id);
+    
+    let ckString = '';
+    if (record) {
+        if (typeof record.state.CK === 'string') {
+            ckString = record.state.CK;
+        } else if ((record.state.CK as unknown) instanceof Uint8Array) {
+            const sodium = await import('@lib/sodiumInitializer').then(m => m.getSodium());
+            ckString = sodium.to_base64(record.state.CK as unknown as Uint8Array, sodium.base64_variants.URLSAFE_NO_PADDING);
+        }
+    }
 
-  return record ? {
-      id: record.id,
-      conversationId: asConversationId(conversationId),
-      senderId: asUserId(senderId),
-      CK: ckString,
-      N: record.state.N
-  } : null;
+    return record ? {
+        id: record.id,
+        conversationId: asConversationId(conversationId),
+        senderId: asUserId(senderId),
+        CK: ckString,
+        N: record.state.N,
+        skippedKeys: record.state.skippedKeys || {}
+    } : null;
+  });
 }
 
 export async function saveGroupReceiverState(state: GroupReceiverState): Promise<void> {

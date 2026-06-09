@@ -2411,6 +2411,12 @@ export const useMessageStore = createWithEqualityFn<State & Actions>((set, get) 
       }
 
       if (decrypted.content === 'waiting_for_key' || decrypted.error) {
+          const existing = await shadowVault.getMessage(decrypted.id);
+          if (existing && !existing.isDeletedLocal && existing.content && !existing.content.startsWith('[') && existing.content !== 'waiting_for_key') {
+              console.warn(`[Shield] Prevented overwriting valid local message ${decrypted.id} with failure.`);
+              return existing;
+          }
+
           console.log(`[Ratchet] Decryption failed for ${message.id}. Retrying once in 500ms...`);
           await new Promise(r => setTimeout(r, 500));
           const retriedDecrypted = await decryptMessageObject(message);
